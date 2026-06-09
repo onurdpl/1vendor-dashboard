@@ -2874,21 +2874,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
-    const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    const warehouseInput = await screen.findByLabelText('Warehouse ID');
     const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
     const buyerStateInput = await screen.findByLabelText('Fallback Kargonomi buyer state ID (PoC override)');
     const buyerCityInput = await screen.findByLabelText('Fallback Kargonomi buyer city ID (PoC override)');
-    const returnReceiverNameInput = await screen.findByLabelText('Return receiver name');
-    const returnReceiverPhoneInput = await screen.findByLabelText('Return receiver phone');
-    const returnReceiverAddressInput = await screen.findByLabelText('Return receiver address');
+    const returnReceiverNameInput = await screen.findByLabelText('Return receiver fallback name');
+    const returnReceiverPhoneInput = await screen.findByLabelText('Return receiver fallback phone');
+    const returnReceiverAddressInput = await screen.findByLabelText('Return receiver fallback address');
     expect(carrierInput).toHaveValue('44');
     expect(returnReceiverNameInput).toHaveValue('Sporjinal warehouse');
     expect(returnReceiverPhoneInput).toHaveValue('');
     expect(returnReceiverAddressInput).toHaveValue('');
+    expect(screen.getByText('Provider basics')).toBeInTheDocument();
+    expect(screen.getByText('Warehouse sync')).toBeInTheDocument();
+    expect(screen.getByText('Return receiver override / fallback')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' })).toBeInTheDocument();
     expect(screen.getByText('Phone missing')).toBeInTheDocument();
     expect(screen.getByText(/-1 means automatic cheapest provider selection/)).toBeInTheDocument();
-    expect(screen.getAllByText('Used as the warehouse/receiver destination for customer return shipments.')).toHaveLength(3);
+    expect(screen.getAllByText('Only used when synced warehouse data is missing or intentionally overridden.').length).toBeGreaterThanOrEqual(3);
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     await user.clear(warehouseInput);
@@ -3012,7 +3015,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByLabelText('Kargonomi warehouse ID')).toHaveValue('112668');
+    expect(await screen.findByLabelText('Warehouse ID')).toHaveValue('112668');
     expect(screen.getByText('Phone missing')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' }));
 
@@ -3081,7 +3084,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'kargonomi');
-    const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    const warehouseInput = await screen.findByLabelText('Warehouse ID');
     const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
     expect(carrierInput).toHaveValue('');
     await user.clear(warehouseInput);

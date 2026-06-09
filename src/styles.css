@@ -6937,13 +6937,58 @@ summary.provider-response-heading::-webkit-details-marker {
   align-items: end;
 }
 
+.shipping-config-kargonomi-layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.shipping-config-section-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.shipping-config-section-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.shipping-config-section-heading strong,
+.shipping-config-sync-heading strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.shipping-config-section-heading span,
+.shipping-config-sync-heading span,
+.shipping-config-note {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.shipping-config-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
 .shipping-config-editor .field {
   gap: 5px;
   font-size: 0.76rem;
 }
 
 .shipping-config-editor .field input,
-.shipping-config-editor .field select {
+.shipping-config-editor .field select,
+.shipping-config-editor .field textarea {
   min-height: 36px;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -6953,6 +6998,11 @@ summary.provider-response-heading::-webkit-details-marker {
   font: inherit;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.shipping-config-editor .field textarea {
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .shipping-config-sync-panel {
@@ -6990,6 +7040,31 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #334155;
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.shipping-config-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.shipping-config-status-chip.present {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.shipping-config-status-chip.missing {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: #f8fafc;
+  color: #64748b;
 }
 
 .shipping-config-readonly {
@@ -7062,6 +7137,29 @@ summary.provider-response-heading::-webkit-details-marker {
 .shipping-config-actions {
   display: flex;
   justify-content: flex-end;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-top: 6px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #ffffff 42%);
+}
+
+@media (max-width: 960px) {
+  .shipping-config-kargonomi-layout {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .shipping-config-editor-heading,
+  .shipping-config-sync-heading {
+    flex-direction: column;
+  }
+
+  .shipping-config-kargonomi-layout,
+  .shipping-config-section-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .order-tracking-form {

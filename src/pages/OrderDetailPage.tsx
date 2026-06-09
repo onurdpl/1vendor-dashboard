@@ -5002,6 +5002,50 @@ export function OrderDetailPage() {
   const kargonomiWarehouseSyncStatus = kargonomiDefaultWarehouse?.syncStatus;
   const kargonomiWarehouseIdForSync = kargonomiDefaultWarehouse?.warehouseId ?? '';
   const canSyncKargonomiWarehouse = isKargonomiConfigDraft && /^\d+$/.test(kargonomiWarehouseIdForSync);
+  const renderKargonomiReadinessChip = (label: string, present: boolean | null | undefined) => (
+    <span className={`shipping-config-status-chip ${present ? 'present' : 'missing'}`}>
+      {label} {present ? 'present' : 'missing'}
+    </span>
+  );
+  const shippingProviderSelectField = (
+    <label className="field">
+      <span>Provider</span>
+      <select
+        value={shippingConfigDraft.preferredProvider}
+        onChange={(event) => {
+          const preferredProvider = event.target.value as ShippingConfigDraftProvider;
+          setShippingConfigDraft((current) => ({
+            ...current,
+            preferredProvider,
+          }));
+          setShippingConfigDraftReady(true);
+        }}
+      >
+        <option value="kargo_entegrator">Kargo Entegratör</option>
+        {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
+        {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
+        <option value="navlungo">Navlungo</option>
+        <option value="hepsijet">Hepsijet</option>
+      </select>
+    </label>
+  );
+  const shippingDefaultDesiField = (
+    <label className="field">
+      <span>Default desi</span>
+      <input
+        type="number"
+        min="0.1"
+        step="0.1"
+        value={shippingConfigDraft.defaultDesi}
+        onChange={(event) =>
+          setShippingConfigDraft((current) => ({
+            ...current,
+            defaultDesi: event.target.value,
+          }))
+        }
+      />
+    </label>
+  );
 
   const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
     <form
@@ -5020,26 +5064,7 @@ export function OrderDetailPage() {
         </span>
       </div>
       <div className="shipping-config-editor-grid">
-        <label className="field">
-          <span>Provider</span>
-          <select
-            value={shippingConfigDraft.preferredProvider}
-            onChange={(event) => {
-              const preferredProvider = event.target.value as ShippingConfigDraftProvider;
-              setShippingConfigDraft((current) => ({
-                ...current,
-                preferredProvider,
-              }));
-              setShippingConfigDraftReady(true);
-            }}
-          >
-            <option value="kargo_entegrator">Kargo Entegratör</option>
-            {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
-            {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
-            <option value="navlungo">Navlungo</option>
-            <option value="hepsijet">Hepsijet</option>
-          </select>
-        </label>
+        {!isKargonomiConfigDraft ? shippingProviderSelectField : null}
         {isKargoConfigDraft || isKargonomiConfigDraft ? (
           <>
             {isKargoConfigDraft ? (
@@ -5058,27 +5083,108 @@ export function OrderDetailPage() {
                 />
               </label>
             ) : null}
-            <label className="field">
-              <span>{isKargonomiConfigDraft ? 'Kargonomi warehouse ID' : 'Warehouse ID'}</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={shippingConfigDraft.defaultWarehouseId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    defaultWarehouseId: event.target.value,
-                  }))
-                }
-              />
-            </label>
+            {!isKargonomiConfigDraft ? (
+              <label className="field">
+                <span>Warehouse ID</span>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={shippingConfigDraft.defaultWarehouseId}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      defaultWarehouseId: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ) : null}
             {isKargonomiConfigDraft ? (
-              <>
-                <div className="field field-full shipping-config-sync-panel">
+              <div className="shipping-config-kargonomi-layout field-full" aria-label="Kargonomi shipping configuration">
+                <section className="shipping-config-section-card" aria-label="Provider basics">
+                  <div className="shipping-config-section-heading">
+                    <strong>Provider basics</strong>
+                    <span>Core provider, warehouse, carrier, and package defaults.</span>
+                  </div>
+                  <div className="shipping-config-section-grid">
+                    {shippingProviderSelectField}
+                    <label className="field">
+                      <span>Warehouse ID</span>
+                      <input
+                        aria-label="Warehouse ID"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={shippingConfigDraft.defaultWarehouseId}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            defaultWarehouseId: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Kargonomi carrier/provider ID</span>
+                      <input
+                        inputMode="numeric"
+                        pattern="-?[0-9]*"
+                        value={shippingConfigDraft.kargonomiShippingProviderId}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiShippingProviderId: event.target.value,
+                          }))
+                        }
+                      />
+                      <small>
+                        -1 means automatic cheapest provider selection. Use a specific Kargonomi carrier ID from price comparison to force a carrier.
+                      </small>
+                    </label>
+                    {shippingDefaultDesiField}
+                    <label className="field">
+                      <span>Fallback Kargonomi buyer state ID (PoC override)</span>
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={shippingConfigDraft.kargonomiBuyerStateId}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiBuyerStateId: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Fallback Kargonomi buyer city ID (PoC override)</span>
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={shippingConfigDraft.kargonomiBuyerCityId}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiBuyerCityId: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <div className="shipping-config-readonly">
+                      <span>Sandbox</span>
+                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
+                    </div>
+                    <div className="shipping-config-readonly">
+                      <span>Webhook ingest</span>
+                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="shipping-config-section-card" aria-label="Warehouse sync">
                   <div className="shipping-config-sync-heading">
                     <div>
-                      <span>Kargonomi warehouse details</span>
-                      <small>Read-only sync from Kargonomi. Used to map return receiver buyer fields.</small>
+                      <strong>Warehouse sync</strong>
+                      <span>Read-only sync from Kargonomi for return receiver buyer fields.</span>
                     </div>
                     <button
                       type="button"
@@ -5089,111 +5195,93 @@ export function OrderDetailPage() {
                       {isSyncingKargonomiWarehouse ? 'Syncing...' : 'Sync Kargonomi warehouse details'}
                     </button>
                   </div>
-                  <div className="shipping-config-sync-grid">
-                    <span>Contact name {kargonomiWarehouseSyncStatus?.contactNamePresent ? 'present' : 'missing'}</span>
-                    <span>Phone {kargonomiWarehouseSyncStatus?.phonePresent ? 'present' : 'missing'}</span>
-                    <span>Address {kargonomiWarehouseSyncStatus?.addressPresent ? 'present' : 'missing'}</span>
-                    <span>State ID {kargonomiWarehouseSyncStatus?.stateIdPresent ? 'present' : 'missing'}</span>
-                    <span>City ID {kargonomiWarehouseSyncStatus?.cityIdPresent ? 'present' : 'missing'}</span>
+                  <div className="shipping-config-sync-grid" aria-label="Kargonomi warehouse readiness">
+                    {renderKargonomiReadinessChip('Contact name', kargonomiWarehouseSyncStatus?.contactNamePresent)}
+                    {renderKargonomiReadinessChip('Phone', kargonomiWarehouseSyncStatus?.phonePresent)}
+                    {renderKargonomiReadinessChip('Address', kargonomiWarehouseSyncStatus?.addressPresent)}
+                    {renderKargonomiReadinessChip('State ID', kargonomiWarehouseSyncStatus?.stateIdPresent)}
+                    {renderKargonomiReadinessChip('City ID', kargonomiWarehouseSyncStatus?.cityIdPresent)}
+                  </div>
+                  <div className="shipping-config-section-grid">
+                    <div className="shipping-config-readonly">
+                      <span>Last sync</span>
+                      <strong>
+                        {kargonomiWarehouseSyncStatus?.syncedAt
+                          ? formatOptionalDate(kargonomiWarehouseSyncStatus.syncedAt)
+                          : kargonomiWarehouseSyncStatus?.lookupStatus ?? 'not synced'}
+                      </strong>
+                    </div>
+                    <div className="shipping-config-readonly">
+                      <span>Resolved location</span>
+                      <strong>
+                        {[kargonomiWarehouseSyncStatus?.stateName, kargonomiWarehouseSyncStatus?.cityName]
+                          .filter(Boolean)
+                          .join(' / ') || '—'}
+                      </strong>
+                    </div>
+                  </div>
+                  {kargonomiWarehouseSyncStatus?.lookupError ? (
+                    <small className="shipping-config-note">{kargonomiWarehouseSyncStatus.lookupError}</small>
+                  ) : null}
+                </section>
+
+                <section className="shipping-config-section-card" aria-label="Return receiver override fallback">
+                  <div className="shipping-config-section-heading">
+                    <strong>Return receiver override / fallback</strong>
+                    <span>Only used when synced warehouse data is missing or intentionally overridden.</span>
+                  </div>
+                  <div className="shipping-config-section-grid">
+                    <label className="field">
+                      <span>Return receiver fallback name</span>
+                      <input
+                        aria-label="Return receiver fallback name"
+                        value={shippingConfigDraft.kargonomiReturnReceiverName}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiReturnReceiverName: event.target.value,
+                          }))
+                        }
+                      />
+                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
+                    </label>
+                    <label className="field">
+                      <span>Return receiver fallback phone</span>
+                      <input
+                        aria-label="Return receiver fallback phone"
+                        value={shippingConfigDraft.kargonomiReturnReceiverPhone}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiReturnReceiverPhone: event.target.value,
+                          }))
+                        }
+                      />
+                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
+                    </label>
+                    <label className="field field-full">
+                      <span>Return receiver fallback address</span>
+                      <textarea
+                        aria-label="Return receiver fallback address"
+                        rows={3}
+                        value={shippingConfigDraft.kargonomiReturnReceiverAddress}
+                        onChange={(event) =>
+                          setShippingConfigDraft((current) => ({
+                            ...current,
+                            kargonomiReturnReceiverAddress: event.target.value,
+                          }))
+                        }
+                      />
+                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
+                    </label>
                   </div>
                   {kargonomiWarehouseSyncStatus?.stateName || kargonomiWarehouseSyncStatus?.cityName ? (
-                    <small>
-                      Resolved location:{' '}
-                      {[kargonomiWarehouseSyncStatus.stateName, kargonomiWarehouseSyncStatus.cityName]
-                        .filter(Boolean)
-                        .join(' / ')}
-                    </small>
+                    <p className="shipping-config-note">
+                      Synced warehouse location is available; fallback receiver fields are optional.
+                    </p>
                   ) : null}
-                </div>
-                <label className="field">
-                  <span>Kargonomi carrier/provider ID</span>
-                  <input
-                    inputMode="numeric"
-                    pattern="-?[0-9]*"
-                    value={shippingConfigDraft.kargonomiShippingProviderId}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiShippingProviderId: event.target.value,
-                      }))
-                    }
-                  />
-                  <small>
-                    -1 means automatic cheapest provider selection. Use a specific Kargonomi carrier ID from price comparison to force a carrier.
-                  </small>
-                </label>
-                <label className="field">
-                  <span>Fallback Kargonomi buyer state ID (PoC override)</span>
-                  <input
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={shippingConfigDraft.kargonomiBuyerStateId}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiBuyerStateId: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Fallback Kargonomi buyer city ID (PoC override)</span>
-                  <input
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={shippingConfigDraft.kargonomiBuyerCityId}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiBuyerCityId: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Return receiver name</span>
-                  <input
-                    aria-label="Return receiver name"
-                    value={shippingConfigDraft.kargonomiReturnReceiverName}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiReturnReceiverName: event.target.value,
-                      }))
-                    }
-                  />
-                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
-                </label>
-                <label className="field">
-                  <span>Return receiver phone</span>
-                  <input
-                    aria-label="Return receiver phone"
-                    value={shippingConfigDraft.kargonomiReturnReceiverPhone}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiReturnReceiverPhone: event.target.value,
-                      }))
-                    }
-                  />
-                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
-                </label>
-                <label className="field field-full">
-                  <span>Return receiver address</span>
-                  <textarea
-                    aria-label="Return receiver address"
-                    rows={3}
-                    value={shippingConfigDraft.kargonomiReturnReceiverAddress}
-                    onChange={(event) =>
-                      setShippingConfigDraft((current) => ({
-                        ...current,
-                        kargonomiReturnReceiverAddress: event.target.value,
-                      }))
-                    }
-                  />
-                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
-                </label>
-              </>
+                </section>
+              </div>
             ) : null}
           </>
         ) : null}
@@ -5519,21 +5607,7 @@ export function OrderDetailPage() {
             </div>
           </>
         ) : null}
-        <label className="field">
-          <span>Default desi</span>
-          <input
-            type="number"
-            min="0.1"
-            step="0.1"
-            value={shippingConfigDraft.defaultDesi}
-            onChange={(event) =>
-              setShippingConfigDraft((current) => ({
-                ...current,
-                defaultDesi: event.target.value,
-              }))
-            }
-          />
-        </label>
+        {!isKargonomiConfigDraft ? shippingDefaultDesiField : null}
         {isKargoConfigDraft ? (
           <label className="field">
             <span>Package type</span>
@@ -5551,14 +5625,18 @@ export function OrderDetailPage() {
             </select>
           </label>
         ) : null}
-        <div className="shipping-config-readonly">
-          <span>Sandbox</span>
-          <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
-        </div>
-        <div className="shipping-config-readonly">
-          <span>Webhook ingest</span>
-          <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
-        </div>
+        {!isKargonomiConfigDraft ? (
+          <>
+            <div className="shipping-config-readonly">
+              <span>Sandbox</span>
+              <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Webhook ingest</span>
+              <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
+            </div>
+          </>
+        ) : null}
       </div>
       {shippingConfigFeedback ? (
         <div className={`shipping-config-feedback ${shippingConfigFeedback.tone}`}>
