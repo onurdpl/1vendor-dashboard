@@ -26,6 +26,7 @@ import {
   getSettlementApprovalAudit,
   previewApproval,
 } from './settlement-approval.service.js';
+import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -427,6 +428,21 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(404).send({ message: 'Settlement approval not found.' });
       }
       return audit;
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/:id/logo-commission-invoice-preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return previewSettlementLogoCommissionInvoice(id);
     },
   );
 

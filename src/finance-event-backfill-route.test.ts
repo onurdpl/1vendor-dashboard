@@ -4,6 +4,7 @@ const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
+const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -21,6 +22,10 @@ vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => (
   getSettlementApproval: vi.fn(),
   getSettlementApprovalAudit: getSettlementApprovalAuditMock,
   previewApproval: vi.fn(),
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-commission-invoice-preview.service.js', () => ({
+  previewSettlementLogoCommissionInvoice: previewSettlementLogoCommissionInvoiceMock,
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -55,6 +60,7 @@ describe('finance event backfill route', () => {
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
     getSettlementApprovalAuditMock.mockReset();
+    previewSettlementLogoCommissionInvoiceMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -265,5 +271,68 @@ describe('finance event backfill route', () => {
 
     expect(allowed).toEqual(audit);
     expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1');
+  });
+
+  it('returns settlement Logo commission invoice preview without writes', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const preview = {
+      ok: true,
+      writesPerformed: false,
+      settlementApprovalId: 'approval-1',
+      readiness: {
+        canCreateLogoInvoiceLater: true,
+        blockers: [],
+        warnings: [],
+      },
+      amounts: {
+        commissionAmount: 100,
+        commissionVatAmount: 20,
+        expectedGrossInvoiceAmount: 120,
+        currency: 'TRY',
+        taxRate: 20,
+        vatIncluded: false,
+      },
+      vendorBillingReadiness: {
+        complete: true,
+        missingFields: [],
+        logoCustomerCodePresent: true,
+        logoCustomerIdPresent: true,
+        logoEinvoiceEligible: true,
+      },
+      logoPayloadPreview: {
+        salesInvoiceDetails: [
+          {
+            productDetail: {
+              itemCode: 'SPORGYM-COMMISSION',
+              itemType: 2,
+            },
+          },
+        ],
+      },
+    };
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValueOnce(preview);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await posts.get('/admin/finance/settlement-approvals/:id/logo-commission-invoice-preview')?.(
+      { authUser: { role: 'admin' }, params: { id: 'approval-1' } },
+      reply,
+    );
+
+    expect(allowed).toEqual(preview);
+    expect(allowed?.writesPerformed).toBe(false);
+    expect(previewSettlementLogoCommissionInvoiceMock).toHaveBeenCalledWith('approval-1');
   });
 });
