@@ -890,12 +890,7 @@ function buildLogoTestInvoicePayload(
           discountRate: 0,
           discountValue: 0,
           productDetail: {
-            ...(isRecord(detail.productDetail) ? detail.productDetail : {}),
             itemCode: serviceItemCode,
-            itemType: 2,
-            name: 'Sporgym Pazaryeri Komisyon Hizmeti',
-            vat: 20,
-            unit: 'Adet',
           },
         };
       })
@@ -1905,7 +1900,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         const testInvoiceWarnings = [
           ...preview.warnings,
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          `Using existing Logo service item ${serviceItemCode} for test-create.`,
+          'Using existing Logo service item by itemCode only, per Logo support guidance.',
         ];
         const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload, serviceItemCode);
 

@@ -1312,13 +1312,9 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             description: 'SPORGYM TEST KOMİSYON FATURASI',
             discountRate: 0,
             discountValue: 0,
-            productDetail: expect.objectContaining({
+            productDetail: {
               itemCode: 'SPORGYM-COMMISSION',
-              itemType: 2,
-              name: 'Sporgym Pazaryeri Komisyon Hizmeti',
-              vat: 20,
-              unit: 'Adet',
-            }),
+            },
           }),
         ],
       }),
@@ -1340,7 +1336,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         ettn: 'logo-ettn-1',
         warnings: expect.arrayContaining([
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Using existing Logo service item SPORGYM-COMMISSION for test-create.',
+          'Using existing Logo service item by itemCode only, per Logo support guidance.',
         ]),
         requestPayload: expect.objectContaining({
           currency: 'TRY',
@@ -1353,13 +1349,9 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             expect.objectContaining({
               discountRate: 0,
               discountValue: 0,
-              productDetail: expect.objectContaining({
+              productDetail: {
                 itemCode: 'SPORGYM-COMMISSION',
-                itemType: 2,
-                name: 'Sporgym Pazaryeri Komisyon Hizmeti',
-                vat: 20,
-                unit: 'Adet',
-              }),
+              },
             }),
           ],
           eGovernmentInvoice: {
@@ -1450,13 +1442,9 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             taxRate: 20,
             price: 1,
             description: 'SPORGYM TEST KOMİSYON FATURASI',
-            productDetail: expect.objectContaining({
+            productDetail: {
               itemCode: 'SERVICE-COMMISSION',
-              itemType: 2,
-              name: 'Sporgym Pazaryeri Komisyon Hizmeti',
-              vat: 20,
-              unit: 'Adet',
-            }),
+            },
           }),
         ],
       }),
@@ -1466,15 +1454,14 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         requestPayload: expect.objectContaining({
           salesInvoiceDetails: [
             expect.objectContaining({
-              productDetail: expect.objectContaining({
+              productDetail: {
                 itemCode: 'SERVICE-COMMISSION',
-                itemType: 2,
-              }),
+              },
             }),
           ],
         }),
         warnings: expect.arrayContaining([
-          'Using existing Logo service item SERVICE-COMMISSION for test-create.',
+          'Using existing Logo service item by itemCode only, per Logo support guidance.',
         ]),
       }),
     );
