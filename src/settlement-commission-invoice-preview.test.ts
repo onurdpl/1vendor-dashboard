@@ -37,8 +37,10 @@ function buildApproval(input: {
   commissionVatMinor?: number;
   netPayableMinor?: number;
   lineVatRates?: Array<number | string | null>;
+  missingSnapshotFields?: string[];
 }) {
   const lineVatRates = input.lineVatRates ?? [20];
+  const missingSnapshotFields = new Set(input.missingSnapshotFields ?? []);
   return {
     id: 'approval-1',
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
@@ -59,8 +61,27 @@ function buildApproval(input: {
     cancelledAt: null,
     notes: null,
     sourceSnapshotJson: {},
-    lines: lineVatRates.map((lineVatRate, index) => ({
-        id: 'line-1',
+    lines: lineVatRates.map((lineVatRate, index) => {
+      const sourceSnapshotJson: Record<string, unknown> = {
+        sourceShopifyOrderId: `gid://shopify/Order/100${index + 1}`,
+        sourceShopifyOrderNumber: `#100${index + 1}`,
+        commissionPercentSnapshot: '10',
+        ...(lineVatRate === null ? {} : { commissionVatPercentSnapshot: String(lineVatRate) }),
+        deductShippingEnabledSnapshot: false,
+        shippingModeSnapshot: 'DISABLED',
+        fixedShippingFeeSnapshot: null,
+        shippingCostSnapshot: null,
+        shippingVatAmountSnapshot: null,
+        shippingCostSourceSnapshot: null,
+        shippingCostProviderSnapshot: null,
+      };
+
+      for (const field of missingSnapshotFields) {
+        delete sourceSnapshotJson[field];
+      }
+
+      return {
+        id: `line-${index + 1}`,
         settlementApprovalId: 'approval-1',
         financeLedgerEntryId: `ledger-${index + 1}`,
         lineType: 'SALE',
@@ -68,12 +89,10 @@ function buildApproval(input: {
         commissionMinor: Math.round((input.commissionMinor ?? 10000) / lineVatRates.length),
         commissionVatMinor: Math.round((input.commissionVatMinor ?? 2000) / lineVatRates.length),
         payableImpactMinor: Math.round(88000 / lineVatRates.length),
-        sourceSnapshotJson: {
-          sourceShopifyOrderId: `gid://shopify/Order/100${index + 1}`,
-          sourceShopifyOrderNumber: `#100${index + 1}`,
-          ...(lineVatRate === null ? {} : { commissionVatPercentSnapshot: String(lineVatRate) }),
-        },
-      })),
+        sourceSnapshotJson,
+        financeLedgerEntry: null,
+      };
+    }),
   };
 }
 
@@ -148,6 +167,13 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.vatRateSource).toBe('settlement_line_snapshots');
     expect(preview.detectedVatRates).toEqual([20]);
     expect(preview.configuredVendorCommissionVatPercent).toBe(20);
+    expect(preview.executionSnapshotGuard).toMatchObject({
+      ok: true,
+      detectedCommissionRates: [10],
+      detectedCommissionVatRates: [20],
+      detectedShippingModes: ['disabled'],
+      requiredSnapshotsPresent: true,
+    });
     expect(preview.logoPayloadPreview).toMatchObject({
       currency: 'TRY',
       vatIncluded: false,
@@ -207,6 +233,7 @@ describe('settlement Logo commission invoice preview', () => {
     });
     expect(preview.vatRateSource).toBe('settlement_line_snapshots');
     expect(preview.detectedVatRates).toEqual([20]);
+    expect(preview.executionSnapshotGuard.ok).toBe(true);
     expect(preview.readiness.blockers).toEqual(
       expect.arrayContaining([
         'Vendor billing profile is missing required fields: billingCity.',
@@ -275,9 +302,28 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.amounts.taxRate).toBeNull();
     expect(preview.vatRateSource).toBe('blocked_mixed_or_missing');
     expect(preview.detectedVatRates).toEqual([18, 20]);
+    expect(preview.executionSnapshotGuard.ok).toBe(false);
     expect(preview.readiness.blockers).toContain(
       'Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.',
     );
+  });
+
+  it('blocks missing commission execution snapshots', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 5000, missingSnapshotFields: ['commissionPercentSnapshot'] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(false);
+    expect(preview.readiness.canCreateLogoInvoiceLater).toBe(false);
+    expect(preview.logoPayloadPreview).toBeNull();
+    expect(preview.executionSnapshotGuard.ok).toBe(false);
+    expect(preview.executionSnapshotGuard.requiredSnapshotsPresent).toBe(false);
+    expect(preview.readiness.blockers).toContain('SettlementApprovalLine line-1 is missing commissionPercentSnapshot.');
+    expect(preview.executionSnapshotGuard.snapshotCompleteness.commissionPercentSnapshot.missingLineIds).toEqual(['line-1']);
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('blocks missing settlement line VAT snapshots', async () => {
@@ -293,9 +339,39 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.amounts.taxRate).toBeNull();
     expect(preview.vatRateSource).toBe('blocked_mixed_or_missing');
     expect(preview.detectedVatRates).toEqual([]);
+    expect(preview.executionSnapshotGuard.ok).toBe(false);
     expect(preview.readiness.blockers).toContain(
-      'Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.',
+      'SettlementApprovalLine line-1 is missing commissionVatPercentSnapshot.',
     );
+  });
+
+  it('does not use current VendorFinancialProfile to rescue missing execution snapshots', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 5000, missingSnapshotFields: ['commissionVatPercentSnapshot'] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
+      id: 'finance-profile-2',
+      vendorId: 'vendor-a',
+      commissionPercent: '10.00',
+      commissionVatPercent: '20.00',
+      deductShippingEnabled: false,
+      shippingMode: 'DISABLED',
+      fixedShippingFee: null,
+      active: true,
+      createdAt: new Date('2026-06-01T09:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T09:00:00.000Z'),
+    });
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(false);
+    expect(preview.amounts.taxRate).toBeNull();
+    expect(preview.detectedVatRates).toEqual([]);
+    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
+    expect(preview.readiness.canCreateLogoInvoiceLater).toBe(false);
+    expect(preview.readiness.blockers).toContain('SettlementApprovalLine line-1 is missing commissionVatPercentSnapshot.');
+    expect(preview.logoPayloadPreview).toBeNull();
   });
 
   it('does not derive taxRate from aggregate commissionVatMinor divided by commissionMinor', async () => {

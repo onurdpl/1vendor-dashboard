@@ -11,6 +11,11 @@ import {
   type LogoIsbasiCommissionInvoicePreview,
 } from '../logo-isbasi/logo-isbasi-commission-preview.js';
 import type { VendorBillingProfileDto } from '../vendors/vendor-billing-profile.service.js';
+import {
+  buildSkippedExecutionSnapshotGuard,
+  validateSettlementApprovalExecutionSnapshots,
+  type SettlementExecutionSnapshotGuardDto,
+} from './settlement-execution-snapshot-guard.service.js';
 
 const REQUIRED_BILLING_FIELDS = [
   'legalCompanyName',
@@ -54,6 +59,7 @@ export type SettlementCommissionInvoicePreviewDto = {
   vatRateSource: 'settlement_line_snapshots' | 'blocked_mixed_or_missing';
   detectedVatRates: number[];
   configuredVendorCommissionVatPercent: number | null;
+  executionSnapshotGuard: SettlementExecutionSnapshotGuardDto;
   logoPayloadPreview: Record<string, unknown> | null;
 };
 
@@ -211,44 +217,6 @@ function resolveConfiguredCommissionVatPercent(profile: VendorFinancialProfile |
   return normalizeVatRate(profile?.commissionVatPercent);
 }
 
-function resolveSettlementLineVatRate(approval: SettlementApprovalForPreview): {
-  taxRate: number | null;
-  vatRateSource: SettlementCommissionInvoicePreviewDto['vatRateSource'];
-  detectedVatRates: number[];
-  missingSnapshotCount: number;
-} {
-  const commissionLines = approval.lines.filter((line) => line.commissionMinor > 0);
-  const detected = new Set<number>();
-  let missingSnapshotCount = 0;
-
-  for (const line of commissionLines) {
-    const snapshot = readSnapshotRecord(line.sourceSnapshotJson);
-    const rate = normalizeVatRate(snapshot.commissionVatPercentSnapshot);
-    if (rate === null) {
-      missingSnapshotCount += 1;
-      continue;
-    }
-    detected.add(rate);
-  }
-
-  const detectedVatRates = Array.from(detected).sort((a, b) => a - b);
-  if (missingSnapshotCount > 0 || detectedVatRates.length !== 1) {
-    return {
-      taxRate: null,
-      vatRateSource: 'blocked_mixed_or_missing',
-      detectedVatRates,
-      missingSnapshotCount,
-    };
-  }
-
-  return {
-    taxRate: detectedVatRates[0],
-    vatRateSource: 'settlement_line_snapshots',
-    detectedVatRates,
-    missingSnapshotCount,
-  };
-}
-
 function buildBlockedResponse(input: {
   settlementApprovalId: string;
   approval?: SettlementApprovalForPreview | null;
@@ -258,6 +226,7 @@ function buildBlockedResponse(input: {
   vatRateSource?: SettlementCommissionInvoicePreviewDto['vatRateSource'];
   detectedVatRates?: number[];
   configuredVendorCommissionVatPercent?: number | null;
+  executionSnapshotGuard?: SettlementExecutionSnapshotGuardDto;
 }): SettlementCommissionInvoicePreviewDto {
   return {
     ok: false,
@@ -282,6 +251,9 @@ function buildBlockedResponse(input: {
     vatRateSource: input.vatRateSource ?? 'blocked_mixed_or_missing',
     detectedVatRates: input.detectedVatRates ?? [],
     configuredVendorCommissionVatPercent: input.configuredVendorCommissionVatPercent ?? null,
+    executionSnapshotGuard:
+      input.executionSnapshotGuard ??
+      buildSkippedExecutionSnapshotGuard(input.blockers[0] ?? 'Execution snapshot guard was not evaluated.'),
     logoPayloadPreview: null,
   };
 }
@@ -338,7 +310,14 @@ export async function previewSettlementLogoCommissionInvoice(
   };
 
   const amounts = buildAmounts(approval);
-  const vatRateResolution = resolveSettlementLineVatRate(approval);
+  const executionSnapshotGuard = await validateSettlementApprovalExecutionSnapshots(settlementApprovalId);
+  const detectedVatRates = executionSnapshotGuard.detectedCommissionVatRates;
+  const snapshotTaxRate =
+    approval.commissionMinor > 0 && executionSnapshotGuard.ok && detectedVatRates.length === 1
+      ? detectedVatRates[0]
+      : null;
+  const vatRateSource: SettlementCommissionInvoicePreviewDto['vatRateSource'] =
+    snapshotTaxRate === null ? 'blocked_mixed_or_missing' : 'settlement_line_snapshots';
   const configuredVendorCommissionVatPercent = resolveConfiguredCommissionVatPercent(financialProfile);
   const blockers = [
     ...(!billingProfile ? ['Vendor billing profile is required.'] : []),
@@ -346,9 +325,7 @@ export async function previewSettlementLogoCommissionInvoice(
     ...(!vendorBillingReadiness.logoCustomerCodePresent ? ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.'] : []),
     ...(!vendorBillingReadiness.logoCustomerIdPresent ? ['Vendor must have logoIsbasiCustomerId before Logo invoice creation.'] : []),
     ...(approval.currency !== 'TRY' ? [`SettlementApproval currency must be TRY for Logo commission invoice preview. Current currency: ${approval.currency}.`] : []),
-    ...(vatRateResolution.taxRate === null
-      ? ['Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.']
-      : []),
+    ...executionSnapshotGuard.blockers,
     ...(approval.commissionMinor <= 0
       ? ['Settlement commission amount is zero; accountant confirmation is required before creating a Logo invoice.']
       : []),
@@ -356,16 +333,17 @@ export async function previewSettlementLogoCommissionInvoice(
   const warnings = [
     'Read-only preview only. No Logo invoice is created.',
     'Do not use netPayableMinor as invoice amount; preview uses commissionMinor plus commissionVatMinor.',
-    ...(vatRateResolution.taxRate !== null &&
+    ...executionSnapshotGuard.warnings,
+    ...(snapshotTaxRate !== null &&
     configuredVendorCommissionVatPercent !== null &&
-    vatRateResolution.taxRate !== configuredVendorCommissionVatPercent
+    snapshotTaxRate !== configuredVendorCommissionVatPercent
       ? [
-          `Settlement line VAT rate ${formatDecimal(vatRateResolution.taxRate)}% differs from current vendor profile commission VAT rate ${formatDecimal(configuredVendorCommissionVatPercent)}%.`,
+          `Settlement line VAT rate ${formatDecimal(snapshotTaxRate)}% differs from current vendor profile commission VAT rate ${formatDecimal(configuredVendorCommissionVatPercent)}%.`,
         ]
       : []),
     ...(!vendorBillingReadiness.logoEinvoiceEligible ? ['Logo e-invoice eligibility is not confirmed for this vendor.'] : []),
   ];
-  amounts.taxRate = vatRateResolution.taxRate;
+  amounts.taxRate = snapshotTaxRate;
 
   const invoiceTaxRate = amounts.taxRate;
   if (blockers.length || !billingProfile || invoiceTaxRate === null) {
@@ -380,9 +358,10 @@ export async function previewSettlementLogoCommissionInvoice(
       },
       amounts,
       vendorBillingReadiness,
-      vatRateSource: vatRateResolution.vatRateSource,
-      detectedVatRates: vatRateResolution.detectedVatRates,
+      vatRateSource,
+      detectedVatRates,
       configuredVendorCommissionVatPercent,
+      executionSnapshotGuard,
       logoPayloadPreview: null,
     };
   }
@@ -409,9 +388,10 @@ export async function previewSettlementLogoCommissionInvoice(
     },
     amounts,
     vendorBillingReadiness,
-    vatRateSource: vatRateResolution.vatRateSource,
-    detectedVatRates: vatRateResolution.detectedVatRates,
+    vatRateSource,
+    detectedVatRates,
     configuredVendorCommissionVatPercent,
+    executionSnapshotGuard,
     logoPayloadPreview: useProvenLogoServiceReference(preview.payload),
   };
 }

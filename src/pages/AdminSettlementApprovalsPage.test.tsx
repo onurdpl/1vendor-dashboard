@@ -187,6 +187,31 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
   vatRateSource: 'settlement_line_snapshots',
   detectedVatRates: [20],
   configuredVendorCommissionVatPercent: 20,
+  executionSnapshotGuard: {
+    ok: true,
+    blockers: [],
+    warnings: [],
+    snapshotCompleteness: {
+      settlementApprovalFound: true,
+      settlementApprovalStatus: 'APPROVED',
+      lineCount: 1,
+      executionLineCount: 1,
+      commissionPercentSnapshot: {
+        present: true,
+        missingLineIds: [],
+        resolvedFromLedgerLineIds: [],
+      },
+      commissionVatPercentSnapshot: {
+        present: true,
+        missingLineIds: [],
+        resolvedFromLedgerLineIds: [],
+      },
+    },
+    detectedCommissionRates: [10],
+    detectedCommissionVatRates: [20],
+    detectedShippingModes: ['disabled'],
+    requiredSnapshotsPresent: true,
+  },
   logoPayloadPreview: {
     salesInvoiceDetails: [
       {
@@ -385,6 +410,9 @@ describe('Finance Settlement approval admin UI', () => {
     await userEvent.click(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i }));
     await waitFor(() => expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument());
     expect(screen.getByText('Read-only preview only. No Logo invoice is created.')).toBeInTheDocument();
+    expect(screen.getByText('Execution snapshot guard')).toBeInTheDocument();
+    expect(screen.getByText('Pass')).toBeInTheDocument();
+    expect(screen.getByText('disabled')).toBeInTheDocument();
     expect(screen.getByText('SPORGYM-COMMISSION')).toBeInTheDocument();
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
   });

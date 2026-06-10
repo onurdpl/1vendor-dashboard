@@ -555,6 +555,26 @@ export function AdminSettlementApprovalsPage() {
               </MetadataGroup>
               <ReadinessList title="Logo blockers" items={logoPreview.readiness.blockers} tone="danger" />
               <ReadinessList title="Logo warnings" items={logoPreview.readiness.warnings} tone="warning" />
+              <MetadataGroup title="Execution snapshot guard">
+                <MetadataRow label="Guard status" value={logoPreview.executionSnapshotGuard.ok ? 'Pass' : 'Blocked'} />
+                <MetadataRow label="Required snapshots" value={logoPreview.executionSnapshotGuard.requiredSnapshotsPresent ? 'Present' : 'Missing'} />
+                <MetadataRow label="Settlement status" value={valueOrDash(logoPreview.executionSnapshotGuard.snapshotCompleteness.settlementApprovalStatus)} />
+                <MetadataRow label="Execution lines" value={formatNumber(logoPreview.executionSnapshotGuard.snapshotCompleteness.executionLineCount)} />
+                <MetadataRow
+                  label="Detected commission VAT"
+                  value={
+                    logoPreview.executionSnapshotGuard.detectedCommissionVatRates.length
+                      ? logoPreview.executionSnapshotGuard.detectedCommissionVatRates.map((rate) => `${rate}%`).join(', ')
+                      : 'None'
+                  }
+                />
+                <MetadataRow
+                  label="Detected shipping modes"
+                  value={logoPreview.executionSnapshotGuard.detectedShippingModes.join(', ') || 'None'}
+                />
+              </MetadataGroup>
+              <ReadinessList title="Execution snapshot blockers" items={logoPreview.executionSnapshotGuard.blockers} tone="danger" />
+              <ReadinessList title="Execution snapshot warnings" items={logoPreview.executionSnapshotGuard.warnings} tone="warning" />
               <MetadataGroup title="Vendor billing readiness">
                 <MetadataRow label="Complete" value={logoPreview.vendorBillingReadiness.complete ? 'Yes' : 'No'} />
                 <MetadataRow label="Missing fields" value={logoPreview.vendorBillingReadiness.missingFields.join(', ') || 'None'} />
