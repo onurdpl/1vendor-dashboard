@@ -2024,6 +2024,26 @@ export function VendorProfilePage() {
                       <strong>{logoInvoicePdfResult.bodyKind ?? 'Not available'}</strong>
                     </div>
                     <div>
+                      <span>responseKeys</span>
+                      <strong>{logoInvoicePdfResult.responseKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>dataType</span>
+                      <strong>{logoInvoicePdfResult.dataType ?? 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>dataLength</span>
+                      <strong>{logoInvoicePdfResult.dataLength ?? 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>jsonCode</span>
+                      <strong>{logoInvoicePdfResult.jsonCode ?? 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>jsonIsError</span>
+                      <strong>{formatBoolean(logoInvoicePdfResult.jsonIsError)}</strong>
+                    </div>
+                    <div>
                       <span>PDF detected</span>
                       <strong>{formatBoolean(logoInvoicePdfResult.pdfDetected)}</strong>
                     </div>

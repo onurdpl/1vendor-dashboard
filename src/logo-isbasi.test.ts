@@ -443,6 +443,110 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
   });
 
+  it('detects base64 PDF data inside Logo invoice PDF JSON responses', async () => {
+    const base64Pdf = Buffer.from('%PDF-1.4 json wrapped pdf bytes that must not be returned in full').toString('base64');
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          code: 200,
+          isError: false,
+          data: base64Pdf,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoice-pdf')?.(
+      {
+        authUser: { role: 'admin' },
+        body: { uuid: '45192DC9-88F7-4382-BD5F-90E6A7BB6264' },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        contentType: 'application/json',
+        bodyKind: 'base64',
+        pdfDetected: true,
+        firstBytesPreview: expect.stringContaining('%PDF'),
+        responseKeys: ['code', 'data', 'isError'],
+        dataType: 'string',
+        dataLength: base64Pdf.length,
+        jsonCode: 200,
+        jsonIsError: false,
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(base64Pdf);
+    expect(serialized).not.toContain('json wrapped pdf bytes that must not be returned in full');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
+  it('does not detect non-PDF Logo invoice PDF JSON responses as PDF', async () => {
+    const nonPdfData = Buffer.from('not a pdf document').toString('base64');
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          code: 200,
+          isError: false,
+          data: nonPdfData,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoice-pdf')?.(
+      {
+        authUser: { role: 'admin' },
+        body: { uuid: '45192DC9-88F7-4382-BD5F-90E6A7BB6264' },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        contentType: 'application/json',
+        bodyKind: 'unknown',
+        pdfDetected: false,
+        firstBytesPreview: null,
+        responseKeys: ['code', 'data', 'isError'],
+        dataType: 'string',
+        dataLength: nonPdfData.length,
+        jsonCode: 200,
+        jsonIsError: false,
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(nonPdfData);
+    expect(serialized).not.toContain('not a pdf document');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
   it('returns sanitized Logo firm detail fields only', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(

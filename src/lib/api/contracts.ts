@@ -1567,6 +1567,11 @@ export type LogoIsbasiInvoicePdfProbeResult = {
   bodyKind?: 'base64' | 'pdf' | 'unknown';
   pdfDetected?: boolean;
   firstBytesPreview?: string | null;
+  responseKeys?: string[];
+  dataType?: string | null;
+  dataLength?: number | null;
+  jsonCode?: string | number | null;
+  jsonIsError?: boolean | null;
   endpoint?: string | null;
   errorCode?: string;
   message?: string;

@@ -250,6 +250,11 @@ type LogoPdfDocumentDiagnostics = {
   bodyKind: 'base64' | 'pdf' | 'unknown';
   pdfDetected: boolean;
   firstBytesPreview: string | null;
+  responseKeys?: string[];
+  dataType?: string | null;
+  dataLength?: number | null;
+  jsonCode?: string | number | null;
+  jsonIsError?: boolean | null;
 };
 
 export type LogoInvoiceShape = {
@@ -510,6 +515,66 @@ function tryDecodeBase64Pdf(bytes: Uint8Array) {
   }
 }
 
+function getJsonValueType(value: unknown) {
+  if (value === null) {
+    return 'null';
+  }
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  return typeof value;
+}
+
+function decodeBase64Prefix(value: string) {
+  const normalized = value.replace(/\s+/g, '');
+  if (!normalized || !/^[A-Za-z0-9+/=]+$/.test(normalized)) {
+    return null;
+  }
+  const prefixLength = Math.max(4, Math.min(96, normalized.length - (normalized.length % 4)));
+  const prefix = normalized.slice(0, prefixLength);
+  if (!prefix || prefix.length % 4 !== 0) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(prefix, 'base64');
+    return decoded.length ? new Uint8Array(decoded) : null;
+  } catch {
+    return null;
+  }
+}
+
+function inspectLogoPdfJsonDocument(value: unknown): LogoPdfDocumentDiagnostics | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const data = value.data;
+  const dataType = getJsonValueType(data);
+  const base = {
+    responseKeys: Object.keys(value).sort(),
+    dataType,
+    dataLength: typeof data === 'string' ? data.length : null,
+    jsonCode: typeof value.code === 'string' || typeof value.code === 'number' ? value.code : null,
+    jsonIsError: typeof value.isError === 'boolean' ? value.isError : null,
+  };
+  if (typeof data === 'string') {
+    const decoded = decodeBase64Prefix(data);
+    if (decoded && bytesStartWithPdf(decoded)) {
+      return {
+        ...base,
+        bodyKind: 'base64',
+        pdfDetected: true,
+        firstBytesPreview: previewBytes(decoded),
+      };
+    }
+  }
+  return {
+    ...base,
+    bodyKind: 'unknown',
+    pdfDetected: false,
+    firstBytesPreview: null,
+  };
+}
+
 function inspectLogoPdfDocument(bytes: Uint8Array): LogoPdfDocumentDiagnostics {
   if (bytesStartWithPdf(bytes)) {
     return {
@@ -517,6 +582,17 @@ function inspectLogoPdfDocument(bytes: Uint8Array): LogoPdfDocumentDiagnostics {
       pdfDetected: true,
       firstBytesPreview: previewBytes(bytes),
     };
+  }
+  const text = Buffer.from(bytes).toString('utf8').trim();
+  if (text.startsWith('{')) {
+    try {
+      const jsonDiagnostics = inspectLogoPdfJsonDocument(JSON.parse(text));
+      if (jsonDiagnostics) {
+        return jsonDiagnostics;
+      }
+    } catch {
+      // Fall through to plain text/base64 detection.
+    }
   }
   const decoded = tryDecodeBase64Pdf(bytes);
   if (decoded && bytesStartWithPdf(decoded)) {
@@ -548,6 +624,11 @@ function buildLogoPdfDocumentProbeResponse(result: LogoIsbasiDocumentResult) {
     bodyKind: diagnostics.bodyKind,
     pdfDetected: diagnostics.pdfDetected,
     firstBytesPreview: diagnostics.firstBytesPreview,
+    responseKeys: diagnostics.responseKeys,
+    dataType: diagnostics.dataType,
+    dataLength: diagnostics.dataLength,
+    jsonCode: diagnostics.jsonCode,
+    jsonIsError: diagnostics.jsonIsError,
     endpoint: result.requestUrl,
     request: {
       url: result.requestUrl,
