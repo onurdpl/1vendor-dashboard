@@ -24,6 +24,18 @@ import { setCurrentUser, setToken } from '../lib/auth';
 
 const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>();
 const getFinanceProfileMock = vi.fn<() => Promise<VendorFinancialProfile>>();
+const updateVendorFinancialProfileMock = vi.fn<
+  (
+    vendorId: string,
+    input: {
+      commissionPercent: number;
+      commissionVatPercent: number;
+      deductShippingEnabled: boolean;
+      shippingMode: VendorFinancialProfile['shippingMode'];
+      fixedShippingFee: number | null;
+    },
+  ) => Promise<VendorFinancialProfile>
+>();
 const getFinanceDashboardMock = vi.fn();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
@@ -54,6 +66,16 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
     getFinanceProfile: () => getFinanceProfileMock(),
+    updateVendorFinancialProfile: (
+      vendorId: string,
+      input: {
+        commissionPercent: number;
+        commissionVatPercent: number;
+        deductShippingEnabled: boolean;
+        shippingMode: VendorFinancialProfile['shippingMode'];
+        fixedShippingFee: number | null;
+      },
+    ) => updateVendorFinancialProfileMock(vendorId, input),
   };
 });
 
@@ -214,6 +236,10 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile']) {
   );
 }
 
+async function openLogoDiagnostics(section: HTMLElement) {
+  await userEvent.click(await within(section).findByText('Logo diagnostics'));
+}
+
 describe('VendorProfilePage', () => {
   beforeEach(() => {
     cleanup();
@@ -234,6 +260,19 @@ describe('VendorProfilePage', () => {
     getFinanceDashboardMock.mockResolvedValue({ profile: financeProfile });
     getFinanceProfileMock.mockReset();
     getFinanceProfileMock.mockResolvedValue(financeProfile);
+    updateVendorFinancialProfileMock.mockReset();
+    updateVendorFinancialProfileMock.mockImplementation((vendorId, input) =>
+      Promise.resolve({
+        vendorId,
+        commissionPercent: input.commissionPercent.toFixed(2),
+        commissionVatPercent: input.commissionVatPercent.toFixed(2),
+        deductShippingEnabled: input.deductShippingEnabled,
+        shippingMode: input.shippingMode,
+        fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+        active: true,
+        source: 'configured',
+      }),
+    );
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
     updateVendorBillingProfileMock.mockReset();
@@ -521,9 +560,18 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
     expect(screen.getByText('Finance readiness means estimate visibility only, not payout or accounting execution.')).toBeInTheDocument();
     expect(screen.getByText('Integration status')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance Policy' })).toBeInTheDocument();
+    expect(screen.getByText('Finance policy applies to future ledger rows only. Existing ledger rows and approved settlements keep their saved snapshots.')).toBeInTheDocument();
+    expect(screen.getByText('Commission %')).toBeInTheDocument();
+    expect(screen.getByText('Commission VAT %')).toBeInTheDocument();
+    expect(screen.getByText('Deduct shipping after fulfillment')).toBeInTheDocument();
+    expect(screen.getAllByText('Finance policy configured').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Billing source configured').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Logo binding configured').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Shipping configured').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();
     expect(screen.getByText('Seller legal billing identity used later as the billing source for Sporgym commission invoices.')).toBeInTheDocument();
-    expect(screen.getByText('Admin-managed')).toBeInTheDocument();
+    expect(screen.getAllByText('Admin-managed').length).toBeGreaterThan(0);
     expect(screen.getByText('Not available in vendor view')).toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
@@ -533,8 +581,9 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
     expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
-    expect(screen.getByText('Legal entity name, tax office, and tax identity')).toBeInTheDocument();
+    expect(screen.queryByText('Legal entity name, tax office, and tax identity')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
   });
 
   it('renders readiness states from missing config truth without fake ready states', async () => {
@@ -574,7 +623,7 @@ describe('VendorProfilePage', () => {
     const financeHeading = screen.getByRole('heading', { name: 'Finance visibility ready' });
     const financeCard = financeHeading.closest('article');
     expect(financeCard).not.toBeNull();
-    expect(within(financeCard!).getByText('Marketplace terms require verification before treating finance visibility as ready.')).toBeInTheDocument();
+    expect(within(financeCard!).getByText('Finance policy requires verification before treating finance visibility as ready.')).toBeInTheDocument();
   });
 
   it('renders readiness guidance links to existing workflow routes', async () => {
@@ -681,7 +730,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
-    expect(await screen.findByText('Demo Vendor A Ltd.')).toBeInTheDocument();
+    expect((await screen.findAllByText('Demo Vendor A Ltd.')).length).toBeGreaterThan(0);
     expect(screen.getByText('1111111111')).toBeInTheDocument();
     expect(screen.getByText('Kadikoy')).toBeInTheDocument();
     expect(screen.getByText('Billing Street 1, Istanbul')).toBeInTheDocument();
@@ -694,10 +743,76 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText('Commission invoice billing source')).toBeInTheDocument();
     expect(within(billingSection!).getAllByText('Configured').length).toBeGreaterThan(0);
     expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument();
+    const logoDiagnostics = within(billingSection!).getByText('Logo diagnostics').closest('details');
+    expect(logoDiagnostics).not.toBeNull();
+    expect(logoDiagnostics).not.toHaveAttribute('open');
     expect(within(billingSection!).queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
     expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer code')).not.toBeInTheDocument();
   });
+
+  it('renders and saves admin Finance Policy controls through the existing finance profile API', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+    updateVendorFinancialProfileMock.mockImplementation((vendorId, input) =>
+      Promise.resolve({
+        vendorId,
+        commissionPercent: input.commissionPercent.toFixed(2),
+        commissionVatPercent: input.commissionVatPercent.toFixed(2),
+        deductShippingEnabled: input.deductShippingEnabled,
+        shippingMode: input.shippingMode,
+        fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+        active: true,
+        source: 'configured',
+      }),
+    );
+
+    renderVendorProfilePage();
+
+    const financeHeading = await screen.findByRole('heading', { name: 'Finance Policy' });
+    const financeSection = financeHeading.closest('section');
+    expect(financeSection).not.toBeNull();
+    expect(await within(financeSection!).findByText('Finance policy applies to future ledger rows only. Existing ledger rows and approved settlements keep their saved snapshots.')).toBeInTheDocument();
+    expect(await within(financeSection!).findByText('12.50%')).toBeInTheDocument();
+    expect(within(financeSection!).getByText('20.00%')).toBeInTheDocument();
+    expect(within(financeSection!).getByRole('button', { name: 'Edit finance policy' })).toBeInTheDocument();
+
+    await userEvent.click(within(financeSection!).getByRole('button', { name: 'Edit finance policy' }));
+
+    expect(within(financeSection!).getByRole('heading', { name: 'Finance Policy edit' })).toBeInTheDocument();
+    expect(within(financeSection!).getByLabelText('Commission %')).toHaveValue(12.5);
+    expect(within(financeSection!).getByLabelText('Commission VAT %')).toHaveValue(20);
+    expect(within(financeSection!).getByLabelText('Shipping deduction mode')).toHaveValue('external_provider');
+    expect(within(financeSection!).getByLabelText(/Deduct shipping after fulfillment/i)).toBeChecked();
+
+    await userEvent.clear(within(financeSection!).getByLabelText('Commission %'));
+    await userEvent.type(within(financeSection!).getByLabelText('Commission %'), '13.75');
+    await userEvent.selectOptions(within(financeSection!).getByLabelText('Shipping deduction mode'), 'fixed');
+    await userEvent.type(within(financeSection!).getByLabelText('Fixed shipping fee'), '25');
+    await userEvent.click(within(financeSection!).getByRole('button', { name: 'Save finance policy' }));
+
+    await waitFor(() =>
+      expect(updateVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', {
+        commissionPercent: 13.75,
+        commissionVatPercent: 20,
+        deductShippingEnabled: true,
+        shippingMode: 'fixed',
+        fixedShippingFee: 25,
+      }),
+    );
+    expect(await within(financeSection!).findByText('13.75%')).toBeInTheDocument();
+    expect(within(financeSection!).getByText('25.00')).toBeInTheDocument();
+    expect(createLogoIsbasiTestInvoiceMock).not.toHaveBeenCalled();
+    expect(within(financeSection!).queryByRole('button', { name: 'Save finance policy' })).not.toBeInTheDocument();
+  }, 10000);
 
   it('shows Logo binding as needing match when customer code exists without a customer id', async () => {
     setCurrentUser({
@@ -722,6 +837,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
     const bindingHeading = await within(billingSection!).findByText('Current Logo Binding');
     const bindingPanel = bindingHeading.closest('.vendor-profile-logo-result');
     expect(bindingPanel).not.toBeNull();
@@ -905,6 +1021,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     expect(await within(billingSection!).findByText('Current Logo Binding')).toBeInTheDocument();
     expect(within(billingSection!).getAllByText('CUST001').length).toBeGreaterThan(0);
@@ -940,6 +1057,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
@@ -996,6 +1114,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
@@ -1052,6 +1171,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
@@ -1081,6 +1201,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Discover Logo Firms' })).toBeInTheDocument(),
@@ -1114,6 +1235,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Discover Incoming E-Invoices' })).toBeInTheDocument(),
@@ -1147,13 +1269,14 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' })).toBeInTheDocument(),
     );
     const createButton = within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' });
     expect(createButton).toBeDisabled();
-    expect(within(billingSection!).getByText('This creates a real invoice in the Logo test tenant.')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('This section contains read-only Logo probes plus the existing test-invoice tool. It is not a settlement invoice execution flow.')).toBeInTheDocument();
 
     await userEvent.click(within(billingSection!).getByLabelText('I understand this creates a test invoice.'));
     expect(createButton).toBeEnabled();
@@ -1218,6 +1341,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Match Vendor To Logo Firm' })).toBeInTheDocument(),
@@ -1255,6 +1379,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),
@@ -1291,6 +1416,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),
@@ -1340,6 +1466,7 @@ describe('VendorProfilePage', () => {
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');
     expect(billingSection).not.toBeNull();
+    await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
       expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),

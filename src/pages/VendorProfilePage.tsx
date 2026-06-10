@@ -12,7 +12,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getFinanceProfile } from '../features/finance/api';
+import { getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import {
@@ -51,6 +51,7 @@ import type {
   SupportTicket,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorFinancialProfile,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -95,6 +96,14 @@ type BillingProfileFormState = {
   logoIsbasiCustomerCode: string;
 };
 
+type FinancePolicyFormState = {
+  commissionPercent: string;
+  commissionVatPercent: string;
+  deductShippingEnabled: boolean;
+  shippingMode: VendorFinancialProfile['shippingMode'];
+  fixedShippingFee: string;
+};
+
 type LogoCommissionPreviewFormState = {
   commissionAmount: string;
   vatRate: string;
@@ -116,6 +125,14 @@ const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
   iban: '',
   legalEntityType: '',
   logoIsbasiCustomerCode: '',
+};
+
+const EMPTY_FINANCE_POLICY_FORM: FinancePolicyFormState = {
+  commissionPercent: '',
+  commissionVatPercent: '',
+  deductShippingEnabled: false,
+  shippingMode: 'disabled',
+  fixedShippingFee: '',
 };
 
 const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
@@ -178,6 +195,62 @@ function buildBillingProfileInput(form: BillingProfileFormState): VendorBillingP
 function validateBillingProfileForm(form: BillingProfileFormState) {
   const missing = billingRequiredFields.find(({ field }) => !form[field].trim());
   return missing ? `${missing.label} is required for commission invoices.` : null;
+}
+
+function buildFinancePolicyFormState(profile: VendorFinancialProfile | null): FinancePolicyFormState {
+  return {
+    commissionPercent: profile?.commissionPercent ?? '',
+    commissionVatPercent: profile?.commissionVatPercent ?? '',
+    deductShippingEnabled: profile?.deductShippingEnabled ?? false,
+    shippingMode: profile?.shippingMode ?? 'disabled',
+    fixedShippingFee: profile?.fixedShippingFee ?? '',
+  };
+}
+
+function parseFinancePolicyPercent(value: string, label: string) {
+  const numeric = Number(value);
+  if (!value.trim() || !Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
+    return {
+      ok: false as const,
+      message: `${label} must be between 0 and 100.`,
+    };
+  }
+  return {
+    ok: true as const,
+    value: Math.round(numeric * 100) / 100,
+  };
+}
+
+function buildFinancePolicyInput(form: FinancePolicyFormState) {
+  const fixedShippingFee = form.fixedShippingFee.trim() ? Number(form.fixedShippingFee) : null;
+  return {
+    commissionPercent: Number(form.commissionPercent),
+    commissionVatPercent: Number(form.commissionVatPercent),
+    deductShippingEnabled: form.deductShippingEnabled,
+    shippingMode: form.shippingMode,
+    fixedShippingFee,
+  };
+}
+
+function validateFinancePolicyForm(form: FinancePolicyFormState) {
+  const commissionPercent = parseFinancePolicyPercent(form.commissionPercent, 'Commission %');
+  if (!commissionPercent.ok) {
+    return commissionPercent.message;
+  }
+
+  const commissionVatPercent = parseFinancePolicyPercent(form.commissionVatPercent, 'Commission VAT %');
+  if (!commissionVatPercent.ok) {
+    return commissionVatPercent.message;
+  }
+
+  if (form.fixedShippingFee.trim()) {
+    const fixedShippingFee = Number(form.fixedShippingFee);
+    if (!Number.isFinite(fixedShippingFee) || fixedShippingFee < 0) {
+      return 'Fixed shipping fee must be zero or greater.';
+    }
+  }
+
+  return null;
 }
 
 function validateLogoCommissionPreviewForm(form: LogoCommissionPreviewFormState) {
@@ -713,6 +786,10 @@ export function VendorProfilePage() {
   const [billingForm, setBillingForm] = useState<BillingProfileFormState>(EMPTY_BILLING_PROFILE_FORM);
   const [billingFormError, setBillingFormError] = useState<string | null>(null);
   const [savedBillingProfile, setSavedBillingProfile] = useState<VendorBillingProfile | null>(null);
+  const [financePolicyEditOpen, setFinancePolicyEditOpen] = useState(false);
+  const [financePolicyForm, setFinancePolicyForm] = useState<FinancePolicyFormState>(EMPTY_FINANCE_POLICY_FORM);
+  const [financePolicyFormError, setFinancePolicyFormError] = useState<string | null>(null);
+  const [savedFinanceProfile, setSavedFinanceProfile] = useState<VendorFinancialProfile | null>(null);
   const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
   const [logoFirmsResult, setLogoFirmsResult] = useState<LogoIsbasiFirmsDiscoveryResult | null>(null);
   const [logoInvoicesResult, setLogoInvoicesResult] = useState<LogoIsbasiInvoiceListProbeResult | null>(null);
@@ -754,7 +831,7 @@ export function VendorProfilePage() {
   );
 
   const shippingConfig = shippingQuery.data;
-  const financeProfile = financeQuery.data ?? null;
+  const financeProfile = savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const logoBindingPresent = Boolean(billingProfile?.logoIsbasiCustomerCode || billingProfile?.logoIsbasiCustomerId);
   const logoBindingNeedsMatch = Boolean(billingProfile?.logoIsbasiCustomerCode?.trim() && !billingProfile?.logoIsbasiCustomerId?.trim());
@@ -845,8 +922,8 @@ export function VendorProfilePage() {
         status: financeQuery.isError ? 'unknown' : financePreviewAvailable ? (marketplaceTermsActive ? 'ready' : 'review') : 'unknown',
         detail: financePreviewAvailable
           ? marketplaceTermsActive
-            ? 'Marketplace terms are active for estimate visibility.'
-            : 'Marketplace terms require verification before treating finance visibility as ready.'
+            ? 'Finance policy is active for estimate visibility.'
+            : 'Finance policy requires verification before treating finance visibility as ready.'
           : 'Settlement visibility cannot be inferred without the finance profile.',
       },
     ];
@@ -983,6 +1060,23 @@ export function VendorProfilePage() {
       },
       onError: (error) => {
         setBillingFormError(error instanceof Error ? error.message : 'Unable to save billing profile.');
+      },
+    },
+  );
+
+  const financePolicyMutation = useMutationAction(
+    (input: ReturnType<typeof buildFinancePolicyInput>) => updateVendorFinancialProfile(currentVendor.vendorId, input),
+    {
+      onSuccess: async (savedProfile) => {
+        queryClient.setQueryData(queryKeys.vendorProfile.financeProfile(currentVendor.vendorId), savedProfile);
+        setSavedFinanceProfile(savedProfile);
+        setFinancePolicyEditOpen(false);
+        setFinancePolicyFormError(null);
+        setFinancePolicyForm(buildFinancePolicyFormState(savedProfile));
+        showFeedback('Finance policy saved for future ledger rows.', 'success');
+      },
+      onError: (error) => {
+        setFinancePolicyFormError(error instanceof Error ? error.message : 'Unable to save finance policy.');
       },
     },
   );
@@ -1401,6 +1495,39 @@ export function VendorProfilePage() {
     void billingMutation.mutateAsync(buildBillingProfileInput(billingForm));
   }
 
+  function handleOpenFinancePolicyEdit() {
+    setFinancePolicyForm(buildFinancePolicyFormState(financeProfile));
+    setFinancePolicyFormError(null);
+    setFinancePolicyEditOpen(true);
+  }
+
+  function handleCancelFinancePolicyEdit() {
+    setFinancePolicyForm(buildFinancePolicyFormState(financeProfile));
+    setFinancePolicyFormError(null);
+    setFinancePolicyEditOpen(false);
+    financePolicyMutation.reset();
+  }
+
+  function handleFinancePolicyFormChange<Field extends keyof FinancePolicyFormState>(
+    field: Field,
+    value: FinancePolicyFormState[Field],
+  ) {
+    setFinancePolicyForm((current) => ({ ...current, [field]: value }));
+    if (financePolicyFormError) {
+      setFinancePolicyFormError(null);
+    }
+  }
+
+  function handleFinancePolicySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validationError = validateFinancePolicyForm(financePolicyForm);
+    if (validationError) {
+      setFinancePolicyFormError(validationError);
+      return;
+    }
+    void financePolicyMutation.mutateAsync(buildFinancePolicyInput(financePolicyForm));
+  }
+
   function handleLogoPreviewFormChange(field: keyof LogoCommissionPreviewFormState, value: string) {
     setLogoPreviewForm((current) => ({ ...current, [field]: value }));
     if (logoPreviewFormError) {
@@ -1443,7 +1570,7 @@ export function VendorProfilePage() {
             <p className="eyebrow">Marketplace seller workspace</p>
             <h1>{currentVendor.vendorName || 'Vendor profile'}</h1>
             <p>
-              Review the seller identity, marketplace terms, shipping operations, and return destination currently managed
+              Review the seller identity, finance policy, shipping operations, and return destination currently managed
               for this store. Marketplace-owned fields are read-only here.
             </p>
           </div>
@@ -1486,7 +1613,7 @@ export function VendorProfilePage() {
           <MetadataGroup>
             <MetadataRow label="Display name" value={formatValue(currentVendor.vendorName, 'Vendor unavailable')} />
             <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
-            <MetadataRow label="Legal name" value="Not modeled yet" />
+            <MetadataRow label="Legal name" value={isAdmin ? formatValue(billingProfile?.legalCompanyName) : 'Admin-managed billing profile'} />
             <MetadataRow label="Store contact" value="Not modeled yet" />
             <MetadataRow label="Signed-in user" value={currentUser?.email ?? 'Unknown'} />
             <MetadataRow label="Seller of record" value="Not configured" />
@@ -1555,9 +1682,13 @@ export function VendorProfilePage() {
                     Edit billing profile
                   </button>
                 </div>
-                <div>
-                  <span>Logo İşbaşı diagnostics</span>
-                  <div className="vendor-profile-logo-actions">
+              </div>
+              <details className="vendor-profile-disclosure vendor-profile-logo-diagnostics">
+                <summary>
+                  <span>Logo diagnostics</span>
+                  <small>Collapsed provider probes and test-only tools</small>
+                </summary>
+                <div className="vendor-profile-logo-actions">
                     <button
                       type="button"
                       className="button button-secondary button-compact"
@@ -1791,12 +1922,10 @@ export function VendorProfilePage() {
                     >
                       {logoTestInvoiceMutation.isPending ? 'Creating TEST invoice...' : 'Create TEST Invoice'}
                     </button>
-                  </div>
-                  <p className="page-description">
-                    This creates a real invoice in the Logo test tenant.
-                  </p>
                 </div>
-              </div>
+                <p className="page-description">
+                  This section contains read-only Logo probes plus the existing test-invoice tool. It is not a settlement invoice execution flow.
+                </p>
               {logoBindingPresent ? (
                 <div className="vendor-profile-logo-result">
                   <span>Current Logo Binding</span>
@@ -2663,6 +2792,7 @@ export function VendorProfilePage() {
                   <pre>{formatLogoProbeJson(logoPreviewResult)}</pre>
                 </div>
               ) : null}
+              </details>
               {billingEditOpen ? (
                 <form className="vendor-profile-billing-form" onSubmit={handleBillingProfileSubmit} noValidate>
                   <div className="vendor-profile-billing-form-heading">
@@ -2798,26 +2928,143 @@ export function VendorProfilePage() {
         </OperationalSection>
 
         <OperationalSection
-          title="Marketplace terms"
-          description="Read-only commercial profile used for operational visibility. This does not implement payout execution."
+          title="Finance Policy"
+          description="Admin-owned policy used for future finance ledger rows. It does not change existing ledger snapshots, approved settlements, invoices, or payouts."
         >
           {financeQuery.isError && !financeProfile ? (
             <SectionErrorRetry
-              title="Marketplace terms unavailable"
+              title="Finance policy unavailable"
               description={financeQuery.error ?? 'Unable to load the vendor commercial profile.'}
               onRetry={() => void financeQuery.refetch()}
             />
           ) : financeQuery.isInitialLoading || !financeProfile ? (
-            <SectionSkeleton title="Loading marketplace terms" description="Fetching the current vendor finance profile." />
+            <SectionSkeleton title="Loading finance policy" description="Fetching the current vendor finance profile." />
           ) : (
-            <MetadataGroup>
-              <MetadataRow label="Commission" value={`${financeProfile.commissionPercent}%`} />
-              <MetadataRow label="Commission VAT" value={`${financeProfile.commissionVatPercent}%`} />
-              <MetadataRow label="Shipping deduction" value={formatShippingMode(financeProfile.shippingMode)} />
-              <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
-              <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
-              <MetadataRow label="Terms active" value={formatBoolean(financeProfile.active)} />
-            </MetadataGroup>
+            <>
+              <p className="page-description">
+                Finance policy applies to future ledger rows only. Existing ledger rows and approved settlements keep their saved snapshots.
+              </p>
+              <MetadataGroup>
+                <MetadataRow label="Commission %" value={`${financeProfile.commissionPercent}%`} />
+                <MetadataRow label="Commission VAT %" value={`${financeProfile.commissionVatPercent}%`} />
+                <MetadataRow label="Shipping deduction mode" value={formatShippingMode(financeProfile.shippingMode)} />
+                <MetadataRow label="Deduct shipping after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
+                <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
+                <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
+                <MetadataRow label="Policy active" value={formatBoolean(financeProfile.active)} />
+              </MetadataGroup>
+              <div className="vendor-profile-integration-list">
+                <div>
+                  <span>Finance policy configured</span>
+                  <StatusBadge tone={financeProfile.active ? 'success' : 'warning'}>
+                    {financeProfile.active ? 'Configured' : 'Needs review'}
+                  </StatusBadge>
+                </div>
+                <div>
+                  <span>Snapshot safety</span>
+                  <StatusBadge tone="info">Future rows only</StatusBadge>
+                </div>
+                {isAdmin ? (
+                  <div>
+                    <span>Admin edit</span>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={handleOpenFinancePolicyEdit}
+                      disabled={financePolicyMutation.isPending}
+                    >
+                      Edit finance policy
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              {financePolicyEditOpen ? (
+                <form className="vendor-profile-billing-form" onSubmit={handleFinancePolicySubmit} noValidate>
+                  <div className="vendor-profile-billing-form-heading">
+                    <div>
+                      <h3>Finance Policy edit</h3>
+                      <p>Changes apply only to future ledger rows. Historical snapshots remain unchanged.</p>
+                    </div>
+                    <StatusBadge tone="warning">Snapshot-safe policy</StatusBadge>
+                  </div>
+                  <div className="vendor-profile-billing-form-grid">
+                    <label>
+                      Commission %
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={financePolicyForm.commissionPercent}
+                        onChange={(event) => handleFinancePolicyFormChange('commissionPercent', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Commission VAT %
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={financePolicyForm.commissionVatPercent}
+                        onChange={(event) => handleFinancePolicyFormChange('commissionVatPercent', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Shipping deduction mode
+                      <select
+                        value={financePolicyForm.shippingMode}
+                        onChange={(event) =>
+                          handleFinancePolicyFormChange(
+                            'shippingMode',
+                            event.target.value as FinancePolicyFormState['shippingMode'],
+                          )
+                        }
+                      >
+                        <option value="disabled">Disabled</option>
+                        <option value="fixed">Fixed shipping fee</option>
+                        <option value="external_provider">External provider cost</option>
+                      </select>
+                    </label>
+                    <label>
+                      Fixed shipping fee
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={financePolicyForm.fixedShippingFee}
+                        onChange={(event) => handleFinancePolicyFormChange('fixedShippingFee', event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label className="vendor-profile-checkbox-field vendor-profile-billing-form-wide">
+                      <input
+                        type="checkbox"
+                        checked={financePolicyForm.deductShippingEnabled}
+                        onChange={(event) => handleFinancePolicyFormChange('deductShippingEnabled', event.target.checked)}
+                      />
+                      <span>Deduct shipping after fulfillment when the selected shipping deduction mode applies.</span>
+                    </label>
+                  </div>
+                  {financePolicyFormError ? <p className="vendor-profile-billing-error" role="alert">{financePolicyFormError}</p> : null}
+                  <OperationalActionGroup>
+                    <button type="submit" className="button button-primary" disabled={financePolicyMutation.isPending}>
+                      {financePolicyMutation.isPending ? 'Saving finance policy...' : 'Save finance policy'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleCancelFinancePolicyEdit}
+                      disabled={financePolicyMutation.isPending}
+                    >
+                      Cancel
+                    </button>
+                  </OperationalActionGroup>
+                </form>
+              ) : null}
+            </>
           )}
         </OperationalSection>
 
@@ -2852,6 +3099,30 @@ export function VendorProfilePage() {
           description="Marketplace systems connected to this seller workspace."
         >
           <div className="vendor-profile-integration-list">
+            <div>
+              <span>Finance policy configured</span>
+              <StatusBadge tone={marketplaceTermsActive ? 'success' : 'warning'}>
+                {marketplaceTermsActive ? 'Configured' : 'Needs review'}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Billing source configured</span>
+              <StatusBadge tone={billingProfile ? 'success' : 'warning'}>
+                {billingProfile ? 'Configured' : isAdmin ? 'Required' : 'Admin-managed'}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Logo binding configured</span>
+              <StatusBadge tone={logoBindingPresent && !logoBindingNeedsMatch ? 'success' : 'warning'}>
+                {logoBindingPresent && !logoBindingNeedsMatch ? 'Configured' : logoBindingNeedsMatch ? 'Needs match' : 'Missing'}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Shipping configured</span>
+              <StatusBadge tone={shippingConfigured ? 'success' : 'warning'}>
+                {shippingConfigured ? 'Configured' : 'Needs setup'}
+              </StatusBadge>
+            </div>
             <div>
               <span>Shopify workspace</span>
               <StatusBadge tone={appReadiness.ready ? 'success' : 'warning'}>{appReadiness.ready ? 'Connected' : 'Loading'}</StatusBadge>
@@ -2947,7 +3218,6 @@ export function VendorProfilePage() {
             <small>Open for data-model notes</small>
           </summary>
           <ul className="vendor-profile-missing-list">
-            <li>Legal entity name, tax office, and tax identity</li>
             <li>Dedicated store operations contact email and phone</li>
             <li>Seller-of-record / commercial authority status</li>
             <li>Public marketplace storefront profile content</li>

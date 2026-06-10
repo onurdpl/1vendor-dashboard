@@ -11532,6 +11532,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .vendor-profile-billing-form-grid input,
+.vendor-profile-billing-form-grid select,
 .vendor-profile-billing-form-grid textarea {
   width: 100%;
   min-width: 0;
@@ -11542,6 +11543,29 @@ summary.provider-response-heading::-webkit-details-marker {
   font: inherit;
   font-weight: 600;
   padding: 10px 12px;
+}
+
+.vendor-profile-checkbox-field {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.vendor-profile-checkbox-field input {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
+.vendor-profile-checkbox-field span {
+  color: #334155;
+  font-size: 0.84rem;
 }
 
 .vendor-profile-billing-form-grid textarea {
@@ -11565,9 +11589,19 @@ summary.provider-response-heading::-webkit-details-marker {
 .vendor-profile-logo-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.vendor-profile-logo-diagnostics {
+  margin-top: 14px;
+}
+
+.vendor-profile-logo-diagnostics > .page-description {
+  margin: 0;
+  padding: 0 14px 14px;
 }
 
 .vendor-profile-logo-confirmation {
