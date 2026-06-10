@@ -97,7 +97,11 @@ function buildLedgerRow(input: {
   };
 }
 
-function buildApproval(input: { id: string; status: 'DRAFT' | 'APPROVED' | 'CANCELLED' }) {
+function buildApproval(input: {
+  id: string;
+  status: 'DRAFT' | 'APPROVED' | 'CANCELLED';
+  commissionInvoices?: Array<{ id: string; status: 'PENDING' | 'CREATED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN' }>;
+}) {
   return {
     id: input.id,
     createdAt: new Date('2026-06-01T11:00:00.000Z'),
@@ -118,6 +122,7 @@ function buildApproval(input: { id: string; status: 'DRAFT' | 'APPROVED' | 'CANC
     cancelledAt: input.status === 'CANCELLED' ? new Date('2026-06-01T13:00:00.000Z') : null,
     notes: null,
     sourceSnapshotJson: { vendorId: 'vendor-a' },
+    commissionInvoices: input.commissionInvoices ?? [],
     lines: [
       {
         id: 'line-1',
@@ -331,6 +336,56 @@ describe('settlement approval foundation', () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ['DRAFT', 'PENDING'],
+    ['APPROVED', 'PENDING'],
+    ['APPROVED', 'CREATED'],
+    ['APPROVED', 'FAILED'],
+    ['APPROVED', 'UNKNOWN'],
+  ] as const)(
+    'blocks cancellation for %s settlement approvals with active %s commission invoice records',
+    async (approvalStatus, invoiceStatus) => {
+      prismaMock.settlementApproval.findUnique.mockResolvedValue(
+        buildApproval({
+          id: 'approval-1',
+          status: approvalStatus,
+          commissionInvoices: [{ id: 'commission-invoice-1', status: invoiceStatus }],
+        }),
+      );
+
+      await expect(cancelSettlementApproval('approval-1', 'admin-2')).rejects.toThrow(
+        'Settlement approval cannot be cancelled because an active commission invoice record exists.',
+      );
+      expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows cancellation when only cancelled commission invoice records exist', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+    prismaMock.settlementApproval.update.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'CANCELLED' }));
+
+    const cancelled = await cancelSettlementApproval('approval-1', 'admin-2');
+
+    expect(prismaMock.settlementApproval.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          commissionInvoices: {
+            where: {
+              status: {
+                not: 'CANCELLED',
+              },
+            },
+            select: {
+              id: true,
+            },
+          },
+        }),
+      }),
+    );
+    expect(cancelled.status).toBe('cancelled');
+    expect(prismaMock.settlementApproval.update).toHaveBeenCalled();
   });
 
   it('excludes rows already linked to active approvals from new preview', async () => {

@@ -2,6 +2,7 @@ import {
   Prisma,
   SettlementApprovalLineType,
   SettlementApprovalStatus,
+  SettlementCommissionInvoiceStatus,
   type SettlementApproval,
   type SettlementApprovalLine,
 } from '@prisma/client';
@@ -758,6 +759,16 @@ export async function cancelSettlementApproval(
       id,
     },
     include: {
+      commissionInvoices: {
+        where: {
+          status: {
+            not: SettlementCommissionInvoiceStatus.CANCELLED,
+          },
+        },
+        select: {
+          id: true,
+        },
+      },
       lines: true,
     },
   });
@@ -766,6 +777,11 @@ export async function cancelSettlementApproval(
   }
   if (existing.status === SettlementApprovalStatus.CANCELLED) {
     throw new Error('Settlement approval is already cancelled.');
+  }
+  const activeCommissionInvoices = (existing as typeof existing & { commissionInvoices: Array<{ id: string }> })
+    .commissionInvoices;
+  if (activeCommissionInvoices.length > 0) {
+    throw new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.');
   }
 
   const cancelled = await prisma.settlementApproval.update({
