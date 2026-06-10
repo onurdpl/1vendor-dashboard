@@ -34,6 +34,7 @@ import type {
   DashboardReturnSummary,
   KargonomiReturnPreview,
   LogoIsbasiCommissionInvoicePreviewInput,
+  LogoIsbasiInvoicePdfProbeResult,
   LogoIsbasiProductServiceDiscoveryResult,
   OperationsQueueDashboard,
   OperationsQueueItem,
@@ -462,6 +463,24 @@ export const runtimeServices = {
                 unit: 'Adet',
               },
             ],
+          }),
+    fetchLogoIsbasiInvoicePdf: (_uuid: string): Promise<LogoIsbasiInvoicePdfProbeResult> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.fetchLogoIsbasiInvoicePdf(_uuid)
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'invoice_pdf_probe' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            contentType: 'application/pdf',
+            contentLength: 1024,
+            bodyKind: 'pdf' as const,
+            pdfDetected: true,
+            firstBytesPreview: '%PDF-1.4',
+            endpoint: 'https://logo.example.test/api/v1.0/einvoices/DocumentDatawithuuid?uuid=mock&fileFormat=PDF',
           }),
     inspectLogoIsbasiInvoice: (invoiceId: string) =>
       runtimeConfig.apiMode === 'real'

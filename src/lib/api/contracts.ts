@@ -1554,6 +1554,26 @@ export type LogoIsbasiProductServiceDiscoveryResult = {
   response?: LogoIsbasiUpstreamResponseDiagnostic;
 };
 
+export type LogoIsbasiInvoicePdfProbeResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'invoice_pdf_probe';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  contentType?: string | null;
+  contentLength?: number | null;
+  bodyKind?: 'base64' | 'pdf' | 'unknown';
+  pdfDetected?: boolean;
+  firstBytesPreview?: string | null;
+  endpoint?: string | null;
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+};
+
 export type LogoIsbasiInvoiceDetailProbeResult = {
   ok: boolean;
   success?: boolean;

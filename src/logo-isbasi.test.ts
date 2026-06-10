@@ -312,6 +312,137 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('api-key-secret');
   });
 
+  it('requires uuid before fetching a Logo invoice PDF document', async () => {
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoice-pdf')?.(
+      { authUser: { role: 'admin' }, body: {} },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(400);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'invoice_pdf_probe',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        errorCode: 'LOGO_ISBASI_INVOICE_PDF_VALIDATION_FAILED',
+        message: 'uuid is required.',
+      }),
+    );
+  });
+
+  it('fetches Logo invoice PDF documents by uuid and detects PDF bytes', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('%PDF-1.4 test pdf bytes that must not be returned in full', {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Length': '58',
+          },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoice-pdf')?.(
+      {
+        authUser: { role: 'admin' },
+        body: { uuid: '45192DC9-88F7-4382-BD5F-90E6A7BB6264' },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/einvoices/DocumentDatawithuuid?uuid=45192DC9-88F7-4382-BD5F-90E6A7BB6264&fileFormat=PDF',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          apiKey: 'api-key-secret',
+          Accept: 'text/plain, application/pdf',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        provider: 'LOGO_ISBASI',
+        mode: 'invoice_pdf_probe',
+        writesPerformed: false,
+        externalApiCallAttempted: true,
+        httpStatus: 200,
+        contentType: 'application/pdf',
+        contentLength: 58,
+        bodyKind: 'pdf',
+        pdfDetected: true,
+        firstBytesPreview: expect.stringContaining('%PDF'),
+        endpoint: expect.stringContaining('/api/v1.0/einvoices/DocumentDatawithuuid?'),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('test pdf bytes that must not be returned in full');
+    expect(serialized).not.toContain('full-secret-access-token');
+    expect(serialized).not.toContain('api-key-secret');
+  });
+
+  it('detects base64 Logo invoice PDF document responses without exposing the document', async () => {
+    const base64Pdf = Buffer.from('%PDF-1.4 base64 pdf bytes that must not be returned in full').toString('base64');
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(base64Pdf, {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoice-pdf')?.(
+      {
+        authUser: { role: 'admin' },
+        body: { uuid: '45192DC9-88F7-4382-BD5F-90E6A7BB6264' },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        bodyKind: 'base64',
+        pdfDetected: true,
+        firstBytesPreview: expect.stringContaining('%PDF'),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(base64Pdf);
+    expect(serialized).not.toContain('base64 pdf bytes that must not be returned in full');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
   it('returns sanitized Logo firm detail fields only', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(

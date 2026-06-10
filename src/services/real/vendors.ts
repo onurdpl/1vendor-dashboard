@@ -8,6 +8,7 @@ import type {
   LogoIsbasiIncomingEinvoiceListProbeResult,
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
+  LogoIsbasiInvoicePdfProbeResult,
   LogoIsbasiLoginProbeResult,
   LogoIsbasiProductServiceDiscoveryResult,
   LogoIsbasiTestInvoiceCreateResult,
@@ -67,6 +68,14 @@ export function discoverLogoIsbasiServices() {
   return apiClient.post<LogoIsbasiProductServiceDiscoveryResult>(
     '/admin/probes/logo-isbasi/products',
     { type: 2, pageSize: 50 },
+    { skipVendorContext: true },
+  );
+}
+
+export function fetchLogoIsbasiInvoicePdf(uuid: string) {
+  return apiClient.post<LogoIsbasiInvoicePdfProbeResult>(
+    '/admin/probes/logo-isbasi/invoice-pdf',
+    { uuid },
     { skipVendorContext: true },
   );
 }

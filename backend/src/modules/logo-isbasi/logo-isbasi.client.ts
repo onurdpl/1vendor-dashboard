@@ -29,6 +29,18 @@ export type LogoIsbasiRawResult = {
   queryParameters?: string[];
 };
 
+export type LogoIsbasiDocumentResult = {
+  status: number;
+  ok: boolean;
+  bytes: Uint8Array;
+  requestUrl: string;
+  requestMethod: string;
+  responseContentType: string | null;
+  contentLength: number | null;
+  requestAccept: string;
+  queryParameters: string[];
+};
+
 export type LogoIsbasiSessionExtraction = {
   accessToken: string | null;
   tenantId: string | null;
@@ -471,5 +483,54 @@ export class LogoIsbasiClient {
       contentType: 'application/json; charset=utf-8',
       accept: 'application/json',
     });
+  }
+
+  async getInvoicePdfDocumentByUuid(
+    session: LogoIsbasiAuthenticatedSession,
+    uuid: string,
+  ): Promise<LogoIsbasiDocumentResult> {
+    const requestUrl = new URL(`${this.baseUrl}/api/v1.0/einvoices/DocumentDatawithuuid`);
+    requestUrl.searchParams.set('uuid', uuid);
+    requestUrl.searchParams.set('fileFormat', 'PDF');
+    const accept = 'text/plain, application/pdf';
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.accessToken}`,
+      tenantId: session.tenantId,
+      apiKey: this.config.apiKey,
+      Accept: accept,
+      Lang: 'tr-TR',
+      DeviceType: 'WEB',
+    };
+    if (session.userId) {
+      headers.UserId = session.userId;
+    }
+    if (session.userEmail) {
+      headers.UserEmail = session.userEmail;
+    }
+    if (session.userName) {
+      headers.UserName = session.userName;
+    }
+
+    const response = await this.fetchImpl(requestUrl.toString(), {
+      method: 'GET',
+      headers,
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const contentLengthHeader = response.headers.get('content-length');
+    const contentLength = contentLengthHeader && /^\d+$/.test(contentLengthHeader)
+      ? Number(contentLengthHeader)
+      : bytes.byteLength;
+
+    return {
+      status: response.status,
+      ok: response.ok,
+      bytes,
+      requestUrl: requestUrl.toString(),
+      requestMethod: 'GET',
+      responseContentType: response.headers.get('content-type'),
+      contentLength,
+      requestAccept: accept,
+      queryParameters: Array.from(requestUrl.searchParams.keys()).sort(),
+    };
   }
 }

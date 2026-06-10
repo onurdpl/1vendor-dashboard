@@ -12,6 +12,7 @@ import {
   LogoIsbasiClient,
   sanitizeLoginResponse,
   type LogoIsbasiAuthenticatedSession,
+  type LogoIsbasiDocumentResult,
   type LogoIsbasiRawResult,
 } from './logo-isbasi.client.js';
 import {
@@ -245,6 +246,12 @@ type SanitizedLogoIncomingEinvoiceSummary = {
   eGovermentTypeDesc: string | null;
 };
 
+type LogoPdfDocumentDiagnostics = {
+  bodyKind: 'base64' | 'pdf' | 'unknown';
+  pdfDetected: boolean;
+  firstBytesPreview: string | null;
+};
+
 export type LogoInvoiceShape = {
   hasEGovernmentInvoice: boolean;
   eGovernmentInvoiceKeys: string[];
@@ -474,6 +481,87 @@ function sanitizeLogoProductServiceItem(value: unknown) {
     type: readRecordString(value, ['type', 'itemType', 'productType']),
     vat: readRecordString(value, ['vat', 'vatRate', 'taxRate', 'vat_rate', 'tax_rate']),
     unit: readRecordString(value, ['unit', 'unitName', 'unitCode']),
+  };
+}
+
+function bytesStartWithPdf(bytes: Uint8Array) {
+  return bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+}
+
+function previewBytes(bytes: Uint8Array) {
+  if (!bytes.length) {
+    return null;
+  }
+  return Array.from(bytes.slice(0, 16))
+    .map((byte) => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'))
+    .join('');
+}
+
+function tryDecodeBase64Pdf(bytes: Uint8Array) {
+  const text = Buffer.from(bytes).toString('utf8').trim();
+  if (!text || text.length > 10_000_000 || !/^[A-Za-z0-9+/=\s]+$/.test(text)) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(text.replace(/\s+/g, ''), 'base64');
+    return decoded.length ? new Uint8Array(decoded) : null;
+  } catch {
+    return null;
+  }
+}
+
+function inspectLogoPdfDocument(bytes: Uint8Array): LogoPdfDocumentDiagnostics {
+  if (bytesStartWithPdf(bytes)) {
+    return {
+      bodyKind: 'pdf',
+      pdfDetected: true,
+      firstBytesPreview: previewBytes(bytes),
+    };
+  }
+  const decoded = tryDecodeBase64Pdf(bytes);
+  if (decoded && bytesStartWithPdf(decoded)) {
+    return {
+      bodyKind: 'base64',
+      pdfDetected: true,
+      firstBytesPreview: previewBytes(decoded),
+    };
+  }
+  return {
+    bodyKind: 'unknown',
+    pdfDetected: false,
+    firstBytesPreview: previewBytes(bytes),
+  };
+}
+
+function buildLogoPdfDocumentProbeResponse(result: LogoIsbasiDocumentResult) {
+  const diagnostics = inspectLogoPdfDocument(result.bytes);
+  return {
+    ok: result.ok,
+    success: result.ok,
+    provider: 'LOGO_ISBASI',
+    mode: 'invoice_pdf_probe',
+    writesPerformed: false,
+    externalApiCallAttempted: true,
+    httpStatus: result.status,
+    contentType: result.responseContentType,
+    contentLength: result.contentLength,
+    bodyKind: diagnostics.bodyKind,
+    pdfDetected: diagnostics.pdfDetected,
+    firstBytesPreview: diagnostics.firstBytesPreview,
+    endpoint: result.requestUrl,
+    request: {
+      url: result.requestUrl,
+      method: result.requestMethod,
+      contentType: null,
+      accept: result.requestAccept,
+      queryParameters: result.queryParameters,
+    },
+    ...(result.ok
+      ? {}
+      : {
+        errorCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
+        message: 'Logo İşbaşı invoice PDF request failed.',
+      }),
   };
 }
 
@@ -1500,6 +1588,66 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           externalApiCallAttempted: true,
           errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
           message: 'Network/backend request failed while calling Logo İşbaşı product/service discovery.',
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/probes/logo-isbasi/invoice-pdf',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'invoice_pdf_probe');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      let uuid: string;
+      try {
+        uuid = readRequiredString(isRecord(request.body) ? request.body : {}, 'uuid');
+      } catch (error) {
+        return reply.code(400).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_pdf_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          errorCode: 'LOGO_ISBASI_INVOICE_PDF_VALIDATION_FAILED',
+          message: error instanceof Error ? error.message : 'uuid is required.',
+        });
+      }
+
+      try {
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'invoice_pdf_probe');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.getInvoicePdfDocumentByUuid(login.session, uuid);
+        const response = buildLogoPdfDocumentProbeResponse(result);
+        return reply.code(result.ok ? 200 : 502).send(response);
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_pdf_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı invoice PDF probe.',
         });
       }
     },

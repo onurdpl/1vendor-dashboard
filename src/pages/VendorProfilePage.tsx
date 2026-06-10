@@ -22,6 +22,7 @@ import {
   discoverLogoIsbasiIncomingEinvoices,
   discoverLogoIsbasiInvoices,
   discoverLogoIsbasiServices,
+  fetchLogoIsbasiInvoicePdf,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
   matchVendorLogoIsbasiFirm,
@@ -42,6 +43,7 @@ import type {
   LogoIsbasiIncomingEinvoiceSummary,
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
+  LogoIsbasiInvoicePdfProbeResult,
   LogoIsbasiInvoiceSummary,
   LogoIsbasiLoginProbeResult,
   LogoIsbasiProductServiceDiscoveryResult,
@@ -242,6 +244,10 @@ function isLogoProductServiceDiscoveryResult(value: unknown): value is LogoIsbas
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'product_service_discovery';
 }
 
+function isLogoInvoicePdfProbeResult(value: unknown): value is LogoIsbasiInvoicePdfProbeResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_pdf_probe';
+}
+
 function isLogoInvoiceDetailResult(value: unknown): value is LogoIsbasiInvoiceDetailProbeResult {
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_detail_discovery';
 }
@@ -356,6 +362,28 @@ function buildLogoProductServiceDiscoveryFailureResult(error: unknown): LogoIsba
     externalApiCallAttempted: false,
     httpStatus: error instanceof ApiError ? error.status : undefined,
     errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_SERVICE_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoInvoicePdfProbeFailureResult(error: unknown): LogoIsbasiInvoicePdfProbeResult {
+  if (error instanceof ApiError && isLogoInvoicePdfProbeResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'invoice_pdf_probe',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INVOICE_PDF_FAILED',
     message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
   };
 }
@@ -691,6 +719,8 @@ export function VendorProfilePage() {
   const [logoIncomingEinvoicesResult, setLogoIncomingEinvoicesResult] =
     useState<LogoIsbasiIncomingEinvoiceListProbeResult | null>(null);
   const [logoServicesResult, setLogoServicesResult] = useState<LogoIsbasiProductServiceDiscoveryResult | null>(null);
+  const [logoInvoicePdfUuid, setLogoInvoicePdfUuid] = useState('');
+  const [logoInvoicePdfResult, setLogoInvoicePdfResult] = useState<LogoIsbasiInvoicePdfProbeResult | null>(null);
   const [selectedLogoInvoiceId, setSelectedLogoInvoiceId] = useState('');
   const [logoInvoiceDetailResult, setLogoInvoiceDetailResult] = useState<LogoIsbasiInvoiceDetailProbeResult | null>(null);
   const [logoFirmMatchResult, setLogoFirmMatchResult] = useState<LogoIsbasiFirmMatchResult | null>(null);
@@ -1111,6 +1141,41 @@ export function VendorProfilePage() {
         setLogoPreviewResult(null);
         setLogoTestInvoiceResult(null);
         setLogoServicesResult(buildLogoProductServiceDiscoveryFailureResult(error));
+      },
+    },
+  );
+
+  const logoInvoicePdfMutation = useMutationAction(
+    (uuid: string) => fetchLogoIsbasiInvoicePdf(uuid),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
+        setLogoServicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoTestInvoiceResult(null);
+        setLogoInvoicePdfResult(result);
+        showFeedback('Logo İşbaşı invoice PDF probe completed.', result.ok ? 'success' : 'info');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
+        setLogoServicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoTestInvoiceResult(null);
+        setLogoInvoicePdfResult(buildLogoInvoicePdfProbeFailureResult(error));
       },
     },
   );
@@ -1593,6 +1658,51 @@ export function VendorProfilePage() {
                     >
                       {logoServicesMutation.isPending ? 'Discovering services...' : 'Discover Logo Services'}
                     </button>
+                    <label className="vendor-profile-logo-confirmation">
+                      Invoice PDF UUID
+                      <input
+                        type="text"
+                        value={logoInvoicePdfUuid}
+                        onChange={(event) => setLogoInvoicePdfUuid(event.target.value)}
+                        placeholder="45192DC9-88F7-4382-BD5F-90E6A7BB6264"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        const uuid = logoInvoicePdfUuid.trim();
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
+                        setLogoServicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
+                        setLogoFirmMatchResult(null);
+                        setLogoFirmBindResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        setLogoTestInvoiceResult(null);
+                        if (!uuid) {
+                          setLogoInvoicePdfResult({
+                            ok: false,
+                            success: false,
+                            provider: 'LOGO_ISBASI',
+                            mode: 'invoice_pdf_probe',
+                            writesPerformed: false,
+                            externalApiCallAttempted: false,
+                            errorCode: 'LOGO_ISBASI_INVOICE_PDF_VALIDATION_FAILED',
+                            message: 'uuid is required.',
+                          });
+                          return;
+                        }
+                        void logoInvoicePdfMutation.mutateAsync(uuid).catch(() => undefined);
+                      }}
+                      disabled={logoInvoicePdfMutation.isPending}
+                    >
+                      {logoInvoicePdfMutation.isPending ? 'Fetching Logo PDF...' : 'Fetch Logo Invoice PDF'}
+                    </button>
                     <button
                       type="button"
                       className="button button-secondary button-compact"
@@ -1887,6 +1997,63 @@ export function VendorProfilePage() {
                       ))}
                     </ul>
                   ) : null}
+                </div>
+              ) : null}
+              {logoInvoicePdfResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo invoice PDF probe result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoInvoicePdfResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoInvoicePdfResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Content type</span>
+                      <strong>{formatValue(logoInvoicePdfResult.contentType)}</strong>
+                    </div>
+                    <div>
+                      <span>Content length</span>
+                      <strong>{logoInvoicePdfResult.contentLength ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Body kind</span>
+                      <strong>{logoInvoicePdfResult.bodyKind ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>PDF detected</span>
+                      <strong>{formatBoolean(logoInvoicePdfResult.pdfDetected)}</strong>
+                    </div>
+                    <div>
+                      <span>First bytes preview</span>
+                      <strong>{formatValue(logoInvoicePdfResult.firstBytesPreview)}</strong>
+                    </div>
+                    <div>
+                      <span>Endpoint</span>
+                      <strong>{formatValue(logoInvoicePdfResult.endpoint)}</strong>
+                    </div>
+                    {logoInvoicePdfResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoInvoicePdfResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoInvoicePdfResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoInvoicePdfResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoInvoicePdfResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoInvoicePdfResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               {logoInvoicesResult ? (
