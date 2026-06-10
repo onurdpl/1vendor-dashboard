@@ -6,6 +6,7 @@ const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
 const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
+const getSettlementCommissionInvoiceDiagnosticsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -31,6 +32,7 @@ vi.mock('../backend/src/modules/finance/settlement-commission-invoice-preview.se
 
 vi.mock('../backend/src/modules/finance/settlement-commission-invoice-record.service.js', () => ({
   findBySettlementApproval: findSettlementCommissionInvoiceRecordsMock,
+  getSettlementCommissionInvoiceDiagnostics: getSettlementCommissionInvoiceDiagnosticsMock,
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -67,6 +69,7 @@ describe('finance event backfill route', () => {
     getSettlementApprovalAuditMock.mockReset();
     previewSettlementLogoCommissionInvoiceMock.mockReset();
     findSettlementCommissionInvoiceRecordsMock.mockReset();
+    getSettlementCommissionInvoiceDiagnosticsMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -380,5 +383,54 @@ describe('finance event backfill route', () => {
       records,
     });
     expect(findSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1');
+  });
+
+  it('returns settlement commission invoice diagnostics without raw snapshot payloads', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const diagnostics = {
+      ok: true,
+      writesPerformed: false,
+      record: {
+        id: 'record-1',
+        status: 'failed',
+        retryCount: 2,
+        providerIdentifiers: {
+          providerInvoiceId: 'logo-invoice-1',
+          providerUuid: 'logo-uuid-1',
+          providerEttn: 'logo-ettn-1',
+          invoiceNo: 'ABC202600001',
+        },
+        snapshots: {
+          request: { present: true, type: 'object', topLevelKeys: ['amount'], approximateSizeBytes: 14 },
+          response: { present: true, type: 'object', topLevelKeys: ['providerError'], approximateSizeBytes: 28 },
+          document: { present: false, type: 'null', topLevelKeys: [], approximateSizeBytes: 0 },
+        },
+      },
+    };
+    getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValueOnce(diagnostics);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await gets.get('/admin/finance/commission-invoices/:id')?.(
+      { authUser: { role: 'admin' }, params: { id: 'record-1' } },
+      reply,
+    );
+
+    expect(allowed).toEqual(diagnostics);
+    expect(allowed?.writesPerformed).toBe(false);
+    expect(JSON.stringify(allowed)).not.toContain('rawBody');
+    expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('record-1');
   });
 });

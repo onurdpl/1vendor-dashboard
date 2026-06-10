@@ -7,14 +7,17 @@ const SettlementCommissionInvoiceProvider = {
 const SettlementCommissionInvoiceStatus = {
   PENDING: 'PENDING',
   CREATED: 'CREATED',
+  FAILED: 'FAILED',
   CANCELLED: 'CANCELLED',
 } as const;
 
 const prismaMock = vi.hoisted(() => ({
   settlementCommissionInvoice: {
     findMany: vi.fn(),
+    findUnique: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
   },
 }));
 
@@ -26,6 +29,10 @@ const {
   assertNoActiveInvoiceForSettlement,
   createPendingRecord,
   findBySettlementApproval,
+  getSettlementCommissionInvoiceDiagnostics,
+  incrementRetry,
+  markCreated,
+  markFailed,
 } = await import('../backend/src/modules/finance/settlement-commission-invoice-record.service.js');
 
 function buildRecord(overrides: Record<string, unknown> = {}) {
@@ -63,8 +70,10 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
 describe('settlement commission invoice record foundation', () => {
   beforeEach(() => {
     prismaMock.settlementCommissionInvoice.findMany.mockReset();
+    prismaMock.settlementCommissionInvoice.findUnique.mockReset();
     prismaMock.settlementCommissionInvoice.findFirst.mockReset();
     prismaMock.settlementCommissionInvoice.create.mockReset();
+    prismaMock.settlementCommissionInvoice.update.mockReset();
   });
 
   it('can create a pending record for a settlement approval without provider calls', async () => {
@@ -175,5 +184,205 @@ describe('settlement commission invoice record foundation', () => {
         createdAt: 'desc',
       },
     });
+  });
+
+  it('marks a pending record as created and preserves the request snapshot', async () => {
+    const pending = buildRecord({ requestSnapshotJson: { request: 'keep-me' } });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(pending);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...pending,
+        status: SettlementCommissionInvoiceStatus.CREATED,
+        providerInvoiceId: 'logo-invoice-1',
+        providerUuid: 'logo-uuid-1',
+        providerEttn: 'logo-ettn-1',
+        invoiceNo: 'ABC202600001',
+        responseSnapshotJson: { ok: true },
+      }),
+    );
+
+    const record = await markCreated({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      providerInvoiceId: 'logo-invoice-1',
+      providerUuid: 'logo-uuid-1',
+      providerEttn: 'logo-ettn-1',
+      invoiceNo: 'ABC202600001',
+      responseSnapshotJson: { ok: true },
+    });
+
+    expect(record).toMatchObject({
+      status: 'created',
+      providerInvoiceId: 'logo-invoice-1',
+      providerUuid: 'logo-uuid-1',
+      providerEttn: 'logo-ettn-1',
+      invoiceNo: 'ABC202600001',
+      requestSnapshotJson: { request: 'keep-me' },
+      responseSnapshotJson: { ok: true },
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: {
+        status: SettlementCommissionInvoiceStatus.CREATED,
+        providerInvoiceId: 'logo-invoice-1',
+        providerUuid: 'logo-uuid-1',
+        providerEttn: 'logo-ettn-1',
+        invoiceNo: 'ABC202600001',
+        responseSnapshotJson: { ok: true },
+      },
+    });
+  });
+
+  it('marks a pending record as failed and preserves the request snapshot', async () => {
+    const pending = buildRecord({ requestSnapshotJson: { request: 'keep-me' } });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(pending);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...pending,
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        failureCode: 'UPSTREAM_502',
+        failureMessage: 'Provider failed.',
+        failedAt: new Date('2026-06-10T10:05:00.000Z'),
+        responseSnapshotJson: { ok: false },
+      }),
+    );
+
+    const record = await markFailed({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      failureCode: 'UPSTREAM_502',
+      failureMessage: 'Provider failed.',
+      responseSnapshotJson: { ok: false },
+    });
+
+    expect(record).toMatchObject({
+      status: 'failed',
+      failureCode: 'UPSTREAM_502',
+      failureMessage: 'Provider failed.',
+      failedAt: '2026-06-10T10:05:00.000Z',
+      requestSnapshotJson: { request: 'keep-me' },
+      responseSnapshotJson: { ok: false },
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: expect.objectContaining({
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        failureCode: 'UPSTREAM_502',
+        failureMessage: 'Provider failed.',
+        responseSnapshotJson: { ok: false },
+      }),
+    });
+    expect(prismaMock.settlementCommissionInvoice.update.mock.calls[0]?.[0].data).not.toHaveProperty('requestSnapshotJson');
+  });
+
+  it('does not allow created records to become failed', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.CREATED }),
+    );
+
+    await expect(
+      markFailed({
+        settlementCommissionInvoiceId: 'settlement-invoice-1',
+        failureCode: 'LATE_FAILURE',
+      }),
+    ).rejects.toThrow('markFailed is not allowed');
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('does not allow cancelled records to become created', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.CANCELLED }),
+    );
+
+    await expect(
+      markCreated({
+        settlementCommissionInvoiceId: 'settlement-invoice-1',
+        providerInvoiceId: 'logo-invoice-1',
+      }),
+    ).rejects.toThrow('markCreated is not allowed');
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('allows retry only for failed records and increments retry count', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.CREATED }),
+    );
+
+    await expect(incrementRetry({ settlementCommissionInvoiceId: 'settlement-invoice-1' })).rejects.toThrow(
+      'incrementRetry is not allowed',
+    );
+
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.FAILED, retryCount: 1 }),
+    );
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        retryCount: 2,
+        lastRetriedAt: new Date('2026-06-10T10:10:00.000Z'),
+      }),
+    );
+
+    const retried = await incrementRetry({ settlementCommissionInvoiceId: 'settlement-invoice-1' });
+
+    expect(retried.retryCount).toBe(2);
+    expect(retried.lastRetriedAt).toBe('2026-06-10T10:10:00.000Z');
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: {
+        retryCount: {
+          increment: 1,
+        },
+        lastRetriedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('returns diagnostics metadata without raw snapshot payloads', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        requestSnapshotJson: { amount: 120, nested: { hidden: true } },
+        responseSnapshotJson: { providerError: 'Bad gateway' },
+        documentSnapshotJson: ['large', 'document'],
+        retryCount: 2,
+        failureCode: 'UPSTREAM_502',
+        failureMessage: 'Provider failed.',
+        failedAt: new Date('2026-06-10T10:05:00.000Z'),
+      }),
+    );
+
+    const diagnostics = await getSettlementCommissionInvoiceDiagnostics('settlement-invoice-1');
+
+    expect(diagnostics).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      record: {
+        id: 'settlement-invoice-1',
+        status: 'failed',
+        retryCount: 2,
+        snapshots: {
+          request: {
+            present: true,
+            type: 'object',
+            topLevelKeys: ['amount', 'nested'],
+          },
+          response: {
+            present: true,
+            type: 'object',
+            topLevelKeys: ['providerError'],
+          },
+          document: {
+            present: true,
+            type: 'array',
+            topLevelKeys: [],
+          },
+        },
+        failure: {
+          failureCode: 'UPSTREAM_502',
+          failureMessage: 'Provider failed.',
+        },
+      },
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('Bad gateway');
+    expect(JSON.stringify(diagnostics)).not.toContain('hidden');
   });
 });
