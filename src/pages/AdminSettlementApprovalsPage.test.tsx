@@ -333,6 +333,7 @@ function renderPage() {
 describe('Finance Settlement approval admin UI', () => {
   beforeEach(() => {
     cleanup();
+    vi.resetAllMocks();
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -380,6 +381,8 @@ describe('Finance Settlement approval admin UI', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Settlement Approvals' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Guided settlement workflow' })).toBeInTheDocument();
+    expect(screen.getByText('Next: Preview settlement candidates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/vendor_dashboard_dev/i)).toBeInTheDocument());
   });
@@ -397,8 +400,11 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('fle-sale-1')).toBeInTheDocument();
     expect(screen.getByText('Eligible lines')).toBeInTheDocument();
     expect(screen.getByText('TRY')).toBeInTheDocument();
-    expect(screen.getByText('Vendor-wide preview can include historical or test rows.')).toBeInTheDocument();
-    expect(screen.getByText('profile-current')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor-wide preview can include historical or test rows.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('profile-current').length).toBeGreaterThan(0);
+    expect(screen.getByText('Next: Review candidate quality warnings.')).toBeInTheDocument();
+    expect(screen.getAllByText('Settlement Preview').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
   });
 
   it('sends period filters to preview and draft creation', async () => {
@@ -413,7 +419,7 @@ describe('Finance Settlement approval admin UI', () => {
       periodStart: '2026-06-01',
       periodEnd: '2026-06-30',
     }));
-    expect(screen.getByText('Start 2026-06-01 · End 2026-06-30')).toBeInTheDocument();
+    expect(screen.getAllByText('Start 2026-06-01 · End 2026-06-30').length).toBeGreaterThan(0);
 
     await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
@@ -455,14 +461,17 @@ describe('Finance Settlement approval admin UI', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
     await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Approve DRAFT \(writes local DB\)/i }));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     await userEvent.click(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i }));
     await waitFor(() => expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument());
+    expect(screen.getByText('Next: Run Logo Readiness.')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i }));
     await waitFor(() => expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument());
     expect(screen.getByText('Read-only preview only. No Logo invoice is created.')).toBeInTheDocument();
     expect(screen.getByText('Execution snapshot guard')).toBeInTheDocument();
-    expect(screen.getByText('Pass')).toBeInTheDocument();
+    expect(screen.getAllByText('Pass').length).toBeGreaterThan(0);
     expect(screen.getByText('disabled')).toBeInTheDocument();
     expect(screen.getByText('SPORGYM-COMMISSION')).toBeInTheDocument();
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
@@ -473,6 +482,11 @@ describe('Finance Settlement approval admin UI', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
     await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Approve DRAFT \(writes local DB\)/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i }));
+    await waitFor(() => expect(previewSettlementLogoCommissionInvoiceMock).toHaveBeenCalledWith('approval-1'));
     await userEvent.click(screen.getByRole('button', { name: /Load commission invoice records \(read-only\)/i }));
 
     await waitFor(() => expect(screen.getByText('Active commission invoice record exists.')).toBeInTheDocument());
@@ -494,7 +508,9 @@ describe('Finance Settlement approval admin UI', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
     await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
-    await waitFor(() => expect(screen.getByText('approval-1')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('approval-1').length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole('button', { name: /Approve DRAFT \(writes local DB\)/i }));
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
 
     await userEvent.click(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i }));
     await waitFor(() => expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument());
@@ -507,8 +523,8 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText('No eligible rows remain because rows are already locked in an active settlement approval.')).toBeInTheDocument();
-    expect(screen.getByText('12')).toBeInTheDocument();
-    expect(screen.getByText('approval-1')).toBeInTheDocument();
+    expect(screen.getAllByText('12').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('approval-1').length).toBeGreaterThan(0);
     expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument();
     expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument();
     expect(screen.getByText('invoice-record-1')).toBeInTheDocument();
@@ -524,8 +540,12 @@ describe('Finance Settlement approval admin UI', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
 
-    expect(await screen.findByText('Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.')).toBeInTheDocument();
+    await waitFor(() => expect(
+      screen.getAllByText('Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.').length,
+    ).toBeGreaterThan(0));
     expect(screen.getByText('Mixed VAT acknowledgement required before draft creation.')).toBeInTheDocument();
+    expect(screen.getByText('Candidate Quality Review')).toBeInTheDocument();
+    expect(screen.getAllByText('Warning').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i })).toBeDisabled();
 
     await userEvent.click(screen.getByLabelText(/I acknowledge this preview contains mixed commission VAT rates/i));

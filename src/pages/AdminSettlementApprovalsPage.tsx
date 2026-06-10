@@ -42,6 +42,15 @@ type ActionName =
   | 'invoiceRecords'
   | 'invoiceDiagnostics';
 
+type WorkflowStepStatus = 'Waiting' | 'Ready' | 'Completed' | 'Blocked' | 'Warning';
+
+type WorkflowStep = {
+  number: number;
+  title: string;
+  status: WorkflowStepStatus;
+  details: Array<{ label: string; value: unknown }>;
+};
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
 }
@@ -74,6 +83,32 @@ function formatPercentList(values: number[] | null | undefined) {
 
 function formatStringList(values: string[] | null | undefined) {
   return values?.length ? values.join(', ') : 'None';
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : null;
+}
+
+function getStatusTone(status: WorkflowStepStatus) {
+  if (status === 'Completed') {
+    return 'success';
+  }
+  if (status === 'Ready') {
+    return 'info';
+  }
+  if (status === 'Blocked') {
+    return 'danger';
+  }
+  if (status === 'Warning') {
+    return 'warning';
+  }
+  return 'neutral';
 }
 
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
@@ -204,6 +239,48 @@ function ReadinessList({ title, items, tone }: { title: string; items: string[];
   );
 }
 
+function WorkflowProgress({
+  steps,
+  recommendedNextAction,
+}: {
+  steps: WorkflowStep[];
+  recommendedNextAction: string;
+}) {
+  return (
+    <section className="settlement-workflow">
+      <div className="settlement-workflow-heading">
+        <div>
+          <span className="eyebrow">Settlement Workflow</span>
+          <h2>Guided settlement workflow</h2>
+        </div>
+        <div className="settlement-next-action">
+          <strong>Recommended Next Action</strong>
+          <span>{recommendedNextAction}</span>
+        </div>
+      </div>
+      <div className="settlement-workflow-steps">
+        {steps.map((step) => (
+          <article key={step.number} className={`settlement-workflow-step op-tone-${getStatusTone(step.status)}`}>
+            <div className="settlement-workflow-step-header">
+              <span className="settlement-step-number">{step.number}</span>
+              <strong>{step.title}</strong>
+              <StatusBadge tone={getStatusTone(step.status)}>{step.status}</StatusBadge>
+            </div>
+            <dl>
+              {step.details.map((detail) => (
+                <div key={`${step.number}-${detail.label}`}>
+                  <dt>{detail.label}</dt>
+                  <dd>{valueOrDash(detail.value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function AdminSettlementApprovalsPage() {
   const appReadiness = useAppReadiness();
   const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
@@ -266,6 +343,162 @@ export function AdminSettlementApprovalsPage() {
     periodStart ? `Start ${periodStart}` : null,
     periodEnd ? `End ${periodEnd}` : null,
   ].filter(Boolean).join(' · ') || 'No period filters: vendor-wide preview';
+  const vendorWideMode = !periodStart && !periodEnd;
+  const approvalGeneratedAt = readString(readRecord(approval?.sourceSnapshotJson).generatedAt);
+  const latestInvoiceRecord = invoiceRecords[0] ?? null;
+  const auditReasonsAvailable = Boolean(audit?.lines.length && audit.lines.every((line) => line.eligibilityReason));
+  const logoBindingReady = Boolean(
+    logoPreview?.vendorBillingReadiness.logoCustomerCodePresent &&
+    logoPreview.vendorBillingReadiness.logoCustomerIdPresent,
+  );
+  const qualityStepStatus: WorkflowStepStatus = !preview
+    ? 'Waiting'
+    : preview.summary.mixedCommissionVatRate || preview.summary.mixedShippingMode || candidateQualityWarnings.length
+      ? 'Warning'
+      : 'Completed';
+  const draftStepStatus: WorkflowStepStatus = approval
+    ? 'Completed'
+    : draftBlockedByAcknowledgement || (preview ? preview.summary.eligibleRowCount === 0 : false)
+      ? 'Blocked'
+      : preview
+        ? 'Ready'
+        : 'Waiting';
+  const approvalStepStatus: WorkflowStepStatus = approval?.status === 'approved'
+    ? 'Completed'
+    : approval?.status === 'draft'
+      ? 'Ready'
+      : approval?.status === 'cancelled'
+        ? 'Blocked'
+        : 'Waiting';
+  const auditStepStatus: WorkflowStepStatus = audit
+    ? 'Completed'
+    : approval?.status === 'approved'
+      ? 'Ready'
+      : 'Waiting';
+  const logoStepStatus: WorkflowStepStatus = logoPreview
+    ? logoPreview.readiness.canCreateLogoInvoiceLater && logoPreview.executionSnapshotGuard.ok
+      ? 'Completed'
+      : 'Blocked'
+    : audit
+      ? 'Ready'
+      : 'Waiting';
+  const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length ? 'Completed' : logoPreview ? 'Ready' : 'Waiting';
+  const workflowSteps: WorkflowStep[] = [
+    {
+      number: 1,
+      title: 'Candidate Selection',
+      status: vendorId.trim() ? 'Ready' : 'Blocked',
+      details: [
+        { label: 'Vendor selected', value: vendorId.trim() || null },
+        { label: 'Period filters', value: activeFilterSummary },
+        { label: 'Selection warning', value: vendorWideMode ? 'Vendor-wide selection can include historical or test rows.' : 'Period filter selected.' },
+      ],
+    },
+    {
+      number: 2,
+      title: 'Settlement Preview',
+      status: preview ? 'Completed' : vendorId.trim() ? 'Ready' : 'Waiting',
+      details: [
+        { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'Not loaded' },
+        { label: 'Excluded rows', value: preview ? formatNumber(preview.summary.excludedActiveApprovalRowCount) : 'Not loaded' },
+        { label: 'Net payable', value: preview ? formatMinor(preview.summary.netPayableMinor, preview.summary.currency) : 'Not loaded' },
+      ],
+    },
+    {
+      number: 3,
+      title: 'Candidate Quality Review',
+      status: qualityStepStatus,
+      details: [
+        { label: 'Mixed commission VAT', value: preview ? (preview.summary.mixedCommissionVatRate ? 'Yes' : 'No') : 'Not reviewed' },
+        { label: 'Mixed shipping mode', value: preview ? (preview.summary.mixedShippingMode ? 'Yes' : 'No') : 'Not reviewed' },
+        { label: 'Financial profile groups', value: preview ? formatStringList(preview.summary.detectedFinancialProfileSnapshotIds) : 'Not reviewed' },
+        { label: 'Warnings', value: candidateQualityWarnings.length ? candidateQualityWarnings.join(' ') : 'None' },
+      ],
+    },
+    {
+      number: 4,
+      title: 'Draft Creation',
+      status: draftStepStatus,
+      details: [
+        { label: 'Draft exists', value: Boolean(approval) },
+        { label: 'Draft id', value: approval?.id ?? null },
+        { label: 'Created at', value: approvalGeneratedAt ? formatDate(approvalGeneratedAt) : 'Not available' },
+      ],
+    },
+    {
+      number: 5,
+      title: 'Settlement Approval',
+      status: approvalStepStatus,
+      details: [
+        { label: 'Approval status', value: approval?.status ?? 'Not created' },
+        { label: 'Approved at', value: approval?.approvedAt ? formatDate(approval.approvedAt) : 'Not approved' },
+        { label: 'Approved by', value: approval?.approvedBy ?? null },
+      ],
+    },
+    {
+      number: 6,
+      title: 'Audit Review',
+      status: auditStepStatus,
+      details: [
+        { label: 'Audit loaded', value: Boolean(audit) },
+        { label: 'Line count', value: audit ? formatNumber(audit.lines.length) : 'Not loaded' },
+        { label: 'Eligibility reasons', value: audit ? (auditReasonsAvailable ? 'Available' : 'Missing') : 'Not loaded' },
+      ],
+    },
+    {
+      number: 7,
+      title: 'Logo Readiness',
+      status: logoStepStatus,
+      details: [
+        { label: 'Can create later', value: logoPreview ? (logoPreview.readiness.canCreateLogoInvoiceLater ? 'Yes' : 'No') : 'Not checked' },
+        { label: 'VAT source', value: logoPreview ? safeStatusLabel(logoPreview.vatRateSource) : 'Not checked' },
+        { label: 'Detected VAT rates', value: logoPreview ? formatPercentList(logoPreview.detectedVatRates) : 'Not checked' },
+        { label: 'Snapshot guard', value: logoPreview ? (logoPreview.executionSnapshotGuard.ok ? 'Pass' : 'Blocked') : 'Not checked' },
+        { label: 'Billing readiness', value: logoPreview ? (logoPreview.vendorBillingReadiness.complete ? 'Complete' : 'Incomplete') : 'Not checked' },
+        { label: 'Logo binding', value: logoPreview ? (logoBindingReady ? 'Ready' : 'Missing') : 'Not checked' },
+      ],
+    },
+    {
+      number: 8,
+      title: 'Commission Invoice Records',
+      status: invoiceRecordsStepStatus,
+      details: [
+        { label: 'Record count', value: formatNumber(invoiceRecords.length) },
+        { label: 'Active record exists', value: activeInvoiceRecords.length > 0 },
+        { label: 'Latest status', value: latestInvoiceRecord?.status ?? 'None loaded' },
+      ],
+    },
+  ];
+  const recommendedNextAction = (() => {
+    if (!vendorId.trim()) {
+      return 'Next: Select a vendor.';
+    }
+    if (!preview) {
+      return 'Next: Preview settlement candidates.';
+    }
+    if (!approval && candidateQualityWarnings.length) {
+      return 'Next: Review candidate quality warnings.';
+    }
+    if (!approval) {
+      return 'Next: Create Draft.';
+    }
+    if (approval.status === 'draft') {
+      return 'Next: Approve Settlement.';
+    }
+    if (approval.status === 'cancelled') {
+      return 'Settlement is cancelled. Select or create another approval.';
+    }
+    if (!audit) {
+      return 'Next: Load Audit Snapshot.';
+    }
+    if (!logoPreview) {
+      return 'Next: Run Logo Readiness.';
+    }
+    if (!invoiceRecords.length) {
+      return 'Next: Load Commission Invoice Records.';
+    }
+    return 'Workflow review is complete. Resolve blockers before any future invoice execution.';
+  })();
 
   function buildSettlementApprovalInput() {
     return {
@@ -453,6 +686,8 @@ export function AdminSettlementApprovalsPage() {
       {error ? <SectionErrorRetry title="Finance action failed" description={error} /> : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
+      <WorkflowProgress steps={workflowSteps} recommendedNextAction={recommendedNextAction} />
+
       <div className="op-toolbar settlement-toolbar" aria-label="Settlement approval controls">
         <label>
           <span>Vendor id</span>
@@ -602,7 +837,7 @@ export function AdminSettlementApprovalsPage() {
         <article className="op-meta-group">
           <h3>Audit transparency</h3>
           <div className="op-action-group">
-            <button type="button" className="button button-secondary" onClick={handleLoadAudit} disabled={busyAction !== null || !selectedApprovalId}>
+            <button type="button" className="button button-secondary" onClick={handleLoadAudit} disabled={busyAction !== null || !selectedApprovalId || approval?.status !== 'approved'}>
               Load audit snapshot (read-only)
             </button>
           </div>
@@ -614,7 +849,7 @@ export function AdminSettlementApprovalsPage() {
         <article className="op-meta-group">
           <h3>Logo readiness panel</h3>
           <p className="page-description">Read-only preview. This does not call Logo create and does not create an invoice.</p>
-          <button type="button" className="button button-secondary" onClick={handleLogoPreview} disabled={busyAction !== null || !selectedApprovalId}>
+          <button type="button" className="button button-secondary" onClick={handleLogoPreview} disabled={busyAction !== null || !selectedApprovalId || !audit}>
             Run Logo readiness preview (read-only)
           </button>
           {logoPreview ? (
@@ -680,7 +915,7 @@ export function AdminSettlementApprovalsPage() {
         <article className="op-meta-group">
           <h3>Commission invoice records</h3>
           <p className="page-description">Read-only settlement commission invoice record visibility and diagnostics.</p>
-          <button type="button" className="button button-secondary" onClick={handleInvoiceRecords} disabled={busyAction !== null || !selectedApprovalId}>
+          <button type="button" className="button button-secondary" onClick={handleInvoiceRecords} disabled={busyAction !== null || !selectedApprovalId || !logoPreview}>
             Load commission invoice records (read-only)
           </button>
           {activeInvoiceRecords.length ? (
