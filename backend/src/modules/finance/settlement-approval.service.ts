@@ -39,6 +39,7 @@ type SettlementApprovalLedgerRow = {
   shippingVatAmountSnapshot: unknown;
   shippingCostSourceSnapshot: string | null;
   shippingCostProviderSnapshot: string | null;
+  financialProfileIdSnapshot: string | null;
   settlementStatus: string | null;
   settlementEligibleAt: Date | null;
   accruedAt: Date | null;
@@ -112,6 +113,14 @@ export type SettlementApprovalPreviewDto = {
   summary: SettlementApprovalTotalsDto & {
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;
+    detectedCommissionRates: number[];
+    detectedCommissionVatRates: number[];
+    detectedShippingModes: string[];
+    detectedFinancialProfileSnapshotIds: string[];
+    mixedCommissionRate: boolean;
+    mixedCommissionVatRate: boolean;
+    mixedShippingMode: boolean;
+    candidateQualityWarnings: string[];
   };
   lines: SettlementApprovalLineDto[];
 };
@@ -440,6 +449,91 @@ function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprova
   );
 }
 
+function sortedNumbers(values: Set<number>) {
+  return Array.from(values).sort((a, b) => a - b);
+}
+
+function sortedStrings(values: Set<string>) {
+  return Array.from(values).sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeQualityNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numeric = toNumber(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildCandidateQualitySummary(
+  rows: SettlementApprovalLedgerRow[],
+  input: SettlementApprovalInput,
+) {
+  const commissionRates = new Set<number>();
+  const commissionVatRates = new Set<number>();
+  const shippingModes = new Set<string>();
+  const financialProfileIds = new Set<string>();
+
+  for (const row of rows) {
+    if (normalizeType(row.entryType) !== 'sale') {
+      continue;
+    }
+
+    const commissionRate = normalizeQualityNumber(row.commissionPercentSnapshot);
+    if (commissionRate !== null) {
+      commissionRates.add(commissionRate);
+    }
+
+    const commissionVatRate = normalizeQualityNumber(row.commissionVatPercentSnapshot);
+    if (commissionVatRate !== null) {
+      commissionVatRates.add(commissionVatRate);
+    }
+
+    const shippingMode = row.shippingModeSnapshot?.trim();
+    if (shippingMode) {
+      shippingModes.add(shippingMode);
+    }
+
+    const financialProfileId = row.financialProfileIdSnapshot?.trim();
+    if (financialProfileId) {
+      financialProfileIds.add(financialProfileId);
+    }
+  }
+
+  const detectedCommissionRates = sortedNumbers(commissionRates);
+  const detectedCommissionVatRates = sortedNumbers(commissionVatRates);
+  const detectedShippingModes = sortedStrings(shippingModes);
+  const detectedFinancialProfileSnapshotIds = sortedStrings(financialProfileIds);
+  const mixedCommissionRate = detectedCommissionRates.length > 1;
+  const mixedCommissionVatRate = detectedCommissionVatRates.length > 1;
+  const mixedShippingMode = detectedShippingModes.length > 1;
+  const candidateQualityWarnings: string[] = [];
+
+  if (!input.periodStart && !input.periodEnd) {
+    candidateQualityWarnings.push('Vendor-wide preview can include historical or test rows.');
+  }
+  if (mixedCommissionRate) {
+    candidateQualityWarnings.push('Candidate rows include mixed commission rates.');
+  }
+  if (mixedCommissionVatRate) {
+    candidateQualityWarnings.push('Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.');
+  }
+  if (mixedShippingMode) {
+    candidateQualityWarnings.push('Candidate rows include mixed shipping modes.');
+  }
+
+  return {
+    detectedCommissionRates,
+    detectedCommissionVatRates,
+    detectedShippingModes,
+    detectedFinancialProfileSnapshotIds,
+    mixedCommissionRate,
+    mixedCommissionVatRate,
+    mixedShippingMode,
+    candidateQualityWarnings,
+  };
+}
+
 function buildPeriodWhere(input: SettlementApprovalInput) {
   const createdAt: { gte?: Date; lte?: Date } = {};
   if (input.periodStart) {
@@ -484,6 +578,7 @@ async function buildApprovalPreview(
       shippingVatAmountSnapshot: true,
       shippingCostSourceSnapshot: true,
       shippingCostProviderSnapshot: true,
+      financialProfileIdSnapshot: true,
       settlementStatus: true,
       settlementEligibleAt: true,
       accruedAt: true,
@@ -541,6 +636,7 @@ async function buildApprovalPreview(
   const unapprovedRows = eligibleRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map(buildLine);
   const totals = summarizeLines(lines);
+  const candidateQualitySummary = buildCandidateQualitySummary(unapprovedRows, input);
 
   return {
     ok: true,
@@ -552,6 +648,7 @@ async function buildApprovalPreview(
       ...totals,
       eligibleRowCount: lines.length,
       excludedActiveApprovalRowCount: eligibleRows.length - unapprovedRows.length,
+      ...candidateQualitySummary,
     },
     lines,
   };

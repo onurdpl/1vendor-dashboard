@@ -58,6 +58,14 @@ export type SettlementApprovalPreview = {
     currency: string;
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;
+    detectedCommissionRates: number[];
+    detectedCommissionVatRates: number[];
+    detectedShippingModes: string[];
+    detectedFinancialProfileSnapshotIds: string[];
+    mixedCommissionRate: boolean;
+    mixedCommissionVatRate: boolean;
+    mixedShippingMode: boolean;
+    candidateQualityWarnings: string[];
   };
   lines: SettlementApprovalLine[];
 };

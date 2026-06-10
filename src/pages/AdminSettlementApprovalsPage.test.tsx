@@ -69,6 +69,14 @@ const previewResponse: SettlementApprovalPreview = {
     currency: 'TRY',
     eligibleRowCount: 2,
     excludedActiveApprovalRowCount: 0,
+    detectedCommissionRates: [10],
+    detectedCommissionVatRates: [20],
+    detectedShippingModes: ['DISABLED'],
+    detectedFinancialProfileSnapshotIds: ['profile-current'],
+    mixedCommissionRate: false,
+    mixedCommissionVatRate: false,
+    mixedShippingMode: false,
+    candidateQualityWarnings: ['Vendor-wide preview can include historical or test rows.'],
   },
   lines: [
     {
@@ -98,6 +106,18 @@ const lockedRowsPreviewResponse: SettlementApprovalPreview = {
     excludedActiveApprovalRowCount: 12,
   },
   lines: [],
+};
+
+const mixedVatPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  summary: {
+    ...previewResponse.summary,
+    detectedCommissionVatRates: [18, 20],
+    mixedCommissionVatRate: true,
+    candidateQualityWarnings: [
+      'Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.',
+    ],
+  },
 };
 
 const draftApproval: SettlementApproval = {
@@ -369,10 +389,39 @@ describe('Finance Settlement approval admin UI', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
 
-    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({ vendorId: 'yalispor' }));
+    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      periodStart: null,
+      periodEnd: null,
+    }));
     expect(screen.getByText('fle-sale-1')).toBeInTheDocument();
     expect(screen.getByText('Eligible lines')).toBeInTheDocument();
     expect(screen.getByText('TRY')).toBeInTheDocument();
+    expect(screen.getByText('Vendor-wide preview can include historical or test rows.')).toBeInTheDocument();
+    expect(screen.getByText('profile-current')).toBeInTheDocument();
+  });
+
+  it('sends period filters to preview and draft creation', async () => {
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText(/Period start/i), '2026-06-01');
+    await userEvent.type(screen.getByLabelText(/Period end/i), '2026-06-30');
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-06-30',
+    }));
+    expect(screen.getByText('Start 2026-06-01 · End 2026-06-30')).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-06-30',
+      notes: 'Admin settlement approval draft',
+    }));
   });
 
   it('calls draft, approve, cancel, and fetch routes through the approval controls', async () => {
@@ -383,6 +432,8 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      periodStart: null,
+      periodEnd: null,
       notes: 'Admin settlement approval draft',
     }));
 
@@ -465,6 +516,28 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Load commission invoice records \(read-only\)/i })).toBeEnabled();
+  });
+
+  it('requires acknowledgement before creating a mixed VAT draft', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(mixedVatPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    expect(await screen.findByText('Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.')).toBeInTheDocument();
+    expect(screen.getByText('Mixed VAT acknowledgement required before draft creation.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i })).toBeDisabled();
+
+    await userEvent.click(screen.getByLabelText(/I acknowledge this preview contains mixed commission VAT rates/i));
+    expect(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      periodStart: null,
+      periodEnd: null,
+      notes: 'Admin settlement approval draft',
+    }));
   });
 
   it('does not reference any Logo create route in the settlement approval UI files', () => {

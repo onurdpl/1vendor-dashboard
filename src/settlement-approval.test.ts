@@ -43,6 +43,10 @@ function buildLedgerRow(input: {
   settlementStatus?: string;
   payoutStatus?: string;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
+  commissionPercentSnapshot?: number | null;
+  commissionVatPercentSnapshot?: number | null;
+  shippingModeSnapshot?: string | null;
+  financialProfileIdSnapshot?: string | null;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -53,15 +57,18 @@ function buildLedgerRow(input: {
     amount: input.amount,
     payoutStatus: input.payoutStatus ?? 'PENDING',
     description: `${input.entryType} row`,
-    commissionPercentSnapshot: input.entryType === 'sale' ? 10 : null,
-    commissionVatPercentSnapshot: input.entryType === 'sale' ? 20 : null,
+    commissionPercentSnapshot:
+      input.commissionPercentSnapshot ?? (input.entryType === 'sale' ? 10 : null),
+    commissionVatPercentSnapshot:
+      input.commissionVatPercentSnapshot ?? (input.entryType === 'sale' ? 20 : null),
     deductShippingEnabledSnapshot: false,
-    shippingModeSnapshot: 'DISABLED',
+    shippingModeSnapshot: input.shippingModeSnapshot ?? 'DISABLED',
     fixedShippingFeeSnapshot: null,
     shippingCostSnapshot: null,
     shippingVatAmountSnapshot: null,
     shippingCostSourceSnapshot: null,
     shippingCostProviderSnapshot: null,
+    financialProfileIdSnapshot: input.financialProfileIdSnapshot ?? 'profile-current',
     settlementStatus:
       input.settlementStatus ??
       (input.entryType === 'refund' ? 'PARTIALLY_REFUNDED' : fulfilled ? 'PAYABLE' : 'ACCRUING'),
@@ -169,6 +176,14 @@ describe('settlement approval foundation', () => {
       commissionMinor: 10000,
       commissionVatMinor: 2000,
       netPayableMinor: 78000,
+      detectedCommissionRates: [10],
+      detectedCommissionVatRates: [20],
+      detectedShippingModes: ['DISABLED'],
+      detectedFinancialProfileSnapshotIds: ['profile-current'],
+      mixedCommissionRate: false,
+      mixedCommissionVatRate: false,
+      mixedShippingMode: false,
+      candidateQualityWarnings: ['Vendor-wide preview can include historical or test rows.'],
     });
     expect(preview.lines).toEqual([
       expect.objectContaining({
@@ -198,6 +213,43 @@ describe('settlement approval foundation', () => {
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('reports mixed candidate quality from settlement preview rows', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-18',
+        entryType: 'sale',
+        amount: 1000,
+        commissionVatPercentSnapshot: 18,
+        shippingModeSnapshot: 'DISABLED',
+        financialProfileIdSnapshot: 'profile-old',
+      }),
+      buildLedgerRow({
+        id: 'sale-20',
+        entryType: 'sale',
+        amount: 500,
+        commissionVatPercentSnapshot: 20,
+        shippingModeSnapshot: 'FIXED',
+        financialProfileIdSnapshot: 'profile-current',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', new Date('2026-06-01T00:00:00.000Z'), null);
+
+    expect(preview.summary).toMatchObject({
+      detectedCommissionRates: [10],
+      detectedCommissionVatRates: [18, 20],
+      detectedShippingModes: ['DISABLED', 'FIXED'],
+      detectedFinancialProfileSnapshotIds: ['profile-current', 'profile-old'],
+      mixedCommissionRate: false,
+      mixedCommissionVatRate: true,
+      mixedShippingMode: true,
+      candidateQualityWarnings: [
+        'Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.',
+        'Candidate rows include mixed shipping modes.',
+      ],
+    });
   });
 
   it('creates a draft approval with total and line snapshots', async () => {

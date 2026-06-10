@@ -68,6 +68,14 @@ function valueOrDash(value: unknown) {
   return String(value);
 }
 
+function formatPercentList(values: number[] | null | undefined) {
+  return values?.length ? values.map((value) => `${value}%`).join(', ') : 'None';
+}
+
+function formatStringList(values: string[] | null | undefined) {
+  return values?.length ? values.join(', ') : 'None';
+}
+
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
   return (
     health?.financeAuditMetadata?.databaseSourceLabel ??
@@ -201,7 +209,10 @@ export function AdminSettlementApprovalsPage() {
   const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
   const [vendorId, setVendorId] = useState(initialVendorId);
   const [approvalId, setApprovalId] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
   const [notes, setNotes] = useState('Admin settlement approval draft');
+  const [mixedVatAcknowledged, setMixedVatAcknowledged] = useState(false);
   const [health, setHealth] = useState<DatabaseHealthResponse | null>(null);
   const [preview, setPreview] = useState<SettlementApprovalPreview | null>(null);
   const [approval, setApproval] = useState<SettlementApproval | null>(null);
@@ -248,6 +259,27 @@ export function AdminSettlementApprovalsPage() {
     preview.summary.eligibleRowCount === 0 &&
     preview.summary.excludedActiveApprovalRowCount > 0,
   );
+  const candidateQualityWarnings = safeArray<string>(preview?.summary.candidateQualityWarnings);
+  const requiresMixedVatAcknowledgement = Boolean(preview?.summary.mixedCommissionVatRate);
+  const draftBlockedByAcknowledgement = requiresMixedVatAcknowledgement && !mixedVatAcknowledged;
+  const activeFilterSummary = [
+    periodStart ? `Start ${periodStart}` : null,
+    periodEnd ? `End ${periodEnd}` : null,
+  ].filter(Boolean).join(' · ') || 'No period filters: vendor-wide preview';
+
+  function buildSettlementApprovalInput() {
+    return {
+      vendorId: vendorId.trim(),
+      periodStart: periodStart || null,
+      periodEnd: periodEnd || null,
+    };
+  }
+
+  function clearPeriodFilters() {
+    setPeriodStart('');
+    setPeriodEnd('');
+    setMixedVatAcknowledged(false);
+  }
 
   async function runAction<T>(action: ActionName, callback: () => Promise<T>, successMessage?: string) {
     setBusyAction(action);
@@ -268,7 +300,8 @@ export function AdminSettlementApprovalsPage() {
   }
 
   async function handlePreview() {
-    const result = await runAction('preview', () => previewSettlementApproval({ vendorId: vendorId.trim() }), 'Preview loaded.');
+    setMixedVatAcknowledged(false);
+    const result = await runAction('preview', () => previewSettlementApproval(buildSettlementApprovalInput()), 'Preview loaded.');
     if (result) {
       setPreview(result);
     }
@@ -277,7 +310,7 @@ export function AdminSettlementApprovalsPage() {
   async function handleCreateDraft() {
     const result = await runAction(
       'createDraft',
-      () => createSettlementApprovalDraft({ vendorId: vendorId.trim(), notes: notes.trim() || null }),
+      () => createSettlementApprovalDraft({ ...buildSettlementApprovalInput(), notes: notes.trim() || null }),
       'Draft settlement approval created.',
     );
     if (result) {
@@ -433,13 +466,42 @@ export function AdminSettlementApprovalsPage() {
           <span>Draft notes</span>
           <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
         </label>
+        <label>
+          <span>Period start</span>
+          <input
+            type="date"
+            value={periodStart}
+            onChange={(event) => {
+              setPeriodStart(event.target.value);
+              setMixedVatAcknowledged(false);
+            }}
+          />
+        </label>
+        <label>
+          <span>Period end</span>
+          <input
+            type="date"
+            value={periodEnd}
+            onChange={(event) => {
+              setPeriodEnd(event.target.value);
+              setMixedVatAcknowledged(false);
+            }}
+          />
+        </label>
+      </div>
+      <div className="settlement-filter-summary">
+        <strong>Active candidate filter</strong>
+        <span>{activeFilterSummary}</span>
+        <button type="button" className="button button-secondary button-compact" onClick={clearPeriodFilters} disabled={busyAction !== null || (!periodStart && !periodEnd)}>
+          Clear filters
+        </button>
       </div>
 
       <div className="settlement-actions">
         <button type="button" className="button button-secondary" onClick={handlePreview} disabled={busyAction !== null || !vendorId.trim()}>
           Preview Settlement (read-only)
         </button>
-        <button type="button" className="button button-primary" onClick={handleCreateDraft} disabled={busyAction !== null || !preview}>
+        <button type="button" className="button button-primary" onClick={handleCreateDraft} disabled={busyAction !== null || !preview || draftBlockedByAcknowledgement}>
           Create Draft from preview (writes local DB)
         </button>
         <button type="button" className="button button-secondary" onClick={handleFetchApproval} disabled={busyAction !== null || !approvalId.trim()}>
@@ -471,6 +533,30 @@ export function AdminSettlementApprovalsPage() {
             <MetadataRow label="Period end" value={formatDate(preview.periodEnd)} />
             <MetadataRow label="Excluded active rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
           </MetadataGroup>
+          <MetadataGroup title="Candidate quality summary">
+            <MetadataRow label="Commission rates" value={formatPercentList(preview.summary.detectedCommissionRates)} />
+            <MetadataRow label="Commission VAT rates" value={formatPercentList(preview.summary.detectedCommissionVatRates)} />
+            <MetadataRow label="Shipping modes" value={formatStringList(preview.summary.detectedShippingModes)} />
+            <MetadataRow label="Financial profile snapshots" value={formatStringList(preview.summary.detectedFinancialProfileSnapshotIds)} />
+            <MetadataRow label="Mixed commission rate" value={preview.summary.mixedCommissionRate ? 'Yes' : 'No'} />
+            <MetadataRow label="Mixed commission VAT" value={preview.summary.mixedCommissionVatRate ? 'Yes' : 'No'} />
+            <MetadataRow label="Mixed shipping mode" value={preview.summary.mixedShippingMode ? 'Yes' : 'No'} />
+          </MetadataGroup>
+          <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
+          {requiresMixedVatAcknowledgement ? (
+            <div className="settlement-alert op-tone-warning">
+              <strong>Mixed VAT acknowledgement required before draft creation.</strong>
+              <p>Logo readiness will block mixed VAT settlements. Create this draft only when the candidate set is intentionally mixed for review.</p>
+              <label className="settlement-acknowledgement">
+                <input
+                  type="checkbox"
+                  checked={mixedVatAcknowledged}
+                  onChange={(event) => setMixedVatAcknowledged(event.target.checked)}
+                />
+                <span>I acknowledge this preview contains mixed commission VAT rates.</span>
+              </label>
+            </div>
+          ) : null}
           {previewRowsLockedInActiveApproval ? (
             <div className="settlement-alert op-tone-warning">
               <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>
