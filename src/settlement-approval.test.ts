@@ -29,7 +29,9 @@ const {
   approveSettlementApproval,
   cancelSettlementApproval,
   createDraftApproval,
+  getSettlementApprovalAudit,
   previewApproval,
+  __settlementApprovalTesting,
 } = await import('../backend/src/modules/finance/settlement-approval.service.js');
 
 function buildLedgerRow(input: {
@@ -40,6 +42,7 @@ function buildLedgerRow(input: {
   activeApproval?: boolean;
   settlementStatus?: string;
   payoutStatus?: string;
+  refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -78,7 +81,7 @@ function buildLedgerRow(input: {
       fulfillment: {
         fulfilledAt: fulfilled ? createdAt : null,
       },
-      refundRecords: [],
+      refundRecords: input.refundRecords ?? [],
     },
     settlementApprovalLines: input.activeApproval
       ? [
@@ -167,11 +170,24 @@ describe('settlement approval foundation', () => {
         financeLedgerEntryId: 'sale-1',
         lineType: 'SALE',
         payableImpactMinor: 88000,
+        storedSettlementStatus: 'PAYABLE',
+        derivedSettlementStatus: 'payable',
+        payoutStatus: 'PENDING',
+        eligibilityDecision: 'included',
+        eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+        refundDetected: false,
+        refundCount: 0,
+        fulfillmentEvidencePresent: true,
+        shippingEvidencePresent: true,
       }),
       expect.objectContaining({
         financeLedgerEntryId: 'refund-1',
         lineType: 'REFUND',
         payableImpactMinor: -10000,
+        storedSettlementStatus: 'PARTIALLY_REFUNDED',
+        derivedSettlementStatus: 'partially_refunded',
+        eligibilityReason: 'Derived partially refunded because refund records exist.',
+        refundDetected: true,
       }),
     ]);
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
@@ -230,11 +246,27 @@ describe('settlement approval foundation', () => {
                 financeLedgerEntryId: 'sale-1',
                 lineType: 'SALE',
                 payableImpactMinor: 88000,
+                sourceSnapshotJson: expect.objectContaining({
+                  storedSettlementStatus: 'PAYABLE',
+                  derivedSettlementStatus: 'payable',
+                  payoutStatus: 'PENDING',
+                  eligibilityDecision: 'included',
+                  eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+                  refundDetected: false,
+                  refundCount: 0,
+                  fulfillmentEvidencePresent: true,
+                  shippingEvidencePresent: true,
+                }),
               }),
               expect.objectContaining({
                 financeLedgerEntryId: 'refund-1',
                 lineType: 'REFUND',
                 payableImpactMinor: -10000,
+                sourceSnapshotJson: expect.objectContaining({
+                  storedSettlementStatus: 'PARTIALLY_REFUNDED',
+                  derivedSettlementStatus: 'partially_refunded',
+                  eligibilityReason: 'Derived partially refunded because refund records exist.',
+                }),
               }),
             ],
           },
@@ -319,5 +351,107 @@ describe('settlement approval foundation', () => {
         financeLedgerEntryId: 'sale-free',
       }),
     ]);
+  });
+
+  it('captures derived partially refunded explanation when stored status differs', async () => {
+    const row = buildLedgerRow({
+      id: 'sale-with-refund',
+      entryType: 'sale',
+      amount: 120,
+      fulfilled: false,
+      settlementStatus: 'ACCRUING',
+      refundRecords: [{ id: 'refund-1', sourceShopifyRefundId: 'rf-1', amount: 120 }],
+    });
+
+    const line = __settlementApprovalTesting.buildLine(row);
+
+    expect(line.sourceSnapshotJson).toEqual(
+      expect.objectContaining({
+        storedSettlementStatus: 'ACCRUING',
+        derivedSettlementStatus: 'partially_refunded',
+        payoutStatus: 'PENDING',
+        eligibilityDecision: 'included',
+        eligibilityReason: 'Derived partially refunded because refund records exist.',
+        refundDetected: true,
+        refundCount: 1,
+        fulfillmentEvidencePresent: false,
+        shippingEvidencePresent: false,
+      }),
+    );
+  });
+
+  it('explains excluded active approval and hold rows without changing eligibility math', async () => {
+    const activeApprovalExplanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({ id: 'sale-active', entryType: 'sale', amount: 1000, activeApproval: true }),
+    );
+    const holdExplanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({ id: 'sale-hold', entryType: 'sale', amount: 1000, payoutStatus: 'HOLD' }),
+    );
+
+    expect(activeApprovalExplanation).toMatchObject({
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Excluded because row already belongs to active settlement approval.',
+    });
+    expect(holdExplanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Excluded because payout status is HOLD.',
+    });
+  });
+
+  it('returns audit lines from stored source snapshot explanations', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...buildApproval({ id: 'approval-1', status: 'DRAFT' }),
+      lines: [
+        {
+          id: 'line-1',
+          settlementApprovalId: 'approval-1',
+          financeLedgerEntryId: 'sale-1',
+          lineType: 'SALE',
+          amountMinor: 100000,
+          commissionMinor: 10000,
+          commissionVatMinor: 2000,
+          payableImpactMinor: 88000,
+          sourceSnapshotJson: {
+            storedSettlementStatus: 'ACCRUING',
+            derivedSettlementStatus: 'partially_refunded',
+            payoutStatus: 'PENDING',
+            eligibilityDecision: 'included',
+            eligibilityReason: 'Derived partially refunded because refund records exist.',
+            refundDetected: true,
+            refundCount: 1,
+            fulfillmentEvidencePresent: false,
+            shippingEvidencePresent: false,
+          },
+        },
+      ],
+    });
+
+    const audit = await getSettlementApprovalAudit('approval-1');
+
+    expect(audit).toEqual({
+      approvalId: 'approval-1',
+      status: 'draft',
+      totals: {
+        grossSalesMinor: 100000,
+        refundTotalMinor: 10000,
+        commissionMinor: 10000,
+        commissionVatMinor: 2000,
+        netPayableMinor: 78000,
+        currency: 'TRY',
+      },
+      lines: [
+        {
+          financeLedgerEntryId: 'sale-1',
+          storedSettlementStatus: 'ACCRUING',
+          derivedSettlementStatus: 'partially_refunded',
+          payoutStatus: 'PENDING',
+          eligibilityDecision: 'included',
+          eligibilityReason: 'Derived partially refunded because refund records exist.',
+        },
+      ],
+    });
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 });

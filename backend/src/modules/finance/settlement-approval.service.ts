@@ -78,6 +78,15 @@ type SettlementApprovalLineDraft = {
   commissionVatMinor: number;
   payableImpactMinor: number;
   sourceSnapshotJson: Prisma.InputJsonValue;
+  storedSettlementStatus: string | null;
+  derivedSettlementStatus: string;
+  payoutStatus: string | null;
+  eligibilityDecision: 'included' | 'excluded';
+  eligibilityReason: string;
+  refundDetected: boolean;
+  refundCount: number;
+  fulfillmentEvidencePresent: boolean;
+  shippingEvidencePresent: boolean;
 };
 
 export type SettlementApprovalLineDto = SettlementApprovalLineDraft & {
@@ -127,6 +136,20 @@ export type SettlementApprovalDto = {
   notes: string | null;
   sourceSnapshotJson: unknown;
   lines: SettlementApprovalLineDto[];
+};
+
+export type SettlementApprovalAuditDto = {
+  approvalId: string;
+  status: SettlementApprovalDto['status'];
+  totals: SettlementApprovalTotalsDto;
+  lines: Array<{
+    financeLedgerEntryId: string;
+    storedSettlementStatus: string | null;
+    derivedSettlementStatus: string;
+    payoutStatus: string | null;
+    eligibilityDecision: 'included' | 'excluded';
+    eligibilityReason: string;
+  }>;
 };
 
 function toNumber(value: unknown) {
@@ -180,6 +203,29 @@ function isFulfilledForSettlement(allocation: SettlementApprovalLedgerRow['vendo
   );
 }
 
+function hasFulfillmentEvidence(allocation: SettlementApprovalLedgerRow['vendorAllocation']) {
+  const lifecycle = [
+    allocation?.allocationStatus,
+    allocation?.fulfillmentStatus,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return Boolean(
+    allocation?.fulfillment?.fulfilledAt || lifecycle.includes('fulfilled')
+  );
+}
+
+function hasShippingEvidence(allocation: SettlementApprovalLedgerRow['vendorAllocation']) {
+  const shippingStatus = allocation?.shippingStatus?.trim().toLowerCase() ?? '';
+  return (
+    shippingStatus.includes('shipped') ||
+    shippingStatus.includes('in transit') ||
+    shippingStatus.includes('delivered')
+  );
+}
+
 function sumRefundImpact(refundRecords: Array<{ amount: unknown }> | undefined) {
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
@@ -223,6 +269,55 @@ function rowHasActiveApproval(row: SettlementApprovalLedgerRow) {
   );
 }
 
+export function buildSettlementEligibilityExplanation(row: SettlementApprovalLedgerRow): {
+  storedSettlementStatus: string | null;
+  derivedSettlementStatus: string;
+  eligibilityDecision: 'included' | 'excluded';
+  eligibilityReason: string;
+  refundDetected: boolean;
+  refundCount: number;
+  fulfillmentEvidencePresent: boolean;
+  shippingEvidencePresent: boolean;
+  payoutStatus: string | null;
+} {
+  const type = normalizeType(row.entryType);
+  const payoutStatus = normalizeStatus(row.payoutStatus);
+  const refundCount = row.vendorAllocation?.refundRecords.length ?? 0;
+  const refundDetected = type === 'refund' || refundCount > 0;
+  const fulfillmentEvidencePresent = hasFulfillmentEvidence(row.vendorAllocation);
+  const shippingEvidencePresent = hasShippingEvidence(row.vendorAllocation);
+  const derivedSettlementStatus = resolveSettlementStatus(row);
+  let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row) ? 'included' : 'excluded';
+  let eligibilityReason = 'Excluded because row is not payable or partially refunded.';
+
+  if (type !== 'sale' && type !== 'refund') {
+    eligibilityReason = 'Excluded because row type is not sale or refund.';
+  } else if (payoutStatus === 'hold') {
+    eligibilityReason = 'Excluded because payout status is HOLD.';
+  } else if (rowHasActiveApproval(row)) {
+    eligibilityDecision = 'excluded';
+    eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
+  } else if (derivedSettlementStatus === 'partially_refunded') {
+    eligibilityReason = 'Derived partially refunded because refund records exist.';
+  } else if (derivedSettlementStatus === 'payable' && fulfillmentEvidencePresent) {
+    eligibilityReason = 'Derived payable because fulfillment evidence exists.';
+  } else if (derivedSettlementStatus === 'payable' && shippingEvidencePresent) {
+    eligibilityReason = 'Derived payable because shipping evidence exists.';
+  }
+
+  return {
+    storedSettlementStatus: row.settlementStatus,
+    derivedSettlementStatus,
+    eligibilityDecision,
+    eligibilityReason,
+    refundDetected,
+    refundCount,
+    fulfillmentEvidencePresent,
+    shippingEvidencePresent,
+    payoutStatus: row.payoutStatus,
+  };
+}
+
 function resolveCalculationProfile(row: SettlementApprovalLedgerRow): VendorFinanceProfileConfig {
   if (row.commissionPercentSnapshot !== null && row.commissionPercentSnapshot !== undefined) {
     return {
@@ -252,6 +347,7 @@ function resolveCalculationProfile(row: SettlementApprovalLedgerRow): VendorFina
 
 function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraft {
   const type = normalizeType(row.entryType);
+  const eligibilityExplanation = buildSettlementEligibilityExplanation(row);
   if (type === 'refund') {
     const refundMinor = toMinorUnits(toNumber(row.amount));
     return {
@@ -261,13 +357,14 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
       commissionMinor: 0,
       commissionVatMinor: 0,
       payableImpactMinor: -refundMinor,
+      ...eligibilityExplanation,
       sourceSnapshotJson: {
         financeLedgerEntryId: row.id,
         entryType: row.entryType,
         amount: String(row.amount),
-        payoutStatus: row.payoutStatus,
         settlementStatus: row.settlementStatus,
         resolvedSettlementStatus: resolveSettlementStatus(row),
+        ...eligibilityExplanation,
         vendorAllocationId: row.vendorAllocation?.id ?? null,
         sourceShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
         sourceShopifyOrderNumber: row.vendorAllocation?.sourceShopifyOrderNumber ?? null,
@@ -290,13 +387,14 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
     commissionMinor: toMinorUnits(calculation.commission),
     commissionVatMinor: toMinorUnits(calculation.commissionVat),
     payableImpactMinor: toMinorUnits(calculation.estimatedPayout),
+    ...eligibilityExplanation,
     sourceSnapshotJson: {
       financeLedgerEntryId: row.id,
       entryType: row.entryType,
       amount: String(row.amount),
-      payoutStatus: row.payoutStatus,
       settlementStatus: row.settlementStatus,
       resolvedSettlementStatus: resolveSettlementStatus(row),
+      ...eligibilityExplanation,
       vendorAllocationId: row.vendorAllocation?.id ?? null,
       sourceShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
       sourceShopifyOrderNumber: row.vendorAllocation?.sourceShopifyOrderNumber ?? null,
@@ -491,7 +589,46 @@ function mapApproval(
       commissionVatMinor: line.commissionVatMinor,
       payableImpactMinor: line.payableImpactMinor,
       sourceSnapshotJson: line.sourceSnapshotJson as Prisma.InputJsonValue,
+      ...readLineExplanation(line.sourceSnapshotJson),
     })),
+  };
+}
+
+function readSnapshotRecord(value: unknown): Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readSnapshotString(value: unknown) {
+  return typeof value === 'string' ? value : null;
+}
+
+function readSnapshotBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : false;
+}
+
+function readSnapshotNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function readLineExplanation(sourceSnapshotJson: unknown) {
+  const snapshot = readSnapshotRecord(sourceSnapshotJson);
+  return {
+    storedSettlementStatus:
+      readSnapshotString(snapshot.storedSettlementStatus) ?? readSnapshotString(snapshot.settlementStatus),
+    derivedSettlementStatus:
+      readSnapshotString(snapshot.derivedSettlementStatus) ??
+      readSnapshotString(snapshot.resolvedSettlementStatus) ??
+      'unknown',
+    payoutStatus: readSnapshotString(snapshot.payoutStatus),
+    eligibilityDecision:
+      snapshot.eligibilityDecision === 'excluded' ? ('excluded' as const) : ('included' as const),
+    eligibilityReason: readSnapshotString(snapshot.eligibilityReason) ?? 'Eligibility explanation unavailable.',
+    refundDetected: readSnapshotBoolean(snapshot.refundDetected),
+    refundCount: readSnapshotNumber(snapshot.refundCount),
+    fulfillmentEvidencePresent: readSnapshotBoolean(snapshot.fulfillmentEvidencePresent),
+    shippingEvidencePresent: readSnapshotBoolean(snapshot.shippingEvidencePresent),
   };
 }
 
@@ -661,8 +798,37 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
   return approval ? mapApproval(approval, false) : null;
 }
 
+export async function getSettlementApprovalAudit(id: string): Promise<SettlementApprovalAuditDto | null> {
+  const approval = await getSettlementApproval(id);
+  if (!approval) {
+    return null;
+  }
+
+  return {
+    approvalId: approval.id,
+    status: approval.status,
+    totals: {
+      grossSalesMinor: approval.grossSalesMinor,
+      refundTotalMinor: approval.refundTotalMinor,
+      commissionMinor: approval.commissionMinor,
+      commissionVatMinor: approval.commissionVatMinor,
+      netPayableMinor: approval.netPayableMinor,
+      currency: 'TRY',
+    },
+    lines: approval.lines.map((line) => ({
+      financeLedgerEntryId: line.financeLedgerEntryId,
+      storedSettlementStatus: line.storedSettlementStatus,
+      derivedSettlementStatus: line.derivedSettlementStatus,
+      payoutStatus: line.payoutStatus,
+      eligibilityDecision: line.eligibilityDecision,
+      eligibilityReason: line.eligibilityReason,
+    })),
+  };
+}
+
 export const __settlementApprovalTesting = {
   buildApprovalPreview,
   buildLine,
+  buildSettlementEligibilityExplanation,
   resolveSettlementStatus,
 };

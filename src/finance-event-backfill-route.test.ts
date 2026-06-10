@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
+const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -11,6 +12,15 @@ vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.j
 vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => ({
   getFinanceEventRelinkPlan: getFinanceEventRelinkPlanMock,
   relinkExistingFinanceEvents: relinkExistingFinanceEventsMock,
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
+  approveSettlementApproval: vi.fn(),
+  cancelSettlementApproval: vi.fn(),
+  createDraftApproval: vi.fn(),
+  getSettlementApproval: vi.fn(),
+  getSettlementApprovalAudit: getSettlementApprovalAuditMock,
+  previewApproval: vi.fn(),
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -44,6 +54,7 @@ describe('finance event backfill route', () => {
     getFinanceEventBackfillPlanMock.mockReset();
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
+    getSettlementApprovalAuditMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -205,5 +216,54 @@ describe('finance event backfill route', () => {
 
     expect(allowed).toEqual(result);
     expect(relinkExistingFinanceEventsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns settlement approval audit explanations to admins', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const audit = {
+      approvalId: 'approval-1',
+      status: 'draft',
+      totals: {
+        grossSalesMinor: 100000,
+        refundTotalMinor: 0,
+        commissionMinor: 10000,
+        commissionVatMinor: 2000,
+        netPayableMinor: 88000,
+        currency: 'TRY',
+      },
+      lines: [
+        {
+          financeLedgerEntryId: 'sale-1',
+          storedSettlementStatus: 'ACCRUING',
+          derivedSettlementStatus: 'partially_refunded',
+          payoutStatus: 'PENDING',
+          eligibilityDecision: 'included',
+          eligibilityReason: 'Derived partially refunded because refund records exist.',
+        },
+      ],
+    };
+    getSettlementApprovalAuditMock.mockResolvedValueOnce(audit);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await gets.get('/admin/finance/settlement-approvals/:id/audit')?.(
+      { authUser: { role: 'admin' }, params: { id: 'approval-1' } },
+      reply,
+    );
+
+    expect(allowed).toEqual(audit);
+    expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1');
   });
 });

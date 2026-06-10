@@ -23,6 +23,7 @@ import {
   cancelSettlementApproval,
   createDraftApproval,
   getSettlementApproval,
+  getSettlementApprovalAudit,
   previewApproval,
 } from './settlement-approval.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
@@ -407,6 +408,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(404).send({ message: 'Settlement approval not found.' });
       }
       return approval;
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id/audit',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      const audit = await getSettlementApprovalAudit(id);
+      if (!audit) {
+        return reply.code(404).send({ message: 'Settlement approval not found.' });
+      }
+      return audit;
     },
   );
 
