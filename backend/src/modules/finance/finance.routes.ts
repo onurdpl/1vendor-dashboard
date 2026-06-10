@@ -16,6 +16,7 @@ import {
   upsertShipmentShippingCost,
   upsertVendorFinancialProfile,
 } from './finance.service.js';
+import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -128,6 +129,20 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       return withDashboardRouteTiming('GET /finance', () =>
         withSlowEndpointTiming('GET /finance', () => getVendorFinanceDashboard(vendorId, resolvePagination(request.query))),
       );
+    },
+  );
+
+  app.get(
+    '/admin/finance/events/backfill-plan',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return getFinanceEventBackfillPlan();
     },
   );
 
