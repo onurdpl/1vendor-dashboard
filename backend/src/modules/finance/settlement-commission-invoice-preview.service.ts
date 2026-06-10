@@ -1,4 +1,10 @@
-import { SettlementApprovalStatus, type SettlementApproval, type SettlementApprovalLine, type VendorBillingProfile } from '@prisma/client';
+import {
+  SettlementApprovalStatus,
+  type SettlementApproval,
+  type SettlementApprovalLine,
+  type VendorBillingProfile,
+  type VendorFinancialProfile,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   buildLogoIsbasiCommissionInvoicePreview,
@@ -45,6 +51,9 @@ export type SettlementCommissionInvoicePreviewDto = {
     logoCustomerIdPresent: boolean;
     logoEinvoiceEligible: boolean | null;
   };
+  vatRateSource: 'settlement_line_snapshots' | 'blocked_mixed_or_missing';
+  detectedVatRates: number[];
+  configuredVendorCommissionVatPercent: number | null;
   logoPayloadPreview: Record<string, unknown> | null;
 };
 
@@ -64,6 +73,24 @@ function readSnapshotRecord(value: unknown): Record<string, unknown> {
 
 function readSnapshotString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeVatRate(value: unknown) {
+  const numeric = readNumber(value);
+  if (numeric === null || numeric < 0 || numeric > 100) {
+    return null;
+  }
+
+  return Math.round(numeric * 10000) / 10000;
 }
 
 function buildSourcePeriod(approval: SettlementApprovalForPreview) {
@@ -175,8 +202,50 @@ function buildAmounts(approval: Pick<SettlementApproval, 'commissionMinor' | 'co
     commissionVatAmount,
     expectedGrossInvoiceAmount: minorToMajor(approval.commissionMinor + approval.commissionVatMinor),
     currency: approval.currency,
-    taxRate: approval.commissionMinor > 0 ? (approval.commissionVatMinor / approval.commissionMinor) * 100 : null,
+    taxRate: null as number | null,
     vatIncluded: false as const,
+  };
+}
+
+function resolveConfiguredCommissionVatPercent(profile: VendorFinancialProfile | null) {
+  return normalizeVatRate(profile?.commissionVatPercent);
+}
+
+function resolveSettlementLineVatRate(approval: SettlementApprovalForPreview): {
+  taxRate: number | null;
+  vatRateSource: SettlementCommissionInvoicePreviewDto['vatRateSource'];
+  detectedVatRates: number[];
+  missingSnapshotCount: number;
+} {
+  const commissionLines = approval.lines.filter((line) => line.commissionMinor > 0);
+  const detected = new Set<number>();
+  let missingSnapshotCount = 0;
+
+  for (const line of commissionLines) {
+    const snapshot = readSnapshotRecord(line.sourceSnapshotJson);
+    const rate = normalizeVatRate(snapshot.commissionVatPercentSnapshot);
+    if (rate === null) {
+      missingSnapshotCount += 1;
+      continue;
+    }
+    detected.add(rate);
+  }
+
+  const detectedVatRates = Array.from(detected).sort((a, b) => a - b);
+  if (missingSnapshotCount > 0 || detectedVatRates.length !== 1) {
+    return {
+      taxRate: null,
+      vatRateSource: 'blocked_mixed_or_missing',
+      detectedVatRates,
+      missingSnapshotCount,
+    };
+  }
+
+  return {
+    taxRate: detectedVatRates[0],
+    vatRateSource: 'settlement_line_snapshots',
+    detectedVatRates,
+    missingSnapshotCount,
   };
 }
 
@@ -186,6 +255,9 @@ function buildBlockedResponse(input: {
   blockers: string[];
   warnings?: string[];
   vendorBillingReadiness?: SettlementCommissionInvoicePreviewDto['vendorBillingReadiness'];
+  vatRateSource?: SettlementCommissionInvoicePreviewDto['vatRateSource'];
+  detectedVatRates?: number[];
+  configuredVendorCommissionVatPercent?: number | null;
 }): SettlementCommissionInvoicePreviewDto {
   return {
     ok: false,
@@ -207,6 +279,9 @@ function buildBlockedResponse(input: {
           vatIncluded: false,
         },
     vendorBillingReadiness: input.vendorBillingReadiness ?? emptyBillingReadiness(),
+    vatRateSource: input.vatRateSource ?? 'blocked_mixed_or_missing',
+    detectedVatRates: input.detectedVatRates ?? [],
+    configuredVendorCommissionVatPercent: input.configuredVendorCommissionVatPercent ?? null,
     logoPayloadPreview: null,
   };
 }
@@ -244,6 +319,15 @@ export async function previewSettlementLogoCommissionInvoice(
       vendorId: approval.vendorId,
     },
   });
+  const financialProfile = await prisma.vendorFinancialProfile.findFirst({
+    where: {
+      vendorId: approval.vendorId,
+      active: true,
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+  });
   const missingFields = getMissingBillingFields(billingProfile);
   const vendorBillingReadiness = {
     complete: Boolean(billingProfile) && missingFields.length === 0,
@@ -254,12 +338,17 @@ export async function previewSettlementLogoCommissionInvoice(
   };
 
   const amounts = buildAmounts(approval);
+  const vatRateResolution = resolveSettlementLineVatRate(approval);
+  const configuredVendorCommissionVatPercent = resolveConfiguredCommissionVatPercent(financialProfile);
   const blockers = [
     ...(!billingProfile ? ['Vendor billing profile is required.'] : []),
     ...(missingFields.length ? [`Vendor billing profile is missing required fields: ${missingFields.join(', ')}.`] : []),
     ...(!vendorBillingReadiness.logoCustomerCodePresent ? ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.'] : []),
     ...(!vendorBillingReadiness.logoCustomerIdPresent ? ['Vendor must have logoIsbasiCustomerId before Logo invoice creation.'] : []),
     ...(approval.currency !== 'TRY' ? [`SettlementApproval currency must be TRY for Logo commission invoice preview. Current currency: ${approval.currency}.`] : []),
+    ...(vatRateResolution.taxRate === null
+      ? ['Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.']
+      : []),
     ...(approval.commissionMinor <= 0
       ? ['Settlement commission amount is zero; accountant confirmation is required before creating a Logo invoice.']
       : []),
@@ -267,10 +356,19 @@ export async function previewSettlementLogoCommissionInvoice(
   const warnings = [
     'Read-only preview only. No Logo invoice is created.',
     'Do not use netPayableMinor as invoice amount; preview uses commissionMinor plus commissionVatMinor.',
+    ...(vatRateResolution.taxRate !== null &&
+    configuredVendorCommissionVatPercent !== null &&
+    vatRateResolution.taxRate !== configuredVendorCommissionVatPercent
+      ? [
+          `Settlement line VAT rate ${formatDecimal(vatRateResolution.taxRate)}% differs from current vendor profile commission VAT rate ${formatDecimal(configuredVendorCommissionVatPercent)}%.`,
+        ]
+      : []),
     ...(!vendorBillingReadiness.logoEinvoiceEligible ? ['Logo e-invoice eligibility is not confirmed for this vendor.'] : []),
   ];
+  amounts.taxRate = vatRateResolution.taxRate;
 
-  if (blockers.length || !billingProfile || amounts.taxRate === null) {
+  const invoiceTaxRate = amounts.taxRate;
+  if (blockers.length || !billingProfile || invoiceTaxRate === null) {
     return {
       ok: false,
       writesPerformed: false,
@@ -282,6 +380,9 @@ export async function previewSettlementLogoCommissionInvoice(
       },
       amounts,
       vendorBillingReadiness,
+      vatRateSource: vatRateResolution.vatRateSource,
+      detectedVatRates: vatRateResolution.detectedVatRates,
+      configuredVendorCommissionVatPercent,
       logoPayloadPreview: null,
     };
   }
@@ -289,7 +390,7 @@ export async function previewSettlementLogoCommissionInvoice(
   const preview: LogoIsbasiCommissionInvoicePreview = buildLogoIsbasiCommissionInvoicePreview({
     vendorBillingProfile: mapBillingProfile(billingProfile),
     commissionAmount: formatDecimal(amounts.commissionAmount),
-    vatRate: formatDecimal(amounts.taxRate),
+    vatRate: formatDecimal(invoiceTaxRate),
     currency: approval.currency,
     description: buildDescription(approval),
     invoiceDate: new Date(),
@@ -308,6 +409,9 @@ export async function previewSettlementLogoCommissionInvoice(
     },
     amounts,
     vendorBillingReadiness,
+    vatRateSource: vatRateResolution.vatRateSource,
+    detectedVatRates: vatRateResolution.detectedVatRates,
+    configuredVendorCommissionVatPercent,
     logoPayloadPreview: useProvenLogoServiceReference(preview.payload),
   };
 }

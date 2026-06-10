@@ -320,6 +320,9 @@ describe('finance event backfill route', () => {
         logoCustomerIdPresent: true,
         logoEinvoiceEligible: true,
       },
+      vatRateSource: 'settlement_line_snapshots',
+      detectedVatRates: [20],
+      configuredVendorCommissionVatPercent: 20,
       logoPayloadPreview: {
         salesInvoiceDetails: [
           {

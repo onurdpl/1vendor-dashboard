@@ -534,6 +534,16 @@ export function AdminSettlementApprovalsPage() {
                 <MetadataRow label="Currency" value={logoPreview.amounts.currency} />
                 <MetadataRow label="VAT included" value={String(logoPreview.amounts.vatIncluded)} />
                 <MetadataRow label="Tax rate" value={logoPreview.amounts.taxRate === null ? 'Requires confirmation' : `${logoPreview.amounts.taxRate.toFixed(2)}%`} />
+                <MetadataRow label="VAT rate source" value={safeStatusLabel(logoPreview.vatRateSource)} />
+                <MetadataRow label="Detected VAT rates" value={logoPreview.detectedVatRates.length ? logoPreview.detectedVatRates.map((rate) => `${rate}%`).join(', ') : 'None'} />
+                <MetadataRow
+                  label="Current profile VAT"
+                  value={
+                    logoPreview.configuredVendorCommissionVatPercent === null
+                      ? 'Not available'
+                      : `${logoPreview.configuredVendorCommissionVatPercent}%`
+                  }
+                />
                 <MetadataRow label="Commission" value={formatCurrency(logoPreview.amounts.commissionAmount, logoPreview.amounts.currency)} />
                 <MetadataRow label="Commission VAT" value={formatCurrency(logoPreview.amounts.commissionVatAmount, logoPreview.amounts.currency)} />
                 <MetadataRow label="Expected gross" value={formatCurrency(logoPreview.amounts.expectedGrossInvoiceAmount, logoPreview.amounts.currency)} />

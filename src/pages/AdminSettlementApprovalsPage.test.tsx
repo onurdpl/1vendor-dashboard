@@ -169,6 +169,9 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
     logoCustomerIdPresent: false,
     logoEinvoiceEligible: null,
   },
+  vatRateSource: 'settlement_line_snapshots',
+  detectedVatRates: [20],
+  configuredVendorCommissionVatPercent: 20,
   logoPayloadPreview: {
     salesInvoiceDetails: [
       {

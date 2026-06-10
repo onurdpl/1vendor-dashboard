@@ -130,6 +130,9 @@ export type SettlementLogoCommissionInvoicePreview = {
     logoCustomerIdPresent: boolean;
     logoEinvoiceEligible: boolean | null;
   };
+  vatRateSource: 'settlement_line_snapshots' | 'blocked_mixed_or_missing';
+  detectedVatRates: number[];
+  configuredVendorCommissionVatPercent: number | null;
   logoPayloadPreview: Record<string, unknown> | null;
 };
 

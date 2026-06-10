@@ -15,6 +15,9 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     update: vi.fn(),
   },
+  vendorFinancialProfile: {
+    findFirst: vi.fn(),
+  },
   invoiceExecution: {
     create: vi.fn(),
   },
@@ -33,7 +36,9 @@ function buildApproval(input: {
   commissionMinor?: number;
   commissionVatMinor?: number;
   netPayableMinor?: number;
+  lineVatRates?: Array<number | string | null>;
 }) {
+  const lineVatRates = input.lineVatRates ?? [20];
   return {
     id: 'approval-1',
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
@@ -54,22 +59,21 @@ function buildApproval(input: {
     cancelledAt: null,
     notes: null,
     sourceSnapshotJson: {},
-    lines: [
-      {
+    lines: lineVatRates.map((lineVatRate, index) => ({
         id: 'line-1',
         settlementApprovalId: 'approval-1',
-        financeLedgerEntryId: 'ledger-1',
+        financeLedgerEntryId: `ledger-${index + 1}`,
         lineType: 'SALE',
-        amountMinor: 100000,
-        commissionMinor: 10000,
-        commissionVatMinor: 2000,
-        payableImpactMinor: 88000,
+        amountMinor: Math.round(100000 / lineVatRates.length),
+        commissionMinor: Math.round((input.commissionMinor ?? 10000) / lineVatRates.length),
+        commissionVatMinor: Math.round((input.commissionVatMinor ?? 2000) / lineVatRates.length),
+        payableImpactMinor: Math.round(88000 / lineVatRates.length),
         sourceSnapshotJson: {
-          sourceShopifyOrderId: 'gid://shopify/Order/1001',
-          sourceShopifyOrderNumber: '#1001',
+          sourceShopifyOrderId: `gid://shopify/Order/100${index + 1}`,
+          sourceShopifyOrderNumber: `#100${index + 1}`,
+          ...(lineVatRate === null ? {} : { commissionVatPercentSnapshot: String(lineVatRate) }),
         },
-      },
-    ],
+      })),
   };
 }
 
@@ -108,7 +112,20 @@ describe('settlement Logo commission invoice preview', () => {
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.vendorBillingProfile.create.mockReset();
     prismaMock.vendorBillingProfile.update.mockReset();
+    prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.invoiceExecution.create.mockReset();
+    prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
+      id: 'finance-profile-1',
+      vendorId: 'vendor-a',
+      commissionPercent: '10.00',
+      commissionVatPercent: '20.00',
+      deductShippingEnabled: false,
+      shippingMode: 'DISABLED',
+      fixedShippingFee: null,
+      active: true,
+      createdAt: new Date('2026-06-01T09:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T09:00:00.000Z'),
+    });
   });
 
   it('returns a read-only Logo payload preview for an approved settlement', async () => {
@@ -128,6 +145,9 @@ describe('settlement Logo commission invoice preview', () => {
       taxRate: 20,
       vatIncluded: false,
     });
+    expect(preview.vatRateSource).toBe('settlement_line_snapshots');
+    expect(preview.detectedVatRates).toEqual([20]);
+    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
     expect(preview.logoPayloadPreview).toMatchObject({
       currency: 'TRY',
       vatIncluded: false,
@@ -185,6 +205,8 @@ describe('settlement Logo commission invoice preview', () => {
       logoCustomerCodePresent: false,
       logoCustomerIdPresent: false,
     });
+    expect(preview.vatRateSource).toBe('settlement_line_snapshots');
+    expect(preview.detectedVatRates).toEqual([20]);
     expect(preview.readiness.blockers).toEqual(
       expect.arrayContaining([
         'Vendor billing profile is missing required fields: billingCity.',
@@ -209,16 +231,84 @@ describe('settlement Logo commission invoice preview', () => {
     expect(details[0].price).not.toBe(9999.99);
   });
 
-  it('derives taxRate from commissionVatMinor divided by commissionMinor', async () => {
+  it('uses uniform 20% settlement line VAT snapshots for taxRate', async () => {
     prismaMock.settlementApproval.findUnique.mockResolvedValue(
-      buildApproval({ commissionMinor: 25000, commissionVatMinor: 5000 }),
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 5000, lineVatRates: [20, 20] }),
     );
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
 
     const preview = await previewSettlementLogoCommissionInvoice('approval-1');
 
     expect(preview.amounts.taxRate).toBe(20);
+    expect(preview.vatRateSource).toBe('settlement_line_snapshots');
+    expect(preview.detectedVatRates).toEqual([20]);
     expect((preview.logoPayloadPreview?.salesInvoiceDetails as Array<Record<string, unknown>>)[0].taxRate).toBe(20);
+  });
+
+  it('uses uniform 18% settlement line VAT snapshots and warns when current profile is 20%', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 4500, lineVatRates: [18, '18.00'] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(true);
+    expect(preview.amounts.taxRate).toBe(18);
+    expect(preview.detectedVatRates).toEqual([18]);
+    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
+    expect(preview.readiness.warnings).toContain(
+      'Settlement line VAT rate 18% differs from current vendor profile commission VAT rate 20%.',
+    );
+  });
+
+  it('blocks mixed 18% and 20% settlement line VAT snapshots', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 4020, lineVatRates: [18, 20] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(false);
+    expect(preview.logoPayloadPreview).toBeNull();
+    expect(preview.amounts.taxRate).toBeNull();
+    expect(preview.vatRateSource).toBe('blocked_mixed_or_missing');
+    expect(preview.detectedVatRates).toEqual([18, 20]);
+    expect(preview.readiness.blockers).toContain(
+      'Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.',
+    );
+  });
+
+  it('blocks missing settlement line VAT snapshots', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 5000, lineVatRates: [null] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(false);
+    expect(preview.logoPayloadPreview).toBeNull();
+    expect(preview.amounts.taxRate).toBeNull();
+    expect(preview.vatRateSource).toBe('blocked_mixed_or_missing');
+    expect(preview.detectedVatRates).toEqual([]);
+    expect(preview.readiness.blockers).toContain(
+      'Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.',
+    );
+  });
+
+  it('does not derive taxRate from aggregate commissionVatMinor divided by commissionMinor', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ commissionMinor: 25000, commissionVatMinor: 4020, lineVatRates: [20] }),
+    );
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(true);
+    expect(preview.amounts.taxRate).toBe(20);
+    expect(preview.amounts.taxRate).not.toBeCloseTo(16.08);
   });
 
   it('returns a blocker for zero commission requiring accountant confirmation', async () => {
