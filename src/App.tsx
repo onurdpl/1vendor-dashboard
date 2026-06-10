@@ -35,6 +35,9 @@ const AdminSupportAnalyticsPage = lazy(() =>
 const AdminProviderManagementPage = lazy(() =>
   import('./pages/AdminProviderManagementPage').then((module) => ({ default: module.AdminProviderManagementPage })),
 );
+const AdminSettlementApprovalsPage = lazy(() =>
+  import('./pages/AdminSettlementApprovalsPage').then((module) => ({ default: module.AdminSettlementApprovalsPage })),
+);
 const VendorSupportTicketsPage = lazy(() =>
   import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
 );
@@ -174,6 +177,14 @@ export default function App() {
             element={
               <RequirePermission permission="orders:write">
                 {resilientRoute('Provider management', <AdminProviderManagementPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/finance/settlement-approvals"
+            element={
+              <RequirePermission permission="orders:write">
+                {resilientRoute('Settlement approvals', <AdminSettlementApprovalsPage />)}
               </RequirePermission>
             }
           />
