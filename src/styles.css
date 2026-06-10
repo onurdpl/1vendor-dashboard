@@ -11586,6 +11586,23 @@ summary.provider-response-heading::-webkit-details-marker {
   flex: 0 0 auto;
 }
 
+.vendor-profile-logo-pdf-input {
+  display: inline-flex;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: min(360px, 100%);
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.vendor-profile-logo-pdf-input input {
+  min-width: min(360px, 100%);
+  flex: 1 1 360px;
+}
+
 .button-danger {
   border-color: #fecaca;
   background: #fef2f2;

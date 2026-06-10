@@ -1658,7 +1658,7 @@ export function VendorProfilePage() {
                     >
                       {logoServicesMutation.isPending ? 'Discovering services...' : 'Discover Logo Services'}
                     </button>
-                    <label className="vendor-profile-logo-confirmation">
+                    <label className="vendor-profile-logo-pdf-input">
                       Invoice PDF UUID
                       <input
                         type="text"
