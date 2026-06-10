@@ -240,9 +240,14 @@ export function AdminSettlementApprovalsPage() {
     [invoiceRecords],
   );
   const productDetail = extractProductDetail(logoPreview?.logoPayloadPreview ?? null);
-  const selectedApprovalId = approval?.id || approvalId.trim();
+  const selectedApprovalId = approvalId.trim() || approval?.id || '';
   const currentTotals = getApprovalTotals(approval);
   const dbWarnings = getDatabaseWarnings(health);
+  const previewRowsLockedInActiveApproval = Boolean(
+    preview &&
+    preview.summary.eligibleRowCount === 0 &&
+    preview.summary.excludedActiveApprovalRowCount > 0,
+  );
 
   async function runAction<T>(action: ActionName, callback: () => Promise<T>, successMessage?: string) {
     setBusyAction(action);
@@ -266,11 +271,6 @@ export function AdminSettlementApprovalsPage() {
     const result = await runAction('preview', () => previewSettlementApproval({ vendorId: vendorId.trim() }), 'Preview loaded.');
     if (result) {
       setPreview(result);
-      setApproval(null);
-      setAudit(null);
-      setLogoPreview(null);
-      setInvoiceRecords([]);
-      setDiagnostics({});
     }
   }
 
@@ -471,6 +471,11 @@ export function AdminSettlementApprovalsPage() {
             <MetadataRow label="Period end" value={formatDate(preview.periodEnd)} />
             <MetadataRow label="Excluded active rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
           </MetadataGroup>
+          {previewRowsLockedInActiveApproval ? (
+            <div className="settlement-alert op-tone-warning">
+              <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>
+            </div>
+          ) : null}
 
           <section className="op-panel-section">
             <h3>Sample eligible lines</h3>

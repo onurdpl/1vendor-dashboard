@@ -85,6 +85,21 @@ const previewResponse: SettlementApprovalPreview = {
   ],
 };
 
+const lockedRowsPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  summary: {
+    ...previewResponse.summary,
+    grossSalesMinor: 0,
+    refundTotalMinor: 0,
+    commissionMinor: 0,
+    commissionVatMinor: 0,
+    netPayableMinor: 0,
+    eligibleRowCount: 0,
+    excludedActiveApprovalRowCount: 12,
+  },
+  lines: [],
+};
+
 const draftApproval: SettlementApproval = {
   ok: true,
   writesPerformed: true,
@@ -389,6 +404,39 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1'));
     expect(screen.getByText('Diagnostics invoice-record-1')).toBeInTheDocument();
     expect(screen.getByText(/Present · object/i)).toBeInTheDocument();
+  });
+
+  it('keeps approval workflow context after a zero-eligible preview with active locked rows', async () => {
+    previewSettlementApprovalMock
+      .mockResolvedValueOnce(previewResponse)
+      .mockResolvedValueOnce(lockedRowsPreviewResponse);
+
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await waitFor(() => expect(screen.getByText('approval-1')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i }));
+    await waitFor(() => expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i }));
+    await waitFor(() => expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Load commission invoice records \(read-only\)/i }));
+    await waitFor(() => expect(screen.getByText('invoice-record-1')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('No eligible rows remain because rows are already locked in an active settlement approval.')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getByText('approval-1')).toBeInTheDocument();
+    expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument();
+    expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument();
+    expect(screen.getByText('invoice-record-1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Fetch approval detail \(read-only\)/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Run Logo readiness preview \(read-only\)/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Load commission invoice records \(read-only\)/i })).toBeEnabled();
   });
 
   it('does not reference any Logo create route in the settlement approval UI files', () => {
