@@ -80,6 +80,17 @@ enum SettlementStatus {
   DISPUTED
 }
 
+enum SettlementApprovalStatus {
+  DRAFT
+  APPROVED
+  CANCELLED
+}
+
+enum SettlementApprovalLineType {
+  SALE
+  REFUND
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -261,6 +272,7 @@ model Vendor {
   paymentProviderSellers VendorPaymentProviderSeller[]
   financeEvents         FinanceEvent[]
   payoutBatches         PayoutBatch[]
+  settlementApprovals   SettlementApproval[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
   notifications         NotificationIntent[]
@@ -793,6 +805,7 @@ model FinanceLedgerEntry {
   payoutBatchLines              PayoutBatchLine[]
   invoiceExecutions             InvoiceExecution[]
   financeEvents                 FinanceEvent[]
+  settlementApprovalLines       SettlementApprovalLine[]
   operationalSignals            OperationalSignal[]
   automationActions             AutomationAction[]
 
@@ -823,6 +836,52 @@ model FinanceEvent {
   @@index([financeLedgerEntryId, createdAt])
   @@index([eventType, createdAt])
   @@index([referenceType, referenceId])
+}
+
+model SettlementApproval {
+  id                 String                    @id @default(cuid())
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  vendorId           String
+  periodStart        DateTime?
+  periodEnd          DateTime?
+  status             SettlementApprovalStatus  @default(DRAFT)
+  currency           String                    @default("TRY")
+  grossSalesMinor    Int
+  refundTotalMinor   Int
+  commissionMinor    Int
+  commissionVatMinor Int
+  netPayableMinor    Int
+  approvedBy         String?
+  approvedAt         DateTime?
+  cancelledBy        String?
+  cancelledAt        DateTime?
+  notes              String?
+  sourceSnapshotJson Json
+  vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  lines              SettlementApprovalLine[]
+
+  @@index([vendorId, status])
+  @@index([periodStart, periodEnd])
+  @@index([createdAt])
+}
+
+model SettlementApprovalLine {
+  id                   String                     @id @default(cuid())
+  settlementApprovalId String
+  financeLedgerEntryId String
+  lineType             SettlementApprovalLineType
+  amountMinor          Int
+  commissionMinor      Int
+  commissionVatMinor   Int
+  payableImpactMinor   Int
+  sourceSnapshotJson   Json
+  settlementApproval   SettlementApproval         @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
+  financeLedgerEntry   FinanceLedgerEntry         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([settlementApprovalId, financeLedgerEntryId])
+  @@index([financeLedgerEntryId])
+  @@index([lineType])
 }
 
 model InvoiceExecution {

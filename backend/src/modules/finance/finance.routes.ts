@@ -18,6 +18,13 @@ import {
 } from './finance.service.js';
 import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
 import { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } from './finance-event-relink.service.js';
+import {
+  approveSettlementApproval,
+  cancelSettlementApproval,
+  createDraftApproval,
+  getSettlementApproval,
+  previewApproval,
+} from './settlement-approval.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -54,6 +61,28 @@ function readOptionalQueryString(query: unknown, key: string) {
 
   const value = query[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readOptionalBodyString(body: unknown, key: string) {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const value = body[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readOptionalBodyDate(body: unknown, key: string) {
+  const value = readOptionalBodyString(body, key);
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${key} must be a valid date.`);
+  }
+  return parsed;
 }
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
@@ -304,6 +333,120 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       return markPayoutBatchReview(id);
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        const vendorId = readOptionalBodyString(request.body, 'vendorId');
+        if (!vendorId) {
+          return reply.code(400).send({ message: 'vendorId is required.' });
+        }
+        return await previewApproval(
+          vendorId,
+          readOptionalBodyDate(request.body, 'periodStart'),
+          readOptionalBodyDate(request.body, 'periodEnd'),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement approval preview could not be created.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        const vendorId = readOptionalBodyString(request.body, 'vendorId');
+        if (!vendorId) {
+          return reply.code(400).send({ message: 'vendorId is required.' });
+        }
+        return await createDraftApproval({
+          vendorId,
+          periodStart: readOptionalBodyDate(request.body, 'periodStart'),
+          periodEnd: readOptionalBodyDate(request.body, 'periodEnd'),
+          notes: readOptionalBodyString(request.body, 'notes'),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement approval draft could not be created.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      const approval = await getSettlementApproval(id);
+      if (!approval) {
+        return reply.code(404).send({ message: 'Settlement approval not found.' });
+      }
+      return approval;
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/:id/approve',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      try {
+        return await approveSettlementApproval(id, request.authUser.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement approval could not be approved.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/:id/cancel',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      try {
+        return await cancelSettlementApproval(id, request.authUser.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement approval could not be cancelled.';
+        return reply.code(400).send({ message });
+      }
     },
   );
 
