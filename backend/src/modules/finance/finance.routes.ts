@@ -17,6 +17,7 @@ import {
   upsertVendorFinancialProfile,
 } from './finance.service.js';
 import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
+import { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } from './finance-event-relink.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -143,6 +144,41 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return getFinanceEventBackfillPlan();
+    },
+  );
+
+  app.get(
+    '/admin/finance/events/relink-plan',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return getFinanceEventRelinkPlan();
+    },
+  );
+
+  app.post(
+    '/admin/finance/events/relink-existing',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      if (!isRecord(request.body) || request.body.confirmRelink !== true) {
+        return reply.code(400).send({
+          message: 'confirmRelink must be true to relink existing FinanceEvent rows.',
+          writesPerformed: false,
+        });
+      }
+
+      return relinkExistingFinanceEvents();
     },
   );
 

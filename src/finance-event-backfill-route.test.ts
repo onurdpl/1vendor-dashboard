@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
+const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
+const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
+}));
+
+vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => ({
+  getFinanceEventRelinkPlan: getFinanceEventRelinkPlanMock,
+  relinkExistingFinanceEvents: relinkExistingFinanceEventsMock,
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -35,6 +42,8 @@ const { registerFinanceRoutes } = await import('../backend/src/modules/finance/f
 describe('finance event backfill route', () => {
   beforeEach(() => {
     getFinanceEventBackfillPlanMock.mockReset();
+    getFinanceEventRelinkPlanMock.mockReset();
+    relinkExistingFinanceEventsMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -82,5 +91,119 @@ describe('finance event backfill route', () => {
     expect(allowed).toEqual(plan);
     expect(allowed?.writesPerformed).toBe(false);
     expect(getFinanceEventBackfillPlanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the read-only relink plan to admins with writesPerformed false', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const plan = {
+      ok: true,
+      writesPerformed: false,
+      summary: {
+        relinkCandidateEvents: 1,
+        affectedLedgerRows: 1,
+      },
+      samples: [
+        {
+          financeEventId: 'event-1',
+          financeLedgerEntryId: 'ledger-1',
+          idempotencyKey: 'ledger-1:SALE_RECORDED',
+          vendorId: 'sporjinal',
+          eventType: 'SALE_RECORDED',
+          reason: 'Existing FinanceEvent idempotency key, vendorId, and eventType match this ledger row; only financeLedgerEntryId is null.',
+        },
+      ],
+    };
+    getFinanceEventRelinkPlanMock.mockResolvedValueOnce(plan);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await gets.get('/admin/finance/events/relink-plan')?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(allowed).toEqual(plan);
+    expect(allowed?.writesPerformed).toBe(false);
+    expect(getFinanceEventRelinkPlanMock).toHaveBeenCalledTimes(1);
+    expect(relinkExistingFinanceEventsMock).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmRelink true before executing relink', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const blocked = await posts.get('/admin/finance/events/relink-existing')?.(
+      { authUser: { role: 'admin' }, body: { confirmRelink: false } },
+      reply,
+    );
+
+    expect(blocked).toEqual({
+      status: 400,
+      body: {
+        message: 'confirmRelink must be true to relink existing FinanceEvent rows.',
+        writesPerformed: false,
+      },
+    });
+    expect(relinkExistingFinanceEventsMock).not.toHaveBeenCalled();
+  });
+
+  it('executes relink for admins when confirmRelink is true', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const result = {
+      ok: true,
+      writesPerformed: true,
+      summary: {
+        relinkCandidateEvents: 1,
+        affectedLedgerRows: 1,
+        relinkedEvents: 1,
+        skippedEvents: 0,
+      },
+      samples: [],
+    };
+    relinkExistingFinanceEventsMock.mockResolvedValueOnce(result);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await posts.get('/admin/finance/events/relink-existing')?.(
+      { authUser: { role: 'admin' }, body: { confirmRelink: true } },
+      reply,
+    );
+
+    expect(allowed).toEqual(result);
+    expect(relinkExistingFinanceEventsMock).toHaveBeenCalledTimes(1);
   });
 });

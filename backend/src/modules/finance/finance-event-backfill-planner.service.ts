@@ -95,7 +95,7 @@ function amountToString(value: unknown) {
   return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
 }
 
-function expectedEventTypes(entryType: string): FinanceEventType[] {
+export function expectedFinanceEventTypes(entryType: string): FinanceEventType[] {
   const normalized = normalizeEntryType(entryType);
   if (normalized === 'sale') {
     return [...SALE_EVENT_TYPES];
@@ -106,7 +106,7 @@ function expectedEventTypes(entryType: string): FinanceEventType[] {
   return [];
 }
 
-function idempotencyKeyFor(financeLedgerEntryId: string, eventType: FinanceEventType) {
+export function financeEventIdempotencyKeyFor(financeLedgerEntryId: string, eventType: FinanceEventType) {
   return `${financeLedgerEntryId}:${eventType}`;
 }
 
@@ -214,15 +214,15 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
   };
 
   for (const row of ledgerRows as PlannerLedgerRow[]) {
-    const expectedTypes = expectedEventTypes(row.entryType);
+    const expectedTypes = expectedFinanceEventTypes(row.entryType);
     const linkedEventTypes = new Set(row.financeEvents.map((event) => event.eventType));
     const missingLinkedEventTypes = expectedTypes.filter((eventType) => !linkedEventTypes.has(eventType));
     const existingByKey = expectedTypes
-      .map((eventType) => eventByIdempotencyKey.get(idempotencyKeyFor(row.id, eventType)))
+      .map((eventType) => eventByIdempotencyKey.get(financeEventIdempotencyKeyFor(row.id, eventType)))
       .filter((event): event is PlannerEventRow => Boolean(event));
     const nullLinkedEvents = existingByKey.filter((event) => event.financeLedgerEntryId === null);
     const missingByIdempotency = expectedTypes.filter(
-      (eventType) => !eventByIdempotencyKey.has(idempotencyKeyFor(row.id, eventType)),
+      (eventType) => !eventByIdempotencyKey.has(financeEventIdempotencyKeyFor(row.id, eventType)),
     );
     const rowClasses = new Set<BackfillClassification>();
     classifications.set(row.id, rowClasses);
@@ -328,6 +328,6 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
 }
 
 export const __financeEventBackfillPlannerTesting = {
-  expectedEventTypes,
-  idempotencyKeyFor,
+  expectedEventTypes: expectedFinanceEventTypes,
+  idempotencyKeyFor: financeEventIdempotencyKeyFor,
 };
