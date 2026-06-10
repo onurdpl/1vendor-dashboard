@@ -91,6 +91,18 @@ enum SettlementApprovalLineType {
   REFUND
 }
 
+enum SettlementCommissionInvoiceProvider {
+  LOGO_ISBASI
+}
+
+enum SettlementCommissionInvoiceStatus {
+  PENDING
+  CREATED
+  FAILED
+  CANCELLED
+  UNKNOWN
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -273,6 +285,7 @@ model Vendor {
   financeEvents         FinanceEvent[]
   payoutBatches         PayoutBatch[]
   settlementApprovals   SettlementApproval[]
+  settlementCommissionInvoices SettlementCommissionInvoice[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
   notifications         NotificationIntent[]
@@ -860,6 +873,7 @@ model SettlementApproval {
   sourceSnapshotJson Json
   vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines              SettlementApprovalLine[]
+  commissionInvoices SettlementCommissionInvoice[]
 
   @@index([vendorId, status])
   @@index([periodStart, periodEnd])
@@ -882,6 +896,44 @@ model SettlementApprovalLine {
   @@unique([settlementApprovalId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
   @@index([lineType])
+}
+
+model SettlementCommissionInvoice {
+  id                   String                              @id @default(cuid())
+  createdAt            DateTime                            @default(now())
+  updatedAt            DateTime                            @updatedAt
+  settlementApprovalId String
+  vendorId             String
+  provider             SettlementCommissionInvoiceProvider
+  status               SettlementCommissionInvoiceStatus   @default(PENDING)
+  providerInvoiceId    String?
+  providerUuid         String?
+  providerEttn         String?
+  invoiceNo            String?
+  documentStatus       String?
+  documentContentType  String?
+  documentSize         Int?
+  documentFetchedAt    DateTime?
+  documentSnapshotJson Json?
+  requestSnapshotJson  Json?
+  responseSnapshotJson Json?
+  failureCode          String?
+  failureMessage       String?
+  failedAt             DateTime?
+  retryCount           Int                                 @default(0)
+  lastRetriedAt        DateTime?
+  createdBy            String?
+  cancelledBy          String?
+  cancelledAt          DateTime?
+  settlementApproval   SettlementApproval                  @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
+  vendor               Vendor                              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([settlementApprovalId])
+  @@index([vendorId])
+  @@index([provider])
+  @@index([status])
+  @@index([providerUuid])
+  @@index([invoiceNo])
 }
 
 model InvoiceExecution {

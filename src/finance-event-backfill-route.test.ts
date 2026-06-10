@@ -5,6 +5,7 @@ const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
+const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -26,6 +27,10 @@ vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => (
 
 vi.mock('../backend/src/modules/finance/settlement-commission-invoice-preview.service.js', () => ({
   previewSettlementLogoCommissionInvoice: previewSettlementLogoCommissionInvoiceMock,
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-commission-invoice-record.service.js', () => ({
+  findBySettlementApproval: findSettlementCommissionInvoiceRecordsMock,
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -61,6 +66,7 @@ describe('finance event backfill route', () => {
     relinkExistingFinanceEventsMock.mockReset();
     getSettlementApprovalAuditMock.mockReset();
     previewSettlementLogoCommissionInvoiceMock.mockReset();
+    findSettlementCommissionInvoiceRecordsMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -334,5 +340,45 @@ describe('finance event backfill route', () => {
     expect(allowed).toEqual(preview);
     expect(allowed?.writesPerformed).toBe(false);
     expect(previewSettlementLogoCommissionInvoiceMock).toHaveBeenCalledWith('approval-1');
+  });
+
+  it('returns settlement commission invoice records without writes', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const records = [
+      {
+        id: 'record-1',
+        settlementApprovalId: 'approval-1',
+        provider: 'logo_isbasi',
+        status: 'pending',
+      },
+    ];
+    findSettlementCommissionInvoiceRecordsMock.mockResolvedValueOnce(records);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await gets.get('/admin/finance/settlement-approvals/:id/commission-invoice-records')?.(
+      { authUser: { role: 'admin' }, params: { id: 'approval-1' } },
+      reply,
+    );
+
+    expect(allowed).toEqual({
+      ok: true,
+      writesPerformed: false,
+      settlementApprovalId: 'approval-1',
+      records,
+    });
+    expect(findSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1');
   });
 });

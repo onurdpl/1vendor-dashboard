@@ -27,6 +27,7 @@ import {
   previewApproval,
 } from './settlement-approval.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
+import { findBySettlementApproval as findSettlementCommissionInvoiceRecords } from './settlement-commission-invoice-record.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -443,6 +444,26 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       return previewSettlementLogoCommissionInvoice(id);
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals/:id/commission-invoice-records',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return {
+        ok: true,
+        writesPerformed: false,
+        settlementApprovalId: id,
+        records: await findSettlementCommissionInvoiceRecords(id),
+      };
     },
   );
 
