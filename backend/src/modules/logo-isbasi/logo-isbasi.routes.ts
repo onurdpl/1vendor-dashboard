@@ -891,6 +891,7 @@ function buildLogoTestInvoicePayload(
           discountValue: 0,
           productDetail: {
             itemCode: serviceItemCode,
+            itemType: 2,
           },
         };
       })
@@ -1900,7 +1901,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         const testInvoiceWarnings = [
           ...preview.warnings,
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Using existing Logo service item by itemCode only, per Logo support guidance.',
+          'Using existing Logo service item by itemCode and itemType only.',
         ];
         const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload, serviceItemCode);
 

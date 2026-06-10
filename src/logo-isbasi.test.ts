@@ -1314,6 +1314,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             discountValue: 0,
             productDetail: {
               itemCode: 'SPORGYM-COMMISSION',
+              itemType: 2,
             },
           }),
         ],
@@ -1336,7 +1337,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         ettn: 'logo-ettn-1',
         warnings: expect.arrayContaining([
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Using existing Logo service item by itemCode only, per Logo support guidance.',
+          'Using existing Logo service item by itemCode and itemType only.',
         ]),
         requestPayload: expect.objectContaining({
           currency: 'TRY',
@@ -1351,6 +1352,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
               discountValue: 0,
               productDetail: {
                 itemCode: 'SPORGYM-COMMISSION',
+                itemType: 2,
               },
             }),
           ],
@@ -1444,6 +1446,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             description: 'SPORGYM TEST KOMİSYON FATURASI',
             productDetail: {
               itemCode: 'SERVICE-COMMISSION',
+              itemType: 2,
             },
           }),
         ],
@@ -1456,12 +1459,13 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             expect.objectContaining({
               productDetail: {
                 itemCode: 'SERVICE-COMMISSION',
+                itemType: 2,
               },
             }),
           ],
         }),
         warnings: expect.arrayContaining([
-          'Using existing Logo service item by itemCode only, per Logo support guidance.',
+          'Using existing Logo service item by itemCode and itemType only.',
         ]),
       }),
     );
