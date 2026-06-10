@@ -89,6 +89,18 @@ enum PayoutBatchStatus {
   PAID_PLACEHOLDER
 }
 
+enum FinanceEventType {
+  SALE_RECORDED
+  COMMISSION_RESERVED
+  COMMISSION_VAT_RESERVED
+  VENDOR_PAYABLE_RESERVED
+  REFUND_RECORDED
+  COMMISSION_REVERSED
+  COMMISSION_VAT_REVERSED
+  VENDOR_PAYABLE_REVERSED
+  MANUAL_ADJUSTMENT
+}
+
 enum ShippingCostSourceType {
   MANUAL
   IMPORTED
@@ -247,6 +259,7 @@ model Vendor {
   financialProfile      VendorFinancialProfile?
   billingProfile        VendorBillingProfile?
   paymentProviderSellers VendorPaymentProviderSeller[]
+  financeEvents         FinanceEvent[]
   payoutBatches         PayoutBatch[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
@@ -467,6 +480,7 @@ model ShopifyOrder {
   allocations              VendorAllocation[]
   webhookEvents            WebhookEvent[]
   refunds                  ShopifyRefund[]
+  financeEvents            FinanceEvent[]
 }
 
 model ShopifyOrderLineItem {
@@ -778,11 +792,37 @@ model FinanceLedgerEntry {
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   payoutBatchLines              PayoutBatchLine[]
   invoiceExecutions             InvoiceExecution[]
+  financeEvents                 FinanceEvent[]
   operationalSignals            OperationalSignal[]
   automationActions             AutomationAction[]
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
+}
+
+model FinanceEvent {
+  id                   String           @id @default(cuid())
+  createdAt            DateTime         @default(now())
+  vendorId             String
+  shopifyOrderId       String?
+  financeLedgerEntryId String?
+  eventType            FinanceEventType
+  amountMinor          Int
+  currency             String           @default("TRY")
+  referenceType        String
+  referenceId          String
+  metadataJson         Json?
+  createdBy            String
+  idempotencyKey       String           @unique
+  vendor               Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  shopifyOrder         ShopifyOrder?    @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+  financeLedgerEntry   FinanceLedgerEntry? @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, createdAt])
+  @@index([shopifyOrderId, createdAt])
+  @@index([financeLedgerEntryId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([referenceType, referenceId])
 }
 
 model InvoiceExecution {

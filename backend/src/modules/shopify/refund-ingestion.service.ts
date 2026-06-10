@@ -1,4 +1,6 @@
 import { prisma } from '../../db/prisma.js';
+import { FinanceEventType } from '@prisma/client';
+import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
@@ -81,6 +83,15 @@ function sumAmounts(values: string[]) {
     const numeric = Number(value);
     return sum + (Number.isFinite(numeric) ? numeric : 0);
   }, 0).toFixed(2);
+}
+
+function toNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function toMinorUnits(value: number) {
+  return Math.round(value * 100);
 }
 
 export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): Promise<RefundIngestionResult> {
@@ -321,9 +332,30 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           });
         }
 
+        const refundLedgerId = `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`;
+        const existingRefundLedgerEntry = await tx.financeLedgerEntry.findUnique({
+          where: {
+            id: refundLedgerId,
+          },
+          select: {
+            id: true,
+          },
+        });
+        const saleLedgerEntry = await tx.financeLedgerEntry.findFirst({
+          where: {
+            vendorId,
+            vendorAllocationId,
+            entryType: 'sale',
+          },
+          select: {
+            commissionPercentSnapshot: true,
+            commissionVatPercentSnapshot: true,
+          },
+        });
+
         await tx.financeLedgerEntry.upsert({
           where: {
-            id: `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`,
+            id: refundLedgerId,
           },
           update: {
             vendorAllocationId,
@@ -334,7 +366,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
           },
           create: {
-            id: `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`,
+            id: refundLedgerId,
             vendorAllocationId,
             vendorId,
             entryType: 'refund',
@@ -343,6 +375,58 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
           },
         });
+
+        if (!existingRefundLedgerEntry) {
+          const refundMinor = toMinorUnits(toNumber(totalRefundAmount));
+          const commissionPercent = toNumber(saleLedgerEntry?.commissionPercentSnapshot);
+          const commissionVatPercent = toNumber(saleLedgerEntry?.commissionVatPercentSnapshot);
+          const commissionReversalMinor = Math.round(refundMinor * (Math.max(commissionPercent, 0) / 100));
+          const vendorPayableReversalMinor = refundMinor - commissionReversalMinor;
+          const baseEvent = {
+            vendorId,
+            shopifyOrderId: shopifyOrder.id,
+            financeLedgerEntryId: refundLedgerId,
+            currency: shopifyOrder.currency ?? 'TRY',
+            referenceType: 'shopify_refund',
+            referenceId: parsedRefund.sourceShopifyRefundId,
+            createdBy: 'system:shopify_refunds_create',
+            metadataJson: {
+              sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+              sourceShopifyOrderNumber: orderNumber,
+              sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+              vendorAllocationId,
+              financeLedgerEntryId: refundLedgerId,
+              commissionPercentSnapshot: commissionPercent,
+              commissionVatPercentSnapshot: commissionVatPercent,
+              sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
+              sourceLineItemIds,
+            },
+          };
+
+          await createEventsIdempotently(
+            [
+              {
+                ...baseEvent,
+                eventType: FinanceEventType.REFUND_RECORDED,
+                amountMinor: refundMinor,
+                idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
+              },
+              {
+                ...baseEvent,
+                eventType: FinanceEventType.COMMISSION_REVERSED,
+                amountMinor: -commissionReversalMinor,
+                idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
+              },
+              {
+                ...baseEvent,
+                eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
+                amountMinor: -vendorPayableReversalMinor,
+                idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
+              },
+            ],
+            tx,
+          );
+        }
       }
 
       await tx.webhookEvent.update({

@@ -1,4 +1,5 @@
-import { SettlementStatus, ShippingDeductionMode, type Prisma } from '@prisma/client';
+import { FinanceEventType, SettlementStatus, ShippingDeductionMode, type Prisma } from '@prisma/client';
+import { createEventsIdempotently } from './finance-event.service.js';
 
 type FinanceLedgerTransaction = Prisma.TransactionClient;
 
@@ -9,6 +10,10 @@ function toAmountString(value: number) {
 function toNumber(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function toMinorUnits(value: number) {
+  return Math.round(value * 100);
 }
 
 function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string) {
@@ -66,6 +71,14 @@ export async function upsertSaleLedgerForAllocation(
 
   const amount = allocation.lineItems.reduce((sum, lineItem) => sum + toNumber(lineItem.lineAmount), 0);
   const ledgerId = buildSaleLedgerEntryId(allocation.assignedVendorId, allocation.order.sourceShopifyOrderId);
+  const existingLedgerEntry = await tx.financeLedgerEntry.findUnique({
+    where: {
+      id: ledgerId,
+    },
+    select: {
+      id: true,
+    },
+  });
   const activeProfile = await tx.vendorFinancialProfile.findFirst({
     where: {
       vendorId: allocation.assignedVendorId,
@@ -104,7 +117,7 @@ export async function upsertSaleLedgerForAllocation(
     settlementEligibleAt: payableAt,
   };
 
-  return tx.financeLedgerEntry.upsert({
+  const ledgerEntry = await tx.financeLedgerEntry.upsert({
     where: {
       id: ledgerId,
     },
@@ -128,6 +141,64 @@ export async function upsertSaleLedgerForAllocation(
       ...settlementFields,
     },
   });
+
+  if (!existingLedgerEntry) {
+    const grossMinor = toMinorUnits(amount);
+    const commissionPercent = toNumber(profileSnapshot.commissionPercentSnapshot);
+    const commissionVatPercent = toNumber(profileSnapshot.commissionVatPercentSnapshot);
+    const commissionMinor = Math.round(grossMinor * (Math.max(commissionPercent, 0) / 100));
+    const commissionVatMinor = Math.round(commissionMinor * (Math.max(commissionVatPercent, 0) / 100));
+    const vendorPayableMinor = grossMinor - commissionMinor - commissionVatMinor;
+    const baseEvent = {
+      vendorId: allocation.assignedVendorId,
+      shopifyOrderId: allocation.order.id,
+      financeLedgerEntryId: ledgerId,
+      currency: allocation.order.currency ?? 'TRY',
+      referenceType: 'shopify_order_allocation',
+      referenceId: allocation.id,
+      createdBy: 'system:shopify_orders_create',
+      metadataJson: {
+        sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
+        vendorAllocationId: allocation.id,
+        financeLedgerEntryId: ledgerId,
+        commissionPercentSnapshot: commissionPercent,
+        commissionVatPercentSnapshot: commissionVatPercent,
+      },
+    };
+
+    await createEventsIdempotently(
+      [
+        {
+          ...baseEvent,
+          eventType: FinanceEventType.SALE_RECORDED,
+          amountMinor: grossMinor,
+          idempotencyKey: `${ledgerId}:SALE_RECORDED`,
+        },
+        {
+          ...baseEvent,
+          eventType: FinanceEventType.COMMISSION_RESERVED,
+          amountMinor: commissionMinor,
+          idempotencyKey: `${ledgerId}:COMMISSION_RESERVED`,
+        },
+        {
+          ...baseEvent,
+          eventType: FinanceEventType.COMMISSION_VAT_RESERVED,
+          amountMinor: commissionVatMinor,
+          idempotencyKey: `${ledgerId}:COMMISSION_VAT_RESERVED`,
+        },
+        {
+          ...baseEvent,
+          eventType: FinanceEventType.VENDOR_PAYABLE_RESERVED,
+          amountMinor: vendorPayableMinor,
+          idempotencyKey: `${ledgerId}:VENDOR_PAYABLE_RESERVED`,
+        },
+      ],
+      tx,
+    );
+  }
+
+  return ledgerEntry;
 }
 
 export const __saleLedgerTesting = {

@@ -24,7 +24,12 @@ const txMock = vi.hoisted(() => ({
     upsert: vi.fn(),
   },
   financeLedgerEntry: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
     upsert: vi.fn(),
+  },
+  financeEvent: {
+    createMany: vi.fn(),
   },
 }));
 
@@ -63,6 +68,7 @@ function setupOrder() {
     id: 'shopify-order-db-1029',
     sourceShopifyOrderId: '7621834670417',
     sourceShopifyOrderNumber: '#1029',
+    currency: 'TRY',
     lineItems: [
       {
         id: 'order-line-db-1',
@@ -82,6 +88,12 @@ function setupOrder() {
   });
   txMock.vendor.findMany.mockResolvedValueOnce([{ id: 'sporjinal' }]);
   txMock.shopifyRefund.upsert.mockResolvedValueOnce({ id: 'shopify-refund-db-1' });
+  txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce(null);
+  txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+    commissionPercentSnapshot: 10,
+    commissionVatPercentSnapshot: 18,
+  });
+  txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 3 });
 }
 
 describe('Shopify refund return linking', () => {
@@ -160,5 +172,96 @@ describe('Shopify refund return linking', () => {
         },
       }),
     );
+  });
+
+  it('creates refund finance events once for a newly created refund ledger row', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        id: '1074533826897',
+        order_id: '7621834670417',
+        created_at: '2026-05-16T14:37:38Z',
+        note: null,
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: '20346971095377',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: '20346971095377',
+              sku: 'DJ1196-002-42',
+              title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+              variant_title: 'Siyah / 42',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(txMock.financeEvent.createMany).toHaveBeenCalledWith({
+      skipDuplicates: true,
+      data: [
+        expect.objectContaining({
+          eventType: 'REFUND_RECORDED',
+          amountMinor: 339900,
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:REFUND_RECORDED',
+        }),
+        expect.objectContaining({
+          eventType: 'COMMISSION_REVERSED',
+          amountMinor: -33990,
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_REVERSED',
+        }),
+        expect.objectContaining({
+          eventType: 'VENDOR_PAYABLE_REVERSED',
+          amountMinor: -305910,
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:VENDOR_PAYABLE_REVERSED',
+        }),
+      ],
+    });
+  });
+
+  it('does not create duplicate refund finance events when the refund ledger row already exists', async () => {
+    setupOrder();
+    txMock.financeLedgerEntry.findUnique.mockReset();
+    txMock.financeLedgerEntry.findFirst.mockReset();
+    txMock.financeEvent.createMany.mockReset();
+    txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce({
+      id: 'fin-sporjinal-refund-1074533826897',
+    });
+    txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 18,
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        id: '1074533826897',
+        order_id: '7621834670417',
+        created_at: '2026-05-16T14:37:38Z',
+        note: null,
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: '20346971095377',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: '20346971095377',
+              sku: 'DJ1196-002-42',
+              title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+              variant_title: 'Siyah / 42',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
   });
 });
