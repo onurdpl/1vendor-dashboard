@@ -74,6 +74,7 @@ export type SettlementApproval = {
   ok: true;
   writesPerformed: boolean;
   id: string;
+  createdAt: string;
   vendorId: string;
   status: SettlementApprovalStatus;
   periodStart: string | null;
@@ -91,6 +92,25 @@ export type SettlementApproval = {
   notes: string | null;
   sourceSnapshotJson: unknown;
   lines: SettlementApprovalLine[];
+};
+
+export type SettlementApprovalSummary = {
+  id: string;
+  createdAt: string;
+  vendorId: string;
+  status: SettlementApprovalStatus;
+  currency: string;
+  grossSalesMinor: number;
+  netPayableMinor: number;
+  approvedAt: string | null;
+  lineCount: number;
+};
+
+export type SettlementApprovalListResponse = {
+  ok: true;
+  writesPerformed: false;
+  vendorId: string;
+  approvals: SettlementApprovalSummary[];
 };
 
 export type SettlementApprovalAudit = {
@@ -239,6 +259,12 @@ export function previewSettlementApproval(input: SettlementApprovalPreviewInput)
 
 export function createSettlementApprovalDraft(input: SettlementApprovalCreateInput) {
   return apiClient.post<SettlementApproval>('/admin/finance/settlement-approvals', input);
+}
+
+export function listSettlementApprovals(vendorId: string) {
+  return apiClient.get<SettlementApprovalListResponse>(
+    `/admin/finance/settlement-approvals?vendorId=${encodeURIComponent(vendorId)}`,
+  );
 }
 
 export function getSettlementApproval(id: string) {

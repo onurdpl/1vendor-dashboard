@@ -18,12 +18,14 @@ import {
   getSettlementApprovalAudit,
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
+  listSettlementApprovals,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type DatabaseHealthResponse,
   type SettlementApproval,
   type SettlementApprovalAudit,
   type SettlementApprovalLine,
+  type SettlementApprovalSummary,
   type SettlementApprovalPreview,
   type SettlementCommissionInvoiceDiagnostics,
   type SettlementCommissionInvoiceRecord,
@@ -49,6 +51,14 @@ type WorkflowStep = {
   title: string;
   status: WorkflowStepStatus;
   details: Array<{ label: string; value: unknown }>;
+};
+
+type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED';
+
+type RecommendedAction = {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
 };
 
 function getErrorMessage(error: unknown) {
@@ -109,6 +119,16 @@ function getStatusTone(status: WorkflowStepStatus) {
     return 'warning';
   }
   return 'neutral';
+}
+
+function getQualityTone(classification: QualityClassification) {
+  if (classification === 'CLEAN') {
+    return 'success';
+  }
+  if (classification === 'BLOCKED') {
+    return 'danger';
+  }
+  return 'warning';
 }
 
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
@@ -242,9 +262,11 @@ function ReadinessList({ title, items, tone }: { title: string; items: string[];
 function WorkflowProgress({
   steps,
   recommendedNextAction,
+  recommendedAction,
 }: {
   steps: WorkflowStep[];
   recommendedNextAction: string;
+  recommendedAction: RecommendedAction;
 }) {
   return (
     <section className="settlement-workflow">
@@ -256,6 +278,14 @@ function WorkflowProgress({
         <div className="settlement-next-action">
           <strong>Recommended Next Action</strong>
           <span>{recommendedNextAction}</span>
+          <button
+            type="button"
+            className="button button-primary button-compact"
+            onClick={recommendedAction.onClick}
+            disabled={recommendedAction.disabled || !recommendedAction.onClick}
+          >
+            {recommendedAction.label}
+          </button>
         </div>
       </div>
       <div className="settlement-workflow-steps">
@@ -281,6 +311,118 @@ function WorkflowProgress({
   );
 }
 
+function RecentApprovalsPanel({
+  approvals,
+  loading,
+  onOpenApproval,
+}: {
+  approvals: SettlementApprovalSummary[];
+  loading: boolean;
+  onOpenApproval: (id: string) => void;
+}) {
+  return (
+    <section className="op-meta-group">
+      <h3>Recent Settlement Approvals</h3>
+      <p className="page-description">Newest first for the selected vendor. Opening an approval loads its workflow context.</p>
+      {loading ? <p className="page-description">Loading recent approvals...</p> : null}
+      {!loading && approvals.length === 0 ? <p className="page-description">No settlement approvals found.</p> : null}
+      {approvals.length ? (
+        <OperationalTable
+          columns={['Approval', 'Status', 'Vendor', 'Lines', 'Gross sales', 'Net payable', 'Created', 'Approved', 'Action']}
+          className="settlement-approvals-table"
+          stickyHeader={false}
+        >
+          {approvals.map((item) => (
+            <OperationalTableRow key={item.id}>
+              <span><strong>{item.id}</strong></span>
+              <span><StatusBadge status={item.status}>{item.status.toUpperCase()}</StatusBadge></span>
+              <span>{item.vendorId}</span>
+              <span>{formatNumber(item.lineCount)}</span>
+              <span>{formatMinor(item.grossSalesMinor, item.currency)}</span>
+              <span>{formatMinor(item.netPayableMinor, item.currency)}</span>
+              <span>{formatDate(item.createdAt)}</span>
+              <span>{formatDate(item.approvedAt)}</span>
+              <span>
+                <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
+                  Open Approval
+                </button>
+              </span>
+            </OperationalTableRow>
+          ))}
+        </OperationalTable>
+      ) : null}
+    </section>
+  );
+}
+
+function CandidateQualityCard({
+  preview,
+  classification,
+  reasons,
+  requiresAcknowledgement,
+  acknowledged,
+  onAcknowledgedChange,
+}: {
+  preview: SettlementApprovalPreview;
+  classification: QualityClassification;
+  reasons: string[];
+  requiresAcknowledgement: boolean;
+  acknowledged: boolean;
+  onAcknowledgedChange: (value: boolean) => void;
+}) {
+  const summary = preview.summary;
+
+  return (
+    <section id="candidate-quality-card" className={`settlement-quality-card op-tone-${getQualityTone(classification)}`}>
+      <div className="settlement-quality-heading">
+        <div>
+          <h3>Candidate Quality</h3>
+          <p className="page-description">Review settlement quality before creating a draft.</p>
+        </div>
+        <StatusBadge tone={getQualityTone(classification)}>{classification}</StatusBadge>
+      </div>
+      <div className="settlement-quality-grid">
+        <MetadataGroup title="Snapshot groups">
+          <MetadataRow label="Commission Rates" value={formatPercentList(summary.detectedCommissionRates)} />
+          <MetadataRow label="Detected Commission VAT Rates" value={formatPercentList(summary.detectedCommissionVatRates)} />
+          <MetadataRow label="Shipping Modes" value={formatStringList(summary.detectedShippingModes)} />
+          <MetadataRow label="Financial Profile Snapshot Groups" value={formatStringList(summary.detectedFinancialProfileSnapshotIds)} />
+        </MetadataGroup>
+        <MetadataGroup title="Candidate rows">
+          <MetadataRow label="Eligible Rows" value={formatNumber(summary.eligibleRowCount)} />
+          <MetadataRow label="Excluded Rows" value={formatNumber(summary.excludedActiveApprovalRowCount)} />
+          <MetadataRow label="Profile Group Count" value={formatNumber(summary.detectedFinancialProfileSnapshotIds.length)} />
+          <MetadataRow label="Quality" value={classification} />
+        </MetadataGroup>
+      </div>
+      {reasons.length ? (
+        <div className={`settlement-alert op-tone-${classification === 'BLOCKED' ? 'danger' : 'warning'}`}>
+          <strong>Reason</strong>
+          <ul>
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <div className={`settlement-alert op-tone-${getQualityTone(classification)}`}>
+        <strong>Draft Safety</strong>
+        <p>This settlement contains {formatNumber(summary.eligibleRowCount)} rows. Quality classification: {classification}.</p>
+        {requiresAcknowledgement ? (
+          <label className="settlement-acknowledgement">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(event) => onAcknowledgedChange(event.target.checked)}
+            />
+            <span>I acknowledge this candidate is BLOCKED for Logo readiness and still want to create a review draft.</span>
+          </label>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function AdminSettlementApprovalsPage() {
   const appReadiness = useAppReadiness();
   const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
@@ -293,6 +435,8 @@ export function AdminSettlementApprovalsPage() {
   const [health, setHealth] = useState<DatabaseHealthResponse | null>(null);
   const [preview, setPreview] = useState<SettlementApprovalPreview | null>(null);
   const [approval, setApproval] = useState<SettlementApproval | null>(null);
+  const [recentApprovals, setRecentApprovals] = useState<SettlementApprovalSummary[]>([]);
+  const [recentApprovalsLoading, setRecentApprovalsLoading] = useState(false);
   const [audit, setAudit] = useState<SettlementApprovalAudit | null>(null);
   const [logoPreview, setLogoPreview] = useState<SettlementLogoCommissionInvoicePreview | null>(null);
   const [invoiceRecords, setInvoiceRecords] = useState<SettlementCommissionInvoiceRecord[]>([]);
@@ -323,6 +467,38 @@ export function AdminSettlementApprovalsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const selectedVendorId = vendorId.trim();
+    if (!selectedVendorId) {
+      setRecentApprovals([]);
+      return;
+    }
+
+    let cancelled = false;
+    setRecentApprovalsLoading(true);
+    void listSettlementApprovals(selectedVendorId)
+      .then((response) => {
+        if (!cancelled) {
+          setRecentApprovals(response.approvals);
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setRecentApprovals([]);
+          setError(getErrorMessage(requestError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRecentApprovalsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorId]);
+
   const activeInvoiceRecords = useMemo(
     () => invoiceRecords.filter((record) => record.status.toLowerCase() !== 'cancelled'),
     [invoiceRecords],
@@ -337,8 +513,6 @@ export function AdminSettlementApprovalsPage() {
     preview.summary.excludedActiveApprovalRowCount > 0,
   );
   const candidateQualityWarnings = safeArray<string>(preview?.summary.candidateQualityWarnings);
-  const requiresMixedVatAcknowledgement = Boolean(preview?.summary.mixedCommissionVatRate);
-  const draftBlockedByAcknowledgement = requiresMixedVatAcknowledgement && !mixedVatAcknowledged;
   const activeFilterSummary = [
     periodStart ? `Start ${periodStart}` : null,
     periodEnd ? `End ${periodEnd}` : null,
@@ -351,9 +525,35 @@ export function AdminSettlementApprovalsPage() {
     logoPreview?.vendorBillingReadiness.logoCustomerCodePresent &&
     logoPreview.vendorBillingReadiness.logoCustomerIdPresent,
   );
+  const candidateQualityClassification: QualityClassification = !preview
+    ? 'WARNING'
+    : preview.summary.mixedCommissionVatRate
+      ? 'BLOCKED'
+      : preview.summary.mixedShippingMode || preview.summary.detectedFinancialProfileSnapshotIds.length > 1
+        ? 'WARNING'
+        : 'CLEAN';
+  const candidateQualityReasons = (() => {
+    if (!preview) {
+      return [];
+    }
+    const reasons: string[] = [];
+    if (preview.summary.mixedCommissionVatRate) {
+      reasons.push('Mixed VAT rates prevent Logo commission invoice readiness.');
+    }
+    if (preview.summary.mixedShippingMode) {
+      reasons.push('Multiple shipping modes require review before settlement approval.');
+    }
+    if (preview.summary.detectedFinancialProfileSnapshotIds.length > 1) {
+      reasons.push('Multiple financial profile snapshot groups are included.');
+    }
+    return reasons.length ? reasons : ['Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.'];
+  })();
+  const draftBlockedByAcknowledgement = candidateQualityClassification === 'BLOCKED' && !mixedVatAcknowledged;
   const qualityStepStatus: WorkflowStepStatus = !preview
     ? 'Waiting'
-    : preview.summary.mixedCommissionVatRate || preview.summary.mixedShippingMode || candidateQualityWarnings.length
+    : candidateQualityClassification === 'BLOCKED'
+      ? 'Blocked'
+      : candidateQualityClassification === 'WARNING'
       ? 'Warning'
       : 'Completed';
   const draftStepStatus: WorkflowStepStatus = approval
@@ -412,7 +612,7 @@ export function AdminSettlementApprovalsPage() {
         { label: 'Mixed commission VAT', value: preview ? (preview.summary.mixedCommissionVatRate ? 'Yes' : 'No') : 'Not reviewed' },
         { label: 'Mixed shipping mode', value: preview ? (preview.summary.mixedShippingMode ? 'Yes' : 'No') : 'Not reviewed' },
         { label: 'Financial profile groups', value: preview ? formatStringList(preview.summary.detectedFinancialProfileSnapshotIds) : 'Not reviewed' },
-        { label: 'Warnings', value: candidateQualityWarnings.length ? candidateQualityWarnings.join(' ') : 'None' },
+        { label: 'Quality', value: preview ? candidateQualityClassification : 'Not reviewed' },
       ],
     },
     {
@@ -422,7 +622,7 @@ export function AdminSettlementApprovalsPage() {
       details: [
         { label: 'Draft exists', value: Boolean(approval) },
         { label: 'Draft id', value: approval?.id ?? null },
-        { label: 'Created at', value: approvalGeneratedAt ? formatDate(approvalGeneratedAt) : 'Not available' },
+        { label: 'Created at', value: approval?.createdAt ? formatDate(approval.createdAt) : approvalGeneratedAt ? formatDate(approvalGeneratedAt) : 'Not available' },
       ],
     },
     {
@@ -473,11 +673,11 @@ export function AdminSettlementApprovalsPage() {
     if (!vendorId.trim()) {
       return 'Next: Select a vendor.';
     }
-    if (!preview) {
+    if (!preview && !approval) {
       return 'Next: Preview settlement candidates.';
     }
-    if (!approval && candidateQualityWarnings.length) {
-      return 'Next: Review candidate quality warnings.';
+    if (preview && !approval && candidateQualityClassification !== 'CLEAN') {
+      return 'Next: Review Candidate Quality.';
     }
     if (!approval) {
       return 'Next: Create Draft.';
@@ -499,6 +699,43 @@ export function AdminSettlementApprovalsPage() {
     }
     return 'Workflow review is complete. Resolve blockers before any future invoice execution.';
   })();
+  const recommendedAction: RecommendedAction = (() => {
+    if (!vendorId.trim()) {
+      return { label: 'Select vendor', disabled: true };
+    }
+    if (!preview && !approval) {
+      return { label: 'Preview Settlement', onClick: () => void handlePreview(), disabled: busyAction !== null || !vendorId.trim() };
+    }
+    if (preview && !approval && candidateQualityClassification !== 'CLEAN') {
+      return {
+        label: 'Review Candidate Quality',
+        onClick: () => document.getElementById('candidate-quality-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      };
+    }
+    if (!approval) {
+      return {
+        label: 'Create Draft',
+        onClick: () => void handleCreateDraft(),
+        disabled: busyAction !== null || !preview || draftBlockedByAcknowledgement,
+      };
+    }
+    if (approval.status === 'draft') {
+      return { label: 'Approve Settlement', onClick: () => void handleApprove(), disabled: busyAction !== null };
+    }
+    if (approval.status === 'cancelled') {
+      return { label: 'Select another approval', disabled: true };
+    }
+    if (!audit) {
+      return { label: 'Load Audit Snapshot', onClick: () => void handleLoadAudit(), disabled: busyAction !== null };
+    }
+    if (!logoPreview) {
+      return { label: 'Run Logo Readiness', onClick: () => void handleLogoPreview(), disabled: busyAction !== null };
+    }
+    if (!invoiceRecords.length) {
+      return { label: 'Load Commission Invoice Records', onClick: () => void handleInvoiceRecords(), disabled: busyAction !== null };
+    }
+    return { label: 'Workflow reviewed', disabled: true };
+  })();
 
   function buildSettlementApprovalInput() {
     return {
@@ -512,6 +749,23 @@ export function AdminSettlementApprovalsPage() {
     setPeriodStart('');
     setPeriodEnd('');
     setMixedVatAcknowledged(false);
+  }
+
+  function rememberApprovalSummary(nextApproval: SettlementApproval) {
+    const summary: SettlementApprovalSummary = {
+      id: nextApproval.id,
+      createdAt: nextApproval.createdAt,
+      vendorId: nextApproval.vendorId,
+      status: nextApproval.status,
+      currency: nextApproval.currency,
+      grossSalesMinor: nextApproval.grossSalesMinor,
+      netPayableMinor: nextApproval.netPayableMinor,
+      approvedAt: nextApproval.approvedAt,
+      lineCount: nextApproval.lines.length,
+    };
+    setRecentApprovals((current) => [summary, ...current.filter((item) => item.id !== summary.id)]
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .slice(0, 20));
   }
 
   async function runAction<T>(action: ActionName, callback: () => Promise<T>, successMessage?: string) {
@@ -549,6 +803,7 @@ export function AdminSettlementApprovalsPage() {
     if (result) {
       setApproval(result);
       setApprovalId(result.id);
+      rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
       setInvoiceRecords([]);
@@ -566,6 +821,21 @@ export function AdminSettlementApprovalsPage() {
     if (result) {
       setApproval(result);
       setVendorId(result.vendorId);
+      rememberApprovalSummary(result);
+      setAudit(null);
+      setLogoPreview(null);
+      setInvoiceRecords([]);
+      setDiagnostics({});
+    }
+  }
+
+  async function handleOpenRecentApproval(id: string) {
+    setApprovalId(id);
+    const result = await runAction('fetchApproval', () => getSettlementApproval(id), 'Approval detail loaded.');
+    if (result) {
+      setApproval(result);
+      setVendorId(result.vendorId);
+      rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
       setInvoiceRecords([]);
@@ -581,6 +851,7 @@ export function AdminSettlementApprovalsPage() {
     const result = await runAction('approve', () => approveSettlementApproval(selectedApprovalId), 'Draft approved.');
     if (result) {
       setApproval(result);
+      rememberApprovalSummary(result);
     }
   }
 
@@ -592,6 +863,7 @@ export function AdminSettlementApprovalsPage() {
     const result = await runAction('cancel', () => cancelSettlementApproval(selectedApprovalId), 'Settlement approval cancelled.');
     if (result) {
       setApproval(result);
+      rememberApprovalSummary(result);
     }
   }
 
@@ -686,7 +958,7 @@ export function AdminSettlementApprovalsPage() {
       {error ? <SectionErrorRetry title="Finance action failed" description={error} /> : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
-      <WorkflowProgress steps={workflowSteps} recommendedNextAction={recommendedNextAction} />
+      <WorkflowProgress steps={workflowSteps} recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} />
 
       <div className="op-toolbar settlement-toolbar" aria-label="Settlement approval controls">
         <label>
@@ -732,6 +1004,12 @@ export function AdminSettlementApprovalsPage() {
         </button>
       </div>
 
+      <RecentApprovalsPanel
+        approvals={recentApprovals}
+        loading={recentApprovalsLoading}
+        onOpenApproval={(id) => void handleOpenRecentApproval(id)}
+      />
+
       <div className="settlement-actions">
         <button type="button" className="button button-secondary" onClick={handlePreview} disabled={busyAction !== null || !vendorId.trim()}>
           Preview Settlement (read-only)
@@ -768,30 +1046,15 @@ export function AdminSettlementApprovalsPage() {
             <MetadataRow label="Period end" value={formatDate(preview.periodEnd)} />
             <MetadataRow label="Excluded active rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
           </MetadataGroup>
-          <MetadataGroup title="Candidate quality summary">
-            <MetadataRow label="Commission rates" value={formatPercentList(preview.summary.detectedCommissionRates)} />
-            <MetadataRow label="Commission VAT rates" value={formatPercentList(preview.summary.detectedCommissionVatRates)} />
-            <MetadataRow label="Shipping modes" value={formatStringList(preview.summary.detectedShippingModes)} />
-            <MetadataRow label="Financial profile snapshots" value={formatStringList(preview.summary.detectedFinancialProfileSnapshotIds)} />
-            <MetadataRow label="Mixed commission rate" value={preview.summary.mixedCommissionRate ? 'Yes' : 'No'} />
-            <MetadataRow label="Mixed commission VAT" value={preview.summary.mixedCommissionVatRate ? 'Yes' : 'No'} />
-            <MetadataRow label="Mixed shipping mode" value={preview.summary.mixedShippingMode ? 'Yes' : 'No'} />
-          </MetadataGroup>
+          <CandidateQualityCard
+            preview={preview}
+            classification={candidateQualityClassification}
+            reasons={candidateQualityReasons}
+            requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
+            acknowledged={mixedVatAcknowledged}
+            onAcknowledgedChange={setMixedVatAcknowledged}
+          />
           <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
-          {requiresMixedVatAcknowledgement ? (
-            <div className="settlement-alert op-tone-warning">
-              <strong>Mixed VAT acknowledgement required before draft creation.</strong>
-              <p>Logo readiness will block mixed VAT settlements. Create this draft only when the candidate set is intentionally mixed for review.</p>
-              <label className="settlement-acknowledgement">
-                <input
-                  type="checkbox"
-                  checked={mixedVatAcknowledged}
-                  onChange={(event) => setMixedVatAcknowledged(event.target.checked)}
-                />
-                <span>I acknowledge this preview contains mixed commission VAT rates.</span>
-              </label>
-            </div>
-          ) : null}
           {previewRowsLockedInActiveApproval ? (
             <div className="settlement-alert op-tone-warning">
               <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>

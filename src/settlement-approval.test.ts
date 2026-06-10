@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   settlementApproval: {
     create: vi.fn(),
+    findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
@@ -30,6 +31,7 @@ const {
   cancelSettlementApproval,
   createDraftApproval,
   getSettlementApprovalAudit,
+  listSettlementApprovalsForVendor,
   previewApproval,
   __settlementApprovalTesting,
 } = await import('../backend/src/modules/finance/settlement-approval.service.js');
@@ -152,6 +154,7 @@ describe('settlement approval foundation', () => {
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.settlementApproval.create.mockReset();
+    prismaMock.settlementApproval.findMany.mockReset();
     prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementApproval.update.mockReset();
     prismaMock.settlementApprovalLine.count.mockReset();
@@ -250,6 +253,58 @@ describe('settlement approval foundation', () => {
         'Candidate rows include mixed shipping modes.',
       ],
     });
+  });
+
+  it('lists recent settlement approvals for a vendor newest first without writes', async () => {
+    prismaMock.settlementApproval.findMany.mockResolvedValue([
+      {
+        ...buildApproval({ id: 'approval-new', status: 'APPROVED' }),
+        _count: { lines: 2 },
+      },
+      {
+        ...buildApproval({ id: 'approval-draft', status: 'DRAFT' }),
+        _count: { lines: 1 },
+      },
+    ]);
+
+    const result = await listSettlementApprovalsForVendor('vendor-a');
+
+    expect(prismaMock.settlementApproval.findMany).toHaveBeenCalledWith({
+      where: { vendorId: 'vendor-a' },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      include: {
+        _count: {
+          select: {
+            lines: true,
+          },
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      vendorId: 'vendor-a',
+      approvals: [
+        {
+          id: 'approval-new',
+          status: 'approved',
+          lineCount: 2,
+          grossSalesMinor: 100000,
+          netPayableMinor: 78000,
+        },
+        {
+          id: 'approval-draft',
+          status: 'draft',
+          lineCount: 1,
+        },
+      ],
+    });
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('creates a draft approval with total and line snapshots', async () => {

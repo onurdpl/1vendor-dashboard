@@ -14,10 +14,12 @@ import {
   getSettlementApprovalAudit,
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
+  listSettlementApprovals,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type SettlementApproval,
   type SettlementApprovalAudit,
+  type SettlementApprovalListResponse,
   type SettlementApprovalPreview,
   type SettlementCommissionInvoiceDiagnostics,
   type SettlementCommissionInvoiceRecordsResponse,
@@ -40,6 +42,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     previewSettlementLogoCommissionInvoice: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
+    listSettlementApprovals: vi.fn(),
   };
 });
 
@@ -53,6 +56,7 @@ const getSettlementApprovalAuditMock = vi.mocked(getSettlementApprovalAudit);
 const previewSettlementLogoCommissionInvoiceMock = vi.mocked(previewSettlementLogoCommissionInvoice);
 const getSettlementCommissionInvoiceRecordsMock = vi.mocked(getSettlementCommissionInvoiceRecords);
 const getSettlementCommissionInvoiceDiagnosticsMock = vi.mocked(getSettlementCommissionInvoiceDiagnostics);
+const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 
 const previewResponse: SettlementApprovalPreview = {
   ok: true,
@@ -120,10 +124,22 @@ const mixedVatPreviewResponse: SettlementApprovalPreview = {
   },
 };
 
+const mixedShippingPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  summary: {
+    ...previewResponse.summary,
+    detectedShippingModes: ['DISABLED', 'FIXED'],
+    detectedFinancialProfileSnapshotIds: ['profile-current'],
+    mixedShippingMode: true,
+    candidateQualityWarnings: ['Candidate rows include mixed shipping modes.'],
+  },
+};
+
 const draftApproval: SettlementApproval = {
   ok: true,
   writesPerformed: true,
   id: 'approval-1',
+  createdAt: '2026-06-10T09:00:00.000Z',
   vendorId: 'yalispor',
   status: 'draft',
   periodStart: null,
@@ -155,6 +171,44 @@ const cancelledApproval: SettlementApproval = {
   status: 'cancelled',
   cancelledBy: 'admin-user',
   cancelledAt: '2026-06-10T10:05:00.000Z',
+};
+
+const recentApprovalsResponse: SettlementApprovalListResponse = {
+  ok: true,
+  writesPerformed: false,
+  vendorId: 'yalispor',
+  approvals: [
+    {
+      id: 'approval-2',
+      createdAt: '2026-06-10T11:00:00.000Z',
+      vendorId: 'yalispor',
+      status: 'approved',
+      currency: 'TRY',
+      grossSalesMinor: 220000,
+      netPayableMinor: 180000,
+      approvedAt: '2026-06-10T12:00:00.000Z',
+      lineCount: 3,
+    },
+    {
+      id: 'approval-1',
+      createdAt: '2026-06-10T09:00:00.000Z',
+      vendorId: 'yalispor',
+      status: 'draft',
+      currency: 'TRY',
+      grossSalesMinor: 120000,
+      netPayableMinor: 95600,
+      approvedAt: null,
+      lineCount: 1,
+    },
+  ],
+};
+
+const selectedRecentApproval: SettlementApproval = {
+  ...approvedApproval,
+  id: 'approval-2',
+  createdAt: '2026-06-10T11:00:00.000Z',
+  grossSalesMinor: 220000,
+  netPayableMinor: 180000,
 };
 
 const auditResponse: SettlementApprovalAudit = {
@@ -371,6 +425,7 @@ describe('Finance Settlement approval admin UI', () => {
     previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(logoPreviewResponse);
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValue(invoiceRecordsResponse);
     getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(diagnosticsResponse);
+    listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
   });
 
   afterEach(() => {
@@ -385,6 +440,26 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Next: Preview settlement candidates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/vendor_dashboard_dev/i)).toBeInTheDocument());
+  });
+
+  it('renders recent approvals and opens an approval without manual id copy paste', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    expect(screen.getByRole('heading', { name: 'Recent Settlement Approvals' })).toBeInTheDocument();
+    expect(screen.getByText('approval-2')).toBeInTheDocument();
+    expect(screen.getByText('approval-1')).toBeInTheDocument();
+    expect(screen.getByText('APPROVED')).toBeInTheDocument();
+
+    const recentRow = screen.getByText('approval-2').closest('.op-table-row') ?? document.body;
+    await userEvent.click(within(recentRow as HTMLElement).getByRole('button', { name: /Open Approval/i }));
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
+    expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-2');
+    expect(screen.getAllByText('approval-2').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Load audit snapshot \(read-only\)/i })).toBeEnabled();
+    expect(screen.getByText('Next: Load Audit Snapshot.')).toBeInTheDocument();
   });
 
   it('loads settlement preview totals and sample lines', async () => {
@@ -402,9 +477,25 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('TRY')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor-wide preview can include historical or test rows.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('profile-current').length).toBeGreaterThan(0);
-    expect(screen.getByText('Next: Review candidate quality warnings.')).toBeInTheDocument();
+    expect(screen.getByText('Candidate Quality')).toBeInTheDocument();
+    expect(screen.getAllByText('CLEAN').length).toBeGreaterThan(0);
+    expect(screen.getByText('Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.')).toBeInTheDocument();
+    expect(screen.getByText('Next: Create Draft.')).toBeInTheDocument();
     expect(screen.getAllByText('Settlement Preview').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+  });
+
+  it('renders warning candidate quality for mixed shipping modes', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(mixedShippingPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    await waitFor(() => expect(screen.getByText('Candidate Quality')).toBeInTheDocument());
+    expect(screen.getAllByText('WARNING').length).toBeGreaterThan(0);
+    expect(screen.getByText('Multiple shipping modes require review before settlement approval.')).toBeInTheDocument();
+    expect(screen.getAllByText('DISABLED, FIXED').length).toBeGreaterThan(0);
+    expect(screen.getByText('Next: Review Candidate Quality.')).toBeInTheDocument();
   });
 
   it('sends period filters to preview and draft creation', async () => {
@@ -543,12 +634,13 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(
       screen.getAllByText('Candidate rows include mixed commission VAT rates. Logo readiness will block mixed VAT settlements.').length,
     ).toBeGreaterThan(0));
-    expect(screen.getByText('Mixed VAT acknowledgement required before draft creation.')).toBeInTheDocument();
+    expect(screen.getAllByText('BLOCKED').length).toBeGreaterThan(0);
+    expect(screen.getByText('Mixed VAT rates prevent Logo commission invoice readiness.')).toBeInTheDocument();
+    expect(screen.getByText('This settlement contains 2 rows. Quality classification: BLOCKED.')).toBeInTheDocument();
     expect(screen.getByText('Candidate Quality Review')).toBeInTheDocument();
-    expect(screen.getAllByText('Warning').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i })).toBeDisabled();
 
-    await userEvent.click(screen.getByLabelText(/I acknowledge this preview contains mixed commission VAT rates/i));
+    await userEvent.click(screen.getByLabelText(/I acknowledge this candidate is BLOCKED for Logo readiness/i));
     expect(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i })).toBeEnabled();
 
     await userEvent.click(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));

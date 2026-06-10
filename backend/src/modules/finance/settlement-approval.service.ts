@@ -129,6 +129,7 @@ export type SettlementApprovalDto = {
   ok: true;
   writesPerformed: boolean;
   id: string;
+  createdAt: string;
   vendorId: string;
   status: 'draft' | 'approved' | 'cancelled';
   periodStart: string | null;
@@ -146,6 +147,25 @@ export type SettlementApprovalDto = {
   notes: string | null;
   sourceSnapshotJson: unknown;
   lines: SettlementApprovalLineDto[];
+};
+
+export type SettlementApprovalSummaryDto = {
+  id: string;
+  createdAt: string;
+  vendorId: string;
+  status: SettlementApprovalDto['status'];
+  currency: string;
+  grossSalesMinor: number;
+  netPayableMinor: number;
+  approvedAt: string | null;
+  lineCount: number;
+};
+
+export type SettlementApprovalListDto = {
+  ok: true;
+  writesPerformed: false;
+  vendorId: string;
+  approvals: SettlementApprovalSummaryDto[];
 };
 
 export type SettlementApprovalAuditDto = {
@@ -662,6 +682,7 @@ function mapApproval(
     ok: true,
     writesPerformed,
     id: approval.id,
+    createdAt: approval.createdAt.toISOString(),
     vendorId: approval.vendorId,
     status: approval.status.toLowerCase() as SettlementApprovalDto['status'],
     periodStart: toIso(approval.periodStart),
@@ -689,6 +710,20 @@ function mapApproval(
       sourceSnapshotJson: line.sourceSnapshotJson as Prisma.InputJsonValue,
       ...readLineExplanation(line.sourceSnapshotJson),
     })),
+  };
+}
+
+function mapApprovalSummary(approval: SettlementApproval & { _count: { lines: number } }): SettlementApprovalSummaryDto {
+  return {
+    id: approval.id,
+    createdAt: approval.createdAt.toISOString(),
+    vendorId: approval.vendorId,
+    status: approval.status.toLowerCase() as SettlementApprovalDto['status'],
+    currency: approval.currency,
+    grossSalesMinor: approval.grossSalesMinor,
+    netPayableMinor: approval.netPayableMinor,
+    approvedAt: toIso(approval.approvedAt),
+    lineCount: approval._count.lines,
   };
 }
 
@@ -909,6 +944,36 @@ export async function getSettlementApproval(id: string): Promise<SettlementAppro
   });
 
   return approval ? mapApproval(approval, false) : null;
+}
+
+export async function listSettlementApprovalsForVendor(vendorId: string): Promise<SettlementApprovalListDto> {
+  if (!vendorId) {
+    throw new Error('vendorId is required.');
+  }
+
+  const approvals = await prisma.settlementApproval.findMany({
+    where: {
+      vendorId,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 20,
+    include: {
+      _count: {
+        select: {
+          lines: true,
+        },
+      },
+    },
+  });
+
+  return {
+    ok: true,
+    writesPerformed: false,
+    vendorId,
+    approvals: approvals.map(mapApprovalSummary),
+  };
 }
 
 export async function getSettlementApprovalAudit(id: string): Promise<SettlementApprovalAuditDto | null> {

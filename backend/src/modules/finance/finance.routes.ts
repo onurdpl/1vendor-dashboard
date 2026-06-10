@@ -24,6 +24,7 @@ import {
   createDraftApproval,
   getSettlementApproval,
   getSettlementApprovalAudit,
+  listSettlementApprovalsForVendor,
   previewApproval,
 } from './settlement-approval.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
@@ -392,6 +393,29 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approval draft could not be created.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-approvals',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        const vendorId = readOptionalQueryString(request.query, 'vendorId');
+        if (!vendorId) {
+          return reply.code(400).send({ message: 'vendorId is required.' });
+        }
+        return await listSettlementApprovalsForVendor(vendorId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement approvals could not be loaded.';
         return reply.code(400).send({ message });
       }
     },
