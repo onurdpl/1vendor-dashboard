@@ -1,5 +1,6 @@
 import { FinanceEventType } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { resolveFinanceCurrency } from './finance-currency-policy.service.js';
 
 const SALE_EVENT_TYPES = [
   FinanceEventType.SALE_RECORDED,
@@ -135,6 +136,17 @@ function pushSample<T>(items: T[], item: T) {
   }
 }
 
+function currencyPolicyReasonSuffix(inputCurrency: string | null | undefined) {
+  const resolution = resolveFinanceCurrency(inputCurrency);
+  if (resolution.ok && resolution.usedDefault) {
+    return ' Null historical ledger currency is policy-approved for TRY backfill.';
+  }
+  if (!resolution.ok) {
+    return ` Unsupported non-TRY finance currency ${resolution.unsupportedCurrency} requires review before backfill.`;
+  }
+  return '';
+}
+
 export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfillPlan> {
   const [ledgerRows, financeEvents] = await Promise.all([
     prisma.financeLedgerEntry.findMany({
@@ -204,7 +216,8 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
   let safeRefundBackfillRows = 0;
   let unsafeRefundRows = 0;
   let alreadyCompleteRows = 0;
-  let rowsRequiringCurrencyFallback = 0;
+  let rowsUsingPolicyApprovedTryFallback = 0;
+  let unsupportedNonTryCurrencyRows = 0;
   const classifications = new Map<string, Set<BackfillClassification>>();
   const samples: FinanceEventBackfillPlan['samples'] = {
     safeSaleBackfill: [],
@@ -226,9 +239,13 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
     );
     const rowClasses = new Set<BackfillClassification>();
     classifications.set(row.id, rowClasses);
+    const currencyReasonSuffix = currencyPolicyReasonSuffix(row.vendorAllocation?.order?.currency);
 
-    if (row.vendorAllocation?.order?.currency === null || row.vendorAllocation?.order?.currency === undefined) {
-      rowsRequiringCurrencyFallback += 1;
+    const currencyResolution = resolveFinanceCurrency(row.vendorAllocation?.order?.currency);
+    if (currencyResolution.ok && currencyResolution.usedDefault) {
+      rowsUsingPolicyApprovedTryFallback += 1;
+    } else if (!currencyResolution.ok) {
+      unsupportedNonTryCurrencyRows += 1;
     }
 
     if (missingLinkedEventTypes.length === 0) {
@@ -259,9 +276,7 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
         toSample({
           row,
           missingEventTypes: missingByIdempotency,
-          reason: row.vendorAllocation?.order?.currency
-            ? 'Sale amount and immutable commission snapshots are available.'
-            : 'Sale amount and immutable commission snapshots are available; currency would use TRY fallback.',
+          reason: `Sale amount and immutable commission snapshots are available.${currencyReasonSuffix}`,
         }),
       );
     }
@@ -290,9 +305,7 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
           toSample({
             row,
             missingEventTypes: missingByIdempotency,
-            reason: row.vendorAllocation?.order?.currency
-              ? 'Refund amount and matching sale commission snapshots are available.'
-              : 'Refund amount and matching sale commission snapshots are available; currency would use TRY fallback.',
+            reason: `Refund amount and matching sale commission snapshots are available.${currencyReasonSuffix}`,
           }),
         );
       }
@@ -300,8 +313,11 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
   }
 
   const warnings: string[] = [];
-  if (rowsRequiringCurrencyFallback > 0) {
-    warnings.push(`${rowsRequiringCurrencyFallback} ledger rows would require TRY currency fallback.`);
+  if (rowsUsingPolicyApprovedTryFallback > 0) {
+    warnings.push('TRY-only finance policy: null historical ledger currency will be backfilled as TRY.');
+  }
+  if (unsupportedNonTryCurrencyRows > 0) {
+    warnings.push('Unsupported non-TRY finance currency found.');
   }
   if (unsafeRefundRows > 0) {
     warnings.push(`${unsafeRefundRows} refund rows cannot be safely backfilled until matching sale ledger evidence is available or a fallback policy is approved.`);

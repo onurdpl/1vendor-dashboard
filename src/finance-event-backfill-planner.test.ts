@@ -23,6 +23,9 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const { getFinanceEventBackfillPlan } = await import(
   '../backend/src/modules/finance/finance-event-backfill-planner.service.js'
 );
+const { resolveFinanceCurrency } = await import(
+  '../backend/src/modules/finance/finance-currency-policy.service.js'
+);
 
 function order(currency: string | null = 'TRY') {
   return {
@@ -161,7 +164,7 @@ describe('finance event backfill planner', () => {
         expect.objectContaining({
           financeLedgerEntryId: 'fin-sporjinal-sale-missing',
           missingEventTypes: ['SALE_RECORDED', 'COMMISSION_RESERVED', 'COMMISSION_VAT_RESERVED', 'VENDOR_PAYABLE_RESERVED'],
-          reason: expect.stringContaining('TRY fallback'),
+          reason: expect.stringContaining('policy-approved for TRY backfill'),
         }),
       ]),
     );
@@ -186,11 +189,81 @@ describe('finance event backfill planner', () => {
     ]);
     expect(plan.warnings).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('TRY currency fallback'),
+        'TRY-only finance policy: null historical ledger currency will be backfilled as TRY.',
         expect.stringContaining('refund rows cannot be safely backfilled'),
         expect.stringContaining('null financeLedgerEntryId'),
       ]),
     );
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.update).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.update).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('resolves null historical finance currency to TRY by policy', () => {
+    expect(resolveFinanceCurrency(null)).toEqual({
+      ok: true,
+      currency: 'TRY',
+      usedDefault: true,
+      unsupportedCurrency: null,
+    });
+    expect(resolveFinanceCurrency(undefined)).toEqual({
+      ok: true,
+      currency: 'TRY',
+      usedDefault: true,
+      unsupportedCurrency: null,
+    });
+  });
+
+  it('resolves TRY finance currency to TRY without defaulting', () => {
+    expect(resolveFinanceCurrency('TRY')).toEqual({
+      ok: true,
+      currency: 'TRY',
+      usedDefault: false,
+      unsupportedCurrency: null,
+    });
+    expect(resolveFinanceCurrency(' try ')).toEqual({
+      ok: true,
+      currency: 'TRY',
+      usedDefault: false,
+      unsupportedCurrency: null,
+    });
+  });
+
+  it('flags non-TRY finance currency as unsupported', () => {
+    expect(resolveFinanceCurrency('USD')).toEqual({
+      ok: false,
+      currency: null,
+      usedDefault: false,
+      unsupportedCurrency: 'USD',
+    });
+  });
+
+  it('reports unsupported non-TRY finance currency in the backfill planner warnings', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      ledgerRow({
+        id: 'fin-sporjinal-sale-usd',
+        entryType: 'sale',
+        allocationId: 'alloc-sale-usd',
+        currency: 'USD',
+      }),
+    ]);
+    prismaMock.financeEvent.findMany.mockResolvedValue([]);
+
+    const plan = await getFinanceEventBackfillPlan();
+
+    expect(plan.writesPerformed).toBe(false);
+    expect(plan.warnings).toContain('Unsupported non-TRY finance currency found.');
+    expect(plan.warnings).not.toContain('TRY-only finance policy: null historical ledger currency will be backfilled as TRY.');
+    expect(plan.samples.safeSaleBackfill).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'fin-sporjinal-sale-usd',
+        reason: expect.stringContaining('Unsupported non-TRY finance currency USD requires review before backfill.'),
+      }),
+    ]);
     expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.update).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
