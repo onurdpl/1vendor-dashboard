@@ -24,7 +24,21 @@ describe('backend deployment health endpoint', () => {
         migrationsReachable: expect.any(Boolean),
       });
       expect(response.json()).toHaveProperty('dbPingMs');
+      expect(response.json()).toHaveProperty('databaseSource');
+      expect(response.json()).toHaveProperty('financeAuditMetadata');
       expect(typeof response.json().dbPingMs === 'number' || response.json().dbPingMs === null).toBe(true);
+      expect(response.json().financeAuditMetadata).toMatchObject({
+        environment: expect.any(String),
+        schemaReady: expect.any(Boolean),
+      });
+      expect(response.json().databaseSource).toEqual(
+        expect.objectContaining({
+          databaseSourceLabel: expect.any(String),
+          duplicateDatabaseUrlDefinitionsDetected: expect.any(Boolean),
+          databaseUrlDefinitionCount: expect.any(Number),
+          warnings: expect.any(Array),
+        }),
+      );
       expect(['ok', 'degraded']).toContain(response.json().status);
       expect(JSON.stringify(response.json())).not.toContain('DATABASE_URL');
       expect(JSON.stringify(response.json())).not.toContain('postgresql://');

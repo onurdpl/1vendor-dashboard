@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { loadEnv } from '../backend/src/config/env.js';
+import {
+  buildDatabaseSourceDiagnostics,
+  buildFinanceAuditRuntimeMetadata,
+  DATABASE_URL_DUPLICATE_WARNING,
+} from '../backend/src/config/database-source-diagnostics.js';
 
 const originalEnv = { ...process.env };
 
@@ -369,5 +377,84 @@ describe('backend env Lidio configuration', () => {
     expect(() => loadEnv()).toThrow(
       'Missing required Lidio env vars when LIDIO_ENABLED=true: LIDIO_AUTHORIZATION_TOKEN.',
     );
+  });
+});
+
+describe('database source diagnostics', () => {
+  it('reports database host and database name without exposing credentials', () => {
+    const diagnostics = buildDatabaseSourceDiagnostics({
+      databaseUrl: 'postgresql://finance_user:secret-password@db.example.internal:5432/vendor_dashboard',
+      envSourceFiles: [],
+    });
+
+    expect(diagnostics).toMatchObject({
+      databaseHost: 'db.example.internal',
+      databaseName: 'vendor_dashboard',
+      databaseSourceLabel: 'remote',
+      duplicateDatabaseUrlDefinitionsDetected: false,
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('finance_user');
+    expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
+    expect(JSON.stringify(diagnostics)).not.toContain('postgresql://');
+  });
+
+  it('flags duplicate DATABASE_URL definitions in configured env sources', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sporgym-db-source-'));
+    fs.writeFileSync(
+      path.join(tempDir, '.env'),
+      [
+        'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev',
+        'DATABASE_URL=postgresql://remote_user:secret@db.example.internal:5432/vendor_dashboard',
+      ].join('\n'),
+    );
+    const diagnostics = buildDatabaseSourceDiagnostics({
+      databaseUrl: 'postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev',
+      cwd: tempDir,
+      envSourceFiles: ['.env'],
+    });
+
+    try {
+      expect(diagnostics.duplicateDatabaseUrlDefinitionsDetected).toBe(true);
+      expect(diagnostics.databaseUrlDefinitionCount).toBe(2);
+      expect(diagnostics.warnings).toContain(DATABASE_URL_DUPLICATE_WARNING);
+      expect(diagnostics.databaseUrlDefinitions.every((entry) => entry.source === '.env')).toBe(true);
+      expect(JSON.stringify(diagnostics)).not.toContain('remote_user');
+      expect(JSON.stringify(diagnostics)).not.toContain('secret');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('builds finance audit runtime metadata with the same duplicate warning', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sporgym-finance-audit-'));
+    fs.writeFileSync(
+      path.join(tempDir, '.env'),
+      [
+        'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev',
+        'DATABASE_URL=postgresql://remote_user:secret@db.example.internal:5432/vendor_dashboard',
+      ].join('\n'),
+    );
+    const metadata = buildFinanceAuditRuntimeMetadata({
+      environment: 'development',
+      databaseUrl: 'postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev',
+      schemaReady: true,
+      cwd: tempDir,
+      envSourceFiles: ['.env'],
+    });
+
+    try {
+      expect(metadata).toEqual(
+        expect.objectContaining({
+          environment: 'development',
+          databaseHost: 'localhost',
+          databaseName: 'vendor_dashboard_dev',
+          databaseSourceLabel: 'local',
+          schemaReady: true,
+        }),
+      );
+      expect(metadata.warnings).toContain(DATABASE_URL_DUPLICATE_WARNING);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

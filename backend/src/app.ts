@@ -36,6 +36,10 @@ import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.r
 import { registerLogoIsbasiRoutes } from './modules/logo-isbasi/logo-isbasi.routes.js';
 import { registerPaymentReturnRoutes } from './modules/payments/payment-return.routes.js';
 import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyzico-marketplace.routes.js';
+import {
+  buildDatabaseSourceDiagnostics,
+  buildFinanceAuditRuntimeMetadata,
+} from './config/database-source-diagnostics.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
 import { registerBackendSentryFastifyHooks } from './lib/sentry.js';
@@ -304,6 +308,14 @@ export function createApp() {
   app.get('/health', async () => {
     const database = await getDatabaseHealth(env);
     const status = database.dbReachable && database.schemaReady ? 'ok' : 'degraded';
+    const databaseSource = buildDatabaseSourceDiagnostics({
+      databaseUrl: env.DATABASE_URL,
+    });
+    const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
+      environment: env.NODE_ENV,
+      databaseUrl: env.DATABASE_URL,
+      schemaReady: database.schemaReady,
+    });
 
     return {
       ok: true,
@@ -314,6 +326,8 @@ export function createApp() {
       dbPingMs: database.dbPingMs,
       migrationsReachable: database.migrationsReachable,
       schemaReady: database.schemaReady,
+      databaseSource,
+      financeAuditMetadata,
       requiredColumnCount: database.requiredColumnCount,
       missingColumns: database.missingColumns,
       schemaReadinessMessage: 'message' in database ? database.message : undefined,
@@ -328,26 +342,49 @@ export function createApp() {
   });
 
   app.get('/health/db', async () => {
+    const databaseSource = buildDatabaseSourceDiagnostics({
+      databaseUrl: env.DATABASE_URL,
+    });
     if (!env.DATABASE_URL) {
       return {
         ok: false,
         status: 'not_configured',
+        databaseSource,
+        financeAuditMetadata: buildFinanceAuditRuntimeMetadata({
+          environment: env.NODE_ENV,
+          databaseUrl: env.DATABASE_URL,
+          schemaReady: false,
+        }),
       };
     }
 
     try {
       const dbPingStartedAt = Date.now();
       await prisma.$queryRaw`SELECT 1`;
+      const schema = await getSchemaReadiness();
       return {
         ok: true,
         status: 'connected',
         dbPingMs: Date.now() - dbPingStartedAt,
+        schemaReady: schema.schemaReady,
+        databaseSource,
+        financeAuditMetadata: buildFinanceAuditRuntimeMetadata({
+          environment: env.NODE_ENV,
+          databaseUrl: env.DATABASE_URL,
+          schemaReady: schema.schemaReady,
+        }),
       };
     } catch (error) {
       return {
         ok: false,
         status: 'unavailable',
         message: 'Database check failed.',
+        databaseSource,
+        financeAuditMetadata: buildFinanceAuditRuntimeMetadata({
+          environment: env.NODE_ENV,
+          databaseUrl: env.DATABASE_URL,
+          schemaReady: false,
+        }),
       };
     }
   });
