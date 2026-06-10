@@ -21,6 +21,22 @@ type SettlementApprovalInput = {
   periodStart?: Date | null;
   periodEnd?: Date | null;
   notes?: string | null;
+  candidateScope?: CandidateScope | null;
+  selectedOrderIds?: string[];
+  selectedShopifyOrderIds?: string[];
+  selectedAllocationIds?: string[];
+};
+
+type CandidateScope = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
+
+type CandidateSelectionSummaryDto = {
+  requestedOrders: string[];
+  matchedOrders: string[];
+  unmatchedOrders: string[];
+  requestedAllocations: string[];
+  matchedAllocations: string[];
+  unmatchedAllocations: string[];
+  candidateRowCount: number;
 };
 
 type SettlementApprovalLedgerRow = {
@@ -110,6 +126,8 @@ export type SettlementApprovalPreviewDto = {
   vendorId: string;
   periodStart: string | null;
   periodEnd: string | null;
+  candidateScope: CandidateScope;
+  candidateSelectionSummary: CandidateSelectionSummaryDto;
   summary: SettlementApprovalTotalsDto & {
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;
@@ -529,7 +547,7 @@ function buildCandidateQualitySummary(
   const mixedShippingMode = detectedShippingModes.length > 1;
   const candidateQualityWarnings: string[] = [];
 
-  if (!input.periodStart && !input.periodEnd) {
+  if (determineCandidateScope(input) === 'vendor_wide') {
     candidateQualityWarnings.push('Vendor-wide preview can include historical or test rows.');
   }
   if (mixedCommissionRate) {
@@ -564,6 +582,96 @@ function buildPeriodWhere(input: SettlementApprovalInput) {
   }
 
   return Object.keys(createdAt).length ? { createdAt } : {};
+}
+
+function normalizeSelectionValues(values: string[] | null | undefined) {
+  return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
+}
+
+function normalizeOrderNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+
+function orderMatchesIdentifier(row: SettlementApprovalLedgerRow, identifier: string) {
+  const orderId = row.vendorAllocation?.sourceShopifyOrderId ?? '';
+  const orderNumber = row.vendorAllocation?.sourceShopifyOrderNumber ?? '';
+  return orderId === identifier || orderNumber === identifier || orderNumber === normalizeOrderNumber(identifier);
+}
+
+function determineCandidateScope(input: SettlementApprovalInput): CandidateScope {
+  const selectedOrders = normalizeSelectionValues([
+    ...(input.selectedOrderIds ?? []),
+    ...(input.selectedShopifyOrderIds ?? []),
+  ]);
+  const selectedAllocations = normalizeSelectionValues(input.selectedAllocationIds);
+  const requestedScope = input.candidateScope ?? null;
+
+  if (selectedOrders.length && selectedAllocations.length) {
+    throw new Error('Use selected orders or selected allocations, not both.');
+  }
+  if (requestedScope === 'selected_orders') {
+    return 'selected_orders';
+  }
+  if (requestedScope === 'selected_allocations') {
+    return 'selected_allocations';
+  }
+  if (requestedScope === 'date_range') {
+    if (!input.periodStart && !input.periodEnd) {
+      throw new Error('At least one period date is required for date range settlement candidate mode.');
+    }
+    return 'date_range';
+  }
+  if (selectedOrders.length) {
+    return 'selected_orders';
+  }
+  if (selectedAllocations.length) {
+    return 'selected_allocations';
+  }
+  if (input.periodStart || input.periodEnd) {
+    return 'date_range';
+  }
+  return 'vendor_wide';
+}
+
+function filterRowsByCandidateSelection(rows: SettlementApprovalLedgerRow[], input: SettlementApprovalInput) {
+  const requestedOrderIds = normalizeSelectionValues(input.selectedOrderIds);
+  const requestedShopifyOrderIds = normalizeSelectionValues(input.selectedShopifyOrderIds);
+  const requestedOrders = normalizeSelectionValues([...requestedOrderIds, ...requestedShopifyOrderIds]);
+  const requestedAllocations = normalizeSelectionValues(input.selectedAllocationIds);
+  const candidateScope = determineCandidateScope(input);
+
+  let selectedRows = rows;
+  if (candidateScope === 'selected_orders') {
+    selectedRows = rows.filter((row) => requestedOrders.some((identifier) => orderMatchesIdentifier(row, identifier)));
+  }
+  if (candidateScope === 'selected_allocations') {
+    selectedRows = rows.filter((row) => requestedAllocations.includes(row.vendorAllocation?.id ?? ''));
+  }
+
+  const matchedOrders = requestedOrders.filter((identifier) =>
+    selectedRows.some((row) => orderMatchesIdentifier(row, identifier)),
+  );
+  const matchedAllocations = requestedAllocations.filter((identifier) =>
+    selectedRows.some((row) => row.vendorAllocation?.id === identifier),
+  );
+
+  return {
+    rows: selectedRows,
+    candidateScope,
+    candidateSelectionSummary: {
+      requestedOrders,
+      matchedOrders,
+      unmatchedOrders: requestedOrders.filter((identifier) => !matchedOrders.includes(identifier)),
+      requestedAllocations,
+      matchedAllocations,
+      unmatchedAllocations: requestedAllocations.filter((identifier) => !matchedAllocations.includes(identifier)),
+      candidateRowCount: selectedRows.length,
+    },
+  };
 }
 
 async function buildApprovalPreview(
@@ -652,7 +760,8 @@ async function buildApprovalPreview(
     },
   });
 
-  const eligibleRows = (rows as SettlementApprovalLedgerRow[]).filter(rowIsEligible);
+  const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
+  const eligibleRows = candidateSelection.rows.filter(rowIsEligible);
   const unapprovedRows = eligibleRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map(buildLine);
   const totals = summarizeLines(lines);
@@ -664,6 +773,8 @@ async function buildApprovalPreview(
     vendorId: input.vendorId,
     periodStart: toIso(input.periodStart),
     periodEnd: toIso(input.periodEnd),
+    candidateScope: candidateSelection.candidateScope,
+    candidateSelectionSummary: candidateSelection.candidateSelectionSummary,
     summary: {
       ...totals,
       eligibleRowCount: lines.length,
@@ -769,8 +880,9 @@ export async function previewApproval(
   vendorId: string,
   periodStart?: Date | null,
   periodEnd?: Date | null,
+  selection?: Pick<SettlementApprovalInput, 'candidateScope' | 'selectedOrderIds' | 'selectedShopifyOrderIds' | 'selectedAllocationIds'>,
 ): Promise<SettlementApprovalPreviewDto> {
-  return buildApprovalPreview({ vendorId, periodStart, periodEnd });
+  return buildApprovalPreview({ vendorId, periodStart, periodEnd, ...selection });
 }
 
 export async function createDraftApproval(
@@ -816,6 +928,8 @@ export async function createDraftApproval(
             vendorId: input.vendorId,
             periodStart: toIso(input.periodStart),
             periodEnd: toIso(input.periodEnd),
+            candidateScope: preview.candidateScope,
+            candidateSelectionSummary: preview.candidateSelectionSummary,
             generatedAt: new Date().toISOString(),
             eligibleRowCount: preview.summary.eligibleRowCount,
             excludedActiveApprovalRowCount: preview.summary.excludedActiveApprovalRowCount,

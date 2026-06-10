@@ -49,6 +49,8 @@ function buildLedgerRow(input: {
   commissionVatPercentSnapshot?: number | null;
   shippingModeSnapshot?: string | null;
   financialProfileIdSnapshot?: string | null;
+  sourceShopifyOrderId?: string;
+  sourceShopifyOrderNumber?: string;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -85,8 +87,8 @@ function buildLedgerRow(input: {
       allocationStatus: 'ACTIVE',
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
-      sourceShopifyOrderId: `order-${input.id}`,
-      sourceShopifyOrderNumber: '#1001',
+      sourceShopifyOrderId: input.sourceShopifyOrderId ?? `order-${input.id}`,
+      sourceShopifyOrderNumber: input.sourceShopifyOrderNumber ?? '#1001',
       fulfillment: {
         fulfilledAt: fulfilled ? createdAt : null,
       },
@@ -172,6 +174,18 @@ describe('settlement approval foundation', () => {
     const preview = await previewApproval('vendor-a');
 
     expect(preview.writesPerformed).toBe(false);
+    expect(preview).toMatchObject({
+      candidateScope: 'vendor_wide',
+      candidateSelectionSummary: {
+        requestedOrders: [],
+        matchedOrders: [],
+        unmatchedOrders: [],
+        requestedAllocations: [],
+        matchedAllocations: [],
+        unmatchedAllocations: [],
+        candidateRowCount: 3,
+      },
+    });
     expect(preview.summary).toMatchObject({
       eligibleRowCount: 2,
       grossSalesMinor: 100000,
@@ -253,6 +267,92 @@ describe('settlement approval foundation', () => {
         'Candidate rows include mixed shipping modes.',
       ],
     });
+  });
+
+  it('previews only rows matching selected order identifiers and reports unmatched orders', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-1074',
+        entryType: 'sale',
+        amount: 1000,
+        sourceShopifyOrderId: 'shopify-order-1074',
+        sourceShopifyOrderNumber: '#1074',
+      }),
+      buildLedgerRow({
+        id: 'sale-1073',
+        entryType: 'sale',
+        amount: 500,
+        sourceShopifyOrderId: 'shopify-order-1073',
+        sourceShopifyOrderNumber: '#1073',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      selectedOrderIds: ['#1074', '#9999'],
+      selectedShopifyOrderIds: ['shopify-order-1074'],
+    });
+
+    expect(preview.candidateScope).toBe('selected_orders');
+    expect(preview.candidateSelectionSummary).toEqual({
+      requestedOrders: ['#1074', '#9999', 'shopify-order-1074'],
+      matchedOrders: ['#1074', 'shopify-order-1074'],
+      unmatchedOrders: ['#9999'],
+      requestedAllocations: [],
+      matchedAllocations: [],
+      unmatchedAllocations: [],
+      candidateRowCount: 1,
+    });
+    expect(preview.summary.eligibleRowCount).toBe(1);
+    expect(preview.lines).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'sale-1074',
+      }),
+    ]);
+    expect(preview.summary.candidateQualityWarnings).not.toContain('Vendor-wide preview can include historical or test rows.');
+  });
+
+  it('previews only rows matching selected allocation ids and reports unmatched allocations', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-selected', entryType: 'sale', amount: 1000 }),
+      buildLedgerRow({ id: 'sale-other', entryType: 'sale', amount: 500 }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      selectedAllocationIds: ['alloc-sale-selected', 'alloc-missing'],
+    });
+
+    expect(preview.candidateScope).toBe('selected_allocations');
+    expect(preview.candidateSelectionSummary).toEqual({
+      requestedOrders: [],
+      matchedOrders: [],
+      unmatchedOrders: [],
+      requestedAllocations: ['alloc-sale-selected', 'alloc-missing'],
+      matchedAllocations: ['alloc-sale-selected'],
+      unmatchedAllocations: ['alloc-missing'],
+      candidateRowCount: 1,
+    });
+    expect(preview.lines).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'sale-selected',
+      }),
+    ]);
+  });
+
+  it('does not fall back to vendor-wide rows when selected order mode has no identifiers', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000 }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+    });
+
+    expect(preview.candidateScope).toBe('selected_orders');
+    expect(preview.candidateSelectionSummary.candidateRowCount).toBe(0);
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.lines).toEqual([]);
   });
 
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {
@@ -397,6 +497,85 @@ describe('settlement approval foundation', () => {
     });
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('creates a draft from the same selected order candidate set used by preview', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-1074',
+        entryType: 'sale',
+        amount: 1000,
+        sourceShopifyOrderId: 'shopify-order-1074',
+        sourceShopifyOrderNumber: '#1074',
+      }),
+      buildLedgerRow({
+        id: 'sale-1073',
+        entryType: 'sale',
+        amount: 500,
+        sourceShopifyOrderId: 'shopify-order-1073',
+        sourceShopifyOrderNumber: '#1073',
+      }),
+    ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-selected',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        settlementApprovalId: 'settlement-approval-selected',
+        ...line,
+      })),
+    }));
+
+    const approval = await createDraftApproval({
+      vendorId: 'vendor-a',
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074'],
+    });
+
+    expect(prismaMock.settlementApproval.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sourceSnapshotJson: expect.objectContaining({
+            candidateScope: 'selected_orders',
+            candidateSelectionSummary: expect.objectContaining({
+              requestedOrders: ['#1074'],
+              matchedOrders: ['#1074'],
+              unmatchedOrders: [],
+              candidateRowCount: 1,
+            }),
+          }),
+          lines: {
+            create: [
+              expect.objectContaining({
+                financeLedgerEntryId: 'sale-1074',
+              }),
+            ],
+          },
+        }),
+      }),
+    );
+    expect(approval.lines).toHaveLength(1);
+    expect(approval.lines[0]).toMatchObject({
+      financeLedgerEntryId: 'sale-1074',
+    });
   });
 
   it('approves only draft approvals without invoice or payout execution', async () => {

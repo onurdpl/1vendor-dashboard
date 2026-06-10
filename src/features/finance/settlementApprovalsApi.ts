@@ -49,6 +49,16 @@ export type SettlementApprovalPreview = {
   vendorId: string;
   periodStart: string | null;
   periodEnd: string | null;
+  candidateScope: 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
+  candidateSelectionSummary: {
+    requestedOrders: string[];
+    matchedOrders: string[];
+    unmatchedOrders: string[];
+    requestedAllocations: string[];
+    matchedAllocations: string[];
+    unmatchedAllocations: string[];
+    candidateRowCount: number;
+  };
   summary: {
     grossSalesMinor: number;
     refundTotalMinor: number;
@@ -243,6 +253,10 @@ export type SettlementApprovalPreviewInput = {
   vendorId: string;
   periodStart?: string | null;
   periodEnd?: string | null;
+  candidateScope?: 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
+  selectedOrderIds?: string[];
+  selectedShopifyOrderIds?: string[];
+  selectedAllocationIds?: string[];
 };
 
 export type SettlementApprovalCreateInput = SettlementApprovalPreviewInput & {

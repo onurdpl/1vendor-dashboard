@@ -64,6 +64,16 @@ const previewResponse: SettlementApprovalPreview = {
   vendorId: 'yalispor',
   periodStart: null,
   periodEnd: null,
+  candidateScope: 'vendor_wide',
+  candidateSelectionSummary: {
+    requestedOrders: [],
+    matchedOrders: [],
+    unmatchedOrders: [],
+    requestedAllocations: [],
+    matchedAllocations: [],
+    unmatchedAllocations: [],
+    candidateRowCount: 2,
+  },
   summary: {
     grossSalesMinor: 120000,
     refundTotalMinor: 10000,
@@ -132,6 +142,49 @@ const mixedShippingPreviewResponse: SettlementApprovalPreview = {
     detectedFinancialProfileSnapshotIds: ['profile-current'],
     mixedShippingMode: true,
     candidateQualityWarnings: ['Candidate rows include mixed shipping modes.'],
+  },
+};
+
+const selectedOrderPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  candidateScope: 'selected_orders',
+  candidateSelectionSummary: {
+    requestedOrders: ['#1074'],
+    matchedOrders: ['#1074'],
+    unmatchedOrders: [],
+    requestedAllocations: [],
+    matchedAllocations: [],
+    unmatchedAllocations: [],
+    candidateRowCount: 1,
+  },
+  summary: {
+    ...previewResponse.summary,
+    eligibleRowCount: 1,
+    detectedCommissionVatRates: [20],
+    detectedShippingModes: ['EXTERNAL_PROVIDER'],
+    detectedFinancialProfileSnapshotIds: ['profile-current'],
+    mixedCommissionVatRate: false,
+    mixedShippingMode: false,
+    candidateQualityWarnings: [],
+  },
+};
+
+const selectedAllocationPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  candidateScope: 'selected_allocations',
+  candidateSelectionSummary: {
+    requestedOrders: [],
+    matchedOrders: [],
+    unmatchedOrders: [],
+    requestedAllocations: ['alloc-1074'],
+    matchedAllocations: ['alloc-1074'],
+    unmatchedAllocations: ['alloc-missing'],
+    candidateRowCount: 1,
+  },
+  summary: {
+    ...previewResponse.summary,
+    eligibleRowCount: 1,
+    candidateQualityWarnings: [],
   },
 };
 
@@ -469,8 +522,12 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      candidateScope: 'vendor_wide',
       periodStart: null,
       periodEnd: null,
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
     }));
     expect(screen.getByText('fle-sale-1')).toBeInTheDocument();
     expect(screen.getByText('Eligible lines')).toBeInTheDocument();
@@ -501,24 +558,91 @@ describe('Finance Settlement approval admin UI', () => {
   it('sends period filters to preview and draft creation', async () => {
     renderPage();
 
+    await userEvent.click(screen.getByLabelText(/Date Range/i));
     await userEvent.type(screen.getByLabelText(/Period start/i), '2026-06-01');
     await userEvent.type(screen.getByLabelText(/Period end/i), '2026-06-30');
     await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
 
     await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      candidateScope: 'date_range',
       periodStart: '2026-06-01',
       periodEnd: '2026-06-30',
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
     }));
     expect(screen.getAllByText('Start 2026-06-01 · End 2026-06-30').length).toBeGreaterThan(0);
 
     await userEvent.click(await screen.findByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      candidateScope: 'date_range',
       periodStart: '2026-06-01',
       periodEnd: '2026-06-30',
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
       notes: 'Admin settlement approval draft',
     }));
+  });
+
+  it('sends selected order identifiers and renders selected candidate quality', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(selectedOrderPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Selected Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1074');
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      candidateScope: 'selected_orders',
+      periodStart: null,
+      periodEnd: null,
+      selectedOrderIds: ['#1074'],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
+    }));
+    expect(screen.getAllByText('Selected Orders').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('#1074').length).toBeGreaterThan(0);
+    expect(screen.getByText('Candidate Rows')).toBeInTheDocument();
+    expect(screen.getAllByText('EXTERNAL_PROVIDER').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('CLEAN').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
+    await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      candidateScope: 'selected_orders',
+      periodStart: null,
+      periodEnd: null,
+      selectedOrderIds: ['#1074'],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
+      notes: 'Admin settlement approval draft',
+    }));
+  });
+
+  it('sends selected allocation identifiers and renders unmatched allocation feedback', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(selectedAllocationPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Selected Allocations/i));
+    await userEvent.type(screen.getByLabelText(/Allocation ids/i), 'alloc-1074, alloc-missing');
+    await userEvent.click(screen.getByRole('button', { name: /Preview Settlement \(read-only\)/i }));
+
+    await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      candidateScope: 'selected_allocations',
+      periodStart: null,
+      periodEnd: null,
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: ['alloc-1074', 'alloc-missing'],
+    }));
+    expect(screen.getAllByText('Selected Allocations').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('alloc-1074').length).toBeGreaterThan(0);
+    expect(screen.getByText('alloc-missing')).toBeInTheDocument();
   });
 
   it('calls draft, approve, cancel, and fetch routes through the approval controls', async () => {
@@ -529,8 +653,12 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      candidateScope: 'vendor_wide',
       periodStart: null,
       periodEnd: null,
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
       notes: 'Admin settlement approval draft',
     }));
 
@@ -646,8 +774,12 @@ describe('Finance Settlement approval admin UI', () => {
     await userEvent.click(screen.getByRole('button', { name: /Create Draft from preview \(writes local DB\)/i }));
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
       vendorId: 'yalispor',
+      candidateScope: 'vendor_wide',
       periodStart: null,
       periodEnd: null,
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
       notes: 'Admin settlement approval draft',
     }));
   });

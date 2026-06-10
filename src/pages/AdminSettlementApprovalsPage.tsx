@@ -54,6 +54,7 @@ type WorkflowStep = {
 };
 
 type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED';
+type CandidateScopeMode = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
 
 type RecommendedAction = {
   label: string;
@@ -95,6 +96,13 @@ function formatStringList(values: string[] | null | undefined) {
   return values?.length ? values.join(', ') : 'None';
 }
 
+function parseMultiValueInput(value: string) {
+  return Array.from(new Set(value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)));
+}
+
 function readRecord(value: unknown): Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -129,6 +137,19 @@ function getQualityTone(classification: QualityClassification) {
     return 'danger';
   }
   return 'warning';
+}
+
+function getScopeLabel(scope: string) {
+  if (scope === 'date_range') {
+    return 'Date Range';
+  }
+  if (scope === 'selected_orders') {
+    return 'Selected Orders';
+  }
+  if (scope === 'selected_allocations') {
+    return 'Selected Allocations';
+  }
+  return 'Vendor-wide';
 }
 
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
@@ -355,6 +376,22 @@ function RecentApprovalsPanel({
   );
 }
 
+function CandidateSelectionSummary({ preview }: { preview: SettlementApprovalPreview }) {
+  const selection = preview.candidateSelectionSummary;
+  return (
+    <MetadataGroup title="Candidate selection">
+      <MetadataRow label="Candidate Scope" value={getScopeLabel(preview.candidateScope)} />
+      <MetadataRow label="Requested Orders" value={formatStringList(selection.requestedOrders)} />
+      <MetadataRow label="Matched Orders" value={formatStringList(selection.matchedOrders)} />
+      <MetadataRow label="Unmatched Orders" value={formatStringList(selection.unmatchedOrders)} />
+      <MetadataRow label="Requested Allocations" value={formatStringList(selection.requestedAllocations)} />
+      <MetadataRow label="Matched Allocations" value={formatStringList(selection.matchedAllocations)} />
+      <MetadataRow label="Unmatched Allocations" value={formatStringList(selection.unmatchedAllocations)} />
+      <MetadataRow label="Candidate Rows" value={formatNumber(selection.candidateRowCount)} />
+    </MetadataGroup>
+  );
+}
+
 function CandidateQualityCard({
   preview,
   classification,
@@ -389,6 +426,7 @@ function CandidateQualityCard({
           <MetadataRow label="Financial Profile Snapshot Groups" value={formatStringList(summary.detectedFinancialProfileSnapshotIds)} />
         </MetadataGroup>
         <MetadataGroup title="Candidate rows">
+          <MetadataRow label="Candidate Scope" value={getScopeLabel(preview.candidateScope)} />
           <MetadataRow label="Eligible Rows" value={formatNumber(summary.eligibleRowCount)} />
           <MetadataRow label="Excluded Rows" value={formatNumber(summary.excludedActiveApprovalRowCount)} />
           <MetadataRow label="Profile Group Count" value={formatNumber(summary.detectedFinancialProfileSnapshotIds.length)} />
@@ -430,6 +468,10 @@ export function AdminSettlementApprovalsPage() {
   const [approvalId, setApprovalId] = useState('');
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
+  const [candidateScopeMode, setCandidateScopeMode] = useState<CandidateScopeMode>('vendor_wide');
+  const [selectedOrderNumbers, setSelectedOrderNumbers] = useState('');
+  const [selectedShopifyOrderIds, setSelectedShopifyOrderIds] = useState('');
+  const [selectedAllocationIds, setSelectedAllocationIds] = useState('');
   const [notes, setNotes] = useState('Admin settlement approval draft');
   const [mixedVatAcknowledged, setMixedVatAcknowledged] = useState(false);
   const [health, setHealth] = useState<DatabaseHealthResponse | null>(null);
@@ -513,11 +555,30 @@ export function AdminSettlementApprovalsPage() {
     preview.summary.excludedActiveApprovalRowCount > 0,
   );
   const candidateQualityWarnings = safeArray<string>(preview?.summary.candidateQualityWarnings);
-  const activeFilterSummary = [
-    periodStart ? `Start ${periodStart}` : null,
-    periodEnd ? `End ${periodEnd}` : null,
-  ].filter(Boolean).join(' · ') || 'No period filters: vendor-wide preview';
-  const vendorWideMode = !periodStart && !periodEnd;
+  const selectedOrderNumberList = parseMultiValueInput(selectedOrderNumbers);
+  const selectedShopifyOrderIdList = parseMultiValueInput(selectedShopifyOrderIds);
+  const selectedAllocationIdList = parseMultiValueInput(selectedAllocationIds);
+  const activeFilterSummary = (() => {
+    if (candidateScopeMode === 'selected_orders') {
+      return [
+        selectedOrderNumberList.length ? `Orders ${formatStringList(selectedOrderNumberList)}` : null,
+        selectedShopifyOrderIdList.length ? `Shopify IDs ${formatStringList(selectedShopifyOrderIdList)}` : null,
+      ].filter(Boolean).join(' · ') || 'Selected Orders: no identifiers entered';
+    }
+    if (candidateScopeMode === 'selected_allocations') {
+      return selectedAllocationIdList.length
+        ? `Allocations ${formatStringList(selectedAllocationIdList)}`
+        : 'Selected Allocations: no identifiers entered';
+    }
+    if (candidateScopeMode === 'date_range') {
+      return [
+        periodStart ? `Start ${periodStart}` : null,
+        periodEnd ? `End ${periodEnd}` : null,
+      ].filter(Boolean).join(' · ') || 'Date Range: no dates entered';
+    }
+    return 'Vendor-wide preview';
+  })();
+  const vendorWideMode = candidateScopeMode === 'vendor_wide';
   const approvalGeneratedAt = readString(readRecord(approval?.sourceSnapshotJson).generatedAt);
   const latestInvoiceRecord = invoiceRecords[0] ?? null;
   const auditReasonsAvailable = Boolean(audit?.lines.length && audit.lines.every((line) => line.eligibilityReason));
@@ -548,6 +609,7 @@ export function AdminSettlementApprovalsPage() {
     }
     return reasons.length ? reasons : ['Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.'];
   })();
+  const candidateScopeReady = candidateScopeMode !== 'date_range' || Boolean(periodStart || periodEnd);
   const draftBlockedByAcknowledgement = candidateQualityClassification === 'BLOCKED' && !mixedVatAcknowledged;
   const qualityStepStatus: WorkflowStepStatus = !preview
     ? 'Waiting'
@@ -590,8 +652,9 @@ export function AdminSettlementApprovalsPage() {
       status: vendorId.trim() ? 'Ready' : 'Blocked',
       details: [
         { label: 'Vendor selected', value: vendorId.trim() || null },
-        { label: 'Period filters', value: activeFilterSummary },
-        { label: 'Selection warning', value: vendorWideMode ? 'Vendor-wide selection can include historical or test rows.' : 'Period filter selected.' },
+        { label: 'Candidate scope', value: getScopeLabel(candidateScopeMode) },
+        { label: 'Candidate filter', value: activeFilterSummary },
+        { label: 'Selection warning', value: vendorWideMode ? 'Vendor-wide selection can include historical or test rows.' : 'Explicit candidate filter selected.' },
       ],
     },
     {
@@ -704,7 +767,7 @@ export function AdminSettlementApprovalsPage() {
       return { label: 'Select vendor', disabled: true };
     }
     if (!preview && !approval) {
-      return { label: 'Preview Settlement', onClick: () => void handlePreview(), disabled: busyAction !== null || !vendorId.trim() };
+      return { label: 'Preview Settlement', onClick: () => void handlePreview(), disabled: busyAction !== null || !vendorId.trim() || !candidateScopeReady };
     }
     if (preview && !approval && candidateQualityClassification !== 'CLEAN') {
       return {
@@ -716,7 +779,7 @@ export function AdminSettlementApprovalsPage() {
       return {
         label: 'Create Draft',
         onClick: () => void handleCreateDraft(),
-        disabled: busyAction !== null || !preview || draftBlockedByAcknowledgement,
+        disabled: busyAction !== null || !preview || draftBlockedByAcknowledgement || !candidateScopeReady,
       };
     }
     if (approval.status === 'draft') {
@@ -738,16 +801,43 @@ export function AdminSettlementApprovalsPage() {
   })();
 
   function buildSettlementApprovalInput() {
-    return {
+    const base = {
       vendorId: vendorId.trim(),
-      periodStart: periodStart || null,
-      periodEnd: periodEnd || null,
+      candidateScope: candidateScopeMode,
+      periodStart: candidateScopeMode === 'date_range' ? periodStart || null : null,
+      periodEnd: candidateScopeMode === 'date_range' ? periodEnd || null : null,
+    };
+    if (candidateScopeMode === 'selected_orders') {
+      return {
+        ...base,
+        selectedOrderIds: selectedOrderNumberList,
+        selectedShopifyOrderIds: selectedShopifyOrderIdList,
+        selectedAllocationIds: [],
+      };
+    }
+    if (candidateScopeMode === 'selected_allocations') {
+      return {
+        ...base,
+        selectedOrderIds: [],
+        selectedShopifyOrderIds: [],
+        selectedAllocationIds: selectedAllocationIdList,
+      };
+    }
+    return {
+      ...base,
+      selectedOrderIds: [],
+      selectedShopifyOrderIds: [],
+      selectedAllocationIds: [],
     };
   }
 
   function clearPeriodFilters() {
     setPeriodStart('');
     setPeriodEnd('');
+    setSelectedOrderNumbers('');
+    setSelectedShopifyOrderIds('');
+    setSelectedAllocationIds('');
+    setCandidateScopeMode('vendor_wide');
     setMixedVatAcknowledged(false);
   }
 
@@ -973,34 +1063,112 @@ export function AdminSettlementApprovalsPage() {
           <span>Draft notes</span>
           <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
         </label>
-        <label>
-          <span>Period start</span>
-          <input
-            type="date"
-            value={periodStart}
-            onChange={(event) => {
-              setPeriodStart(event.target.value);
-              setMixedVatAcknowledged(false);
-            }}
-          />
-        </label>
-        <label>
-          <span>Period end</span>
-          <input
-            type="date"
-            value={periodEnd}
-            onChange={(event) => {
-              setPeriodEnd(event.target.value);
-              setMixedVatAcknowledged(false);
-            }}
-          />
-        </label>
       </div>
+      <section className="op-meta-group settlement-candidate-scope">
+        <h3>Candidate Scope</h3>
+        <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Scope">
+          {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
+            <label key={scope}>
+              <input
+                type="radio"
+                name="candidateScope"
+                value={scope}
+                checked={candidateScopeMode === scope}
+                onChange={() => {
+                  setCandidateScopeMode(scope);
+                  setMixedVatAcknowledged(false);
+                }}
+              />
+              <span>{getScopeLabel(scope)}</span>
+            </label>
+          ))}
+        </div>
+        {candidateScopeMode === 'date_range' ? (
+          <div className="op-toolbar settlement-toolbar" aria-label="Settlement date range controls">
+            <label>
+              <span>Period start</span>
+              <input
+                type="date"
+                value={periodStart}
+                onChange={(event) => {
+                  setPeriodStart(event.target.value);
+                  setMixedVatAcknowledged(false);
+                }}
+              />
+            </label>
+            <label>
+              <span>Period end</span>
+              <input
+                type="date"
+                value={periodEnd}
+                onChange={(event) => {
+                  setPeriodEnd(event.target.value);
+                  setMixedVatAcknowledged(false);
+                }}
+              />
+            </label>
+          </div>
+        ) : null}
+        {candidateScopeMode === 'date_range' && !candidateScopeReady ? (
+          <div className="settlement-alert op-tone-warning">
+            <strong>Date Range mode requires a period start or period end before preview.</strong>
+          </div>
+        ) : null}
+        {candidateScopeMode === 'selected_orders' ? (
+          <div className="settlement-selection-grid">
+            <label>
+              <span>Order numbers</span>
+              <textarea
+                value={selectedOrderNumbers}
+                onChange={(event) => {
+                  setSelectedOrderNumbers(event.target.value);
+                  setMixedVatAcknowledged(false);
+                }}
+                placeholder="#1074, #1075"
+                rows={3}
+              />
+            </label>
+            <label>
+              <span>Shopify order ids</span>
+              <textarea
+                value={selectedShopifyOrderIds}
+                onChange={(event) => {
+                  setSelectedShopifyOrderIds(event.target.value);
+                  setMixedVatAcknowledged(false);
+                }}
+                placeholder="gid://shopify/Order/..."
+                rows={3}
+              />
+            </label>
+          </div>
+        ) : null}
+        {candidateScopeMode === 'selected_allocations' ? (
+          <div className="settlement-selection-grid">
+            <label>
+              <span>Allocation ids</span>
+              <textarea
+                value={selectedAllocationIds}
+                onChange={(event) => {
+                  setSelectedAllocationIds(event.target.value);
+                  setMixedVatAcknowledged(false);
+                }}
+                placeholder="allocation id, one per line or comma-separated"
+                rows={3}
+              />
+            </label>
+          </div>
+        ) : null}
+      </section>
       <div className="settlement-filter-summary">
         <strong>Active candidate filter</strong>
         <span>{activeFilterSummary}</span>
-        <button type="button" className="button button-secondary button-compact" onClick={clearPeriodFilters} disabled={busyAction !== null || (!periodStart && !periodEnd)}>
-          Clear filters
+        <button
+          type="button"
+          className="button button-secondary button-compact"
+          onClick={clearPeriodFilters}
+          disabled={busyAction !== null || (candidateScopeMode === 'vendor_wide' && !periodStart && !periodEnd && !selectedOrderNumbers && !selectedShopifyOrderIds && !selectedAllocationIds)}
+        >
+          Clear candidate filters
         </button>
       </div>
 
@@ -1011,10 +1179,10 @@ export function AdminSettlementApprovalsPage() {
       />
 
       <div className="settlement-actions">
-        <button type="button" className="button button-secondary" onClick={handlePreview} disabled={busyAction !== null || !vendorId.trim()}>
+        <button type="button" className="button button-secondary" onClick={handlePreview} disabled={busyAction !== null || !vendorId.trim() || !candidateScopeReady}>
           Preview Settlement (read-only)
         </button>
-        <button type="button" className="button button-primary" onClick={handleCreateDraft} disabled={busyAction !== null || !preview || draftBlockedByAcknowledgement}>
+        <button type="button" className="button button-primary" onClick={handleCreateDraft} disabled={busyAction !== null || !preview || draftBlockedByAcknowledgement || !candidateScopeReady}>
           Create Draft from preview (writes local DB)
         </button>
         <button type="button" className="button button-secondary" onClick={handleFetchApproval} disabled={busyAction !== null || !approvalId.trim()}>
@@ -1046,6 +1214,7 @@ export function AdminSettlementApprovalsPage() {
             <MetadataRow label="Period end" value={formatDate(preview.periodEnd)} />
             <MetadataRow label="Excluded active rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
           </MetadataGroup>
+          <CandidateSelectionSummary preview={preview} />
           <CandidateQualityCard
             preview={preview}
             classification={candidateQualityClassification}

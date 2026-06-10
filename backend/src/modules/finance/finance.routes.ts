@@ -79,6 +79,22 @@ function readOptionalBodyString(body: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function readOptionalBodyStringArray(body: unknown, key: string) {
+  if (!isRecord(body)) {
+    return [];
+  }
+
+  const value = body[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)));
+}
+
 function readOptionalBodyDate(body: unknown, key: string) {
   const value = readOptionalBodyString(body, key);
   if (!value) {
@@ -90,6 +106,22 @@ function readOptionalBodyDate(body: unknown, key: string) {
     throw new Error(`${key} must be a valid date.`);
   }
   return parsed;
+}
+
+function readOptionalCandidateScope(body: unknown) {
+  const value = readOptionalBodyString(body, 'candidateScope');
+  if (!value) {
+    return null;
+  }
+  if (
+    value !== 'vendor_wide' &&
+    value !== 'date_range' &&
+    value !== 'selected_orders' &&
+    value !== 'selected_allocations'
+  ) {
+    throw new Error('candidateScope must be vendor_wide, date_range, selected_orders, or selected_allocations.');
+  }
+  return value;
 }
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
@@ -362,6 +394,12 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           vendorId,
           readOptionalBodyDate(request.body, 'periodStart'),
           readOptionalBodyDate(request.body, 'periodEnd'),
+          {
+            candidateScope: readOptionalCandidateScope(request.body),
+            selectedOrderIds: readOptionalBodyStringArray(request.body, 'selectedOrderIds'),
+            selectedShopifyOrderIds: readOptionalBodyStringArray(request.body, 'selectedShopifyOrderIds'),
+            selectedAllocationIds: readOptionalBodyStringArray(request.body, 'selectedAllocationIds'),
+          },
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approval preview could not be created.';
@@ -389,6 +427,10 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           vendorId,
           periodStart: readOptionalBodyDate(request.body, 'periodStart'),
           periodEnd: readOptionalBodyDate(request.body, 'periodEnd'),
+          candidateScope: readOptionalCandidateScope(request.body),
+          selectedOrderIds: readOptionalBodyStringArray(request.body, 'selectedOrderIds'),
+          selectedShopifyOrderIds: readOptionalBodyStringArray(request.body, 'selectedShopifyOrderIds'),
+          selectedAllocationIds: readOptionalBodyStringArray(request.body, 'selectedAllocationIds'),
           notes: readOptionalBodyString(request.body, 'notes'),
         });
       } catch (error) {
