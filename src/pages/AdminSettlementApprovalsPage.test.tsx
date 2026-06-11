@@ -489,7 +489,7 @@ describe('Finance Settlement approval admin UI', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Settlement Workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Current settlement' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Candidate source' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Operational totals' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Audit' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logo Readiness' })).toBeInTheDocument();
@@ -497,8 +497,9 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('Next: Preview settlement candidates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Preview Settlement' })).toBeInTheDocument();
-    expect(screen.getByText('Selected')).toBeInTheDocument();
-    expect(screen.getByText('Invoice Ready')).toBeInTheDocument();
+    expect(screen.getByText('Preview not generated yet.')).toBeInTheDocument();
+    expect(screen.getByText('Candidate Selected')).toBeInTheDocument();
+    expect(screen.getByText('Invoice Records')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/vendor_dashboard_dev/i)).toBeInTheDocument());
   });
 
@@ -515,7 +516,7 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
     expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-2');
-    expect(screen.getByText('Open in workspace')).toBeInTheDocument();
+    expect(screen.getAllByText('Open in workspace').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Load Audit' })).toBeEnabled();
     expect(screen.getByText('Next: Load Audit Snapshot.')).toBeInTheDocument();
   });
@@ -534,7 +535,7 @@ describe('Finance Settlement approval admin UI', () => {
       selectedShopifyOrderIds: [],
       selectedAllocationIds: [],
     }));
-    expect(screen.getByText('fle-sale-1')).toBeInTheDocument();
+    expect(screen.getAllByText(/1,200\.00/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor-wide preview can include historical or test rows.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('profile-current').length).toBeGreaterThan(0);
     expect(screen.getByText('Candidate Quality')).toBeInTheDocument();
@@ -542,7 +543,7 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.')).toBeInTheDocument();
     expect(screen.getByText('Next: Create Draft.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create Draft' })).toBeEnabled();
-    expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+    expect(screen.getByText('Preview Reviewed')).toBeInTheDocument();
   });
 
   it('renders warning candidate quality for mixed shipping modes', async () => {
@@ -561,7 +562,7 @@ describe('Finance Settlement approval admin UI', () => {
   it('sends period filters to preview and draft creation', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByLabelText(/Date Range/i));
+    await userEvent.click(screen.getByLabelText(/Period/i));
     await userEvent.type(screen.getByLabelText(/Period start/i), '2026-06-01');
     await userEvent.type(screen.getByLabelText(/Period end/i), '2026-06-30');
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
@@ -575,7 +576,8 @@ describe('Finance Settlement approval admin UI', () => {
       selectedShopifyOrderIds: [],
       selectedAllocationIds: [],
     }));
-    expect(screen.getAllByText('Start 2026-06-01 · End 2026-06-30').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Start 2026-06-01').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('End 2026-06-30').length).toBeGreaterThan(0);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
     await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalledWith({
@@ -594,7 +596,7 @@ describe('Finance Settlement approval admin UI', () => {
     previewSettlementApprovalMock.mockResolvedValue(selectedOrderPreviewResponse);
     renderPage();
 
-    await userEvent.click(screen.getByLabelText(/Selected Orders/i));
+    await userEvent.click(screen.getByLabelText(/Orders/i));
     await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1074');
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
 
@@ -607,8 +609,8 @@ describe('Finance Settlement approval admin UI', () => {
       selectedShopifyOrderIds: [],
       selectedAllocationIds: [],
     }));
-    expect(screen.getAllByText('Selected Orders').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('#1074').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Orders').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Order #1074').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Candidate Rows').length).toBeGreaterThan(0);
     expect(screen.getAllByText('EXTERNAL_PROVIDER').length).toBeGreaterThan(0);
     expect(screen.getAllByText('CLEAN').length).toBeGreaterThan(0);
@@ -630,7 +632,7 @@ describe('Finance Settlement approval admin UI', () => {
     previewSettlementApprovalMock.mockResolvedValue(selectedAllocationPreviewResponse);
     renderPage();
 
-    await userEvent.click(screen.getByLabelText(/Selected Allocations/i));
+    await userEvent.click(screen.getByLabelText(/Allocations/i));
     await userEvent.type(screen.getByLabelText(/Allocation ids/i), 'alloc-1074, alloc-missing');
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
 
@@ -643,9 +645,9 @@ describe('Finance Settlement approval admin UI', () => {
       selectedShopifyOrderIds: [],
       selectedAllocationIds: ['alloc-1074', 'alloc-missing'],
     }));
-    expect(screen.getAllByText('Selected Allocations').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('alloc-1074').length).toBeGreaterThan(0);
-    expect(screen.getByText('alloc-missing')).toBeInTheDocument();
+    expect(screen.getAllByText('Allocations').length).toBeGreaterThan(0);
+    expect(screen.getByText('Allocation alloc-1074')).toBeInTheDocument();
+    expect(screen.getByText('Allocation alloc-missing')).toBeInTheDocument();
   });
 
   it('calls draft, approve, cancel, and fetch routes through the approval controls', async () => {
@@ -770,7 +772,7 @@ describe('Finance Settlement approval admin UI', () => {
     ).toBeGreaterThan(0));
     expect(screen.getAllByText('BLOCKED').length).toBeGreaterThan(0);
     expect(screen.getByText('Mixed VAT rates prevent Logo commission invoice readiness.')).toBeInTheDocument();
-    expect(screen.getByText('This settlement contains 2 rows. Quality classification: BLOCKED.')).toBeInTheDocument();
+    expect(screen.getByText('Mixed VAT acknowledgement required')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create Draft' })).toBeDisabled();
 
     await userEvent.click(screen.getByLabelText(/I acknowledge this candidate is BLOCKED for Logo readiness/i));

@@ -64,6 +64,11 @@ type RecommendedAction = {
   detail?: string;
 };
 
+type HeaderMetric = {
+  label: string;
+  value: ReactNode;
+};
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
 }
@@ -143,15 +148,15 @@ function getQualityTone(classification: QualityClassification) {
 
 function getScopeLabel(scope: string) {
   if (scope === 'date_range') {
-    return 'Date Range';
+    return 'Period';
   }
   if (scope === 'selected_orders') {
-    return 'Selected Orders';
+    return 'Orders';
   }
   if (scope === 'selected_allocations') {
-    return 'Selected Allocations';
+    return 'Allocations';
   }
-  return 'Vendor-wide';
+  return 'Vendor';
 }
 
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
@@ -291,12 +296,10 @@ function WorkflowProgress({
     <section className="settlement-workflow" aria-label="Settlement workflow progress">
       <div className="settlement-workflow-steps">
         {steps.map((step) => (
-          <article key={step.number} className={`settlement-workflow-step op-tone-${getStatusTone(step.status)}`}>
-            <div className="settlement-workflow-step-header">
-              <strong>{step.title}</strong>
-              <StatusBadge tone={getStatusTone(step.status)}>{step.status}</StatusBadge>
-            </div>
-          </article>
+          <div key={step.number} className={`settlement-progress-step op-tone-${getStatusTone(step.status)}`}>
+            <span aria-hidden="true">{step.status === 'Completed' ? '✓' : '○'}</span>
+            <strong>{step.title}</strong>
+          </div>
         ))}
       </div>
     </section>
@@ -313,36 +316,20 @@ function SummaryField({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function WorkspaceHeader({
-  vendor,
-  scope,
-  quality,
-  approvalStatus,
-  rows,
-  netPayable,
+  metrics,
 }: {
-  vendor: string;
-  scope: string;
-  quality: QualityClassification | 'Not previewed';
-  approvalStatus: string;
-  rows: string;
-  netPayable: string;
+  metrics: HeaderMetric[];
 }) {
   return (
     <section className="settlement-workspace-header">
       <div>
         <p className="eyebrow">Admin finance</p>
         <h1>Settlement Workspace</h1>
-        <p className="page-description">
-          {vendor} · {scope} · {quality} quality · {safeStatusLabel(approvalStatus)} · {rows} rows · {netPayable}
-        </p>
       </div>
       <div className="settlement-executive-summary" aria-label="Settlement executive summary">
-        <SummaryField label="Vendor" value={vendor} />
-        <SummaryField label="Scope" value={scope} />
-        <SummaryField label="Quality" value={<StatusBadge tone={quality === 'Not previewed' ? 'neutral' : getQualityTone(quality)}>{quality}</StatusBadge>} />
-        <SummaryField label="Approval" value={<StatusBadge status={approvalStatus}>{safeStatusLabel(approvalStatus)}</StatusBadge>} />
-        <SummaryField label="Rows" value={rows} />
-        <SummaryField label="Net Payable" value={netPayable} />
+        {metrics.map((metric) => (
+          <SummaryField key={metric.label} label={metric.label} value={metric.value} />
+        ))}
       </div>
     </section>
   );
@@ -390,33 +377,58 @@ function RecentApprovalsPanel({
       <h3>Recent approvals</h3>
       <p className="page-description">Newest first for the selected vendor. Opening an approval loads this workspace context.</p>
       {loading ? <p className="page-description">Loading recent approvals...</p> : null}
-      {!loading && visibleApprovals.length === 0 ? <p className="page-description">No settlement approvals found.</p> : null}
+      {!loading && visibleApprovals.length === 0 ? <p className="settlement-compact-empty">No settlement approvals found.</p> : null}
       {visibleApprovals.length ? (
-        <OperationalTable
-          columns={['Created', 'Status', 'Vendor', 'Lines', 'Gross sales', 'Net payable', 'Approved', 'Workspace']}
-          className="settlement-approvals-table"
-          stickyHeader={false}
-        >
+        <div className="settlement-approval-cards">
           {visibleApprovals.map((item) => (
-            <OperationalTableRow key={item.id}>
-              <span>
-                <strong>{formatDate(item.createdAt)}</strong>
+            <article key={item.id} className="settlement-approval-card">
+              <div className="settlement-approval-card-header">
+                <StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge>
                 {item.id === activeApprovalId ? <small>Open in workspace</small> : null}
-              </span>
-              <span><StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge></span>
-              <span>{item.vendorId}</span>
-              <span>{formatNumber(item.lineCount)}</span>
-              <span>{formatMinor(item.grossSalesMinor, item.currency)}</span>
-              <span>{formatMinor(item.netPayableMinor, item.currency)}</span>
-              <span>{formatDate(item.approvedAt)}</span>
-              <span>
-                <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                  Open
-                </button>
-              </span>
-            </OperationalTableRow>
+              </div>
+              <div className="settlement-approval-card-grid">
+                <SummaryField label="Vendor" value={item.vendorId} />
+                <SummaryField label="Rows" value={formatNumber(item.lineCount)} />
+                <SummaryField label="Net payable" value={formatMinor(item.netPayableMinor, item.currency)} />
+                <SummaryField label="Created" value={formatDate(item.createdAt)} />
+                <SummaryField label="Approved" value={formatDate(item.approvedAt)} />
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
+                Open
+              </button>
+            </article>
           ))}
-        </OperationalTable>
+        </div>
+      ) : null}
+      {visibleApprovals.length ? (
+        <details className="settlement-advanced-diagnostics">
+          <summary>Advanced table view</summary>
+          <OperationalTable
+            columns={['Created', 'Status', 'Vendor', 'Rows', 'Gross sales', 'Net payable', 'Approved', 'Workspace']}
+            className="settlement-approvals-table"
+            stickyHeader={false}
+          >
+            {visibleApprovals.map((item) => (
+              <OperationalTableRow key={item.id}>
+                <span>
+                  <strong>{formatDate(item.createdAt)}</strong>
+                  {item.id === activeApprovalId ? <small>Open in workspace</small> : null}
+                </span>
+                <span><StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge></span>
+                <span>{item.vendorId}</span>
+                <span>{formatNumber(item.lineCount)}</span>
+                <span>{formatMinor(item.grossSalesMinor, item.currency)}</span>
+                <span>{formatMinor(item.netPayableMinor, item.currency)}</span>
+                <span>{formatDate(item.approvedAt)}</span>
+                <span>
+                  <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
+                    Open
+                  </button>
+                </span>
+              </OperationalTableRow>
+            ))}
+          </OperationalTable>
+        </details>
       ) : null}
     </section>
   );
@@ -460,28 +472,19 @@ function CandidateQualityCard({
       <div className="settlement-quality-heading">
         <div>
           <h3>Candidate Quality</h3>
-          <p className="page-description">Review settlement quality before creating a draft.</p>
         </div>
         <StatusBadge tone={getQualityTone(classification)}>{classification}</StatusBadge>
       </div>
-      <div className="settlement-quality-grid">
-        <MetadataGroup title="Snapshot groups">
-          <MetadataRow label="Commission Rates" value={formatPercentList(summary.detectedCommissionRates)} />
-          <MetadataRow label="Detected Commission VAT Rates" value={formatPercentList(summary.detectedCommissionVatRates)} />
-          <MetadataRow label="Shipping Modes" value={formatStringList(summary.detectedShippingModes)} />
-          <MetadataRow label="Financial Profile Snapshot Groups" value={formatStringList(summary.detectedFinancialProfileSnapshotIds)} />
-        </MetadataGroup>
-        <MetadataGroup title="Candidate rows">
-          <MetadataRow label="Candidate Scope" value={getScopeLabel(preview.candidateScope)} />
-          <MetadataRow label="Eligible Rows" value={formatNumber(summary.eligibleRowCount)} />
-          <MetadataRow label="Excluded Rows" value={formatNumber(summary.excludedActiveApprovalRowCount)} />
-          <MetadataRow label="Profile Group Count" value={formatNumber(summary.detectedFinancialProfileSnapshotIds.length)} />
-          <MetadataRow label="Quality" value={classification} />
-        </MetadataGroup>
+      <div className="settlement-quality-metrics">
+        <SummaryField label="Commission Rates" value={formatPercentList(summary.detectedCommissionRates)} />
+        <SummaryField label="VAT Rates" value={formatPercentList(summary.detectedCommissionVatRates)} />
+        <SummaryField label="Shipping Modes" value={formatStringList(summary.detectedShippingModes)} />
+        <SummaryField label="Profile Groups" value={formatStringList(summary.detectedFinancialProfileSnapshotIds)} />
+        <SummaryField label="Quality Classification" value={classification} />
       </div>
       {reasons.length ? (
         <div className={`settlement-alert op-tone-${classification === 'BLOCKED' ? 'danger' : 'warning'}`}>
-          <strong>Reason</strong>
+          <strong>{classification === 'BLOCKED' ? 'Blocked candidate quality' : 'Quality warning'}</strong>
           <ul>
             {reasons.map((reason) => (
               <li key={reason}>{reason}</li>
@@ -489,10 +492,9 @@ function CandidateQualityCard({
           </ul>
         </div>
       ) : null}
-      <div className={`settlement-alert op-tone-${getQualityTone(classification)}`}>
-        <strong>Draft Safety</strong>
-        <p>This settlement contains {formatNumber(summary.eligibleRowCount)} rows. Quality classification: {classification}.</p>
-        {requiresAcknowledgement ? (
+      {requiresAcknowledgement ? (
+        <div className="settlement-alert op-tone-danger">
+          <strong>Mixed VAT acknowledgement required</strong>
           <label className="settlement-acknowledgement">
             <input
               type="checkbox"
@@ -501,8 +503,8 @@ function CandidateQualityCard({
             />
             <span>I acknowledge this candidate is BLOCKED for Logo readiness and still want to create a review draft.</span>
           </label>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -696,13 +698,16 @@ export function AdminSettlementApprovalsPage() {
       : 'Waiting';
   const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length ? 'Completed' : logoPreview ? 'Ready' : 'Waiting';
   const workspaceRows = preview
-    ? formatNumber(preview.summary.eligibleRowCount)
+    ? `${formatNumber(preview.summary.eligibleRowCount)} eligible`
     : approval
       ? formatNumber(approval.lines.length)
-      : '0';
+      : 'Not previewed';
+  const workspaceGrossSales = workspaceTotals
+    ? formatMinor(workspaceTotals.grossSalesMinor, workspaceTotals.currency)
+    : 'Not previewed';
   const workspaceNetPayable = workspaceTotals
     ? formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)
-    : formatMinor(0);
+    : 'Not previewed';
   const workspaceApprovalStatus = approval?.status ?? 'not created';
   const workspaceQualityLabel = preview ? candidateQualityClassification : 'Not previewed';
   const selectedOrdersOrAllocations = (() => {
@@ -717,10 +722,47 @@ export function AdminSettlementApprovalsPage() {
     }
     return 'All eligible vendor rows';
   })();
+  const candidateFilterChips = (() => {
+    const chips: string[] = [getScopeLabel(candidateScopeMode)];
+    if (candidateScopeMode === 'date_range') {
+      if (periodStart) {
+        chips.push(`Start ${periodStart}`);
+      }
+      if (periodEnd) {
+        chips.push(`End ${periodEnd}`);
+      }
+      if (!periodStart && !periodEnd) {
+        chips.push('No dates');
+      }
+    }
+    if (candidateScopeMode === 'selected_orders') {
+      chips.push(...selectedOrderNumberList.map((item) => `Order ${item}`));
+      chips.push(...selectedShopifyOrderIdList.map((item) => `Shopify ${item}`));
+      if (!selectedOrderNumberList.length && !selectedShopifyOrderIdList.length) {
+        chips.push('No orders');
+      }
+    }
+    if (candidateScopeMode === 'selected_allocations') {
+      chips.push(...selectedAllocationIdList.map((item) => `Allocation ${item}`));
+      if (!selectedAllocationIdList.length) {
+        chips.push('No allocations');
+      }
+    }
+    return chips;
+  })();
+  const headerMetrics: HeaderMetric[] = [
+    { label: 'Vendor', value: vendorId.trim() || 'No vendor selected' },
+    { label: 'Scope', value: getScopeLabel(candidateScopeMode) },
+    { label: 'Rows', value: workspaceRows },
+    { label: 'Quality', value: <StatusBadge tone={workspaceQualityLabel === 'Not previewed' ? 'neutral' : getQualityTone(workspaceQualityLabel)}>{workspaceQualityLabel}</StatusBadge> },
+    { label: 'Approval', value: <StatusBadge status={workspaceApprovalStatus}>{safeStatusLabel(workspaceApprovalStatus)}</StatusBadge> },
+    { label: 'Gross Sales', value: workspaceGrossSales },
+    { label: 'Net Payable', value: workspaceNetPayable },
+  ];
   const workflowSteps: WorkflowStep[] = [
     {
       number: 1,
-      title: 'Selected',
+      title: 'Candidate Selected',
       status: vendorId.trim() ? 'Ready' : 'Blocked',
       details: [
         { label: 'Vendor selected', value: vendorId.trim() || null },
@@ -731,7 +773,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 2,
-      title: 'Previewed',
+      title: 'Preview Reviewed',
       status: preview ? 'Completed' : vendorId.trim() ? 'Ready' : 'Waiting',
       details: [
         { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'Not loaded' },
@@ -741,7 +783,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 3,
-      title: 'Drafted',
+      title: 'Draft Created',
       status: draftStepStatus,
       details: [
         { label: 'Draft exists', value: Boolean(approval) },
@@ -761,7 +803,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 5,
-      title: 'Audited',
+      title: 'Audit Loaded',
       status: auditStepStatus,
       details: [
         { label: 'Audit loaded', value: Boolean(audit) },
@@ -784,7 +826,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 7,
-      title: 'Invoice Ready',
+      title: 'Invoice Records',
       status: invoiceRecordsStepStatus,
       details: [
         { label: 'Record count', value: formatNumber(invoiceRecords.length) },
@@ -1101,12 +1143,7 @@ export function AdminSettlementApprovalsPage() {
   return (
     <section className="op-page settlement-approvals-page">
       <WorkspaceHeader
-        vendor={vendorId.trim() || 'No vendor selected'}
-        scope={getScopeLabel(candidateScopeMode)}
-        quality={workspaceQualityLabel}
-        approvalStatus={workspaceApprovalStatus}
-        rows={workspaceRows}
-        netPayable={workspaceNetPayable}
+        metrics={headerMetrics}
       />
 
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
@@ -1117,8 +1154,8 @@ export function AdminSettlementApprovalsPage() {
       <section className="settlement-workspace-grid">
         <aside className="settlement-context-panel">
           <div>
-            <p className="eyebrow">Settlement Context</p>
-            <h2>Current settlement</h2>
+            <p className="eyebrow">Candidate Builder</p>
+            <h2>Candidate source</h2>
           </div>
           <div className="op-toolbar settlement-toolbar" aria-label="Settlement vendor controls">
             <label>
@@ -1130,16 +1167,8 @@ export function AdminSettlementApprovalsPage() {
               <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
             </label>
           </div>
-          <div className="settlement-context-summary">
-            <SummaryField label="Scope" value={getScopeLabel(candidateScopeMode)} />
-            <SummaryField label="Selected Orders / Allocations" value={selectedOrdersOrAllocations} />
-            <SummaryField label="Candidate Rows" value={preview ? formatNumber(preview.candidateSelectionSummary.candidateRowCount) : 'Not previewed'} />
-            <SummaryField label="Quality" value={workspaceQualityLabel} />
-            <SummaryField label="Approval Status" value={safeStatusLabel(workspaceApprovalStatus)} />
-          </div>
           <section className="settlement-candidate-scope">
-            <h3>Candidate Scope</h3>
-            <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Scope">
+            <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Source">
               {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
                 <label key={scope}>
                   <input
@@ -1232,9 +1261,12 @@ export function AdminSettlementApprovalsPage() {
               </div>
             ) : null}
           </section>
-          <div className="settlement-filter-summary">
-            <strong>Active candidate filter</strong>
-            <span>{activeFilterSummary}</span>
+          <div className="settlement-filter-summary" aria-label="Selected candidate filters">
+            <div className="settlement-chip-row">
+              {candidateFilterChips.map((chip) => (
+                <span key={chip} className="settlement-chip">{chip}</span>
+              ))}
+            </div>
             <button
               type="button"
               className="button button-secondary button-compact"
@@ -1264,7 +1296,7 @@ export function AdminSettlementApprovalsPage() {
               <KPIStatCard label="Net payable" value={formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)} tone="success" />
             </div>
           ) : (
-            <p className="page-description">Preview a settlement or open an approval to populate summary totals.</p>
+            <p className="settlement-preview-empty">Preview not generated yet.</p>
           )}
           {preview ? (
             <>
@@ -1277,11 +1309,6 @@ export function AdminSettlementApprovalsPage() {
                 onAcknowledgedChange={setMixedVatAcknowledged}
               />
               <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
-              <CandidateSelectionSummary preview={preview} />
-              <section className="op-panel-section">
-                <h3>Sample eligible lines</h3>
-                <LineSamples lines={preview.lines} />
-              </section>
             </>
           ) : null}
         </main>
@@ -1328,7 +1355,7 @@ export function AdminSettlementApprovalsPage() {
                 <AuditLines audit={audit} />
               </>
             ) : (
-              <p className="page-description">Approve a draft, then use the next action to load the audit snapshot.</p>
+              <p className="settlement-compact-empty">No audit loaded yet.</p>
             )}
           </article>
         ) : null}
@@ -1401,7 +1428,7 @@ export function AdminSettlementApprovalsPage() {
                 </details>
               </>
             ) : (
-              <p className="page-description">Load audit first, then use the next action to run Logo readiness.</p>
+              <p className="settlement-compact-empty">No Logo readiness loaded yet.</p>
             )}
           </article>
         ) : null}
@@ -1445,7 +1472,7 @@ export function AdminSettlementApprovalsPage() {
                 ))}
               </OperationalTable>
             ) : (
-              <p className="page-description">Run Logo readiness first, then use the next action to load commission invoice records.</p>
+              <p className="settlement-compact-empty">No invoice records loaded yet.</p>
             )}
             {Object.values(diagnostics).length ? (
               <details className="settlement-advanced-diagnostics" open>
@@ -1479,7 +1506,7 @@ export function AdminSettlementApprovalsPage() {
       </section>
 
       <details className="settlement-details-drawer">
-        <summary>Workspace details and advanced controls</summary>
+        <summary>Advanced Details</summary>
         <section className="settlement-db-banner">
           <div>
             <span className="eyebrow">Database source</span>
@@ -1520,6 +1547,21 @@ export function AdminSettlementApprovalsPage() {
             <MetadataRow label="Cancelled by" value={valueOrDash(approval.cancelledBy)} />
             <MetadataRow label="Notes" value={valueOrDash(approval.notes)} />
           </MetadataGroup>
+        ) : null}
+        {preview ? (
+          <>
+            <CandidateSelectionSummary preview={preview} />
+            <MetadataGroup title="Snapshot identifiers">
+              <MetadataRow label="Financial profile snapshot groups" value={formatStringList(preview.summary.detectedFinancialProfileSnapshotIds)} />
+              <MetadataRow label="Selected orders / allocations" value={selectedOrdersOrAllocations} />
+              <MetadataRow label="Active candidate filter" value={activeFilterSummary} />
+              <MetadataRow label="Excluded active approval rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
+            </MetadataGroup>
+            <section className="op-panel-section">
+              <h3>Sample eligible lines</h3>
+              <LineSamples lines={preview.lines} />
+            </section>
+          </>
         ) : null}
       </details>
     </section>
