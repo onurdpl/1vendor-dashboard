@@ -11833,6 +11833,90 @@ summary.provider-response-heading::-webkit-details-marker {
   max-width: 1480px;
 }
 
+.settlement-workspace-header {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.settlement-workspace-header h1,
+.settlement-context-panel h2,
+.settlement-summary-panel h2,
+.settlement-next-action h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.settlement-executive-summary,
+.settlement-context-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: var(--space-2);
+}
+
+.settlement-summary-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-summary-field span {
+  color: var(--op-muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settlement-summary-field strong {
+  min-width: 0;
+  color: var(--op-text-strong);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.settlement-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.78fr) minmax(420px, 1.35fr) minmax(240px, 0.62fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.settlement-context-panel,
+.settlement-summary-panel,
+.settlement-next-action,
+.settlement-tabs,
+.settlement-tab-panel,
+.settlement-details-drawer {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.settlement-context-panel,
+.settlement-next-action {
+  position: sticky;
+  top: var(--space-3);
+}
+
+.settlement-summary-cards {
+  grid-template-columns: repeat(4, minmax(126px, 1fr));
+}
+
 .settlement-db-banner,
 .settlement-alert {
   display: flex;
@@ -11902,9 +11986,8 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-workflow {
   display: grid;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-  padding: var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-2);
   border: 1px solid var(--op-border);
   border-radius: var(--radius-sm);
   background: var(--op-surface);
@@ -11941,64 +12024,28 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-workflow-steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: repeat(7, minmax(96px, 1fr));
   gap: var(--space-2);
 }
 
 .settlement-workflow-step {
-  display: grid;
-  gap: var(--space-2);
-  min-height: 176px;
-  padding: var(--space-3);
+  display: block;
+  min-height: 0;
+  padding: var(--space-2);
   border: 1px solid currentColor;
   border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
 }
 
 .settlement-workflow-step-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-2);
-}
-
-.settlement-step-number {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--op-text-strong);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.settlement-workflow-step dl {
-  display: grid;
   gap: 6px;
-  margin: 0;
 }
 
-.settlement-workflow-step dl div {
-  display: grid;
-  grid-template-columns: minmax(96px, 0.7fr) minmax(0, 1fr);
-  gap: var(--space-2);
-}
-
-.settlement-workflow-step dt,
-.settlement-workflow-step dd {
-  margin: 0;
+.settlement-workflow-step-header strong {
   font-size: 0.78rem;
-}
-
-.settlement-workflow-step dt {
-  color: var(--op-muted);
-  font-weight: 700;
-}
-
-.settlement-workflow-step dd {
-  color: var(--op-text);
-  overflow-wrap: anywhere;
 }
 
 .settlement-actions {
@@ -12098,13 +12145,12 @@ summary.provider-response-heading::-webkit-details-marker {
 .settlement-approvals-table .op-table-head,
 .settlement-approvals-table .op-table-row {
   grid-template-columns:
-    minmax(170px, 1.5fr)
+    minmax(160px, 1.4fr)
     minmax(92px, 0.8fr)
     minmax(92px, 0.8fr)
     minmax(64px, 0.5fr)
     minmax(110px, 0.9fr)
     minmax(110px, 0.9fr)
-    minmax(130px, 1fr)
     minmax(130px, 1fr)
     minmax(118px, 0.8fr);
 }
@@ -12117,4 +12163,73 @@ summary.provider-response-heading::-webkit-details-marker {
 .settlement-invoice-table .op-table-head,
 .settlement-invoice-table .op-table-row {
   grid-template-columns: minmax(150px, 1.4fr) minmax(100px, 0.8fr) minmax(88px, 0.7fr) minmax(100px, 0.9fr) minmax(56px, 0.5fr) minmax(160px, 1fr);
+}
+
+.settlement-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--op-border);
+  padding-bottom: var(--space-2);
+}
+
+.settlement-tab-list button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+  color: var(--op-text);
+  font-weight: 800;
+}
+
+.settlement-tab-list button.is-active {
+  border-color: var(--accent);
+  background: #eef2ff;
+  color: var(--op-text-strong);
+}
+
+.settlement-tab-panel {
+  box-shadow: none;
+}
+
+.settlement-history-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settlement-details-drawer summary,
+.settlement-advanced-diagnostics summary {
+  cursor: pointer;
+  color: var(--op-text-strong);
+  font-weight: 800;
+}
+
+.settlement-advanced-diagnostics {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+@media (max-width: 1180px) {
+  .settlement-workspace-header,
+  .settlement-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settlement-context-panel,
+  .settlement-next-action {
+    position: static;
+  }
+
+  .settlement-workflow-steps {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+
+  .settlement-summary-cards {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
 }

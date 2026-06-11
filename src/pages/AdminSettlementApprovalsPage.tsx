@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   KPIStatCard,
   MetadataGroup,
@@ -55,11 +55,13 @@ type WorkflowStep = {
 
 type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED';
 type CandidateScopeMode = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
+type WorkspaceTab = 'audit' | 'logo' | 'invoices' | 'history';
 
 type RecommendedAction = {
   label: string;
   onClick?: () => void;
   disabled?: boolean;
+  detail?: string;
 };
 
 function getErrorMessage(error: unknown) {
@@ -282,49 +284,18 @@ function ReadinessList({ title, items, tone }: { title: string; items: string[];
 
 function WorkflowProgress({
   steps,
-  recommendedNextAction,
-  recommendedAction,
 }: {
   steps: WorkflowStep[];
-  recommendedNextAction: string;
-  recommendedAction: RecommendedAction;
 }) {
   return (
-    <section className="settlement-workflow">
-      <div className="settlement-workflow-heading">
-        <div>
-          <span className="eyebrow">Settlement Workflow</span>
-          <h2>Guided settlement workflow</h2>
-        </div>
-        <div className="settlement-next-action">
-          <strong>Recommended Next Action</strong>
-          <span>{recommendedNextAction}</span>
-          <button
-            type="button"
-            className="button button-primary button-compact"
-            onClick={recommendedAction.onClick}
-            disabled={recommendedAction.disabled || !recommendedAction.onClick}
-          >
-            {recommendedAction.label}
-          </button>
-        </div>
-      </div>
+    <section className="settlement-workflow" aria-label="Settlement workflow progress">
       <div className="settlement-workflow-steps">
         {steps.map((step) => (
           <article key={step.number} className={`settlement-workflow-step op-tone-${getStatusTone(step.status)}`}>
             <div className="settlement-workflow-step-header">
-              <span className="settlement-step-number">{step.number}</span>
               <strong>{step.title}</strong>
               <StatusBadge tone={getStatusTone(step.status)}>{step.status}</StatusBadge>
             </div>
-            <dl>
-              {step.details.map((detail) => (
-                <div key={`${step.number}-${detail.label}`}>
-                  <dt>{detail.label}</dt>
-                  <dd>{valueOrDash(detail.value)}</dd>
-                </div>
-              ))}
-            </dl>
           </article>
         ))}
       </div>
@@ -332,40 +303,115 @@ function WorkflowProgress({
   );
 }
 
+function SummaryField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="settlement-summary-field">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function WorkspaceHeader({
+  vendor,
+  scope,
+  quality,
+  approvalStatus,
+  rows,
+  netPayable,
+}: {
+  vendor: string;
+  scope: string;
+  quality: QualityClassification | 'Not previewed';
+  approvalStatus: string;
+  rows: string;
+  netPayable: string;
+}) {
+  return (
+    <section className="settlement-workspace-header">
+      <div>
+        <p className="eyebrow">Admin finance</p>
+        <h1>Settlement Workspace</h1>
+        <p className="page-description">
+          {vendor} · {scope} · {quality} quality · {safeStatusLabel(approvalStatus)} · {rows} rows · {netPayable}
+        </p>
+      </div>
+      <div className="settlement-executive-summary" aria-label="Settlement executive summary">
+        <SummaryField label="Vendor" value={vendor} />
+        <SummaryField label="Scope" value={scope} />
+        <SummaryField label="Quality" value={<StatusBadge tone={quality === 'Not previewed' ? 'neutral' : getQualityTone(quality)}>{quality}</StatusBadge>} />
+        <SummaryField label="Approval" value={<StatusBadge status={approvalStatus}>{safeStatusLabel(approvalStatus)}</StatusBadge>} />
+        <SummaryField label="Rows" value={rows} />
+        <SummaryField label="Net Payable" value={netPayable} />
+      </div>
+    </section>
+  );
+}
+
+function NextActionPanel({
+  recommendedNextAction,
+  recommendedAction,
+}: {
+  recommendedNextAction: string;
+  recommendedAction: RecommendedAction;
+}) {
+  return (
+    <aside className="settlement-next-action">
+      <span className="eyebrow">Next Action</span>
+      <h2>{recommendedAction.label}</h2>
+      <p>{recommendedNextAction}</p>
+      {recommendedAction.detail ? <small>{recommendedAction.detail}</small> : null}
+      <button
+        type="button"
+        className="button button-primary"
+        onClick={recommendedAction.onClick}
+        disabled={recommendedAction.disabled || !recommendedAction.onClick}
+      >
+        {recommendedAction.label}
+      </button>
+    </aside>
+  );
+}
+
 function RecentApprovalsPanel({
   approvals,
   loading,
   onOpenApproval,
+  activeApprovalId,
 }: {
   approvals: SettlementApprovalSummary[];
   loading: boolean;
   onOpenApproval: (id: string) => void;
+  activeApprovalId: string;
 }) {
+  const visibleApprovals = safeArray(approvals);
   return (
-    <section className="op-meta-group">
-      <h3>Recent Settlement Approvals</h3>
-      <p className="page-description">Newest first for the selected vendor. Opening an approval loads its workflow context.</p>
+    <section className="settlement-history-panel">
+      <h3>Recent approvals</h3>
+      <p className="page-description">Newest first for the selected vendor. Opening an approval loads this workspace context.</p>
       {loading ? <p className="page-description">Loading recent approvals...</p> : null}
-      {!loading && approvals.length === 0 ? <p className="page-description">No settlement approvals found.</p> : null}
-      {approvals.length ? (
+      {!loading && visibleApprovals.length === 0 ? <p className="page-description">No settlement approvals found.</p> : null}
+      {visibleApprovals.length ? (
         <OperationalTable
-          columns={['Approval', 'Status', 'Vendor', 'Lines', 'Gross sales', 'Net payable', 'Created', 'Approved', 'Action']}
+          columns={['Created', 'Status', 'Vendor', 'Lines', 'Gross sales', 'Net payable', 'Approved', 'Workspace']}
           className="settlement-approvals-table"
           stickyHeader={false}
         >
-          {approvals.map((item) => (
+          {visibleApprovals.map((item) => (
             <OperationalTableRow key={item.id}>
-              <span><strong>{item.id}</strong></span>
-              <span><StatusBadge status={item.status}>{item.status.toUpperCase()}</StatusBadge></span>
+              <span>
+                <strong>{formatDate(item.createdAt)}</strong>
+                {item.id === activeApprovalId ? <small>Open in workspace</small> : null}
+              </span>
+              <span><StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge></span>
               <span>{item.vendorId}</span>
               <span>{formatNumber(item.lineCount)}</span>
               <span>{formatMinor(item.grossSalesMinor, item.currency)}</span>
               <span>{formatMinor(item.netPayableMinor, item.currency)}</span>
-              <span>{formatDate(item.createdAt)}</span>
               <span>{formatDate(item.approvedAt)}</span>
               <span>
                 <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                  Open Approval
+                  Open
                 </button>
               </span>
             </OperationalTableRow>
@@ -486,6 +532,7 @@ export function AdminSettlementApprovalsPage() {
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
 
   useEffect(() => {
     setVendorId((current) => current || appReadiness.currentVendor.vendorId || 'yalispor');
@@ -521,7 +568,7 @@ export function AdminSettlementApprovalsPage() {
     void listSettlementApprovals(selectedVendorId)
       .then((response) => {
         if (!cancelled) {
-          setRecentApprovals(response.approvals);
+          setRecentApprovals(safeArray(response?.approvals));
         }
       })
       .catch((requestError) => {
@@ -548,6 +595,16 @@ export function AdminSettlementApprovalsPage() {
   const productDetail = extractProductDetail(logoPreview?.logoPayloadPreview ?? null);
   const selectedApprovalId = approvalId.trim() || approval?.id || '';
   const currentTotals = getApprovalTotals(approval);
+  const workspaceTotals = preview
+    ? {
+        grossSalesMinor: preview.summary.grossSalesMinor,
+        refundTotalMinor: preview.summary.refundTotalMinor,
+        commissionMinor: preview.summary.commissionMinor,
+        commissionVatMinor: preview.summary.commissionVatMinor,
+        netPayableMinor: preview.summary.netPayableMinor,
+        currency: preview.summary.currency,
+      }
+    : currentTotals;
   const dbWarnings = getDatabaseWarnings(health);
   const previewRowsLockedInActiveApproval = Boolean(
     preview &&
@@ -611,13 +668,6 @@ export function AdminSettlementApprovalsPage() {
   })();
   const candidateScopeReady = candidateScopeMode !== 'date_range' || Boolean(periodStart || periodEnd);
   const draftBlockedByAcknowledgement = candidateQualityClassification === 'BLOCKED' && !mixedVatAcknowledged;
-  const qualityStepStatus: WorkflowStepStatus = !preview
-    ? 'Waiting'
-    : candidateQualityClassification === 'BLOCKED'
-      ? 'Blocked'
-      : candidateQualityClassification === 'WARNING'
-      ? 'Warning'
-      : 'Completed';
   const draftStepStatus: WorkflowStepStatus = approval
     ? 'Completed'
     : draftBlockedByAcknowledgement || (preview ? preview.summary.eligibleRowCount === 0 : false)
@@ -645,10 +695,32 @@ export function AdminSettlementApprovalsPage() {
       ? 'Ready'
       : 'Waiting';
   const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length ? 'Completed' : logoPreview ? 'Ready' : 'Waiting';
+  const workspaceRows = preview
+    ? formatNumber(preview.summary.eligibleRowCount)
+    : approval
+      ? formatNumber(approval.lines.length)
+      : '0';
+  const workspaceNetPayable = workspaceTotals
+    ? formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)
+    : formatMinor(0);
+  const workspaceApprovalStatus = approval?.status ?? 'not created';
+  const workspaceQualityLabel = preview ? candidateQualityClassification : 'Not previewed';
+  const selectedOrdersOrAllocations = (() => {
+    if (candidateScopeMode === 'selected_orders') {
+      return formatStringList([...selectedOrderNumberList, ...selectedShopifyOrderIdList]);
+    }
+    if (candidateScopeMode === 'selected_allocations') {
+      return formatStringList(selectedAllocationIdList);
+    }
+    if (candidateScopeMode === 'date_range') {
+      return activeFilterSummary;
+    }
+    return 'All eligible vendor rows';
+  })();
   const workflowSteps: WorkflowStep[] = [
     {
       number: 1,
-      title: 'Candidate Selection',
+      title: 'Selected',
       status: vendorId.trim() ? 'Ready' : 'Blocked',
       details: [
         { label: 'Vendor selected', value: vendorId.trim() || null },
@@ -659,7 +731,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 2,
-      title: 'Settlement Preview',
+      title: 'Previewed',
       status: preview ? 'Completed' : vendorId.trim() ? 'Ready' : 'Waiting',
       details: [
         { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'Not loaded' },
@@ -669,18 +741,7 @@ export function AdminSettlementApprovalsPage() {
     },
     {
       number: 3,
-      title: 'Candidate Quality Review',
-      status: qualityStepStatus,
-      details: [
-        { label: 'Mixed commission VAT', value: preview ? (preview.summary.mixedCommissionVatRate ? 'Yes' : 'No') : 'Not reviewed' },
-        { label: 'Mixed shipping mode', value: preview ? (preview.summary.mixedShippingMode ? 'Yes' : 'No') : 'Not reviewed' },
-        { label: 'Financial profile groups', value: preview ? formatStringList(preview.summary.detectedFinancialProfileSnapshotIds) : 'Not reviewed' },
-        { label: 'Quality', value: preview ? candidateQualityClassification : 'Not reviewed' },
-      ],
-    },
-    {
-      number: 4,
-      title: 'Draft Creation',
+      title: 'Drafted',
       status: draftStepStatus,
       details: [
         { label: 'Draft exists', value: Boolean(approval) },
@@ -689,8 +750,8 @@ export function AdminSettlementApprovalsPage() {
       ],
     },
     {
-      number: 5,
-      title: 'Settlement Approval',
+      number: 4,
+      title: 'Approved',
       status: approvalStepStatus,
       details: [
         { label: 'Approval status', value: approval?.status ?? 'Not created' },
@@ -699,8 +760,8 @@ export function AdminSettlementApprovalsPage() {
       ],
     },
     {
-      number: 6,
-      title: 'Audit Review',
+      number: 5,
+      title: 'Audited',
       status: auditStepStatus,
       details: [
         { label: 'Audit loaded', value: Boolean(audit) },
@@ -709,8 +770,8 @@ export function AdminSettlementApprovalsPage() {
       ],
     },
     {
-      number: 7,
-      title: 'Logo Readiness',
+      number: 6,
+      title: 'Logo Ready',
       status: logoStepStatus,
       details: [
         { label: 'Can create later', value: logoPreview ? (logoPreview.readiness.canCreateLogoInvoiceLater ? 'Yes' : 'No') : 'Not checked' },
@@ -722,8 +783,8 @@ export function AdminSettlementApprovalsPage() {
       ],
     },
     {
-      number: 8,
-      title: 'Commission Invoice Records',
+      number: 7,
+      title: 'Invoice Ready',
       status: invoiceRecordsStepStatus,
       details: [
         { label: 'Record count', value: formatNumber(invoiceRecords.length) },
@@ -739,8 +800,8 @@ export function AdminSettlementApprovalsPage() {
     if (!preview && !approval) {
       return 'Next: Preview settlement candidates.';
     }
-    if (preview && !approval && candidateQualityClassification !== 'CLEAN') {
-      return 'Next: Review Candidate Quality.';
+    if (preview && !approval && draftBlockedByAcknowledgement) {
+      return 'Next: Acknowledge blocked candidate quality before creating a draft.';
     }
     if (!approval) {
       return 'Next: Create Draft.';
@@ -760,44 +821,69 @@ export function AdminSettlementApprovalsPage() {
     if (!invoiceRecords.length) {
       return 'Next: Load Commission Invoice Records.';
     }
-    return 'Workflow review is complete. Resolve blockers before any future invoice execution.';
+    return 'Workflow review is complete. Preview another candidate scope when needed.';
   })();
   const recommendedAction: RecommendedAction = (() => {
     if (!vendorId.trim()) {
       return { label: 'Select vendor', disabled: true };
     }
     if (!preview && !approval) {
-      return { label: 'Preview Settlement', onClick: () => void handlePreview(), disabled: busyAction !== null || !vendorId.trim() || !candidateScopeReady };
-    }
-    if (preview && !approval && candidateQualityClassification !== 'CLEAN') {
       return {
-        label: 'Review Candidate Quality',
-        onClick: () => document.getElementById('candidate-quality-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        label: 'Preview Settlement',
+        detail: 'Read-only candidate preview.',
+        onClick: () => void handlePreview(),
+        disabled: busyAction !== null || !vendorId.trim() || !candidateScopeReady,
       };
     }
     if (!approval) {
       return {
         label: 'Create Draft',
+        detail: 'Writes local DB only. No external provider calls.',
         onClick: () => void handleCreateDraft(),
         disabled: busyAction !== null || !preview || draftBlockedByAcknowledgement || !candidateScopeReady,
       };
     }
     if (approval.status === 'draft') {
-      return { label: 'Approve Settlement', onClick: () => void handleApprove(), disabled: busyAction !== null };
+      return {
+        label: 'Approve Settlement',
+        detail: 'Writes local DB approval state only.',
+        onClick: () => void handleApprove(),
+        disabled: busyAction !== null,
+      };
     }
     if (approval.status === 'cancelled') {
       return { label: 'Select another approval', disabled: true };
     }
     if (!audit) {
-      return { label: 'Load Audit Snapshot', onClick: () => void handleLoadAudit(), disabled: busyAction !== null };
+      return {
+        label: 'Load Audit',
+        detail: 'Read-only audit snapshot.',
+        onClick: () => void handleLoadAudit(),
+        disabled: busyAction !== null,
+      };
     }
     if (!logoPreview) {
-      return { label: 'Run Logo Readiness', onClick: () => void handleLogoPreview(), disabled: busyAction !== null };
+      return {
+        label: 'Run Logo Readiness',
+        detail: 'Read-only Logo readiness preview. No Logo invoice is created.',
+        onClick: () => void handleLogoPreview(),
+        disabled: busyAction !== null,
+      };
     }
     if (!invoiceRecords.length) {
-      return { label: 'Load Commission Invoice Records', onClick: () => void handleInvoiceRecords(), disabled: busyAction !== null };
+      return {
+        label: 'Load Commission Invoice Records',
+        detail: 'Read-only invoice record list.',
+        onClick: () => void handleInvoiceRecords(),
+        disabled: busyAction !== null,
+      };
     }
-    return { label: 'Workflow reviewed', disabled: true };
+    return {
+      label: 'Preview Settlement',
+      detail: 'Read-only candidate preview for the current scope.',
+      onClick: () => void handlePreview(),
+      disabled: busyAction !== null || !vendorId.trim() || !candidateScopeReady,
+    };
   })();
 
   function buildSettlementApprovalInput() {
@@ -965,6 +1051,7 @@ export function AdminSettlementApprovalsPage() {
     const result = await runAction('audit', () => getSettlementApprovalAudit(selectedApprovalId), 'Audit detail loaded.');
     if (result) {
       setAudit(result);
+      setActiveTab('audit');
     }
   }
 
@@ -980,6 +1067,7 @@ export function AdminSettlementApprovalsPage() {
     );
     if (result) {
       setLogoPreview(result);
+      setActiveTab('logo');
     }
   }
 
@@ -995,6 +1083,7 @@ export function AdminSettlementApprovalsPage() {
     );
     if (result) {
       setInvoiceRecords(result.records);
+      setActiveTab('invoices');
     }
   }
 
@@ -1011,396 +1100,428 @@ export function AdminSettlementApprovalsPage() {
 
   return (
     <section className="op-page settlement-approvals-page">
-      <div className="op-page-heading">
-        <div>
-          <p className="eyebrow">Admin finance</p>
-          <h1>Settlement Approvals</h1>
-          <p className="page-description">
-            Admin-only controls for local settlement approval records, audit snapshots, Logo readiness preview, and commission invoice record visibility.
-          </p>
-        </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone="info">No external provider writes</StatusBadge>
-          <StatusBadge tone="warning">Local DB write buttons are labeled</StatusBadge>
-        </div>
-      </div>
+      <WorkspaceHeader
+        vendor={vendorId.trim() || 'No vendor selected'}
+        scope={getScopeLabel(candidateScopeMode)}
+        quality={workspaceQualityLabel}
+        approvalStatus={workspaceApprovalStatus}
+        rows={workspaceRows}
+        netPayable={workspaceNetPayable}
+      />
 
-      <section className="settlement-db-banner">
-        <div>
-          <span className="eyebrow">Database source</span>
-          <strong>{valueOrDash(getDatabaseSourceLabel(health))}</strong>
-          <small>
-            Host {valueOrDash(health?.financeAuditMetadata?.databaseHost ?? health?.databaseSource?.databaseHost)}
-            {' · '}
-            DB {valueOrDash(health?.financeAuditMetadata?.databaseName ?? health?.databaseSource?.databaseName)}
-            {' · '}
-            Schema {health?.financeAuditMetadata?.schemaReady === false ? 'not ready' : 'ready/unknown'}
-          </small>
-        </div>
-        {health?.databaseSource?.duplicateDatabaseUrlDefinitionsDetected ? (
-          <StatusBadge tone="warning">Multiple DATABASE_URL definitions detected</StatusBadge>
-        ) : (
-          <StatusBadge tone="success">Secret-safe diagnostics</StatusBadge>
-        )}
-      </section>
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
 
       {error ? <SectionErrorRetry title="Finance action failed" description={error} /> : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
-      <WorkflowProgress steps={workflowSteps} recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} />
-
-      <div className="op-toolbar settlement-toolbar" aria-label="Settlement approval controls">
-        <label>
-          <span>Vendor id</span>
-          <input value={vendorId} onChange={(event) => setVendorId(event.target.value)} placeholder="yalispor" />
-        </label>
-        <label>
-          <span>Approval id</span>
-          <input value={approvalId} onChange={(event) => setApprovalId(event.target.value)} placeholder="SettlementApproval id" />
-        </label>
-        <label>
-          <span>Draft notes</span>
-          <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
-        </label>
-      </div>
-      <section className="op-meta-group settlement-candidate-scope">
-        <h3>Candidate Scope</h3>
-        <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Scope">
-          {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
-            <label key={scope}>
-              <input
-                type="radio"
-                name="candidateScope"
-                value={scope}
-                checked={candidateScopeMode === scope}
-                onChange={() => {
-                  setCandidateScopeMode(scope);
-                  setMixedVatAcknowledged(false);
-                }}
-              />
-              <span>{getScopeLabel(scope)}</span>
-            </label>
-          ))}
-        </div>
-        {candidateScopeMode === 'date_range' ? (
-          <div className="op-toolbar settlement-toolbar" aria-label="Settlement date range controls">
+      <section className="settlement-workspace-grid">
+        <aside className="settlement-context-panel">
+          <div>
+            <p className="eyebrow">Settlement Context</p>
+            <h2>Current settlement</h2>
+          </div>
+          <div className="op-toolbar settlement-toolbar" aria-label="Settlement vendor controls">
             <label>
-              <span>Period start</span>
-              <input
-                type="date"
-                value={periodStart}
-                onChange={(event) => {
-                  setPeriodStart(event.target.value);
-                  setMixedVatAcknowledged(false);
-                }}
-              />
+              <span>Vendor</span>
+              <input value={vendorId} onChange={(event) => setVendorId(event.target.value)} placeholder="yalispor" />
             </label>
             <label>
-              <span>Period end</span>
-              <input
-                type="date"
-                value={periodEnd}
-                onChange={(event) => {
-                  setPeriodEnd(event.target.value);
-                  setMixedVatAcknowledged(false);
-                }}
-              />
+              <span>Draft notes</span>
+              <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
             </label>
           </div>
-        ) : null}
-        {candidateScopeMode === 'date_range' && !candidateScopeReady ? (
-          <div className="settlement-alert op-tone-warning">
-            <strong>Date Range mode requires a period start or period end before preview.</strong>
+          <div className="settlement-context-summary">
+            <SummaryField label="Scope" value={getScopeLabel(candidateScopeMode)} />
+            <SummaryField label="Selected Orders / Allocations" value={selectedOrdersOrAllocations} />
+            <SummaryField label="Candidate Rows" value={preview ? formatNumber(preview.candidateSelectionSummary.candidateRowCount) : 'Not previewed'} />
+            <SummaryField label="Quality" value={workspaceQualityLabel} />
+            <SummaryField label="Approval Status" value={safeStatusLabel(workspaceApprovalStatus)} />
           </div>
-        ) : null}
-        {candidateScopeMode === 'selected_orders' ? (
-          <div className="settlement-selection-grid">
-            <label>
-              <span>Order numbers</span>
-              <textarea
-                value={selectedOrderNumbers}
-                onChange={(event) => {
-                  setSelectedOrderNumbers(event.target.value);
-                  setMixedVatAcknowledged(false);
-                }}
-                placeholder="#1074, #1075"
-                rows={3}
-              />
-            </label>
-            <label>
-              <span>Shopify order ids</span>
-              <textarea
-                value={selectedShopifyOrderIds}
-                onChange={(event) => {
-                  setSelectedShopifyOrderIds(event.target.value);
-                  setMixedVatAcknowledged(false);
-                }}
-                placeholder="gid://shopify/Order/..."
-                rows={3}
-              />
-            </label>
+          <section className="settlement-candidate-scope">
+            <h3>Candidate Scope</h3>
+            <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Scope">
+              {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
+                <label key={scope}>
+                  <input
+                    type="radio"
+                    name="candidateScope"
+                    value={scope}
+                    checked={candidateScopeMode === scope}
+                    onChange={() => {
+                      setCandidateScopeMode(scope);
+                      setMixedVatAcknowledged(false);
+                    }}
+                  />
+                  <span>{getScopeLabel(scope)}</span>
+                </label>
+              ))}
+            </div>
+            {candidateScopeMode === 'date_range' ? (
+              <div className="op-toolbar settlement-toolbar" aria-label="Settlement date range controls">
+                <label>
+                  <span>Period start</span>
+                  <input
+                    type="date"
+                    value={periodStart}
+                    onChange={(event) => {
+                      setPeriodStart(event.target.value);
+                      setMixedVatAcknowledged(false);
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Period end</span>
+                  <input
+                    type="date"
+                    value={periodEnd}
+                    onChange={(event) => {
+                      setPeriodEnd(event.target.value);
+                      setMixedVatAcknowledged(false);
+                    }}
+                  />
+                </label>
+              </div>
+            ) : null}
+            {candidateScopeMode === 'date_range' && !candidateScopeReady ? (
+              <div className="settlement-alert op-tone-warning">
+                <strong>Date Range mode requires a period start or period end before preview.</strong>
+              </div>
+            ) : null}
+            {candidateScopeMode === 'selected_orders' ? (
+              <div className="settlement-selection-grid">
+                <label>
+                  <span>Order numbers</span>
+                  <textarea
+                    value={selectedOrderNumbers}
+                    onChange={(event) => {
+                      setSelectedOrderNumbers(event.target.value);
+                      setMixedVatAcknowledged(false);
+                    }}
+                    placeholder="#1074, #1075"
+                    rows={3}
+                  />
+                </label>
+                <label>
+                  <span>Shopify order ids</span>
+                  <textarea
+                    value={selectedShopifyOrderIds}
+                    onChange={(event) => {
+                      setSelectedShopifyOrderIds(event.target.value);
+                      setMixedVatAcknowledged(false);
+                    }}
+                    placeholder="gid://shopify/Order/..."
+                    rows={3}
+                  />
+                </label>
+              </div>
+            ) : null}
+            {candidateScopeMode === 'selected_allocations' ? (
+              <div className="settlement-selection-grid">
+                <label>
+                  <span>Allocation ids</span>
+                  <textarea
+                    value={selectedAllocationIds}
+                    onChange={(event) => {
+                      setSelectedAllocationIds(event.target.value);
+                      setMixedVatAcknowledged(false);
+                    }}
+                    placeholder="allocation id, one per line or comma-separated"
+                    rows={3}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </section>
+          <div className="settlement-filter-summary">
+            <strong>Active candidate filter</strong>
+            <span>{activeFilterSummary}</span>
+            <button
+              type="button"
+              className="button button-secondary button-compact"
+              onClick={clearPeriodFilters}
+              disabled={busyAction !== null || (candidateScopeMode === 'vendor_wide' && !periodStart && !periodEnd && !selectedOrderNumbers && !selectedShopifyOrderIds && !selectedAllocationIds)}
+            >
+              Clear filters
+            </button>
           </div>
-        ) : null}
-        {candidateScopeMode === 'selected_allocations' ? (
-          <div className="settlement-selection-grid">
-            <label>
-              <span>Allocation ids</span>
-              <textarea
-                value={selectedAllocationIds}
-                onChange={(event) => {
-                  setSelectedAllocationIds(event.target.value);
-                  setMixedVatAcknowledged(false);
-                }}
-                placeholder="allocation id, one per line or comma-separated"
-                rows={3}
-              />
-            </label>
-          </div>
-        ) : null}
-      </section>
-      <div className="settlement-filter-summary">
-        <strong>Active candidate filter</strong>
-        <span>{activeFilterSummary}</span>
-        <button
-          type="button"
-          className="button button-secondary button-compact"
-          onClick={clearPeriodFilters}
-          disabled={busyAction !== null || (candidateScopeMode === 'vendor_wide' && !periodStart && !periodEnd && !selectedOrderNumbers && !selectedShopifyOrderIds && !selectedAllocationIds)}
-        >
-          Clear candidate filters
-        </button>
-      </div>
-
-      <RecentApprovalsPanel
-        approvals={recentApprovals}
-        loading={recentApprovalsLoading}
-        onOpenApproval={(id) => void handleOpenRecentApproval(id)}
-      />
-
-      <div className="settlement-actions">
-        <button type="button" className="button button-secondary" onClick={handlePreview} disabled={busyAction !== null || !vendorId.trim() || !candidateScopeReady}>
-          Preview Settlement (read-only)
-        </button>
-        <button type="button" className="button button-primary" onClick={handleCreateDraft} disabled={busyAction !== null || !preview || draftBlockedByAcknowledgement || !candidateScopeReady}>
-          Create Draft from preview (writes local DB)
-        </button>
-        <button type="button" className="button button-secondary" onClick={handleFetchApproval} disabled={busyAction !== null || !approvalId.trim()}>
-          Fetch approval detail (read-only)
-        </button>
-        <button type="button" className="button button-primary" onClick={handleApprove} disabled={busyAction !== null || approval?.status !== 'draft'}>
-          Approve DRAFT (writes local DB)
-        </button>
-        <button type="button" className="button button-danger" onClick={handleCancel} disabled={busyAction !== null || !selectedApprovalId}>
-          Cancel DRAFT/APPROVED (writes local DB)
-        </button>
-      </div>
-
-      {preview ? (
-        <>
-          <div className="op-kpi-row">
-            <KPIStatCard label="Gross sales" value={formatMinor(preview.summary.grossSalesMinor, preview.summary.currency)} tone="info" />
-            <KPIStatCard label="Refund total" value={formatMinor(preview.summary.refundTotalMinor, preview.summary.currency)} tone="warning" />
-            <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
-            <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
-            <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone="success" />
-            <KPIStatCard label="Eligible lines" value={formatNumber(preview.summary.eligibleRowCount)} detail={preview.summary.currency} tone="neutral" />
-          </div>
-
-          <MetadataGroup title="Preview settlement impact">
-            <MetadataRow label="writesPerformed" value={String(preview.writesPerformed)} />
-            <MetadataRow label="Vendor" value={preview.vendorId} />
-            <MetadataRow label="Period start" value={formatDate(preview.periodStart)} />
-            <MetadataRow label="Period end" value={formatDate(preview.periodEnd)} />
-            <MetadataRow label="Excluded active rows" value={formatNumber(preview.summary.excludedActiveApprovalRowCount)} />
-          </MetadataGroup>
-          <CandidateSelectionSummary preview={preview} />
-          <CandidateQualityCard
-            preview={preview}
-            classification={candidateQualityClassification}
-            reasons={candidateQualityReasons}
-            requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
-            acknowledged={mixedVatAcknowledged}
-            onAcknowledgedChange={setMixedVatAcknowledged}
-          />
-          <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
           {previewRowsLockedInActiveApproval ? (
             <div className="settlement-alert op-tone-warning">
               <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>
             </div>
           ) : null}
+        </aside>
 
-          <section className="op-panel-section">
-            <h3>Sample eligible lines</h3>
-            <LineSamples lines={preview.lines} />
-          </section>
-        </>
-      ) : null}
-
-      <section className="settlement-grid">
-        <article className="op-meta-group">
-          <h3>Approval detail</h3>
-          {approval ? (
-            <MetadataGroup>
-              <MetadataRow label="ID" value={approval.id} />
-              <MetadataRow label="Status" value={<StatusBadge status={approval.status}>{safeStatusLabel(approval.status)}</StatusBadge>} />
-              <MetadataRow label="Vendor" value={approval.vendorId} />
-              <MetadataRow label="Lines" value={formatNumber(approval.lines.length)} />
-              <MetadataRow label="Approved at" value={formatDate(approval.approvedAt)} />
-              <MetadataRow label="Approved by" value={valueOrDash(approval.approvedBy)} />
-              <MetadataRow label="Cancelled at" value={formatDate(approval.cancelledAt)} />
-              <MetadataRow label="Cancelled by" value={valueOrDash(approval.cancelledBy)} />
-              <MetadataRow label="Notes" value={valueOrDash(approval.notes)} />
-            </MetadataGroup>
-          ) : (
-            <p className="page-description">Create a draft or fetch an existing approval to view status and timestamps.</p>
-          )}
-          {currentTotals ? (
-            <MetadataGroup title="Approval snapshot totals">
-              <MetadataRow label="Gross sales" value={formatMinor(currentTotals.grossSalesMinor, currentTotals.currency)} />
-              <MetadataRow label="Refund total" value={formatMinor(currentTotals.refundTotalMinor, currentTotals.currency)} />
-              <MetadataRow label="Commission" value={formatMinor(currentTotals.commissionMinor, currentTotals.currency)} />
-              <MetadataRow label="Commission VAT" value={formatMinor(currentTotals.commissionVatMinor, currentTotals.currency)} />
-              <MetadataRow label="Net payable" value={formatMinor(currentTotals.netPayableMinor, currentTotals.currency)} />
-            </MetadataGroup>
-          ) : null}
-        </article>
-
-        <article className="op-meta-group">
-          <h3>Audit transparency</h3>
-          <div className="op-action-group">
-            <button type="button" className="button button-secondary" onClick={handleLoadAudit} disabled={busyAction !== null || !selectedApprovalId || approval?.status !== 'approved'}>
-              Load audit snapshot (read-only)
-            </button>
+        <main className="settlement-summary-panel">
+          <div>
+            <p className="eyebrow">Settlement Summary</p>
+            <h2>Operational totals</h2>
           </div>
-          <AuditLines audit={audit} />
-        </article>
-      </section>
-
-      <section className="settlement-grid">
-        <article className="op-meta-group">
-          <h3>Logo readiness panel</h3>
-          <p className="page-description">Read-only preview. This does not call Logo create and does not create an invoice.</p>
-          <button type="button" className="button button-secondary" onClick={handleLogoPreview} disabled={busyAction !== null || !selectedApprovalId || !audit}>
-            Run Logo readiness preview (read-only)
-          </button>
-          {logoPreview ? (
+          {workspaceTotals ? (
+            <div className="op-kpi-row settlement-summary-cards">
+              <KPIStatCard label="Gross sales" value={formatMinor(workspaceTotals.grossSalesMinor, workspaceTotals.currency)} tone="info" />
+              <KPIStatCard label="Commission" value={formatMinor(workspaceTotals.commissionMinor, workspaceTotals.currency)} tone="info" />
+              <KPIStatCard label="Commission VAT" value={formatMinor(workspaceTotals.commissionVatMinor, workspaceTotals.currency)} tone="info" />
+              <KPIStatCard label="Net payable" value={formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)} tone="success" />
+            </div>
+          ) : (
+            <p className="page-description">Preview a settlement or open an approval to populate summary totals.</p>
+          )}
+          {preview ? (
             <>
-              <MetadataGroup title="Readiness">
-                <MetadataRow label="writesPerformed" value={String(logoPreview.writesPerformed)} />
-                <MetadataRow label="Can create later" value={logoPreview.readiness.canCreateLogoInvoiceLater ? 'Yes' : 'No'} />
-                <MetadataRow label="Currency" value={logoPreview.amounts.currency} />
-                <MetadataRow label="VAT included" value={String(logoPreview.amounts.vatIncluded)} />
-                <MetadataRow label="Tax rate" value={logoPreview.amounts.taxRate === null ? 'Requires confirmation' : `${logoPreview.amounts.taxRate.toFixed(2)}%`} />
-                <MetadataRow label="VAT rate source" value={safeStatusLabel(logoPreview.vatRateSource)} />
-                <MetadataRow label="Detected VAT rates" value={logoPreview.detectedVatRates.length ? logoPreview.detectedVatRates.map((rate) => `${rate}%`).join(', ') : 'None'} />
-                <MetadataRow
-                  label="Current profile VAT"
-                  value={
-                    logoPreview.configuredVendorCommissionVatPercent === null
-                      ? 'Not available'
-                      : `${logoPreview.configuredVendorCommissionVatPercent}%`
-                  }
-                />
-                <MetadataRow label="Commission" value={formatCurrency(logoPreview.amounts.commissionAmount, logoPreview.amounts.currency)} />
-                <MetadataRow label="Commission VAT" value={formatCurrency(logoPreview.amounts.commissionVatAmount, logoPreview.amounts.currency)} />
-                <MetadataRow label="Expected gross" value={formatCurrency(logoPreview.amounts.expectedGrossInvoiceAmount, logoPreview.amounts.currency)} />
-              </MetadataGroup>
-              <ReadinessList title="Logo blockers" items={logoPreview.readiness.blockers} tone="danger" />
-              <ReadinessList title="Logo warnings" items={logoPreview.readiness.warnings} tone="warning" />
-              <MetadataGroup title="Execution snapshot guard">
-                <MetadataRow label="Guard status" value={logoPreview.executionSnapshotGuard.ok ? 'Pass' : 'Blocked'} />
-                <MetadataRow label="Required snapshots" value={logoPreview.executionSnapshotGuard.requiredSnapshotsPresent ? 'Present' : 'Missing'} />
-                <MetadataRow label="Settlement status" value={valueOrDash(logoPreview.executionSnapshotGuard.snapshotCompleteness.settlementApprovalStatus)} />
-                <MetadataRow label="Execution lines" value={formatNumber(logoPreview.executionSnapshotGuard.snapshotCompleteness.executionLineCount)} />
-                <MetadataRow
-                  label="Detected commission VAT"
-                  value={
-                    logoPreview.executionSnapshotGuard.detectedCommissionVatRates.length
-                      ? logoPreview.executionSnapshotGuard.detectedCommissionVatRates.map((rate) => `${rate}%`).join(', ')
-                      : 'None'
-                  }
-                />
-                <MetadataRow
-                  label="Detected shipping modes"
-                  value={logoPreview.executionSnapshotGuard.detectedShippingModes.join(', ') || 'None'}
-                />
-              </MetadataGroup>
-              <ReadinessList title="Execution snapshot blockers" items={logoPreview.executionSnapshotGuard.blockers} tone="danger" />
-              <ReadinessList title="Execution snapshot warnings" items={logoPreview.executionSnapshotGuard.warnings} tone="warning" />
-              <MetadataGroup title="Vendor billing readiness">
-                <MetadataRow label="Complete" value={logoPreview.vendorBillingReadiness.complete ? 'Yes' : 'No'} />
-                <MetadataRow label="Missing fields" value={logoPreview.vendorBillingReadiness.missingFields.join(', ') || 'None'} />
-                <MetadataRow label="Logo customer code" value={logoPreview.vendorBillingReadiness.logoCustomerCodePresent ? 'Present' : 'Missing'} />
-                <MetadataRow label="Logo customer id" value={logoPreview.vendorBillingReadiness.logoCustomerIdPresent ? 'Present' : 'Missing'} />
-                <MetadataRow label="E-invoice eligible" value={valueOrDash(logoPreview.vendorBillingReadiness.logoEinvoiceEligible)} />
-              </MetadataGroup>
-              <MetadataGroup title="Product detail shape">
-                <MetadataRow label="Payload exists" value={logoPreview.logoPayloadPreview ? 'Yes' : 'No'} />
-                <MetadataRow label="itemCode" value={valueOrDash(productDetail?.itemCode)} />
-                <MetadataRow label="itemType" value={valueOrDash(productDetail?.itemType)} />
-              </MetadataGroup>
+              <CandidateQualityCard
+                preview={preview}
+                classification={candidateQualityClassification}
+                reasons={candidateQualityReasons}
+                requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
+                acknowledged={mixedVatAcknowledged}
+                onAcknowledgedChange={setMixedVatAcknowledged}
+              />
+              <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
+              <CandidateSelectionSummary preview={preview} />
+              <section className="op-panel-section">
+                <h3>Sample eligible lines</h3>
+                <LineSamples lines={preview.lines} />
+              </section>
             </>
           ) : null}
-        </article>
+        </main>
 
-        <article className="op-meta-group">
-          <h3>Commission invoice records</h3>
-          <p className="page-description">Read-only settlement commission invoice record visibility and diagnostics.</p>
-          <button type="button" className="button button-secondary" onClick={handleInvoiceRecords} disabled={busyAction !== null || !selectedApprovalId || !logoPreview}>
-            Load commission invoice records (read-only)
-          </button>
-          {activeInvoiceRecords.length ? (
-            <div className="settlement-alert op-tone-warning">
-              <strong>Active commission invoice record exists.</strong>
-              <p>Settlement cancellation should be blocked while a non-CANCELLED record exists.</p>
-            </div>
-          ) : null}
-          {invoiceRecords.length ? (
-            <OperationalTable
-              columns={['Record', 'Provider', 'Status', 'Invoice no', 'Retry', 'Diagnostics']}
-              className="settlement-invoice-table"
-              stickyHeader={false}
-            >
-              {invoiceRecords.map((record) => (
-                <OperationalTableRow key={record.id}>
-                  <span>
-                    <strong>{record.id}</strong>
-                    <small>{formatDate(record.createdAt)}</small>
-                  </span>
-                  <span>{safeStatusLabel(record.provider)}</span>
-                  <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
-                  <span>{valueOrDash(record.invoiceNo)}</span>
-                  <span>{formatNumber(record.retryCount)}</span>
-                  <span>
-                    <button
-                      type="button"
-                      className="button button-secondary button-compact"
-                      onClick={() => void handleDiagnostics(record.id)}
-                      disabled={busyAction !== null}
-                    >
-                      Read diagnostics (read-only)
-                    </button>
-                  </span>
-                </OperationalTableRow>
-              ))}
-            </OperationalTable>
-          ) : (
-            <p className="page-description">No commission invoice records loaded.</p>
-          )}
-          {Object.values(diagnostics).map((item) => (
-            <MetadataGroup key={item.record.id} title={`Diagnostics ${item.record.id}`}>
-              <MetadataRow label="writesPerformed" value={String(item.writesPerformed)} />
-              <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
-              <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
-              <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
-              <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.present ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
-              <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
-              <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
-            </MetadataGroup>
-          ))}
-        </article>
+        <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} />
       </section>
+
+      <WorkflowProgress steps={workflowSteps} />
+
+      <section className="settlement-tabs">
+        <div className="settlement-tab-list" role="tablist" aria-label="Settlement workspace tabs">
+          {[
+            ['audit', 'Audit'],
+            ['logo', 'Logo Readiness'],
+            ['invoices', 'Commission Invoice Records'],
+            ['history', 'History'],
+          ].map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              className={activeTab === tab ? 'is-active' : ''}
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab as WorkspaceTab)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'audit' ? (
+          <article className="settlement-tab-panel" role="tabpanel">
+            <h3>Audit</h3>
+            {audit ? (
+              <>
+                <MetadataGroup title="Audit snapshot">
+                  <MetadataRow label="Status" value={safeStatusLabel(audit.status)} />
+                  <MetadataRow label="Gross sales" value={formatMinor(audit.totals.grossSalesMinor, audit.totals.currency)} />
+                  <MetadataRow label="Commission" value={formatMinor(audit.totals.commissionMinor, audit.totals.currency)} />
+                  <MetadataRow label="Commission VAT" value={formatMinor(audit.totals.commissionVatMinor, audit.totals.currency)} />
+                  <MetadataRow label="Net payable" value={formatMinor(audit.totals.netPayableMinor, audit.totals.currency)} />
+                  <MetadataRow label="Eligibility reasons" value={auditReasonsAvailable ? 'Available' : 'Missing'} />
+                </MetadataGroup>
+                <AuditLines audit={audit} />
+              </>
+            ) : (
+              <p className="page-description">Approve a draft, then use the next action to load the audit snapshot.</p>
+            )}
+          </article>
+        ) : null}
+
+        {activeTab === 'logo' ? (
+          <article className="settlement-tab-panel" role="tabpanel">
+            <h3>Logo Readiness</h3>
+            <p className="page-description">Read-only preview. This does not call Logo create and does not create an invoice.</p>
+            {logoPreview ? (
+              <>
+                <MetadataGroup title="Readiness">
+                  <MetadataRow label="writesPerformed" value={String(logoPreview.writesPerformed)} />
+                  <MetadataRow label="Can create later" value={logoPreview.readiness.canCreateLogoInvoiceLater ? 'Yes' : 'No'} />
+                  <MetadataRow label="Currency" value={logoPreview.amounts.currency} />
+                  <MetadataRow label="VAT included" value={String(logoPreview.amounts.vatIncluded)} />
+                  <MetadataRow label="Tax rate" value={logoPreview.amounts.taxRate === null ? 'Requires confirmation' : `${logoPreview.amounts.taxRate.toFixed(2)}%`} />
+                  <MetadataRow label="VAT rate source" value={safeStatusLabel(logoPreview.vatRateSource)} />
+                  <MetadataRow label="Detected VAT rates" value={logoPreview.detectedVatRates.length ? logoPreview.detectedVatRates.map((rate) => `${rate}%`).join(', ') : 'None'} />
+                  <MetadataRow
+                    label="Current profile VAT"
+                    value={
+                      logoPreview.configuredVendorCommissionVatPercent === null
+                        ? 'Not available'
+                        : `${logoPreview.configuredVendorCommissionVatPercent}%`
+                    }
+                  />
+                  <MetadataRow label="Commission" value={formatCurrency(logoPreview.amounts.commissionAmount, logoPreview.amounts.currency)} />
+                  <MetadataRow label="Commission VAT" value={formatCurrency(logoPreview.amounts.commissionVatAmount, logoPreview.amounts.currency)} />
+                  <MetadataRow label="Expected gross" value={formatCurrency(logoPreview.amounts.expectedGrossInvoiceAmount, logoPreview.amounts.currency)} />
+                </MetadataGroup>
+                <ReadinessList title="Logo blockers" items={logoPreview.readiness.blockers} tone="danger" />
+                <ReadinessList title="Logo warnings" items={logoPreview.readiness.warnings} tone="warning" />
+                <details className="settlement-advanced-diagnostics" open>
+                  <summary>Execution snapshot guard</summary>
+                  <MetadataGroup>
+                    <MetadataRow label="Guard status" value={logoPreview.executionSnapshotGuard.ok ? 'Pass' : 'Blocked'} />
+                    <MetadataRow label="Required snapshots" value={logoPreview.executionSnapshotGuard.requiredSnapshotsPresent ? 'Present' : 'Missing'} />
+                    <MetadataRow label="Settlement status" value={valueOrDash(logoPreview.executionSnapshotGuard.snapshotCompleteness.settlementApprovalStatus)} />
+                    <MetadataRow label="Execution lines" value={formatNumber(logoPreview.executionSnapshotGuard.snapshotCompleteness.executionLineCount)} />
+                    <MetadataRow
+                      label="Detected commission VAT"
+                      value={
+                        logoPreview.executionSnapshotGuard.detectedCommissionVatRates.length
+                          ? logoPreview.executionSnapshotGuard.detectedCommissionVatRates.map((rate) => `${rate}%`).join(', ')
+                          : 'None'
+                      }
+                    />
+                    <MetadataRow
+                      label="Detected shipping modes"
+                      value={logoPreview.executionSnapshotGuard.detectedShippingModes.join(', ') || 'None'}
+                    />
+                  </MetadataGroup>
+                  <ReadinessList title="Execution snapshot blockers" items={logoPreview.executionSnapshotGuard.blockers} tone="danger" />
+                  <ReadinessList title="Execution snapshot warnings" items={logoPreview.executionSnapshotGuard.warnings} tone="warning" />
+                </details>
+                <details className="settlement-advanced-diagnostics">
+                  <summary>Vendor billing and payload diagnostics</summary>
+                  <MetadataGroup title="Vendor billing readiness">
+                    <MetadataRow label="Complete" value={logoPreview.vendorBillingReadiness.complete ? 'Yes' : 'No'} />
+                    <MetadataRow label="Missing fields" value={logoPreview.vendorBillingReadiness.missingFields.join(', ') || 'None'} />
+                    <MetadataRow label="Logo customer code" value={logoPreview.vendorBillingReadiness.logoCustomerCodePresent ? 'Present' : 'Missing'} />
+                    <MetadataRow label="Logo customer id" value={logoPreview.vendorBillingReadiness.logoCustomerIdPresent ? 'Present' : 'Missing'} />
+                    <MetadataRow label="E-invoice eligible" value={valueOrDash(logoPreview.vendorBillingReadiness.logoEinvoiceEligible)} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Product detail shape">
+                    <MetadataRow label="Payload exists" value={logoPreview.logoPayloadPreview ? 'Yes' : 'No'} />
+                    <MetadataRow label="itemCode" value={valueOrDash(productDetail?.itemCode)} />
+                    <MetadataRow label="itemType" value={valueOrDash(productDetail?.itemType)} />
+                  </MetadataGroup>
+                </details>
+              </>
+            ) : (
+              <p className="page-description">Load audit first, then use the next action to run Logo readiness.</p>
+            )}
+          </article>
+        ) : null}
+
+        {activeTab === 'invoices' ? (
+          <article className="settlement-tab-panel" role="tabpanel">
+            <h3>Commission Invoice Records</h3>
+            {activeInvoiceRecords.length ? (
+              <div className="settlement-alert op-tone-warning">
+                <strong>Active commission invoice record exists.</strong>
+                <p>Settlement cancellation should be blocked while a non-CANCELLED record exists.</p>
+              </div>
+            ) : null}
+            {invoiceRecords.length ? (
+              <OperationalTable
+                columns={['Record', 'Provider', 'Status', 'Invoice no', 'Retry', 'Diagnostics']}
+                className="settlement-invoice-table"
+                stickyHeader={false}
+              >
+                {invoiceRecords.map((record) => (
+                  <OperationalTableRow key={record.id}>
+                    <span>
+                      <strong>{record.id}</strong>
+                      <small>{formatDate(record.createdAt)}</small>
+                    </span>
+                    <span>{safeStatusLabel(record.provider)}</span>
+                    <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
+                    <span>{valueOrDash(record.invoiceNo)}</span>
+                    <span>{formatNumber(record.retryCount)}</span>
+                    <span>
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        onClick={() => void handleDiagnostics(record.id)}
+                        disabled={busyAction !== null}
+                      >
+                        Read diagnostics (read-only)
+                      </button>
+                    </span>
+                  </OperationalTableRow>
+                ))}
+              </OperationalTable>
+            ) : (
+              <p className="page-description">Run Logo readiness first, then use the next action to load commission invoice records.</p>
+            )}
+            {Object.values(diagnostics).length ? (
+              <details className="settlement-advanced-diagnostics" open>
+                <summary>Invoice diagnostics</summary>
+                {Object.values(diagnostics).map((item) => (
+                  <MetadataGroup key={item.record.id} title={`Diagnostics ${item.record.id}`}>
+                    <MetadataRow label="writesPerformed" value={String(item.writesPerformed)} />
+                    <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
+                    <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
+                    <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
+                    <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.present ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
+                    <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
+                    <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
+                  </MetadataGroup>
+                ))}
+              </details>
+            ) : null}
+          </article>
+        ) : null}
+
+        {activeTab === 'history' ? (
+          <article className="settlement-tab-panel" role="tabpanel">
+            <RecentApprovalsPanel
+              approvals={recentApprovals}
+              loading={recentApprovalsLoading}
+              activeApprovalId={selectedApprovalId}
+              onOpenApproval={(id) => void handleOpenRecentApproval(id)}
+            />
+          </article>
+        ) : null}
+      </section>
+
+      <details className="settlement-details-drawer">
+        <summary>Workspace details and advanced controls</summary>
+        <section className="settlement-db-banner">
+          <div>
+            <span className="eyebrow">Database source</span>
+            <strong>{valueOrDash(getDatabaseSourceLabel(health))}</strong>
+            <small>
+              Host {valueOrDash(health?.financeAuditMetadata?.databaseHost ?? health?.databaseSource?.databaseHost)}
+              {' · '}
+              DB {valueOrDash(health?.financeAuditMetadata?.databaseName ?? health?.databaseSource?.databaseName)}
+              {' · '}
+              Schema {health?.financeAuditMetadata?.schemaReady === false ? 'not ready' : 'ready/unknown'}
+            </small>
+          </div>
+          {health?.databaseSource?.duplicateDatabaseUrlDefinitionsDetected ? (
+            <StatusBadge tone="warning">Multiple DATABASE_URL definitions detected</StatusBadge>
+          ) : (
+            <StatusBadge tone="success">Secret-safe diagnostics</StatusBadge>
+          )}
+        </section>
+        <div className="op-toolbar settlement-toolbar" aria-label="Advanced settlement approval controls">
+          <label>
+            <span>Approval id</span>
+            <input value={approvalId} onChange={(event) => setApprovalId(event.target.value)} placeholder="SettlementApproval id" />
+          </label>
+          <button type="button" className="button button-secondary" onClick={handleFetchApproval} disabled={busyAction !== null || !approvalId.trim()}>
+            Fetch approval detail (read-only)
+          </button>
+          <button type="button" className="button button-danger" onClick={handleCancel} disabled={busyAction !== null || !selectedApprovalId}>
+            Cancel DRAFT/APPROVED (writes local DB)
+          </button>
+        </div>
+        {approval ? (
+          <MetadataGroup title="Approval detail">
+            <MetadataRow label="Approval id" value={approval.id} />
+            <MetadataRow label="Created at" value={formatDate(approval.createdAt)} />
+            <MetadataRow label="Approved at" value={formatDate(approval.approvedAt)} />
+            <MetadataRow label="Approved by" value={valueOrDash(approval.approvedBy)} />
+            <MetadataRow label="Cancelled at" value={formatDate(approval.cancelledAt)} />
+            <MetadataRow label="Cancelled by" value={valueOrDash(approval.cancelledBy)} />
+            <MetadataRow label="Notes" value={valueOrDash(approval.notes)} />
+          </MetadataGroup>
+        ) : null}
+      </details>
     </section>
   );
 }
