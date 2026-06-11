@@ -59,6 +59,19 @@ export type SettlementApprovalPreview = {
     unmatchedAllocations: string[];
     candidateRowCount: number;
   };
+  selectedOrderDiagnostics?: Array<{
+    requestedIdentifier: string;
+    matched: boolean;
+    matchedOrderNumber: string | null;
+    matchedShopifyOrderId: string | null;
+    financeLedgerEntryId: string | null;
+    candidateIncluded: boolean;
+    excludedReason: string | null;
+    lockedApprovalId: string | null;
+    lockedApprovalStatus: string | null;
+    currentSettlementStatus: string | null;
+    derivedSettlementStatus: string | null;
+  }>;
   summary: {
     grossSalesMinor: number;
     refundTotalMinor: number;

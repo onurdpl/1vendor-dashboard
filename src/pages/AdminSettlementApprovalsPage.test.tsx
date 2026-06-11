@@ -167,6 +167,114 @@ const selectedOrderPreviewResponse: SettlementApprovalPreview = {
     mixedShippingMode: false,
     candidateQualityWarnings: [],
   },
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1074',
+      matched: true,
+      matchedOrderNumber: '#1074',
+      matchedShopifyOrderId: 'shopify-order-1074',
+      financeLedgerEntryId: 'fle-sale-1',
+      candidateIncluded: true,
+      excludedReason: null,
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: 'PAYABLE',
+      derivedSettlementStatus: 'payable',
+    },
+  ],
+};
+
+const unmatchedSelectedOrderPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  candidateScope: 'selected_orders',
+  candidateSelectionSummary: {
+    requestedOrders: ['#1074'],
+    matchedOrders: [],
+    unmatchedOrders: ['#1074'],
+    requestedAllocations: [],
+    matchedAllocations: [],
+    unmatchedAllocations: [],
+    candidateRowCount: 0,
+  },
+  summary: {
+    ...previewResponse.summary,
+    grossSalesMinor: 0,
+    refundTotalMinor: 0,
+    commissionMinor: 0,
+    commissionVatMinor: 0,
+    netPayableMinor: 0,
+    eligibleRowCount: 0,
+    excludedActiveApprovalRowCount: 0,
+    detectedCommissionRates: [],
+    detectedCommissionVatRates: [],
+    detectedShippingModes: [],
+    detectedFinancialProfileSnapshotIds: [],
+    candidateQualityWarnings: [],
+  },
+  lines: [],
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1074',
+      matched: false,
+      matchedOrderNumber: null,
+      matchedShopifyOrderId: null,
+      financeLedgerEntryId: null,
+      candidateIncluded: false,
+      excludedReason: 'No finance ledger row matched this selected order.',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: null,
+      derivedSettlementStatus: null,
+    },
+  ],
+};
+
+const ineligibleSelectedOrderPreviewResponse: SettlementApprovalPreview = {
+  ...unmatchedSelectedOrderPreviewResponse,
+  candidateSelectionSummary: {
+    ...unmatchedSelectedOrderPreviewResponse.candidateSelectionSummary,
+    matchedOrders: ['#1074'],
+    unmatchedOrders: [],
+    candidateRowCount: 1,
+  },
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1074',
+      matched: true,
+      matchedOrderNumber: '#1074',
+      matchedShopifyOrderId: 'shopify-order-1074',
+      financeLedgerEntryId: 'fle-sale-1074',
+      candidateIncluded: false,
+      excludedReason: 'Excluded because row is not payable or partially refunded.',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'accruing',
+    },
+  ],
+};
+
+const lockedSelectedOrderPreviewResponse: SettlementApprovalPreview = {
+  ...ineligibleSelectedOrderPreviewResponse,
+  summary: {
+    ...ineligibleSelectedOrderPreviewResponse.summary,
+    excludedActiveApprovalRowCount: 1,
+  },
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1074',
+      matched: true,
+      matchedOrderNumber: '#1074',
+      matchedShopifyOrderId: 'shopify-order-1074',
+      financeLedgerEntryId: 'fle-sale-1074',
+      candidateIncluded: false,
+      excludedReason: 'Excluded because row already belongs to active settlement approval.',
+      lockedApprovalId: 'approval-locked-1074',
+      lockedApprovalStatus: 'APPROVED',
+      currentSettlementStatus: 'PAYABLE',
+      derivedSettlementStatus: 'payable',
+    },
+  ],
 };
 
 const selectedAllocationPreviewResponse: SettlementApprovalPreview = {
@@ -498,6 +606,7 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Next: Preview settlement candidates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Preview Settlement' })).toBeInTheDocument();
     expect(screen.getByText('Preview not generated yet.')).toBeInTheDocument();
+    expect(screen.queryByText('TRY 0.00')).not.toBeInTheDocument();
     expect(screen.getByText('Candidate Selected')).toBeInTheDocument();
     expect(screen.getByText('Invoice Records')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/vendor_dashboard_dev/i)).toBeInTheDocument());
@@ -626,6 +735,61 @@ describe('Finance Settlement approval admin UI', () => {
       selectedAllocationIds: [],
       notes: 'Admin settlement approval draft',
     }));
+  });
+
+  it('shows selected-order no-match diagnostics without marking quality clean', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(unmatchedSelectedOrderPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1074');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+
+    await waitFor(() => expect(screen.getByText('Selected Order Diagnostics')).toBeInTheDocument());
+    expect(screen.getByText('No finance ledger row matched this selected order.')).toBeInTheDocument();
+    expect(screen.getAllByText('NO MATCH').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.')).not.toBeInTheDocument();
+    expect(screen.queryByText('CLEAN')).not.toBeInTheDocument();
+    expect(screen.getAllByText('TRY 0.00').length).toBeGreaterThan(0);
+  });
+
+  it('shows selected-order matched but ineligible diagnostics', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(ineligibleSelectedOrderPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1074');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+
+    await waitFor(() => expect(screen.getByText('Selected Order Diagnostics')).toBeInTheDocument());
+    expect(screen.getByText('Excluded because row is not payable or partially refunded.')).toBeInTheDocument();
+    expect(screen.getByText('fle-sale-1074')).toBeInTheDocument();
+    expect(screen.getAllByText('EMPTY').length).toBeGreaterThan(0);
+    expect(screen.queryByText('CLEAN')).not.toBeInTheDocument();
+  });
+
+  it('shows selected-order locked approval diagnostics and opens the linked approval', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce({
+      ...selectedRecentApproval,
+      id: 'approval-locked-1074',
+      status: 'approved',
+    });
+    previewSettlementApprovalMock.mockResolvedValue(lockedSelectedOrderPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1074');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+
+    await waitFor(() => expect(screen.getByText('Selected Order Diagnostics')).toBeInTheDocument());
+    expect(screen.getByText('Excluded because row already belongs to active settlement approval.')).toBeInTheDocument();
+    expect(screen.getByText('approval-locked-1074')).toBeInTheDocument();
+
+    const diagnosticsPanel = screen.getByText('Selected Order Diagnostics').closest('section') ?? document.body;
+    await userEvent.click(within(diagnosticsPanel as HTMLElement).getByRole('button', { name: 'Open' }));
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-locked-1074'));
+    expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-locked-1074');
   });
 
   it('sends selected allocation identifiers and renders unmatched allocation feedback', async () => {

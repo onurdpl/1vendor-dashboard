@@ -39,6 +39,20 @@ type CandidateSelectionSummaryDto = {
   candidateRowCount: number;
 };
 
+type SelectedOrderDiagnosticDto = {
+  requestedIdentifier: string;
+  matched: boolean;
+  matchedOrderNumber: string | null;
+  matchedShopifyOrderId: string | null;
+  financeLedgerEntryId: string | null;
+  candidateIncluded: boolean;
+  excludedReason: string | null;
+  lockedApprovalId: string | null;
+  lockedApprovalStatus: string | null;
+  currentSettlementStatus: string | null;
+  derivedSettlementStatus: string | null;
+};
+
 type SettlementApprovalLedgerRow = {
   id: string;
   vendorId: string;
@@ -128,6 +142,7 @@ export type SettlementApprovalPreviewDto = {
   periodEnd: string | null;
   candidateScope: CandidateScope;
   candidateSelectionSummary: CandidateSelectionSummaryDto;
+  selectedOrderDiagnostics: SelectedOrderDiagnosticDto[];
   summary: SettlementApprovalTotalsDto & {
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;
@@ -596,10 +611,139 @@ function normalizeOrderNumber(value: string) {
   return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
 }
 
+function normalizeOrderNumberLoose(value: string | null | undefined) {
+  return value?.trim().replace(/^#/, '') ?? '';
+}
+
 function orderMatchesIdentifier(row: SettlementApprovalLedgerRow, identifier: string) {
   const orderId = row.vendorAllocation?.sourceShopifyOrderId ?? '';
   const orderNumber = row.vendorAllocation?.sourceShopifyOrderNumber ?? '';
   return orderId === identifier || orderNumber === identifier || orderNumber === normalizeOrderNumber(identifier);
+}
+
+function orderNumberFormatMismatchesIdentifier(row: SettlementApprovalLedgerRow, identifier: string) {
+  const orderNumber = row.vendorAllocation?.sourceShopifyOrderNumber ?? '';
+  const normalizedStoredNumber = normalizeOrderNumberLoose(orderNumber);
+  const normalizedIdentifier = normalizeOrderNumberLoose(identifier);
+  return Boolean(
+    normalizedStoredNumber &&
+      normalizedIdentifier &&
+      normalizedStoredNumber === normalizedIdentifier &&
+      !orderMatchesIdentifier(row, identifier),
+  );
+}
+
+function getActiveApprovalLine(row: SettlementApprovalLedgerRow) {
+  return row.settlementApprovalLines.find(
+    (line) => line.settlementApproval.status !== SettlementApprovalStatus.CANCELLED,
+  ) ?? null;
+}
+
+function buildMatchedOrderDiagnostic(
+  requestedIdentifier: string,
+  row: SettlementApprovalLedgerRow,
+): SelectedOrderDiagnosticDto {
+  const explanation = buildSettlementEligibilityExplanation(row);
+  const activeApprovalLine = getActiveApprovalLine(row);
+  const candidateIncluded = rowIsEligible(row) && !activeApprovalLine;
+
+  return {
+    requestedIdentifier,
+    matched: true,
+    matchedOrderNumber: row.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+    matchedShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
+    financeLedgerEntryId: row.id,
+    candidateIncluded,
+    excludedReason: candidateIncluded ? null : explanation.eligibilityReason,
+    lockedApprovalId: activeApprovalLine?.settlementApproval.id ?? null,
+    lockedApprovalStatus: activeApprovalLine?.settlementApproval.status ?? null,
+    currentSettlementStatus: row.settlementStatus,
+    derivedSettlementStatus: explanation.derivedSettlementStatus,
+  };
+}
+
+function buildUnmatchedOrderDiagnostic(
+  requestedIdentifier: string,
+  rows: SettlementApprovalLedgerRow[],
+  crossVendorRows: SettlementApprovalLedgerRow[],
+): SelectedOrderDiagnosticDto {
+  const formatMismatchRow = rows.find((row) => orderNumberFormatMismatchesIdentifier(row, requestedIdentifier));
+  if (formatMismatchRow) {
+    const explanation = buildSettlementEligibilityExplanation(formatMismatchRow);
+    return {
+      requestedIdentifier,
+      matched: false,
+      matchedOrderNumber: formatMismatchRow.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+      matchedShopifyOrderId: formatMismatchRow.vendorAllocation?.sourceShopifyOrderId ?? null,
+      financeLedgerEntryId: null,
+      candidateIncluded: false,
+      excludedReason:
+        'A finance ledger row matched this order after order-number normalization, but the stored order number format did not match the selected identifier.',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: formatMismatchRow.settlementStatus,
+      derivedSettlementStatus: explanation.derivedSettlementStatus,
+    };
+  }
+
+  const crossVendorRow = crossVendorRows.find((row) => orderMatchesIdentifier(row, requestedIdentifier));
+  if (crossVendorRow) {
+    const explanation = buildSettlementEligibilityExplanation(crossVendorRow);
+    return {
+      requestedIdentifier,
+      matched: false,
+      matchedOrderNumber: crossVendorRow.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+      matchedShopifyOrderId: crossVendorRow.vendorAllocation?.sourceShopifyOrderId ?? null,
+      financeLedgerEntryId: null,
+      candidateIncluded: false,
+      excludedReason: 'A finance ledger row matched this selected order, but not for the selected vendor.',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: crossVendorRow.settlementStatus,
+      derivedSettlementStatus: explanation.derivedSettlementStatus,
+    };
+  }
+
+  return {
+    requestedIdentifier,
+    matched: false,
+    matchedOrderNumber: null,
+    matchedShopifyOrderId: null,
+    financeLedgerEntryId: null,
+    candidateIncluded: false,
+    excludedReason: 'No finance ledger row matched this selected order.',
+    lockedApprovalId: null,
+    lockedApprovalStatus: null,
+    currentSettlementStatus: null,
+    derivedSettlementStatus: null,
+  };
+}
+
+function buildSelectedOrderDiagnostics(
+  rows: SettlementApprovalLedgerRow[],
+  input: SettlementApprovalInput,
+  crossVendorRows: SettlementApprovalLedgerRow[] = [],
+): SelectedOrderDiagnosticDto[] {
+  const requestedOrders = normalizeSelectionValues([
+    ...(input.selectedOrderIds ?? []),
+    ...(input.selectedShopifyOrderIds ?? []),
+  ]);
+  if (determineCandidateScope(input) !== 'selected_orders' || requestedOrders.length === 0) {
+    return [];
+  }
+
+  return requestedOrders.map((requestedIdentifier) => {
+    const matchedRows = rows.filter((row) => orderMatchesIdentifier(row, requestedIdentifier));
+    const includedRow = matchedRows.find((row) => rowIsEligible(row) && !rowHasActiveApproval(row));
+    const eligibleLockedRow = matchedRows.find((row) => rowIsEligible(row) && rowHasActiveApproval(row));
+    const firstMatchedRow = includedRow ?? eligibleLockedRow ?? matchedRows[0];
+
+    if (firstMatchedRow) {
+      return buildMatchedOrderDiagnostic(requestedIdentifier, firstMatchedRow);
+    }
+
+    return buildUnmatchedOrderDiagnostic(requestedIdentifier, rows, crossVendorRows);
+  });
 }
 
 function determineCandidateScope(input: SettlementApprovalInput): CandidateScope {
@@ -759,6 +903,108 @@ async function buildApprovalPreview(
       createdAt: 'asc',
     },
   });
+  const requestedOrders = normalizeSelectionValues([
+    ...(input.selectedOrderIds ?? []),
+    ...(input.selectedShopifyOrderIds ?? []),
+  ]);
+  const selectedOrderNumbers = Array.from(new Set([
+    ...requestedOrders,
+    ...requestedOrders.map(normalizeOrderNumber),
+  ]));
+  const crossVendorRows = determineCandidateScope(input) === 'selected_orders' && requestedOrders.length
+    ? await tx.financeLedgerEntry.findMany({
+      where: {
+        vendorId: {
+          not: input.vendorId,
+        },
+        entryType: {
+          in: ['sale', 'refund'],
+        },
+        vendorAllocation: {
+          OR: [
+            {
+              sourceShopifyOrderId: {
+                in: requestedOrders,
+              },
+            },
+            {
+              sourceShopifyOrderNumber: {
+                in: selectedOrderNumbers,
+              },
+            },
+          ],
+        },
+      },
+      select: {
+        id: true,
+        vendorId: true,
+        entryType: true,
+        amount: true,
+        payoutStatus: true,
+        description: true,
+        commissionPercentSnapshot: true,
+        commissionVatPercentSnapshot: true,
+        deductShippingEnabledSnapshot: true,
+        shippingModeSnapshot: true,
+        fixedShippingFeeSnapshot: true,
+        shippingCostSnapshot: true,
+        shippingVatAmountSnapshot: true,
+        shippingCostSourceSnapshot: true,
+        shippingCostProviderSnapshot: true,
+        financialProfileIdSnapshot: true,
+        settlementStatus: true,
+        settlementEligibleAt: true,
+        accruedAt: true,
+        payableAt: true,
+        settledAt: true,
+        settlementHoldReason: true,
+        createdAt: true,
+        vendorAllocation: {
+          select: {
+            id: true,
+            allocationStatus: true,
+            fulfillmentStatus: true,
+            shippingStatus: true,
+            sourceShopifyOrderId: true,
+            sourceShopifyOrderNumber: true,
+            fulfillment: {
+              select: {
+                fulfilledAt: true,
+              },
+            },
+            refundRecords: {
+              select: {
+                id: true,
+                sourceShopifyRefundId: true,
+                amount: true,
+              },
+            },
+          },
+        },
+        settlementApprovalLines: {
+          where: {
+            settlementApproval: {
+              status: {
+                in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
+              },
+            },
+          },
+          select: {
+            id: true,
+            settlementApproval: {
+              select: {
+                id: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    })
+    : [];
 
   const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
   const eligibleRows = candidateSelection.rows.filter(rowIsEligible);
@@ -775,6 +1021,11 @@ async function buildApprovalPreview(
     periodEnd: toIso(input.periodEnd),
     candidateScope: candidateSelection.candidateScope,
     candidateSelectionSummary: candidateSelection.candidateSelectionSummary,
+    selectedOrderDiagnostics: buildSelectedOrderDiagnostics(
+      rows as SettlementApprovalLedgerRow[],
+      input,
+      crossVendorRows as SettlementApprovalLedgerRow[],
+    ),
     summary: {
       ...totals,
       eligibleRowCount: lines.length,

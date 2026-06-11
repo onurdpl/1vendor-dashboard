@@ -303,6 +303,35 @@ describe('settlement approval foundation', () => {
       candidateRowCount: 1,
     });
     expect(preview.summary.eligibleRowCount).toBe(1);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1074',
+        matched: true,
+        matchedOrderNumber: '#1074',
+        matchedShopifyOrderId: 'shopify-order-1074',
+        financeLedgerEntryId: 'sale-1074',
+        candidateIncluded: true,
+        excludedReason: null,
+        lockedApprovalId: null,
+        currentSettlementStatus: 'PAYABLE',
+        derivedSettlementStatus: 'payable',
+      }),
+      expect.objectContaining({
+        requestedIdentifier: '#9999',
+        matched: false,
+        financeLedgerEntryId: null,
+        candidateIncluded: false,
+        excludedReason: 'No finance ledger row matched this selected order.',
+      }),
+      expect.objectContaining({
+        requestedIdentifier: 'shopify-order-1074',
+        matched: true,
+        matchedOrderNumber: '#1074',
+        matchedShopifyOrderId: 'shopify-order-1074',
+        financeLedgerEntryId: 'sale-1074',
+        candidateIncluded: true,
+      }),
+    ]);
     expect(preview.lines).toEqual([
       expect.objectContaining({
         financeLedgerEntryId: 'sale-1074',
@@ -353,6 +382,122 @@ describe('settlement approval foundation', () => {
     expect(preview.candidateSelectionSummary.candidateRowCount).toBe(0);
     expect(preview.summary.eligibleRowCount).toBe(0);
     expect(preview.lines).toEqual([]);
+  });
+
+  it('explains unmatched selected orders without changing candidate math', async () => {
+    prismaMock.financeLedgerEntry.findMany
+      .mockResolvedValueOnce([
+        buildLedgerRow({
+          id: 'sale-1073',
+          entryType: 'sale',
+          amount: 500,
+          sourceShopifyOrderId: 'shopify-order-1073',
+          sourceShopifyOrderNumber: '#1073',
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074'],
+    });
+
+    expect(preview.candidateSelectionSummary).toMatchObject({
+      requestedOrders: ['#1074'],
+      matchedOrders: [],
+      unmatchedOrders: ['#1074'],
+      candidateRowCount: 0,
+    });
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      {
+        requestedIdentifier: '#1074',
+        matched: false,
+        matchedOrderNumber: null,
+        matchedShopifyOrderId: null,
+        financeLedgerEntryId: null,
+        candidateIncluded: false,
+        excludedReason: 'No finance ledger row matched this selected order.',
+        lockedApprovalId: null,
+        lockedApprovalStatus: null,
+        currentSettlementStatus: null,
+        derivedSettlementStatus: null,
+      },
+    ]);
+  });
+
+  it('explains selected orders that match but are not eligible', async () => {
+    prismaMock.financeLedgerEntry.findMany
+      .mockResolvedValueOnce([
+        buildLedgerRow({
+          id: 'sale-1074',
+          entryType: 'sale',
+          amount: 1000,
+          fulfilled: false,
+          sourceShopifyOrderId: 'shopify-order-1074',
+          sourceShopifyOrderNumber: '#1074',
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074'],
+    });
+
+    expect(preview.candidateSelectionSummary.candidateRowCount).toBe(1);
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1074',
+        matched: true,
+        matchedOrderNumber: '#1074',
+        matchedShopifyOrderId: 'shopify-order-1074',
+        financeLedgerEntryId: 'sale-1074',
+        candidateIncluded: false,
+        excludedReason: 'Excluded because row is not payable or partially refunded.',
+        lockedApprovalId: null,
+        currentSettlementStatus: 'ACCRUING',
+        derivedSettlementStatus: 'accruing',
+      }),
+    ]);
+  });
+
+  it('explains selected orders locked by an active settlement approval', async () => {
+    prismaMock.financeLedgerEntry.findMany
+      .mockResolvedValueOnce([
+        buildLedgerRow({
+          id: 'sale-1074',
+          entryType: 'sale',
+          amount: 1000,
+          activeApproval: true,
+          sourceShopifyOrderId: 'shopify-order-1074',
+          sourceShopifyOrderNumber: '#1074',
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1074'],
+    });
+
+    expect(preview.candidateSelectionSummary.candidateRowCount).toBe(1);
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.summary.excludedActiveApprovalRowCount).toBe(1);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1074',
+        matched: true,
+        financeLedgerEntryId: 'sale-1074',
+        candidateIncluded: false,
+        excludedReason: 'Excluded because row already belongs to active settlement approval.',
+        lockedApprovalId: 'approval-sale-1074',
+        lockedApprovalStatus: 'APPROVED',
+        currentSettlementStatus: 'PAYABLE',
+        derivedSettlementStatus: 'payable',
+      }),
+    ]);
   });
 
   it('lists recent settlement approvals for a vendor newest first without writes', async () => {

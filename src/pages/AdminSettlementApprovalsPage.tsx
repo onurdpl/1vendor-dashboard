@@ -53,7 +53,7 @@ type WorkflowStep = {
   details: Array<{ label: string; value: unknown }>;
 };
 
-type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED';
+type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED' | 'NOT READY' | 'EMPTY' | 'NO MATCH';
 type CandidateScopeMode = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
 type WorkspaceTab = 'audit' | 'logo' | 'invoices' | 'history';
 
@@ -68,6 +68,8 @@ type HeaderMetric = {
   label: string;
   value: ReactNode;
 };
+
+type SelectedOrderDiagnostic = NonNullable<SettlementApprovalPreview['selectedOrderDiagnostics']>[number];
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
@@ -143,7 +145,10 @@ function getQualityTone(classification: QualityClassification) {
   if (classification === 'BLOCKED') {
     return 'danger';
   }
-  return 'warning';
+  if (classification === 'NO MATCH' || classification === 'WARNING') {
+    return 'warning';
+  }
+  return 'neutral';
 }
 
 function getScopeLabel(scope: string) {
@@ -450,6 +455,79 @@ function CandidateSelectionSummary({ preview }: { preview: SettlementApprovalPre
   );
 }
 
+function SelectedOrderDiagnostics({
+  diagnostics,
+  onOpenApproval,
+}: {
+  diagnostics: SelectedOrderDiagnostic[];
+  onOpenApproval: (id: string) => void;
+}) {
+  if (!diagnostics.length) {
+    return null;
+  }
+
+  return (
+    <section className="settlement-selected-order-diagnostics">
+      <div className="settlement-quality-heading">
+        <div>
+          <h3>Selected Order Diagnostics</h3>
+        </div>
+      </div>
+      <div className="settlement-selected-order-list">
+        {diagnostics.map((diagnostic) => {
+          const stateLabel = diagnostic.candidateIncluded
+            ? 'Included'
+            : diagnostic.matched
+              ? 'Excluded'
+              : 'No match';
+          const stateTone = diagnostic.candidateIncluded
+            ? 'success'
+            : diagnostic.matched
+              ? 'warning'
+              : 'danger';
+
+          return (
+            <article key={diagnostic.requestedIdentifier} className="settlement-selected-order-row">
+              <div className="settlement-selected-order-main">
+                <div>
+                  <strong>{diagnostic.requestedIdentifier}</strong>
+                  <small>
+                    {diagnostic.matchedOrderNumber ? `Order ${diagnostic.matchedOrderNumber}` : 'No matched order number'}
+                    {diagnostic.matchedShopifyOrderId ? ` · Shopify ${diagnostic.matchedShopifyOrderId}` : ''}
+                  </small>
+                </div>
+                <StatusBadge tone={stateTone}>{stateLabel}</StatusBadge>
+              </div>
+              <div className="settlement-selected-order-details">
+                <SummaryField label="Ledger row" value={diagnostic.financeLedgerEntryId ?? 'None'} />
+                <SummaryField label="Current status" value={safeStatusLabel(diagnostic.currentSettlementStatus ?? 'Unknown')} />
+                <SummaryField label="Derived status" value={safeStatusLabel(diagnostic.derivedSettlementStatus ?? 'Unknown')} />
+                <SummaryField label="Reason" value={diagnostic.excludedReason ?? 'Candidate row is included.'} />
+              </div>
+              {diagnostic.lockedApprovalId ? (
+                <div className="settlement-selected-order-lock">
+                  <span>
+                    Locked by {safeStatusLabel(diagnostic.lockedApprovalStatus ?? 'approval')} approval
+                    {' '}
+                    <strong>{diagnostic.lockedApprovalId}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-compact"
+                    onClick={() => onOpenApproval(diagnostic.lockedApprovalId!)}
+                  >
+                    Open
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function CandidateQualityCard({
   preview,
   classification,
@@ -614,6 +692,7 @@ export function AdminSettlementApprovalsPage() {
     preview.summary.excludedActiveApprovalRowCount > 0,
   );
   const candidateQualityWarnings = safeArray<string>(preview?.summary.candidateQualityWarnings);
+  const selectedOrderDiagnostics = safeArray<SelectedOrderDiagnostic>(preview?.selectedOrderDiagnostics);
   const selectedOrderNumberList = parseMultiValueInput(selectedOrderNumbers);
   const selectedShopifyOrderIdList = parseMultiValueInput(selectedShopifyOrderIds);
   const selectedAllocationIdList = parseMultiValueInput(selectedAllocationIds);
@@ -645,16 +724,31 @@ export function AdminSettlementApprovalsPage() {
     logoPreview?.vendorBillingReadiness.logoCustomerCodePresent &&
     logoPreview.vendorBillingReadiness.logoCustomerIdPresent,
   );
+  const selectedOrderNoMatch = Boolean(
+    preview?.candidateScope === 'selected_orders' &&
+    selectedOrderDiagnostics.length > 0 &&
+    selectedOrderDiagnostics.every((diagnostic) => !diagnostic.matched),
+  );
   const candidateQualityClassification: QualityClassification = !preview
-    ? 'WARNING'
-    : preview.summary.mixedCommissionVatRate
-      ? 'BLOCKED'
-      : preview.summary.mixedShippingMode || preview.summary.detectedFinancialProfileSnapshotIds.length > 1
-        ? 'WARNING'
-        : 'CLEAN';
+    ? 'NOT READY'
+    : selectedOrderNoMatch
+      ? 'NO MATCH'
+      : preview.candidateSelectionSummary.candidateRowCount === 0 || preview.summary.eligibleRowCount === 0
+        ? 'EMPTY'
+        : preview.summary.mixedCommissionVatRate
+          ? 'BLOCKED'
+          : preview.summary.mixedShippingMode || preview.summary.detectedFinancialProfileSnapshotIds.length > 1
+            ? 'WARNING'
+            : 'CLEAN';
   const candidateQualityReasons = (() => {
     if (!preview) {
       return [];
+    }
+    if (candidateQualityClassification === 'NO MATCH') {
+      return ['Selected orders did not match finance ledger rows for this candidate scope.'];
+    }
+    if (candidateQualityClassification === 'EMPTY') {
+      return ['No candidate rows are available for this preview.'];
     }
     const reasons: string[] = [];
     if (preview.summary.mixedCommissionVatRate) {
@@ -666,7 +760,9 @@ export function AdminSettlementApprovalsPage() {
     if (preview.summary.detectedFinancialProfileSnapshotIds.length > 1) {
       reasons.push('Multiple financial profile snapshot groups are included.');
     }
-    return reasons.length ? reasons : ['Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.'];
+    return reasons.length || preview.summary.eligibleRowCount === 0
+      ? reasons
+      : ['Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.'];
   })();
   const candidateScopeReady = candidateScopeMode !== 'date_range' || Boolean(periodStart || periodEnd);
   const draftBlockedByAcknowledgement = candidateQualityClassification === 'BLOCKED' && !mixedVatAcknowledged;
@@ -709,7 +805,7 @@ export function AdminSettlementApprovalsPage() {
     ? formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)
     : 'Not previewed';
   const workspaceApprovalStatus = approval?.status ?? 'not created';
-  const workspaceQualityLabel = preview ? candidateQualityClassification : 'Not previewed';
+  const workspaceQualityLabel = candidateQualityClassification;
   const selectedOrdersOrAllocations = (() => {
     if (candidateScopeMode === 'selected_orders') {
       return formatStringList([...selectedOrderNumberList, ...selectedShopifyOrderIdList]);
@@ -754,7 +850,7 @@ export function AdminSettlementApprovalsPage() {
     { label: 'Vendor', value: vendorId.trim() || 'No vendor selected' },
     { label: 'Scope', value: getScopeLabel(candidateScopeMode) },
     { label: 'Rows', value: workspaceRows },
-    { label: 'Quality', value: <StatusBadge tone={workspaceQualityLabel === 'Not previewed' ? 'neutral' : getQualityTone(workspaceQualityLabel)}>{workspaceQualityLabel}</StatusBadge> },
+    { label: 'Quality', value: <StatusBadge tone={getQualityTone(workspaceQualityLabel)}>{workspaceQualityLabel}</StatusBadge> },
     { label: 'Approval', value: <StatusBadge status={workspaceApprovalStatus}>{safeStatusLabel(workspaceApprovalStatus)}</StatusBadge> },
     { label: 'Gross Sales', value: workspaceGrossSales },
     { label: 'Net Payable', value: workspaceNetPayable },
@@ -1307,6 +1403,10 @@ export function AdminSettlementApprovalsPage() {
                 requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
                 acknowledged={mixedVatAcknowledged}
                 onAcknowledgedChange={setMixedVatAcknowledged}
+              />
+              <SelectedOrderDiagnostics
+                diagnostics={selectedOrderDiagnostics}
+                onOpenApproval={(id) => void handleOpenRecentApproval(id)}
               />
               <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
             </>
