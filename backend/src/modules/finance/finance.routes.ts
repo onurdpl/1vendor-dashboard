@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { SettlementCommissionInvoiceProvider } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
@@ -29,6 +30,7 @@ import {
 } from './settlement-approval.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
 import {
+  createPendingRecordFromImmutableRequestSnapshot,
   findBySettlementApproval as findSettlementCommissionInvoiceRecords,
   getSettlementCommissionInvoiceDiagnostics,
 } from './settlement-commission-invoice-record.service.js';
@@ -513,6 +515,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       return previewSettlementLogoCommissionInvoice(id);
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-approvals/:id/logo-commission-invoice-request-snapshot',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return createPendingRecordFromImmutableRequestSnapshot(
+        id,
+        SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+        { createdBy: request.authUser.id },
+      );
     },
   );
 

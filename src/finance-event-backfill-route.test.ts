@@ -7,6 +7,7 @@ const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
 const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
 const getSettlementCommissionInvoiceDiagnosticsMock = vi.hoisted(() => vi.fn());
+const createPendingRecordFromImmutableRequestSnapshotMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -31,6 +32,7 @@ vi.mock('../backend/src/modules/finance/settlement-commission-invoice-preview.se
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-commission-invoice-record.service.js', () => ({
+  createPendingRecordFromImmutableRequestSnapshot: createPendingRecordFromImmutableRequestSnapshotMock,
   findBySettlementApproval: findSettlementCommissionInvoiceRecordsMock,
   getSettlementCommissionInvoiceDiagnostics: getSettlementCommissionInvoiceDiagnosticsMock,
 }));
@@ -70,6 +72,7 @@ describe('finance event backfill route', () => {
     previewSettlementLogoCommissionInvoiceMock.mockReset();
     findSettlementCommissionInvoiceRecordsMock.mockReset();
     getSettlementCommissionInvoiceDiagnosticsMock.mockReset();
+    createPendingRecordFromImmutableRequestSnapshotMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -372,6 +375,70 @@ describe('finance event backfill route', () => {
     expect(allowed).toEqual(preview);
     expect(allowed?.writesPerformed).toBe(false);
     expect(previewSettlementLogoCommissionInvoiceMock).toHaveBeenCalledWith('approval-1');
+  });
+
+  it('persists immutable Logo request snapshots as pending local records for admins', async () => {
+    const posts = new Map<string, (request: { authUser?: { id?: string; role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { id?: string; role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const result = {
+      ok: true,
+      writesPerformed: true,
+      settlementApprovalId: 'approval-1',
+      provider: 'logo_isbasi',
+      status: 'pending',
+      blockers: [],
+      warnings: [],
+      record: {
+        id: 'record-1',
+        settlementApprovalId: 'approval-1',
+        provider: 'logo_isbasi',
+        status: 'pending',
+        requestSnapshot: {
+          requestSnapshotPresent: true,
+          payloadBuilderVersion: 'settlement-logo-request-v1',
+          requestBuiltAt: '2026-06-12T10:00:00.000Z',
+          snapshotSource: 'immutable_settlement_truth',
+        },
+      },
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+        payloadBuilderVersion: 'settlement-logo-request-v1',
+        requestBuiltAt: '2026-06-12T10:00:00.000Z',
+        snapshotSource: 'immutable_settlement_truth',
+      },
+    };
+    createPendingRecordFromImmutableRequestSnapshotMock.mockResolvedValueOnce(result);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const blocked = await posts.get('/admin/finance/settlement-approvals/:id/logo-commission-invoice-request-snapshot')?.(
+      { authUser: { id: 'vendor-user', role: 'vendor' }, params: { id: 'approval-1' } },
+      reply,
+    );
+    const allowed = await posts.get('/admin/finance/settlement-approvals/:id/logo-commission-invoice-request-snapshot')?.(
+      { authUser: { id: 'admin-user', role: 'admin' }, params: { id: 'approval-1' } },
+      reply,
+    );
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(allowed).toEqual(result);
+    expect(allowed?.writesPerformed).toBe(true);
+    expect(createPendingRecordFromImmutableRequestSnapshotMock).toHaveBeenCalledWith(
+      'approval-1',
+      'LOGO_ISBASI',
+      { createdBy: 'admin-user' },
+    );
   });
 
   it('returns settlement commission invoice records without writes', async () => {

@@ -232,8 +232,23 @@ export type SettlementCommissionInvoiceRecord = {
   retryCount: number;
   lastRetriedAt: string | null;
   cancelledAt: string | null;
-  requestSnapshotJson?: unknown;
-  responseSnapshotJson?: unknown;
+  requestSnapshot: SettlementCommissionInvoiceRequestSnapshotMetadata;
+  responseSnapshot: SettlementCommissionInvoiceSnapshotMetadata;
+  documentSnapshot: SettlementCommissionInvoiceSnapshotMetadata;
+};
+
+export type SettlementCommissionInvoiceSnapshotMetadata = {
+  present: boolean;
+  type: string;
+  topLevelKeys: string[];
+  approximateSizeBytes: number;
+};
+
+export type SettlementCommissionInvoiceRequestSnapshotMetadata = SettlementCommissionInvoiceSnapshotMetadata & {
+  requestSnapshotPresent: boolean;
+  payloadBuilderVersion: string | null;
+  requestBuiltAt: string | null;
+  snapshotSource: 'immutable_settlement_truth' | null;
 };
 
 export type SettlementCommissionInvoiceRecordsResponse = {
@@ -241,6 +256,18 @@ export type SettlementCommissionInvoiceRecordsResponse = {
   writesPerformed: false;
   settlementApprovalId: string;
   records: SettlementCommissionInvoiceRecord[];
+};
+
+export type PersistSettlementLogoCommissionInvoiceRequestSnapshotResponse = {
+  ok: boolean;
+  writesPerformed: boolean;
+  settlementApprovalId: string;
+  provider: string;
+  status: 'pending' | 'blocked';
+  blockers: string[];
+  warnings: string[];
+  record: SettlementCommissionInvoiceRecord | null;
+  requestSnapshot: SettlementCommissionInvoiceRequestSnapshotMetadata | null;
 };
 
 export type SettlementCommissionInvoiceDiagnostics = {
@@ -260,12 +287,11 @@ export type SettlementCommissionInvoiceDiagnostics = {
       invoiceNo: string | null;
     };
     timestamps: Record<string, string | null>;
-    snapshots: Record<string, {
-      present: boolean;
-      type: string;
-      topLevelKeys: string[];
-      approximateSizeBytes: number;
-    }>;
+    snapshots: {
+      request: SettlementCommissionInvoiceRequestSnapshotMetadata;
+      response: SettlementCommissionInvoiceSnapshotMetadata;
+      document: SettlementCommissionInvoiceSnapshotMetadata;
+    };
     failure: {
       failureCode: string | null;
       failureMessage: string | null;
@@ -324,6 +350,13 @@ export function getSettlementApprovalAudit(id: string) {
 export function previewSettlementLogoCommissionInvoice(id: string) {
   return apiClient.post<SettlementLogoCommissionInvoicePreview>(
     `/admin/finance/settlement-approvals/${encodeURIComponent(id)}/logo-commission-invoice-preview`,
+    {},
+  );
+}
+
+export function persistSettlementLogoCommissionInvoiceRequestSnapshot(id: string) {
+  return apiClient.post<PersistSettlementLogoCommissionInvoiceRequestSnapshotResponse>(
+    `/admin/finance/settlement-approvals/${encodeURIComponent(id)}/logo-commission-invoice-request-snapshot`,
     {},
   );
 }

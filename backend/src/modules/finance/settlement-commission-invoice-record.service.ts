@@ -5,6 +5,7 @@ import {
   type SettlementCommissionInvoice,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { buildSettlementLogoCommissionInvoiceRequestSnapshot } from './settlement-logo-request-snapshot-builder.service.js';
 
 export type SettlementCommissionInvoiceRecordDto = {
   id: string;
@@ -22,9 +23,9 @@ export type SettlementCommissionInvoiceRecordDto = {
   documentContentType: string | null;
   documentSize: number | null;
   documentFetchedAt: string | null;
-  documentSnapshotJson: unknown;
-  requestSnapshotJson: unknown;
-  responseSnapshotJson: unknown;
+  requestSnapshot: RequestSnapshotMetadata;
+  responseSnapshot: SnapshotMetadata;
+  documentSnapshot: SnapshotMetadata;
   failureCode: string | null;
   failureMessage: string | null;
   failedAt: string | null;
@@ -63,6 +64,23 @@ export type IncrementSettlementCommissionInvoiceRetryInput = {
   settlementCommissionInvoiceId: string;
 };
 
+export type CreatePendingRecordFromImmutableRequestSnapshotInput = {
+  createdBy?: string | null;
+  invoiceDate?: string | Date | null;
+};
+
+export type CreatePendingRecordFromImmutableRequestSnapshotResult = {
+  ok: boolean;
+  writesPerformed: boolean;
+  settlementApprovalId: string;
+  provider: SettlementCommissionInvoiceRecordDto['provider'];
+  status: 'pending' | 'blocked';
+  blockers: string[];
+  warnings: string[];
+  record: SettlementCommissionInvoiceRecordDto | null;
+  requestSnapshot: RequestSnapshotMetadata | null;
+};
+
 export type SettlementCommissionInvoiceDiagnosticsDto = {
   ok: true;
   writesPerformed: false;
@@ -88,7 +106,7 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
       documentFetchedAt: string | null;
     };
     snapshots: {
-      request: SnapshotMetadata;
+      request: RequestSnapshotMetadata;
       response: SnapshotMetadata;
       document: SnapshotMetadata;
     };
@@ -106,6 +124,13 @@ type SnapshotMetadata = {
   approximateSizeBytes: number;
 };
 
+type RequestSnapshotMetadata = SnapshotMetadata & {
+  requestSnapshotPresent: boolean;
+  payloadBuilderVersion: string | null;
+  requestBuiltAt: string | null;
+  snapshotSource: 'immutable_settlement_truth' | null;
+};
+
 function toIso(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
@@ -116,6 +141,14 @@ function mapProvider(provider: SettlementCommissionInvoiceProvider) {
 
 function mapStatus(status: SettlementCommissionInvoiceStatus) {
   return status.toLowerCase() as SettlementCommissionInvoiceRecordDto['status'];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInvoiceRecordDto {
@@ -135,9 +168,9 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     documentContentType: record.documentContentType,
     documentSize: record.documentSize,
     documentFetchedAt: toIso(record.documentFetchedAt),
-    documentSnapshotJson: record.documentSnapshotJson,
-    requestSnapshotJson: record.requestSnapshotJson,
-    responseSnapshotJson: record.responseSnapshotJson,
+    requestSnapshot: getRequestSnapshotMetadata(record.requestSnapshotJson),
+    responseSnapshot: getSnapshotMetadata(record.responseSnapshotJson),
+    documentSnapshot: getSnapshotMetadata(record.documentSnapshotJson),
     failureCode: record.failureCode,
     failureMessage: record.failureMessage,
     failedAt: toIso(record.failedAt),
@@ -147,6 +180,20 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     cancelledBy: record.cancelledBy,
     cancelledAt: toIso(record.cancelledAt),
   };
+}
+
+function hasImmutableSettlementTruthShape(value: unknown) {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    value.provider === SettlementCommissionInvoiceProvider.LOGO_ISBASI &&
+    isRecord(value.settlementApprovalSnapshot) &&
+    isRecord(value.settlementBillingSnapshot) &&
+    isRecord(value.settlementLineSnapshotSummary) &&
+    isRecord(value.executionSnapshotGuard) &&
+    isRecord(value.logoPayload)
+  );
 }
 
 function getSnapshotMetadata(value: unknown): SnapshotMetadata {
@@ -178,6 +225,18 @@ function getSnapshotMetadata(value: unknown): SnapshotMetadata {
   };
 }
 
+function getRequestSnapshotMetadata(value: unknown): RequestSnapshotMetadata {
+  const metadata = getSnapshotMetadata(value);
+  const record = isRecord(value) ? value : {};
+  return {
+    ...metadata,
+    requestSnapshotPresent: metadata.present,
+    payloadBuilderVersion: readString(record.payloadBuilderVersion),
+    requestBuiltAt: readString(record.requestBuiltAt),
+    snapshotSource: hasImmutableSettlementTruthShape(value) ? 'immutable_settlement_truth' : null,
+  };
+}
+
 function assertRecordStatus(
   record: Pick<SettlementCommissionInvoice, 'id' | 'status'>,
   allowed: SettlementCommissionInvoiceStatus[],
@@ -202,6 +261,25 @@ async function getRequiredRecord(id: string) {
   return record;
 }
 
+async function findActiveInvoiceForSettlement(
+  settlementApprovalId: string,
+  provider: SettlementCommissionInvoiceProvider,
+) {
+  return prisma.settlementCommissionInvoice.findFirst({
+    where: {
+      settlementApprovalId,
+      provider,
+      status: {
+        not: SettlementCommissionInvoiceStatus.CANCELLED,
+      },
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+}
+
 export async function findBySettlementApproval(
   settlementApprovalId: string,
 ): Promise<SettlementCommissionInvoiceRecordDto[]> {
@@ -221,19 +299,7 @@ export async function assertNoActiveInvoiceForSettlement(
   settlementApprovalId: string,
   provider: SettlementCommissionInvoiceProvider,
 ): Promise<void> {
-  const existing = await prisma.settlementCommissionInvoice.findFirst({
-    where: {
-      settlementApprovalId,
-      provider,
-      status: {
-        not: SettlementCommissionInvoiceStatus.CANCELLED,
-      },
-    },
-    select: {
-      id: true,
-      status: true,
-    },
-  });
+  const existing = await findActiveInvoiceForSettlement(settlementApprovalId, provider);
 
   if (existing) {
     throw new Error(
@@ -242,10 +308,9 @@ export async function assertNoActiveInvoiceForSettlement(
   }
 }
 
-export async function createPendingRecord(
+async function insertPendingRecord(
   input: CreatePendingSettlementCommissionInvoiceRecordInput,
 ): Promise<SettlementCommissionInvoiceRecordDto> {
-  await assertNoActiveInvoiceForSettlement(input.settlementApprovalId, input.provider);
   const record = await prisma.settlementCommissionInvoice.create({
     data: {
       settlementApprovalId: input.settlementApprovalId,
@@ -258,6 +323,119 @@ export async function createPendingRecord(
   });
 
   return mapRecord(record);
+}
+
+export async function createPendingRecord(
+  input: CreatePendingSettlementCommissionInvoiceRecordInput,
+): Promise<SettlementCommissionInvoiceRecordDto> {
+  await assertNoActiveInvoiceForSettlement(input.settlementApprovalId, input.provider);
+  return insertPendingRecord(input);
+}
+
+function buildBlockedPendingSnapshotResult(input: {
+  settlementApprovalId: string;
+  provider: SettlementCommissionInvoiceProvider;
+  blockers: string[];
+  warnings?: string[];
+}): CreatePendingRecordFromImmutableRequestSnapshotResult {
+  return {
+    ok: false,
+    writesPerformed: false,
+    settlementApprovalId: input.settlementApprovalId,
+    provider: mapProvider(input.provider),
+    status: 'blocked',
+    blockers: Array.from(new Set(input.blockers)),
+    warnings: Array.from(new Set(input.warnings ?? [])),
+    record: null,
+    requestSnapshot: null,
+  };
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+export async function createPendingRecordFromImmutableRequestSnapshot(
+  settlementApprovalId: string,
+  provider: SettlementCommissionInvoiceProvider,
+  input: CreatePendingRecordFromImmutableRequestSnapshotInput = {},
+): Promise<CreatePendingRecordFromImmutableRequestSnapshotResult> {
+  if (provider !== SettlementCommissionInvoiceProvider.LOGO_ISBASI) {
+    return buildBlockedPendingSnapshotResult({
+      settlementApprovalId,
+      provider,
+      blockers: [`Provider ${provider} is not supported for immutable settlement request snapshots.`],
+    });
+  }
+
+  const built = await buildSettlementLogoCommissionInvoiceRequestSnapshot(
+    settlementApprovalId,
+    input.invoiceDate ?? new Date(),
+  );
+
+  if (!built.ok || !built.requestSnapshotJson) {
+    return buildBlockedPendingSnapshotResult({
+      settlementApprovalId,
+      provider,
+      blockers: built.blockers.length ? built.blockers : ['Immutable Logo request snapshot could not be built.'],
+      warnings: built.warnings,
+    });
+  }
+
+  const requestSnapshotRecord = isRecord(built.requestSnapshotJson) ? built.requestSnapshotJson : {};
+  const vendorId = readString(requestSnapshotRecord.vendorId);
+  if (!vendorId) {
+    return buildBlockedPendingSnapshotResult({
+      settlementApprovalId,
+      provider,
+      blockers: ['Immutable Logo request snapshot is missing vendorId.'],
+      warnings: built.warnings,
+    });
+  }
+
+  const existing = await findActiveInvoiceForSettlement(settlementApprovalId, provider);
+  if (existing) {
+    return buildBlockedPendingSnapshotResult({
+      settlementApprovalId,
+      provider,
+      blockers: [
+        `SettlementApproval already has an active ${provider} commission invoice record (${existing.id}, ${existing.status}).`,
+      ],
+      warnings: built.warnings,
+    });
+  }
+
+  try {
+    const record = await insertPendingRecord({
+      settlementApprovalId,
+      vendorId,
+      provider,
+      requestSnapshotJson: built.requestSnapshotJson,
+      createdBy: input.createdBy ?? null,
+    });
+
+    return {
+      ok: true,
+      writesPerformed: true,
+      settlementApprovalId,
+      provider: mapProvider(provider),
+      status: 'pending',
+      blockers: [],
+      warnings: built.warnings,
+      record,
+      requestSnapshot: record.requestSnapshot,
+    };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return buildBlockedPendingSnapshotResult({
+        settlementApprovalId,
+        provider,
+        blockers: [`SettlementApproval already has an active ${provider} commission invoice record.`],
+        warnings: built.warnings,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function markCreated(
@@ -364,7 +542,7 @@ export async function getSettlementCommissionInvoiceDiagnostics(
         documentFetchedAt: toIso(record.documentFetchedAt),
       },
       snapshots: {
-        request: getSnapshotMetadata(record.requestSnapshotJson),
+        request: getRequestSnapshotMetadata(record.requestSnapshotJson),
         response: getSnapshotMetadata(record.responseSnapshotJson),
         document: getSnapshotMetadata(record.documentSnapshotJson),
       },
@@ -379,4 +557,5 @@ export async function getSettlementCommissionInvoiceDiagnostics(
 export const __settlementCommissionInvoiceRecordTesting = {
   mapRecord,
   getSnapshotMetadata,
+  getRequestSnapshotMetadata,
 };

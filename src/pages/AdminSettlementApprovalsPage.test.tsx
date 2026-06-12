@@ -15,6 +15,7 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
+  persistSettlementLogoCommissionInvoiceRequestSnapshot,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type SettlementApproval,
@@ -35,6 +36,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     getDatabaseHealth: vi.fn(),
     previewSettlementApproval: vi.fn(),
     createSettlementApprovalDraft: vi.fn(),
+    persistSettlementLogoCommissionInvoiceRequestSnapshot: vi.fn(),
     getSettlementApproval: vi.fn(),
     approveSettlementApproval: vi.fn(),
     cancelSettlementApproval: vi.fn(),
@@ -49,6 +51,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
 const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const createSettlementApprovalDraftMock = vi.mocked(createSettlementApprovalDraft);
+const persistSettlementLogoCommissionInvoiceRequestSnapshotMock = vi.mocked(persistSettlementLogoCommissionInvoiceRequestSnapshot);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
 const cancelSettlementApprovalMock = vi.mocked(cancelSettlementApproval);
@@ -470,6 +473,34 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
   },
 };
 
+const readyLogoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
+  ...logoPreviewResponse,
+  ok: true,
+  readiness: {
+    canCreateLogoInvoiceLater: true,
+    blockers: [],
+    warnings: ['Read-only preview only. No Logo invoice is created.'],
+    billingSnapshotPresent: true,
+    billingSnapshotSource: 'settlement_approval',
+  },
+  vendorBillingReadiness: {
+    complete: true,
+    missingFields: [],
+    logoCustomerCodePresent: true,
+    logoCustomerIdPresent: true,
+    logoEinvoiceEligible: true,
+    billingSnapshotPresent: true,
+    billingSnapshotSource: 'settlement_approval',
+  },
+  immutableRequestSnapshot: {
+    status: 'READY',
+    payloadBuilderVersion: 'settlement-logo-request-v1',
+    blockers: [],
+    warnings: [],
+    requestSnapshotPresent: true,
+  },
+};
+
 const invoiceRecordsResponse: SettlementCommissionInvoiceRecordsResponse = {
   ok: true,
   writesPerformed: false,
@@ -493,8 +524,85 @@ const invoiceRecordsResponse: SettlementCommissionInvoiceRecordsResponse = {
       retryCount: 0,
       lastRetriedAt: null,
       cancelledAt: null,
+      requestSnapshot: {
+        present: false,
+        type: 'null',
+        topLevelKeys: [],
+        approximateSizeBytes: 0,
+        requestSnapshotPresent: false,
+        payloadBuilderVersion: null,
+        requestBuiltAt: null,
+        snapshotSource: null,
+      },
+      responseSnapshot: {
+        present: false,
+        type: 'null',
+        topLevelKeys: [],
+        approximateSizeBytes: 0,
+      },
+      documentSnapshot: {
+        present: false,
+        type: 'null',
+        topLevelKeys: [],
+        approximateSizeBytes: 0,
+      },
     },
   ],
+};
+
+const createRequestSnapshotResponse = {
+  ok: true,
+  writesPerformed: true,
+  settlementApprovalId: 'approval-1',
+  provider: 'logo_isbasi',
+  status: 'pending' as const,
+  blockers: [],
+  warnings: [],
+  record: {
+    ...invoiceRecordsResponse.records[0],
+    requestSnapshot: {
+      present: true,
+      type: 'object',
+      topLevelKeys: [
+        'executionSnapshotGuard',
+        'logoPayload',
+        'payloadBuilderVersion',
+        'provider',
+        'requestBuiltAt',
+        'settlementApprovalId',
+        'settlementApprovalSnapshot',
+        'settlementBillingSnapshot',
+        'settlementLineSnapshotSummary',
+        'vendorId',
+      ],
+      approximateSizeBytes: 4096,
+      requestSnapshotPresent: true,
+      payloadBuilderVersion: 'settlement-logo-request-v1',
+      requestBuiltAt: '2026-06-12T10:00:00.000Z',
+      snapshotSource: 'immutable_settlement_truth' as const,
+    },
+  },
+  requestSnapshot: {
+    present: true,
+    type: 'object',
+    topLevelKeys: [
+      'executionSnapshotGuard',
+      'logoPayload',
+      'payloadBuilderVersion',
+      'provider',
+      'requestBuiltAt',
+      'settlementApprovalId',
+      'settlementApprovalSnapshot',
+      'settlementBillingSnapshot',
+      'settlementLineSnapshotSummary',
+      'vendorId',
+    ],
+    approximateSizeBytes: 4096,
+    requestSnapshotPresent: true,
+    payloadBuilderVersion: 'settlement-logo-request-v1',
+    requestBuiltAt: '2026-06-12T10:00:00.000Z',
+    snapshotSource: 'immutable_settlement_truth' as const,
+  },
 };
 
 const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
@@ -527,6 +635,10 @@ const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
         type: 'object',
         topLevelKeys: ['payload'],
         approximateSizeBytes: 20,
+        requestSnapshotPresent: true,
+        payloadBuilderVersion: 'settlement-logo-request-v1',
+        requestBuiltAt: '2026-06-12T10:00:00.000Z',
+        snapshotSource: 'immutable_settlement_truth',
       },
       response: {
         present: false,
@@ -595,6 +707,7 @@ describe('Finance Settlement approval admin UI', () => {
     cancelSettlementApprovalMock.mockResolvedValue(cancelledApproval);
     getSettlementApprovalAuditMock.mockResolvedValue(auditResponse);
     previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(logoPreviewResponse);
+    persistSettlementLogoCommissionInvoiceRequestSnapshotMock.mockResolvedValue(createRequestSnapshotResponse);
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValue(invoiceRecordsResponse);
     getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(diagnosticsResponse);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
@@ -902,6 +1015,32 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1'));
     expect(screen.getByText('Diagnostics invoice-record-1')).toBeInTheDocument();
     expect(screen.getByText(/Present · object/i)).toBeInTheDocument();
+  });
+
+  it('stores immutable Logo request snapshot as a pending local record from readiness', async () => {
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+
+    await waitFor(() => expect(screen.getByText('Next: Store Immutable Request Snapshot.')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Store Request Snapshot' })).toBeEnabled();
+    expect(screen.getByText('Missing Snapshot')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Store Request Snapshot' }));
+
+    await waitFor(() =>
+      expect(persistSettlementLogoCommissionInvoiceRequestSnapshotMock).toHaveBeenCalledWith('approval-1'),
+    );
+    expect(screen.getByText('Immutable request snapshot stored as a pending local record. No Logo call was made.')).toBeInTheDocument();
+    expect(screen.getByText('Request Snapshot Stored')).toBeInTheDocument();
+    expect(screen.getAllByText('settlement-logo-request-v1').length).toBeGreaterThan(0);
+    expect(screen.getByText('immutable_settlement_truth')).toBeInTheDocument();
   });
 
   it('keeps approval workflow context after a zero-eligible preview with active locked rows', async () => {

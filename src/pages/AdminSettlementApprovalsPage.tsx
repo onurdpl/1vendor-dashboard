@@ -19,6 +19,7 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
+  persistSettlementLogoCommissionInvoiceRequestSnapshot,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type DatabaseHealthResponse,
@@ -41,6 +42,7 @@ type ActionName =
   | 'cancel'
   | 'audit'
   | 'logoPreview'
+  | 'requestSnapshot'
   | 'invoiceRecords'
   | 'invoiceDiagnostics';
 
@@ -668,12 +670,34 @@ export function AdminSettlementApprovalsPage() {
     };
   }, [vendorId]);
 
+  const selectedApprovalId = approvalId.trim() || approval?.id || '';
   const activeInvoiceRecords = useMemo(
     () => invoiceRecords.filter((record) => record.status.toLowerCase() !== 'cancelled'),
     [invoiceRecords],
   );
+  const storedImmutableRequestSnapshot = useMemo(() => {
+    const diagnosticsSnapshot = Object.values(diagnostics)
+      .find((item) =>
+        item.record.settlementApprovalId === selectedApprovalId &&
+        item.record.provider === 'logo_isbasi' &&
+        item.record.snapshots.request.snapshotSource === 'immutable_settlement_truth' &&
+        item.record.snapshots.request.requestSnapshotPresent,
+      )
+      ?.record.snapshots.request;
+    if (diagnosticsSnapshot) {
+      return diagnosticsSnapshot;
+    }
+
+    return invoiceRecords
+      .find((record) =>
+        record.settlementApprovalId === selectedApprovalId &&
+        record.provider === 'logo_isbasi' &&
+        record.requestSnapshot?.snapshotSource === 'immutable_settlement_truth' &&
+        record.requestSnapshot.requestSnapshotPresent,
+      )
+      ?.requestSnapshot ?? null;
+  }, [diagnostics, invoiceRecords, selectedApprovalId]);
   const productDetail = extractProductDetail(logoPreview?.logoPayloadPreview ?? null);
-  const selectedApprovalId = approvalId.trim() || approval?.id || '';
   const currentTotals = getApprovalTotals(approval);
   const workspaceTotals = preview
     ? {
@@ -792,7 +816,17 @@ export function AdminSettlementApprovalsPage() {
     : audit
       ? 'Ready'
       : 'Waiting';
-  const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length ? 'Completed' : logoPreview ? 'Ready' : 'Waiting';
+  const requestSnapshotCanBeStored = Boolean(
+    selectedApprovalId &&
+    logoPreview?.immutableRequestSnapshot.status === 'READY' &&
+    logoPreview.immutableRequestSnapshot.requestSnapshotPresent &&
+    !storedImmutableRequestSnapshot,
+  );
+  const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length || storedImmutableRequestSnapshot
+    ? 'Completed'
+    : logoPreview
+      ? 'Ready'
+      : 'Waiting';
   const workspaceRows = preview
     ? `${formatNumber(preview.summary.eligibleRowCount)} eligible`
     : approval
@@ -928,6 +962,7 @@ export function AdminSettlementApprovalsPage() {
         { label: 'Record count', value: formatNumber(invoiceRecords.length) },
         { label: 'Active record exists', value: activeInvoiceRecords.length > 0 },
         { label: 'Latest status', value: latestInvoiceRecord?.status ?? 'None loaded' },
+        { label: 'Immutable request snapshot', value: storedImmutableRequestSnapshot ? 'Stored' : 'Missing' },
       ],
     },
   ];
@@ -955,6 +990,9 @@ export function AdminSettlementApprovalsPage() {
     }
     if (!logoPreview) {
       return 'Next: Run Logo Readiness.';
+    }
+    if (requestSnapshotCanBeStored) {
+      return 'Next: Store Immutable Request Snapshot.';
     }
     if (!invoiceRecords.length) {
       return 'Next: Load Commission Invoice Records.';
@@ -1005,6 +1043,14 @@ export function AdminSettlementApprovalsPage() {
         label: 'Run Logo Readiness',
         detail: 'Read-only Logo readiness preview. No Logo invoice is created.',
         onClick: () => void handleLogoPreview(),
+        disabled: busyAction !== null,
+      };
+    }
+    if (requestSnapshotCanBeStored) {
+      return {
+        label: 'Store Request Snapshot',
+        detail: 'Writes a local PENDING execution artifact only. No Logo call.',
+        onClick: () => void handlePersistRequestSnapshot(),
         disabled: busyAction !== null,
       };
     }
@@ -1207,6 +1253,28 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(result);
       setActiveTab('logo');
     }
+  }
+
+  async function handlePersistRequestSnapshot() {
+    if (!selectedApprovalId) {
+      setError('Settlement approval id is required.');
+      return;
+    }
+    const result = await runAction(
+      'requestSnapshot',
+      () => persistSettlementLogoCommissionInvoiceRequestSnapshot(selectedApprovalId),
+    );
+    if (!result) {
+      return;
+    }
+    if (!result.ok || !result.record) {
+      setError(result.blockers.join(' ') || 'Immutable request snapshot could not be stored.');
+      return;
+    }
+    const storedRecord = result.record;
+    setInvoiceRecords((current) => [storedRecord, ...current.filter((record) => record.id !== storedRecord.id)]);
+    setSuccess('Immutable request snapshot stored as a pending local record. No Logo call was made.');
+    setActiveTab('logo');
   }
 
   async function handleInvoiceRecords() {
@@ -1486,7 +1554,21 @@ export function AdminSettlementApprovalsPage() {
                     <MetadataRow label="Status" value={logoPreview.immutableRequestSnapshot.status} />
                     <MetadataRow label="Builder version" value={logoPreview.immutableRequestSnapshot.payloadBuilderVersion} />
                     <MetadataRow label="Request snapshot" value={logoPreview.immutableRequestSnapshot.requestSnapshotPresent ? 'Ready' : 'Not built'} />
+                    <MetadataRow label="Stored snapshot" value={storedImmutableRequestSnapshot ? 'Request Snapshot Stored' : 'Missing Snapshot'} />
+                    <MetadataRow label="Stored builder version" value={valueOrDash(storedImmutableRequestSnapshot?.payloadBuilderVersion)} />
+                    <MetadataRow label="Stored built at" value={formatDate(storedImmutableRequestSnapshot?.requestBuiltAt)} />
+                    <MetadataRow label="Stored source" value={valueOrDash(storedImmutableRequestSnapshot?.snapshotSource)} />
                   </MetadataGroup>
+                  {requestSnapshotCanBeStored ? (
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => void handlePersistRequestSnapshot()}
+                      disabled={busyAction !== null}
+                    >
+                      Store Request Snapshot (local DB only)
+                    </button>
+                  ) : null}
                   <ReadinessList
                     title="Immutable snapshot blockers"
                     items={logoPreview.immutableRequestSnapshot.blockers.map((item) => `Immutable request snapshot: ${item}`)}
@@ -1556,7 +1638,7 @@ export function AdminSettlementApprovalsPage() {
             ) : null}
             {invoiceRecords.length ? (
               <OperationalTable
-                columns={['Record', 'Provider', 'Status', 'Invoice no', 'Retry', 'Diagnostics']}
+                columns={['Record', 'Provider', 'Status', 'Request snapshot', 'Invoice no', 'Retry', 'Diagnostics']}
                 className="settlement-invoice-table"
                 stickyHeader={false}
               >
@@ -1568,6 +1650,7 @@ export function AdminSettlementApprovalsPage() {
                     </span>
                     <span>{safeStatusLabel(record.provider)}</span>
                     <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
+                    <span>{record.requestSnapshot?.requestSnapshotPresent ? 'Stored' : 'Missing'}</span>
                     <span>{valueOrDash(record.invoiceNo)}</span>
                     <span>{formatNumber(record.retryCount)}</span>
                     <span>
@@ -1595,7 +1678,10 @@ export function AdminSettlementApprovalsPage() {
                     <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
                     <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
                     <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
-                    <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.present ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
+                    <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.requestSnapshotPresent ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
+                    <MetadataRow label="Payload builder version" value={valueOrDash(item.record.snapshots.request.payloadBuilderVersion)} />
+                    <MetadataRow label="Request built at" value={formatDate(item.record.snapshots.request.requestBuiltAt)} />
+                    <MetadataRow label="Snapshot source" value={valueOrDash(item.record.snapshots.request.snapshotSource)} />
                     <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
                     <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
                   </MetadataGroup>

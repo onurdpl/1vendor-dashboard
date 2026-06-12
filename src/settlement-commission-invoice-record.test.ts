@@ -9,15 +9,32 @@ const SettlementCommissionInvoiceStatus = {
   CREATED: 'CREATED',
   FAILED: 'FAILED',
   CANCELLED: 'CANCELLED',
+  UNKNOWN: 'UNKNOWN',
 } as const;
 
 const prismaMock = vi.hoisted(() => ({
+  settlementApproval: {
+    findUnique: vi.fn(),
+  },
   settlementCommissionInvoice: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+  },
+  vendorBillingProfile: {
+    findUnique: vi.fn(),
+  },
+  vendorFinancialProfile: {
+    findFirst: vi.fn(),
+  },
+  financeLedgerEntry: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+  },
+  invoiceExecution: {
+    create: vi.fn(),
   },
 }));
 
@@ -28,12 +45,16 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const {
   assertNoActiveInvoiceForSettlement,
   createPendingRecord,
+  createPendingRecordFromImmutableRequestSnapshot,
   findBySettlementApproval,
   getSettlementCommissionInvoiceDiagnostics,
   incrementRetry,
   markCreated,
   markFailed,
 } = await import('../backend/src/modules/finance/settlement-commission-invoice-record.service.js');
+const { buildSettlementLogoCommissionInvoiceRequestSnapshot } = await import(
+  '../backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.js'
+);
 
 function buildRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -67,13 +88,119 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildBillingSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    source: 'vendor_billing_profile',
+    capturedAt: '2026-06-01T09:30:00.000Z',
+    vendorId: 'vendor-a',
+    vendorBillingProfileId: 'billing-1',
+    legalCompanyName: 'Snapshot Vendor A.S.',
+    taxNumber: '1111111111',
+    taxOffice: 'Kadikoy',
+    billingAddress: 'Snapshot billing address',
+    billingCity: 'Istanbul',
+    billingDistrict: 'Kadikoy',
+    authorizedPerson: 'Snapshot Person',
+    billingEmail: 'snapshot-billing@example.test',
+    billingPhone: '+905551112233',
+    legalEntityType: 'limited_company',
+    logoIsbasiCustomerCode: 'SNAPSHOT-CUSTOMER',
+    logoIsbasiCustomerId: 'SNAPSHOT-ID',
+    logoIsbasiEinvoiceEligible: true,
+    logoIsbasiLastCheckedAt: '2026-06-01T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function buildLine(input: { id: string; vatRate?: string | null; commissionMinor?: number; commissionVatMinor?: number }) {
+  return {
+    id: `line-${input.id}`,
+    settlementApprovalId: 'approval-1',
+    financeLedgerEntryId: `ledger-${input.id}`,
+    lineType: 'SALE',
+    amountMinor: 100000,
+    commissionMinor: input.commissionMinor ?? 10000,
+    commissionVatMinor: input.commissionVatMinor ?? 2000,
+    payableImpactMinor: 88000,
+    sourceSnapshotJson: {
+      financeLedgerEntryId: `ledger-${input.id}`,
+      sourceShopifyOrderId: `gid://shopify/Order/${input.id}`,
+      sourceShopifyOrderNumber: `#${input.id}`,
+      commissionPercentSnapshot: '10',
+      ...(input.vatRate === null ? {} : { commissionVatPercentSnapshot: input.vatRate ?? '20' }),
+      deductShippingEnabledSnapshot: false,
+      shippingModeSnapshot: 'DISABLED',
+      fixedShippingFeeSnapshot: null,
+      shippingCostSnapshot: null,
+      shippingVatAmountSnapshot: null,
+      shippingCostSourceSnapshot: null,
+      shippingCostProviderSnapshot: null,
+    },
+  };
+}
+
+function buildApproval(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'approval-1',
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-01T10:00:00.000Z'),
+    vendorId: 'vendor-a',
+    periodStart: new Date('2026-06-01T00:00:00.000Z'),
+    periodEnd: new Date('2026-06-30T23:59:59.000Z'),
+    status: 'APPROVED',
+    currency: 'TRY',
+    grossSalesMinor: 100000,
+    refundTotalMinor: 0,
+    commissionMinor: 10000,
+    commissionVatMinor: 2000,
+    netPayableMinor: 88000,
+    approvedBy: 'admin-1',
+    approvedAt: new Date('2026-06-01T12:00:00.000Z'),
+    cancelledBy: null,
+    cancelledAt: null,
+    notes: null,
+    sourceSnapshotJson: {
+      vendorId: 'vendor-a',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-06-30T23:59:59.000Z',
+      candidateScope: 'vendor_wide',
+      generatedAt: '2026-06-01T10:00:00.000Z',
+      settlementBillingSnapshot: buildBillingSnapshot(),
+    },
+    lines: [buildLine({ id: '1001' })],
+    ...overrides,
+  };
+}
+
+function mockPendingCreateFromInput(id = 'snapshot-record-1') {
+  prismaMock.settlementCommissionInvoice.create.mockImplementation(async (input: { data: Record<string, unknown> }) =>
+    buildRecord({
+      id,
+      settlementApprovalId: input.data.settlementApprovalId,
+      vendorId: input.data.vendorId,
+      provider: input.data.provider,
+      status: input.data.status,
+      requestSnapshotJson: input.data.requestSnapshotJson,
+      createdBy: input.data.createdBy,
+    }),
+  );
+}
+
 describe('settlement commission invoice record foundation', () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementCommissionInvoice.findMany.mockReset();
     prismaMock.settlementCommissionInvoice.findUnique.mockReset();
     prismaMock.settlementCommissionInvoice.findFirst.mockReset();
     prismaMock.settlementCommissionInvoice.create.mockReset();
     prismaMock.settlementCommissionInvoice.update.mockReset();
+    prismaMock.vendorBillingProfile.findUnique.mockReset();
+    prismaMock.vendorFinancialProfile.findFirst.mockReset();
+    prismaMock.financeLedgerEntry.findUnique.mockReset();
+    prismaMock.financeLedgerEntry.findFirst.mockReset();
+    prismaMock.invoiceExecution.create.mockReset();
   });
 
   it('can create a pending record for a settlement approval without provider calls', async () => {
@@ -94,7 +221,11 @@ describe('settlement commission invoice record foundation', () => {
       vendorId: 'vendor-a',
       provider: 'logo_isbasi',
       status: 'pending',
-      requestSnapshotJson: { amount: 120 },
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+        payloadBuilderVersion: null,
+        snapshotSource: null,
+      },
       createdBy: 'admin-1',
     });
     expect(prismaMock.settlementCommissionInvoice.create).toHaveBeenCalledWith({
@@ -154,6 +285,138 @@ describe('settlement commission invoice record foundation', () => {
         status: true,
       },
     });
+  });
+
+  it('creates a pending record from a complete immutable Logo request snapshot', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-12T10:00:00.000Z'));
+    const approval = buildApproval();
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(approval);
+    prismaMock.settlementCommissionInvoice.findFirst.mockResolvedValue(null);
+    mockPendingCreateFromInput();
+
+    const built = await buildSettlementLogoCommissionInvoiceRequestSnapshot('approval-1', '2026-06-12');
+    prismaMock.settlementApproval.findUnique.mockClear();
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(approval);
+
+    const result = await createPendingRecordFromImmutableRequestSnapshot(
+      'approval-1',
+      SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+      { createdBy: 'admin-1', invoiceDate: '2026-06-12' },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: true,
+      settlementApprovalId: 'approval-1',
+      provider: 'logo_isbasi',
+      status: 'pending',
+      blockers: [],
+      record: {
+        id: 'snapshot-record-1',
+        settlementApprovalId: 'approval-1',
+        vendorId: 'vendor-a',
+        status: 'pending',
+        requestSnapshot: {
+          requestSnapshotPresent: true,
+          payloadBuilderVersion: 'settlement-logo-request-v1',
+          requestBuiltAt: '2026-06-12T10:00:00.000Z',
+          snapshotSource: 'immutable_settlement_truth',
+        },
+      },
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+        payloadBuilderVersion: 'settlement-logo-request-v1',
+        snapshotSource: 'immutable_settlement_truth',
+      },
+    });
+    expect(prismaMock.settlementCommissionInvoice.create).toHaveBeenCalledWith({
+      data: {
+        settlementApprovalId: 'approval-1',
+        vendorId: 'vendor-a',
+        provider: SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+        status: SettlementCommissionInvoiceStatus.PENDING,
+        requestSnapshotJson: built.requestSnapshotJson,
+        createdBy: 'admin-1',
+      },
+    });
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks pending snapshot persistence when the settlement billing snapshot is missing', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({ sourceSnapshotJson: { vendorId: 'vendor-a' } }),
+    );
+
+    const result = await createPendingRecordFromImmutableRequestSnapshot(
+      'approval-1',
+      SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+      { createdBy: 'admin-1', invoiceDate: '2026-06-12' },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      status: 'blocked',
+      record: null,
+      requestSnapshot: null,
+    });
+    expect(result.blockers).toContain(
+      'Settlement billing snapshot is missing. Historical invoice execution cannot be guaranteed.',
+    );
+    expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks pending snapshot persistence when VAT rates are mixed', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({
+        lines: [
+          buildLine({ id: '1001', vatRate: '18' }),
+          buildLine({ id: '1002', vatRate: '20' }),
+        ],
+      }),
+    );
+
+    const result = await createPendingRecordFromImmutableRequestSnapshot(
+      'approval-1',
+      SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+      { createdBy: 'admin-1', invoiceDate: '2026-06-12' },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.blockers).toContain(
+      'Commission VAT rate is not uniform across settlement lines; Logo invoice creation is blocked until reviewed.',
+    );
+    expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps duplicate protection active when persisting immutable request snapshots', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval());
+    prismaMock.settlementCommissionInvoice.findFirst.mockResolvedValue({
+      id: 'existing-1',
+      status: SettlementCommissionInvoiceStatus.PENDING,
+    });
+
+    const result = await createPendingRecordFromImmutableRequestSnapshot(
+      'approval-1',
+      SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+      { createdBy: 'admin-1', invoiceDate: '2026-06-12' },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      status: 'blocked',
+      record: null,
+    });
+    expect(result.blockers).toContain(
+      'SettlementApproval already has an active LOGO_ISBASI commission invoice record (existing-1, PENDING).',
+    );
+    expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
   });
 
   it('returns existing records for a settlement approval', async () => {
@@ -216,8 +479,12 @@ describe('settlement commission invoice record foundation', () => {
       providerUuid: 'logo-uuid-1',
       providerEttn: 'logo-ettn-1',
       invoiceNo: 'ABC202600001',
-      requestSnapshotJson: { request: 'keep-me' },
-      responseSnapshotJson: { ok: true },
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+      },
+      responseSnapshot: {
+        present: true,
+      },
     });
     expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
       where: { id: 'settlement-invoice-1' },
@@ -258,8 +525,12 @@ describe('settlement commission invoice record foundation', () => {
       failureCode: 'UPSTREAM_502',
       failureMessage: 'Provider failed.',
       failedAt: '2026-06-10T10:05:00.000Z',
-      requestSnapshotJson: { request: 'keep-me' },
-      responseSnapshotJson: { ok: false },
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+      },
+      responseSnapshot: {
+        present: true,
+      },
     });
     expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
       where: { id: 'settlement-invoice-1' },
@@ -362,8 +633,12 @@ describe('settlement commission invoice record foundation', () => {
         snapshots: {
           request: {
             present: true,
+            requestSnapshotPresent: true,
             type: 'object',
             topLevelKeys: ['amount', 'nested'],
+            payloadBuilderVersion: null,
+            requestBuiltAt: null,
+            snapshotSource: null,
           },
           response: {
             present: true,
