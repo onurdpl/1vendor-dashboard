@@ -86,6 +86,9 @@ export type AppEnv = {
   LOGO_ISBASI_API_KEY?: string;
   LOGO_ISBASI_USERNAME?: string;
   LOGO_ISBASI_PASSWORD?: string;
+  LOGO_ISBASI_CREATE_ENABLED?: boolean;
+  LOGO_ISBASI_CREATE_ENVIRONMENT?: string;
+  LOGO_ISBASI_EXPECTED_TENANT_ID?: string;
   LIDIO_ENABLED?: boolean;
   LIDIO_BASE_URL?: string;
   LIDIO_MERCHANT_CODE?: string;
@@ -284,6 +287,9 @@ export function loadEnv(): AppEnv {
   const logoIsbasiApiKey = process.env.LOGO_ISBASI_API_KEY?.trim() || undefined;
   const logoIsbasiUsername = process.env.LOGO_ISBASI_USERNAME?.trim() || undefined;
   const logoIsbasiPassword = process.env.LOGO_ISBASI_PASSWORD?.trim() || undefined;
+  const logoIsbasiCreateEnabled = parseBoolean(process.env.LOGO_ISBASI_CREATE_ENABLED, false);
+  const logoIsbasiCreateEnvironment = process.env.LOGO_ISBASI_CREATE_ENVIRONMENT?.trim().toLowerCase() || undefined;
+  const logoIsbasiExpectedTenantId = process.env.LOGO_ISBASI_EXPECTED_TENANT_ID?.trim() || undefined;
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
@@ -445,6 +451,9 @@ export function loadEnv(): AppEnv {
     LOGO_ISBASI_API_KEY: logoIsbasiApiKey,
     LOGO_ISBASI_USERNAME: logoIsbasiUsername,
     LOGO_ISBASI_PASSWORD: logoIsbasiPassword,
+    LOGO_ISBASI_CREATE_ENABLED: logoIsbasiCreateEnabled,
+    LOGO_ISBASI_CREATE_ENVIRONMENT: logoIsbasiCreateEnvironment,
+    LOGO_ISBASI_EXPECTED_TENANT_ID: logoIsbasiExpectedTenantId,
     LIDIO_ENABLED: lidioEnabled,
     LIDIO_BASE_URL: lidioBaseUrl,
     LIDIO_MERCHANT_CODE: lidioMerchantCode,

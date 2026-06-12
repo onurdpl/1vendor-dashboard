@@ -4,7 +4,16 @@ import {
   SettlementCommissionInvoiceStatus,
   type SettlementCommissionInvoice,
 } from '@prisma/client';
+import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
+import {
+  validateLogoExecutionEnvironment,
+  type LogoExecutionEnvironmentGuardResult,
+} from '../logo-isbasi/logo-execution-environment-guard.service.js';
+import {
+  validateLogoExecutionContractRecord,
+  type SettlementLogoExecutionContractDto,
+} from './settlement-logo-execution-contract.service.js';
 import { buildSettlementLogoCommissionInvoiceRequestSnapshot } from './settlement-logo-request-snapshot-builder.service.js';
 
 export type SettlementCommissionInvoiceRecordDto = {
@@ -29,6 +38,12 @@ export type SettlementCommissionInvoiceRecordDto = {
   failureCode: string | null;
   failureMessage: string | null;
   failedAt: string | null;
+  unknownReason: string | null;
+  unknownAt: string | null;
+  reconciliationStatus: string | null;
+  reconciliationEvidenceSnapshot: SnapshotMetadata;
+  reconciledAt: string | null;
+  reconciledBy: string | null;
   retryCount: number;
   lastRetriedAt: string | null;
   createdBy: string | null;
@@ -60,8 +75,33 @@ export type MarkSettlementCommissionInvoiceFailedInput = {
   responseSnapshotJson?: Prisma.InputJsonValue | null;
 };
 
+export type MarkSettlementCommissionInvoiceUnknownInput = {
+  settlementCommissionInvoiceId: string;
+  unknownReason: string;
+  responseSnapshotJson?: Prisma.InputJsonValue | null;
+};
+
+export type ResolveSettlementCommissionInvoiceUnknownAsCreatedInput = MarkSettlementCommissionInvoiceCreatedInput & {
+  reconciliationEvidenceJson: Prisma.InputJsonValue;
+  reconciledBy?: string | null;
+};
+
+export type ResolveSettlementCommissionInvoiceUnknownAsFailedInput = MarkSettlementCommissionInvoiceFailedInput & {
+  reconciliationEvidenceJson: Prisma.InputJsonValue;
+  reconciledBy?: string | null;
+};
+
 export type IncrementSettlementCommissionInvoiceRetryInput = {
   settlementCommissionInvoiceId: string;
+};
+
+export type SettlementCommissionInvoiceRetryDecisionDto = {
+  ok: true;
+  writesPerformed: false;
+  settlementCommissionInvoiceId: string;
+  status: SettlementCommissionInvoiceRecordDto['status'];
+  canRetry: boolean;
+  blockers: string[];
 };
 
 export type CreatePendingRecordFromImmutableRequestSnapshotInput = {
@@ -91,6 +131,8 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
     provider: SettlementCommissionInvoiceRecordDto['provider'];
     status: SettlementCommissionInvoiceRecordDto['status'];
     retryCount: number;
+    environmentGuard: LogoExecutionEnvironmentGuardResult | null;
+    executionContract: SettlementLogoExecutionContractDto;
     providerIdentifiers: {
       providerInvoiceId: string | null;
       providerUuid: string | null;
@@ -101,8 +143,10 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
       createdAt: string;
       updatedAt: string;
       failedAt: string | null;
+      unknownAt: string | null;
       lastRetriedAt: string | null;
       cancelledAt: string | null;
+      reconciledAt: string | null;
       documentFetchedAt: string | null;
     };
     snapshots: {
@@ -113,6 +157,14 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
     failure: {
       failureCode: string | null;
       failureMessage: string | null;
+    };
+    unknown: {
+      reason: string | null;
+      unknownAt: string | null;
+      reconciliationState: string | null;
+      reconciledAt: string | null;
+      reconciledBy: string | null;
+      reconciliationEvidence: SnapshotMetadata;
     };
   };
 };
@@ -174,6 +226,12 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     failureCode: record.failureCode,
     failureMessage: record.failureMessage,
     failedAt: toIso(record.failedAt),
+    unknownReason: record.unknownReason,
+    unknownAt: toIso(record.unknownAt),
+    reconciliationStatus: record.reconciliationStatus,
+    reconciliationEvidenceSnapshot: getSnapshotMetadata(record.reconciliationEvidenceJson),
+    reconciledAt: toIso(record.reconciledAt),
+    reconciledBy: record.reconciledBy,
     retryCount: record.retryCount,
     lastRetriedAt: toIso(record.lastRetriedAt),
     createdBy: record.createdBy,
@@ -247,6 +305,52 @@ function assertRecordStatus(
       `${transitionName} is not allowed for SettlementCommissionInvoice ${record.id} while status is ${record.status}.`,
     );
   }
+}
+
+function readRequiredText(value: string | null | undefined, fieldName: string) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${fieldName} is required.`);
+  }
+  return value.trim();
+}
+
+function assertReconciliationEvidence(value: Prisma.InputJsonValue) {
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    throw new Error('Explicit reconciliation evidence is required before resolving UNKNOWN execution.');
+  }
+}
+
+function buildRetryDecision(record: SettlementCommissionInvoice): SettlementCommissionInvoiceRetryDecisionDto {
+  if (record.status === SettlementCommissionInvoiceStatus.FAILED) {
+    return {
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: record.id,
+      status: mapStatus(record.status),
+      canRetry: true,
+      blockers: [],
+    };
+  }
+
+  if (record.status === SettlementCommissionInvoiceStatus.UNKNOWN) {
+    return {
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: record.id,
+      status: mapStatus(record.status),
+      canRetry: false,
+      blockers: ['UNKNOWN execution must be reconciled before retry.'],
+    };
+  }
+
+  return {
+    ok: true,
+    writesPerformed: false,
+    settlementCommissionInvoiceId: record.id,
+    status: mapStatus(record.status),
+    canRetry: false,
+    blockers: [`SettlementCommissionInvoice status ${record.status} is not retryable.`],
+  };
 }
 
 async function getRequiredRecord(id: string) {
@@ -485,10 +589,93 @@ export async function markFailed(
   return mapRecord(record);
 }
 
+export async function markUnknown(
+  input: MarkSettlementCommissionInvoiceUnknownInput,
+): Promise<SettlementCommissionInvoiceRecordDto> {
+  const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.PENDING], 'markUnknown');
+  const record = await prisma.settlementCommissionInvoice.update({
+    where: {
+      id: input.settlementCommissionInvoiceId,
+    },
+    data: {
+      status: SettlementCommissionInvoiceStatus.UNKNOWN,
+      unknownReason: readRequiredText(input.unknownReason, 'unknownReason'),
+      unknownAt: new Date(),
+      responseSnapshotJson: input.responseSnapshotJson ?? undefined,
+    },
+  });
+
+  return mapRecord(record);
+}
+
+export async function resolveUnknownAsCreated(
+  input: ResolveSettlementCommissionInvoiceUnknownAsCreatedInput,
+): Promise<SettlementCommissionInvoiceRecordDto> {
+  assertReconciliationEvidence(input.reconciliationEvidenceJson);
+  const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.UNKNOWN], 'resolveUnknownAsCreated');
+  const record = await prisma.settlementCommissionInvoice.update({
+    where: {
+      id: input.settlementCommissionInvoiceId,
+    },
+    data: {
+      status: SettlementCommissionInvoiceStatus.CREATED,
+      providerInvoiceId: input.providerInvoiceId ?? null,
+      providerUuid: input.providerUuid ?? null,
+      providerEttn: input.providerEttn ?? null,
+      invoiceNo: input.invoiceNo ?? null,
+      responseSnapshotJson: input.responseSnapshotJson ?? undefined,
+      reconciliationStatus: 'resolved_created',
+      reconciliationEvidenceJson: input.reconciliationEvidenceJson,
+      reconciledAt: new Date(),
+      reconciledBy: input.reconciledBy ?? null,
+    },
+  });
+
+  return mapRecord(record);
+}
+
+export async function resolveUnknownAsFailed(
+  input: ResolveSettlementCommissionInvoiceUnknownAsFailedInput,
+): Promise<SettlementCommissionInvoiceRecordDto> {
+  assertReconciliationEvidence(input.reconciliationEvidenceJson);
+  const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.UNKNOWN], 'resolveUnknownAsFailed');
+  const record = await prisma.settlementCommissionInvoice.update({
+    where: {
+      id: input.settlementCommissionInvoiceId,
+    },
+    data: {
+      status: SettlementCommissionInvoiceStatus.FAILED,
+      failureCode: input.failureCode ?? null,
+      failureMessage: input.failureMessage ?? null,
+      failedAt: new Date(),
+      responseSnapshotJson: input.responseSnapshotJson ?? undefined,
+      reconciliationStatus: 'resolved_failed',
+      reconciliationEvidenceJson: input.reconciliationEvidenceJson,
+      reconciledAt: new Date(),
+      reconciledBy: input.reconciledBy ?? null,
+    },
+  });
+
+  return mapRecord(record);
+}
+
+export async function canRetry(
+  input: IncrementSettlementCommissionInvoiceRetryInput,
+): Promise<SettlementCommissionInvoiceRetryDecisionDto> {
+  const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  return buildRetryDecision(existing);
+}
+
 export async function incrementRetry(
   input: IncrementSettlementCommissionInvoiceRetryInput,
 ): Promise<SettlementCommissionInvoiceRecordDto> {
   const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  if (existing.status === SettlementCommissionInvoiceStatus.UNKNOWN) {
+    throw new Error('UNKNOWN execution must be reconciled before retry.');
+  }
   assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.FAILED], 'incrementRetry');
   const record = await prisma.settlementCommissionInvoice.update({
     where: {
@@ -507,6 +694,7 @@ export async function incrementRetry(
 
 export async function getSettlementCommissionInvoiceDiagnostics(
   settlementCommissionInvoiceId: string,
+  options: { env?: AppEnv } = {},
 ): Promise<SettlementCommissionInvoiceDiagnosticsDto | null> {
   const record = await prisma.settlementCommissionInvoice.findUnique({
     where: {
@@ -516,6 +704,12 @@ export async function getSettlementCommissionInvoiceDiagnostics(
   if (!record) {
     return null;
   }
+  const environmentGuard = options.env
+    ? validateLogoExecutionEnvironment({
+        env: options.env,
+      })
+    : null;
+  const executionContract = validateLogoExecutionContractRecord(record);
 
   return {
     ok: true,
@@ -527,6 +721,8 @@ export async function getSettlementCommissionInvoiceDiagnostics(
       provider: mapProvider(record.provider),
       status: mapStatus(record.status),
       retryCount: record.retryCount,
+      environmentGuard,
+      executionContract,
       providerIdentifiers: {
         providerInvoiceId: record.providerInvoiceId,
         providerUuid: record.providerUuid,
@@ -537,8 +733,10 @@ export async function getSettlementCommissionInvoiceDiagnostics(
         createdAt: record.createdAt.toISOString(),
         updatedAt: record.updatedAt.toISOString(),
         failedAt: toIso(record.failedAt),
+        unknownAt: toIso(record.unknownAt),
         lastRetriedAt: toIso(record.lastRetriedAt),
         cancelledAt: toIso(record.cancelledAt),
+        reconciledAt: toIso(record.reconciledAt),
         documentFetchedAt: toIso(record.documentFetchedAt),
       },
       snapshots: {
@@ -549,6 +747,14 @@ export async function getSettlementCommissionInvoiceDiagnostics(
       failure: {
         failureCode: record.failureCode,
         failureMessage: record.failureMessage,
+      },
+      unknown: {
+        reason: record.unknownReason,
+        unknownAt: toIso(record.unknownAt),
+        reconciliationState: record.reconciliationStatus,
+        reconciledAt: toIso(record.reconciledAt),
+        reconciledBy: record.reconciledBy,
+        reconciliationEvidence: getSnapshotMetadata(record.reconciliationEvidenceJson),
       },
     },
   };

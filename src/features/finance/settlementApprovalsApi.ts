@@ -229,6 +229,12 @@ export type SettlementCommissionInvoiceRecord = {
   failureCode: string | null;
   failureMessage: string | null;
   failedAt: string | null;
+  unknownReason?: string | null;
+  unknownAt?: string | null;
+  reconciliationStatus?: string | null;
+  reconciliationEvidenceSnapshot?: SettlementCommissionInvoiceSnapshotMetadata;
+  reconciledAt?: string | null;
+  reconciledBy?: string | null;
   retryCount: number;
   lastRetriedAt: string | null;
   cancelledAt: string | null;
@@ -280,6 +286,31 @@ export type SettlementCommissionInvoiceDiagnostics = {
     provider: string;
     status: string;
     retryCount: number;
+    environmentGuard: {
+      allowed: boolean;
+      environment: 'test' | 'production' | null;
+      tenantValidation: {
+        expectedTenantIdPresent: boolean;
+        expectedTenantId: string | null;
+        actualTenantIdPresent: boolean;
+        actualTenantId: string | null;
+        status: 'not_checked' | 'matched' | 'mismatch' | 'missing_expected_tenant';
+      };
+      blockers: string[];
+    } | null;
+    executionContract: {
+      ok: boolean;
+      writesPerformed: false;
+      settlementCommissionInvoiceId: string;
+      status: 'READY' | 'BLOCKED';
+      recordStatus: string | null;
+      requestSnapshotPresent: boolean;
+      payloadPresent: boolean;
+      snapshotSource: 'immutable_settlement_truth' | null;
+      payloadBuilderVersion: string | null;
+      requestBuiltAt: string | null;
+      blockers: string[];
+    };
     providerIdentifiers: {
       providerInvoiceId: string | null;
       providerUuid: string | null;
@@ -295,6 +326,14 @@ export type SettlementCommissionInvoiceDiagnostics = {
     failure: {
       failureCode: string | null;
       failureMessage: string | null;
+    };
+    unknown: {
+      reason: string | null;
+      unknownAt: string | null;
+      reconciliationState: string | null;
+      reconciledAt: string | null;
+      reconciledBy: string | null;
+      reconciliationEvidence: SettlementCommissionInvoiceSnapshotMetadata;
     };
   };
 };

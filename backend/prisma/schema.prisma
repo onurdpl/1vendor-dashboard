@@ -920,6 +920,12 @@ model SettlementCommissionInvoice {
   failureCode          String?
   failureMessage       String?
   failedAt             DateTime?
+  unknownReason        String?
+  unknownAt            DateTime?
+  reconciliationStatus String?
+  reconciliationEvidenceJson Json?
+  reconciledAt         DateTime?
+  reconciledBy         String?
   retryCount           Int                                 @default(0)
   lastRetriedAt        DateTime?
   createdBy            String?

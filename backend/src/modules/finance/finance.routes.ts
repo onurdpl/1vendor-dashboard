@@ -568,7 +568,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const { id } = request.params as { id: string };
-      const diagnostics = await getSettlementCommissionInvoiceDiagnostics(id);
+      const diagnostics = await getSettlementCommissionInvoiceDiagnostics(id, { env });
       if (!diagnostics) {
         return reply.code(404).send({ message: 'Settlement commission invoice record not found.' });
       }

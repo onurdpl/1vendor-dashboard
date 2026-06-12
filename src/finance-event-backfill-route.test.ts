@@ -527,6 +527,6 @@ describe('finance event backfill route', () => {
     expect(allowed).toEqual(diagnostics);
     expect(allowed?.writesPerformed).toBe(false);
     expect(JSON.stringify(allowed)).not.toContain('rawBody');
-    expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('record-1');
+    expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('record-1', { env: {} });
   });
 });

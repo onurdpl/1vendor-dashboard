@@ -615,6 +615,31 @@ const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
     provider: 'logo_isbasi',
     status: 'pending',
     retryCount: 0,
+    environmentGuard: {
+      allowed: false,
+      environment: null,
+      tenantValidation: {
+        expectedTenantIdPresent: false,
+        expectedTenantId: null,
+        actualTenantIdPresent: false,
+        actualTenantId: null,
+        status: 'missing_expected_tenant',
+      },
+      blockers: ['LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.'],
+    },
+    executionContract: {
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: 'invoice-record-1',
+      status: 'READY',
+      recordStatus: 'PENDING',
+      requestSnapshotPresent: true,
+      payloadPresent: true,
+      snapshotSource: 'immutable_settlement_truth',
+      payloadBuilderVersion: 'settlement-logo-request-v1',
+      requestBuiltAt: '2026-06-12T10:00:00.000Z',
+      blockers: [],
+    },
     providerIdentifiers: {
       providerInvoiceId: null,
       providerUuid: null,
@@ -656,6 +681,19 @@ const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
     failure: {
       failureCode: null,
       failureMessage: null,
+    },
+    unknown: {
+      reason: null,
+      unknownAt: null,
+      reconciliationState: null,
+      reconciledAt: null,
+      reconciledBy: null,
+      reconciliationEvidence: {
+        present: false,
+        type: 'null',
+        topLevelKeys: [],
+        approximateSizeBytes: 0,
+      },
     },
   },
 };

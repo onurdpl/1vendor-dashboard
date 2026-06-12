@@ -48,12 +48,22 @@ const {
   createPendingRecordFromImmutableRequestSnapshot,
   findBySettlementApproval,
   getSettlementCommissionInvoiceDiagnostics,
+  canRetry,
   incrementRetry,
   markCreated,
   markFailed,
+  markUnknown,
+  resolveUnknownAsCreated,
+  resolveUnknownAsFailed,
 } = await import('../backend/src/modules/finance/settlement-commission-invoice-record.service.js');
 const { buildSettlementLogoCommissionInvoiceRequestSnapshot } = await import(
   '../backend/src/modules/finance/settlement-logo-request-snapshot-builder.service.js'
+);
+const { validateLogoExecutionEnvironment } = await import(
+  '../backend/src/modules/logo-isbasi/logo-execution-environment-guard.service.js'
+);
+const { validateLogoExecutionContract } = await import(
+  '../backend/src/modules/finance/settlement-logo-execution-contract.service.js'
 );
 
 function buildRecord(overrides: Record<string, unknown> = {}) {
@@ -79,6 +89,12 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
     failureCode: null,
     failureMessage: null,
     failedAt: null,
+    unknownReason: null,
+    unknownAt: null,
+    reconciliationStatus: null,
+    reconciliationEvidenceJson: null,
+    reconciledAt: null,
+    reconciledBy: null,
     retryCount: 0,
     lastRetriedAt: null,
     createdBy: 'admin-1',
@@ -173,6 +189,59 @@ function buildApproval(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildImmutableLogoRequestSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: SettlementCommissionInvoiceProvider.LOGO_ISBASI,
+    settlementApprovalId: 'approval-1',
+    vendorId: 'vendor-a',
+    requestBuiltAt: '2026-06-12T10:00:00.000Z',
+    payloadBuilderVersion: 'settlement-logo-request-v1',
+    settlementApprovalSnapshot: {
+      id: 'approval-1',
+      vendorId: 'vendor-a',
+      status: 'APPROVED',
+      commissionMinor: 10000,
+      commissionVatMinor: 2000,
+      currency: 'TRY',
+    },
+    settlementBillingSnapshot: buildBillingSnapshot(),
+    settlementLineSnapshotSummary: {
+      lineCount: 1,
+      executionLineCount: 1,
+      detectedCommissionVatRates: [20],
+      totals: {
+        commissionMinor: 10000,
+        commissionVatMinor: 2000,
+        currency: 'TRY',
+      },
+    },
+    executionSnapshotGuard: {
+      ok: true,
+      blockers: [],
+      warnings: [],
+      requiredSnapshotsPresent: true,
+    },
+    logoPayload: {
+      invoiceDate: '2026-06-15 00:00:00',
+      currency: 'TRY',
+      customer: {
+        code: 'SNAPSHOT-CUSTOMER',
+      },
+      salesInvoiceDetails: [
+        {
+          price: 100,
+          taxRate: 20,
+          productDetail: {
+            itemCode: 'SPORGYM-COMMISSION',
+            itemType: 2,
+          },
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
 function mockPendingCreateFromInput(id = 'snapshot-record-1') {
   prismaMock.settlementCommissionInvoice.create.mockImplementation(async (input: { data: Record<string, unknown> }) =>
     buildRecord({
@@ -201,6 +270,74 @@ describe('settlement commission invoice record foundation', () => {
     prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.financeLedgerEntry.findFirst.mockReset();
     prismaMock.invoiceExecution.create.mockReset();
+  });
+
+  it('blocks Logo execution when create is disabled', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: false,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: 'tenant-1',
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+      actualTenantId: 'tenant-1',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      environment: 'test',
+      tenantValidation: {
+        status: 'matched',
+      },
+      blockers: ['LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.'],
+    });
+  });
+
+  it('blocks Logo execution when authenticated tenant does not match expected tenant', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'production',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: 'tenant-prod-1',
+        LOGO_ISBASI_BASE_URL: 'https://logo.example.test',
+      } as never,
+      actualTenantId: 'tenant-other',
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.tenantValidation).toMatchObject({
+      status: 'mismatch',
+      expectedTenantId: 'tenant-prod-1',
+      actualTenantId: 'tenant-other',
+    });
+    expect(result.blockers).toContain(
+      'Logo tenant mismatch. Authenticated Logo tenant does not match LOGO_ISBASI_EXPECTED_TENANT_ID.',
+    );
+  });
+
+  it('allows Logo execution environment when explicit create settings and tenant match', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: 'tenant-1',
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+      actualTenantId: 'tenant-1',
+    });
+
+    expect(result).toEqual({
+      allowed: true,
+      environment: 'test',
+      tenantValidation: {
+        expectedTenantIdPresent: true,
+        expectedTenantId: 'tenant-1',
+        actualTenantIdPresent: true,
+        actualTenantId: 'tenant-1',
+        status: 'matched',
+      },
+      blockers: [],
+    });
   });
 
   it('can create a pending record for a settlement approval without provider calls', async () => {
@@ -449,6 +586,77 @@ describe('settlement commission invoice record foundation', () => {
     });
   });
 
+  it('validates Logo execution contract from persisted immutable request snapshot only', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({
+        requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+      }),
+    );
+
+    const result = await validateLogoExecutionContract('settlement-invoice-1');
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      status: 'READY',
+      recordStatus: 'PENDING',
+      requestSnapshotPresent: true,
+      payloadPresent: true,
+      snapshotSource: 'immutable_settlement_truth',
+      payloadBuilderVersion: 'settlement-logo-request-v1',
+      blockers: [],
+    });
+    expect(prismaMock.settlementCommissionInvoice.findUnique).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+    });
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks Logo execution contract when request snapshot is missing', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({
+        requestSnapshotJson: null,
+      }),
+    );
+
+    const result = await validateLogoExecutionContract('settlement-invoice-1');
+
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({
+      status: 'BLOCKED',
+      requestSnapshotPresent: false,
+      payloadPresent: false,
+      snapshotSource: null,
+    });
+    expect(result.blockers).toContain('SettlementCommissionInvoice requestSnapshotJson is required before Logo execution.');
+    expect(result.blockers).toContain('SettlementCommissionInvoice requestSnapshotJson.logoPayload is required before Logo execution.');
+  });
+
+  it('blocks Logo execution contract when logoPayload is missing', async () => {
+    const snapshotWithoutPayload = { ...buildImmutableLogoRequestSnapshot() };
+    delete (snapshotWithoutPayload as Record<string, unknown>).logoPayload;
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({
+        requestSnapshotJson: snapshotWithoutPayload,
+      }),
+    );
+
+    const result = await validateLogoExecutionContract('settlement-invoice-1');
+
+    expect(result.ok).toBe(false);
+    expect(result.payloadPresent).toBe(false);
+    expect(result.snapshotSource).toBeNull();
+    expect(result.blockers).toContain('SettlementCommissionInvoice requestSnapshotJson.logoPayload is required before Logo execution.');
+    expect(result.blockers).toContain(
+      'SettlementCommissionInvoice request snapshot must come from immutable_settlement_truth before Logo execution.',
+    );
+  });
+
   it('marks a pending record as created and preserves the request snapshot', async () => {
     const pending = buildRecord({ requestSnapshotJson: { request: 'keep-me' } });
     prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(pending);
@@ -544,6 +752,197 @@ describe('settlement commission invoice record foundation', () => {
     expect(prismaMock.settlementCommissionInvoice.update.mock.calls[0]?.[0].data).not.toHaveProperty('requestSnapshotJson');
   });
 
+  it('marks a pending record as UNKNOWN for ambiguous provider execution outcomes', async () => {
+    const pending = buildRecord({
+      requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+    });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(pending);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...pending,
+        status: SettlementCommissionInvoiceStatus.UNKNOWN,
+        unknownReason: 'provider timeout after request sent',
+        unknownAt: new Date('2026-06-10T10:06:00.000Z'),
+        responseSnapshotJson: { error: 'timeout' },
+      }),
+    );
+
+    const record = await markUnknown({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      unknownReason: 'provider timeout after request sent',
+      responseSnapshotJson: { error: 'timeout' },
+    });
+
+    expect(record).toMatchObject({
+      status: 'unknown',
+      unknownReason: 'provider timeout after request sent',
+      unknownAt: '2026-06-10T10:06:00.000Z',
+      requestSnapshot: {
+        requestSnapshotPresent: true,
+        snapshotSource: 'immutable_settlement_truth',
+      },
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: {
+        status: SettlementCommissionInvoiceStatus.UNKNOWN,
+        unknownReason: 'provider timeout after request sent',
+        unknownAt: expect.any(Date),
+        responseSnapshotJson: { error: 'timeout' },
+      },
+    });
+  });
+
+  it('supports provider-created-but-local-failed recovery through UNKNOWN before reconciliation', async () => {
+    const pending = buildRecord({
+      requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+    });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(pending);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...pending,
+        status: SettlementCommissionInvoiceStatus.UNKNOWN,
+        unknownReason: 'local persistence ambiguity after provider request sent',
+        unknownAt: new Date('2026-06-10T10:06:00.000Z'),
+      }),
+    );
+
+    const record = await markUnknown({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      unknownReason: 'local persistence ambiguity after provider request sent',
+      responseSnapshotJson: {
+        providerRequestSent: true,
+        providerResponsePersisted: false,
+      },
+    });
+
+    expect(record).toMatchObject({
+      status: 'unknown',
+      unknownReason: 'local persistence ambiguity after provider request sent',
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: expect.objectContaining({
+        status: SettlementCommissionInvoiceStatus.UNKNOWN,
+        unknownReason: 'local persistence ambiguity after provider request sent',
+      }),
+    });
+  });
+
+  it('resolves UNKNOWN as CREATED only with explicit reconciliation evidence', async () => {
+    const unknownRecord = buildRecord({
+      status: SettlementCommissionInvoiceStatus.UNKNOWN,
+      unknownReason: 'provider timeout after request sent',
+      unknownAt: new Date('2026-06-10T10:06:00.000Z'),
+      requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+    });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(unknownRecord);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...unknownRecord,
+        status: SettlementCommissionInvoiceStatus.CREATED,
+        providerInvoiceId: 'logo-invoice-1',
+        providerUuid: 'logo-uuid-1',
+        providerEttn: 'logo-ettn-1',
+        invoiceNo: 'ABC202600001',
+        reconciliationStatus: 'resolved_created',
+        reconciliationEvidenceJson: { evidence: 'provider status check confirmed invoice' },
+        reconciledAt: new Date('2026-06-10T10:20:00.000Z'),
+        reconciledBy: 'admin-1',
+      }),
+    );
+
+    const record = await resolveUnknownAsCreated({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      providerInvoiceId: 'logo-invoice-1',
+      providerUuid: 'logo-uuid-1',
+      providerEttn: 'logo-ettn-1',
+      invoiceNo: 'ABC202600001',
+      reconciliationEvidenceJson: { evidence: 'provider status check confirmed invoice' },
+      reconciledBy: 'admin-1',
+    });
+
+    expect(record).toMatchObject({
+      status: 'created',
+      providerInvoiceId: 'logo-invoice-1',
+      providerUuid: 'logo-uuid-1',
+      providerEttn: 'logo-ettn-1',
+      invoiceNo: 'ABC202600001',
+      reconciliationStatus: 'resolved_created',
+      reconciliationEvidenceSnapshot: {
+        present: true,
+        topLevelKeys: ['evidence'],
+      },
+      reconciledAt: '2026-06-10T10:20:00.000Z',
+      reconciledBy: 'admin-1',
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: expect.objectContaining({
+        status: SettlementCommissionInvoiceStatus.CREATED,
+        reconciliationStatus: 'resolved_created',
+        reconciliationEvidenceJson: { evidence: 'provider status check confirmed invoice' },
+        reconciledAt: expect.any(Date),
+        reconciledBy: 'admin-1',
+      }),
+    });
+  });
+
+  it('resolves UNKNOWN as FAILED only with explicit reconciliation evidence', async () => {
+    const unknownRecord = buildRecord({
+      status: SettlementCommissionInvoiceStatus.UNKNOWN,
+      unknownReason: 'network interruption after request sent',
+      unknownAt: new Date('2026-06-10T10:06:00.000Z'),
+      requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+    });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(unknownRecord);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        ...unknownRecord,
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        failureCode: 'RECONCILED_NO_PROVIDER_INVOICE',
+        failureMessage: 'Provider status check found no invoice.',
+        failedAt: new Date('2026-06-10T10:20:00.000Z'),
+        reconciliationStatus: 'resolved_failed',
+        reconciliationEvidenceJson: { evidence: 'provider status check found no invoice' },
+        reconciledAt: new Date('2026-06-10T10:20:00.000Z'),
+        reconciledBy: 'admin-1',
+      }),
+    );
+
+    const record = await resolveUnknownAsFailed({
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      failureCode: 'RECONCILED_NO_PROVIDER_INVOICE',
+      failureMessage: 'Provider status check found no invoice.',
+      reconciliationEvidenceJson: { evidence: 'provider status check found no invoice' },
+      reconciledBy: 'admin-1',
+    });
+
+    expect(record).toMatchObject({
+      status: 'failed',
+      failureCode: 'RECONCILED_NO_PROVIDER_INVOICE',
+      failureMessage: 'Provider status check found no invoice.',
+      reconciliationStatus: 'resolved_failed',
+      reconciliationEvidenceSnapshot: {
+        present: true,
+        topLevelKeys: ['evidence'],
+      },
+      reconciledAt: '2026-06-10T10:20:00.000Z',
+      reconciledBy: 'admin-1',
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: expect.objectContaining({
+        status: SettlementCommissionInvoiceStatus.FAILED,
+        failureCode: 'RECONCILED_NO_PROVIDER_INVOICE',
+        failureMessage: 'Provider status check found no invoice.',
+        failedAt: expect.any(Date),
+        reconciliationStatus: 'resolved_failed',
+        reconciliationEvidenceJson: { evidence: 'provider status check found no invoice' },
+      }),
+    });
+  });
+
   it('does not allow created records to become failed', async () => {
     prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
       buildRecord({ status: SettlementCommissionInvoiceStatus.CREATED }),
@@ -582,6 +981,14 @@ describe('settlement commission invoice record foundation', () => {
     );
 
     prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.UNKNOWN }),
+    );
+
+    await expect(incrementRetry({ settlementCommissionInvoiceId: 'settlement-invoice-1' })).rejects.toThrow(
+      'UNKNOWN execution must be reconciled before retry.',
+    );
+
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
       buildRecord({ status: SettlementCommissionInvoiceStatus.FAILED, retryCount: 1 }),
     );
     prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
@@ -604,6 +1011,38 @@ describe('settlement commission invoice record foundation', () => {
         },
         lastRetriedAt: expect.any(Date),
       },
+    });
+  });
+
+  it('returns retry decisions that allow FAILED and block UNKNOWN until reconciliation', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.FAILED }),
+    );
+
+    const failedDecision = await canRetry({ settlementCommissionInvoiceId: 'settlement-invoice-1' });
+
+    expect(failedDecision).toEqual({
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      status: 'failed',
+      canRetry: true,
+      blockers: [],
+    });
+
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(
+      buildRecord({ status: SettlementCommissionInvoiceStatus.UNKNOWN }),
+    );
+
+    const unknownDecision = await canRetry({ settlementCommissionInvoiceId: 'settlement-invoice-1' });
+
+    expect(unknownDecision).toEqual({
+      ok: true,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: 'settlement-invoice-1',
+      status: 'unknown',
+      canRetry: false,
+      blockers: ['UNKNOWN execution must be reconciled before retry.'],
     });
   });
 
@@ -659,5 +1098,60 @@ describe('settlement commission invoice record foundation', () => {
     });
     expect(JSON.stringify(diagnostics)).not.toContain('Bad gateway');
     expect(JSON.stringify(diagnostics)).not.toContain('hidden');
+  });
+
+  it('returns environment, execution contract, and UNKNOWN diagnostics without payload bodies', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(
+      buildRecord({
+        status: SettlementCommissionInvoiceStatus.UNKNOWN,
+        requestSnapshotJson: buildImmutableLogoRequestSnapshot(),
+        unknownReason: 'provider timeout after request sent',
+        unknownAt: new Date('2026-06-10T10:06:00.000Z'),
+        reconciliationStatus: null,
+      }),
+    );
+
+    const diagnostics = await getSettlementCommissionInvoiceDiagnostics('settlement-invoice-1', {
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: false,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: 'tenant-1',
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+    });
+
+    expect(diagnostics).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      record: {
+        status: 'unknown',
+        environmentGuard: {
+          allowed: false,
+          environment: 'test',
+          tenantValidation: {
+            status: 'not_checked',
+          },
+          blockers: ['LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.'],
+        },
+        executionContract: {
+          ok: false,
+          status: 'BLOCKED',
+          requestSnapshotPresent: true,
+          payloadPresent: true,
+          snapshotSource: 'immutable_settlement_truth',
+          blockers: ['SettlementCommissionInvoice status must be PENDING before Logo execution. Current status: UNKNOWN.'],
+        },
+        unknown: {
+          reason: 'provider timeout after request sent',
+          unknownAt: '2026-06-10T10:06:00.000Z',
+          reconciliationState: null,
+          reconciliationEvidence: {
+            present: false,
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('salesInvoiceDetails');
+    expect(JSON.stringify(diagnostics)).not.toContain('SNAPSHOT-CUSTOMER');
   });
 });

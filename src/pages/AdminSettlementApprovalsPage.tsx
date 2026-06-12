@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   KPIStatCard,
   MetadataGroup,
@@ -1673,18 +1673,33 @@ export function AdminSettlementApprovalsPage() {
               <details className="settlement-advanced-diagnostics" open>
                 <summary>Invoice diagnostics</summary>
                 {Object.values(diagnostics).map((item) => (
-                  <MetadataGroup key={item.record.id} title={`Diagnostics ${item.record.id}`}>
-                    <MetadataRow label="writesPerformed" value={String(item.writesPerformed)} />
-                    <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
-                    <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
-                    <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
-                    <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.requestSnapshotPresent ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
-                    <MetadataRow label="Payload builder version" value={valueOrDash(item.record.snapshots.request.payloadBuilderVersion)} />
-                    <MetadataRow label="Request built at" value={formatDate(item.record.snapshots.request.requestBuiltAt)} />
-                    <MetadataRow label="Snapshot source" value={valueOrDash(item.record.snapshots.request.snapshotSource)} />
-                    <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
-                    <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
-                  </MetadataGroup>
+                  <Fragment key={item.record.id}>
+                    <MetadataGroup title={`Diagnostics ${item.record.id}`}>
+                      <MetadataRow label="writesPerformed" value={String(item.writesPerformed)} />
+                      <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
+                      <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
+                      <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
+                      <MetadataRow label="Environment guard" value={item.record.environmentGuard?.allowed ? 'Allowed' : 'Blocked'} />
+                      <MetadataRow label="Logo environment" value={valueOrDash(item.record.environmentGuard?.environment)} />
+                      <MetadataRow label="Tenant validation" value={valueOrDash(item.record.environmentGuard?.tenantValidation.status)} />
+                      <MetadataRow label="Execution contract" value={item.record.executionContract.ok ? 'Ready' : 'Blocked'} />
+                      <MetadataRow label="Contract status" value={safeStatusLabel(item.record.executionContract.recordStatus)} />
+                      <MetadataRow label="Payload present" value={valueOrDash(item.record.executionContract.payloadPresent)} />
+                      <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.requestSnapshotPresent ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
+                      <MetadataRow label="Payload builder version" value={valueOrDash(item.record.snapshots.request.payloadBuilderVersion)} />
+                      <MetadataRow label="Request built at" value={formatDate(item.record.snapshots.request.requestBuiltAt)} />
+                      <MetadataRow label="Snapshot source" value={valueOrDash(item.record.snapshots.request.snapshotSource)} />
+                      <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
+                      <MetadataRow label="UNKNOWN reason" value={valueOrDash(item.record.unknown.reason)} />
+                      <MetadataRow label="UNKNOWN at" value={formatDate(item.record.unknown.unknownAt)} />
+                      <MetadataRow label="Reconciliation state" value={valueOrDash(item.record.unknown.reconciliationState)} />
+                      <MetadataRow label="Reconciled at" value={formatDate(item.record.unknown.reconciledAt)} />
+                      <MetadataRow label="Reconciliation evidence" value={`${item.record.unknown.reconciliationEvidence.present ? 'Present' : 'Missing'} · ${item.record.unknown.reconciliationEvidence.type}`} />
+                      <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
+                    </MetadataGroup>
+                    <ReadinessList title="Environment guard blockers" items={item.record.environmentGuard?.blockers ?? []} tone="danger" />
+                    <ReadinessList title="Execution contract blockers" items={item.record.executionContract.blockers} tone="danger" />
+                  </Fragment>
                 ))}
               </details>
             ) : null}
