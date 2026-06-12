@@ -304,6 +304,8 @@ describe('finance event backfill route', () => {
         canCreateLogoInvoiceLater: true,
         blockers: [],
         warnings: [],
+        billingSnapshotPresent: true,
+        billingSnapshotSource: 'settlement_approval',
       },
       amounts: {
         commissionAmount: 100,
@@ -319,6 +321,8 @@ describe('finance event backfill route', () => {
         logoCustomerCodePresent: true,
         logoCustomerIdPresent: true,
         logoEinvoiceEligible: true,
+        billingSnapshotPresent: true,
+        billingSnapshotSource: 'settlement_approval',
       },
       vatRateSource: 'settlement_line_snapshots',
       detectedVatRates: [20],

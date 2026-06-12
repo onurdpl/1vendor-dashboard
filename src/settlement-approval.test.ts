@@ -14,6 +14,9 @@ const prismaMock = vi.hoisted(() => ({
   settlementApprovalLine: {
     count: vi.fn(),
   },
+  vendorBillingProfile: {
+    findUnique: vi.fn(),
+  },
   payoutBatch: {
     create: vi.fn(),
   },
@@ -150,6 +153,31 @@ function buildApproval(input: {
   };
 }
 
+function buildBillingProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'billing-1',
+    vendorId: 'vendor-a',
+    legalCompanyName: 'Yali Spor A.S.',
+    taxNumber: '1234567890',
+    taxOffice: 'Kadikoy',
+    billingAddress: 'Billing address',
+    billingCity: 'Istanbul',
+    billingDistrict: 'Kadikoy',
+    iban: null,
+    authorizedPerson: 'Authorized Person',
+    billingEmail: 'billing@yali.test',
+    billingPhone: '+905551112233',
+    legalEntityType: 'limited_company',
+    logoIsbasiCustomerCode: 'LOGO-CODE-1',
+    logoIsbasiCustomerId: 'LOGO-ID-1',
+    logoIsbasiEinvoiceEligible: true,
+    logoIsbasiLastCheckedAt: new Date('2026-06-01T09:00:00.000Z'),
+    createdAt: new Date('2026-06-01T09:00:00.000Z'),
+    updatedAt: new Date('2026-06-01T09:00:00.000Z'),
+    ...overrides,
+  };
+}
+
 describe('settlement approval foundation', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockReset();
@@ -160,6 +188,7 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementApproval.update.mockReset();
     prismaMock.settlementApprovalLine.count.mockReset();
+    prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.invoiceExecution.create.mockReset();
   });
@@ -558,6 +587,7 @@ describe('settlement approval foundation', () => {
       buildLedgerRow({ id: 'refund-1', entryType: 'refund', amount: 100 }),
     ]);
     prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
     prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
       id: 'settlement-approval-1',
       createdAt: new Date('2026-06-01T11:00:00.000Z'),
@@ -597,6 +627,29 @@ describe('settlement approval foundation', () => {
           commissionMinor: 10000,
           commissionVatMinor: 2000,
           netPayableMinor: 78000,
+          sourceSnapshotJson: expect.objectContaining({
+            candidateScope: 'vendor_wide',
+            settlementBillingSnapshot: expect.objectContaining({
+              version: 1,
+              source: 'vendor_billing_profile',
+              vendorId: 'vendor-a',
+              vendorBillingProfileId: 'billing-1',
+              legalCompanyName: 'Yali Spor A.S.',
+              taxNumber: '1234567890',
+              taxOffice: 'Kadikoy',
+              billingAddress: 'Billing address',
+              billingCity: 'Istanbul',
+              billingDistrict: 'Kadikoy',
+              authorizedPerson: 'Authorized Person',
+              billingEmail: 'billing@yali.test',
+              billingPhone: '+905551112233',
+              legalEntityType: 'limited_company',
+              logoIsbasiCustomerCode: 'LOGO-CODE-1',
+              logoIsbasiCustomerId: 'LOGO-ID-1',
+              logoIsbasiEinvoiceEligible: true,
+              logoIsbasiLastCheckedAt: '2026-06-01T09:00:00.000Z',
+            }),
+          }),
           lines: {
             create: [
               expect.objectContaining({
@@ -638,7 +691,14 @@ describe('settlement approval foundation', () => {
       writesPerformed: true,
       status: 'draft',
       grossSalesMinor: 100000,
+      commissionMinor: 10000,
+      commissionVatMinor: 2000,
       netPayableMinor: 78000,
+    });
+    expect(prismaMock.vendorBillingProfile.findUnique).toHaveBeenCalledWith({
+      where: {
+        vendorId: 'vendor-a',
+      },
     });
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();

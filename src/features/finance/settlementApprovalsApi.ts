@@ -165,6 +165,8 @@ export type SettlementLogoCommissionInvoicePreview = {
     canCreateLogoInvoiceLater: boolean;
     blockers: string[];
     warnings: string[];
+    billingSnapshotPresent: boolean;
+    billingSnapshotSource: 'settlement_approval' | null;
   };
   amounts: {
     commissionAmount: number;
@@ -180,6 +182,8 @@ export type SettlementLogoCommissionInvoicePreview = {
     logoCustomerCodePresent: boolean;
     logoCustomerIdPresent: boolean;
     logoEinvoiceEligible: boolean | null;
+    billingSnapshotPresent: boolean;
+    billingSnapshotSource: 'settlement_approval' | null;
   };
   vatRateSource: 'settlement_line_snapshots' | 'blocked_mixed_or_missing';
   detectedVatRates: number[];

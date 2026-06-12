@@ -1514,6 +1514,8 @@ export function AdminSettlementApprovalsPage() {
                 <details className="settlement-advanced-diagnostics">
                   <summary>Vendor billing and payload diagnostics</summary>
                   <MetadataGroup title="Vendor billing readiness">
+                    <MetadataRow label="Settlement snapshot" value={logoPreview.vendorBillingReadiness.billingSnapshotPresent ? 'Present' : 'Missing'} />
+                    <MetadataRow label="Snapshot source" value={valueOrDash(logoPreview.vendorBillingReadiness.billingSnapshotSource)} />
                     <MetadataRow label="Complete" value={logoPreview.vendorBillingReadiness.complete ? 'Yes' : 'No'} />
                     <MetadataRow label="Missing fields" value={logoPreview.vendorBillingReadiness.missingFields.join(', ') || 'None'} />
                     <MetadataRow label="Logo customer code" value={logoPreview.vendorBillingReadiness.logoCustomerCodePresent ? 'Present' : 'Missing'} />

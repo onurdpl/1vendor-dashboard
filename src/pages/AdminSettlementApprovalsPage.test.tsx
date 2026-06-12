@@ -403,6 +403,8 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
     canCreateLogoInvoiceLater: false,
     blockers: ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.'],
     warnings: ['Read-only preview only. No Logo invoice is created.'],
+    billingSnapshotPresent: true,
+    billingSnapshotSource: 'settlement_approval',
   },
   amounts: {
     commissionAmount: 120,
@@ -418,6 +420,8 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
     logoCustomerCodePresent: false,
     logoCustomerIdPresent: false,
     logoEinvoiceEligible: null,
+    billingSnapshotPresent: true,
+    billingSnapshotSource: 'settlement_approval',
   },
   vatRateSource: 'settlement_line_snapshots',
   detectedVatRates: [20],

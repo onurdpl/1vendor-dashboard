@@ -38,9 +38,16 @@ function buildApproval(input: {
   netPayableMinor?: number;
   lineVatRates?: Array<number | string | null>;
   missingSnapshotFields?: string[];
+  billingSnapshot?: Record<string, unknown> | null;
 }) {
   const lineVatRates = input.lineVatRates ?? [20];
   const missingSnapshotFields = new Set(input.missingSnapshotFields ?? []);
+  const sourceSnapshotJson =
+    input.billingSnapshot === null
+      ? {}
+      : {
+          settlementBillingSnapshot: input.billingSnapshot ?? buildBillingSnapshot(),
+        };
   return {
     id: 'approval-1',
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
@@ -60,7 +67,7 @@ function buildApproval(input: {
     cancelledBy: null,
     cancelledAt: null,
     notes: null,
-    sourceSnapshotJson: {},
+    sourceSnapshotJson,
     lines: lineVatRates.map((lineVatRate, index) => {
       const sourceSnapshotJson: Record<string, unknown> = {
         sourceShopifyOrderId: `gid://shopify/Order/100${index + 1}`,
@@ -93,6 +100,31 @@ function buildApproval(input: {
         financeLedgerEntry: null,
       };
     }),
+  };
+}
+
+function buildBillingSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    source: 'vendor_billing_profile',
+    capturedAt: '2026-06-01T09:30:00.000Z',
+    vendorId: 'vendor-a',
+    vendorBillingProfileId: 'billing-1',
+    legalCompanyName: 'Yali Spor A.S.',
+    taxNumber: '1234567890',
+    taxOffice: 'Kadikoy',
+    billingAddress: 'Billing address',
+    billingCity: 'Istanbul',
+    billingDistrict: 'Kadikoy',
+    authorizedPerson: 'Authorized Person',
+    billingEmail: 'billing@yali.test',
+    billingPhone: '+905551112233',
+    legalEntityType: 'limited_company',
+    logoIsbasiCustomerCode: 'LOGO-CODE-1',
+    logoIsbasiCustomerId: 'LOGO-ID-1',
+    logoIsbasiEinvoiceEligible: true,
+    logoIsbasiLastCheckedAt: '2026-06-01T09:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -156,6 +188,14 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.ok).toBe(true);
     expect(preview.writesPerformed).toBe(false);
     expect(preview.readiness.canCreateLogoInvoiceLater).toBe(true);
+    expect(preview.readiness).toMatchObject({
+      billingSnapshotPresent: true,
+      billingSnapshotSource: 'settlement_approval',
+    });
+    expect(preview.vendorBillingReadiness).toMatchObject({
+      billingSnapshotPresent: true,
+      billingSnapshotSource: 'settlement_approval',
+    });
     expect(preview.amounts).toMatchObject({
       commissionAmount: 100,
       commissionVatAmount: 20,
@@ -186,6 +226,7 @@ describe('settlement Logo commission invoice preview', () => {
     expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.create).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
@@ -211,13 +252,48 @@ describe('settlement Logo commission invoice preview', () => {
     expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
   });
 
-  it('returns blockers for missing billing fields and missing Logo binding', async () => {
-    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({}));
+  it('uses the settlement billing snapshot instead of current VendorBillingProfile data', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({
+        billingSnapshot: buildBillingSnapshot({
+          legalCompanyName: 'Snapshot Vendor A.S.',
+          taxNumber: '1111111111',
+          billingEmail: 'snapshot-billing@example.test',
+          logoIsbasiCustomerCode: 'SNAPSHOT-CUSTOMER',
+        }),
+      }),
+    );
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(
       buildBillingProfile({
-        billingCity: null,
-        logoIsbasiCustomerCode: null,
-        logoIsbasiCustomerId: null,
+        legalCompanyName: 'Changed Vendor A.S.',
+        taxNumber: '2222222222',
+        billingEmail: 'changed-billing@example.test',
+        logoIsbasiCustomerCode: 'CHANGED-CUSTOMER',
+      }),
+    );
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+    const customer = preview.logoPayloadPreview?.customer as Record<string, unknown>;
+
+    expect(preview.ok).toBe(true);
+    expect(customer).toMatchObject({
+      code: 'SNAPSHOT-CUSTOMER',
+      name: 'Snapshot Vendor A.S.',
+      tcknVkn: '1111111111',
+      email: 'snapshot-billing@example.test',
+    });
+    expect(customer.code).not.toBe('CHANGED-CUSTOMER');
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('returns blockers for missing billing fields and missing Logo binding', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({
+        billingSnapshot: buildBillingSnapshot({
+          billingCity: null,
+          logoIsbasiCustomerCode: null,
+          logoIsbasiCustomerId: null,
+        }),
       }),
     );
 
@@ -230,17 +306,42 @@ describe('settlement Logo commission invoice preview', () => {
       missingFields: ['billingCity'],
       logoCustomerCodePresent: false,
       logoCustomerIdPresent: false,
+      billingSnapshotPresent: true,
+      billingSnapshotSource: 'settlement_approval',
     });
     expect(preview.vatRateSource).toBe('settlement_line_snapshots');
     expect(preview.detectedVatRates).toEqual([20]);
     expect(preview.executionSnapshotGuard.ok).toBe(true);
     expect(preview.readiness.blockers).toEqual(
       expect.arrayContaining([
-        'Vendor billing profile is missing required fields: billingCity.',
+        'Settlement billing snapshot is missing required fields: billingCity.',
         'Vendor must have logoIsbasiCustomerCode before Logo invoice creation.',
         'Vendor must have logoIsbasiCustomerId before Logo invoice creation.',
       ]),
     );
+  });
+
+  it('blocks Logo readiness when the settlement billing snapshot is missing', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ billingSnapshot: null }));
+
+    const preview = await previewSettlementLogoCommissionInvoice('approval-1');
+
+    expect(preview.ok).toBe(false);
+    expect(preview.logoPayloadPreview).toBeNull();
+    expect(preview.readiness).toMatchObject({
+      canCreateLogoInvoiceLater: false,
+      billingSnapshotPresent: false,
+      billingSnapshotSource: null,
+    });
+    expect(preview.vendorBillingReadiness).toMatchObject({
+      complete: false,
+      billingSnapshotPresent: false,
+      billingSnapshotSource: null,
+    });
+    expect(preview.readiness.blockers).toContain(
+      'Settlement billing snapshot is missing. Historical invoice execution cannot be guaranteed.',
+    );
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
   });
 
   it('uses commissionMinor for invoice amount instead of netPayableMinor', async () => {

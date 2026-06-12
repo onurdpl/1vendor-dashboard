@@ -2,7 +2,6 @@ import {
   SettlementApprovalStatus,
   type SettlementApproval,
   type SettlementApprovalLine,
-  type VendorBillingProfile,
   type VendorFinancialProfile,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
@@ -11,6 +10,12 @@ import {
   type LogoIsbasiCommissionInvoicePreview,
 } from '../logo-isbasi/logo-isbasi-commission-preview.js';
 import type { VendorBillingProfileDto } from '../vendors/vendor-billing-profile.service.js';
+import {
+  mapSettlementBillingSnapshotToVendorBillingProfileDto,
+  readSettlementBillingSnapshot,
+  SETTLEMENT_BILLING_SNAPSHOT_MISSING_BLOCKER,
+  SETTLEMENT_BILLING_SNAPSHOT_READINESS_SOURCE,
+} from './settlement-billing-snapshot.service.js';
 import {
   buildSkippedExecutionSnapshotGuard,
   validateSettlementApprovalExecutionSnapshots,
@@ -40,6 +45,8 @@ export type SettlementCommissionInvoicePreviewDto = {
     canCreateLogoInvoiceLater: boolean;
     blockers: string[];
     warnings: string[];
+    billingSnapshotPresent: boolean;
+    billingSnapshotSource: typeof SETTLEMENT_BILLING_SNAPSHOT_READINESS_SOURCE | null;
   };
   amounts: {
     commissionAmount: number;
@@ -55,6 +62,8 @@ export type SettlementCommissionInvoicePreviewDto = {
     logoCustomerCodePresent: boolean;
     logoCustomerIdPresent: boolean;
     logoEinvoiceEligible: boolean | null;
+    billingSnapshotPresent: boolean;
+    billingSnapshotSource: typeof SETTLEMENT_BILLING_SNAPSHOT_READINESS_SOURCE | null;
   };
   vatRateSource: 'settlement_line_snapshots' | 'blocked_mixed_or_missing';
   detectedVatRates: number[];
@@ -117,31 +126,7 @@ function buildDescription(approval: SettlementApprovalForPreview) {
   ].filter(Boolean).join(' - ');
 }
 
-function mapBillingProfile(profile: VendorBillingProfile): VendorBillingProfileDto {
-  return {
-    id: profile.id,
-    vendorId: profile.vendorId,
-    legalCompanyName: profile.legalCompanyName,
-    taxNumber: profile.taxNumber,
-    taxOffice: profile.taxOffice,
-    billingAddress: profile.billingAddress,
-    billingCity: profile.billingCity,
-    billingDistrict: profile.billingDistrict,
-    iban: profile.iban,
-    authorizedPerson: profile.authorizedPerson,
-    billingEmail: profile.billingEmail,
-    billingPhone: profile.billingPhone,
-    legalEntityType: profile.legalEntityType,
-    logoIsbasiCustomerCode: profile.logoIsbasiCustomerCode,
-    logoIsbasiCustomerId: profile.logoIsbasiCustomerId,
-    logoIsbasiEinvoiceEligible: profile.logoIsbasiEinvoiceEligible,
-    logoIsbasiLastCheckedAt: profile.logoIsbasiLastCheckedAt?.toISOString() ?? null,
-    createdAt: profile.createdAt.toISOString(),
-    updatedAt: profile.updatedAt.toISOString(),
-  };
-}
-
-function getMissingBillingFields(profile: VendorBillingProfile | null) {
+function getMissingBillingFields(profile: VendorBillingProfileDto | null) {
   if (!profile) {
     return [...REQUIRED_BILLING_FIELDS];
   }
@@ -197,6 +182,8 @@ function emptyBillingReadiness(): SettlementCommissionInvoicePreviewDto['vendorB
     logoCustomerCodePresent: false,
     logoCustomerIdPresent: false,
     logoEinvoiceEligible: null,
+    billingSnapshotPresent: false,
+    billingSnapshotSource: null,
   };
 }
 
@@ -236,6 +223,8 @@ function buildBlockedResponse(input: {
       canCreateLogoInvoiceLater: false,
       blockers: input.blockers,
       warnings: input.warnings ?? [],
+      billingSnapshotPresent: Boolean(input.vendorBillingReadiness?.billingSnapshotPresent),
+      billingSnapshotSource: input.vendorBillingReadiness?.billingSnapshotSource ?? null,
     },
     amounts: input.approval
       ? buildAmounts(input.approval)
@@ -286,11 +275,6 @@ export async function previewSettlementLogoCommissionInvoice(
     });
   }
 
-  const billingProfile = await prisma.vendorBillingProfile.findUnique({
-    where: {
-      vendorId: approval.vendorId,
-    },
-  });
   const financialProfile = await prisma.vendorFinancialProfile.findFirst({
     where: {
       vendorId: approval.vendorId,
@@ -300,13 +284,19 @@ export async function previewSettlementLogoCommissionInvoice(
       updatedAt: 'desc',
     },
   });
+  const settlementBillingSnapshot = readSettlementBillingSnapshot(approval.sourceSnapshotJson);
+  const billingProfile = settlementBillingSnapshot
+    ? mapSettlementBillingSnapshotToVendorBillingProfileDto(settlementBillingSnapshot)
+    : null;
   const missingFields = getMissingBillingFields(billingProfile);
   const vendorBillingReadiness = {
-    complete: Boolean(billingProfile) && missingFields.length === 0,
+    complete: Boolean(settlementBillingSnapshot) && Boolean(billingProfile) && missingFields.length === 0,
     missingFields,
     logoCustomerCodePresent: Boolean(billingProfile?.logoIsbasiCustomerCode?.trim()),
     logoCustomerIdPresent: Boolean(billingProfile?.logoIsbasiCustomerId?.trim()),
     logoEinvoiceEligible: billingProfile?.logoIsbasiEinvoiceEligible ?? null,
+    billingSnapshotPresent: Boolean(settlementBillingSnapshot),
+    billingSnapshotSource: settlementBillingSnapshot ? SETTLEMENT_BILLING_SNAPSHOT_READINESS_SOURCE : null,
   };
 
   const amounts = buildAmounts(approval);
@@ -320,10 +310,16 @@ export async function previewSettlementLogoCommissionInvoice(
     snapshotTaxRate === null ? 'blocked_mixed_or_missing' : 'settlement_line_snapshots';
   const configuredVendorCommissionVatPercent = resolveConfiguredCommissionVatPercent(financialProfile);
   const blockers = [
-    ...(!billingProfile ? ['Vendor billing profile is required.'] : []),
-    ...(missingFields.length ? [`Vendor billing profile is missing required fields: ${missingFields.join(', ')}.`] : []),
-    ...(!vendorBillingReadiness.logoCustomerCodePresent ? ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.'] : []),
-    ...(!vendorBillingReadiness.logoCustomerIdPresent ? ['Vendor must have logoIsbasiCustomerId before Logo invoice creation.'] : []),
+    ...(!settlementBillingSnapshot ? [SETTLEMENT_BILLING_SNAPSHOT_MISSING_BLOCKER] : []),
+    ...(settlementBillingSnapshot && missingFields.length
+      ? [`Settlement billing snapshot is missing required fields: ${missingFields.join(', ')}.`]
+      : []),
+    ...(settlementBillingSnapshot && !vendorBillingReadiness.logoCustomerCodePresent
+      ? ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.']
+      : []),
+    ...(settlementBillingSnapshot && !vendorBillingReadiness.logoCustomerIdPresent
+      ? ['Vendor must have logoIsbasiCustomerId before Logo invoice creation.']
+      : []),
     ...(approval.currency !== 'TRY' ? [`SettlementApproval currency must be TRY for Logo commission invoice preview. Current currency: ${approval.currency}.`] : []),
     ...executionSnapshotGuard.blockers,
     ...(approval.commissionMinor <= 0
@@ -341,7 +337,9 @@ export async function previewSettlementLogoCommissionInvoice(
           `Settlement line VAT rate ${formatDecimal(snapshotTaxRate)}% differs from current vendor profile commission VAT rate ${formatDecimal(configuredVendorCommissionVatPercent)}%.`,
         ]
       : []),
-    ...(!vendorBillingReadiness.logoEinvoiceEligible ? ['Logo e-invoice eligibility is not confirmed for this vendor.'] : []),
+    ...(settlementBillingSnapshot && !vendorBillingReadiness.logoEinvoiceEligible
+      ? ['Logo e-invoice eligibility is not confirmed for this vendor.']
+      : []),
   ];
   amounts.taxRate = snapshotTaxRate;
 
@@ -355,6 +353,8 @@ export async function previewSettlementLogoCommissionInvoice(
         canCreateLogoInvoiceLater: false,
         blockers,
         warnings,
+        billingSnapshotPresent: vendorBillingReadiness.billingSnapshotPresent,
+        billingSnapshotSource: vendorBillingReadiness.billingSnapshotSource,
       },
       amounts,
       vendorBillingReadiness,
@@ -367,7 +367,7 @@ export async function previewSettlementLogoCommissionInvoice(
   }
 
   const preview: LogoIsbasiCommissionInvoicePreview = buildLogoIsbasiCommissionInvoicePreview({
-    vendorBillingProfile: mapBillingProfile(billingProfile),
+    vendorBillingProfile: billingProfile,
     commissionAmount: formatDecimal(amounts.commissionAmount),
     vatRate: formatDecimal(invoiceTaxRate),
     currency: approval.currency,
@@ -385,6 +385,8 @@ export async function previewSettlementLogoCommissionInvoice(
       canCreateLogoInvoiceLater: true,
       blockers: [],
       warnings: [...warnings, ...preview.warnings],
+      billingSnapshotPresent: vendorBillingReadiness.billingSnapshotPresent,
+      billingSnapshotSource: vendorBillingReadiness.billingSnapshotSource,
     },
     amounts,
     vendorBillingReadiness,

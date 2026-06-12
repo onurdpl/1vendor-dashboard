@@ -13,6 +13,7 @@ import {
   type ShippingMode,
   type VendorFinanceProfileConfig,
 } from './payout-calculator.js';
+import { buildSettlementBillingSnapshot } from './settlement-billing-snapshot.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -1162,6 +1163,14 @@ export async function createDraftApproval(
         throw new Error('One or more settlement rows are already linked to an active approval.');
       }
 
+      const billingProfile = await tx.vendorBillingProfile.findUnique({
+        where: {
+          vendorId: input.vendorId,
+        },
+      });
+      const generatedAt = new Date();
+      const settlementBillingSnapshot = buildSettlementBillingSnapshot(billingProfile, generatedAt);
+
       const approval = await tx.settlementApproval.create({
         data: {
           vendorId: input.vendorId,
@@ -1181,7 +1190,8 @@ export async function createDraftApproval(
             periodEnd: toIso(input.periodEnd),
             candidateScope: preview.candidateScope,
             candidateSelectionSummary: preview.candidateSelectionSummary,
-            generatedAt: new Date().toISOString(),
+            generatedAt: generatedAt.toISOString(),
+            settlementBillingSnapshot,
             eligibleRowCount: preview.summary.eligibleRowCount,
             excludedActiveApprovalRowCount: preview.summary.excludedActiveApprovalRowCount,
             writesPerformed: false,
