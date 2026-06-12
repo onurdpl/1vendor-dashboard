@@ -220,6 +220,41 @@ async function injectLogin(
   };
 }
 
+async function injectLoginRateLimitReset(
+  input: {
+    email?: unknown;
+    ip?: unknown;
+    requestIp?: string;
+    headers?: Record<string, string>;
+    env?: AppEnv;
+    omitEmail?: boolean;
+  } = {},
+) {
+  const handlers = createAuthRouteHandlers(input.env);
+  const reply = createReply();
+  const body: Record<string, unknown> = {};
+  if (!input.omitEmail) {
+    body.email = 'email' in input ? input.email : 'vendor@example.com';
+  }
+  if ('ip' in input) {
+    body.ip = input.ip;
+  }
+  const result = await handlers.post['/auth/login-rate-limit/reset']?.(
+    {
+      headers: input.headers ?? {},
+      body,
+      ip: input.requestIp ?? '127.0.0.1',
+    },
+    reply,
+  );
+
+  return {
+    statusCode: reply.statusCode,
+    payload: reply.sent ? reply.payload : result,
+    headers: reply.headers,
+  };
+}
+
 describe('auth login rate limiting', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -832,7 +867,12 @@ describe('auth login rate limiting', () => {
     const response = await injectLogin({ password: 'wrong' });
 
     expect(response.statusCode).toBe(429);
-    expect(response.payload).toEqual({ message: 'Too many login attempts. Please try again later.' });
+    expect(response.headers['Retry-After']).toBe('600');
+    expect(response.payload).toEqual({
+      message: 'Too many login attempts. Please try again later.',
+      retryAfterSeconds: 600,
+      retryAt: expect.any(String),
+    });
   });
 
   it('keeps separate buckets for different normalized emails', async () => {
@@ -855,14 +895,43 @@ describe('auth login rate limiting', () => {
     expect(response.payload).toEqual({ message: 'Invalid email or password.' });
   });
 
-  it('counts failed and successful attempts before authentication result', async () => {
+  it('uses the forwarded client IP before the proxy IP for deployed rate-limit buckets', async () => {
+    await injectLogin({
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' },
+      password: 'wrong',
+    });
+    await injectLogin({
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' },
+      password: 'wrong',
+    });
+
+    const separateForwardedIp = await injectLogin({
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.11, 10.0.0.1' },
+      password: 'wrong',
+    });
+    const originalForwardedIp = await injectLogin({
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.1' },
+      password: 'wrong',
+    });
+
+    expect(separateForwardedIp.statusCode).toBe(401);
+    expect(originalForwardedIp.statusCode).toBe(429);
+  });
+
+  it('resets failed attempts after a successful login without disabling future protection', async () => {
     await injectLogin({ password: 'wrong' });
-    await injectLogin({ password: 'demo123' });
+    const success = await injectLogin({ password: 'demo123' });
 
-    const response = await injectLogin({ password: 'demo123' });
+    expect(success.statusCode).toBe(200);
+    expect((await injectLogin({ password: 'wrong' })).statusCode).toBe(401);
+    expect((await injectLogin({ password: 'wrong' })).statusCode).toBe(401);
 
+    const response = await injectLogin({ password: 'wrong' });
     expect(response.statusCode).toBe(429);
-    expect(response.payload).toEqual({ message: 'Too many login attempts. Please try again later.' });
   });
 
   it('does not reveal whether the account exists when the rate limit is exceeded', async () => {
@@ -873,9 +942,27 @@ describe('auth login rate limiting', () => {
     const response = await injectLogin({ email: 'missing@example.com', password: 'wrong' });
 
     expect(response.statusCode).toBe(429);
-    expect(response.payload).toEqual({ message: 'Too many login attempts. Please try again later.' });
+    expect(response.payload).toEqual({
+      message: 'Too many login attempts. Please try again later.',
+      retryAfterSeconds: 600,
+      retryAt: expect.any(String),
+    });
     expect(JSON.stringify(response.payload)).not.toContain('missing@example.com');
     expect(JSON.stringify(response.payload)).not.toContain('exists');
+  });
+
+  it('keeps production login rate limiting enabled', async () => {
+    const env = buildEnv({ NODE_ENV: 'production' });
+    await injectLogin({ password: 'wrong', env });
+    await injectLogin({ password: 'wrong', env });
+
+    const response = await injectLogin({ password: 'wrong', env });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.payload).toEqual(expect.objectContaining({
+      message: 'Too many login attempts. Please try again later.',
+      retryAfterSeconds: 600,
+    }));
   });
 
   it('allows attempts again after the configured window expires', async () => {
@@ -893,5 +980,70 @@ describe('auth login rate limiting', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the demo/dev reset route disabled by default', async () => {
+    const response = await injectLoginRateLimitReset();
+
+    expect(response.statusCode).toBe(404);
+    expect(response.payload).toEqual({ message: 'Not found.' });
+  });
+
+  it('keeps the reset route blocked in production even when the flag is set', async () => {
+    const env = buildEnv({
+      NODE_ENV: 'production',
+      AUTH_RATE_LIMIT_RESET_ENABLED: true,
+      AUTH_RATE_LIMIT_RESET_TOKEN: 'test-reset-token',
+    });
+
+    const response = await injectLoginRateLimitReset({
+      env,
+      headers: { 'x-auth-rate-limit-reset-token': 'test-reset-token' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.payload).toEqual({ message: 'Not found.' });
+  });
+
+  it('requires the reset token when the demo/dev reset route is enabled', async () => {
+    const env = buildEnv({
+      AUTH_RATE_LIMIT_RESET_ENABLED: true,
+      AUTH_RATE_LIMIT_RESET_TOKEN: 'test-reset-token',
+    });
+
+    const response = await injectLoginRateLimitReset({ env });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Reset is not available.' });
+  });
+
+  it('resets the selected IP and email bucket through the gated demo/dev reset route', async () => {
+    const env = buildEnv({
+      AUTH_RATE_LIMIT_RESET_ENABLED: true,
+      AUTH_RATE_LIMIT_RESET_TOKEN: 'test-reset-token',
+    });
+    await injectLogin({ ip: '198.51.100.10', password: 'wrong', env });
+    await injectLogin({ ip: '198.51.100.10', password: 'wrong', env });
+    expect((await injectLogin({ ip: '198.51.100.10', password: 'wrong', env })).statusCode).toBe(429);
+
+    const reset = await injectLoginRateLimitReset({
+      env,
+      email: 'Vendor@Example.COM',
+      ip: '198.51.100.10',
+      headers: { 'x-auth-rate-limit-reset-token': 'test-reset-token' },
+    });
+    const afterReset = await injectLogin({ ip: '198.51.100.10', password: 'wrong', env });
+
+    expect(reset.statusCode).toBe(200);
+    expect(reset.payload).toEqual({
+      ok: true,
+      reset: true,
+      keyingStrategy: 'ip_email',
+      email: 'vendor@example.com',
+      ip: '198.51.100.10',
+      maxAttempts: 2,
+      windowSeconds: 600,
+    });
+    expect(afterReset.statusCode).toBe(401);
   });
 });

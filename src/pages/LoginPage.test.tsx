@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequireAuth } from '../lib/RequireAuth';
+import { ApiError } from '../lib/api/errors';
 import {
   EXPIRED_SESSION_MESSAGE,
   clearToken,
@@ -179,6 +180,23 @@ describe('LoginPage expired session flow', () => {
     expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.queryByText('Sign-in is taking longer than expected. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('shows the retry window when login is temporarily rate limited', async () => {
+    loginMock.mockRejectedValueOnce(new ApiError('Too many login attempts. Please try again later.', 'server', {
+      status: 429,
+      details: {
+        message: 'Too many login attempts. Please try again later.',
+        retryAfterSeconds: 600,
+        retryAt: '2026-06-12T10:10:00.000Z',
+      },
+    }));
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByText('Too many login attempts. Please try again in 10 minutes.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
   });
 
   it('logs safe POST dispatch diagnostics without credentials', async () => {

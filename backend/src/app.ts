@@ -250,6 +250,7 @@ export function createApp() {
       'X-Shopify-Webhook-Id',
       'X-Shopify-Topic',
       'X-Admin-Probe-Token',
+      'X-Auth-Rate-Limit-Reset-Token',
     ],
     exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id'],
   });

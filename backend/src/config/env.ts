@@ -11,6 +11,8 @@ export type AppEnv = {
   JWT_EXPIRES_IN: string;
   LOGIN_RATE_LIMIT_MAX_ATTEMPTS: number;
   LOGIN_RATE_LIMIT_WINDOW_SECONDS: number;
+  AUTH_RATE_LIMIT_RESET_ENABLED?: boolean;
+  AUTH_RATE_LIMIT_RESET_TOKEN?: string;
   SHOPIFY_WEBHOOK_SECRET: string;
   SHOPIFY_RETURN_WEBHOOK_SECRET?: string;
   SHOPIFY_FULFILLMENT_WEBHOOK_SECRET?: string;
@@ -363,6 +365,8 @@ export function loadEnv(): AppEnv {
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS: parsePositiveInteger(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, 10),
     LOGIN_RATE_LIMIT_WINDOW_SECONDS: parsePositiveInteger(process.env.LOGIN_RATE_LIMIT_WINDOW_SECONDS, 600),
+    AUTH_RATE_LIMIT_RESET_ENABLED: parseBoolean(process.env.AUTH_RATE_LIMIT_RESET_ENABLED, false),
+    AUTH_RATE_LIMIT_RESET_TOKEN: process.env.AUTH_RATE_LIMIT_RESET_TOKEN?.trim() || undefined,
     SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
     SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
     SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,

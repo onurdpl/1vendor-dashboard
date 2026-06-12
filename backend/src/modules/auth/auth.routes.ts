@@ -1,17 +1,27 @@
 import type { FastifyInstance } from 'fastify';
 import jwt from 'jsonwebtoken';
+import { timingSafeEqual } from 'node:crypto';
 import type { AppEnv } from '../../config/env.js';
 import { normalizeAuthAttemptId } from '../../lib/request-timing.js';
 import { createAuthService } from './auth.service.js';
 import { createAuthMiddleware } from './auth.middleware.js';
 import type { AuthLoginRouteTiming, LoginBody } from './auth.types.js';
-import { checkLoginRateLimit } from './login-rate-limit.js';
+import {
+  checkLoginRateLimit,
+  recordFailedLoginRateLimitAttempt,
+  resetLoginRateLimit,
+} from './login-rate-limit.js';
 import { createClearSessionCookie, createSessionCookie, getSessionCookieToken } from './session-cookie.js';
 
 export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 
 type LoginFailureStage = 'body_validation' | 'rate_limit' | 'user_lookup' | 'password_verify' | 'user_status' | 'unknown' | null;
 type LoginFailureReason = 'missing_credentials' | 'user_not_found' | 'invalid_password' | 'inactive_user' | 'unknown' | null;
+
+type LoginRateLimitResetBody = {
+  email?: unknown;
+  ip?: unknown;
+};
 
 export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -61,15 +71,17 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       return reply.code(400).send({ message: 'Email and password are required.' });
     }
 
+    const loginRateLimitIdentity = {
+      ip: getLoginRateLimitIp(request),
+      email,
+    };
+    const loginRateLimitConfig = {
+      maxAttempts: env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+      windowSeconds: env.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    };
     const loginRateLimit = checkLoginRateLimit(
-      {
-        ip: request.ip,
-        email,
-      },
-      {
-        maxAttempts: env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
-        windowSeconds: env.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-      },
+      loginRateLimitIdentity,
+      loginRateLimitConfig,
     );
     if (loginRateLimit.limited) {
       logAuthLoginDiagnostics(app, request, {
@@ -80,7 +92,9 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         responseStatus: 429,
         routeStartedAt,
       });
-      return reply.code(429).send({ message: 'Too many login attempts. Please try again later.' });
+      const payload = buildLoginRateLimitExceededPayload(loginRateLimit);
+      reply.header('Retry-After', String(payload.retryAfterSeconds));
+      return reply.code(429).send(payload);
     }
 
     const serviceStartedAt = process.hrtime.bigint();
@@ -104,6 +118,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     const routeEntryToServiceStartMs = elapsedMs(routeStartedAt, serviceStartedAt);
 
     if (!loginResult.success) {
+      recordFailedLoginRateLimitAttempt(loginRateLimitIdentity, loginRateLimitConfig);
       logAuthLoginDiagnostics(app, request, {
         email,
         success: false,
@@ -118,6 +133,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       return reply.code(401).send({ message: 'Invalid email or password.' });
     }
 
+    resetLoginRateLimit(loginRateLimitIdentity);
     const responsePreparationStartedAt = process.hrtime.bigint();
     const csrfToken = authService.createCsrfToken(loginResult.token);
     const cookieSetStartedAt = process.hrtime.bigint();
@@ -171,6 +187,47 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     });
 
     return responseBody;
+  });
+
+  app.post<{ Body: LoginRateLimitResetBody }>('/auth/login-rate-limit/reset', async (request, reply) => {
+    if (env.NODE_ENV === 'production' || env.AUTH_RATE_LIMIT_RESET_ENABLED !== true) {
+      return reply.code(404).send({ message: 'Not found.' });
+    }
+
+    if (!isValidLoginRateLimitResetToken(request, env)) {
+      return reply.code(403).send({ message: 'Reset is not available.' });
+    }
+
+    const body = request.body as LoginRateLimitResetBody | undefined;
+    const email = normalizeLoginEmail(body?.email);
+    if (!email) {
+      return reply.code(400).send({ message: 'Email is required.' });
+    }
+
+    const ip = typeof body?.ip === 'string' && body.ip.trim()
+      ? body.ip.trim()
+      : getLoginRateLimitIp(request);
+    resetLoginRateLimit({ ip, email });
+    app.log.info(
+      {
+        event: 'AUTH_LOGIN_RATE_LIMIT_RESET',
+        email,
+        ip,
+        keyingStrategy: 'ip_email',
+        nodeEnv: env.NODE_ENV,
+      },
+      'auth login rate limit reset',
+    );
+
+    return {
+      ok: true,
+      reset: true,
+      keyingStrategy: 'ip_email',
+      email,
+      ip,
+      maxAttempts: env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+      windowSeconds: env.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    };
   });
 
   app.post('/auth/logout', async (request, reply) => {
@@ -235,6 +292,42 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
 function readHeaderValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function getLoginRateLimitIp(request: { headers?: Record<string, string | string[] | undefined>; ip?: string }) {
+  const forwardedIp = readHeaderValue(request.headers?.['x-forwarded-for'])
+    .split(',')[0]
+    ?.trim();
+
+  return forwardedIp || request.ip || 'unknown';
+}
+
+function buildLoginRateLimitExceededPayload(input: { retryAfterSeconds: number; resetAtMs: number }) {
+  return {
+    message: 'Too many login attempts. Please try again later.',
+    retryAfterSeconds: input.retryAfterSeconds,
+    retryAt: new Date(input.resetAtMs).toISOString(),
+  };
+}
+
+function timingSafeStringEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isValidLoginRateLimitResetToken(
+  request: { headers?: Record<string, string | string[] | undefined> },
+  env: AppEnv,
+) {
+  const configuredToken = env.AUTH_RATE_LIMIT_RESET_TOKEN?.trim();
+  const providedToken = readHeaderValue(request.headers?.['x-auth-rate-limit-reset-token']).trim();
+
+  return Boolean(configuredToken && providedToken && timingSafeStringEqual(providedToken, configuredToken));
 }
 
 function shouldUseSecureSessionCookie(request: { headers?: Record<string, string | string[] | undefined>; protocol?: string }, env: AppEnv) {

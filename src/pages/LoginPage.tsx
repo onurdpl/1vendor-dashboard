@@ -12,6 +12,7 @@ import {
 } from '../lib/auth';
 import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
+import { ApiError } from '../lib/api/errors';
 import { runtimeServices } from '../services/runtime-services';
 
 type LoginRedirectState = {
@@ -41,6 +42,40 @@ function createAuthAttemptId() {
 
 function formatLoginTimeoutMessage(authAttemptId: string) {
   return `${LOGIN_TIMEOUT_MESSAGE} Reference: ${authAttemptId}`;
+}
+
+function readNumberProperty(value: unknown, propertyName: string) {
+  if (!value || typeof value !== 'object' || !(propertyName in value)) {
+    return null;
+  }
+
+  const property = Reflect.get(value, propertyName);
+  return typeof property === 'number' && Number.isFinite(property) ? property : null;
+}
+
+function formatRetryWindow(seconds: number) {
+  const roundedSeconds = Math.max(1, Math.ceil(seconds));
+  if (roundedSeconds < 60) {
+    return `${roundedSeconds} second${roundedSeconds === 1 ? '' : 's'}`;
+  }
+
+  const minutes = Math.ceil(roundedSeconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+function getLoginErrorMessage(error: unknown, input: { timeoutTriggered: boolean; responseReceived: boolean; authAttemptId: string }) {
+  if (input.timeoutTriggered && !input.responseReceived) {
+    return formatLoginTimeoutMessage(input.authAttemptId);
+  }
+
+  if (error instanceof ApiError && error.status === 429) {
+    const retryAfterSeconds = readNumberProperty(error.details, 'retryAfterSeconds');
+    if (retryAfterSeconds) {
+      return `Too many login attempts. Please try again in ${formatRetryWindow(retryAfterSeconds)}.`;
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Unable to sign in.';
 }
 
 function shouldLogAuthDiagnostics() {
@@ -234,13 +269,7 @@ export function LoginPage() {
         elapsedMs: Date.now() - startedAt,
         timedOut: timeoutTriggered,
       });
-      setErrorMessage(
-        timeoutTriggered && !responseReceived
-          ? formatLoginTimeoutMessage(authAttemptId)
-          : error instanceof Error
-            ? error.message
-            : 'Unable to sign in.',
-      );
+      setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authAttemptId }));
     } finally {
       clearLoginTimeout();
       setIsSubmitting(false);
