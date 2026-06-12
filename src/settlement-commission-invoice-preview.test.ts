@@ -206,7 +206,13 @@ describe('settlement Logo commission invoice preview', () => {
     });
     expect(preview.vatRateSource).toBe('settlement_line_snapshots');
     expect(preview.detectedVatRates).toEqual([20]);
-    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
+    expect(preview.configuredVendorCommissionVatPercent).toBeNull();
+    expect(preview.immutableRequestSnapshot).toMatchObject({
+      status: 'READY',
+      payloadBuilderVersion: 'settlement-logo-request-v1',
+      requestSnapshotPresent: true,
+      blockers: [],
+    });
     expect(preview.executionSnapshotGuard).toMatchObject({
       ok: true,
       detectedCommissionRates: [10],
@@ -227,6 +233,7 @@ describe('settlement Logo commission invoice preview', () => {
     expect(prismaMock.vendorBillingProfile.create).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
@@ -373,7 +380,7 @@ describe('settlement Logo commission invoice preview', () => {
     expect((preview.logoPayloadPreview?.salesInvoiceDetails as Array<Record<string, unknown>>)[0].taxRate).toBe(20);
   });
 
-  it('uses uniform 18% settlement line VAT snapshots and warns when current profile is 20%', async () => {
+  it('uses uniform 18% settlement line VAT snapshots without reading current vendor policy', async () => {
     prismaMock.settlementApproval.findUnique.mockResolvedValue(
       buildApproval({ commissionMinor: 25000, commissionVatMinor: 4500, lineVatRates: [18, '18.00'] }),
     );
@@ -384,10 +391,11 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.ok).toBe(true);
     expect(preview.amounts.taxRate).toBe(18);
     expect(preview.detectedVatRates).toEqual([18]);
-    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
-    expect(preview.readiness.warnings).toContain(
+    expect(preview.configuredVendorCommissionVatPercent).toBeNull();
+    expect(preview.readiness.warnings).not.toContain(
       'Settlement line VAT rate 18% differs from current vendor profile commission VAT rate 20%.',
     );
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
   });
 
   it('blocks mixed 18% and 20% settlement line VAT snapshots', async () => {
@@ -469,10 +477,11 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.ok).toBe(false);
     expect(preview.amounts.taxRate).toBeNull();
     expect(preview.detectedVatRates).toEqual([]);
-    expect(preview.configuredVendorCommissionVatPercent).toBe(20);
+    expect(preview.configuredVendorCommissionVatPercent).toBeNull();
     expect(preview.readiness.canCreateLogoInvoiceLater).toBe(false);
     expect(preview.readiness.blockers).toContain('SettlementApprovalLine line-1 is missing commissionVatPercentSnapshot.');
     expect(preview.logoPayloadPreview).toBeNull();
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
   });
 
   it('does not derive taxRate from aggregate commissionVatMinor divided by commissionMinor', async () => {

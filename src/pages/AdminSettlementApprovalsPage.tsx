@@ -1474,20 +1474,30 @@ export function AdminSettlementApprovalsPage() {
                   <MetadataRow label="Tax rate" value={logoPreview.amounts.taxRate === null ? 'Requires confirmation' : `${logoPreview.amounts.taxRate.toFixed(2)}%`} />
                   <MetadataRow label="VAT rate source" value={safeStatusLabel(logoPreview.vatRateSource)} />
                   <MetadataRow label="Detected VAT rates" value={logoPreview.detectedVatRates.length ? logoPreview.detectedVatRates.map((rate) => `${rate}%`).join(', ') : 'None'} />
-                  <MetadataRow
-                    label="Current profile VAT"
-                    value={
-                      logoPreview.configuredVendorCommissionVatPercent === null
-                        ? 'Not available'
-                        : `${logoPreview.configuredVendorCommissionVatPercent}%`
-                    }
-                  />
                   <MetadataRow label="Commission" value={formatCurrency(logoPreview.amounts.commissionAmount, logoPreview.amounts.currency)} />
                   <MetadataRow label="Commission VAT" value={formatCurrency(logoPreview.amounts.commissionVatAmount, logoPreview.amounts.currency)} />
                   <MetadataRow label="Expected gross" value={formatCurrency(logoPreview.amounts.expectedGrossInvoiceAmount, logoPreview.amounts.currency)} />
                 </MetadataGroup>
                 <ReadinessList title="Logo blockers" items={logoPreview.readiness.blockers} tone="danger" />
                 <ReadinessList title="Logo warnings" items={logoPreview.readiness.warnings} tone="warning" />
+                <details className="settlement-advanced-diagnostics" open>
+                  <summary>Immutable request snapshot</summary>
+                  <MetadataGroup>
+                    <MetadataRow label="Status" value={logoPreview.immutableRequestSnapshot.status} />
+                    <MetadataRow label="Builder version" value={logoPreview.immutableRequestSnapshot.payloadBuilderVersion} />
+                    <MetadataRow label="Request snapshot" value={logoPreview.immutableRequestSnapshot.requestSnapshotPresent ? 'Ready' : 'Not built'} />
+                  </MetadataGroup>
+                  <ReadinessList
+                    title="Immutable snapshot blockers"
+                    items={logoPreview.immutableRequestSnapshot.blockers.map((item) => `Immutable request snapshot: ${item}`)}
+                    tone="danger"
+                  />
+                  <ReadinessList
+                    title="Immutable snapshot warnings"
+                    items={logoPreview.immutableRequestSnapshot.warnings.map((item) => `Immutable request snapshot: ${item}`)}
+                    tone="warning"
+                  />
+                </details>
                 <details className="settlement-advanced-diagnostics" open>
                   <summary>Execution snapshot guard</summary>
                   <MetadataGroup>

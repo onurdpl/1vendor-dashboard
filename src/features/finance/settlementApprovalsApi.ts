@@ -204,6 +204,13 @@ export type SettlementLogoCommissionInvoicePreview = {
     detectedShippingModes: string[];
     requiredSnapshotsPresent: boolean;
   };
+  immutableRequestSnapshot: {
+    status: 'READY' | 'BLOCKED';
+    payloadBuilderVersion: string;
+    blockers: string[];
+    warnings: string[];
+    requestSnapshotPresent: boolean;
+  };
   logoPayloadPreview: Record<string, unknown> | null;
 };
 

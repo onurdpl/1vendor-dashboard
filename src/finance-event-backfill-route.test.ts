@@ -326,7 +326,7 @@ describe('finance event backfill route', () => {
       },
       vatRateSource: 'settlement_line_snapshots',
       detectedVatRates: [20],
-      configuredVendorCommissionVatPercent: 20,
+      configuredVendorCommissionVatPercent: null,
       executionSnapshotGuard: {
         ok: true,
         blockers: [],
@@ -341,6 +341,13 @@ describe('finance event backfill route', () => {
         detectedCommissionVatRates: [20],
         detectedShippingModes: ['disabled'],
         requiredSnapshotsPresent: true,
+      },
+      immutableRequestSnapshot: {
+        status: 'READY',
+        payloadBuilderVersion: 'settlement-logo-request-v1',
+        blockers: [],
+        warnings: [],
+        requestSnapshotPresent: true,
       },
       logoPayloadPreview: {
         salesInvoiceDetails: [

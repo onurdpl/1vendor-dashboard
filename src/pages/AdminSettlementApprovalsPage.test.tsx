@@ -425,7 +425,7 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
   },
   vatRateSource: 'settlement_line_snapshots',
   detectedVatRates: [20],
-  configuredVendorCommissionVatPercent: 20,
+  configuredVendorCommissionVatPercent: null,
   executionSnapshotGuard: {
     ok: true,
     blockers: [],
@@ -450,6 +450,13 @@ const logoPreviewResponse: SettlementLogoCommissionInvoicePreview = {
     detectedCommissionVatRates: [20],
     detectedShippingModes: ['disabled'],
     requiredSnapshotsPresent: true,
+  },
+  immutableRequestSnapshot: {
+    status: 'BLOCKED',
+    payloadBuilderVersion: 'settlement-logo-request-v1',
+    blockers: ['Vendor must have logoIsbasiCustomerCode before Logo invoice creation.'],
+    warnings: [],
+    requestSnapshotPresent: false,
   },
   logoPayloadPreview: {
     salesInvoiceDetails: [
@@ -864,6 +871,9 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(screen.getByText('Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument());
     expect(screen.getByRole('tab', { name: 'Logo Readiness' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('Read-only preview only. No Logo invoice is created.')).toBeInTheDocument();
+    expect(screen.getByText('Immutable request snapshot')).toBeInTheDocument();
+    expect(screen.getByText('settlement-logo-request-v1')).toBeInTheDocument();
+    expect(screen.getByText('Immutable request snapshot: Vendor must have logoIsbasiCustomerCode before Logo invoice creation.')).toBeInTheDocument();
     expect(screen.getByText('Execution snapshot guard')).toBeInTheDocument();
     expect(screen.getAllByText('Pass').length).toBeGreaterThan(0);
     expect(screen.getByText('disabled')).toBeInTheDocument();
