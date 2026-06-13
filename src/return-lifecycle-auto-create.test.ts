@@ -15,6 +15,7 @@ const shopifyAdminMock = vi.hoisted(() => ({
   fetchReturnDetails: vi.fn(),
 }));
 
+const autoCreateKargonomiReturnShipmentForApprovedReturnMock = vi.hoisted(() => vi.fn());
 const autoCreateNavlungoReturnPickupForApprovedReturnMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -26,6 +27,7 @@ vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
 }));
 
 vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
+  autoCreateKargonomiReturnShipmentForApprovedReturn: autoCreateKargonomiReturnShipmentForApprovedReturnMock,
   autoCreateNavlungoReturnPickupForApprovedReturn: autoCreateNavlungoReturnPickupForApprovedReturnMock,
 }));
 
@@ -80,6 +82,7 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     prismaMock.returnRecord.findMany.mockReset();
     prismaMock.$transaction.mockReset();
     shopifyAdminMock.fetchReturnDetails.mockReset();
+    autoCreateKargonomiReturnShipmentForApprovedReturnMock.mockReset();
     autoCreateNavlungoReturnPickupForApprovedReturnMock.mockReset();
 
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) =>
@@ -89,6 +92,10 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     prismaMock.returnRecord.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.returnRecord.findMany.mockResolvedValue([{ id: 'return-request-1' }]);
     shopifyAdminMock.fetchReturnDetails.mockResolvedValue({ returnTracking: null });
+    autoCreateKargonomiReturnShipmentForApprovedReturnMock.mockResolvedValue({
+      attempted: false,
+      skippedReason: 'provider_not_kargonomi',
+    });
     autoCreateNavlungoReturnPickupForApprovedReturnMock.mockResolvedValue({ attempted: true, skippedReason: null });
   });
 
@@ -112,6 +119,32 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).toHaveBeenCalledWith('return-request-1', env);
   });
 
+  it('runs Kargonomi return shipment auto-create without falling through to Navlungo for Kargonomi records', async () => {
+    autoCreateKargonomiReturnShipmentForApprovedReturnMock.mockResolvedValueOnce({
+      attempted: true,
+      skippedReason: null,
+    });
+
+    const result = await applyReturnLifecycleStatusWebhook(env, 'returns/approve', {
+      event: {
+        id: 'webhook-1',
+      } as never,
+      payload: {
+        id: 23165600081,
+        admin_graphql_api_id: 'gid://shopify/Return/23165600081',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      affectedRecordCount: 1,
+      navlungoReturnAutoCreateAttemptedCount: 1,
+      navlungoReturnAutoCreateSkippedCount: 0,
+    });
+    expect(autoCreateKargonomiReturnShipmentForApprovedReturnMock).toHaveBeenCalledWith('return-request-1', env);
+    expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).not.toHaveBeenCalled();
+  });
+
   it('does not auto-create Navlungo return pickup for non-approved lifecycle updates', async () => {
     const result = await applyReturnLifecycleStatusWebhook(env, 'returns/close', {
       event: {
@@ -129,6 +162,7 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
       navlungoReturnAutoCreateAttemptedCount: 0,
       navlungoReturnAutoCreateSkippedCount: 1,
     });
+    expect(autoCreateKargonomiReturnShipmentForApprovedReturnMock).not.toHaveBeenCalled();
     expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).not.toHaveBeenCalled();
   });
 });

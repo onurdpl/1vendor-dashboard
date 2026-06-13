@@ -2512,6 +2512,143 @@ export async function createKargonomiReturnShipmentForReturn(
   return updated;
 }
 
+function hasReturnProviderDuplicateEvidence(record: {
+  returnProviderShipmentId: string | null;
+  returnTrackingNumber: string | null;
+  returnLabel: string | null;
+}) {
+  return Boolean(record.returnProviderShipmentId || record.returnTrackingNumber || record.returnLabel);
+}
+
+async function persistKargonomiReturnAutoCreateDiagnostic(
+  returnId: string,
+  existingSnapshot: unknown,
+  input: {
+    attempted: boolean;
+    status: 'not_applicable' | 'skipped' | 'needs_attention' | 'failed';
+    skippedReason?: string | null;
+    missingFields?: string[];
+    details?: Record<string, unknown>;
+  },
+) {
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      returnProviderSnapshot: {
+        ...(readSnapshot(existingSnapshot) ?? {}),
+        provider: 'kargonomi',
+        flow: 'return_shipment',
+        direction: 'CUSTOMER_TO_VENDOR',
+        kargonomiReturnAutoCreateAttempted: input.attempted,
+        kargonomiReturnAutoCreateStatus: input.status,
+        kargonomiReturnAutoCreateSkippedReason: input.skippedReason ?? null,
+        kargonomiReturnShipmentAttempted: false,
+        kargonomiReturnShipmentSucceeded: false,
+        kargonomiReturnMissingFields: input.missingFields ?? [],
+        ...(input.details ?? {}),
+        attemptedAt: new Date().toISOString(),
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
+export async function autoCreateKargonomiReturnShipmentForApprovedReturn(
+  returnId: string,
+  env: AppEnv,
+  input: KargonomiReturnShipmentCreateInput = {},
+) {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: true,
+    },
+  });
+
+  if (!record) {
+    return { attempted: false, skippedReason: 'return_record_not_found' };
+  }
+
+  const normalizedStatus = (record.returnLifecycleStatus || record.status || '').toLowerCase();
+  if (normalizedStatus !== 'approved') {
+    return { attempted: false, skippedReason: 'return_not_approved' };
+  }
+
+  if (hasReturnProviderDuplicateEvidence(record)) {
+    await persistKargonomiReturnAutoCreateDiagnostic(returnId, record.returnProviderSnapshot, {
+      attempted: false,
+      status: 'skipped',
+      skippedReason: 'return_provider_evidence_exists',
+      details: {
+        returnProviderShipmentIdPresent: Boolean(record.returnProviderShipmentId),
+        returnTrackingNumberPresent: Boolean(record.returnTrackingNumber),
+        returnLabelPresent: Boolean(record.returnLabel),
+      },
+    });
+    return { attempted: false, skippedReason: 'return_provider_evidence_exists' };
+  }
+
+  const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  if (config.preferredProvider !== 'kargonomi') {
+    await persistKargonomiReturnAutoCreateDiagnostic(returnId, record.returnProviderSnapshot, {
+      attempted: false,
+      status: 'not_applicable',
+      skippedReason: 'provider_not_kargonomi',
+      details: {
+        preferredProvider: config.preferredProvider,
+        shippingEnabled: config.shippingEnabled,
+      },
+    });
+    return { attempted: false, skippedReason: 'provider_not_kargonomi' };
+  }
+
+  if (!config.shippingEnabled) {
+    await persistKargonomiReturnAutoCreateDiagnostic(returnId, record.returnProviderSnapshot, {
+      attempted: false,
+      status: 'not_applicable',
+      skippedReason: 'shipping_disabled',
+      details: {
+        preferredProvider: config.preferredProvider,
+        shippingEnabled: config.shippingEnabled,
+      },
+    });
+    return { attempted: false, skippedReason: 'shipping_disabled' };
+  }
+
+  const actor: ReturnActorScope = { role: 'admin', vendorId: null };
+  const preview = await previewKargonomiReturnShipmentForReturn(returnId, actor, {
+    env,
+    kargonomiDestinationClient: input.kargonomiDestinationClient,
+    senderTaxNumber: input.senderTaxNumber,
+  });
+  if (!preview.ready) {
+    await persistKargonomiReturnAutoCreateDiagnostic(returnId, record.returnProviderSnapshot, {
+      attempted: true,
+      status: 'needs_attention',
+      skippedReason: 'missing_required_fields',
+      missingFields: preview.missingFields,
+      details: buildKargonomiReturnCreateReadinessDetails(preview),
+    });
+    return { attempted: false, skippedReason: 'missing_required_fields', missingFields: preview.missingFields };
+  }
+
+  try {
+    await createKargonomiReturnShipmentForReturn(returnId, actor, env, input);
+    return { attempted: true, skippedReason: null };
+  } catch (error) {
+    if (!(error instanceof ReturnReviewError)) {
+      await persistKargonomiReturnAutoCreateDiagnostic(returnId, record.returnProviderSnapshot, {
+        attempted: true,
+        status: 'failed',
+        skippedReason: 'provider_create_failed',
+        details: {
+          errorMessage: error instanceof Error ? error.message : 'Kargonomi return shipment auto-create failed.',
+        },
+      });
+    }
+    return { attempted: true, skippedReason: 'provider_create_failed' };
+  }
+}
+
 function isReturnCancelledOrDeleted(record: { status: string; returnLifecycleStatus: string | null }) {
   const normalized = `${record.status ?? ''} ${record.returnLifecycleStatus ?? ''}`.toLowerCase();
   return /\b(cancelled|canceled|deleted)\b/.test(normalized);

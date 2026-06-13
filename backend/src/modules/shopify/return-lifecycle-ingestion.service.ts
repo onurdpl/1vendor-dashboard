@@ -1,7 +1,10 @@
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
 import type { AppEnv } from '../../config/env.js';
-import { autoCreateNavlungoReturnPickupForApprovedReturn } from '../returns/returns.service.js';
+import {
+  autoCreateKargonomiReturnShipmentForApprovedReturn,
+  autoCreateNavlungoReturnPickupForApprovedReturn,
+} from '../returns/returns.service.js';
 import type {
   ReturnLifecycleIngestionInput,
   ReturnLifecycleIngestionResult,
@@ -123,7 +126,11 @@ async function autoCreateReturnPickupsForApprovedRecords(env: AppEnv, returnReco
   let skipped = 0;
 
   for (const returnRecordId of returnRecordIds) {
-    const result = await autoCreateNavlungoReturnPickupForApprovedReturn(returnRecordId, env);
+    const kargonomiResult = await autoCreateKargonomiReturnShipmentForApprovedReturn(returnRecordId, env);
+    const result =
+      kargonomiResult.skippedReason === 'provider_not_kargonomi'
+        ? await autoCreateNavlungoReturnPickupForApprovedReturn(returnRecordId, env)
+        : kargonomiResult;
     if (result.attempted) {
       attempted += 1;
     } else {

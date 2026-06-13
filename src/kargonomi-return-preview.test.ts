@@ -16,6 +16,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  autoCreateKargonomiReturnShipmentForApprovedReturn,
   createKargonomiReturnShipmentForReturn,
   previewKargonomiReturnShipmentForReturn,
   refreshKargonomiReturnProviderData,
@@ -888,6 +889,256 @@ describe('Kargonomi return preview', () => {
       }),
     );
     expect(result.returnProviderShipmentId).toBe('2654001');
+  });
+
+  it('auto-creates an approved Kargonomi return shipment with the manual create field writes', async () => {
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654001',
+      trackingNumber: 'KSUR2654001RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBER',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: true,
+      },
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654001',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: 'KSUR2654001RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+      }),
+    );
+
+    const result = await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-1',
+      {
+        KARGONOMI_ACCOUNT_TAX_NUMBER: '11111111111',
+      } as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(result).toEqual({ attempted: true, skippedReason: null });
+    expect(adapterCreateShipment).toHaveBeenCalledTimes(1);
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'return-1' },
+        data: expect.objectContaining({
+          returnProvider: 'kargonomi',
+          returnProviderShipmentId: '2654001',
+          returnCarrierName: 'Sürat Kargo',
+          returnTrackingNumber: 'KSUR2654001RET',
+          returnLabel: 'data:application/pdf;base64,JVBER',
+        }),
+      }),
+    );
+  });
+
+  it('does not call Kargonomi auto-create for non-Kargonomi preferred providers', async () => {
+    const adapterCreateShipment = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(
+      baseShippingConfig({
+        preferredProvider: 'NAVLUNGO',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+
+    const result = await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-1',
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(result).toEqual({ attempted: false, skippedReason: 'provider_not_kargonomi' });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          returnProviderSnapshot: expect.objectContaining({
+            provider: 'kargonomi',
+            kargonomiReturnAutoCreateAttempted: false,
+            kargonomiReturnAutoCreateSkippedReason: 'provider_not_kargonomi',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    ['returnProviderShipmentId', { returnProviderShipmentId: '2654001' }],
+    ['returnTrackingNumber', { returnTrackingNumber: 'KSUR2654001RET' }],
+    ['returnLabel', { returnLabel: 'data:application/pdf;base64,JVBER' }],
+  ])('skips Kargonomi auto-create when duplicate evidence exists in %s', async (_field, override) => {
+    const adapterCreateShipment = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord(override));
+    prismaMock.returnRecord.update.mockResolvedValue({});
+
+    const result = await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-1',
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(result).toEqual({ attempted: false, skippedReason: 'return_provider_evidence_exists' });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(prismaMock.vendorShippingConfig.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('writes needs-attention diagnostics and does not call Kargonomi when readiness is missing fields', async () => {
+    const adapterCreateShipment = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(
+      baseShippingConfig({
+        warehouses: [],
+        defaultWarehouseId: null,
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+
+    const result = await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-1',
+      {
+        KARGONOMI_ACCOUNT_TAX_NUMBER: '11111111111',
+      } as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(result).toMatchObject({
+      attempted: false,
+      skippedReason: 'missing_required_fields',
+      missingFields: expect.arrayContaining(['receiver.warehouseId']),
+    });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'return-1' },
+        data: expect.objectContaining({
+          returnProviderSnapshot: expect.objectContaining({
+            provider: 'kargonomi',
+            kargonomiReturnAutoCreateAttempted: true,
+            kargonomiReturnAutoCreateStatus: 'needs_attention',
+            kargonomiReturnAutoCreateSkippedReason: 'missing_required_fields',
+            kargonomiReturnShipmentAttempted: false,
+            kargonomiReturnMissingFields: expect.arrayContaining(['receiver.warehouseId']),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('keeps multi-vendor Kargonomi auto-create scoped per ReturnRecord', async () => {
+    const adapterCreateShipment = vi.fn()
+      .mockResolvedValueOnce({
+        providerShipmentId: '2654001',
+        trackingNumber: 'KSUR2654001RET',
+        trackingUrl: null,
+        labelUrl: 'data:application/pdf;base64,JVBER1',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: { shippingProviderName: 'Sürat Kargo' },
+      })
+      .mockResolvedValueOnce({
+        providerShipmentId: '2654002',
+        trackingNumber: 'KSUR2654002RET',
+        trackingUrl: null,
+        labelUrl: 'data:application/pdf;base64,JVBER2',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: { shippingProviderName: 'Sürat Kargo' },
+      });
+    const yalisporRecord = baseReturnRecord({
+      id: 'return-yalispor',
+      vendorAllocationId: 'alloc-yalispor-1075',
+      vendorAllocation: {
+        ...baseReturnRecord().vendorAllocation,
+        id: 'alloc-yalispor-1075',
+        assignedVendorId: 'yalispor',
+      },
+    });
+    const sporjinalRecord = baseReturnRecord({
+      id: 'return-sporjinal',
+      vendorAllocationId: 'alloc-sporjinal-1075',
+      vendorAllocation: {
+        ...baseReturnRecord().vendorAllocation,
+        id: 'alloc-sporjinal-1075',
+        assignedVendorId: 'sporjinal',
+      },
+    });
+    prismaMock.returnRecord.findUnique
+      .mockResolvedValueOnce(yalisporRecord)
+      .mockResolvedValueOnce(yalisporRecord)
+      .mockResolvedValueOnce(yalisporRecord)
+      .mockResolvedValueOnce(yalisporRecord)
+      .mockResolvedValueOnce(sporjinalRecord)
+      .mockResolvedValueOnce(sporjinalRecord)
+      .mockResolvedValueOnce(sporjinalRecord)
+      .mockResolvedValueOnce(sporjinalRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst
+      .mockResolvedValueOnce(baseReturnRecord({ id: 'return-yalispor', returnProviderShipmentId: '2654001' }))
+      .mockResolvedValueOnce(baseReturnRecord({ id: 'return-sporjinal', returnProviderShipmentId: '2654002' }));
+
+    await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-yalispor',
+      { KARGONOMI_ACCOUNT_TAX_NUMBER: '11111111111' } as never,
+      { adapter: { provider: 'KARGONOMI', createShipment: adapterCreateShipment } as never },
+    );
+    await autoCreateKargonomiReturnShipmentForApprovedReturn(
+      'return-sporjinal',
+      { KARGONOMI_ACCOUNT_TAX_NUMBER: '11111111111' } as never,
+      { adapter: { provider: 'KARGONOMI', createShipment: adapterCreateShipment } as never },
+    );
+
+    expect(adapterCreateShipment).toHaveBeenCalledTimes(2);
+    expect(adapterCreateShipment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        allocationId: 'alloc-yalispor-1075',
+        vendorId: 'yalispor',
+      }),
+    );
+    expect(adapterCreateShipment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        allocationId: 'alloc-sporjinal-1075',
+        vendorId: 'sporjinal',
+      }),
+    );
   });
 
   it('auto-syncs a created Kargonomi return shipment to Shopify when tracking and label are persisted', async () => {
