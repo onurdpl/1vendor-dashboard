@@ -236,9 +236,13 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     return responseBody;
   });
 
-  app.get('/auth/diagnostics/public-login-readiness', async (request) => {
+  app.get('/auth/diagnostics/public-login-readiness', async (request, reply) => {
+    const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    if (authAttemptId) {
+      reply.header('X-Auth-Attempt-Id', authAttemptId);
+    }
     const secure = shouldUseSecureSessionCookie(request, env);
-    return {
+    const response = {
       ok: true,
       serverTime: new Date().toISOString(),
       envMode: env.NODE_ENV,
@@ -254,6 +258,25 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         expiresConfigPresent: Boolean(env.JWT_EXPIRES_IN?.trim()),
       },
     };
+
+    app.log.info(
+      {
+        event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
+        requestId: request.requestId ?? request.id ?? null,
+        authAttemptId,
+        method: request.method ?? 'GET',
+        path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-readiness',
+        responseStatus: 200,
+        cookieSecure: response.cookieConfig.secure,
+        cookieSameSite: response.cookieConfig.sameSite,
+        cookieNamePresent: response.cookieConfig.cookieNamePresent,
+        corsOriginConfigured: response.cors.originConfigured,
+        jwtExpiresConfigPresent: response.jwt.expiresConfigPresent,
+      },
+      'auth login readiness diagnostics',
+    );
+
+    return response;
   });
 
   app.post<{ Body: LoginRateLimitResetBody }>('/auth/login-rate-limit/reset', async (request, reply) => {

@@ -10,9 +10,11 @@ import {
   setToken,
   type CurrentUser,
 } from '../lib/auth';
+import { runtimeConfig } from '../config/runtime';
 import { LoginPage } from './LoginPage';
 
 const loginMock = vi.hoisted(() => vi.fn());
+const probePublicLoginReadinessMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
@@ -20,6 +22,10 @@ vi.mock('../services/runtime-services', () => ({
       login: loginMock,
     },
   },
+}));
+
+vi.mock('../services/backend-auth', () => ({
+  probePublicLoginReadiness: probePublicLoginReadinessMock,
 }));
 
 const testUser: CurrentUser = {
@@ -64,18 +70,49 @@ function fillAndSubmitLogin() {
 }
 
 describe('LoginPage expired session flow', () => {
+  const originalRuntimeConfig = {
+    apiMode: runtimeConfig.apiMode,
+    apiBaseUrl: runtimeConfig.apiBaseUrl,
+    apiBaseOrigin: runtimeConfig.apiBaseOrigin,
+    appEnvironment: runtimeConfig.appEnvironment,
+  };
+
   beforeEach(() => {
+    Object.assign(runtimeConfig, originalRuntimeConfig);
     window.localStorage.clear();
     loginMock.mockReset();
+    probePublicLoginReadinessMock.mockReset();
     loginMock.mockResolvedValue({
       token: null,
       user: testUser,
+    });
+    probePublicLoginReadinessMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      elapsedMs: 12,
+      response: {
+        ok: true,
+        serverTime: '2026-06-14T00:00:00.000Z',
+        envMode: 'production',
+        cookieConfig: {
+          secure: true,
+          sameSite: 'None',
+          cookieNamePresent: true,
+        },
+        cors: {
+          originConfigured: true,
+        },
+        jwt: {
+          expiresConfigPresent: true,
+        },
+      },
     });
   });
 
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    Object.assign(runtimeConfig, originalRuntimeConfig);
   });
 
   it('shows the expired-session message and returns to the intended route after login', async () => {
@@ -227,6 +264,38 @@ describe('LoginPage expired session flow', () => {
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
 
     debugSpy.mockRestore();
+  });
+
+  it('sends the same auth attempt id to readiness and login requests', async () => {
+    Object.assign(runtimeConfig, {
+      apiMode: 'real',
+      apiBaseUrl: 'https://api.example.com',
+      apiBaseOrigin: 'https://api.example.com',
+      appEnvironment: 'production',
+    });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+    expect(probePublicLoginReadinessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        timeoutMs: 3_000,
+      }),
+    );
+    expect(loginMock).toHaveBeenCalledWith(
+      'vendor@example.com',
+      'demo123',
+      expect.objectContaining({
+        authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+
+    const readinessAuthAttemptId = probePublicLoginReadinessMock.mock.calls[0][0].authAttemptId;
+    const loginAuthAttemptId = (loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId;
+    expect(readinessAuthAttemptId).toBe(loginAuthAttemptId);
   });
 
   it('clears the login timeout after a successful backend response', async () => {

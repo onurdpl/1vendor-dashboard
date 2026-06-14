@@ -71,6 +71,29 @@ describe('backend request id diagnostics', () => {
     }
   });
 
+  it('allows auth attempt id on login CORS preflight requests', async () => {
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/auth/login',
+        headers: {
+          origin: 'http://localhost:5173',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type,x-auth-attempt-id',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+      expect(String(response.headers['access-control-allow-headers']).toLowerCase()).toContain('x-auth-attempt-id');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('allows credentialed CORS requests from the configured Render frontend origin', async () => {
     vi.stubEnv('CORS_ORIGIN', 'https://onevendor-dashboard.onrender.com');
     const app = createApp();

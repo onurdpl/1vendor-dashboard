@@ -403,6 +403,9 @@ describe('auth login rate limiting', () => {
 
     const result = await handlers.get['/auth/diagnostics/public-login-readiness']?.handler(
       {
+        requestId: 'readiness-request',
+        method: 'GET',
+        routeOptions: { url: '/auth/diagnostics/public-login-readiness' },
         headers: { 'x-forwarded-proto': 'https' },
         protocol: 'https',
       },
@@ -429,6 +432,52 @@ describe('auth login rate limiting', () => {
     expect(serialized).not.toContain('super-secret-jwt-value');
     expect(serialized).not.toContain('sporgym_session=');
     expect(serialized).not.toContain('csrf');
+  });
+
+  it('logs auth attempt id on public login readiness diagnostics without exposing secrets', async () => {
+    const handlers = createAuthRouteHandlers(buildEnv({
+      NODE_ENV: 'production',
+      JWT_SECRET: 'super-secret-jwt-value',
+      JWT_EXPIRES_IN: '12h',
+      CORS_ORIGIN: ['https://app.example.com'],
+    }));
+    const reply = createReply();
+
+    await handlers.get['/auth/diagnostics/public-login-readiness']?.handler(
+      {
+        requestId: 'readiness-correlated-request',
+        method: 'GET',
+        routeOptions: { url: '/auth/diagnostics/public-login-readiness' },
+        headers: {
+          'x-auth-attempt-id': 'auth-readiness123',
+          'x-forwarded-proto': 'https',
+        },
+        protocol: 'https',
+      },
+      reply,
+    );
+
+    expect(reply.headers['X-Auth-Attempt-Id']).toBe('auth-readiness123');
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
+        requestId: 'readiness-correlated-request',
+        authAttemptId: 'auth-readiness123',
+        method: 'GET',
+        path: '/auth/diagnostics/public-login-readiness',
+        responseStatus: 200,
+        cookieSecure: true,
+        cookieSameSite: 'None',
+        cookieNamePresent: true,
+        corsOriginConfigured: true,
+        jwtExpiresConfigPresent: true,
+      }),
+      'auth login readiness diagnostics',
+    );
+    const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('super-secret-jwt-value');
+    expect(serializedLogs).not.toContain('sporgym_session=');
+    expect(serializedLogs).not.toContain('csrf-token');
   });
 
   it('rejects missing email or password with the existing generic response', async () => {

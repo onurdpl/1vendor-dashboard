@@ -41,7 +41,7 @@ import {
   buildFinanceAuditRuntimeMetadata,
 } from './config/database-source-diagnostics.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
-import { registerRequestTimingHooks } from './lib/request-timing.js';
+import { normalizeAuthAttemptId, registerRequestTimingHooks } from './lib/request-timing.js';
 import { registerBackendSentryFastifyHooks } from './lib/sentry.js';
 import { DASHBOARD_DEFERRED_LOAD_HEADER, DASHBOARD_INITIAL_LOAD_HEADER, registerDashboardTimingHooks } from './lib/dashboard-timing.js';
 
@@ -273,7 +273,7 @@ export function createApp() {
       {
         event: 'AUTH_LOGIN_CORS_DIAGNOSTICS',
         requestId: request.requestId ?? request.id ?? null,
-        authAttemptId: request.headers['x-auth-attempt-id'] ?? null,
+        authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
         method: request.method,
         path: '/auth/login',
         origin: origin ?? null,
