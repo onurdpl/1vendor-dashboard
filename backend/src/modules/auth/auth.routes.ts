@@ -11,7 +11,12 @@ import {
   recordFailedLoginRateLimitAttempt,
   resetLoginRateLimit,
 } from './login-rate-limit.js';
-import { createClearSessionCookie, createSessionCookie, getSessionCookieToken } from './session-cookie.js';
+import {
+  SESSION_COOKIE_NAME,
+  createClearSessionCookie,
+  createSessionCookie,
+  getSessionCookieToken,
+} from './session-cookie.js';
 
 export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 
@@ -29,6 +34,8 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
   app.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
     const routeStartedAt = process.hrtime.bigint();
+    const requestReceivedAt = new Date().toISOString();
+    const routeEnteredAt = requestReceivedAt;
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
     const normalizedEmail = normalizeLoginEmail((request.body as Partial<Record<keyof LoginBody, unknown>> | undefined)?.email);
     if (authAttemptId) {
@@ -40,9 +47,14 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     });
 
     const body = request.body as Partial<Record<keyof LoginBody, unknown>> | undefined;
+    const validationStartedAt = process.hrtime.bigint();
+    const validationStartedAtIso = new Date().toISOString();
     const rawEmail = body?.email;
     const rawPassword = body?.password;
+    const validationEndedAt = process.hrtime.bigint();
+    const validationEndedAtIso = new Date().toISOString();
     const routeEntryToBodyValidationMs = elapsedMs(routeStartedAt);
+    const validationDurationMs = elapsedMs(validationStartedAt, validationEndedAt);
 
     if (typeof rawEmail !== 'string' || typeof rawPassword !== 'string') {
       logAuthLoginDiagnostics(app, request, {
@@ -52,6 +64,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         failureReason: 'missing_credentials',
         responseStatus: 400,
         routeStartedAt,
+        requestReceivedAt,
+        routeEnteredAt,
+        validationStartedAt: validationStartedAtIso,
+        validationEndedAt: validationEndedAtIso,
+        validationDurationMs,
       });
       return reply.code(400).send({ message: 'Email and password are required.' });
     }
@@ -67,6 +84,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         failureReason: 'missing_credentials',
         responseStatus: 400,
         routeStartedAt,
+        requestReceivedAt,
+        routeEnteredAt,
+        validationStartedAt: validationStartedAtIso,
+        validationEndedAt: validationEndedAtIso,
+        validationDurationMs,
       });
       return reply.code(400).send({ message: 'Email and password are required.' });
     }
@@ -91,6 +113,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         failureReason: 'unknown',
         responseStatus: 429,
         routeStartedAt,
+        requestReceivedAt,
+        routeEnteredAt,
+        validationStartedAt: validationStartedAtIso,
+        validationEndedAt: validationEndedAtIso,
+        validationDurationMs,
       });
       const payload = buildLoginRateLimitExceededPayload(loginRateLimit);
       reply.header('Retry-After', String(payload.retryAfterSeconds));
@@ -112,6 +139,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         failureReason: 'unknown',
         responseStatus: 500,
         routeStartedAt,
+        requestReceivedAt,
+        routeEnteredAt,
+        validationStartedAt: validationStartedAtIso,
+        validationEndedAt: validationEndedAtIso,
+        validationDurationMs,
       });
       throw error;
     }
@@ -126,6 +158,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         failureReason: loginResult.failureReason,
         responseStatus: 401,
         routeStartedAt,
+        requestReceivedAt,
+        routeEnteredAt,
+        validationStartedAt: validationStartedAtIso,
+        validationEndedAt: validationEndedAtIso,
+        validationDurationMs,
         userLookupDurationMs: loginResult.timing.userLookupMs,
         passwordVerifyDurationMs: loginResult.timing.passwordVerificationMs,
         tokenIssueDurationMs: loginResult.timing.tokenSignMs,
@@ -135,7 +172,9 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
     resetLoginRateLimit(loginRateLimitIdentity);
     const responsePreparationStartedAt = process.hrtime.bigint();
+    const csrfGenerationStartedAt = process.hrtime.bigint();
     const csrfToken = authService.createCsrfToken(loginResult.token);
+    const csrfGenerationDurationMs = elapsedMs(csrfGenerationStartedAt);
     const cookieSetStartedAt = process.hrtime.bigint();
     reply.header('Set-Cookie', createSessionCookie(
       loginResult.token,
@@ -180,13 +219,41 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       failureReason: null,
       responseStatus: 200,
       routeStartedAt,
+      requestReceivedAt,
+      routeEnteredAt,
+      validationStartedAt: validationStartedAtIso,
+      validationEndedAt: validationEndedAtIso,
+      validationDurationMs,
       userLookupDurationMs: loginResult.timing.userLookupMs,
       passwordVerifyDurationMs: loginResult.timing.passwordVerificationMs,
       tokenIssueDurationMs: loginResult.timing.tokenSignMs,
       cookieSetDurationMs,
+      csrfGenerationDurationMs,
+      sessionCookieSetAttempted: true,
+      csrfTokenGenerationAttempted: true,
     });
 
     return responseBody;
+  });
+
+  app.get('/auth/diagnostics/public-login-readiness', async (request) => {
+    const secure = shouldUseSecureSessionCookie(request, env);
+    return {
+      ok: true,
+      serverTime: new Date().toISOString(),
+      envMode: env.NODE_ENV,
+      cookieConfig: {
+        secure,
+        sameSite: secure ? 'None' : 'Lax',
+        cookieNamePresent: Boolean(SESSION_COOKIE_NAME),
+      },
+      cors: {
+        originConfigured: env.CORS_ORIGIN.length > 0,
+      },
+      jwt: {
+        expiresConfigPresent: Boolean(env.JWT_EXPIRES_IN?.trim()),
+      },
+    };
   });
 
   app.post<{ Body: LoginRateLimitResetBody }>('/auth/login-rate-limit/reset', async (request, reply) => {
@@ -384,10 +451,18 @@ function logAuthLoginDiagnostics(
     failureReason: LoginFailureReason;
     responseStatus: number;
     routeStartedAt: bigint;
+    requestReceivedAt?: string;
+    routeEnteredAt?: string;
+    validationStartedAt?: string;
+    validationEndedAt?: string;
+    validationDurationMs?: number | null;
     userLookupDurationMs?: number | null;
     passwordVerifyDurationMs?: number | null;
     tokenIssueDurationMs?: number | null;
     cookieSetDurationMs?: number | null;
+    csrfGenerationDurationMs?: number | null;
+    sessionCookieSetAttempted?: boolean;
+    csrfTokenGenerationAttempted?: boolean;
   },
 ) {
   app.log.info(
@@ -397,6 +472,11 @@ function logAuthLoginDiagnostics(
       authAttemptId: normalizeAuthAttemptId(request.headers?.['x-auth-attempt-id']),
       email: input.email,
       success: input.success,
+      requestReceivedAt: input.requestReceivedAt ?? null,
+      routeEnteredAt: input.routeEnteredAt ?? null,
+      validationStartedAt: input.validationStartedAt ?? null,
+      validationEndedAt: input.validationEndedAt ?? null,
+      validationDurationMs: input.validationDurationMs ?? null,
       failureStage: input.failureStage,
       failureReason: input.failureReason,
       totalDurationMs: elapsedMs(input.routeStartedAt),
@@ -404,6 +484,10 @@ function logAuthLoginDiagnostics(
       passwordVerifyDurationMs: input.passwordVerifyDurationMs ?? null,
       tokenIssueDurationMs: input.tokenIssueDurationMs ?? null,
       cookieSetDurationMs: input.cookieSetDurationMs ?? null,
+      csrfGenerationDurationMs: input.csrfGenerationDurationMs ?? null,
+      sessionCookieSetAttempted: input.sessionCookieSetAttempted ?? false,
+      csrfTokenGenerationAttempted: input.csrfTokenGenerationAttempted ?? false,
+      csrfHeaderGenerationAttempted: false,
       responseStatus: input.responseStatus,
     },
     'auth login diagnostics',

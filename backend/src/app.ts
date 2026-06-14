@@ -65,6 +65,14 @@ function normalizeRequestId(value: unknown) {
   return sanitized || null;
 }
 
+function readSingleHeader(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function isAuthLoginDiagnosticsPath(url: string) {
+  return url === '/auth/login' || url.startsWith('/auth/login?');
+}
+
 function getBackendBuildInfo(env: ReturnType<typeof loadEnv>) {
   const rawCommit =
     process.env.RENDER_GIT_COMMIT ||
@@ -253,6 +261,30 @@ export function createApp() {
       'X-Auth-Rate-Limit-Reset-Token',
     ],
     exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id'],
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    if (!isAuthLoginDiagnosticsPath(request.url)) {
+      return;
+    }
+
+    const origin = readSingleHeader(request.headers.origin);
+    app.log.info(
+      {
+        event: 'AUTH_LOGIN_CORS_DIAGNOSTICS',
+        requestId: request.requestId ?? request.id ?? null,
+        authAttemptId: request.headers['x-auth-attempt-id'] ?? null,
+        method: request.method,
+        path: '/auth/login',
+        origin: origin ?? null,
+        corsAllowed: origin ? env.CORS_ORIGIN.includes(origin) : true,
+        requestHeaderNames: Object.keys(request.headers).sort(),
+        accessControlAllowOriginPresent: Boolean(reply.getHeader('access-control-allow-origin')),
+        accessControlAllowCredentialsPresent: Boolean(reply.getHeader('access-control-allow-credentials')),
+        responseStatus: reply.statusCode,
+      },
+      'auth login cors diagnostics',
+    );
   });
 
   app.addHook('onRequest', async (request, reply) => {

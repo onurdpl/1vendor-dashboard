@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const DATABASE_URL_DUPLICATE_WARNING =
-  'Multiple DATABASE_URL definitions detected. Audit results may not represent deployed environment.';
+  'Multiple database connection URL definitions detected. Audit results may not represent deployed environment.';
 
 export type DatabaseSourceLabel = 'not_configured' | 'local' | 'remote' | 'invalid';
 

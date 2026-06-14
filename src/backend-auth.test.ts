@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
-import { login } from './services/backend-auth';
+import { login, probePublicLoginReadiness } from './services/backend-auth';
 
 describe('backend auth client diagnostics', () => {
   const fetchMock = vi.fn();
@@ -61,5 +61,55 @@ describe('backend auth client diagnostics', () => {
       email: 'vendor@example.com',
       password: 'demo123',
     });
+  });
+
+  it('sends auth attempt id on public login readiness probe without exposing cookies or secrets', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          serverTime: '2026-06-14T00:00:00.000Z',
+          envMode: 'production',
+          cookieConfig: {
+            secure: true,
+            sameSite: 'None',
+            cookieNamePresent: true,
+          },
+          cors: {
+            originConfigured: true,
+          },
+          jwt: {
+            expiresConfigPresent: true,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await probePublicLoginReadiness({
+      authAttemptId: 'auth-probe123',
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 200,
+      response: {
+        cookieConfig: {
+          cookieNamePresent: true,
+        },
+      },
+    });
+    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const headers = new Headers((init as RequestInit).headers);
+
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/auth/diagnostics/public-login-readiness');
+    expect((init as RequestInit).credentials).toBe('same-origin');
+    expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-probe123');
+    expect(JSON.stringify(init)).not.toContain('sporgym_session=');
+    expect(JSON.stringify(init)).not.toContain('csrf-token');
   });
 });

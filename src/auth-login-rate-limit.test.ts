@@ -323,17 +323,28 @@ describe('auth login rate limiting', () => {
         success: true,
         failureStage: null,
         failureReason: null,
+        requestReceivedAt: expect.any(String),
+        routeEnteredAt: expect.any(String),
+        validationStartedAt: expect.any(String),
+        validationEndedAt: expect.any(String),
+        validationDurationMs: expect.any(Number),
         totalDurationMs: expect.any(Number),
         userLookupDurationMs: expect.any(Number),
         passwordVerifyDurationMs: expect.any(Number),
         tokenIssueDurationMs: expect.any(Number),
         cookieSetDurationMs: expect.any(Number),
+        csrfGenerationDurationMs: expect.any(Number),
+        sessionCookieSetAttempted: true,
+        csrfTokenGenerationAttempted: true,
+        csrfHeaderGenerationAttempted: false,
         responseStatus: 200,
       }),
       'auth login diagnostics',
     );
     const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
     expect(serializedLogs).not.toContain('demo123');
+    expect(serializedLogs).not.toContain('csrf-token');
+    expect(serializedLogs).not.toContain(SESSION_COOKIE_NAME);
   });
 
   it('emits structured login diagnostics for invalid password without changing the response', async () => {
@@ -366,6 +377,8 @@ describe('auth login rate limiting', () => {
         success: false,
         failureStage: 'password_verify',
         failureReason: 'invalid_password',
+        sessionCookieSetAttempted: false,
+        csrfTokenGenerationAttempted: false,
         totalDurationMs: expect.any(Number),
         userLookupDurationMs: expect.any(Number),
         passwordVerifyDurationMs: expect.any(Number),
@@ -377,6 +390,45 @@ describe('auth login rate limiting', () => {
     );
     const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
     expect(serializedLogs).not.toContain('wrong-password');
+  });
+
+  it('returns public login readiness without exposing auth secrets', async () => {
+    const handlers = createAuthRouteHandlers(buildEnv({
+      NODE_ENV: 'production',
+      JWT_SECRET: 'super-secret-jwt-value',
+      JWT_EXPIRES_IN: '12h',
+      CORS_ORIGIN: ['https://app.example.com'],
+    }));
+    const reply = createReply();
+
+    const result = await handlers.get['/auth/diagnostics/public-login-readiness']?.handler(
+      {
+        headers: { 'x-forwarded-proto': 'https' },
+        protocol: 'https',
+      },
+      reply,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      serverTime: expect.any(String),
+      envMode: 'production',
+      cookieConfig: {
+        secure: true,
+        sameSite: 'None',
+        cookieNamePresent: true,
+      },
+      cors: {
+        originConfigured: true,
+      },
+      jwt: {
+        expiresConfigPresent: true,
+      },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('super-secret-jwt-value');
+    expect(serialized).not.toContain('sporgym_session=');
+    expect(serialized).not.toContain('csrf');
   });
 
   it('rejects missing email or password with the existing generic response', async () => {

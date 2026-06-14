@@ -1,5 +1,6 @@
 import { apiClient, clearCsrfToken, setCsrfToken } from '../lib/api-client';
 import { ApiError } from '../lib/api/errors';
+import { runtimeConfig } from '../config/runtime';
 
 export type BackendAuthVendorAccess = {
   vendorId: string;
@@ -19,6 +20,50 @@ export type BackendLoginResponse = {
   user: BackendAuthUser;
   csrfToken?: string | null;
 };
+
+export type PublicLoginReadinessResponse = {
+  ok: boolean;
+  serverTime: string;
+  envMode: string;
+  cookieConfig: {
+    secure: boolean;
+    sameSite: string;
+    cookieNamePresent: boolean;
+  };
+  cors: {
+    originConfigured: boolean;
+  };
+  jwt: {
+    expiresConfigPresent: boolean;
+  };
+};
+
+export type PublicLoginReadinessResult =
+  | {
+      ok: true;
+      status: number;
+      elapsedMs: number;
+      response: PublicLoginReadinessResponse;
+    }
+  | {
+      ok: false;
+      status: number | null;
+      elapsedMs: number;
+      failureStage: 'readiness_timeout' | 'readiness_network_error' | 'readiness_http_error' | 'readiness_parse_error';
+    };
+
+function buildApiUrl(path: string) {
+  const normalizedBase = runtimeConfig.apiBaseUrl.endsWith('/')
+    ? runtimeConfig.apiBaseUrl.slice(0, -1)
+    : runtimeConfig.apiBaseUrl;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  return `${normalizedBase}${normalizedPath}`;
+}
+
+function getRequestCredentials(): RequestCredentials {
+  return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
+}
 
 function getSafeRouteDiagnostics() {
   if (typeof window === 'undefined') {
@@ -93,6 +138,59 @@ export async function login(
       ...getErrorDiagnostics(error),
     });
     throw error;
+  }
+}
+
+export async function probePublicLoginReadiness(
+  options: { authAttemptId?: string; timeoutMs?: number } = {},
+): Promise<PublicLoginReadinessResult> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 3_000);
+
+  try {
+    const response = await fetch(buildApiUrl('/auth/diagnostics/public-login-readiness'), {
+      method: 'GET',
+      credentials: getRequestCredentials(),
+      headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
+      signal: controller.signal,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        elapsedMs,
+        failureStage: 'readiness_http_error',
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        status: response.status,
+        elapsedMs,
+        response: await response.json() as PublicLoginReadinessResponse,
+      };
+    } catch {
+      return {
+        ok: false,
+        status: response.status,
+        elapsedMs,
+        failureStage: 'readiness_parse_error',
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      elapsedMs: Date.now() - startedAt,
+      failureStage: error instanceof DOMException && error.name === 'AbortError'
+        ? 'readiness_timeout'
+        : 'readiness_network_error',
+    };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
