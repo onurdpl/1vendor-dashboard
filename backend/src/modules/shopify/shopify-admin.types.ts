@@ -105,9 +105,27 @@ export type FetchShopifyReturnDetailsResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifyReturnCancellationState = {
+  returnGid: string;
+  status: string;
+  requestApprovedAt: string | null;
+  closedAt: string | null;
+  refundIds: string[];
+  transactionIds: string[];
+  reverseFulfillmentOrders: ShopifyReverseFulfillmentOrderInfo[];
+  source: 'shopify_admin';
+};
+
 export type ShopifyUserError = {
   field: string[];
   message: string;
+};
+
+export type CancelShopifyReturnResult = {
+  returnGid: string | null;
+  status: string | null;
+  userErrors: ShopifyUserError[];
+  source: 'shopify_admin';
 };
 
 export type ProbeShopifyReturnLabelUploadInput = {

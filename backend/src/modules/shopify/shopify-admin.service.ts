@@ -1,6 +1,7 @@
 import type { AppEnv } from '../../config/env.js';
 import { Buffer } from 'node:buffer';
 import type {
+  CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
   FetchOrderLineItemImagesResult,
@@ -16,6 +17,7 @@ import type {
   ShopifyGraphqlResponse,
   ShopifyMoneySnapshot,
   ShopifyOrderFulfillmentState,
+  ShopifyReturnCancellationState,
   ShopifyReverseDeliveryLineItem,
   ShopifyReturnLineItem,
   ShopifyTaxLineSnapshot,
@@ -197,6 +199,45 @@ type ShopifyReturnReverseDeliveryInputsQueryResponse = {
         };
       }>;
     };
+  } | null;
+};
+
+type ShopifyReturnCancellationStateQueryResponse = {
+  return: {
+    id: string;
+    status: string;
+    requestApprovedAt: string | null;
+    closedAt: string | null;
+    refunds: {
+      edges: Array<{
+        node: {
+          id: string;
+        };
+      }>;
+    };
+    transactions: {
+      edges: Array<{
+        node: {
+          id: string;
+        };
+      }>;
+    };
+    reverseFulfillmentOrders: ShopifyReturnReverseDeliveryInputNode['reverseFulfillmentOrders'];
+  } | null;
+};
+
+type ShopifyReturnReverseDeliveryInputNode = NonNullable<ShopifyReturnReverseDeliveryInputsQueryResponse['return']>;
+
+type ShopifyReturnCancelMutationResponse = {
+  returnCancel?: {
+    return?: {
+      id: string;
+      status: string;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
   } | null;
 };
 
@@ -1209,6 +1250,140 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  function mapReverseFulfillmentOrders(
+    returnNode: {
+      reverseFulfillmentOrders: ShopifyReturnReverseDeliveryInputNode['reverseFulfillmentOrders'];
+    },
+  ) {
+    return (returnNode.reverseFulfillmentOrders.nodes || []).map((order) => ({
+      id: order.id,
+      status: order.status,
+      lineItems: (order.lineItems.nodes || [])
+        .map((lineItem) => ({
+          id: lineItem.id,
+          quantity: typeof lineItem.totalQuantity === 'number' && lineItem.totalQuantity > 0 ? lineItem.totalQuantity : 1,
+          lineItemGid: lineItem.fulfillmentLineItem?.lineItem?.id ?? null,
+          sku: lineItem.fulfillmentLineItem?.lineItem?.sku ?? null,
+        }))
+        .filter((lineItem) => lineItem.id),
+      reverseDeliveries: (order.reverseDeliveries.nodes || [])
+        .map((delivery) => ({
+          id: delivery.id,
+          labelPublicFileUrl: delivery.deliverable?.label?.publicFileUrl ?? null,
+          trackingNumber: delivery.deliverable?.tracking?.number ?? null,
+          trackingUrl: delivery.deliverable?.tracking?.url ?? null,
+          carrierName: delivery.deliverable?.tracking?.carrierName ?? null,
+        }))
+        .filter((delivery) => delivery.id),
+    }));
+  }
+
+  async function fetchReturnCancellationState(returnGid: string): Promise<ShopifyReturnCancellationState> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return cancellation state fetch is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query GetReturnCancellationState($id: ID!) {
+              return(id: $id) {
+                id
+                status
+                requestApprovedAt
+                closedAt
+                refunds(first: 1) {
+                  edges {
+                    node {
+                      id
+                    }
+                  }
+                }
+                transactions(first: 1) {
+                  edges {
+                    node {
+                      id
+                    }
+                  }
+                }
+                reverseFulfillmentOrders(first: 20) {
+                  nodes {
+                    id
+                    status
+                    lineItems(first: 50) {
+                      nodes {
+                        id
+                        totalQuantity
+                        fulfillmentLineItem {
+                          lineItem {
+                            id
+                            sku
+                          }
+                        }
+                      }
+                    }
+                    reverseDeliveries(first: 20) {
+                      nodes {
+                        id
+                        deliverable {
+                          ... on ReverseDeliveryShippingDeliverable {
+                            label {
+                              publicFileUrl
+                            }
+                            tracking {
+                              carrierName
+                              number
+                              url
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { id: returnGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return cancellation state fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReturnCancellationStateQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return cancellation state fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const returnNode = json.data?.return;
+    if (!returnNode?.id || !returnNode.status) {
+      throw new Error('Shopify return cancellation state response did not include return.id and return.status.');
+    }
+
+    return {
+      returnGid: returnNode.id,
+      status: returnNode.status,
+      requestApprovedAt: returnNode.requestApprovedAt,
+      closedAt: returnNode.closedAt,
+      refundIds: (returnNode.refunds.edges || []).map((edge) => edge.node.id).filter(Boolean),
+      transactionIds: (returnNode.transactions.edges || []).map((edge) => edge.node.id).filter(Boolean),
+      reverseFulfillmentOrders: mapReverseFulfillmentOrders(returnNode),
+      source: 'shopify_admin',
+    };
+  }
+
   function normalizeUserErrors(
     errors: Array<{ field?: string[] | null; message?: string | null }> | undefined,
   ) {
@@ -1216,6 +1391,57 @@ export function createShopifyAdminService(env: AppEnv) {
       field: Array.isArray(error.field) ? error.field.filter((field): field is string => typeof field === 'string') : [],
       message: error.message ?? 'Unknown Shopify user error.',
     }));
+  }
+
+  async function cancelReturn(returnGid: string): Promise<CancelShopifyReturnResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return cancel is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation CancelReturn($id: ID!) {
+              returnCancel(id: $id) {
+                return {
+                  id
+                  status
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
+          variables: { id: returnGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return cancel failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReturnCancelMutationResponse>;
+    if (json.errors?.length) {
+      throw new Error(`Shopify return cancel returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+
+    const payload = json.data?.returnCancel;
+    return {
+      returnGid: payload?.return?.id ?? null,
+      status: payload?.return?.status ?? null,
+      userErrors: normalizeUserErrors(payload?.userErrors),
+      source: 'shopify_admin',
+    };
   }
 
   function getShopifyIdentifierCandidates(value: string | null | undefined) {
@@ -2014,6 +2240,8 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,
     fetchReturnDetails,
+    fetchReturnCancellationState,
+    cancelReturn,
     fetchReturnReverseDeliveryInputs,
     probeReturnLabelUpload,
     syncReturnShipping,

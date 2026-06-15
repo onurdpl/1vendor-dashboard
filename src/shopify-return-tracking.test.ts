@@ -124,6 +124,97 @@ describe('Shopify return tracking fetch', () => {
     expect(result.returnTracking).toBeNull();
   });
 
+  it('fetches canonical return cancellation state before abandoned return auto-cancel', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildGraphqlResponse({
+      return: {
+        id: 'gid://shopify/Return/239',
+        status: 'OPEN',
+        requestApprovedAt: '2026-05-25T10:00:00Z',
+        closedAt: null,
+        refunds: { edges: [] },
+        transactions: { edges: [] },
+        reverseFulfillmentOrders: {
+          nodes: [
+            {
+              id: 'gid://shopify/ReverseFulfillmentOrder/1',
+              status: 'OPEN',
+              lineItems: { nodes: [] },
+              reverseDeliveries: { nodes: [] },
+            },
+          ],
+        },
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2026-04',
+    } as never).fetchReturnCancellationState('gid://shopify/Return/239');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { query: string; variables: { id: string } };
+    expect(body.query).toContain('requestApprovedAt');
+    expect(body.query).toContain('refunds(first: 1)');
+    expect(body.query).toContain('reverseFulfillmentOrders');
+    expect(body.variables.id).toBe('gid://shopify/Return/239');
+    expect(result).toMatchObject({
+      returnGid: 'gid://shopify/Return/239',
+      status: 'OPEN',
+      requestApprovedAt: '2026-05-25T10:00:00Z',
+      refundIds: [],
+      transactionIds: [],
+      reverseFulfillmentOrders: [
+        {
+          id: 'gid://shopify/ReverseFulfillmentOrder/1',
+          status: 'OPEN',
+          reverseDeliveries: [],
+        },
+      ],
+    });
+  });
+
+  it('calls Shopify returnCancel and maps userErrors without raw payload exposure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildGraphqlResponse({
+      returnCancel: {
+        return: {
+          id: 'gid://shopify/Return/239',
+          status: 'CANCELED',
+        },
+        userErrors: [
+          {
+            field: ['id'],
+            message: 'Return was already canceled.',
+          },
+        ],
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2026-04',
+    } as never).cancelReturn('gid://shopify/Return/239');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { query: string; variables: { id: string } };
+    expect(body.query).toContain('returnCancel');
+    expect(body.variables.id).toBe('gid://shopify/Return/239');
+    expect(result).toEqual({
+      returnGid: 'gid://shopify/Return/239',
+      status: 'CANCELED',
+      userErrors: [
+        {
+          field: ['id'],
+          message: 'Return was already canceled.',
+        },
+      ],
+      source: 'shopify_admin',
+    });
+  });
+
   it('probes Shopify reverse delivery label upload with return tracking and label URL', async () => {
     const fetchMock = vi
       .fn()

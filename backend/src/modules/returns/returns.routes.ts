@@ -27,6 +27,7 @@ import { backfillShopifyReturnReasons } from './return-reason-backfill.service.j
 import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+import { runAbandonedApprovedReturnAutoCancel } from './abandoned-approved-return-auto-cancel.service.js';
 
 type ReturnReasonBackfillBody = {
   dryRun?: boolean;
@@ -36,6 +37,12 @@ type ReturnReasonBackfillBody = {
 type DuplicateReturnCleanupBody = {
   dryRun?: boolean;
   limit?: unknown;
+};
+
+type AbandonedReturnAutoCancelBody = {
+  dryRun?: boolean;
+  limit?: unknown;
+  confirm?: string;
 };
 
 type ReturnReviewBody = {
@@ -241,6 +248,36 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return cleanupDuplicateReturnRecords(buildReturnAdminOptions(body));
+    },
+  );
+
+  app.post<{ Body: AbandonedReturnAutoCancelBody }>(
+    '/admin/returns/abandoned-approved/auto-cancel',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const body = readReturnAdminBody(request.body);
+      const limitValidation = validateReturnAdminLimit(body, 100);
+      if (!limitValidation.ok) {
+        return reply.code(400).send({ message: limitValidation.message });
+      }
+
+      const dryRun = body.dryRun !== false;
+      if (!dryRun && body.confirm !== 'CANCEL_ABANDONED_APPROVED_RETURNS') {
+        return reply.code(400).send({
+          message: 'Confirmation is required before cancelling abandoned approved Shopify returns.',
+        });
+      }
+
+      return runAbandonedApprovedReturnAutoCancel(env, {
+        ...buildReturnAdminOptions(body),
+        dryRun,
+      });
     },
   );
 
