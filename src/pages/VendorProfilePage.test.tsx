@@ -33,6 +33,7 @@ const updateVendorFinancialProfileMock = vi.fn<
       deductShippingEnabled: boolean;
       shippingMode: VendorFinancialProfile['shippingMode'];
       fixedShippingFee: number | null;
+      settlementDelayDays: number;
     },
   ) => Promise<VendorFinancialProfile>
 >();
@@ -74,6 +75,7 @@ vi.mock('../features/finance/api', async () => {
         deductShippingEnabled: boolean;
         shippingMode: VendorFinancialProfile['shippingMode'];
         fixedShippingFee: number | null;
+        settlementDelayDays: number;
       },
     ) => updateVendorFinancialProfileMock(vendorId, input),
   };
@@ -145,6 +147,7 @@ const financeProfile: VendorFinancialProfile = {
   deductShippingEnabled: true,
   shippingMode: 'external_provider',
   fixedShippingFee: null,
+  settlementDelayDays: 21,
   active: true,
   source: 'configured',
 };
@@ -269,6 +272,7 @@ describe('VendorProfilePage', () => {
         deductShippingEnabled: input.deductShippingEnabled,
         shippingMode: input.shippingMode,
         fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+        settlementDelayDays: input.settlementDelayDays,
         active: true,
         source: 'configured',
       }),
@@ -770,6 +774,7 @@ describe('VendorProfilePage', () => {
         deductShippingEnabled: input.deductShippingEnabled,
         shippingMode: input.shippingMode,
         fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+        settlementDelayDays: input.settlementDelayDays,
         active: true,
         source: 'configured',
       }),
@@ -791,10 +796,13 @@ describe('VendorProfilePage', () => {
     expect(within(financeSection!).getByLabelText('Commission %')).toHaveValue(12.5);
     expect(within(financeSection!).getByLabelText('Commission VAT %')).toHaveValue(20);
     expect(within(financeSection!).getByLabelText('Shipping deduction mode')).toHaveValue('external_provider');
+    expect(within(financeSection!).getByLabelText('Settlement delay days')).toHaveValue(21);
     expect(within(financeSection!).getByLabelText(/Deduct shipping after fulfillment/i)).toBeChecked();
 
     await userEvent.clear(within(financeSection!).getByLabelText('Commission %'));
     await userEvent.type(within(financeSection!).getByLabelText('Commission %'), '13.75');
+    await userEvent.clear(within(financeSection!).getByLabelText('Settlement delay days'));
+    await userEvent.type(within(financeSection!).getByLabelText('Settlement delay days'), '14');
     await userEvent.selectOptions(within(financeSection!).getByLabelText('Shipping deduction mode'), 'fixed');
     await userEvent.type(within(financeSection!).getByLabelText('Fixed shipping fee'), '25');
     await userEvent.click(within(financeSection!).getByRole('button', { name: 'Save finance policy' }));
@@ -806,10 +814,12 @@ describe('VendorProfilePage', () => {
         deductShippingEnabled: true,
         shippingMode: 'fixed',
         fixedShippingFee: 25,
+        settlementDelayDays: 14,
       }),
     );
     expect(await within(financeSection!).findByText('13.75%')).toBeInTheDocument();
     expect(within(financeSection!).getByText('25.00')).toBeInTheDocument();
+    expect(within(financeSection!).getByText('14 days')).toBeInTheDocument();
     expect(createLogoIsbasiTestInvoiceMock).not.toHaveBeenCalled();
     expect(within(financeSection!).queryByRole('button', { name: 'Save finance policy' })).not.toBeInTheDocument();
   }, 10000);

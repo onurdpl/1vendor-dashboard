@@ -1326,6 +1326,7 @@ export type VendorFinancialProfile = {
   deductShippingEnabled: boolean;
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee: string | null;
+  settlementDelayDays: number;
   active: boolean;
   source: 'configured' | 'default';
 };

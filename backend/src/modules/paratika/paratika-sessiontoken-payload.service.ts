@@ -370,6 +370,7 @@ async function buildOrderItemPreview(
       deductShippingEnabled: false,
       shippingMode: 'disabled',
       fixedShippingFee: null,
+      settlementDelayDays: 21,
     },
   });
 

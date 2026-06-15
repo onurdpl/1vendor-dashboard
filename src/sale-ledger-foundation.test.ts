@@ -32,6 +32,7 @@ describe('sale ledger foundation', () => {
           ],
           fulfillment: {
             fulfilledAt: new Date('2026-05-13T10:20:00.000Z'),
+            shipmentUpdatedAt: new Date('2026-05-13T10:20:00.000Z'),
           },
         }),
       },
@@ -43,6 +44,7 @@ describe('sale ledger foundation', () => {
           deductShippingEnabled: true,
           shippingMode: 'EXTERNAL_PROVIDER',
           fixedShippingFee: 88,
+          settlementDelayDays: 21,
         }),
       },
       shipmentShippingCost: {
@@ -84,13 +86,15 @@ describe('sale ledger foundation', () => {
       shippingCostProviderSnapshot: 'Manual provider',
       shippingCostIdSnapshot: 'shipcost-sporjinal-alloc-1-manual',
       financialProfileIdSnapshot: 'profile-sporjinal',
+      settlementDelayDaysSnapshot: 21,
       settlementStatus: 'PAYABLE',
       accruedAt: new Date('2026-05-13T10:00:00.000Z'),
-      payableAt: new Date('2026-05-13T10:20:00.000Z'),
-      settlementEligibleAt: new Date('2026-05-13T10:20:00.000Z'),
+      payableAt: new Date('2026-06-03T10:20:00.000Z'),
+      settlementEligibleAt: new Date('2026-06-03T10:20:00.000Z'),
     });
     expect(result.update).not.toHaveProperty('commissionPercentSnapshot');
     expect(result.update).not.toHaveProperty('commissionVatPercentSnapshot');
+    expect(result.update).not.toHaveProperty('settlementDelayDaysSnapshot');
     expect(result.update).not.toHaveProperty('shippingCostSnapshot');
     expect(financeEventCreateManyCalls).toHaveLength(1);
     expect(financeEventCreateManyCalls[0]).toMatchObject({
@@ -144,6 +148,7 @@ describe('sale ledger foundation', () => {
           ],
           fulfillment: {
             fulfilledAt: new Date('2026-05-13T10:20:00.000Z'),
+            shipmentUpdatedAt: new Date('2026-05-13T10:20:00.000Z'),
           },
         }),
       },

@@ -19,11 +19,17 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const { preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js');
 
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 function buildEntry(input: {
   id: string;
   entryType: 'sale' | 'refund';
   amount: number;
   fulfilled?: boolean;
+  deliveredAt?: Date | null;
+  settlementDelayDaysSnapshot?: number;
   batched?: boolean;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
   returnRecords?: Array<{
@@ -34,6 +40,14 @@ function buildEntry(input: {
   }>;
 }) {
   const fulfilled = input.fulfilled ?? true;
+  const deliveredAt =
+    input.deliveredAt === undefined
+      ? fulfilled
+        ? new Date('2026-05-10T10:00:00Z')
+        : null
+      : input.deliveredAt;
+  const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
+  const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
   return {
     id: input.id,
     vendorId: 'demo-vendor-a',
@@ -45,10 +59,11 @@ function buildEntry(input: {
     deductShippingEnabledSnapshot: false,
     shippingModeSnapshot: 'DISABLED',
     fixedShippingFeeSnapshot: null,
+    settlementDelayDaysSnapshot,
     settlementStatus: input.entryType === 'sale' && !fulfilled ? 'ACCRUING' : input.entryType === 'refund' ? 'PARTIALLY_REFUNDED' : 'PAYABLE',
-    settlementEligibleAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
+    settlementEligibleAt: eligibleAt,
     accruedAt: new Date('2026-05-13T09:00:00Z'),
-    payableAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
+    payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
@@ -58,6 +73,7 @@ function buildEntry(input: {
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       fulfillment: {
         fulfilledAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
+        shipmentUpdatedAt: deliveredAt,
       },
       refundRecords: input.refundRecords ?? [],
       returnRecords: (input.returnRecords ?? []).map((record) => ({
@@ -85,6 +101,7 @@ describe('payout batch preparation', () => {
       deductShippingEnabled: false,
       shippingMode: 'DISABLED',
       fixedShippingFee: null,
+      settlementDelayDays: 21,
       active: true,
     });
   });
@@ -155,6 +172,69 @@ describe('payout batch preparation', () => {
       'No eligible payable ledger rows',
     );
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('excludes sales from payout batch preparation before the settlement delay passes', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-delay-pending',
+        entryType: 'sale',
+        amount: 1000,
+        deliveredAt: new Date('2999-01-01T00:00:00Z'),
+      }),
+      buildEntry({
+        id: 'sale-14-day-delay',
+        entryType: 'sale',
+        amount: 500,
+        deliveredAt: new Date('2026-06-01T00:00:00Z'),
+        settlementDelayDaysSnapshot: 14,
+      }),
+      buildEntry({ id: 'refund-payable', entryType: 'refund', amount: 100 }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-delay',
+      vendorId: data.vendorId,
+      status: data.status,
+      grossAmount: data.grossAmount,
+      commissionAmount: data.commissionAmount,
+      commissionVatAmount: data.commissionVatAmount,
+      shippingDeductionAmount: data.shippingDeductionAmount,
+      refundAmount: data.refundAmount,
+      netAmount: data.netAmount,
+      currency: data.currency,
+      createdByUserId: data.createdByUserId,
+      createdAt: new Date('2026-06-15T11:00:00Z'),
+      updatedAt: new Date('2026-06-15T11:00:00Z'),
+      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+        id: `batch-line-delay-${index}`,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        amountSnapshot: line.amountSnapshot,
+        createdAt: new Date('2026-06-15T11:00:00Z'),
+      })),
+    }));
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossAmount: 500,
+          refundAmount: 100,
+          netAmount: 350,
+          lines: {
+            create: [
+              { financeLedgerEntryId: 'sale-14-day-delay', amountSnapshot: 450 },
+              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -100 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(batch).toMatchObject({
+      id: 'batch-delay',
+      lineCount: 2,
+      netAmount: '350.00',
+    });
   });
 
   it('excludes Shopify-approved open return sales from payout batch preparation', async () => {

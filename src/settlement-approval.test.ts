@@ -39,11 +39,16 @@ const {
   __settlementApprovalTesting,
 } = await import('../backend/src/modules/finance/settlement-approval.service.js');
 
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 function buildLedgerRow(input: {
   id: string;
   entryType: 'sale' | 'refund';
   amount: number;
   fulfilled?: boolean;
+  deliveredAt?: Date | null;
   activeApproval?: boolean;
   settlementStatus?: string;
   payoutStatus?: string;
@@ -58,11 +63,20 @@ function buildLedgerRow(input: {
   commissionVatPercentSnapshot?: number | null;
   shippingModeSnapshot?: string | null;
   financialProfileIdSnapshot?: string | null;
+  settlementDelayDaysSnapshot?: number | null;
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
+  const deliveredAt =
+    input.deliveredAt === undefined
+      ? fulfilled
+        ? new Date('2026-05-10T10:00:00.000Z')
+        : null
+      : input.deliveredAt;
+  const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
+  const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
   return {
     id: input.id,
     vendorId: 'vendor-a',
@@ -82,12 +96,13 @@ function buildLedgerRow(input: {
     shippingCostSourceSnapshot: null,
     shippingCostProviderSnapshot: null,
     financialProfileIdSnapshot: input.financialProfileIdSnapshot ?? 'profile-current',
+    settlementDelayDaysSnapshot,
     settlementStatus:
       input.settlementStatus ??
       (input.entryType === 'refund' ? 'PARTIALLY_REFUNDED' : fulfilled ? 'PAYABLE' : 'ACCRUING'),
-    settlementEligibleAt: fulfilled ? createdAt : null,
+    settlementEligibleAt: eligibleAt,
     accruedAt: createdAt,
-    payableAt: fulfilled ? createdAt : null,
+    payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
     createdAt,
@@ -100,6 +115,7 @@ function buildLedgerRow(input: {
       sourceShopifyOrderNumber: input.sourceShopifyOrderNumber ?? '#1001',
       fulfillment: {
         fulfilledAt: fulfilled ? createdAt : null,
+        shipmentUpdatedAt: deliveredAt,
       },
       refundRecords: input.refundRecords ?? [],
       returnRecords: (input.returnRecords ?? []).map((record) => ({
@@ -250,7 +266,7 @@ describe('settlement approval foundation', () => {
         derivedSettlementStatus: 'payable',
         payoutStatus: 'PENDING',
         eligibilityDecision: 'included',
-        eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+        eligibilityReason: 'Derived payable because delivery evidence satisfies settlement delay.',
         refundDetected: false,
         refundCount: 0,
         fulfillmentEvidencePresent: true,
@@ -325,6 +341,95 @@ describe('settlement approval foundation', () => {
       'sale-declined-return',
       'sale-cancelled-return',
       'sale-closed-return',
+    ]);
+  });
+
+  it('applies sale-time settlement delay snapshots to settlement preview eligibility', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-default-delay',
+        entryType: 'sale',
+        amount: 100,
+        deliveredAt: new Date('2026-05-20T00:00:00.000Z'),
+        sourceShopifyOrderNumber: '#2001',
+      }),
+      buildLedgerRow({
+        id: 'sale-14-day-delay',
+        entryType: 'sale',
+        amount: 100,
+        deliveredAt: new Date('2026-06-01T00:00:00.000Z'),
+        settlementDelayDaysSnapshot: 14,
+        sourceShopifyOrderNumber: '#2002',
+      }),
+      buildLedgerRow({
+        id: 'sale-28-day-delay',
+        entryType: 'sale',
+        amount: 100,
+        deliveredAt: new Date('2026-05-01T00:00:00.000Z'),
+        settlementDelayDaysSnapshot: 28,
+        sourceShopifyOrderNumber: '#2003',
+      }),
+      buildLedgerRow({
+        id: 'sale-delay-pending',
+        entryType: 'sale',
+        amount: 100,
+        deliveredAt: new Date('2999-01-01T00:00:00.000Z'),
+        sourceShopifyOrderNumber: '#2004',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2001', '#2002', '#2003', '#2004'],
+    });
+
+    expect(preview.summary.eligibleRowCount).toBe(3);
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual([
+      'sale-default-delay',
+      'sale-14-day-delay',
+      'sale-28-day-delay',
+    ]);
+    expect(preview.selectedOrderDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestedIdentifier: '#2004',
+          matched: true,
+          financeLedgerEntryId: 'sale-delay-pending',
+          candidateIncluded: false,
+          excludedReason: 'Settlement delay period has not elapsed',
+          derivedSettlementStatus: 'accruing',
+        }),
+      ]),
+    );
+  });
+
+  it('blocks sale settlement eligibility when delivery date is missing', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-missing-delivery',
+        entryType: 'sale',
+        amount: 100,
+        deliveredAt: null,
+        sourceShopifyOrderNumber: '#2005',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2005'],
+    });
+
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.lines).toEqual([]);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#2005',
+        matched: true,
+        financeLedgerEntryId: 'sale-missing-delivery',
+        candidateIncluded: false,
+        excludedReason: 'Missing delivery date for settlement eligibility',
+        derivedSettlementStatus: 'accruing',
+      }),
     ]);
   });
 
@@ -625,7 +730,7 @@ describe('settlement approval foundation', () => {
         matchedShopifyOrderId: 'shopify-order-1074',
         financeLedgerEntryId: 'sale-1074',
         candidateIncluded: false,
-        excludedReason: 'Excluded because row is not payable or partially refunded.',
+        excludedReason: 'Missing delivery date for settlement eligibility',
         lockedApprovalId: null,
         currentSettlementStatus: 'ACCRUING',
         derivedSettlementStatus: 'accruing',
@@ -801,8 +906,9 @@ describe('settlement approval foundation', () => {
                   storedSettlementStatus: 'PAYABLE',
                   derivedSettlementStatus: 'payable',
                   payoutStatus: 'PENDING',
+                  settlementDelayDaysSnapshot: 21,
                   eligibilityDecision: 'included',
-                  eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+                  eligibilityReason: 'Derived payable because delivery evidence satisfies settlement delay.',
                   refundDetected: false,
                   refundCount: 0,
                   fulfillmentEvidencePresent: true,
@@ -884,6 +990,67 @@ describe('settlement approval foundation', () => {
       lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
         id: `line-open-return-${index}`,
         settlementApprovalId: 'settlement-approval-open-return',
+        ...line,
+      })),
+    }));
+
+    const approval = await createDraftApproval({ vendorId: 'vendor-a' });
+
+    expect(prismaMock.settlementApproval.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossSalesMinor: 50000,
+          lines: {
+            create: [
+              expect.objectContaining({
+                financeLedgerEntryId: 'sale-clear',
+              }),
+            ],
+          },
+        }),
+      }),
+    );
+    expect(approval.lines).toHaveLength(1);
+    expect(approval.lines[0]).toMatchObject({
+      financeLedgerEntryId: 'sale-clear',
+    });
+  });
+
+  it('excludes sale rows from settlement approval drafts before the settlement delay passes', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-delay-pending',
+        entryType: 'sale',
+        amount: 1000,
+        deliveredAt: new Date('2999-01-01T00:00:00.000Z'),
+      }),
+      buildLedgerRow({ id: 'sale-clear', entryType: 'sale', amount: 500 }),
+    ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-delay',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-delay-${index}`,
+        settlementApprovalId: 'settlement-approval-delay',
         ...line,
       })),
     }));

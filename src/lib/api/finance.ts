@@ -33,6 +33,7 @@ export function updateVendorFinancialProfile(
     deductShippingEnabled: boolean;
     shippingMode: VendorFinancialProfile['shippingMode'];
     fixedShippingFee: number | null;
+    settlementDelayDays: number;
   },
 ) {
   return runtimeServices.finance.updateProfile(vendorId, input);

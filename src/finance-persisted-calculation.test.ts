@@ -21,6 +21,10 @@ const { getVendorFinanceDashboard, getVendorFinanceSummary, upsertVendorFinancia
   '../backend/src/modules/finance/finance.service.js'
 );
 
+function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 type LedgerFixture = {
   id: string;
   entryType: string;
@@ -37,6 +41,7 @@ type LedgerFixture = {
   shippingVatAmountSnapshot?: number | null;
   shippingCostSourceSnapshot?: string | null;
   shippingCostProviderSnapshot?: string | null;
+  settlementDelayDaysSnapshot: number;
   settlementStatus: string;
   settlementEligibleAt: Date | null;
   accruedAt: Date | null;
@@ -48,7 +53,7 @@ type LedgerFixture = {
     allocationStatus: string;
     fulfillmentStatus: string;
     shippingStatus: string;
-    fulfillment: { fulfilledAt: Date | null };
+    fulfillment: { fulfilledAt: Date | null; shipmentUpdatedAt: Date | null };
     sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
     returnRecords: Array<{ id: string }>;
@@ -65,9 +70,21 @@ function buildSaleFixture(input: {
   commissionVatPercentSnapshot: number;
   createdAt: string;
   fulfilled?: boolean;
+  deliveredAt?: string | null;
+  settlementDelayDaysSnapshot?: number;
 }): LedgerFixture {
   const createdAt = new Date(input.createdAt);
   const fulfilled = input.fulfilled ?? true;
+  const deliveredAt =
+    input.deliveredAt === undefined
+      ? fulfilled
+        ? new Date('2026-05-10T10:00:00.000Z')
+        : null
+      : input.deliveredAt
+        ? new Date(input.deliveredAt)
+        : null;
+  const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
+  const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
   return {
     id: input.id,
     entryType: 'sale',
@@ -84,10 +101,11 @@ function buildSaleFixture(input: {
     shippingVatAmountSnapshot: null,
     shippingCostSourceSnapshot: null,
     shippingCostProviderSnapshot: null,
+    settlementDelayDaysSnapshot,
     settlementStatus: fulfilled ? 'PAYABLE' : 'ACCRUING',
-    settlementEligibleAt: fulfilled ? createdAt : null,
+    settlementEligibleAt: eligibleAt,
     accruedAt: createdAt,
-    payableAt: fulfilled ? createdAt : null,
+    payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
     vendorAllocation: {
@@ -97,6 +115,7 @@ function buildSaleFixture(input: {
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       fulfillment: {
         fulfilledAt: fulfilled ? createdAt : null,
+        shipmentUpdatedAt: deliveredAt,
       },
       sourceShopifyOrderId: input.orderId,
       sourceShopifyOrderNumber: input.orderNumber,
@@ -115,6 +134,7 @@ describe('persisted vendor finance calculations', () => {
     deductShippingEnabled: boolean;
     shippingMode: string;
     fixedShippingFee: number | null;
+    settlementDelayDays: number;
     active: boolean;
   } | null;
   let ledgerRows: LedgerFixture[];
@@ -147,6 +167,7 @@ describe('persisted vendor finance calculations', () => {
         shippingVatAmountSnapshot: null,
         shippingCostSourceSnapshot: null,
         shippingCostProviderSnapshot: null,
+        settlementDelayDaysSnapshot: 21,
         settlementStatus: 'PARTIALLY_REFUNDED',
         settlementEligibleAt: null,
         accruedAt: null,
@@ -160,6 +181,7 @@ describe('persisted vendor finance calculations', () => {
           shippingStatus: 'Delivered',
           fulfillment: {
             fulfilledAt: new Date('2026-05-13T10:00:00.000Z'),
+            shipmentUpdatedAt: new Date('2026-05-10T10:00:00.000Z'),
           },
           sourceShopifyOrderId: 'refund-order',
           sourceShopifyOrderNumber: '#1018',
@@ -185,19 +207,21 @@ describe('persisted vendor finance calculations', () => {
         deductShippingEnabled: Boolean(next.deductShippingEnabled),
         shippingMode: String(next.shippingMode),
         fixedShippingFee: next.fixedShippingFee === null ? null : Number(next.fixedShippingFee),
+        settlementDelayDays:
+          next.settlementDelayDays === undefined ? activeProfile?.settlementDelayDays ?? 21 : Number(next.settlementDelayDays),
         active: Boolean(next.active),
       };
       return activeProfile;
     });
-	    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
-	      if (args.select) {
-	        return ledgerRows.map((row) => ({
-	          id: row.id,
-	          entryType: row.entryType,
-	          amount: row.amount,
-	          payoutStatus: row.payoutStatus,
-	          description: row.description,
-	          commissionPercentSnapshot: row.commissionPercentSnapshot,
+    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
+      if (args.select) {
+        return ledgerRows.map((row) => ({
+          id: row.id,
+          entryType: row.entryType,
+          amount: row.amount,
+          payoutStatus: row.payoutStatus,
+          description: row.description,
+          commissionPercentSnapshot: row.commissionPercentSnapshot,
           commissionVatPercentSnapshot: row.commissionVatPercentSnapshot,
           deductShippingEnabledSnapshot: row.deductShippingEnabledSnapshot,
           shippingModeSnapshot: row.shippingModeSnapshot,
@@ -206,6 +230,7 @@ describe('persisted vendor finance calculations', () => {
           shippingVatAmountSnapshot: row.shippingVatAmountSnapshot,
           shippingCostSourceSnapshot: row.shippingCostSourceSnapshot,
           shippingCostProviderSnapshot: row.shippingCostProviderSnapshot,
+          settlementDelayDaysSnapshot: row.settlementDelayDaysSnapshot,
           settlementStatus: row.settlementStatus,
           settlementEligibleAt: row.settlementEligibleAt,
           accruedAt: row.accruedAt,
@@ -213,23 +238,23 @@ describe('persisted vendor finance calculations', () => {
           settledAt: row.settledAt,
           settlementHoldReason: row.settlementHoldReason,
           createdAt: row.createdAt,
-	          vendorAllocation: row.vendorAllocation
-	            ? {
-	                sourceShopifyOrderId: row.vendorAllocation.sourceShopifyOrderId,
-	                sourceShopifyOrderNumber: row.vendorAllocation.sourceShopifyOrderNumber,
-	                id: row.vendorAllocation.id,
-	                allocationStatus: row.vendorAllocation.allocationStatus,
-	                fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
-	                shippingStatus: row.vendorAllocation.shippingStatus,
-	                fulfillment: row.vendorAllocation.fulfillment,
-	                returnRecords: row.vendorAllocation.returnRecords,
-	                refundRecords: row.vendorAllocation.refundRecords,
-	              }
-	            : null,
-	          payoutBatchLines: row.payoutBatchLines ?? [],
-	          invoiceExecutions: row.invoiceExecutions ?? [],
-	        }));
-	      }
+          vendorAllocation: row.vendorAllocation
+            ? {
+                sourceShopifyOrderId: row.vendorAllocation.sourceShopifyOrderId,
+                sourceShopifyOrderNumber: row.vendorAllocation.sourceShopifyOrderNumber,
+                id: row.vendorAllocation.id,
+                allocationStatus: row.vendorAllocation.allocationStatus,
+                fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
+                shippingStatus: row.vendorAllocation.shippingStatus,
+                fulfillment: row.vendorAllocation.fulfillment,
+                returnRecords: row.vendorAllocation.returnRecords,
+                refundRecords: row.vendorAllocation.refundRecords,
+              }
+            : null,
+          payoutBatchLines: row.payoutBatchLines ?? [],
+          invoiceExecutions: row.invoiceExecutions ?? [],
+        }));
+      }
 
       return ledgerRows;
     });

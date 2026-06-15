@@ -1016,6 +1016,7 @@ describe('FinancePage control center', () => {
         deductShippingEnabled: true,
         shippingMode: 'external_provider',
         fixedShippingFee: 88,
+        settlementDelayDays: 21,
       }),
     );
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
@@ -1111,6 +1112,7 @@ describe('FinancePage control center', () => {
         deductShippingEnabled: true,
         shippingMode: 'external_provider',
         fixedShippingFee: 88,
+        settlementDelayDays: 21,
       }),
     );
     expect((await screen.findAllByText('12.00%')).length).toBeGreaterThan(0);

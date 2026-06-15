@@ -142,6 +142,7 @@ function buildVendorFinance(vendorId: VendorId): VendorFinanceDashboard {
       deductShippingEnabled: false,
       shippingMode: 'disabled',
       fixedShippingFee: null,
+      settlementDelayDays: 21,
       active: true,
       source: 'default',
     },

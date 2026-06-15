@@ -374,6 +374,7 @@ model VendorFinancialProfile {
   deductShippingEnabled  Boolean               @default(false)
   shippingMode           ShippingDeductionMode @default(DISABLED)
   fixedShippingFee       Decimal?              @db.Decimal(10, 2)
+  settlementDelayDays    Int                   @default(21)
   active                 Boolean               @default(true)
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
@@ -805,6 +806,7 @@ model FinanceLedgerEntry {
   shippingCostProviderSnapshot  String?
   shippingCostIdSnapshot        String?
   financialProfileIdSnapshot    String?
+  settlementDelayDaysSnapshot   Int                    @default(21)
   settlementStatus              SettlementStatus       @default(PENDING)
   settlementEligibleAt          DateTime?
   accruedAt                     DateTime?

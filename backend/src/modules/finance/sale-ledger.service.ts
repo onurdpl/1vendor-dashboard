@@ -1,5 +1,9 @@
 import { FinanceEventType, SettlementStatus, ShippingDeductionMode, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from './finance-event.service.js';
+import {
+  evaluateSaleSettlementDelay,
+  normalizeSettlementDelayDays,
+} from './settlement-delay-eligibility.service.js';
 
 type FinanceLedgerTransaction = Prisma.TransactionClient;
 
@@ -32,22 +36,9 @@ function mapShippingModeSnapshot(mode: string | null | undefined) {
 }
 
 function isFulfilledForSettlement(allocation: {
-  fulfillmentStatus?: string | null;
   shippingStatus?: string | null;
-  fulfillment?: { fulfilledAt: Date | null } | null;
 }) {
-  const lifecycle = [allocation.fulfillmentStatus, allocation.shippingStatus]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return Boolean(
-    allocation.fulfillment?.fulfilledAt ||
-      lifecycle.includes('fulfilled') ||
-      lifecycle.includes('shipped') ||
-      lifecycle.includes('in transit') ||
-      lifecycle.includes('delivered'),
-  );
+  return Boolean(allocation.shippingStatus?.trim().toLowerCase().includes('delivered'));
 }
 
 export async function upsertSaleLedgerForAllocation(
@@ -107,11 +98,17 @@ export async function upsertSaleLedgerForAllocation(
     shippingCostProviderSnapshot: confirmedShippingCost?.providerName ?? null,
     shippingCostIdSnapshot: confirmedShippingCost?.id ?? null,
     financialProfileIdSnapshot: activeProfile?.id ?? null,
+    settlementDelayDaysSnapshot: normalizeSettlementDelayDays(activeProfile?.settlementDelayDays),
   };
   const fulfilled = isFulfilledForSettlement(allocation);
-  const payableAt = fulfilled ? allocation.fulfillment?.fulfilledAt ?? allocation.updatedAt : null;
+  const settlementTiming = evaluateSaleSettlementDelay({
+    entryType: 'sale',
+    settlementDelayDaysSnapshot: profileSnapshot.settlementDelayDaysSnapshot,
+    vendorAllocation: allocation,
+  });
+  const payableAt = fulfilled ? settlementTiming.eligibleAt : null;
   const settlementFields = {
-    settlementStatus: fulfilled ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
+    settlementStatus: fulfilled && settlementTiming.eligible ? SettlementStatus.PAYABLE : SettlementStatus.ACCRUING,
     accruedAt: allocation.createdAt,
     payableAt,
     settlementEligibleAt: payableAt,
@@ -128,6 +125,7 @@ export async function upsertSaleLedgerForAllocation(
       amount: toAmountString(amount),
       payoutStatus: 'PENDING',
       description: `Allocated sale for Shopify order ${allocation.order.sourceShopifyOrderNumber}`,
+      ...settlementFields,
     },
     create: {
       id: ledgerId,

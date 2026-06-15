@@ -15,6 +15,11 @@ import {
 } from './payout-calculator.js';
 import { buildSettlementBillingSnapshot } from './settlement-billing-snapshot.service.js';
 import { APPROVED_OPEN_RETURN_HOLD_REASON, hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
+import {
+  evaluateSaleSettlementDelay,
+  MISSING_DELIVERY_DATE_REASON,
+  SETTLEMENT_DELAY_PENDING_REASON,
+} from './settlement-delay-eligibility.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -72,6 +77,7 @@ type SettlementApprovalLedgerRow = {
   shippingCostSourceSnapshot: string | null;
   shippingCostProviderSnapshot: string | null;
   financialProfileIdSnapshot: string | null;
+  settlementDelayDaysSnapshot: number | null;
   settlementStatus: string | null;
   settlementEligibleAt: Date | null;
   accruedAt: Date | null;
@@ -88,6 +94,7 @@ type SettlementApprovalLedgerRow = {
     sourceShopifyOrderNumber: string;
     fulfillment: {
       fulfilledAt: Date | null;
+      shipmentUpdatedAt: Date | null;
     } | null;
     refundRecords: Array<{
       id: string;
@@ -323,7 +330,7 @@ function resolveSettlementStatus(row: SettlementApprovalLedgerRow) {
     return 'held';
   }
   if (type === 'sale') {
-    return isFulfilledForSettlement(row.vendorAllocation) ? 'payable' : 'accruing';
+    return evaluateSaleSettlementDelay(row).eligible ? 'payable' : 'accruing';
   }
   return storedStatus || 'pending';
 }
@@ -360,6 +367,7 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
   const refundDetected = type === 'refund' || refundCount > 0;
   const fulfillmentEvidencePresent = hasFulfillmentEvidence(row.vendorAllocation);
   const shippingEvidencePresent = hasShippingEvidence(row.vendorAllocation);
+  const settlementDelay = evaluateSaleSettlementDelay(row);
   const derivedSettlementStatus = resolveSettlementStatus(row);
   let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row) ? 'included' : 'excluded';
   let eligibilityReason = 'Excluded because row is not payable or partially refunded.';
@@ -375,10 +383,14 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
   } else if (derivedSettlementStatus === 'partially_refunded') {
     eligibilityReason = 'Derived partially refunded because refund records exist.';
+  } else if (settlementDelay.applies && settlementDelay.blockerReason === MISSING_DELIVERY_DATE_REASON) {
+    eligibilityReason = MISSING_DELIVERY_DATE_REASON;
+  } else if (settlementDelay.applies && settlementDelay.blockerReason === SETTLEMENT_DELAY_PENDING_REASON) {
+    eligibilityReason = SETTLEMENT_DELAY_PENDING_REASON;
   } else if (derivedSettlementStatus === 'payable' && fulfillmentEvidencePresent) {
-    eligibilityReason = 'Derived payable because fulfillment evidence exists.';
+    eligibilityReason = 'Derived payable because delivery evidence satisfies settlement delay.';
   } else if (derivedSettlementStatus === 'payable' && shippingEvidencePresent) {
-    eligibilityReason = 'Derived payable because shipping evidence exists.';
+    eligibilityReason = 'Derived payable because delivery evidence satisfies settlement delay.';
   }
 
   return {
@@ -415,6 +427,7 @@ function resolveCalculationProfile(row: SettlementApprovalLedgerRow): VendorFina
           : toNumber(row.shippingVatAmountSnapshot),
       shippingCostSource: row.shippingCostSourceSnapshot,
       shippingCostProvider: row.shippingCostProviderSnapshot,
+      settlementDelayDays: row.settlementDelayDaysSnapshot ?? DEFAULT_VENDOR_FINANCIAL_PROFILE.settlementDelayDays,
     };
   }
 
@@ -484,6 +497,7 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
       shippingVatAmountSnapshot: row.shippingVatAmountSnapshot === null ? null : String(row.shippingVatAmountSnapshot),
       shippingCostSourceSnapshot: row.shippingCostSourceSnapshot,
       shippingCostProviderSnapshot: row.shippingCostProviderSnapshot,
+      settlementDelayDaysSnapshot: row.settlementDelayDaysSnapshot,
     },
   };
 }
@@ -864,6 +878,7 @@ async function buildApprovalPreview(
       shippingCostSourceSnapshot: true,
       shippingCostProviderSnapshot: true,
       financialProfileIdSnapshot: true,
+      settlementDelayDaysSnapshot: true,
       settlementStatus: true,
       settlementEligibleAt: true,
       accruedAt: true,
@@ -882,6 +897,7 @@ async function buildApprovalPreview(
           fulfillment: {
             select: {
               fulfilledAt: true,
+              shipmentUpdatedAt: true,
             },
           },
           refundRecords: {
@@ -973,6 +989,7 @@ async function buildApprovalPreview(
         shippingCostSourceSnapshot: true,
         shippingCostProviderSnapshot: true,
         financialProfileIdSnapshot: true,
+        settlementDelayDaysSnapshot: true,
         settlementStatus: true,
         settlementEligibleAt: true,
         accruedAt: true,
@@ -991,6 +1008,7 @@ async function buildApprovalPreview(
             fulfillment: {
               select: {
                 fulfilledAt: true,
+                shipmentUpdatedAt: true,
               },
             },
             refundRecords: {

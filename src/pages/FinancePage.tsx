@@ -61,6 +61,7 @@ type VendorProfileFormInput = {
   deductShippingEnabled: boolean;
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee: number | null;
+  settlementDelayDays: number;
 };
 
 type FinanceDeepLinkTarget = {
@@ -632,6 +633,7 @@ export function FinancePage() {
   const [deductShippingEnabled, setDeductShippingEnabled] = useState(false);
   const [shippingMode, setShippingMode] = useState<'disabled' | 'fixed' | 'external_provider'>('disabled');
   const [fixedShippingFee, setFixedShippingFee] = useState('');
+  const [settlementDelayDays, setSettlementDelayDays] = useState('21');
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
@@ -757,6 +759,7 @@ export function FinancePage() {
     setDeductShippingEnabled(finance.profile.deductShippingEnabled);
     setShippingMode(finance.profile.shippingMode);
     setFixedShippingFee(finance.profile.fixedShippingFee ?? '');
+    setSettlementDelayDays(String(finance.profile.settlementDelayDays ?? 21));
   }, [finance?.profile]);
 
   async function handleSaveVendorProfile(event: FormEvent<HTMLFormElement>) {
@@ -773,6 +776,7 @@ export function FinancePage() {
         fixedShippingFee: String(formData.get('fixedShippingFee') ?? '').trim()
           ? Number(formData.get('fixedShippingFee'))
           : null,
+        settlementDelayDays: Number(formData.get('settlementDelayDays') || 21),
       });
     } catch {
       // The mutation onError handler renders the compact save failure message.
@@ -1021,6 +1025,9 @@ export function FinancePage() {
       availableBalance: UNKNOWN_FINANCE_VALUE,
       pendingPayouts: UNKNOWN_FINANCE_VALUE,
       refundsThisMonth: UNKNOWN_FINANCE_VALUE,
+      payableBalance: UNKNOWN_FINANCE_VALUE,
+      accruedBalance: UNKNOWN_FINANCE_VALUE,
+      heldBalance: UNKNOWN_FINANCE_VALUE,
     },
     transactions: [],
     profile: {
@@ -1030,6 +1037,7 @@ export function FinancePage() {
       deductShippingEnabled: false,
       shippingMode: 'disabled' as const,
       fixedShippingFee: null,
+      settlementDelayDays: 21,
       active: true,
       source: 'default' as const,
     },
@@ -1277,6 +1285,7 @@ export function FinancePage() {
                 <MetadataRow label="Commission" value={`${financeView.profile?.commissionPercent ?? '10.00'}%`} />
                 <MetadataRow label="Tax" value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
                 <MetadataRow label="Shipping" value={financeView.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
+                <MetadataRow label="Settlement delay" value={`${financeView.profile?.settlementDelayDays ?? 21} days`} />
               </div>
               {isAdmin ? (
                 <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
@@ -1314,6 +1323,18 @@ export function FinancePage() {
                         value={fixedShippingFee}
                         onChange={(event) => setFixedShippingFee(event.target.value)}
                         inputMode="decimal"
+                      />
+                    </label>
+                    <label>
+                      <span>Settlement delay days</span>
+                      <input
+                        name="settlementDelayDays"
+                        value={settlementDelayDays}
+                        onChange={(event) => setSettlementDelayDays(event.target.value)}
+                        inputMode="numeric"
+                        min="0"
+                        max="365"
+                        type="number"
                       />
                     </label>
                   </div>

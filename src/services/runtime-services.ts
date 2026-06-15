@@ -2187,6 +2187,7 @@ export const runtimeServices = {
             deductShippingEnabled: input.deductShippingEnabled,
             shippingMode: input.shippingMode,
             fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+            settlementDelayDays: input.settlementDelayDays,
             active: true,
             source: 'configured' as const,
           }),

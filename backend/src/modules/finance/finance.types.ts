@@ -36,6 +36,7 @@ export type VendorFinancialProfileDto = {
   deductShippingEnabled: boolean;
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee: string | null;
+  settlementDelayDays: number;
   active: boolean;
   source: 'configured' | 'default';
 };
@@ -197,6 +198,7 @@ export type VendorFinancialProfileUpdateDto = {
   deductShippingEnabled?: boolean;
   shippingMode?: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee?: number | null;
+  settlementDelayDays?: number;
   active?: boolean;
 };
 

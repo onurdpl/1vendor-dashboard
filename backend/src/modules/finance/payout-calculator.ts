@@ -10,6 +10,7 @@ export type VendorFinanceProfileConfig = {
   externalProviderShippingVatAmount?: number | null;
   shippingCostSource?: string | null;
   shippingCostProvider?: string | null;
+  settlementDelayDays: number;
 };
 
 export type PayoutCalculationInput = {
@@ -39,6 +40,7 @@ export const DEFAULT_VENDOR_FINANCIAL_PROFILE: VendorFinanceProfileConfig = {
   deductShippingEnabled: false,
   shippingMode: 'disabled',
   fixedShippingFee: null,
+  settlementDelayDays: 21,
 };
 
 function clampMoney(value: number) {

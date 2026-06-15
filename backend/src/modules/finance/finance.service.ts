@@ -28,6 +28,11 @@ import {
 } from '../invoices/invoice-visibility.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
+import {
+  DEFAULT_SETTLEMENT_DELAY_DAYS,
+  evaluateSaleSettlementDelay,
+  normalizeSettlementDelayDays,
+} from './settlement-delay-eligibility.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
@@ -78,6 +83,7 @@ function mapProfile(profile: {
   deductShippingEnabled: boolean;
   shippingMode: string;
   fixedShippingFee: unknown;
+  settlementDelayDays?: unknown;
   active: boolean;
 } | null, vendorId: string): VendorFinancialProfileDto {
   const config = profile
@@ -87,6 +93,7 @@ function mapProfile(profile: {
         deductShippingEnabled: profile.deductShippingEnabled,
         shippingMode: mapShippingMode(profile.shippingMode),
         fixedShippingFee: profile.fixedShippingFee === null ? null : toNumber(profile.fixedShippingFee),
+        settlementDelayDays: normalizeSettlementDelayDays(profile.settlementDelayDays),
         active: profile.active,
         source: 'configured' as const,
       }
@@ -103,6 +110,7 @@ function mapProfile(profile: {
     deductShippingEnabled: config.deductShippingEnabled,
     shippingMode: config.shippingMode,
     fixedShippingFee: config.fixedShippingFee === null ? null : toAmountString(config.fixedShippingFee),
+    settlementDelayDays: config.settlementDelayDays,
     active: config.active,
     source: config.source,
   };
@@ -115,6 +123,7 @@ function profileToCalculationConfig(profile: VendorFinancialProfileDto): VendorF
     deductShippingEnabled: profile.deductShippingEnabled,
     shippingMode: profile.shippingMode,
     fixedShippingFee: profile.fixedShippingFee === null ? null : toNumber(profile.fixedShippingFee),
+    settlementDelayDays: profile.settlementDelayDays,
   };
 }
 
@@ -132,6 +141,7 @@ function entrySnapshotToCalculationProfile(entry: {
   shippingVatAmountSnapshot?: unknown;
   shippingCostSourceSnapshot?: string | null;
   shippingCostProviderSnapshot?: string | null;
+  settlementDelayDaysSnapshot?: unknown;
 }): CalculationProfile | null {
   if (entry.commissionPercentSnapshot === null || entry.commissionPercentSnapshot === undefined) {
     return null;
@@ -156,6 +166,7 @@ function entrySnapshotToCalculationProfile(entry: {
         : toNumber(entry.shippingVatAmountSnapshot),
     shippingCostSource: entry.shippingCostSourceSnapshot ?? null,
     shippingCostProvider: entry.shippingCostProviderSnapshot ?? null,
+    settlementDelayDays: normalizeSettlementDelayDays(entry.settlementDelayDaysSnapshot),
     source: 'snapshot',
   };
 }
@@ -171,6 +182,7 @@ function resolveCalculationProfile(
     shippingVatAmountSnapshot?: unknown;
     shippingCostSourceSnapshot?: string | null;
     shippingCostProviderSnapshot?: string | null;
+    settlementDelayDaysSnapshot?: unknown;
   },
   activeProfile: VendorFinancialProfileDto,
 ): CalculationProfile {
@@ -398,11 +410,12 @@ function getSettlementStatus(entry: {
   entryType: string;
   payoutStatus?: string | null;
   settlementStatus?: string | null;
+  settlementDelayDaysSnapshot?: unknown;
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
-    fulfillment?: { fulfilledAt: Date | null } | null;
+    fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     returnRecords?: Array<{
       status?: string | null;
@@ -432,7 +445,7 @@ function getSettlementStatus(entry: {
     return 'held';
   }
   if (type === 'sale') {
-    return isFulfilledForShipping(entry.vendorAllocation) ? 'payable' : 'accruing';
+    return evaluateSaleSettlementDelay(entry).eligible ? 'payable' : 'accruing';
   }
   return storedStatus;
 }
@@ -447,11 +460,12 @@ function buildSettlement(entry: {
   settledAt?: Date | null;
   settlementHoldReason?: string | null;
   createdAt?: Date;
+  settlementDelayDaysSnapshot?: unknown;
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
-    fulfillment?: { fulfilledAt: Date | null } | null;
+    fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     returnRecords?: Array<{
       status?: string | null;
@@ -461,15 +475,18 @@ function buildSettlement(entry: {
   } | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
-  const fulfilledAt = entry.vendorAllocation?.fulfillment?.fulfilledAt ?? null;
-  const payableAt = entry.payableAt ?? fulfilledAt ?? (status === 'payable' ? entry.createdAt : null) ?? null;
+  const saleDelay = evaluateSaleSettlementDelay(entry);
+  const payableAt =
+    saleDelay.applies
+      ? saleDelay.eligibleAt
+      : entry.payableAt ?? entry.vendorAllocation?.fulfillment?.fulfilledAt ?? (status === 'payable' ? entry.createdAt : null) ?? null;
   const accruedAt = entry.accruedAt ?? (normalizeType(entry.entryType) === 'sale' ? entry.createdAt : null) ?? null;
-  const eligibleAt = entry.settlementEligibleAt ?? payableAt;
+  const eligibleAt = saleDelay.applies ? saleDelay.eligibleAt : entry.settlementEligibleAt ?? payableAt;
   const payoutReady = status === 'payable' || status === 'partially_refunded';
   const noteByStatus: Record<SettlementDto['status'], string> = {
     pending: 'Awaiting settlement classification.',
-    accruing: 'Accruing until fulfillment or shipping evidence is present.',
-    payable: 'Fulfilled or shipped sale is payout-ready.',
+    accruing: 'Accruing until delivery evidence and settlement delay are satisfied.',
+    payable: 'Delivered sale has satisfied the vendor settlement delay.',
     partially_refunded: 'Refund impact is reducing the vendor balance.',
     held: entry.settlementHoldReason ?? 'Settlement is held for operator review.',
     settled: 'Marked settled in the operational ledger.',
@@ -498,12 +515,13 @@ function isEntryEligibleForPayoutBatch(entry: {
   settledAt?: Date | null;
   settlementHoldReason?: string | null;
   createdAt?: Date;
+  settlementDelayDaysSnapshot?: unknown;
   payoutBatchLines?: Array<unknown>;
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
-    fulfillment?: { fulfilledAt: Date | null } | null;
+    fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     returnRecords?: Array<{
       status?: string | null;
@@ -540,6 +558,7 @@ function calculateEntryBatchAmounts(
     shippingVatAmountSnapshot?: unknown;
     shippingCostSourceSnapshot?: string | null;
     shippingCostProviderSnapshot?: string | null;
+    settlementDelayDaysSnapshot?: unknown;
     vendorAllocation?: {
       allocationStatus?: string;
       fulfillmentStatus?: string | null;
@@ -710,6 +729,7 @@ export async function getVendorFinanceDashboard(
         shippingVatAmountSnapshot: true,
         shippingCostSourceSnapshot: true,
         shippingCostProviderSnapshot: true,
+        settlementDelayDaysSnapshot: true,
         settlementStatus: true,
         settlementEligibleAt: true,
         accruedAt: true,
@@ -726,6 +746,7 @@ export async function getVendorFinanceDashboard(
             fulfillment: {
               select: {
                 fulfilledAt: true,
+                shipmentUpdatedAt: true,
               },
             },
             refundRecords: {
@@ -782,6 +803,7 @@ export async function getVendorFinanceDashboard(
         shippingVatAmountSnapshot: true,
         shippingCostSourceSnapshot: true,
         shippingCostProviderSnapshot: true,
+        settlementDelayDaysSnapshot: true,
         settlementStatus: true,
         settlementEligibleAt: true,
         accruedAt: true,
@@ -799,6 +821,7 @@ export async function getVendorFinanceDashboard(
             fulfillment: {
               select: {
                 fulfilledAt: true,
+                shipmentUpdatedAt: true,
               },
             },
             returnRecords: {
@@ -1071,6 +1094,7 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
       shippingVatAmountSnapshot: true,
       shippingCostSourceSnapshot: true,
       shippingCostProviderSnapshot: true,
+      settlementDelayDaysSnapshot: true,
       vendorAllocation: {
         select: {
           allocationStatus: true,
@@ -1079,6 +1103,7 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
           fulfillment: {
             select: {
               fulfilledAt: true,
+              shipmentUpdatedAt: true,
             },
           },
         },
@@ -1500,6 +1525,16 @@ function normalizeShippingMode(value: VendorFinancialProfileUpdateDto['shippingM
   return value ?? fallback;
 }
 
+function normalizeSettlementDelayDaysInput(value: number | undefined, fallback: number) {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isFinite(value) || value < 0 || value > 365) {
+    throw new Error('Settlement delay days must be between 0 and 365.');
+  }
+  return Math.round(value);
+}
+
 export async function upsertVendorFinancialProfile(
   vendorId: string,
   input: VendorFinancialProfileUpdateDto,
@@ -1514,6 +1549,10 @@ export async function upsertVendorFinancialProfile(
         ? null
         : toNumber(existing.fixedShippingFee)
       : input.fixedShippingFee;
+  const settlementDelayDays = normalizeSettlementDelayDaysInput(
+    input.settlementDelayDays,
+    existing.settlementDelayDays ?? DEFAULT_SETTLEMENT_DELAY_DAYS,
+  );
 
   if (fixedShippingFee !== null && (!Number.isFinite(fixedShippingFee) || fixedShippingFee < 0)) {
     throw new Error('Fixed shipping fee must be zero or greater.');
@@ -1529,6 +1568,7 @@ export async function upsertVendorFinancialProfile(
       deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
+      settlementDelayDays,
       active: input.active ?? true,
     },
     create: {
@@ -1538,6 +1578,7 @@ export async function upsertVendorFinancialProfile(
       deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
+      settlementDelayDays,
       active: input.active ?? true,
     },
   });

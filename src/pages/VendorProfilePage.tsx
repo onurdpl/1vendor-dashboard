@@ -102,6 +102,7 @@ type FinancePolicyFormState = {
   deductShippingEnabled: boolean;
   shippingMode: VendorFinancialProfile['shippingMode'];
   fixedShippingFee: string;
+  settlementDelayDays: string;
 };
 
 type LogoCommissionPreviewFormState = {
@@ -133,6 +134,7 @@ const EMPTY_FINANCE_POLICY_FORM: FinancePolicyFormState = {
   deductShippingEnabled: false,
   shippingMode: 'disabled',
   fixedShippingFee: '',
+  settlementDelayDays: '21',
 };
 
 const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
@@ -204,6 +206,7 @@ function buildFinancePolicyFormState(profile: VendorFinancialProfile | null): Fi
     deductShippingEnabled: profile?.deductShippingEnabled ?? false,
     shippingMode: profile?.shippingMode ?? 'disabled',
     fixedShippingFee: profile?.fixedShippingFee ?? '',
+    settlementDelayDays: String(profile?.settlementDelayDays ?? 21),
   };
 }
 
@@ -229,6 +232,7 @@ function buildFinancePolicyInput(form: FinancePolicyFormState) {
     deductShippingEnabled: form.deductShippingEnabled,
     shippingMode: form.shippingMode,
     fixedShippingFee,
+    settlementDelayDays: Number(form.settlementDelayDays),
   };
 }
 
@@ -248,6 +252,16 @@ function validateFinancePolicyForm(form: FinancePolicyFormState) {
     if (!Number.isFinite(fixedShippingFee) || fixedShippingFee < 0) {
       return 'Fixed shipping fee must be zero or greater.';
     }
+  }
+
+  const settlementDelayDays = Number(form.settlementDelayDays);
+  if (
+    !form.settlementDelayDays.trim() ||
+    !Number.isFinite(settlementDelayDays) ||
+    settlementDelayDays < 0 ||
+    settlementDelayDays > 365
+  ) {
+    return 'Settlement delay days must be between 0 and 365.';
   }
 
   return null;
@@ -2950,6 +2964,7 @@ export function VendorProfilePage() {
                 <MetadataRow label="Shipping deduction mode" value={formatShippingMode(financeProfile.shippingMode)} />
                 <MetadataRow label="Deduct shipping after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
                 <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
+                <MetadataRow label="Settlement delay" value={`${financeProfile.settlementDelayDays} days`} />
                 <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
                 <MetadataRow label="Policy active" value={formatBoolean(financeProfile.active)} />
               </MetadataGroup>
@@ -3037,6 +3052,18 @@ export function VendorProfilePage() {
                         value={financePolicyForm.fixedShippingFee}
                         onChange={(event) => handleFinancePolicyFormChange('fixedShippingFee', event.target.value)}
                         placeholder="Optional"
+                      />
+                    </label>
+                    <label>
+                      Settlement delay days
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        step="1"
+                        value={financePolicyForm.settlementDelayDays}
+                        onChange={(event) => handleFinancePolicyFormChange('settlementDelayDays', event.target.value)}
+                        required
                       />
                     </label>
                     <label className="vendor-profile-checkbox-field vendor-profile-billing-form-wide">

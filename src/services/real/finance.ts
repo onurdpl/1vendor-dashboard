@@ -283,6 +283,7 @@ export async function updateVendorFinancialProfile(
     deductShippingEnabled: boolean;
     shippingMode: VendorFinancialProfile['shippingMode'];
     fixedShippingFee: number | null;
+    settlementDelayDays: number;
   },
 ): Promise<VendorFinancialProfile> {
   return apiClient.put<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, input);
