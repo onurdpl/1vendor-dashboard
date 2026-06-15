@@ -99,6 +99,7 @@ describe('RequireAuth', () => {
       import('./auth'),
     ]);
     auth.setCurrentUser(buildTestUser());
+    window.history.replaceState({}, '', '/orders');
 
     render(
       <MemoryRouter initialEntries={['/orders']}>
@@ -241,6 +242,7 @@ describe('RequireAuth', () => {
       import('./auth'),
     ]);
     auth.setCurrentUser(buildTestUser());
+    window.history.replaceState({}, '', '/orders');
 
     render(
       <MemoryRouter initialEntries={['/orders']}>
@@ -258,7 +260,162 @@ describe('RequireAuth', () => {
     expect(meMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not hang forever or mark the session expired when real-mode session restore times out', async () => {
+  it('recovers when the first real-mode session restore has a network failure and retry succeeds', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError('Unable to reach backend.', 'network'))
+      .mockResolvedValueOnce(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Orders workspace')).toBeInTheDocument();
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('recovers when the first real-mode session restore has a non-401 server failure and retry succeeds', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError('Backend request failed.', 'server', { status: 500 }))
+      .mockResolvedValueOnce(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Orders workspace')).toBeInTheDocument();
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('redirects to login when a transient restore failure is followed by a 401 retry', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError('Unable to reach backend.', 'network'))
+      .mockRejectedValueOnce(new ApiError('Unauthorized request.', 'unauthorized', { status: 401 }));
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
+    auth.setCurrentUser(buildTestUser());
+    window.history.replaceState({}, '', '/orders');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(auth.peekExpiredSessionNotice()).toMatchObject({
+      intendedPath: '/orders',
+    });
+  });
+
+  it('shows restore attention after one automatic retry fails with another non-401 error', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError('Unable to reach backend.', 'network'))
+      .mockRejectedValueOnce(new ApiError('Backend request failed.', 'server', { status: 500 }));
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(auth.peekExpiredSessionNotice()).toBeNull();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+  });
+
+  it('does not hang forever or mark the session expired when real-mode session restore and one recovery retry time out', async () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.doMock('../config/runtime', () => ({
@@ -294,7 +451,7 @@ describe('RequireAuth', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(20000);
     });
     vi.useRealTimers();
 
@@ -303,9 +460,10 @@ describe('RequireAuth', () => {
     expect(screen.getByRole('button', { name: 'Sign in again' })).toBeEnabled();
     expect(auth.peekExpiredSessionNotice()).toBeNull();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(meMock).toHaveBeenCalledTimes(2);
   });
 
-  it('retries a timed-out real-mode restore and preserves the deep link hash', async () => {
+  it('automatically retries a timed-out real-mode restore and preserves the deep link hash', async () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.doMock('../config/runtime', () => ({
@@ -342,12 +500,6 @@ describe('RequireAuth', () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
     vi.useRealTimers();
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
-
-    await act(async () => {
-      screen.getByRole('button', { name: 'Retry' }).click();
-    });
 
     expect(await screen.findByTestId('current-route')).toHaveTextContent(
       '/orders/alloc-yalispor-7709129507153#provider-response-summary',

@@ -9,6 +9,7 @@ type AuthGateStatus = 'checking' | 'authenticated' | 'unauthenticated' | 'restor
 const AUTH_RESTORE_TIMEOUT_MS = 10000;
 const AUTH_RESTORE_RECOVERABLE_MESSAGE =
   'Session restore is taking longer than expected. Please retry or sign in again.';
+const AUTH_RESTORE_RECOVERY_RETRY_LIMIT = 1;
 
 function getInitialAuthGateStatus(): AuthGateStatus {
   if (runtimeConfig.apiMode === 'real') {
@@ -97,6 +98,29 @@ function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>) {
   };
 }
 
+async function restoreCurrentSessionWithTimeout() {
+  const restore = withRestoreTimeout((signal) => runtimeServices.auth.me({ signal }));
+  try {
+    return {
+      user: await restore.promise,
+      didTimeout: restore.didTimeout(),
+    };
+  } catch (error) {
+    if (error && typeof error === 'object') {
+      Reflect.set(error, 'restoreDidTimeout', restore.didTimeout());
+    }
+    throw error;
+  }
+}
+
+function didRestoreTimeout(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  return Reflect.get(error, 'restoreDidTimeout') === true;
+}
+
 export function RequireAuth() {
   const location = useLocation();
   const [authGateStatus, setAuthGateStatus] = useState<AuthGateStatus>(getInitialAuthGateStatus);
@@ -124,9 +148,8 @@ export function RequireAuth() {
       setRestoreErrorMessage(null);
       const startedAt = Date.now();
       logAuthRestoreInfo('AUTH_RESTORE_START', { restoreId });
-      const restore = withRestoreTimeout((signal) => runtimeServices.auth.me({ signal }));
       try {
-        const user = await restore.promise;
+        const { user } = await restoreCurrentSessionWithTimeout();
         if (!cancelled) {
           if (!user) {
             throw new Error('Session restore did not return a user.');
@@ -138,18 +161,62 @@ export function RequireAuth() {
         }
       } catch (error) {
         if (!cancelled) {
-          const didTimeout = restore.didTimeout();
           const isUnauthorized = isUnauthorizedRestoreFailure(error);
-          logAuthRestoreWarn(didTimeout ? 'AUTH_RESTORE_TIMEOUT' : 'AUTH_RESTORE_FAILURE', {
+          const firstFailureMessage = error instanceof Error ? error.message : 'Session restore failed.';
+          logAuthRestoreWarn(didRestoreTimeout(error) ? 'AUTH_RESTORE_TIMEOUT' : 'AUTH_RESTORE_FAILURE', {
             restoreId,
             durationMs: Date.now() - startedAt,
-            message: error instanceof Error ? error.message : 'Session restore failed.',
+            message: firstFailureMessage,
           });
           suppressNextSessionReset = true;
           if (isUnauthorized) {
             clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
             setAuthGateStatus('unauthenticated');
           } else {
+            for (let attempt = 1; attempt <= AUTH_RESTORE_RECOVERY_RETRY_LIMIT; attempt += 1) {
+              try {
+                logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_START', {
+                  restoreId,
+                  attempt,
+                  previousFailureMessage: firstFailureMessage,
+                });
+                const retryStartedAt = Date.now();
+                const { user } = await restoreCurrentSessionWithTimeout();
+                if (cancelled) {
+                  return;
+                }
+                if (!user) {
+                  throw new Error('Session restore did not return a user.');
+                }
+                suppressNextSessionReset = true;
+                setSession(null, user);
+                logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_SUCCESS', {
+                  restoreId,
+                  attempt,
+                  durationMs: Date.now() - retryStartedAt,
+                  totalDurationMs: Date.now() - startedAt,
+                });
+                setAuthGateStatus('authenticated');
+                return;
+              } catch (retryError) {
+                if (cancelled) {
+                  return;
+                }
+                const retryIsUnauthorized = isUnauthorizedRestoreFailure(retryError);
+                logAuthRestoreWarn('AUTH_RESTORE_RECOVERY_RETRY_FAILURE', {
+                  restoreId,
+                  attempt,
+                  durationMs: Date.now() - startedAt,
+                  message: retryError instanceof Error ? retryError.message : 'Session restore retry failed.',
+                });
+                suppressNextSessionReset = true;
+                if (retryIsUnauthorized) {
+                  clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+                  setAuthGateStatus('unauthenticated');
+                  return;
+                }
+              }
+            }
             clearToken();
             setRestoreErrorMessage(AUTH_RESTORE_RECOVERABLE_MESSAGE);
             setAuthGateStatus('restore-error');

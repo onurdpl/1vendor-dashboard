@@ -188,20 +188,23 @@ export function LoginPage() {
     let timeoutTriggered = false;
     let responseReceived = false;
     let currentStage: 'readiness' | 'login_post' | 'post_response' = 'readiness';
-    let timeoutId: number | null = window.setTimeout(() => {
-      timeoutTriggered = true;
-      logAuthDiagnostic('auth timeout triggered', {
-        authAttemptId,
-        stage: currentStage,
-        elapsedMs: Date.now() - startedAt,
-      });
-      logAuthDiagnostic('abort fired', {
-        authAttemptId,
-        stage: currentStage,
-        elapsedMs: Date.now() - startedAt,
-      });
-      abortController.abort();
-    }, LOGIN_TIMEOUT_MS);
+    let timeoutId: number | null = null;
+    const startLoginPostTimeout = () => {
+      timeoutId = window.setTimeout(() => {
+        timeoutTriggered = true;
+        logAuthDiagnostic('auth timeout triggered', {
+          authAttemptId,
+          stage: currentStage,
+          elapsedMs: Date.now() - startedAt,
+        });
+        logAuthDiagnostic('abort fired', {
+          authAttemptId,
+          stage: currentStage,
+          elapsedMs: Date.now() - startedAt,
+        });
+        abortController.abort();
+      }, LOGIN_TIMEOUT_MS);
+    };
     const clearLoginTimeout = () => {
       if (timeoutId === null) {
         return;
@@ -241,6 +244,7 @@ export function LoginPage() {
       }
 
       currentStage = 'login_post';
+      startLoginPostTimeout();
       logAuthDiagnostic('fetch dispatch started', {
         authAttemptId,
         stage: 'login_post',
