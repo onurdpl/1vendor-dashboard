@@ -60,6 +60,16 @@ function buildReturnRecord(overrides: Record<string, unknown> = {}) {
     createdAt: new Date('2026-05-20T10:00:00.000Z'),
     updatedAt: oldApprovedAt,
     vendorAllocation: {
+      assignedVendorId: 'vendor-a',
+      assignedVendor: {
+        id: 'vendor-a',
+        name: 'Yali Spor',
+      },
+      order: {
+        id: 'order-local-1075',
+        sourceShopifyOrderId: '1075',
+        sourceShopifyOrderNumber: '#1075',
+      },
       refundRecords: [],
       financeEntries: [],
     },
@@ -182,6 +192,16 @@ describe('abandoned approved return auto-cancel', () => {
   it('skips when a RefundRecord exists', async () => {
     const record = buildReturnRecord({
       vendorAllocation: {
+        assignedVendorId: 'vendor-a',
+        assignedVendor: {
+          id: 'vendor-a',
+          name: 'Yali Spor',
+        },
+        order: {
+          id: 'order-local-1075',
+          sourceShopifyOrderId: '1075',
+          sourceShopifyOrderNumber: '#1075',
+        },
         refundRecords: [{ id: 'refund-record-1', sourceShopifyRefundId: 'refund-1' }],
         financeEntries: [],
       },
@@ -201,6 +221,16 @@ describe('abandoned approved return auto-cancel', () => {
   it('skips when refund ledger evidence exists', async () => {
     const record = buildReturnRecord({
       vendorAllocation: {
+        assignedVendorId: 'vendor-a',
+        assignedVendor: {
+          id: 'vendor-a',
+          name: 'Yali Spor',
+        },
+        order: {
+          id: 'order-local-1075',
+          sourceShopifyOrderId: '1075',
+          sourceShopifyOrderNumber: '#1075',
+        },
         refundRecords: [],
         financeEntries: [{ id: 'fin-refund-1' }],
       },
@@ -215,6 +245,76 @@ describe('abandoned approved return auto-cancel', () => {
 
     expect(shopifyService.cancelReturn).not.toHaveBeenCalled();
     expect(result.results[0]).toMatchObject({ status: 'skipped', skippedReason: 'refund_ledger_exists' });
+  });
+
+  it('returns read-only dry-run diagnostics for an actionable abandoned approved return', async () => {
+    const record = buildReturnRecord();
+    const shopifyService = buildShopifyService();
+    mockCandidateAndRelated(record);
+
+    const result = await runAbandonedApprovedReturnAutoCancel(env as never, {
+      now,
+      dryRun: true,
+      shopifyAdminService: shopifyService,
+    });
+
+    expect(shopifyService.fetchReturnCancellationState).toHaveBeenCalledWith('gid://shopify/Return/239');
+    expect(shopifyService.cancelReturn).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({
+      returnRecordId: 'return-1',
+      vendorId: 'vendor-a',
+      vendorName: 'Yali Spor',
+      orderId: '#1075',
+      shopifyOrderId: '1075',
+      shopifyReturnGid: 'gid://shopify/Return/239',
+      localReturnStatus: 'approved',
+      returnLifecycleStatus: 'approved',
+      approvedOpenTimestamp: '2026-05-25T10:00:00.000Z',
+      ageInDays: 21,
+      vendorReceivedAt: null,
+      vendorDecision: null,
+      refundExists: false,
+      refundRecordCount: 0,
+      reverseShipmentExists: false,
+      trackingNumber: null,
+      settlementCurrentlyHeld: true,
+      skipReason: null,
+      status: 'dry_run_ready',
+      skippedReason: null,
+    });
+    expect(result.results[0].diagnostics).toMatchObject({
+      returnRecordId: 'return-1',
+      settlementCurrentlyHeld: true,
+      skipReason: null,
+    });
+  });
+
+  it('does not mutate dry-run diagnostics for skipped guarded candidates', async () => {
+    const record = buildReturnRecord({
+      returnTrackingNumber: 'RET-TRACK-1',
+      returnProviderShipmentId: 'provider-return-1',
+    });
+    const shopifyService = buildShopifyService();
+    mockCandidateAndRelated(record);
+
+    const result = await runAbandonedApprovedReturnAutoCancel(env as never, {
+      now,
+      dryRun: true,
+      shopifyAdminService: shopifyService,
+    });
+
+    expect(shopifyService.fetchReturnCancellationState).not.toHaveBeenCalled();
+    expect(shopifyService.cancelReturn).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({
+      status: 'skipped',
+      skippedReason: 'return_shipment_evidence_exists',
+      reverseShipmentExists: true,
+      trackingNumber: 'RET-TRACK-1',
+      settlementCurrentlyHeld: true,
+      skipReason: 'return_shipment_evidence_exists',
+    });
   });
 
   it('skips when vendor receipt or decision exists', async () => {

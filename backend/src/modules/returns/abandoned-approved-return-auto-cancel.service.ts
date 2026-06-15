@@ -39,6 +39,16 @@ type ReturnAutoCancelRecord = {
   createdAt: Date;
   updatedAt: Date;
   vendorAllocation: {
+    assignedVendorId: string;
+    assignedVendor: {
+      id: string;
+      name: string;
+    };
+    order: {
+      id: string;
+      sourceShopifyOrderId: string;
+      sourceShopifyOrderNumber: string;
+    };
     refundRecords: Array<{
       id: string;
       sourceShopifyRefundId: string;
@@ -55,12 +65,38 @@ type AutoCancelStatus =
   | 'skipped'
   | 'failed';
 
-export type AbandonedApprovedReturnAutoCancelRecordResult = {
+type AbandonedApprovedReturnAutoCancelRecordResultBase = {
   returnRecordId: string;
   shopifyReturnGid: string | null;
   status: AutoCancelStatus;
   skippedReason: string | null;
   affectedReturnRecordIds: string[];
+  diagnostics?: AbandonedApprovedReturnDiagnostic;
+};
+
+export type AbandonedApprovedReturnAutoCancelRecordResult =
+  AbandonedApprovedReturnAutoCancelRecordResultBase &
+  Partial<AbandonedApprovedReturnDiagnostic>;
+
+export type AbandonedApprovedReturnDiagnostic = {
+  returnRecordId: string;
+  vendorId: string;
+  vendorName: string;
+  orderId: string;
+  shopifyOrderId: string;
+  shopifyReturnGid: string | null;
+  localReturnStatus: string;
+  returnLifecycleStatus: string | null;
+  approvedOpenTimestamp: string | null;
+  ageInDays: number | null;
+  vendorReceivedAt: string | null;
+  vendorDecision: string | null;
+  refundExists: boolean;
+  refundRecordCount: number;
+  reverseShipmentExists: boolean;
+  trackingNumber: string | null;
+  settlementCurrentlyHeld: boolean;
+  skipReason: string | null;
 };
 
 export type AbandonedApprovedReturnAutoCancelResult = {
@@ -103,6 +139,19 @@ function isCancelledLocalReturn(record: Pick<ReturnAutoCancelRecord, 'returnLife
 
 function getApprovalTimestamp(record: Pick<ReturnAutoCancelRecord, 'requestUpdatedAt' | 'updatedAt' | 'createdAt'>) {
   return record.requestUpdatedAt ?? record.updatedAt ?? record.createdAt;
+}
+
+function toIsoString(value: Date | null | undefined) {
+  return value ? value.toISOString() : null;
+}
+
+function getAgeInDays(timestamp: Date | null, now: Date) {
+  if (!timestamp) {
+    return null;
+  }
+
+  const ageMs = now.getTime() - timestamp.getTime();
+  return Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000)));
 }
 
 function getAutoCancelDays(env: AppEnv, override?: number) {
@@ -181,6 +230,32 @@ function hasLocalReturnShipmentEvidence(record: ReturnAutoCancelRecord) {
         'reverseDeliveryIdPresent',
       ]),
   );
+}
+
+function getTrackingNumber(record: ReturnAutoCancelRecord, canonicalState?: ShopifyReturnCancellationState | null) {
+  if (record.returnTrackingNumber?.trim()) {
+    return record.returnTrackingNumber.trim();
+  }
+
+  const snapshotTracking = readString(record.returnProviderSnapshot, [
+    'trackingNumber',
+    'returnTrackingNumber',
+    'providerTrackingId',
+    'navlungoReturnProviderTrackingId',
+  ]);
+  if (snapshotTracking) {
+    return snapshotTracking;
+  }
+
+  for (const order of canonicalState?.reverseFulfillmentOrders ?? []) {
+    for (const delivery of order.reverseDeliveries) {
+      if (delivery.trackingNumber?.trim()) {
+        return delivery.trackingNumber.trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 function getLocalSkipReason(record: ReturnAutoCancelRecord, input: {
@@ -265,6 +340,58 @@ function hasCanonicalReturnShipmentEvidence(state: ShopifyReturnCancellationStat
       ),
     );
   });
+}
+
+function isSettlementCurrentlyHeld(record: ReturnAutoCancelRecord) {
+  return isApprovedLocalReturn(record) &&
+    record.vendorAllocation.refundRecords.length === 0 &&
+    !record.sourceShopifyRefundId?.trim();
+}
+
+function buildDryRunDiagnostics(input: {
+  record: ReturnAutoCancelRecord;
+  now: Date;
+  shopifyReturnGid: string | null;
+  skippedReason: string | null;
+  canonicalState?: ShopifyReturnCancellationState | null;
+}) {
+  const approvalTimestamp = getApprovalTimestamp(input.record);
+  const reverseShipmentExists =
+    hasLocalReturnShipmentEvidence(input.record) ||
+    (input.canonicalState ? hasCanonicalReturnShipmentEvidence(input.canonicalState) : false);
+  const refundExists =
+    Boolean(input.record.sourceShopifyRefundId?.trim()) ||
+    input.record.vendorAllocation.refundRecords.length > 0 ||
+    input.record.vendorAllocation.financeEntries.length > 0 ||
+    Boolean(input.canonicalState && (input.canonicalState.refundIds.length > 0 || input.canonicalState.transactionIds.length > 0));
+
+  return {
+    returnRecordId: input.record.id,
+    vendorId: input.record.vendorAllocation.assignedVendorId,
+    vendorName: input.record.vendorAllocation.assignedVendor.name,
+    orderId: input.record.sourceShopifyOrderNumber || input.record.vendorAllocation.order.sourceShopifyOrderNumber,
+    shopifyOrderId: input.record.vendorAllocation.order.sourceShopifyOrderId || input.record.sourceShopifyOrderId,
+    shopifyReturnGid: input.shopifyReturnGid,
+    localReturnStatus: input.record.status,
+    returnLifecycleStatus: input.record.returnLifecycleStatus,
+    approvedOpenTimestamp: toIsoString(approvalTimestamp),
+    ageInDays: getAgeInDays(approvalTimestamp, input.now),
+    vendorReceivedAt: toIsoString(input.record.vendorReceivedAt),
+    vendorDecision: input.record.vendorDecision,
+    refundExists,
+    refundRecordCount: input.record.vendorAllocation.refundRecords.length,
+    reverseShipmentExists,
+    trackingNumber: getTrackingNumber(input.record, input.canonicalState),
+    settlementCurrentlyHeld: isSettlementCurrentlyHeld(input.record),
+    skipReason: input.skippedReason,
+  };
+}
+
+function attachDiagnostics(
+  result: AbandonedApprovedReturnAutoCancelRecordResultBase,
+  diagnostics: AbandonedApprovedReturnDiagnostic | undefined,
+): AbandonedApprovedReturnAutoCancelRecordResult {
+  return diagnostics ? { ...result, ...diagnostics, diagnostics } : result;
 }
 
 function buildAutoCancelSnapshot(existing: unknown, input: {
@@ -364,6 +491,20 @@ async function findRelatedReturnRecords(record: ReturnAutoCancelRecord) {
     include: {
       vendorAllocation: {
         select: {
+          assignedVendorId: true,
+          assignedVendor: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              sourceShopifyOrderId: true,
+              sourceShopifyOrderNumber: true,
+            },
+          },
           refundRecords: {
             select: {
               id: true,
@@ -391,20 +532,26 @@ export async function findAbandonedApprovedReturnAutoCancelCandidates(options: {
   now?: Date;
   autoCancelDays?: number;
   limit?: number;
+  diagnosticsMode?: boolean;
 } = {}) {
   const now = options.now ?? new Date();
   const autoCancelDays = options.autoCancelDays ?? APPROVED_RETURN_AUTO_CANCEL_DEFAULT_DAYS;
   const cutoff = new Date(now.getTime() - autoCancelDays * 24 * 60 * 60 * 1000);
+  const diagnosticsMode = options.diagnosticsMode === true;
 
   return prisma.returnRecord.findMany({
     where: {
       returnRequestSource: 'shopify_return_request',
-      vendorReceivedAt: null,
-      vendorDecision: null,
-      sourceShopifyRefundId: null,
-      returnProviderShipmentId: null,
-      returnTrackingNumber: null,
-      returnLabel: null,
+      ...(diagnosticsMode
+        ? {}
+        : {
+            vendorReceivedAt: null,
+            vendorDecision: null,
+            sourceShopifyRefundId: null,
+            returnProviderShipmentId: null,
+            returnTrackingNumber: null,
+            returnLabel: null,
+          }),
       AND: [
         {
           OR: [
@@ -432,6 +579,20 @@ export async function findAbandonedApprovedReturnAutoCancelCandidates(options: {
     include: {
       vendorAllocation: {
         select: {
+          assignedVendorId: true,
+          assignedVendor: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              sourceShopifyOrderId: true,
+              sourceShopifyOrderNumber: true,
+            },
+          },
           refundRecords: {
             select: {
               id: true,
@@ -468,21 +629,31 @@ async function processAutoCancelCandidate(
   const attemptedAt = input.now;
   const shopifyReturnGid = resolveShopifyReturnGid(record);
   if (!shopifyReturnGid) {
-    await persistAutoCancelSnapshot(record, {
-      status: 'skipped',
-      skippedReason: 'shopify_return_id_missing',
-      policyDays: input.autoCancelDays,
-      attemptedAt,
-      shopifyReturnGid: null,
-      dryRun: input.dryRun,
-    });
-    return {
+    if (!input.dryRun) {
+      await persistAutoCancelSnapshot(record, {
+        status: 'skipped',
+        skippedReason: 'shopify_return_id_missing',
+        policyDays: input.autoCancelDays,
+        attemptedAt,
+        shopifyReturnGid: null,
+        dryRun: input.dryRun,
+      });
+    }
+    const diagnostics = input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid: null,
+          skippedReason: 'shopify_return_id_missing',
+        })
+      : undefined;
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid: null,
       status: 'skipped',
       skippedReason: 'shopify_return_id_missing',
       affectedReturnRecordIds: [record.id],
-    };
+    }, diagnostics);
   }
 
   const relatedRecords = await findRelatedReturnRecords(record);
@@ -495,25 +666,35 @@ async function processAutoCancelCandidate(
       allowCancelled: true,
     });
     if (skippedReason) {
-      await persistAutoCancelSnapshot(record, {
-        status: 'skipped',
-        skippedReason,
-        policyDays: input.autoCancelDays,
-        attemptedAt,
-        shopifyReturnGid,
-        dryRun: input.dryRun,
-        affectedReturnRecordIds,
-        details: {
-          skippedReturnRecordId: relatedRecord.id,
-        },
-      });
-      return {
+      if (!input.dryRun) {
+        await persistAutoCancelSnapshot(record, {
+          status: 'skipped',
+          skippedReason,
+          policyDays: input.autoCancelDays,
+          attemptedAt,
+          shopifyReturnGid,
+          dryRun: input.dryRun,
+          affectedReturnRecordIds,
+          details: {
+            skippedReturnRecordId: relatedRecord.id,
+          },
+        });
+      }
+      const diagnostics = input.dryRun
+        ? buildDryRunDiagnostics({
+            record,
+            now: input.now,
+            shopifyReturnGid,
+            skippedReason,
+          })
+        : undefined;
+      return attachDiagnostics({
         returnRecordId: record.id,
         shopifyReturnGid,
         status: 'skipped',
         skippedReason,
         affectedReturnRecordIds,
-      };
+      }, diagnostics);
     }
   }
 
@@ -522,25 +703,35 @@ async function processAutoCancelCandidate(
     canonicalState = await input.shopifyAdminService.fetchReturnCancellationState(shopifyReturnGid);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Shopify return canonical fetch failed.';
-    await persistAutoCancelSnapshot(record, {
-      status: 'failed',
-      skippedReason: 'canonical_fetch_failed',
-      policyDays: input.autoCancelDays,
-      attemptedAt,
-      shopifyReturnGid,
-      dryRun: input.dryRun,
-      affectedReturnRecordIds,
-      details: {
-        errorMessage: message,
-      },
-    });
-    return {
+    if (!input.dryRun) {
+      await persistAutoCancelSnapshot(record, {
+        status: 'failed',
+        skippedReason: 'canonical_fetch_failed',
+        policyDays: input.autoCancelDays,
+        attemptedAt,
+        shopifyReturnGid,
+        dryRun: input.dryRun,
+        affectedReturnRecordIds,
+        details: {
+          errorMessage: message,
+        },
+      });
+    }
+    const diagnostics = input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid,
+          skippedReason: 'canonical_fetch_failed',
+        })
+      : undefined;
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: 'failed',
       skippedReason: 'canonical_fetch_failed',
       affectedReturnRecordIds,
-    };
+    }, diagnostics);
   }
 
   const canonicalStatus = normalizeShopifyStatus(canonicalState.status);
@@ -555,57 +746,87 @@ async function processAutoCancelCandidate(
         skippedReason: 'shopify_already_cancelled',
       });
     }
-    return {
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: input.dryRun ? 'dry_run_ready' : 'cancelled',
       skippedReason: input.dryRun ? null : 'shopify_already_cancelled',
       affectedReturnRecordIds,
-    };
+    }, input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid,
+          skippedReason: null,
+          canonicalState,
+        })
+      : undefined);
   }
 
   if (canonicalStatus !== 'OPEN') {
-    await persistAutoCancelSnapshot(record, {
-      status: 'skipped',
-      skippedReason: 'shopify_return_not_open',
-      policyDays: input.autoCancelDays,
-      attemptedAt,
-      shopifyReturnGid,
-      canonicalStatus,
-      dryRun: input.dryRun,
-      affectedReturnRecordIds,
-    });
-    return {
+    if (!input.dryRun) {
+      await persistAutoCancelSnapshot(record, {
+        status: 'skipped',
+        skippedReason: 'shopify_return_not_open',
+        policyDays: input.autoCancelDays,
+        attemptedAt,
+        shopifyReturnGid,
+        canonicalStatus,
+        dryRun: input.dryRun,
+        affectedReturnRecordIds,
+      });
+    }
+    const diagnostics = input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid,
+          skippedReason: 'shopify_return_not_open',
+          canonicalState,
+        })
+      : undefined;
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: 'skipped',
       skippedReason: 'shopify_return_not_open',
       affectedReturnRecordIds,
-    };
+    }, diagnostics);
   }
 
   if (canonicalState.refundIds.length > 0 || canonicalState.transactionIds.length > 0) {
-    await persistAutoCancelSnapshot(record, {
-      status: 'skipped',
-      skippedReason: 'shopify_refund_or_transaction_exists',
-      policyDays: input.autoCancelDays,
-      attemptedAt,
-      shopifyReturnGid,
-      canonicalStatus,
-      dryRun: input.dryRun,
-      affectedReturnRecordIds,
-      details: {
-        shopifyRefundCount: canonicalState.refundIds.length,
-        shopifyTransactionCount: canonicalState.transactionIds.length,
-      },
-    });
-    return {
+    if (!input.dryRun) {
+      await persistAutoCancelSnapshot(record, {
+        status: 'skipped',
+        skippedReason: 'shopify_refund_or_transaction_exists',
+        policyDays: input.autoCancelDays,
+        attemptedAt,
+        shopifyReturnGid,
+        canonicalStatus,
+        dryRun: input.dryRun,
+        affectedReturnRecordIds,
+        details: {
+          shopifyRefundCount: canonicalState.refundIds.length,
+          shopifyTransactionCount: canonicalState.transactionIds.length,
+        },
+      });
+    }
+    const diagnostics = input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid,
+          skippedReason: 'shopify_refund_or_transaction_exists',
+          canonicalState,
+        })
+      : undefined;
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: 'skipped',
       skippedReason: 'shopify_refund_or_transaction_exists',
       affectedReturnRecordIds,
-    };
+    }, diagnostics);
   }
 
   if (canonicalState.requestApprovedAt) {
@@ -613,62 +834,90 @@ async function processAutoCancelCandidate(
     if (Number.isFinite(canonicalApprovedAt.getTime())) {
       const canonicalAgeMs = input.now.getTime() - canonicalApprovedAt.getTime();
       if (canonicalAgeMs < input.autoCancelDays * 24 * 60 * 60 * 1000) {
-        await persistAutoCancelSnapshot(record, {
-          status: 'skipped',
-          skippedReason: 'shopify_approval_too_recent',
-          policyDays: input.autoCancelDays,
-          attemptedAt,
-          shopifyReturnGid,
-          canonicalStatus,
-          dryRun: input.dryRun,
-          affectedReturnRecordIds,
-        });
-        return {
+        if (!input.dryRun) {
+          await persistAutoCancelSnapshot(record, {
+            status: 'skipped',
+            skippedReason: 'shopify_approval_too_recent',
+            policyDays: input.autoCancelDays,
+            attemptedAt,
+            shopifyReturnGid,
+            canonicalStatus,
+            dryRun: input.dryRun,
+            affectedReturnRecordIds,
+          });
+        }
+        const diagnostics = input.dryRun
+          ? buildDryRunDiagnostics({
+              record,
+              now: input.now,
+              shopifyReturnGid,
+              skippedReason: 'shopify_approval_too_recent',
+              canonicalState,
+            })
+          : undefined;
+        return attachDiagnostics({
           returnRecordId: record.id,
           shopifyReturnGid,
           status: 'skipped',
           skippedReason: 'shopify_approval_too_recent',
           affectedReturnRecordIds,
-        };
+        }, diagnostics);
       }
     }
   }
 
   if (hasCanonicalReturnShipmentEvidence(canonicalState)) {
-    await persistAutoCancelSnapshot(record, {
-      status: 'skipped',
-      skippedReason: 'shopify_reverse_delivery_evidence_exists',
-      policyDays: input.autoCancelDays,
-      attemptedAt,
-      shopifyReturnGid,
-      canonicalStatus,
-      dryRun: input.dryRun,
-      affectedReturnRecordIds,
-      details: {
-        reverseFulfillmentOrderCount: canonicalState.reverseFulfillmentOrders.length,
-        reverseDeliveryCount: canonicalState.reverseFulfillmentOrders.reduce(
-          (count, order) => count + order.reverseDeliveries.length,
-          0,
-        ),
-      },
-    });
-    return {
+    if (!input.dryRun) {
+      await persistAutoCancelSnapshot(record, {
+        status: 'skipped',
+        skippedReason: 'shopify_reverse_delivery_evidence_exists',
+        policyDays: input.autoCancelDays,
+        attemptedAt,
+        shopifyReturnGid,
+        canonicalStatus,
+        dryRun: input.dryRun,
+        affectedReturnRecordIds,
+        details: {
+          reverseFulfillmentOrderCount: canonicalState.reverseFulfillmentOrders.length,
+          reverseDeliveryCount: canonicalState.reverseFulfillmentOrders.reduce(
+            (count, order) => count + order.reverseDeliveries.length,
+            0,
+          ),
+        },
+      });
+    }
+    const diagnostics = input.dryRun
+      ? buildDryRunDiagnostics({
+          record,
+          now: input.now,
+          shopifyReturnGid,
+          skippedReason: 'shopify_reverse_delivery_evidence_exists',
+          canonicalState,
+        })
+      : undefined;
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: 'skipped',
       skippedReason: 'shopify_reverse_delivery_evidence_exists',
       affectedReturnRecordIds,
-    };
+    }, diagnostics);
   }
 
   if (input.dryRun) {
-    return {
+    return attachDiagnostics({
       returnRecordId: record.id,
       shopifyReturnGid,
       status: 'dry_run_ready',
       skippedReason: null,
       affectedReturnRecordIds,
-    };
+    }, buildDryRunDiagnostics({
+        record,
+        now: input.now,
+        shopifyReturnGid,
+        skippedReason: null,
+        canonicalState,
+      }));
   }
 
   let cancelResult: CancelShopifyReturnResult;
@@ -750,6 +999,7 @@ export async function runAbandonedApprovedReturnAutoCancel(
     now,
     autoCancelDays,
     limit,
+    diagnosticsMode: dryRun,
   });
   const shopifyAdminService = options.shopifyAdminService ?? createShopifyAdminService(env);
   const processedReturnKeys = new Set<string>();
@@ -757,10 +1007,10 @@ export async function runAbandonedApprovedReturnAutoCancel(
 
   for (const candidate of candidates) {
     const key = getShopifyReturnKey(candidate);
-    if (key && processedReturnKeys.has(key)) {
+    if (!dryRun && key && processedReturnKeys.has(key)) {
       continue;
     }
-    if (key) {
+    if (!dryRun && key) {
       processedReturnKeys.add(key);
     }
 
