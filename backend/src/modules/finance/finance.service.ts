@@ -27,6 +27,7 @@ import {
   mapInvoiceProvider,
 } from '../invoices/invoice-visibility.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
@@ -403,6 +404,11 @@ function getSettlementStatus(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    returnRecords?: Array<{
+      status?: string | null;
+      returnLifecycleStatus?: string | null;
+      sourceShopifyRefundId?: string | null;
+    }>;
   } | null;
 }): SettlementDto['status'] {
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
@@ -421,6 +427,9 @@ function getSettlementStatus(entry: {
   const type = normalizeType(entry.entryType);
   if (type === 'refund' || sumRefundImpact(entry.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
+  }
+  if (hasApprovedOpenReturnHold(entry)) {
+    return 'held';
   }
   if (type === 'sale') {
     return isFulfilledForShipping(entry.vendorAllocation) ? 'payable' : 'accruing';
@@ -444,6 +453,11 @@ function buildSettlement(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    returnRecords?: Array<{
+      status?: string | null;
+      returnLifecycleStatus?: string | null;
+      sourceShopifyRefundId?: string | null;
+    }>;
   } | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
@@ -491,6 +505,11 @@ function isEntryEligibleForPayoutBatch(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    returnRecords?: Array<{
+      status?: string | null;
+      returnLifecycleStatus?: string | null;
+      sourceShopifyRefundId?: string | null;
+    }>;
   } | null;
 }) {
   const type = normalizeType(entry.entryType);
@@ -711,7 +730,17 @@ export async function getVendorFinanceDashboard(
             },
             refundRecords: {
               select: {
+                id: true,
+                sourceShopifyRefundId: true,
                 amount: true,
+              },
+            },
+            returnRecords: {
+              select: {
+                id: true,
+                status: true,
+                returnLifecycleStatus: true,
+                sourceShopifyRefundId: true,
               },
             },
           },
@@ -775,6 +804,9 @@ export async function getVendorFinanceDashboard(
             returnRecords: {
               select: {
                 id: true,
+                status: true,
+                returnLifecycleStatus: true,
+                sourceShopifyRefundId: true,
               },
               orderBy: {
                 createdAt: 'asc',
@@ -1322,6 +1354,14 @@ export async function preparePayoutBatch(
             include: {
               fulfillment: true,
               refundRecords: true,
+              returnRecords: {
+                select: {
+                  id: true,
+                  status: true,
+                  returnLifecycleStatus: true,
+                  sourceShopifyRefundId: true,
+                },
+              },
             },
           },
           payoutBatchLines: {

@@ -48,6 +48,12 @@ function buildLedgerRow(input: {
   settlementStatus?: string;
   payoutStatus?: string;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
+  returnRecords?: Array<{
+    id: string;
+    status: string;
+    returnLifecycleStatus: string | null;
+    sourceShopifyRefundId?: string | null;
+  }>;
   commissionPercentSnapshot?: number | null;
   commissionVatPercentSnapshot?: number | null;
   shippingModeSnapshot?: string | null;
@@ -96,6 +102,10 @@ function buildLedgerRow(input: {
         fulfilledAt: fulfilled ? createdAt : null,
       },
       refundRecords: input.refundRecords ?? [],
+      returnRecords: (input.returnRecords ?? []).map((record) => ({
+        ...record,
+        sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
+      })),
     },
     settlementApprovalLines: input.activeApproval
       ? [
@@ -259,6 +269,137 @@ describe('settlement approval foundation', () => {
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps payable sales eligible when no approved open return exists', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-no-return', entryType: 'sale', amount: 100 }),
+      buildLedgerRow({
+        id: 'sale-requested-return',
+        entryType: 'sale',
+        amount: 100,
+        returnRecords: [{
+          id: 'return-requested',
+          status: 'requested',
+          returnLifecycleStatus: 'requested',
+        }],
+      }),
+      buildLedgerRow({
+        id: 'sale-declined-return',
+        entryType: 'sale',
+        amount: 100,
+        returnRecords: [{
+          id: 'return-declined',
+          status: 'declined',
+          returnLifecycleStatus: 'declined',
+        }],
+      }),
+      buildLedgerRow({
+        id: 'sale-cancelled-return',
+        entryType: 'sale',
+        amount: 100,
+        returnRecords: [{
+          id: 'return-cancelled',
+          status: 'cancelled',
+          returnLifecycleStatus: 'cancelled',
+        }],
+      }),
+      buildLedgerRow({
+        id: 'sale-closed-return',
+        entryType: 'sale',
+        amount: 100,
+        returnRecords: [{
+          id: 'return-closed',
+          status: 'closed',
+          returnLifecycleStatus: 'closed',
+        }],
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a');
+
+    expect(preview.summary.eligibleRowCount).toBe(5);
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual([
+      'sale-no-return',
+      'sale-requested-return',
+      'sale-declined-return',
+      'sale-cancelled-return',
+      'sale-closed-return',
+    ]);
+  });
+
+  it('excludes Shopify-approved open returns from settlement preview diagnostics', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-approved-return',
+        entryType: 'sale',
+        amount: 100,
+        sourceShopifyOrderId: 'shopify-order-1075',
+        sourceShopifyOrderNumber: '#1075',
+        returnRecords: [{
+          id: 'return-approved',
+          status: 'requested',
+          returnLifecycleStatus: 'approved',
+        }],
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#1075'],
+    });
+
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.lines).toEqual([]);
+    expect(preview.selectedOrderDiagnostics).toEqual([
+      expect.objectContaining({
+        requestedIdentifier: '#1075',
+        matched: true,
+        financeLedgerEntryId: 'sale-approved-return',
+        candidateIncluded: false,
+        excludedReason: 'Open approved return pending refund outcome',
+        derivedSettlementStatus: 'held',
+      }),
+    ]);
+  });
+
+  it('keeps processed refund impact and refund ledger rows eligible with approved return history', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-refund-processed',
+        entryType: 'sale',
+        amount: 100,
+        refundRecords: [{ id: 'refund-processed', sourceShopifyRefundId: 'refund-1', amount: 100 }],
+        returnRecords: [{
+          id: 'return-approved-processed',
+          status: 'processed',
+          returnLifecycleStatus: 'approved',
+          sourceShopifyRefundId: 'refund-1',
+        }],
+      }),
+      buildLedgerRow({
+        id: 'refund-row',
+        entryType: 'refund',
+        amount: 100,
+        returnRecords: [{
+          id: 'return-approved-refund-row',
+          status: 'approved',
+          returnLifecycleStatus: 'approved',
+        }],
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a');
+
+    expect(preview.summary.eligibleRowCount).toBe(2);
+    expect(preview.lines.map((line) => line.financeLedgerEntryId)).toEqual([
+      'sale-refund-processed',
+      'refund-row',
+    ]);
+    expect(preview.lines[0]).toMatchObject({
+      derivedSettlementStatus: 'partially_refunded',
+      eligibilityReason: 'Derived partially refunded because refund records exist.',
+    });
   });
 
   it('reports mixed candidate quality from settlement preview rows', async () => {
@@ -704,6 +845,71 @@ describe('settlement approval foundation', () => {
     expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
+  it('excludes Shopify-approved open returns from settlement approval drafts', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-approved-return',
+        entryType: 'sale',
+        amount: 1000,
+        returnRecords: [{
+          id: 'return-approved',
+          status: 'approved',
+          returnLifecycleStatus: 'approved',
+        }],
+      }),
+      buildLedgerRow({ id: 'sale-clear', entryType: 'sale', amount: 500 }),
+    ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-open-return',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-open-return-${index}`,
+        settlementApprovalId: 'settlement-approval-open-return',
+        ...line,
+      })),
+    }));
+
+    const approval = await createDraftApproval({ vendorId: 'vendor-a' });
+
+    expect(prismaMock.settlementApproval.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossSalesMinor: 50000,
+          lines: {
+            create: [
+              expect.objectContaining({
+                financeLedgerEntryId: 'sale-clear',
+              }),
+            ],
+          },
+        }),
+      }),
+    );
+    expect(approval.lines).toHaveLength(1);
+    expect(approval.lines[0]).toMatchObject({
+      financeLedgerEntryId: 'sale-clear',
+    });
+  });
+
   it('creates a draft from the same selected order candidate set used by preview', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({
@@ -933,6 +1139,18 @@ describe('settlement approval foundation', () => {
     const holdExplanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
       buildLedgerRow({ id: 'sale-hold', entryType: 'sale', amount: 1000, payoutStatus: 'HOLD' }),
     );
+    const approvedReturnExplanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-approved-return',
+        entryType: 'sale',
+        amount: 1000,
+        returnRecords: [{
+          id: 'return-approved',
+          status: 'approved',
+          returnLifecycleStatus: null,
+        }],
+      }),
+    );
 
     expect(activeApprovalExplanation).toMatchObject({
       eligibilityDecision: 'excluded',
@@ -942,6 +1160,11 @@ describe('settlement approval foundation', () => {
       derivedSettlementStatus: 'held',
       eligibilityDecision: 'excluded',
       eligibilityReason: 'Excluded because payout status is HOLD.',
+    });
+    expect(approvedReturnExplanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Open approved return pending refund outcome',
     });
   });
 

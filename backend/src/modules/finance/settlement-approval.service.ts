@@ -14,6 +14,7 @@ import {
   type VendorFinanceProfileConfig,
 } from './payout-calculator.js';
 import { buildSettlementBillingSnapshot } from './settlement-billing-snapshot.service.js';
+import { APPROVED_OPEN_RETURN_HOLD_REASON, hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -92,6 +93,12 @@ type SettlementApprovalLedgerRow = {
       id: string;
       sourceShopifyRefundId: string;
       amount: unknown;
+    }>;
+    returnRecords: Array<{
+      id: string;
+      status: string;
+      returnLifecycleStatus: string | null;
+      sourceShopifyRefundId: string | null;
     }>;
   } | null;
   settlementApprovalLines: Array<{
@@ -312,6 +319,9 @@ function resolveSettlementStatus(row: SettlementApprovalLedgerRow) {
   if (type === 'refund' || sumRefundImpact(row.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
   }
+  if (hasApprovedOpenReturnHold(row)) {
+    return 'held';
+  }
   if (type === 'sale') {
     return isFulfilledForSettlement(row.vendorAllocation) ? 'payable' : 'accruing';
   }
@@ -324,7 +334,7 @@ function rowIsEligible(row: SettlementApprovalLedgerRow) {
     return false;
   }
   const settlementStatus = resolveSettlementStatus(row);
-  return settlementStatus === 'payable' || settlementStatus === 'partially_refunded';
+  return (settlementStatus === 'payable' || settlementStatus === 'partially_refunded') && !hasApprovedOpenReturnHold(row);
 }
 
 function rowHasActiveApproval(row: SettlementApprovalLedgerRow) {
@@ -358,6 +368,8 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = 'Excluded because row type is not sale or refund.';
   } else if (payoutStatus === 'hold') {
     eligibilityReason = 'Excluded because payout status is HOLD.';
+  } else if (hasApprovedOpenReturnHold(row)) {
+    eligibilityReason = APPROVED_OPEN_RETURN_HOLD_REASON;
   } else if (rowHasActiveApproval(row)) {
     eligibilityDecision = 'excluded';
     eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
@@ -879,6 +891,14 @@ async function buildApprovalPreview(
               amount: true,
             },
           },
+          returnRecords: {
+            select: {
+              id: true,
+              status: true,
+              returnLifecycleStatus: true,
+              sourceShopifyRefundId: true,
+            },
+          },
         },
       },
       settlementApprovalLines: {
@@ -978,6 +998,14 @@ async function buildApprovalPreview(
                 id: true,
                 sourceShopifyRefundId: true,
                 amount: true,
+              },
+            },
+            returnRecords: {
+              select: {
+                id: true,
+                status: true,
+                returnLifecycleStatus: true,
+                sourceShopifyRefundId: true,
               },
             },
           },
