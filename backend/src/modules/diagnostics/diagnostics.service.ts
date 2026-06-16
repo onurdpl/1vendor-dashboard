@@ -733,6 +733,257 @@ export async function getOrderDistrictReadinessDiagnostic(orderNumber: string) {
   };
 }
 
+type AddressPersistenceComparison = 'yes' | 'no' | 'unknown';
+
+function readSafeAddressFields(address: Record<string, unknown> | null) {
+  return {
+    address1: readDiagnosticString(address, ['address1']),
+    address2: readDiagnosticString(address, ['address2']),
+    city: readDiagnosticString(address, ['city']),
+    province: readDiagnosticString(address, ['province', 'province_name', 'provinceName']),
+    zip: readDiagnosticString(address, ['zip', 'postcode']),
+    country: readDiagnosticString(address, ['country']),
+    country_code: readDiagnosticString(address, ['country_code', 'countryCode']),
+    company: readDiagnosticString(address, ['company']),
+    phonePresent: Boolean(readDiagnosticString(address, ['phone'])),
+  };
+}
+
+function addressValuePresent(value: string | null | undefined) {
+  return Boolean(value?.trim());
+}
+
+function composeRawAddress(address: Record<string, unknown> | null) {
+  const direct = readDiagnosticString(address, ['address']);
+  if (direct) {
+    return direct;
+  }
+
+  const parts = [
+    readDiagnosticString(address, ['address1']),
+    readDiagnosticString(address, ['address2']),
+  ].filter((part): part is string => Boolean(part));
+  return parts.join(', ') || null;
+}
+
+function comparePersistedValue(persisted: string | null, raw: string | null): AddressPersistenceComparison {
+  if (!raw) {
+    return 'unknown';
+  }
+
+  return persisted?.trim() === raw.trim() ? 'yes' : 'no';
+}
+
+function compareBillingAddressPersistence(input: {
+  persistedAddress1: string | null;
+  persistedAddress2: string | null;
+  rawAddress: Record<string, unknown> | null;
+}): AddressPersistenceComparison {
+  const rawAddress1 = readDiagnosticString(input.rawAddress, ['address1']);
+  const rawAddress2 = readDiagnosticString(input.rawAddress, ['address2']);
+  if (!rawAddress1 && !rawAddress2) {
+    return 'unknown';
+  }
+
+  return input.persistedAddress1?.trim() === (rawAddress1 ?? '') &&
+    (input.persistedAddress2?.trim() || null) === (rawAddress2 ?? null)
+    ? 'yes'
+    : 'no';
+}
+
+function getShippingDistrictSource(address: Record<string, unknown> | null): 'address2' | 'district' | 'province' | 'missing' | 'unknown' {
+  if (!address) {
+    return 'unknown';
+  }
+
+  if (
+    readDiagnosticString(address, ['district']) ||
+    readDiagnosticString(address, ['district_name', 'districtName']) ||
+    readDiagnosticString(address, ['city_area', 'cityArea'])
+  ) {
+    return 'district';
+  }
+
+  if (isDiagnosticTurkeyAddress(address) && readDiagnosticString(address, ['address2'])) {
+    return 'address2';
+  }
+
+  if (readDiagnosticString(address, ['province', 'province_name', 'provinceName'])) {
+    return 'province';
+  }
+
+  return 'missing';
+}
+
+function hasRawAddressData(address: Record<string, unknown> | null) {
+  return Boolean(
+    readDiagnosticString(address, ['address', 'address1', 'address2', 'city', 'province', 'zip', 'postcode', 'country', 'country_code', 'company']),
+  );
+}
+
+function deriveAddressPersistenceRootCause(input: {
+  rawShippingAddress: Record<string, unknown> | null;
+  rawBillingAddress: Record<string, unknown> | null;
+  persistedShippingAny: boolean;
+  persistedBillingAny: boolean;
+  shippingAddressPersistedFromRaw: AddressPersistenceComparison;
+  shippingCityPersistedFromRaw: AddressPersistenceComparison;
+  billingAddressPersistedFromRaw: AddressPersistenceComparison;
+}) {
+  const rawPresent = hasRawAddressData(input.rawShippingAddress) || hasRawAddressData(input.rawBillingAddress);
+  if (!rawPresent) {
+    return 'raw_missing' as const;
+  }
+
+  if (!input.persistedShippingAny && !input.persistedBillingAny) {
+    return 'persistence_missing' as const;
+  }
+
+  if (
+    input.shippingAddressPersistedFromRaw === 'no' ||
+    input.shippingCityPersistedFromRaw === 'no' ||
+    input.billingAddressPersistedFromRaw === 'no'
+  ) {
+    return 'ingestion_missing' as const;
+  }
+
+  if (input.persistedShippingAny || input.persistedBillingAny) {
+    return 'rendering_issue' as const;
+  }
+
+  return 'unknown' as const;
+}
+
+export async function getOrderAddressPersistenceDiagnostic(orderNumber: string) {
+  const normalized = normalizeDiagnosticOrderNumber(orderNumber);
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        {
+          sourceShopifyOrderNumber: {
+            in: [normalized.plain, normalized.hash],
+          },
+        },
+        {
+          sourceShopifyOrderId: normalized.plain,
+        },
+      ],
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      customerPhone: true,
+      billingFullName: true,
+      billingCompany: true,
+      billingPhone: true,
+      billingCity: true,
+      billingDistrict: true,
+      billingAddress1: true,
+      billingAddress2: true,
+      billingPostcode: true,
+      shippingCountry: true,
+      shippingPostcode: true,
+      shippingCity: true,
+      shippingDistrict: true,
+      shippingAddress: true,
+      webhookEvents: {
+        where: {
+          topic: 'orders/create',
+          rawPayload: {
+            not: null,
+          },
+        },
+        orderBy: [
+          {
+            processedAt: 'desc',
+          },
+          {
+            receivedAt: 'desc',
+          },
+        ],
+        take: 1,
+        select: {
+          rawPayload: true,
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const payload = parseDiagnosticPayload(order.webhookEvents[0]?.rawPayload);
+  const shippingAddress = readDiagnosticRecord(payload?.shipping_address);
+  const billingAddress = readDiagnosticRecord(payload?.billing_address);
+  const rawShippingAddress = readSafeAddressFields(shippingAddress);
+  const rawBillingAddress = readSafeAddressFields(billingAddress);
+  const shippingAddressPersistedFromRaw = comparePersistedValue(order.shippingAddress, composeRawAddress(shippingAddress));
+  const shippingCityPersistedFromRaw = comparePersistedValue(
+    order.shippingCity,
+    readDiagnosticString(shippingAddress, ['city']),
+  );
+  const billingAddressPersistedFromRaw = compareBillingAddressPersistence({
+    persistedAddress1: order.billingAddress1,
+    persistedAddress2: order.billingAddress2,
+    rawAddress: billingAddress,
+  });
+  const persistedShippingFields = {
+    shippingAddress: order.shippingAddress,
+    shippingCity: order.shippingCity,
+    shippingDistrict: order.shippingDistrict,
+    shippingPostcode: order.shippingPostcode,
+    shippingCountry: order.shippingCountry,
+    customerPhonePresent: Boolean(order.customerPhone?.trim()),
+  };
+  const persistedBillingFields = {
+    billingFullName: order.billingFullName,
+    billingCompany: order.billingCompany,
+    billingPhonePresent: Boolean(order.billingPhone?.trim()),
+    billingCity: order.billingCity,
+    billingDistrict: order.billingDistrict,
+    billingAddress1: order.billingAddress1,
+    billingAddress2: order.billingAddress2,
+    billingPostcode: order.billingPostcode,
+  };
+
+  const persistedShippingAny = Object.values(persistedShippingFields).some((value) =>
+    typeof value === 'boolean' ? value : addressValuePresent(value),
+  );
+  const persistedBillingAny = Object.values(persistedBillingFields).some((value) =>
+    typeof value === 'boolean' ? value : addressValuePresent(value),
+  );
+
+  return {
+    ok: true,
+    orderNumber: order.sourceShopifyOrderNumber,
+    orderId: order.id,
+    shopifyOrderId: order.sourceShopifyOrderId,
+    persistedShippingFields,
+    persistedBillingFields,
+    rawOrdersCreateWebhook: {
+      shipping_address: rawShippingAddress,
+      billing_address: rawBillingAddress,
+    },
+    derived: {
+      shippingAddressPersistedFromRaw,
+      shippingCityPersistedFromRaw,
+      shippingDistrictSource: getShippingDistrictSource(shippingAddress),
+      billingAddressPersistedFromRaw,
+      likelyRootCause: deriveAddressPersistenceRootCause({
+        rawShippingAddress: shippingAddress,
+        rawBillingAddress: billingAddress,
+        persistedShippingAny,
+        persistedBillingAny,
+        shippingAddressPersistedFromRaw,
+        shippingCityPersistedFromRaw,
+        billingAddressPersistedFromRaw,
+      }),
+    },
+  };
+}
+
 function normalizeOrderLookup(value: string) {
   const trimmed = value.trim();
   return {

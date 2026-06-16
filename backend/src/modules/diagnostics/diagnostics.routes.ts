@@ -5,6 +5,7 @@ import { createAuthService } from '../auth/auth.service.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import {
   getWebhookDiagnosticById,
+  getOrderAddressPersistenceDiagnostic,
   getOrderDistrictReadinessDiagnostic,
   getReturnVisibilityDiagnostic,
   getReconciliationDiagnostics,
@@ -100,6 +101,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const diagnostic = await getOrderDistrictReadinessDiagnostic(request.params.orderNumber);
+      if (!diagnostic) {
+        return reply.code(404).send({ message: 'Order not found.' });
+      }
+
+      return diagnostic;
+    },
+  );
+
+  app.get<{ Params: { orderNumber: string } }>(
+    '/admin/diagnostics/orders/:orderNumber/address-persistence',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const diagnostic = await getOrderAddressPersistenceDiagnostic(request.params.orderNumber);
       if (!diagnostic) {
         return reply.code(404).send({ message: 'Order not found.' });
       }
