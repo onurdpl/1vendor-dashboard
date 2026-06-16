@@ -4978,6 +4978,24 @@ h3 {
   text-align: right;
 }
 
+.orders-rail-summary-list .order-snapshot-address-helper {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-transform: none;
+}
+
+.orders-rail-summary-list > .order-snapshot-address-warning {
+  background: #fff7ed;
+}
+
+.orders-rail-summary-list > .order-snapshot-address-warning strong {
+  color: #9a3412;
+}
+
 .orders-rail-diagnostics {
   border-style: dashed;
   background: #f8fafc;

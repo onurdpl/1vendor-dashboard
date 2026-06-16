@@ -77,6 +77,14 @@ const orderDetail: OrderDetail = {
     vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
     vendorInvoiceAmount: '1950.00',
     vendorInvoiceReceivedAt: '2026-06-02T12:30:00Z',
+    shippingAddress: {
+      address: '22 Harbor Ave',
+      city: 'Dublin',
+      district: null,
+      postcode: null,
+      country: 'IE',
+      customerPhonePresent: true,
+    },
     billingAddress: {
       fullName: 'Acme Billing',
       company: 'Acme Supply Co.',

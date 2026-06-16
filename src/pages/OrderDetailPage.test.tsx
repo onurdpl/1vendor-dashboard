@@ -177,6 +177,14 @@ const orderWithShipmentSummary: OrderDetail = {
     vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
     vendorInvoiceAmount: '4999.00',
     vendorInvoiceReceivedAt: '2026-06-02T12:30:00.000Z',
+    shippingAddress: {
+      address: 'Shipping street 9',
+      city: 'Istanbul',
+      district: 'Kadikoy',
+      postcode: '34710',
+      country: 'TR',
+      customerPhonePresent: true,
+    },
     billingAddress: {
       fullName: 'Billing Customer',
       company: 'Billing Co',
@@ -1222,8 +1230,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText(/TRY\s*49\.90/)).toBeInTheDocument();
     expect(screen.getByText(/TRY\s*125\.00/)).toBeInTheDocument();
     expect(screen.getAllByText(/TRY\s*454\.45/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Shipping address')).toBeInTheDocument();
+    expect(screen.getByText(/Shipping street 9/)).toBeInTheDocument();
+    expect(screen.getByText(/Kadikoy/)).toBeInTheDocument();
+    expect(screen.getByText(/34710/)).toBeInTheDocument();
+    expect(screen.getByText('Used for shipment destination.')).toBeInTheDocument();
+    expect(screen.queryByText('Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.')).not.toBeInTheDocument();
+    expect(screen.getByText('Billing address')).toBeInTheDocument();
     expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
     expect(screen.getByText(/Billing street 1/)).toBeInTheDocument();
+    expect(screen.getByText('Used for billing/invoice reference.')).toBeInTheDocument();
     expect(screen.getAllByText('Integration note').length).toBeGreaterThan(0);
     expect(screen.getByText('entegrasyon, priority')).toBeInTheDocument();
     expect(screen.getByText('acknowledged')).toBeInTheDocument();
@@ -1243,6 +1259,40 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText(/Line total incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1028/)).toBeInTheDocument();
     expect(screen.queryByText(/rawPayload/i)).not.toBeInTheDocument();
+  });
+
+  it('warns when persisted shipping address is invalid for Kargonomi destination', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot,
+        shippingAddress: {
+          address: 'NA, NA NA',
+          city: 'NA',
+          district: null,
+          postcode: null,
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('Shipping address')).toBeInTheDocument();
+    expect(screen.getByText(/NA, NA NA/)).toBeInTheDocument();
+    expect(screen.getByText('Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.')).toBeInTheDocument();
+    expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
   });
 
   it('renders missing optional integration snapshot fields safely', async () => {
@@ -1279,6 +1329,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         vendorInvoiceUrl: null,
         vendorInvoiceAmount: null,
         vendorInvoiceReceivedAt: null,
+        shippingAddress: {
+          address: null,
+          city: null,
+          district: null,
+          postcode: null,
+          country: null,
+          customerPhonePresent: false,
+        },
         billingAddress: {
           fullName: null,
           company: null,

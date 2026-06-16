@@ -784,6 +784,14 @@ export type OrderIntegrationSnapshot = {
   vendorInvoiceUrl: string | null;
   vendorInvoiceAmount: string | null;
   vendorInvoiceReceivedAt: string | null;
+  shippingAddress: {
+    address: string | null;
+    city: string | null;
+    district: string | null;
+    postcode: string | null;
+    country: string | null;
+    customerPhonePresent: boolean;
+  };
   billingAddress: {
     fullName: string | null;
     company: string | null;

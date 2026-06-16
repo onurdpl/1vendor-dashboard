@@ -1326,6 +1326,14 @@ export async function getVendorOrderById(
       vendorInvoiceUrl: allocation.vendorInvoiceUrl,
       vendorInvoiceAmount: toNullableAmountString(allocation.vendorInvoiceAmount),
       vendorInvoiceReceivedAt: toIsoString(allocation.vendorInvoiceReceivedAt),
+      shippingAddress: {
+        address: allocation.order.shippingAddress,
+        city: allocation.order.shippingCity,
+        district: allocation.order.shippingDistrict,
+        postcode: allocation.order.shippingPostcode,
+        country: allocation.order.shippingCountry,
+        customerPhonePresent: Boolean(allocation.order.customerPhone?.trim()),
+      },
       billingAddress: {
         fullName: allocation.order.billingFullName,
         company: allocation.order.billingCompany,

@@ -156,6 +156,47 @@ function formatBillingAddress(address: NonNullable<OrderDetail['orderSnapshot']>
   ].filter((part) => part?.trim()).join(' · ') || '—';
 }
 
+function formatShippingAddress(address: NonNullable<OrderDetail['orderSnapshot']>['shippingAddress'] | null | undefined) {
+  if (!address) {
+    return '—';
+  }
+
+  return [
+    address.address,
+    address.district,
+    address.city,
+    address.postcode,
+    address.country,
+    address.customerPhonePresent ? 'Phone present' : null,
+  ].filter((part) => part?.trim()).join(' · ') || '—';
+}
+
+function normalizeAddressPlaceholderValue(value: string | null | undefined) {
+  return value
+    ?.replace(/[,\.;:_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase() ?? '';
+}
+
+function isInvalidAddressPlaceholderValue(value: string | null | undefined) {
+  const normalized = normalizeAddressPlaceholderValue(value);
+  if (!normalized) {
+    return true;
+  }
+
+  const tokens = normalized.split(' ').filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => token === 'na' || token === 'n/a');
+}
+
+function isInvalidShippingSnapshotAddress(address: NonNullable<OrderDetail['orderSnapshot']>['shippingAddress'] | null | undefined) {
+  if (!address) {
+    return true;
+  }
+
+  return isInvalidAddressPlaceholderValue(address.address) || isInvalidAddressPlaceholderValue(address.city);
+}
+
 function isPositiveFinanceValue(value: string | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0;
@@ -5844,8 +5885,24 @@ export function OrderDetailPage() {
             </div>
             <div className="orders-rail-summary-list">
               <div>
+                <span>Shipping address</span>
+                <strong>
+                  {formatShippingAddress(order.orderSnapshot?.shippingAddress)}
+                  <small className="order-snapshot-address-helper">Used for shipment destination.</small>
+                </strong>
+              </div>
+              {isInvalidShippingSnapshotAddress(order.orderSnapshot?.shippingAddress) ? (
+                <div className="order-snapshot-address-warning">
+                  <span>Shipping warning</span>
+                  <strong>Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.</strong>
+                </div>
+              ) : null}
+              <div>
                 <span>Billing address</span>
-                <strong>{formatBillingAddress(order.orderSnapshot?.billingAddress)}</strong>
+                <strong>
+                  {formatBillingAddress(order.orderSnapshot?.billingAddress)}
+                  <small className="order-snapshot-address-helper">Used for billing/invoice reference.</small>
+                </strong>
               </div>
               {order.orderSnapshot?.orderNote ? (
                 <div>
