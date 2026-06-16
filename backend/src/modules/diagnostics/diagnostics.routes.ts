@@ -8,8 +8,10 @@ import {
   getOrderAddressHistoryDiagnostic,
   getOrderAddressPersistenceDiagnostic,
   getOrderDistrictReadinessDiagnostic,
+  getOrderWebhookEventsDiagnostic,
   getReturnVisibilityDiagnostic,
   getReconciliationDiagnostics,
+  listShopifyWebhookSubscriptionDiagnostics,
   listSyncDiagnostics,
   listWebhookDiagnostics,
   recoverWebhookEvent,
@@ -29,6 +31,20 @@ import { runNavlungoAuthDiagnostics, runNavlungoCarrierDiagnostics } from '../sh
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+
+  app.get(
+    '/admin/diagnostics/shopify/webhook-subscriptions',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return listShopifyWebhookSubscriptionDiagnostics(env);
+    },
+  );
 
   app.get(
     '/admin/diagnostics/webhooks',
@@ -88,6 +104,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return withDashboardRouteTiming('GET /admin/diagnostics/reconciliation', () => getReconciliationDiagnostics());
+    },
+  );
+
+  app.get<{ Params: { orderNumber: string } }>(
+    '/admin/diagnostics/orders/:orderNumber/webhook-events',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const diagnostic = await getOrderWebhookEventsDiagnostic(request.params.orderNumber);
+      if (!diagnostic) {
+        return reply.code(404).send({ message: 'Order not found.' });
+      }
+
+      return diagnostic;
     },
   );
 

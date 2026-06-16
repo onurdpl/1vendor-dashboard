@@ -38,6 +38,11 @@ import type {
   ReturnVisibilityDiagnostic,
 } from './diagnostics.types.js';
 
+const SHOPIFY_ORDER_WEBHOOK_ROUTES: Record<string, string> = {
+  ORDERS_CREATE: '/webhooks/shopify/orders-create',
+  ORDERS_UPDATED: '/webhooks/shopify/orders-updated',
+};
+
 const SUPPORTED_REPLAY_TOPICS = new Set([
   'orders/create',
   'refunds/create',
@@ -500,6 +505,52 @@ function readDiagnosticString(value: Record<string, unknown> | null | undefined,
   }
 
   return null;
+}
+
+function readRuntimeEnvString(key: string) {
+  const value = process.env[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function resolveExpectedOrderWebhookBaseUrl() {
+  return readRuntimeEnvString('SHOPIFY_ORDER_WEBHOOK_BASE_URL')?.replace(/\/+$/, '') ?? null;
+}
+
+function normalizeWebhookTopic(value: string | null | undefined) {
+  return value?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_') ?? '';
+}
+
+function routeForShopifyTopic(topic: string) {
+  return SHOPIFY_ORDER_WEBHOOK_ROUTES[normalizeWebhookTopic(topic)] ?? null;
+}
+
+function callbackMatchesExpectedRoute(input: { topic: string; callbackUrl: string; expectedBaseUrl: string | null }) {
+  const routePath = routeForShopifyTopic(input.topic);
+  if (!routePath) {
+    return false;
+  }
+
+  if (input.expectedBaseUrl) {
+    return input.callbackUrl === `${input.expectedBaseUrl}${routePath}`;
+  }
+
+  try {
+    return new URL(input.callbackUrl).pathname === routePath;
+  } catch {
+    return false;
+  }
+}
+
+function readGraphqlErrorMessage(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const messages = value
+    .map((entry) => readDiagnosticRecord(entry))
+    .map((entry) => readDiagnosticString(entry, ['message']))
+    .filter((message): message is string => Boolean(message));
+  return messages.join('; ') || null;
 }
 
 const DISTRICT_CANDIDATE_KEYS = [
@@ -1100,6 +1151,261 @@ export async function getOrderAddressPersistenceDiagnostic(orderNumber: string) 
         shippingCityPersistedFromRaw,
         billingAddressPersistedFromRaw,
       }),
+    },
+  };
+}
+
+export async function listShopifyWebhookSubscriptionDiagnostics(env: AppEnv) {
+  const expectedOrderWebhookBaseUrl = resolveExpectedOrderWebhookBaseUrl();
+  const config = {
+    shopDomainConfigured: Boolean(env.SHOPIFY_SHOP_DOMAIN),
+    adminAccessTokenConfigured: Boolean(env.SHOPIFY_ADMIN_ACCESS_TOKEN),
+    apiVersion: env.SHOPIFY_API_VERSION,
+    expectedOrderWebhookBaseUrl,
+  };
+
+  if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+    return {
+      ok: false,
+      config,
+      subscriptions: [],
+      derived: {
+        ordersCreateSubscribed: false,
+        ordersUpdatedSubscribed: false,
+        ordersUpdatedCallbackMatchesExpected: false,
+        likelyRootCause: 'unknown' as const,
+      },
+      error: 'Shopify Admin API configuration is missing.',
+    };
+  }
+
+  const edges: unknown[] = [];
+  let hasNextPage = true;
+  let cursor: string | null = null;
+
+  while (hasNextPage) {
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query WebhookSubscriptions($after: String) {
+              webhookSubscriptions(first: 100, after: $after) {
+                edges {
+                  cursor
+                  node {
+                    id
+                    topic
+                    endpoint {
+                      __typename
+                      ... on WebhookHttpEndpoint {
+                        callbackUrl
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                }
+              }
+            }
+          `,
+          variables: {
+            after: cursor,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        config,
+        subscriptions: [],
+        derived: {
+          ordersCreateSubscribed: false,
+          ordersUpdatedSubscribed: false,
+          ordersUpdatedCallbackMatchesExpected: false,
+          likelyRootCause: 'unknown' as const,
+        },
+        error: `Shopify Admin API webhook subscription query failed with status ${response.status}.`,
+      };
+    }
+
+    const payload = await response.json() as Record<string, unknown>;
+    const graphqlError = readGraphqlErrorMessage(payload.errors);
+    if (graphqlError) {
+      return {
+        ok: false,
+        config,
+        subscriptions: [],
+        derived: {
+          ordersCreateSubscribed: false,
+          ordersUpdatedSubscribed: false,
+          ordersUpdatedCallbackMatchesExpected: false,
+          likelyRootCause: 'unknown' as const,
+        },
+        error: `Shopify Admin API webhook subscription query returned GraphQL errors: ${graphqlError}`,
+      };
+    }
+
+    const data = readDiagnosticRecord(payload.data);
+    const connection = readDiagnosticRecord(data?.webhookSubscriptions);
+    const pageEdges = Array.isArray(connection?.edges) ? connection.edges : [];
+    edges.push(...pageEdges);
+    const pageInfo = readDiagnosticRecord(connection?.pageInfo);
+    hasNextPage = Boolean(pageInfo?.hasNextPage);
+    cursor = hasNextPage
+      ? readDiagnosticString(readDiagnosticRecord(pageEdges.at(-1)), ['cursor'])
+      : null;
+    if (hasNextPage && !cursor) {
+      hasNextPage = false;
+    }
+  }
+
+  const subscriptions = edges
+    .map((edge) => readDiagnosticRecord(edge))
+    .map((edge) => readDiagnosticRecord(edge?.node))
+    .filter((node): node is Record<string, unknown> => Boolean(node))
+    .map((node) => {
+      const endpoint = readDiagnosticRecord(node.endpoint);
+      const topic = readDiagnosticString(node, ['topic']) ?? 'UNKNOWN';
+      const callbackUrl = endpoint?.__typename === 'WebhookHttpEndpoint'
+        ? readDiagnosticString(endpoint, ['callbackUrl'])
+        : null;
+      return {
+        id: readDiagnosticString(node, ['id']),
+        topic,
+        endpointType: readDiagnosticString(endpoint, ['__typename']),
+        callbackUrl,
+        expectedRoutePath: routeForShopifyTopic(topic),
+        callbackMatchesExpectedRoute: callbackUrl
+          ? callbackMatchesExpectedRoute({ topic, callbackUrl, expectedBaseUrl: expectedOrderWebhookBaseUrl })
+          : false,
+      };
+    });
+
+  const ordersCreateSubscriptions = subscriptions.filter((subscription) => subscription.topic === 'ORDERS_CREATE');
+  const ordersUpdatedSubscriptions = subscriptions.filter((subscription) => subscription.topic === 'ORDERS_UPDATED');
+  const ordersUpdatedCallbackMatchesExpected = ordersUpdatedSubscriptions.some(
+    (subscription) => subscription.callbackMatchesExpectedRoute,
+  );
+  const ordersUpdatedSubscribed = ordersUpdatedSubscriptions.length > 0;
+
+  return {
+    ok: true,
+    config,
+    subscriptions,
+    derived: {
+      ordersCreateSubscribed: ordersCreateSubscriptions.length > 0,
+      ordersUpdatedSubscribed,
+      ordersUpdatedCallbackMatchesExpected,
+      likelyRootCause: !ordersUpdatedSubscribed
+        ? 'orders_updated_not_subscribed'
+        : 'unknown',
+    },
+  };
+}
+
+export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
+  const normalized = normalizeDiagnosticOrderNumber(orderNumber);
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        {
+          sourceShopifyOrderNumber: {
+            in: [normalized.plain, normalized.hash],
+          },
+        },
+        {
+          sourceShopifyOrderId: normalized.plain,
+        },
+      ],
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const events = await prisma.webhookEvent.findMany({
+    where: {
+      OR: [
+        { shopifyOrderId: order.id },
+        { rawPayload: { contains: order.sourceShopifyOrderId } },
+        { rawPayload: { contains: order.sourceShopifyOrderNumber } },
+        { rawPayload: { contains: order.sourceShopifyOrderNumber.replace(/^#/, '') } },
+      ],
+    },
+    orderBy: [
+      {
+        receivedAt: 'asc',
+      },
+    ],
+    select: {
+      id: true,
+      topic: true,
+      receivedAt: true,
+      processedAt: true,
+      status: true,
+      errorMessage: true,
+      shopifyOrderId: true,
+      rawPayload: true,
+    },
+  });
+
+  const webhookEvents = events
+    .map((event) => {
+      const payload = parseDiagnosticPayload(event.rawPayload);
+      const affected = inferAffectedEntities({ topic: event.topic, rawPayload: event.rawPayload });
+      const payloadOrderHint = getPayloadOrderHint(payload);
+      const payloadMatches = payloadMatchesOrder(payload, order);
+      return {
+        webhookEventId: event.id,
+        topic: event.topic,
+        receivedAt: event.receivedAt.toISOString(),
+        processedAt: toIsoString(event.processedAt),
+        status: event.status,
+        errorMessage: event.errorMessage,
+        hasRawPayload: Boolean(event.rawPayload),
+        linkedToOrder: event.shopifyOrderId === order.id,
+        payloadMatchesOrder: payloadMatches,
+        safeOrder: {
+          shopifyOrderId: affected.shopifyOrderId ?? payloadOrderHint,
+          shopifyOrderNumber: affected.shopifyOrderNumber,
+        },
+        shipping_address: readSafeAddressHistoryFields(readDiagnosticRecord(payload?.shipping_address)),
+        billing_address: readSafeAddressHistoryFields(readDiagnosticRecord(payload?.billing_address)),
+      };
+    })
+    .filter((event) => event.linkedToOrder || event.payloadMatchesOrder);
+
+  const ordersUpdatedEvents = webhookEvents.filter((event) => event.topic === 'orders/updated');
+
+  return {
+    ok: true,
+    orderNumber: order.sourceShopifyOrderNumber,
+    orderId: order.id,
+    shopifyOrderId: order.sourceShopifyOrderId,
+    webhookEvents: webhookEvents.map(({ linkedToOrder, payloadMatchesOrder: _payloadMatchesOrder, ...event }) => event),
+    derived: {
+      ordersUpdatedStored: ordersUpdatedEvents.length > 0,
+      ordersUpdatedProcessed: ordersUpdatedEvents.some((event) => event.processedAt && event.status === 'PROCESSED'),
+      likelyRootCause: ordersUpdatedEvents.length === 0
+        ? 'unknown'
+        : ordersUpdatedEvents.some((event) => event.processedAt && event.status === 'PROCESSED')
+          ? 'unknown'
+          : 'orders_updated_stored_but_not_processed',
     },
   };
 }

@@ -14,7 +14,12 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { getOrderAddressHistoryDiagnostic, getOrderAddressPersistenceDiagnostic } = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
+const {
+  getOrderAddressHistoryDiagnostic,
+  getOrderAddressPersistenceDiagnostic,
+  getOrderWebhookEventsDiagnostic,
+  listShopifyWebhookSubscriptionDiagnostics,
+} = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
 const { registerDiagnosticsRoutes } = await import('../backend/src/modules/diagnostics/diagnostics.routes.js');
 
 function buildEnv(): AppEnv {
@@ -50,6 +55,14 @@ function buildEnv(): AppEnv {
     TRY_OTO_SANDBOX_MODE: false,
     TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
     PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_RATE',
+  };
+}
+
+function buildShopifyEnv(): AppEnv {
+  return {
+    ...buildEnv(),
+    SHOPIFY_SHOP_DOMAIN: 'sporgym.myshopify.com',
+    SHOPIFY_ADMIN_ACCESS_TOKEN: 'test-token',
   };
 }
 
@@ -328,11 +341,130 @@ function buildWebhookEvent(overrides: Record<string, unknown> = {}) {
     topic: 'orders/create',
     receivedAt: new Date('2026-06-01T10:00:00.000Z'),
     processedAt: new Date('2026-06-01T10:00:01.000Z'),
+    status: 'PROCESSED',
+    errorMessage: null,
     shopifyOrderId: 'order-db-1',
     rawPayload: buildRawPayload(),
     ...overrides,
   };
 }
+
+describe('Shopify webhook subscription diagnostic', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.SHOPIFY_ORDER_WEBHOOK_BASE_URL;
+  });
+
+  it('requires admin access on the subscription diagnostic route', async () => {
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/shopify/webhook-subscriptions');
+    const result = await handler?.({ authUser: { role: 'vendor' }, params: { orderNumber: 'unused' } }, buildReply());
+
+    expect(result).toMatchObject({
+      status: 403,
+      body: { message: 'Forbidden' },
+    });
+  });
+
+  it('lists Shopify webhook subscriptions safely and flags missing orders/updated', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          webhookSubscriptions: {
+            edges: [
+              {
+                node: {
+                  id: 'gid://shopify/WebhookSubscription/1',
+                  topic: 'ORDERS_CREATE',
+                  endpoint: {
+                    __typename: 'WebhookHttpEndpoint',
+                    callbackUrl: 'https://backend.example/webhooks/shopify/orders-create',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    })));
+
+    const diagnostic = await listShopifyWebhookSubscriptionDiagnostics(buildShopifyEnv());
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://sporgym.myshopify.com/admin/api/2026-01/graphql.json',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-shopify-access-token': 'test-token',
+        }),
+      }),
+    );
+    expect(diagnostic).toMatchObject({
+      ok: true,
+      config: {
+        shopDomainConfigured: true,
+        adminAccessTokenConfigured: true,
+      },
+      subscriptions: [
+        {
+          topic: 'ORDERS_CREATE',
+          callbackUrl: 'https://backend.example/webhooks/shopify/orders-create',
+          expectedRoutePath: '/webhooks/shopify/orders-create',
+          callbackMatchesExpectedRoute: true,
+        },
+      ],
+      derived: {
+        ordersCreateSubscribed: true,
+        ordersUpdatedSubscribed: false,
+        ordersUpdatedCallbackMatchesExpected: false,
+        likelyRootCause: 'orders_updated_not_subscribed',
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('test-token');
+  });
+
+  it('detects orders/updated subscription callback matching the deployed backend base URL', async () => {
+    process.env.SHOPIFY_ORDER_WEBHOOK_BASE_URL = 'https://backend.example';
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          webhookSubscriptions: {
+            edges: [
+              {
+                node: {
+                  id: 'gid://shopify/WebhookSubscription/2',
+                  topic: 'ORDERS_UPDATED',
+                  endpoint: {
+                    __typename: 'WebhookHttpEndpoint',
+                    callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    })));
+
+    const diagnostic = await listShopifyWebhookSubscriptionDiagnostics(buildShopifyEnv());
+
+    expect(diagnostic).toMatchObject({
+      derived: {
+        ordersUpdatedSubscribed: true,
+        ordersUpdatedCallbackMatchesExpected: true,
+        likelyRootCause: 'unknown',
+      },
+      subscriptions: [
+        {
+          topic: 'ORDERS_UPDATED',
+          expectedRoutePath: '/webhooks/shopify/orders-updated',
+          callbackMatchesExpectedRoute: true,
+        },
+      ],
+    });
+  });
+});
 
 describe('order address history diagnostic', () => {
   beforeEach(() => {
@@ -600,5 +732,84 @@ describe('order address history diagnostic', () => {
         likelyRootCause: 'create_payload_missing',
       },
     });
+  });
+});
+
+describe('order webhook events diagnostic', () => {
+  beforeEach(() => {
+    prismaMock.shopifyOrder.findFirst.mockReset();
+    prismaMock.webhookEvent.findMany.mockReset();
+  });
+
+  it('requires admin access on the order webhook events route', async () => {
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/orders/:orderNumber/webhook-events');
+    const result = await handler?.({ authUser: { role: 'vendor' }, params: { orderNumber: '1080' } }, buildReply());
+
+    expect(result).toMatchObject({
+      status: 403,
+      body: { message: 'Forbidden' },
+    });
+    expect(prismaMock.shopifyOrder.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.webhookEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns sanitized stored webhook events for one order', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder());
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent(),
+      buildWebhookEvent({
+        id: 'webhook-update-1',
+        topic: 'orders/updated',
+        receivedAt: new Date('2026-06-01T11:00:00.000Z'),
+        processedAt: new Date('2026-06-01T11:00:01.000Z'),
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: null,
+            city: 'istanbul',
+            province: 'istanbul',
+            zip: '34160',
+            country: 'Türkiye',
+            phone: '+90 555 777 88 99',
+          },
+        }),
+      }),
+    ]);
+
+    const diagnostic = await getOrderWebhookEventsDiagnostic('1080');
+
+    expect(diagnostic).toMatchObject({
+      ok: true,
+      orderNumber: '#1080',
+      webhookEvents: [
+        {
+          webhookEventId: 'webhook-create-1',
+          topic: 'orders/create',
+          hasRawPayload: true,
+          safeOrder: {
+            shopifyOrderNumber: '#1080',
+          },
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: 'Gungoren',
+          },
+        },
+        {
+          webhookEventId: 'webhook-update-1',
+          topic: 'orders/updated',
+          hasRawPayload: true,
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            city: 'istanbul',
+            zip: '34160',
+          },
+        },
+      ],
+      derived: {
+        ordersUpdatedStored: true,
+        ordersUpdatedProcessed: true,
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('+90 555');
   });
 });
