@@ -57,6 +57,10 @@ export function findMatchingSubscription(subscriptions, topic, callbackUrl) {
   );
 }
 
+export function findSubscriptionsByTopic(subscriptions, topic) {
+  return subscriptions.filter((subscription) => subscription.topic === topic);
+}
+
 export function createShopifyGraphqlClient(config) {
   const endpoint = `https://${config.shopDomain}/admin/api/${config.apiVersion}/graphql.json`;
 
@@ -224,6 +228,18 @@ export async function registerWebhookTopics({
         topic: registration.topic,
         callbackUrl,
         subscriptionId: existingSubscription.id,
+      });
+      continue;
+    }
+
+    const sameTopicSubscriptions = findSubscriptionsByTopic(subscriptions, registration.topic);
+    if (sameTopicSubscriptions.length > 0) {
+      failed.push({
+        topic: registration.topic,
+        callbackUrl,
+        reason: `Existing ${registration.topic} subscription uses a different callback URL: ${sameTopicSubscriptions
+          .map((subscription) => subscription.callbackUrl)
+          .join(', ')}`,
       });
       continue;
     }

@@ -24,7 +24,7 @@ Optional:
   - opt-in flag required to register return lifecycle webhooks
   - script exits safely without mutating Shopify when this flag is not set to `true`
 - `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
-  - opt-in flag required to register `ORDERS_CREATE`
+  - opt-in flag required to register `ORDERS_CREATE` and `ORDERS_UPDATED`
   - script exits safely without mutating Shopify when this flag is not set to `true`
 
 ## Readiness Check
@@ -47,8 +47,8 @@ Behavior:
 - never prints secret values
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
 
-## Order Create Webhook Registration (Opt-In)
-Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Register it through the same idempotent GraphQL helper used for other webhook groups.
+## Order Webhook Registration (Opt-In)
+Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Order address/contact correction depends on `ORDERS_UPDATED` delivery. Register both through the same idempotent GraphQL helper used for other webhook groups.
 
 Registration command from repository root:
 
@@ -63,8 +63,9 @@ Required env for registration:
 - `SHOPIFY_API_VERSION`
 - `SHOPIFY_ORDER_WEBHOOK_BASE_URL`
 
-Registered topic and callback:
+Registered topics and callbacks:
 - `ORDERS_CREATE` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-create`
+- `ORDERS_UPDATED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-updated`
 
 ## Starting the Backend for Tunnel Testing
 Use the normal backend start flow:

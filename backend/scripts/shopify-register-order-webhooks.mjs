@@ -14,6 +14,7 @@ const exampleEnvFilePath = path.join(backendDir, '.env.example');
 
 const topics = [
   { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+  { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
 ];
 
 function isValidHttpsUrl(value) {
