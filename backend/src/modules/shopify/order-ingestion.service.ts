@@ -21,6 +21,14 @@ function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
   return fullName || null;
 }
 
+function buildCustomerEmail(payload: ShopifyOrdersCreateWebhookPayload) {
+  return typeof payload.customer?.email === 'string'
+    ? readAddressString(payload.customer.email)
+    : typeof payload.email === 'string'
+      ? readAddressString(payload.email)
+      : null;
+}
+
 function readAddressString(value: string | null | undefined) {
   const normalized = typeof value === 'string' ? value.trim() : '';
   return normalized || null;
@@ -144,6 +152,105 @@ export function mapShopifyBillingAddress(payload: ShopifyOrdersCreateWebhookPayl
     billingAddress1: readAddressString(address?.address1),
     billingAddress2: readAddressString(address?.address2),
     billingPostcode: readAddressString(address?.zip) ?? readAddressString(address?.postcode),
+  };
+}
+
+function mapShopifyOrderContactAddressSnapshot(payload: ShopifyOrdersCreateWebhookPayload) {
+  return {
+    customerName: buildCustomerName(payload),
+    customerEmail: buildCustomerEmail(payload),
+    ...mapShopifyShippingAddress(payload),
+    ...mapShopifyBillingAddress(payload),
+  };
+}
+
+function normalizeComparableSnapshotValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() || null : value ?? null;
+}
+
+export async function updateShopifyOrderContactAddressSnapshotFromWebhook(payload: ShopifyOrdersCreateWebhookPayload) {
+  const sourceShopifyOrderId = payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+  const sourceShopifyOrderNumber =
+    typeof payload.name === 'string' && payload.name.trim()
+      ? payload.name.trim()
+      : payload.order_number !== undefined && payload.order_number !== null
+        ? `#${String(payload.order_number)}`
+        : null;
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        ...(sourceShopifyOrderId ? [{ sourceShopifyOrderId }] : []),
+        ...(sourceShopifyOrderNumber
+          ? [
+              { sourceShopifyOrderNumber: sourceShopifyOrderNumber },
+              { sourceShopifyOrderNumber: sourceShopifyOrderNumber.replace(/^#/, '') },
+            ]
+          : []),
+      ],
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      customerName: true,
+      customerEmail: true,
+      customerPhone: true,
+      shippingAddress: true,
+      shippingCity: true,
+      shippingDistrict: true,
+      shippingPostcode: true,
+      shippingCountry: true,
+      billingFullName: true,
+      billingCompany: true,
+      billingPhone: true,
+      billingCity: true,
+      billingDistrict: true,
+      billingAddress1: true,
+      billingAddress2: true,
+      billingPostcode: true,
+    },
+  });
+
+  if (!order) {
+    return {
+      matched: false,
+      updated: false,
+      orderId: null,
+      sourceShopifyOrderId,
+      changedFields: [],
+    };
+  }
+
+  const snapshot = mapShopifyOrderContactAddressSnapshot(payload);
+  const updateData: Partial<typeof snapshot> = {};
+  const changedFields: string[] = [];
+
+  for (const [field, value] of Object.entries(snapshot) as Array<[keyof typeof snapshot, string | null]>) {
+    if (value === null) {
+      continue;
+    }
+
+    if (normalizeComparableSnapshotValue(order[field]) !== normalizeComparableSnapshotValue(value)) {
+      updateData[field] = value;
+      changedFields.push(field);
+    }
+  }
+
+  if (changedFields.length > 0) {
+    await prisma.shopifyOrder.update({
+      where: {
+        id: order.id,
+      },
+      data: updateData,
+    });
+  }
+
+  return {
+    matched: true,
+    updated: changedFields.length > 0,
+    orderId: order.id,
+    sourceShopifyOrderId: order.sourceShopifyOrderId,
+    changedFields,
   };
 }
 
@@ -312,12 +419,7 @@ function parseOrderPayload(
     orderNote: readPayloadString(payload.note),
     orderTags: parseOrderTags(payload.tags),
     customerName: buildCustomerName(payload),
-    customerEmail:
-      typeof payload.customer?.email === 'string'
-        ? payload.customer.email
-        : typeof payload.email === 'string'
-          ? payload.email
-          : null,
+    customerEmail: buildCustomerEmail(payload),
     ...shippingAddress,
     ...billingAddress,
     lineItems: lineItems.map<ParsedShopifyOrderLineItem>((lineItem) => {

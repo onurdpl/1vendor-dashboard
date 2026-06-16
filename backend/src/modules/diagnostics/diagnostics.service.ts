@@ -955,6 +955,10 @@ function deriveAddressHistoryRootCause(input: {
     return 'update_ignored' as const;
   }
 
+  if (input.ordersUpdatedExists && input.persistedMatchesLatestWebhook) {
+    return 'update_processed' as const;
+  }
+
   if (!input.ordersUpdatedExists && !hasUsableAddressHistoryData(input.firstCreateShipping)) {
     return 'create_payload_missing' as const;
   }

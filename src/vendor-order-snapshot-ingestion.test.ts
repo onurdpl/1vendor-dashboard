@@ -9,7 +9,9 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
   shopifyOrder: {
+    findFirst: vi.fn(),
     upsert: vi.fn(),
+    update: vi.fn(),
   },
   shopifyOrderLineItem: {
     upsert: vi.fn(),
@@ -40,12 +42,14 @@ vi.mock('../backend/src/integrations/odoo/odooAllocationOrderSync.service.js', (
   syncOdooSaleOrdersForAllocations: syncOdooSaleOrdersForAllocationsMock,
 }));
 
-const { ingestShopifyOrderWebhook } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
+const { ingestShopifyOrderWebhook, updateShopifyOrderContactAddressSnapshotFromWebhook } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
 
 function mockSuccessfulDbWrites() {
   prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }]);
   prismaMock.webhookEvent.update.mockResolvedValue({});
   prismaMock.shopifyOrder.upsert.mockResolvedValue({ id: 'shopify-order-db-1' });
+  prismaMock.shopifyOrder.findFirst.mockResolvedValue(null);
+  prismaMock.shopifyOrder.update.mockResolvedValue({});
   prismaMock.shopifyOrderLineItem.upsert.mockResolvedValue({ id: 'shopify-line-db-1' });
   prismaMock.vendorAllocation.upsert.mockResolvedValue({ id: 'alloc-sporjinal-2001' });
   prismaMock.vendorAllocationLineItem.upsert.mockResolvedValue({});
@@ -158,6 +162,134 @@ describe('vendor order snapshot ingestion', () => {
         }),
       }),
     );
+  });
+
+  it('updates persisted order contact and shipping address fields from orders/updated payload', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce({
+      id: 'shopify-order-db-1080',
+      sourceShopifyOrderId: '1080-shopify',
+      sourceShopifyOrderNumber: '#1080',
+      customerName: 'Old Customer',
+      customerEmail: 'old@example.test',
+      customerPhone: null,
+      shippingAddress: 'NA, NA NA',
+      shippingCity: 'NA',
+      shippingDistrict: 'NA NA',
+      shippingPostcode: null,
+      shippingCountry: 'TR',
+      billingFullName: null,
+      billingCompany: null,
+      billingPhone: null,
+      billingCity: null,
+      billingDistrict: null,
+      billingAddress1: null,
+      billingAddress2: null,
+      billingPostcode: null,
+    });
+
+    const result = await updateShopifyOrderContactAddressSnapshotFromWebhook({
+      id: '1080-shopify',
+      name: '#1080',
+      customer: {
+        first_name: 'Orhan',
+        last_name: 'Customer',
+        email: 'orhan@example.test',
+        phone: '+90 555 111 22 33',
+      },
+      shipping_address: {
+        phone: '+90 555 444 55 66',
+        country_code: 'TR',
+        zip: '34160',
+        city: 'istanbul',
+        province: 'istanbul',
+        address1: 'Orhan Sokak',
+        address2: 'Gungoren',
+      },
+      billing_address: {
+        name: 'Orhan Billing',
+        company: 'Billing Co',
+        phone: '+90 555 777 88 99',
+        country_code: 'TR',
+        city: 'istanbul',
+        province: 'istanbul',
+        address1: 'Billing Sokak',
+        address2: 'Kat 2',
+        zip: '34160',
+      },
+    });
+
+    expect(result).toMatchObject({
+      matched: true,
+      updated: true,
+      orderId: 'shopify-order-db-1080',
+      changedFields: expect.arrayContaining([
+        'customerName',
+        'customerEmail',
+        'customerPhone',
+        'shippingAddress',
+        'shippingCity',
+        'shippingDistrict',
+        'shippingPostcode',
+        'billingFullName',
+        'billingCompany',
+        'billingPhone',
+        'billingCity',
+        'billingDistrict',
+        'billingAddress1',
+        'billingAddress2',
+        'billingPostcode',
+      ]),
+    });
+    expect(prismaMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-1080' },
+      data: expect.objectContaining({
+        customerName: 'Orhan Customer',
+        customerEmail: 'orhan@example.test',
+        customerPhone: '+905554445566',
+        shippingAddress: 'Orhan Sokak, Gungoren',
+        shippingCity: 'istanbul',
+        shippingDistrict: 'Gungoren',
+        shippingPostcode: '34160',
+        billingFullName: 'Orhan Billing',
+        billingCompany: 'Billing Co',
+        billingPhone: '+905557778899',
+        billingCity: 'istanbul',
+        billingDistrict: 'Kat 2',
+        billingAddress1: 'Billing Sokak',
+        billingAddress2: 'Kat 2',
+        billingPostcode: '34160',
+      }),
+    });
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocationLineItem.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+  });
+
+  it('does not create a ShopifyOrder when orders/updated has no matching existing order', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(null);
+
+    const result = await updateShopifyOrderContactAddressSnapshotFromWebhook({
+      id: 'missing-shopify-order',
+      name: '#9999',
+      shipping_address: {
+        address1: 'Corrected address',
+        city: 'Istanbul',
+      },
+    });
+
+    expect(result).toEqual({
+      matched: false,
+      updated: false,
+      orderId: null,
+      sourceShopifyOrderId: 'missing-shopify-order',
+      changedFields: [],
+    });
+    expect(prismaMock.shopifyOrder.update).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
   });
 
   it('maps Shopify Turkey shipping address2 to shippingDistrict when explicit district fields are absent', async () => {

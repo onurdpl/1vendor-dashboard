@@ -517,6 +517,58 @@ describe('order address history diagnostic', () => {
     });
   });
 
+  it('reports update_processed when persisted address matches the latest orders/updated payload', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
+      shippingAddress: 'Orhan Sokak',
+      shippingCity: 'istanbul',
+      shippingDistrict: null,
+      shippingPostcode: '34160',
+      shippingCountry: 'TR',
+    }));
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent({
+        id: 'webhook-create-na',
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'NA',
+            address2: 'NA NA',
+            city: 'NA',
+            province: null,
+            zip: null,
+            country: 'Türkiye',
+          },
+        }),
+      }),
+      buildWebhookEvent({
+        id: 'webhook-update-processed',
+        topic: 'orders/updated',
+        receivedAt: new Date('2026-06-01T11:00:00.000Z'),
+        processedAt: new Date('2026-06-01T11:00:01.000Z'),
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: null,
+            city: 'istanbul',
+            province: 'istanbul',
+            zip: '34160',
+            country: 'Türkiye',
+          },
+        }),
+      }),
+    ]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('1080');
+
+    expect(diagnostic).toMatchObject({
+      derived: {
+        addressChangedAfterCreate: true,
+        ordersUpdatedExists: true,
+        persistedMatchesLatestWebhook: true,
+        likelyRootCause: 'update_processed',
+      },
+    });
+  });
+
   it('classifies placeholder create-only address as create_payload_missing', async () => {
     prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
       shippingAddress: 'NA, NA NA',

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AppEnv } from '../../config/env.js';
 import { getShopifyWebhookHeaders } from './webhook.types.js';
 import { getOrCreateWebhookEvent } from './webhook-idempotency.service.js';
-import { ingestShopifyOrderWebhook } from './order-ingestion.service.js';
+import { ingestShopifyOrderWebhook, updateShopifyOrderContactAddressSnapshotFromWebhook } from './order-ingestion.service.js';
 import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
 import { fetchSellerInfoWithRetry } from './seller-info-retry.service.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
@@ -311,6 +311,9 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       const payload = request.body ?? {};
+      const orderUpdateResult = topic === 'orders/updated'
+        ? await updateShopifyOrderContactAddressSnapshotFromWebhook(payload as ShopifyOrdersCreateWebhookPayload)
+        : null;
       const summary = await recordShopifyReturnSignalDiscovery({
         event: idempotencyResult.event,
         payload,
@@ -328,6 +331,8 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
           refundIdPresent: summary.refundIdPresent,
           matchedOrder: Boolean(summary.matchedOrderId),
           matchedByField: summary.matchedByField,
+          addressContactSnapshotUpdated: orderUpdateResult?.updated ?? null,
+          changedFields: orderUpdateResult?.changedFields ?? [],
         },
         'Shopify return signal discovery webhook received.',
       );
@@ -340,6 +345,12 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         topic,
         matchedOrder: Boolean(summary.matchedOrderId),
         matchedByField: summary.matchedByField,
+        ...(orderUpdateResult
+          ? {
+              addressContactSnapshotUpdated: orderUpdateResult.updated,
+              changedFields: orderUpdateResult.changedFields,
+            }
+          : {}),
       });
     });
   };
