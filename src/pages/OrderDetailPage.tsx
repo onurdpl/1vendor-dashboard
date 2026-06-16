@@ -1676,6 +1676,14 @@ function getMissingShipmentCustomerFields(message: string, provider?: string | n
 }
 
 function getCreateShipmentErrorMessage(error: unknown) {
+  const rawMessage = error instanceof Error ? error.message : '';
+  if (
+    rawMessage.includes('invalid_order_destination') ||
+    rawMessage.includes('invalidOrderDestination: true')
+  ) {
+    return 'Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.';
+  }
+
   if (error instanceof ApiError) {
     return error.message;
   }

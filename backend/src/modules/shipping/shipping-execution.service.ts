@@ -1668,6 +1668,48 @@ function readStoredOrderWebhookAddress(orderRecord: Record<string, unknown>) {
   return null;
 }
 
+function normalizeKargonomiDestinationValue(value: string | null | undefined) {
+  return value
+    ?.replace(/[,\.;:_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase() ?? '';
+}
+
+function isInvalidKargonomiDestinationValue(value: string | null | undefined) {
+  const normalized = normalizeKargonomiDestinationValue(value);
+  if (!normalized) {
+    return true;
+  }
+
+  const tokens = normalized.split(' ').filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => token === 'na' || token === 'n/a');
+}
+
+function validateKargonomiOrderDestination(
+  order: unknown,
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'],
+) {
+  const orderRecord = isRecord(order) ? order : {};
+  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const overrides = normalizeCustomerOverrides(customerOverrides);
+  const destination = readKargonomiDestinationText(order, customerOverrides);
+  const address = overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null;
+  const stateText = destination.province ?? destination.city ?? null;
+  const storedDestinationIdsPresent = hasKargonomiOrderDestinationIds(order);
+  const missingFields = [
+    isInvalidKargonomiDestinationValue(address) ? 'buyer.buyer_address' : null,
+    isInvalidKargonomiDestinationValue(stateText) ? 'buyer.buyer_state_id' : null,
+    !storedDestinationIdsPresent && isInvalidKargonomiDestinationValue(destination.district) ? 'buyer.buyer_city_id' : null,
+  ].filter((field): field is string => Boolean(field));
+
+  return {
+    invalid: missingFields.length > 0,
+    missingFields,
+    destination,
+  };
+}
+
 function readNestedRecord(value: Record<string, unknown>, key: string) {
   const nested = value[key];
   return isRecord(nested) ? nested : null;
@@ -6552,6 +6594,31 @@ async function buildShipmentRequestPreview(
   });
   let kargonomiDestinationResolution: Record<string, unknown> | null = null;
   let resolvedKargonomiDestination: { buyerStateId?: string | null; buyerCityId?: string | null } | undefined;
+  if (provider === ShippingProvider.KARGONOMI) {
+    const destinationValidity = validateKargonomiOrderDestination(allocation.order, input.customerOverrides);
+    if (destinationValidity.invalid) {
+      kargonomiDestinationResolution = {
+        source: 'order_destination_validation',
+        resolved: false,
+        invalidOrderDestination: true,
+        skippedReason: 'invalid_order_destination',
+        missingFields: destinationValidity.missingFields,
+        buyerStateIdPresent: false,
+        buyerCityIdPresent: false,
+      };
+      throw new Error(
+        [
+          'Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.',
+          'invalidOrderDestination: true',
+          'skippedReason: invalid_order_destination',
+          'Missing required shipment fields:',
+          ...destinationValidity.missingFields.map((field) => `- ${field}`),
+          '',
+          'Provider request blocked before create call.',
+        ].join('\n'),
+      );
+    }
+  }
   if (provider === ShippingProvider.KARGONOMI && !hasKargonomiOrderDestinationIds(allocation.order)) {
     const fallbackStateId = resolveKargonomiBuyerStateId(config.providerMetadata);
     const fallbackCityId = resolveKargonomiBuyerCityId(config.providerMetadata);

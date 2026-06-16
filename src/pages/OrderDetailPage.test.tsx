@@ -6824,6 +6824,42 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/Endpoint:\s*POST \/shipments\/create/)).not.toBeInTheDocument();
   });
 
+  it('shows clear Kargonomi invalid destination create shipment errors', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock.mockRejectedValueOnce(
+      new Error(
+        [
+          'Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.',
+          'invalidOrderDestination: true',
+          'skippedReason: invalid_order_destination',
+          'Missing required shipment fields:',
+          '- buyer.buyer_address',
+          '- buyer.buyer_state_id',
+          '- buyer.buyer_city_id',
+          '',
+          'Provider request blocked before create call.',
+        ].join('\n'),
+      ),
+    );
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect((await screen.findAllByText('Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('invalidOrderDestination: true')).not.toBeInTheDocument();
+  });
+
   it('renders missing shipment field inputs and retries with shipment-only overrides', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue(orderWithoutShipment);

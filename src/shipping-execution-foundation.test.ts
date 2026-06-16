@@ -1563,7 +1563,7 @@ describe('shipping execution foundation', () => {
           },
         },
       ),
-    ).rejects.toThrow('Kargonomi destination could not be resolved from the order shipping address.');
+    ).rejects.toThrow('Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.');
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
@@ -1651,6 +1651,139 @@ describe('shipping execution foundation', () => {
         }),
       }),
     );
+  });
+
+  it('blocks Kargonomi before fallback IDs are used when order destination contains NA placeholders', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'yalispor',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: {
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        assignedVendorId: 'yalispor',
+        order: {
+          id: 'order-1080',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress: 'NA, NA NA',
+          shippingCity: 'NA',
+          shippingDistrict: 'NA',
+          shippingPostcode: null,
+          webhookEvents: [
+            {
+              rawPayload: JSON.stringify({
+                shipping_address: {
+                  address1: 'NA',
+                  address2: 'NA NA',
+                  city: 'NA',
+                  zip: null,
+                  country: 'Türkiye',
+                },
+              }),
+            },
+          ],
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    const kargonomiDestinationClient = {
+      listStates: vi.fn(),
+      listCities: vi.fn(),
+    };
+
+    const blockedCreate = createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'yalispor',
+        adapter,
+        kargonomiDestinationClient,
+      },
+    );
+
+    await expect(blockedCreate).rejects.toThrow('Order destination address is invalid or incomplete. Kargonomi shipment was blocked before provider call.');
+    await expect(blockedCreate).rejects.toThrow('skippedReason: invalid_order_destination');
+    expect(kargonomiDestinationClient.listStates).not.toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listCities).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks Kargonomi stored destination IDs when the order destination address is invalid', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'yalispor',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        assignedVendorId: 'yalispor',
+        order: {
+          id: 'order-1080',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress: 'NA, NA NA',
+          shippingCity: 'NA',
+          shippingDistrict: 'NA',
+          shippingStateId: '34',
+          shippingCityId: '828',
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          provider: 'kargonomi',
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'kargonomi',
+            SHIPPING_EXECUTION_ENABLED: true,
+            KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+            KARGONOMI_API_TOKEN: 'test-token',
+          },
+          vendorId: 'yalispor',
+          adapter,
+        },
+      ),
+    ).rejects.toThrow('invalidOrderDestination: true');
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
   it('uses Sporjinal Kargo Entegratör warehouse 1774 and cargo integration 2547', async () => {

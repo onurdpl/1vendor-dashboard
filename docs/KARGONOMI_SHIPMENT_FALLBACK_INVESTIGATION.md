@@ -52,6 +52,10 @@ Flow:
 - No return/reverse logic was modified.
 - No automatic retry was added.
 
+## Invalid Destination Guard
+
+Fallback buyer state/city IDs must not be used when the order destination address is placeholder or incomplete, including values like `NA`, `N/A`, `NA NA`, or `NA, NA NA`. In that case Kargonomi outbound shipment creation must block before provider calls, even if vendor metadata has fallback destination IDs.
+
 ## Remaining Unknowns
 
 The correct Kargonomi numeric state/city ids for each destination remain operational data. The current patch supports static provider metadata fallback for the PoC, but a production-grade implementation should eventually map Shopify destination city/state to Kargonomi ids per order.
