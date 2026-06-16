@@ -5,13 +5,16 @@ const prismaMock = vi.hoisted(() => ({
   shopifyOrder: {
     findFirst: vi.fn(),
   },
+  webhookEvent: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { getOrderAddressPersistenceDiagnostic } = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
+const { getOrderAddressHistoryDiagnostic, getOrderAddressPersistenceDiagnostic } = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
 const { registerDiagnosticsRoutes } = await import('../backend/src/modules/diagnostics/diagnostics.routes.js');
 
 function buildEnv(): AppEnv {
@@ -108,7 +111,7 @@ function buildOrder(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function registerAddressPersistenceRoute() {
+function registerOrderDiagnosticRoute(path: string) {
   const gets = new Map<string, (request: { authUser?: { role?: string }; params: { orderNumber: string } }, reply: ReturnType<typeof buildReply>) => unknown>();
   const app = {
     get: vi.fn((path: string, ...args: unknown[]) => {
@@ -118,7 +121,7 @@ function registerAddressPersistenceRoute() {
     post: vi.fn(),
   };
   registerDiagnosticsRoutes(app as never, buildEnv());
-  return gets.get('/admin/diagnostics/orders/:orderNumber/address-persistence');
+  return gets.get(path);
 }
 
 function buildReply() {
@@ -132,10 +135,11 @@ function buildReply() {
 describe('order address persistence diagnostic', () => {
   beforeEach(() => {
     prismaMock.shopifyOrder.findFirst.mockReset();
+    prismaMock.webhookEvent.findMany.mockReset();
   });
 
   it('requires admin access on the diagnostic route', async () => {
-    const handler = registerAddressPersistenceRoute();
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/orders/:orderNumber/address-persistence');
     const result = await handler?.({ authUser: { role: 'vendor' }, params: { orderNumber: '1080' } }, buildReply());
 
     expect(result).toMatchObject({
@@ -313,6 +317,235 @@ describe('order address persistence diagnostic', () => {
         shippingCityPersistedFromRaw: 'yes',
         billingAddressPersistedFromRaw: 'no',
         likelyRootCause: 'ingestion_missing',
+      },
+    });
+  });
+});
+
+function buildWebhookEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'webhook-create-1',
+    topic: 'orders/create',
+    receivedAt: new Date('2026-06-01T10:00:00.000Z'),
+    processedAt: new Date('2026-06-01T10:00:01.000Z'),
+    shopifyOrderId: 'order-db-1',
+    rawPayload: buildRawPayload(),
+    ...overrides,
+  };
+}
+
+describe('order address history diagnostic', () => {
+  beforeEach(() => {
+    prismaMock.shopifyOrder.findFirst.mockReset();
+    prismaMock.webhookEvent.findMany.mockReset();
+  });
+
+  it('requires admin access on the address history route', async () => {
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/orders/:orderNumber/address-history');
+    const result = await handler?.({ authUser: { role: 'vendor' }, params: { orderNumber: '1080' } }, buildReply());
+
+    expect(result).toMatchObject({
+      status: 403,
+      body: { message: 'Forbidden' },
+    });
+    expect(prismaMock.shopifyOrder.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.webhookEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it('reports create-only address history', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder());
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildWebhookEvent()]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('1080');
+
+    expect(prismaMock.webhookEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: expect.any(Array),
+      }),
+    }));
+    expect(diagnostic).toMatchObject({
+      ok: true,
+      orderNumber: '#1080',
+      orderId: 'order-db-1',
+      shopifyOrderId: '1080-shopify',
+      timeline: [
+        {
+          webhookEventId: 'webhook-create-1',
+          topic: 'orders/create',
+          receivedAt: '2026-06-01T10:00:00.000Z',
+          processedAt: '2026-06-01T10:00:01.000Z',
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: 'Gungoren',
+            city: 'istanbul',
+            province: 'istanbul',
+            zip: '34160',
+            country: 'Türkiye',
+          },
+          billing_address: {
+            address1: 'Billing street',
+            address2: 'Billing district',
+            city: 'istanbul',
+            province: 'istanbul',
+            zip: '34160',
+            country: 'Türkiye',
+          },
+        },
+      ],
+      comparison: {
+        firstCreate: {
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: 'Gungoren',
+          },
+        },
+        latestUpdate: {
+          shipping_address: null,
+        },
+        currentPersistedOrder: {
+          shippingAddress: 'Orhan Sokak, Gungoren',
+          shippingCity: 'istanbul',
+          shippingDistrict: 'Gungoren',
+          shippingPostcode: '34160',
+          shippingCountry: 'TR',
+        },
+      },
+      derived: {
+        addressChangedAfterCreate: false,
+        ordersUpdatedExists: false,
+        persistedMatchesLatestWebhook: false,
+        likelyRootCause: 'rendering_issue',
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('+90 555');
+  });
+
+  it('detects create plus orders/updated address change as update_ignored when persisted still matches create', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
+      shippingAddress: 'NA, NA NA',
+      shippingCity: 'NA',
+      shippingDistrict: null,
+      shippingPostcode: null,
+      shippingCountry: 'TR',
+    }));
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent({
+        id: 'webhook-create-na',
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'NA',
+            address2: 'NA NA',
+            city: 'NA',
+            province: null,
+            zip: null,
+            country: 'Türkiye',
+          },
+        }),
+      }),
+      buildWebhookEvent({
+        id: 'webhook-update-1',
+        topic: 'orders/updated',
+        receivedAt: new Date('2026-06-01T11:00:00.000Z'),
+        processedAt: new Date('2026-06-01T11:00:01.000Z'),
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            address2: null,
+            city: 'istanbul',
+            province: 'istanbul',
+            zip: '34160',
+            country: 'Türkiye',
+          },
+        }),
+      }),
+    ]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('#1080');
+
+    expect(diagnostic).toMatchObject({
+      comparison: {
+        firstCreate: {
+          shipping_address: {
+            address1: 'NA',
+            address2: 'NA NA',
+            city: 'NA',
+            zip: null,
+          },
+        },
+        latestUpdate: {
+          shipping_address: {
+            address1: 'Orhan Sokak',
+            city: 'istanbul',
+            zip: '34160',
+          },
+        },
+      },
+      derived: {
+        addressChangedAfterCreate: true,
+        ordersUpdatedExists: true,
+        persistedMatchesLatestWebhook: false,
+        likelyRootCause: 'update_ignored',
+      },
+    });
+  });
+
+  it('detects persisted mismatch against latest webhook as persistence_issue', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
+      shippingAddress: 'Different address',
+      shippingCity: 'istanbul',
+      shippingPostcode: '34160',
+    }));
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent(),
+      buildWebhookEvent({
+        id: 'webhook-update-same',
+        topic: 'orders/updated',
+        receivedAt: new Date('2026-06-01T11:00:00.000Z'),
+        processedAt: new Date('2026-06-01T11:00:01.000Z'),
+      }),
+    ]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('1080');
+
+    expect(diagnostic).toMatchObject({
+      derived: {
+        addressChangedAfterCreate: false,
+        ordersUpdatedExists: true,
+        persistedMatchesLatestWebhook: false,
+        likelyRootCause: 'persistence_issue',
+      },
+    });
+  });
+
+  it('classifies placeholder create-only address as create_payload_missing', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
+      shippingAddress: 'NA, NA NA',
+      shippingCity: 'NA',
+      shippingPostcode: null,
+    }));
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent({
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'NA',
+            address2: 'NA NA',
+            city: 'NA',
+            province: null,
+            zip: null,
+            country: null,
+          },
+        }),
+      }),
+    ]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('1080');
+
+    expect(diagnostic).toMatchObject({
+      derived: {
+        addressChangedAfterCreate: false,
+        ordersUpdatedExists: false,
+        persistedMatchesLatestWebhook: false,
+        likelyRootCause: 'create_payload_missing',
       },
     });
   });

@@ -821,6 +821,26 @@ function hasRawAddressData(address: Record<string, unknown> | null) {
   );
 }
 
+function isPlaceholderAddressValue(value: string | null | undefined) {
+  const normalized = value?.replace(/\s+/g, ' ').trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === 'null' ||
+    normalized === '-' ||
+    /^(?:na|n\/a)(?: (?:na|n\/a))*$/.test(normalized)
+  );
+}
+
+function hasUsableAddressHistoryData(address: SafeAddressHistoryFields | null) {
+  if (!address) {
+    return false;
+  }
+
+  return [address.address1, address.address2, address.city, address.province, address.zip, address.country].some(
+    (value) => !isPlaceholderAddressValue(value),
+  );
+}
+
 function deriveAddressPersistenceRootCause(input: {
   rawShippingAddress: Record<string, unknown> | null;
   rawBillingAddress: Record<string, unknown> | null;
@@ -848,6 +868,102 @@ function deriveAddressPersistenceRootCause(input: {
   }
 
   if (input.persistedShippingAny || input.persistedBillingAny) {
+    return 'rendering_issue' as const;
+  }
+
+  return 'unknown' as const;
+}
+
+function readSafeAddressHistoryFields(address: Record<string, unknown> | null) {
+  return {
+    address1: readDiagnosticString(address, ['address1']),
+    address2: readDiagnosticString(address, ['address2']),
+    city: readDiagnosticString(address, ['city']),
+    province: readDiagnosticString(address, ['province', 'province_name', 'provinceName']),
+    zip: readDiagnosticString(address, ['zip', 'postcode']),
+    country: readDiagnosticString(address, ['country']),
+  };
+}
+
+type SafeAddressHistoryFields = ReturnType<typeof readSafeAddressHistoryFields>;
+
+function addressHistoryFieldsEqual(left: SafeAddressHistoryFields | null, right: SafeAddressHistoryFields | null) {
+  if (!left || !right) {
+    return false;
+  }
+
+  return (Object.keys(left) as Array<keyof SafeAddressHistoryFields>).every((key) => {
+    const leftValue = left[key]?.trim() || null;
+    const rightValue = right[key]?.trim() || null;
+    return leftValue === rightValue;
+  });
+}
+
+function currentPersistedShippingFieldsMatchWebhook(
+  persisted: {
+    shippingAddress: string | null;
+    shippingCity: string | null;
+    shippingPostcode: string | null;
+    shippingCountry: string | null;
+  },
+  webhookShipping: SafeAddressHistoryFields | null,
+) {
+  if (!webhookShipping) {
+    return false;
+  }
+
+  return (
+    comparePersistedValue(persisted.shippingAddress, [webhookShipping.address1, webhookShipping.address2].filter(Boolean).join(', ') || null) === 'yes' &&
+    comparePersistedValue(persisted.shippingCity, webhookShipping.city) === 'yes' &&
+    comparePersistedValue(persisted.shippingPostcode, webhookShipping.zip) === 'yes'
+  );
+}
+
+function payloadMatchesOrder(payload: Record<string, unknown> | null, order: {
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+}) {
+  const affected = inferAffectedEntities({ topic: 'orders/create', rawPayload: payload ? JSON.stringify(payload) : null });
+  const hint = getPayloadOrderHint(payload);
+  return [hint, affected.shopifyOrderId, affected.shopifyOrderNumber]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => {
+      const normalized = value.replace(/^#/, '');
+      return (
+        value === order.sourceShopifyOrderId ||
+        value === order.sourceShopifyOrderNumber ||
+        normalized === order.sourceShopifyOrderNumber.replace(/^#/, '') ||
+        normalized === order.sourceShopifyOrderId
+      );
+    });
+}
+
+function isOrderAddressHistoryTopic(topic: string) {
+  const normalized = topic.toLowerCase();
+  return normalized.startsWith('orders/') || normalized.includes('order/edit') || normalized.includes('order_update');
+}
+
+function deriveAddressHistoryRootCause(input: {
+  firstCreateShipping: SafeAddressHistoryFields | null;
+  latestUpdateShipping: SafeAddressHistoryFields | null;
+  ordersUpdatedExists: boolean;
+  addressChangedAfterCreate: boolean;
+  persistedMatchesLatestWebhook: boolean;
+  persistedMatchesFirstCreate: boolean;
+}) {
+  if (input.ordersUpdatedExists && input.addressChangedAfterCreate && !input.persistedMatchesLatestWebhook) {
+    return 'update_ignored' as const;
+  }
+
+  if (!input.ordersUpdatedExists && !hasUsableAddressHistoryData(input.firstCreateShipping)) {
+    return 'create_payload_missing' as const;
+  }
+
+  if (input.latestUpdateShipping && !input.persistedMatchesLatestWebhook) {
+    return 'persistence_issue' as const;
+  }
+
+  if (input.persistedMatchesLatestWebhook || (!input.latestUpdateShipping && input.persistedMatchesFirstCreate)) {
     return 'rendering_issue' as const;
   }
 
@@ -979,6 +1095,142 @@ export async function getOrderAddressPersistenceDiagnostic(orderNumber: string) 
         shippingAddressPersistedFromRaw,
         shippingCityPersistedFromRaw,
         billingAddressPersistedFromRaw,
+      }),
+    },
+  };
+}
+
+export async function getOrderAddressHistoryDiagnostic(orderNumber: string) {
+  const normalized = normalizeDiagnosticOrderNumber(orderNumber);
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        {
+          sourceShopifyOrderNumber: {
+            in: [normalized.plain, normalized.hash],
+          },
+        },
+        {
+          sourceShopifyOrderId: normalized.plain,
+        },
+      ],
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      shippingAddress: true,
+      shippingCity: true,
+      shippingDistrict: true,
+      shippingPostcode: true,
+      shippingCountry: true,
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const webhookEvents = await prisma.webhookEvent.findMany({
+    where: {
+      AND: [
+        {
+          topic: {
+            startsWith: 'orders/',
+          },
+        },
+        {
+          OR: [
+            { shopifyOrderId: order.id },
+            { rawPayload: { contains: order.sourceShopifyOrderId } },
+            { rawPayload: { contains: order.sourceShopifyOrderNumber } },
+            { rawPayload: { contains: order.sourceShopifyOrderNumber.replace(/^#/, '') } },
+          ],
+        },
+      ],
+    },
+    orderBy: [
+      {
+        receivedAt: 'asc',
+      },
+    ],
+    select: {
+      id: true,
+      topic: true,
+      receivedAt: true,
+      processedAt: true,
+      shopifyOrderId: true,
+      rawPayload: true,
+    },
+  });
+
+  const timeline = webhookEvents
+    .filter((event) => isOrderAddressHistoryTopic(event.topic))
+    .map((event) => {
+      const payload = parseDiagnosticPayload(event.rawPayload);
+      const shippingAddress = readDiagnosticRecord(payload?.shipping_address);
+      const billingAddress = readDiagnosticRecord(payload?.billing_address);
+      return {
+        webhookEventId: event.id,
+        topic: event.topic,
+        receivedAt: event.receivedAt.toISOString(),
+        processedAt: toIsoString(event.processedAt),
+        linkedToOrder: event.shopifyOrderId === order.id,
+        payloadMatchesOrder: payloadMatchesOrder(payload, order),
+        shipping_address: readSafeAddressHistoryFields(shippingAddress),
+        billing_address: readSafeAddressHistoryFields(billingAddress),
+      };
+    })
+    .filter((event) => event.linkedToOrder || event.payloadMatchesOrder);
+
+  const firstCreate = timeline.find((event) => event.topic === 'orders/create') ?? null;
+  const latestUpdate = [...timeline].reverse().find((event) => event.topic !== 'orders/create') ?? null;
+  const currentPersistedOrder = {
+    shippingAddress: order.shippingAddress,
+    shippingCity: order.shippingCity,
+    shippingDistrict: order.shippingDistrict,
+    shippingPostcode: order.shippingPostcode,
+    shippingCountry: order.shippingCountry,
+  };
+  const addressChangedAfterCreate = Boolean(
+    firstCreate &&
+      latestUpdate &&
+      !addressHistoryFieldsEqual(firstCreate.shipping_address, latestUpdate.shipping_address),
+  );
+  const persistedMatchesLatestWebhook = latestUpdate
+    ? currentPersistedShippingFieldsMatchWebhook(currentPersistedOrder, latestUpdate.shipping_address)
+    : false;
+  const persistedMatchesFirstCreate = firstCreate
+    ? currentPersistedShippingFieldsMatchWebhook(currentPersistedOrder, firstCreate.shipping_address)
+    : false;
+  const ordersUpdatedExists = timeline.some((event) => event.topic === 'orders/updated');
+
+  return {
+    ok: true,
+    orderNumber: order.sourceShopifyOrderNumber,
+    orderId: order.id,
+    shopifyOrderId: order.sourceShopifyOrderId,
+    timeline: timeline.map(({ linkedToOrder, payloadMatchesOrder: _payloadMatchesOrder, ...event }) => event),
+    comparison: {
+      firstCreate: {
+        shipping_address: firstCreate?.shipping_address ?? null,
+      },
+      latestUpdate: {
+        shipping_address: latestUpdate?.shipping_address ?? null,
+      },
+      currentPersistedOrder,
+    },
+    derived: {
+      addressChangedAfterCreate,
+      ordersUpdatedExists,
+      persistedMatchesLatestWebhook,
+      likelyRootCause: deriveAddressHistoryRootCause({
+        firstCreateShipping: firstCreate?.shipping_address ?? null,
+        latestUpdateShipping: latestUpdate?.shipping_address ?? null,
+        ordersUpdatedExists,
+        addressChangedAfterCreate,
+        persistedMatchesLatestWebhook,
+        persistedMatchesFirstCreate,
       }),
     },
   };
