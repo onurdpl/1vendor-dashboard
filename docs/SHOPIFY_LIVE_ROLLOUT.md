@@ -56,6 +56,14 @@ Registration command from repository root:
 npm run shopify:order-webhooks:register
 ```
 
+Render shell alternative:
+
+```http
+POST /admin/shopify/order-webhooks/register
+```
+
+Use this admin-only deployed backend endpoint when Render shell access is unavailable. It uses the same idempotent registration semantics: exact existing subscriptions are reported as existing, missing subscriptions are created, and same-topic callback mismatches are reported without deleting or duplicating subscriptions.
+
 Required env for registration:
 - `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
 - `SHOPIFY_SHOP_DOMAIN`

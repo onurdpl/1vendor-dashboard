@@ -19,6 +19,7 @@ import { registerAutomationActionRoutes } from './modules/automation/automation-
 import { registerFulfillmentRoutes } from './modules/fulfillments/fulfillment.routes.js';
 import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.service.js';
 import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.js';
+import { registerShopifyOrderWebhookRegistrationRoutes } from './modules/shopify/order-webhook-registration.routes.js';
 import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.routes.js';
 import { registerScheduledReconciliationScheduler } from './modules/reconciliation/scheduled-reconciliation.service.js';
@@ -449,6 +450,7 @@ export function createApp() {
   registerIyzicoMarketplaceDiagnosticsRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerOdooDiscoveryProbeRoutes(app);
+  registerShopifyOrderWebhookRegistrationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
   registerScheduledReconciliationScheduler(app, env);
   registerAbandonedApprovedReturnAutoCancelScheduler(app, env);

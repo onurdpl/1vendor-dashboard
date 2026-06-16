@@ -19,6 +19,7 @@ export type AppEnv = {
   SHOPIFY_SHOP_DOMAIN?: string;
   SHOPIFY_ADMIN_ACCESS_TOKEN?: string;
   SHOPIFY_API_VERSION: string;
+  SHOPIFY_ORDER_WEBHOOK_BASE_URL?: string;
   SHOPIFY_MOCK_SELLER_INFO?: string;
   SHOPIFY_MOCK_RETURN_DETAILS?: string;
   SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE?: string;
@@ -377,6 +378,7 @@ export function loadEnv(): AppEnv {
     SHOPIFY_SHOP_DOMAIN: shopifyShopDomain,
     SHOPIFY_ADMIN_ACCESS_TOKEN: shopifyAdminAccessToken,
     SHOPIFY_API_VERSION: shopifyApiVersion,
+    SHOPIFY_ORDER_WEBHOOK_BASE_URL: process.env.SHOPIFY_ORDER_WEBHOOK_BASE_URL?.trim() || undefined,
     SHOPIFY_MOCK_SELLER_INFO: process.env.SHOPIFY_MOCK_SELLER_INFO || undefined,
     SHOPIFY_MOCK_RETURN_DETAILS: process.env.SHOPIFY_MOCK_RETURN_DETAILS || undefined,
     SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE: process.env.SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE || undefined,
