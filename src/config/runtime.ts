@@ -47,6 +47,10 @@ function resolveApiBaseOrigin(apiBaseUrl: string) {
   }
 }
 
+function isPathOnlyApiBaseUrl(apiBaseUrl: string) {
+  return apiBaseUrl.startsWith('/') && !apiBaseUrl.startsWith('//');
+}
+
 function getFrontendOrigin() {
   if (typeof window === 'undefined') {
     return null;
@@ -70,6 +74,7 @@ function getStartupIssues(mode: ApiMode, apiBaseUrl: string, apiBaseOrigin: stri
   if (
     mode === 'real' &&
     isProductionFrontend() &&
+    !isPathOnlyApiBaseUrl(apiBaseUrl) &&
     frontendOrigin &&
     apiBaseOrigin === frontendOrigin
   ) {

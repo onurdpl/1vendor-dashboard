@@ -69,6 +69,21 @@ describe('runtime configuration diagnostics', () => {
     expect(runtimeConfig.startupIssues).toEqual([]);
   });
 
+  it('allows production real mode with a path-only same-origin API proxy base', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig).toMatchObject({
+      apiMode: 'real',
+      apiBaseUrl: '/api',
+      apiBaseOrigin: window.location.origin,
+      startupIssues: [],
+    });
+  });
+
   it('flags production real-mode API configuration that points at the frontend origin', async () => {
     vi.stubEnv('VITE_APP_ENV', 'production');
     vi.stubEnv('VITE_API_MODE', 'real');

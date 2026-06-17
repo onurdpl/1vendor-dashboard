@@ -26,7 +26,7 @@ This checklist is for Render production deploys of the VendorOps frontend and ba
   - provider gates such as `INVOICE_EXECUTION_ENABLED`, `BIZIMHESAP_ENABLED`, `SHIPPING_EXECUTION_ENABLED`, and `KARGO_ENTEGRATOR_ENABLED` only when intentionally live
 - Confirm production frontend variables:
   - `VITE_API_MODE=real`
-  - `VITE_API_BASE_URL=<backend origin>`
+  - `VITE_API_BASE_URL=<backend origin>` for standard cross-origin mode, or `VITE_API_BASE_URL=/api` for the reversible mobile same-origin proxy test
   - optional visibility metadata: `VITE_APP_ENV`, `VITE_APP_VERSION`, `VITE_BUILD_TIMESTAMP`, `VITE_GIT_COMMIT`
 - Production frontend startup fails closed unless `VITE_API_MODE=real`; see `docs/FRONTEND_PRODUCTION_CONFIG.md`.
 
@@ -54,6 +54,10 @@ npm run backend:db:deploy && npm run backend:start
 - Deploy the frontend after the backend is healthy.
 - Confirm SPA fallback remains configured so direct routes such as `/orders`, `/returns/:id`, `/finance`, and `/admin/diagnostics` load the app shell.
 - Confirm `VITE_API_BASE_URL` points to the production backend origin, not localhost.
+- For mobile same-origin auth testing, configure Render Static Site rewrites in this order:
+  - Source `/api/*`, Destination `https://vendor-dashboard-backend-398h.onrender.com/*`, Action `Rewrite`
+  - Source `/*`, Destination `/index.html`, Action `Rewrite`
+  - Do not proxy `/admin/*`; frontend admin routes remain under `/admin/*`, while backend admin APIs use `/api/admin/*`.
 - If auth/session code changed, expect users with old browser sessions to be redirected to login with the expired-session message.
 
 ## Post-Deploy Verification
@@ -104,6 +108,7 @@ Expected safe fields:
 - Roll back backend only after confirming the previous backend can run against the current production schema.
 - Do not roll back a migration by deleting production data. Create a forward fix migration if schema repair is required.
 - If users see unexpected Unauthorized after rollback/deploy, have them sign in again; stale sessions are cleared on backend `401`.
+- To roll back the mobile same-origin proxy test, set `VITE_API_BASE_URL` back to the absolute backend URL, remove the `/api/*` Static Site rewrite, redeploy the frontend, and keep the SPA fallback.
 
 ## Stop Conditions
 

@@ -1,4 +1,4 @@
-import { apiClient, clearCsrfToken, setCsrfToken } from '../lib/api-client';
+import { apiClient, buildApiUrl, clearCsrfToken, setCsrfToken } from '../lib/api-client';
 import { ApiError } from '../lib/api/errors';
 import { runtimeConfig } from '../config/runtime';
 
@@ -51,15 +51,6 @@ export type PublicLoginReadinessResult =
       elapsedMs: number;
       failureStage: 'readiness_timeout' | 'readiness_network_error' | 'readiness_http_error' | 'readiness_parse_error';
     };
-
-function buildApiUrl(path: string) {
-  const normalizedBase = runtimeConfig.apiBaseUrl.endsWith('/')
-    ? runtimeConfig.apiBaseUrl.slice(0, -1)
-    : runtimeConfig.apiBaseUrl;
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-
-  return `${normalizedBase}${normalizedPath}`;
-}
 
 function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';

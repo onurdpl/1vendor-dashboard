@@ -26,15 +26,13 @@ export function clearCsrfToken() {
   csrfToken = null;
 }
 
-function buildUrl(path: string) {
+export function buildApiUrl(path: string) {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
 
-  const normalizedBase = runtimeConfig.apiBaseUrl.endsWith('/')
-    ? runtimeConfig.apiBaseUrl.slice(0, -1)
-    : runtimeConfig.apiBaseUrl;
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const normalizedBase = runtimeConfig.apiBaseUrl.replace(/\/+$/, '');
+  const normalizedPath = `/${path.replace(/^\/+/, '')}`;
 
   return `${normalizedBase}${normalizedPath}`;
 }
@@ -121,7 +119,7 @@ async function fetchCsrfToken(signal?: AbortSignal) {
   let response: Response;
 
   try {
-    response = await fetch(buildUrl('/auth/csrf'), {
+    response = await fetch(buildApiUrl('/auth/csrf'), {
       method: 'GET',
       credentials: getRequestCredentials(),
       signal,
@@ -281,7 +279,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
 
   try {
     await attachCsrfHeaderIfNeeded(method, path, headers, options.signal);
-    const response = await fetch(buildUrl(path), {
+    const response = await fetch(buildApiUrl(path), {
       method,
       headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,

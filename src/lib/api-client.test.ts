@@ -37,6 +37,7 @@ describe('apiClient vendor-scoped headers', () => {
   it('sends the explicit selected vendor header with admin requests', async () => {
     await apiClient.get('/orders', { vendorId: 'demo-vendor-b' });
 
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/orders');
     const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
     const headers = init.headers as Headers;
 
@@ -177,6 +178,77 @@ describe('apiClient real-mode cookie auth', () => {
     expect(headers.get('Authorization')).toBeNull();
     expect(headers.get('X-CSRF-Token')).toBe('csrf-from-cookie-session');
     expect(window.localStorage.getItem('vendor-dashboard.session-token')).toBe('stale-local-token');
+  });
+
+  it('builds same-origin /api URLs for auth, admin, and returns requests in real mode', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    window.localStorage.clear();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: 'csrf-from-cookie-session' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        user: {
+          email: 'admin@demo.com',
+          name: 'Demo Admin',
+          role: 'admin',
+          vendorAccess: [],
+        },
+        csrfToken: 'csrf-from-cookie-session',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        user: {
+          email: 'admin@demo.com',
+          name: 'Demo Admin',
+          role: 'admin',
+          vendorAccess: [],
+        },
+        csrfToken: 'csrf-from-cookie-session',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: sameOriginApiClient, buildApiUrl } = await import('./api-client');
+
+    expect(buildApiUrl('/auth/me')).toBe('/api/auth/me');
+    expect(buildApiUrl('auth/login')).toBe('/api/auth/login');
+    expect(buildApiUrl('/admin/operations/summary')).toBe('/api/admin/operations/summary');
+    expect(buildApiUrl('/returns?workflow=pending-review')).toBe('/api/returns?workflow=pending-review');
+
+    await sameOriginApiClient.post('/returns/return-1/review', { decision: 'approved' });
+    await sameOriginApiClient.post('/auth/login', { email: 'admin@demo.com', password: 'demo123' }, {
+      skipVendorContext: true,
+    });
+    await sameOriginApiClient.get('/auth/me', { vendorId: null });
+    await sameOriginApiClient.get('/admin/operations/summary');
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/auth/csrf',
+      '/api/returns/return-1/review',
+      '/api/auth/login',
+      '/api/auth/me',
+      '/api/admin/operations/summary',
+    ]);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe('include');
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).credentials).toBe('include');
   });
 
   it('sends login to the configured backend origin with credentials included', async () => {
