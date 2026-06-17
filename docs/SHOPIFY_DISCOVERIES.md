@@ -30,6 +30,13 @@
 - If operational uncertainty remains, ask Shopify AI before implementation.
 - Do not invent Shopify behavior.
 
+## Turkey Address2 District Split
+- Shopify Support confirmed that Turkey checkout neighborhood/district (`İlçe`) is not exposed as a separate Order API, webhook, or GraphQL field.
+- Shopify merges the address line 2 value and neighborhood/district into `address2` using its reserved Unicode delimiter.
+- Sporgym uses Shopify's official `@shopify/worldwide` `splitAddress2()` behavior only for Kargonomi outbound destination resolution.
+- This split is not persisted back to `ShopifyOrder`, does not change Shopify ingestion storage, and does not change vendor-facing order APIs or UI display.
+- If `splitAddress2()` cannot identify a neighborhood/district, Sporgym must not guess by parsing apartment or free-text address content.
+
 ## Order Vendor Mapping
 - `orders/create` webhook payload does not include metafields.
 - Order metafield `custom.seller_info` must be fetched separately through Shopify Admin API.

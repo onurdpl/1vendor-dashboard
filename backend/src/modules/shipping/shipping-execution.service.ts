@@ -26,6 +26,7 @@ import {
 } from './navlungo-provider.adapter.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
+import { splitShopifyWorldwideAddress2 } from '../shopify/shopify-worldwide-address.service.js';
 import { createFulfillmentService } from '../fulfillments/fulfillment.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type { ProbeShopifyReturnLabelUploadResult } from '../shopify/shopify-admin.types.js';
@@ -1668,6 +1669,32 @@ function readStoredOrderWebhookAddress(orderRecord: Record<string, unknown>) {
   return null;
 }
 
+function readStoredOrderWebhookShippingAddressRecord(orderRecord: Record<string, unknown>) {
+  const events = Array.isArray(orderRecord.webhookEvents) ? orderRecord.webhookEvents : [];
+  for (const event of events) {
+    if (!isRecord(event)) {
+      continue;
+    }
+
+    const rawPayload = readString(event, ['rawPayload']);
+    if (!rawPayload) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+      const shippingAddress = readNestedRecord(payload, 'shipping_address');
+      if (shippingAddress) {
+        return shippingAddress;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function normalizeKargonomiDestinationValue(value: string | null | undefined) {
   return value
     ?.replace(/[,\.;:_-]+/g, ' ')
@@ -2212,38 +2239,134 @@ function buildNavlungoReturnPickupPayload(input: {
   };
 }
 
+type KargonomiDistrictResolutionSource = 'exact' | 'shopify_worldwide_split' | 'unresolved';
+
+function readKargonomiDestinationCountryCode(input: {
+  orderRecord: Record<string, unknown>;
+  webhookAddress: ReturnType<typeof readStoredOrderWebhookAddress>;
+  webhookShippingAddress: Record<string, unknown> | null;
+}) {
+  return (
+    readString(input.orderRecord, ['shippingCountry', 'country', 'countryCode', 'country_code']) ??
+    input.webhookAddress?.shippingCountry ??
+    readString(input.webhookShippingAddress ?? {}, ['country_code', 'countryCode', 'country'])
+  );
+}
+
+function resolveKargonomiDistrictText(input: {
+  orderRecord: Record<string, unknown>;
+  webhookAddress: ReturnType<typeof readStoredOrderWebhookAddress>;
+  webhookShippingAddress: Record<string, unknown> | null;
+  overrideDistrict?: string | null;
+}): {
+  district: string | null;
+  rawValue: string | null;
+  source: KargonomiDistrictResolutionSource;
+} {
+  if (input.overrideDistrict) {
+    return {
+      district: input.overrideDistrict,
+      rawValue: input.overrideDistrict,
+      source: 'exact',
+    };
+  }
+
+  const countryCode = readKargonomiDestinationCountryCode(input);
+  const explicitWebhookDistrict = readString(input.webhookShippingAddress ?? {}, [
+    'district',
+    'district_name',
+    'districtName',
+    'city_area',
+    'cityArea',
+    'county',
+    'county_name',
+    'countyName',
+  ]);
+  if (explicitWebhookDistrict) {
+    return {
+      district: explicitWebhookDistrict,
+      rawValue: explicitWebhookDistrict,
+      source: 'exact',
+    };
+  }
+
+  const storedDistrict = readString(input.orderRecord, [
+    'shippingDistrict',
+    'district',
+    'shippingCounty',
+    'county',
+    'shippingCityArea',
+    'cityArea',
+    'billingDistrict',
+    'billingCounty',
+    'billingCityArea',
+  ]);
+  const rawAddress2 = readString(input.webhookShippingAddress ?? {}, ['address2']);
+
+  for (const rawValue of [rawAddress2, storedDistrict]) {
+    const split = splitShopifyWorldwideAddress2({ address2: rawValue, countryCode });
+    if (split.splitSource === 'shopify_worldwide' && split.district) {
+      return {
+        district: split.district,
+        rawValue: rawValue ?? null,
+        source: 'shopify_worldwide_split',
+      };
+    }
+  }
+
+  const exactDistrict =
+    storedDistrict ??
+    input.webhookAddress?.shippingDistrict ??
+    readStoredOrderWebhookDistrict(input.orderRecord);
+  if (exactDistrict) {
+    return {
+      district: exactDistrict,
+      rawValue: exactDistrict,
+      source: 'exact',
+    };
+  }
+
+  return {
+    district: null,
+    rawValue: rawAddress2 ?? null,
+    source: 'unresolved',
+  };
+}
+
 function readKargonomiDestinationText(
   order: unknown,
   customerOverrides?: CreateShipmentExecutionDto['customerOverrides'],
 ) {
   const orderRecord = isRecord(order) ? order : {};
   const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const webhookShippingAddress = readStoredOrderWebhookShippingAddressRecord(orderRecord);
   const overrides = normalizeCustomerOverrides(customerOverrides);
   const province =
     readString(orderRecord, ['shippingProvince', 'province', 'shippingState', 'state']) ??
     null;
   const city = overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null;
-  const district =
-    readString(orderRecord, [
-      'shippingDistrict',
-      'district',
-      'shippingCounty',
-      'county',
-      'shippingCityArea',
-      'cityArea',
-      'billingDistrict',
-      'billingCounty',
-      'billingCityArea',
-    ]) ??
-    webhookAddress?.shippingDistrict ??
-    readStoredOrderWebhookDistrict(orderRecord) ??
-    overrides.district ??
-    null;
+  const districtResolution = resolveKargonomiDistrictText({
+    orderRecord,
+    webhookAddress,
+    webhookShippingAddress,
+    overrideDistrict: overrides.district ?? null,
+  });
 
   return {
     province,
     city,
-    district,
+    district: districtResolution.district,
+    districtRawValue: districtResolution.rawValue,
+    districtResolvedValue: districtResolution.district,
+    districtResolutionSource: districtResolution.source,
+  };
+}
+
+function buildKargonomiDistrictResolutionDiagnostics(destination: ReturnType<typeof readKargonomiDestinationText>) {
+  return {
+    districtRawValue: destination.districtRawValue,
+    districtResolvedValue: destination.districtResolvedValue,
+    districtResolutionSource: destination.districtResolutionSource,
   };
 }
 
@@ -6599,6 +6722,7 @@ async function buildShipmentRequestPreview(
       kargonomiDestinationResolution = {
         source: 'order_destination_validation',
         resolved: false,
+        ...buildKargonomiDistrictResolutionDiagnostics(destinationValidity.destination),
         invalidOrderDestination: true,
         skippedReason: 'invalid_order_destination',
         missingFields: destinationValidity.missingFields,
@@ -6627,6 +6751,7 @@ async function buildShipmentRequestPreview(
 
     if (destinationClient) {
       const destination = readKargonomiDestinationText(allocation.order, input.customerOverrides);
+      const districtDiagnostics = buildKargonomiDistrictResolutionDiagnostics(destination);
       const resolution = await resolveKargonomiDestinationAddress(destination, destinationClient);
       if (resolution.ok) {
         resolvedKargonomiDestination = {
@@ -6636,6 +6761,7 @@ async function buildShipmentRequestPreview(
         kargonomiDestinationResolution = {
           source: 'order_shipping_address_lookup',
           resolved: true,
+          ...districtDiagnostics,
           stateSource: resolution.stateSource,
           citySource: resolution.citySource,
           buyerStateIdPresent: true,
@@ -6645,6 +6771,7 @@ async function buildShipmentRequestPreview(
         kargonomiDestinationResolution = {
           source: fallbackStateId && fallbackCityId ? 'fallback_metadata_after_lookup_failure' : 'order_shipping_address_lookup',
           resolved: false,
+          ...districtDiagnostics,
           reason: resolution.reason,
           buyerStateIdPresent: Boolean(fallbackStateId),
           buyerCityIdPresent: Boolean(fallbackCityId),
@@ -6666,9 +6793,11 @@ async function buildShipmentRequestPreview(
         }
       }
     } else if (!fallbackStateId || !fallbackCityId) {
+      const destination = readKargonomiDestinationText(allocation.order, input.customerOverrides);
       kargonomiDestinationResolution = {
         source: 'unavailable_lookup',
         resolved: false,
+        ...buildKargonomiDistrictResolutionDiagnostics(destination),
         reason: 'lookup_client_unavailable',
         buyerStateIdPresent: Boolean(fallbackStateId),
         buyerCityIdPresent: Boolean(fallbackCityId),
@@ -6686,9 +6815,11 @@ async function buildShipmentRequestPreview(
           .join('\n'),
       );
     } else {
+      const destination = readKargonomiDestinationText(allocation.order, input.customerOverrides);
       kargonomiDestinationResolution = {
         source: 'fallback_metadata',
         resolved: false,
+        ...buildKargonomiDistrictResolutionDiagnostics(destination),
         reason: 'lookup_client_unavailable',
         buyerStateIdPresent: true,
         buyerCityIdPresent: true,
@@ -6818,6 +6949,7 @@ async function buildShipmentRequestPreview(
           buyer: kargonomiBuyer.buyer,
           destinationResolution: kargonomiDestinationResolution ?? {
             source: hasKargonomiOrderDestinationIds(allocation.order) ? 'order_stored_ids' : 'fallback_metadata',
+            ...buildKargonomiDistrictResolutionDiagnostics(readKargonomiDestinationText(allocation.order, input.customerOverrides)),
             buyerStateIdPresent: Boolean(kargonomiBuyer.buyer.buyer_state_id),
             buyerCityIdPresent: Boolean(kargonomiBuyer.buyer.buyer_city_id),
           },
