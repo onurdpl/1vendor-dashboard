@@ -786,16 +786,96 @@ export async function getOrderDistrictReadinessDiagnostic(orderNumber: string) {
 
 type AddressPersistenceComparison = 'yes' | 'no' | 'unknown';
 
+const SAFE_ADDRESS_VALUE_KEYS = [
+  'district',
+  'district_name',
+  'districtName',
+  'city_area',
+  'cityArea',
+  'county',
+  'county_name',
+  'countyName',
+  'province',
+  'province_name',
+  'provinceName',
+  'province_code',
+  'provinceCode',
+  'address',
+  'address1',
+  'address2',
+  'company',
+  'city',
+  'zip',
+  'postcode',
+  'country',
+  'country_code',
+  'countryCode',
+] as const;
+
+const SAFE_ADDRESS_PRESENCE_KEYS = [
+  'latitude',
+  'longitude',
+  'lat',
+  'lng',
+] as const;
+
+function readAddressObjectKeys(address: Record<string, unknown> | null) {
+  return address ? Object.keys(address).sort() : [];
+}
+
+function readSafeAddressValueMap(address: Record<string, unknown> | null) {
+  return Object.fromEntries(
+    SAFE_ADDRESS_VALUE_KEYS.map((key) => [key, readDiagnosticString(address, [key])]),
+  );
+}
+
+function readSafeAddressPresenceMap(address: Record<string, unknown> | null) {
+  return Object.fromEntries(
+    SAFE_ADDRESS_PRESENCE_KEYS.map((key) => [key, address ? address[key] !== undefined && address[key] !== null : false]),
+  );
+}
+
+function readSafeLocalizedOrCustomAddressFields(address: Record<string, unknown> | null) {
+  if (!address) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(address)
+      .filter(([key]) => /locali[sz]ed|custom/i.test(key))
+      .map(([key, value]) => {
+        if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+          return [key, value];
+        }
+
+        if (Array.isArray(value)) {
+          return [key, { present: true, type: 'array', length: value.length }];
+        }
+
+        if (typeof value === 'object') {
+          return [key, { present: true, type: 'object', keys: Object.keys(value as Record<string, unknown>).sort() }];
+        }
+
+        return [key, { present: true, type: typeof value }];
+      }),
+  );
+}
+
 function readSafeAddressFields(address: Record<string, unknown> | null) {
   return {
+    keys: readAddressObjectKeys(address),
+    ...readSafeAddressValueMap(address),
     address1: readDiagnosticString(address, ['address1']),
     address2: readDiagnosticString(address, ['address2']),
     city: readDiagnosticString(address, ['city']),
     province: readDiagnosticString(address, ['province', 'province_name', 'provinceName']),
+    province_code: readDiagnosticString(address, ['province_code', 'provinceCode']),
     zip: readDiagnosticString(address, ['zip', 'postcode']),
     country: readDiagnosticString(address, ['country']),
     country_code: readDiagnosticString(address, ['country_code', 'countryCode']),
     company: readDiagnosticString(address, ['company']),
+    coordinatePresence: readSafeAddressPresenceMap(address),
+    localizedOrCustomFields: readSafeLocalizedOrCustomAddressFields(address),
     phonePresent: Boolean(readDiagnosticString(address, ['phone'])),
   };
 }
@@ -927,12 +1007,18 @@ function deriveAddressPersistenceRootCause(input: {
 
 function readSafeAddressHistoryFields(address: Record<string, unknown> | null) {
   return {
+    keys: readAddressObjectKeys(address),
+    ...readSafeAddressValueMap(address),
     address1: readDiagnosticString(address, ['address1']),
     address2: readDiagnosticString(address, ['address2']),
     city: readDiagnosticString(address, ['city']),
     province: readDiagnosticString(address, ['province', 'province_name', 'provinceName']),
+    province_code: readDiagnosticString(address, ['province_code', 'provinceCode']),
     zip: readDiagnosticString(address, ['zip', 'postcode']),
     country: readDiagnosticString(address, ['country']),
+    country_code: readDiagnosticString(address, ['country_code', 'countryCode']),
+    coordinatePresence: readSafeAddressPresenceMap(address),
+    localizedOrCustomFields: readSafeLocalizedOrCustomAddressFields(address),
   };
 }
 
@@ -943,9 +1029,13 @@ function addressHistoryFieldsEqual(left: SafeAddressHistoryFields | null, right:
     return false;
   }
 
-  return (Object.keys(left) as Array<keyof SafeAddressHistoryFields>).every((key) => {
-    const leftValue = left[key]?.trim() || null;
-    const rightValue = right[key]?.trim() || null;
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  return SAFE_ADDRESS_VALUE_KEYS.every((key) => {
+    const leftRaw = leftRecord[key];
+    const rightRaw = rightRecord[key];
+    const leftValue = typeof leftRaw === 'string' ? leftRaw.trim() || null : leftRaw ?? null;
+    const rightValue = typeof rightRaw === 'string' ? rightRaw.trim() || null : rightRaw ?? null;
     return leftValue === rightValue;
   });
 }

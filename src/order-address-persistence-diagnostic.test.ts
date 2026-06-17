@@ -552,6 +552,84 @@ describe('order address history diagnostic', () => {
     expect(JSON.stringify(diagnostic)).not.toContain('+90 555');
   });
 
+  it('exposes safe raw address keys and exact district candidate values in address history', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder());
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([
+      buildWebhookEvent({
+        rawPayload: buildRawPayload({
+          shipping_address: {
+            address1: 'İncirağacı Sokak no 6b',
+            address2: 'Daire 4',
+            districtName: 'Kartal',
+            cityArea: null,
+            county: null,
+            city: 'İstanbul',
+            province: 'İstanbul',
+            province_code: '34',
+            zip: '34870',
+            country: 'Türkiye',
+            country_code: 'TR',
+            company: null,
+            latitude: 40.9,
+            longitude: 29.2,
+            phone: '+90 555 777 88 99',
+            localizedFields: {
+              district: 'Kartal',
+            },
+          },
+          billing_address: {
+            address1: 'Billing Sokak',
+            address2: 'Kat 2',
+            district_name: 'Maltepe',
+            city: 'İstanbul',
+            province: 'İstanbul',
+            country: 'Türkiye',
+            country_code: 'TR',
+            phone: '+90 555 000 00 00',
+          },
+        }),
+      }),
+    ]);
+
+    const diagnostic = await getOrderAddressHistoryDiagnostic('1080');
+
+    expect(diagnostic).toMatchObject({
+      timeline: [
+        {
+          shipping_address: {
+            keys: expect.arrayContaining(['address1', 'address2', 'districtName', 'latitude', 'longitude', 'localizedFields']),
+            address1: 'İncirağacı Sokak no 6b',
+            address2: 'Daire 4',
+            districtName: 'Kartal',
+            cityArea: null,
+            county: null,
+            city: 'İstanbul',
+            province: 'İstanbul',
+            province_code: '34',
+            zip: '34870',
+            country: 'Türkiye',
+            country_code: 'TR',
+            coordinatePresence: {
+              latitude: true,
+              longitude: true,
+            },
+            localizedOrCustomFields: {
+              localizedFields: {
+                present: true,
+                type: 'object',
+                keys: ['district'],
+              },
+            },
+          },
+          billing_address: {
+            district_name: 'Maltepe',
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('+90 555');
+  });
+
   it('detects create plus orders/updated address change as update_ignored when persisted still matches create', async () => {
     prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(buildOrder({
       shippingAddress: 'NA, NA NA',

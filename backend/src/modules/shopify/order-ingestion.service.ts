@@ -52,6 +52,34 @@ function readTurkeyAddress2District(address: { address2?: string | null; country
   return isTurkeyAddress(address) ? readAddressString(address?.address2) : null;
 }
 
+function readShopifyAddressDistrict(address: {
+  district?: string | null;
+  district_name?: string | null;
+  districtName?: string | null;
+  city_area?: string | null;
+  cityArea?: string | null;
+  county?: string | null;
+  county_name?: string | null;
+  countyName?: string | null;
+  address2?: string | null;
+  province?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+} | null | undefined) {
+  return (
+    readAddressString(address?.district) ??
+    readAddressString(address?.district_name) ??
+    readAddressString(address?.districtName) ??
+    readAddressString(address?.city_area) ??
+    readAddressString(address?.cityArea) ??
+    readAddressString(address?.county) ??
+    readAddressString(address?.county_name) ??
+    readAddressString(address?.countyName) ??
+    readTurkeyAddress2District(address) ??
+    readAddressString(address?.province)
+  );
+}
+
 function toMoneyString(value: string | number | null | undefined) {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -113,12 +141,7 @@ export function mapShopifyShippingAddress(payload: ShopifyOrdersCreateWebhookPay
     shippingCountry: readAddressString(address?.country_code) ?? readAddressString(address?.country),
     shippingPostcode: readAddressString(address?.zip) ?? readAddressString(address?.postcode),
     shippingCity: readAddressString(address?.city),
-    shippingDistrict:
-      readAddressString(address?.district) ??
-      readAddressString(address?.district_name) ??
-      readAddressString(address?.city_area) ??
-      readTurkeyAddress2District(address) ??
-      readAddressString(address?.province),
+    shippingDistrict: readShopifyAddressDistrict(address),
     shippingAddress: composeShopifyShippingAddress(address),
   };
 }
@@ -142,13 +165,7 @@ export function mapShopifyBillingAddress(payload: ShopifyOrdersCreateWebhookPayl
     billingCompany: readAddressString(address?.company),
     billingPhone: normalizeShopifyShipmentPhone(address?.phone),
     billingCity: readAddressString(address?.city),
-    billingDistrict:
-      readAddressString(address?.district) ??
-      readAddressString(address?.district_name) ??
-      readAddressString(address?.city_area) ??
-      readAddressString(address?.county) ??
-      readTurkeyAddress2District(address) ??
-      readAddressString(address?.province),
+    billingDistrict: readShopifyAddressDistrict(address),
     billingAddress1: readAddressString(address?.address1),
     billingAddress2: readAddressString(address?.address2),
     billingPostcode: readAddressString(address?.zip) ?? readAddressString(address?.postcode),

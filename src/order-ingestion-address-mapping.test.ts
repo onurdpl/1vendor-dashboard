@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mapShopifyBillingAddress,
   mapShopifyShippingAddress,
   normalizeShopifyShipmentPhone,
 } from '../backend/src/modules/shopify/order-ingestion.service.js';
@@ -59,6 +60,65 @@ describe('Shopify order shipping address mapping', () => {
       }),
     ).toMatchObject({
       shippingDistrict: 'Besiktas',
+    });
+  });
+
+  it('maps exact Shopify district aliases before address2 fallback', () => {
+    const mapped = mapShopifyShippingAddress({
+      id: 1081,
+      name: '#1081',
+      shipping_address: {
+        country_code: 'TR',
+        city: 'İstanbul',
+        districtName: 'Kartal',
+        address1: 'İncirağacı Sokak no 6b',
+        address2: 'Daire 4',
+      },
+      line_items: [],
+    });
+
+    expect(mapped).toMatchObject({
+      shippingDistrict: 'Kartal',
+      shippingAddress: 'İncirağacı Sokak no 6b, Daire 4',
+    });
+  });
+
+  it('keeps Turkey address2 fallback only when exact district fields are absent', () => {
+    expect(
+      mapShopifyShippingAddress({
+        id: 1082,
+        name: '#1082',
+        shipping_address: {
+          country: 'Türkiye',
+          city: 'İstanbul',
+          address1: 'İncirağacı Sokak',
+          address2: '6B Kartal',
+        },
+        line_items: [],
+      }),
+    ).toMatchObject({
+      shippingDistrict: '6B Kartal',
+      shippingAddress: 'İncirağacı Sokak, 6B Kartal',
+    });
+  });
+
+  it('maps billing district from the same exact district aliases', () => {
+    const mapped = mapShopifyBillingAddress({
+      id: 1083,
+      name: '#1083',
+      billing_address: {
+        city: 'İstanbul',
+        cityArea: 'Kartal',
+        address1: 'Billing Sokak',
+        address2: 'Kat 2',
+      },
+      line_items: [],
+    });
+
+    expect(mapped).toMatchObject({
+      billingDistrict: 'Kartal',
+      billingAddress1: 'Billing Sokak',
+      billingAddress2: 'Kat 2',
     });
   });
 
