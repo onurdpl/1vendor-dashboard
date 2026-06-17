@@ -156,14 +156,32 @@ function formatBillingAddress(address: NonNullable<OrderDetail['orderSnapshot']>
   ].filter((part) => part?.trim()).join(' · ') || '—';
 }
 
+function normalizeShippingAddressSegment(value: string | null | undefined) {
+  return value?.trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ') ?? '';
+}
+
+function shippingAddressContainsDistrictSegment(address: string | null | undefined, district: string | null | undefined) {
+  const normalizedDistrict = normalizeShippingAddressSegment(district);
+  if (!normalizedDistrict) {
+    return false;
+  }
+
+  return (address ?? '')
+    .split(/[,\n·]+/)
+    .map((part) => normalizeShippingAddressSegment(part))
+    .some((part) => part === normalizedDistrict);
+}
+
 function formatShippingAddress(address: NonNullable<OrderDetail['orderSnapshot']>['shippingAddress'] | null | undefined) {
   if (!address) {
     return '—';
   }
 
+  const district = shippingAddressContainsDistrictSegment(address.address, address.district) ? null : address.district;
+
   return [
     address.address,
-    address.district,
+    district,
     address.city,
     address.postcode,
     address.country,

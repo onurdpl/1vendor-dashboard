@@ -1261,6 +1261,104 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/rawPayload/i)).not.toBeInTheDocument();
   });
 
+  it('renders duplicate shipping district only once when the address already contains it as a segment', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot,
+        shippingAddress: {
+          address: 'Çınar Mahallesi Orhan Sokak 1/3, Maltepe',
+          city: 'İstanbul',
+          district: 'Maltepe',
+          postcode: '34841',
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    const shippingAddressRow = screen.getByText('Shipping address').closest('div');
+    expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3, Maltepe · İstanbul · 34841 · TR');
+    expect(shippingAddressRow).not.toHaveTextContent('Maltepe · Maltepe');
+    expect((shippingAddressRow?.textContent?.match(/Maltepe/g) ?? []).length).toBe(1);
+  });
+
+  it('renders shipping district when it is absent from the composed address', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot,
+        shippingAddress: {
+          address: 'Çınar Mahallesi Orhan Sokak 1/3/1',
+          city: 'İstanbul',
+          district: 'Maltepe',
+          postcode: '34841',
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    const shippingAddressRow = screen.getByText('Shipping address').closest('div');
+    expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3/1 · Maltepe · İstanbul · 34841 · TR');
+  });
+
+  it('keeps shipping address display unchanged when district is null', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot,
+        shippingAddress: {
+          address: 'Çınar Mahallesi Orhan Sokak 1/3/1',
+          city: 'İstanbul',
+          district: null,
+          postcode: '34841',
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    const shippingAddressRow = screen.getByText('Shipping address').closest('div');
+    expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3/1 · İstanbul · 34841 · TR');
+  });
+
   it('warns when persisted shipping address is invalid for Kargonomi destination', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
