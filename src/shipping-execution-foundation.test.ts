@@ -1196,6 +1196,203 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('uses corrected persisted shipping fields when stale orders/create webhook address is invalid', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1080',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress: 'Çınar Mahallesi Orhan Sokak 1/3, Maltepe',
+          shippingCity: 'İstanbul',
+          shippingDistrict: 'Maltepe',
+          shippingPostcode: '34841',
+          shippingCountry: 'TR',
+          webhookEvents: [
+            {
+              rawPayload: JSON.stringify({
+                shipping_address: {
+                  address1: 'NA',
+                  address2: 'NA NA',
+                  city: 'NA',
+                  zip: null,
+                  country: 'Türkiye',
+                },
+              }),
+            },
+          ],
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'kg-1080',
+      trackingNumber: 'KG-TRACK-1080',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+    const kargonomiDestinationClient = {
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 828, name: 'Maltepe' }] },
+      }),
+    };
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient,
+      },
+    );
+
+    expect(kargonomiDestinationClient.listStates).toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listCities).toHaveBeenCalledWith('34');
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kargonomi',
+        requestSnapshot: expect.objectContaining({
+          buyer: expect.objectContaining({
+            buyer_address: 'Çınar Mahallesi Orhan Sokak 1/3, Maltepe',
+            buyer_state_id: '34',
+            buyer_city_id: '828',
+          }),
+          destinationResolution: expect.objectContaining({
+            source: 'order_shipping_address_lookup',
+            resolved: true,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('reports unresolved corrected Kargonomi destination lookup separately from invalid destination guard', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1080',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress: 'Çınar Mahallesi Orhan Sokak 1/3, Maltepe',
+          shippingCity: 'İstanbul',
+          shippingDistrict: 'Maltepe',
+          shippingPostcode: '34841',
+          shippingCountry: 'TR',
+          webhookEvents: [
+            {
+              rawPayload: JSON.stringify({
+                shipping_address: {
+                  address1: 'NA',
+                  address2: 'NA NA',
+                  city: 'NA',
+                  zip: null,
+                  country: 'Türkiye',
+                },
+              }),
+            },
+          ],
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    const unresolvedLookup = createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient: {
+          listStates: vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            contentType: 'application/json',
+            body: { data: [{ id: 34, name: 'İstanbul' }] },
+          }),
+          listCities: vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            contentType: 'application/json',
+            body: { data: [{ id: 828, name: 'Kadıköy' }] },
+          }),
+        },
+      },
+    );
+
+    let error: unknown;
+    try {
+      await unresolvedLookup;
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : '';
+    expect(message).toContain('Kargonomi destination could not be resolved from the order shipping address.');
+    expect(message).not.toContain('invalid_order_destination');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
   it('uses shipment-only district override for Kargonomi destination resolution', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
