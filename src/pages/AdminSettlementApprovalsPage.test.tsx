@@ -405,6 +405,64 @@ const draftApproval: SettlementApproval = {
   lines: previewResponse.lines,
 };
 
+const draftApprovalWithTwoLines: SettlementApproval = {
+  ...draftApproval,
+  id: 'approval-1',
+  grossSalesMinor: 759800,
+  refundTotalMinor: 0,
+  commissionMinor: 103940,
+  commissionVatMinor: 20788,
+  netPayableMinor: 623036,
+  sourceSnapshotJson: {
+    eligibleRowCount: 2,
+    candidateScope: 'vendor_wide',
+  },
+  lines: [
+    {
+      id: 'line-1081-a',
+      financeLedgerEntryId: 'fle-sale-1081-a',
+      lineType: 'SALE',
+      amountMinor: 379900,
+      commissionMinor: 51970,
+      commissionVatMinor: 10394,
+      payableImpactMinor: 311518,
+      sourceSnapshotJson: {
+        financeLedgerEntryId: 'fle-sale-1081-a',
+        vendorAllocationId: 'alloc-yalispor-1081-a',
+        sourceShopifyOrderId: 'shopify-order-1081',
+        sourceShopifyOrderNumber: '#1081',
+        settlementStatus: 'ACCRUING',
+        resolvedSettlementStatus: 'PAYABLE',
+      },
+      storedSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'PAYABLE',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+    },
+    {
+      id: 'line-1081-b',
+      financeLedgerEntryId: 'fle-sale-1081-b',
+      lineType: 'SALE',
+      amountMinor: 379900,
+      commissionMinor: 51970,
+      commissionVatMinor: 10394,
+      payableImpactMinor: 311518,
+      sourceSnapshotJson: {
+        financeLedgerEntryId: 'fle-sale-1081-b',
+        vendorAllocationId: 'alloc-yalispor-1081-b',
+        sourceShopifyOrderId: 'shopify-order-1081',
+        sourceShopifyOrderNumber: '#1081',
+        settlementStatus: 'ACCRUING',
+        resolvedSettlementStatus: 'PAYABLE',
+      },
+      storedSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'PAYABLE',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Derived payable because fulfillment evidence exists.',
+    },
+  ],
+};
+
 const approvedApproval: SettlementApproval = {
   ...draftApproval,
   status: 'approved',
@@ -441,10 +499,10 @@ const recentApprovalsResponse: SettlementApprovalListResponse = {
       vendorId: 'yalispor',
       status: 'draft',
       currency: 'TRY',
-      grossSalesMinor: 120000,
-      netPayableMinor: 95600,
+      grossSalesMinor: 759800,
+      netPayableMinor: 623036,
       approvedAt: null,
-      lineCount: 1,
+      lineCount: 2,
     },
   ],
 };
@@ -874,6 +932,34 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Next: Load Audit Snapshot.')).toBeInTheDocument();
   });
 
+  it('opens a draft approval with snapshot totals and lines after an empty preview', async () => {
+    previewSettlementApprovalMock.mockResolvedValueOnce(lockedRowsPreviewResponse);
+    getSettlementApprovalMock.mockResolvedValueOnce(draftApprovalWithTwoLines);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await waitFor(() => expect(screen.getByText('No eligible rows remain because rows are already locked in an active settlement approval.')).toBeInTheDocument());
+    expect(screen.getAllByText('EMPTY').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Open' })[1]);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-1');
+
+    const executiveSummary = screen.getByLabelText('Settlement executive summary');
+    expect(within(executiveSummary).getByText('SNAPSHOT')).toBeInTheDocument();
+    expect(within(executiveSummary).getByText('TRY 7,598.00')).toBeInTheDocument();
+    expect(within(executiveSummary).getByText('TRY 6,230.36')).toBeInTheDocument();
+    expect(within(executiveSummary).queryByText('EMPTY')).not.toBeInTheDocument();
+    expect(screen.queryByText('No eligible rows remain because rows are already locked in an active settlement approval.')).not.toBeInTheDocument();
+
+    expect(screen.getByRole('heading', { name: 'Approval snapshot totals' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
+    expect(screen.getAllByText('#1081').length).toBeGreaterThan(0);
+    expect(screen.getByText('fle-sale-1081-a')).toBeInTheDocument();
+    expect(screen.getByText(/Allocation alloc-yalispor-1081-a/)).toBeInTheDocument();
+  });
+
   it('loads settlement preview totals and sample lines', async () => {
     renderPage();
 
@@ -1247,6 +1333,12 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText('No eligible rows remain because rows are already locked in an active settlement approval.')).toBeInTheDocument();
     expect(screen.getAllByText('12').length).toBeGreaterThan(0);
+    const executiveSummary = screen.getByLabelText('Settlement executive summary');
+    expect(within(executiveSummary).getByText('SNAPSHOT')).toBeInTheDocument();
+    expect(within(executiveSummary).getByText('TRY 1,200.00')).toBeInTheDocument();
+    expect(within(executiveSummary).getByText('TRY 956.00')).toBeInTheDocument();
+    expect(within(executiveSummary).queryByText('EMPTY')).not.toBeInTheDocument();
+    expect(screen.getByText('Current candidate preview is separate from the loaded approval snapshot.')).toBeInTheDocument();
     expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-1');
     await userEvent.click(screen.getByRole('tab', { name: 'Audit' }));
     expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument();

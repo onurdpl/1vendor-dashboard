@@ -12308,6 +12308,33 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: minmax(150px, 1.4fr) repeat(5, minmax(86px, 1fr));
 }
 
+.settlement-approval-lines-section,
+.settlement-current-preview-section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settlement-approval-lines-section h3,
+.settlement-current-preview-section h3 {
+  margin: 0;
+}
+
+.settlement-approval-lines-table .op-table-head,
+.settlement-approval-lines-table .op-table-row {
+  grid-template-columns:
+    minmax(150px, 1.4fr)
+    minmax(150px, 1.3fr)
+    minmax(70px, 0.6fr)
+    repeat(4, minmax(86px, 0.8fr))
+    minmax(120px, 1fr);
+}
+
+.settlement-approval-lines-table small {
+  display: block;
+  color: var(--op-muted);
+  overflow-wrap: anywhere;
+}
+
 .settlement-approvals-table .op-table-head,
 .settlement-approvals-table .op-table-row {
   grid-template-columns:

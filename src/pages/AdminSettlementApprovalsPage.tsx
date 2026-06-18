@@ -55,7 +55,7 @@ type WorkflowStep = {
   details: Array<{ label: string; value: unknown }>;
 };
 
-type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED' | 'NOT READY' | 'EMPTY' | 'NO MATCH';
+type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED' | 'NOT READY' | 'EMPTY' | 'NO MATCH' | 'SNAPSHOT';
 type CandidateScopeMode = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
 type WorkspaceTab = 'audit' | 'logo' | 'invoices' | 'history';
 
@@ -138,6 +138,38 @@ function readString(value: unknown) {
   return typeof value === 'string' ? value : null;
 }
 
+function readSnapshotString(line: SettlementApprovalLine, key: string) {
+  const value = readRecord(line.sourceSnapshotJson)[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return null;
+}
+
+function getApprovalLineOrderLabel(line: SettlementApprovalLine) {
+  return (
+    readSnapshotString(line, 'sourceShopifyOrderNumber') ??
+    readSnapshotString(line, 'sourceShopifyOrderId') ??
+    'Unknown order'
+  );
+}
+
+function getApprovalLineStatus(line: SettlementApprovalLine) {
+  return {
+    stored:
+      line.storedSettlementStatus ??
+      readSnapshotString(line, 'storedSettlementStatus') ??
+      readSnapshotString(line, 'settlementStatus'),
+    derived:
+      line.derivedSettlementStatus ??
+      readSnapshotString(line, 'derivedSettlementStatus') ??
+      readSnapshotString(line, 'resolvedSettlementStatus'),
+  };
+}
+
 function getStatusTone(status: WorkflowStepStatus) {
   if (status === 'Completed') {
     return 'success';
@@ -160,6 +192,9 @@ function getQualityTone(classification: QualityClassification) {
   }
   if (classification === 'BLOCKED') {
     return 'danger';
+  }
+  if (classification === 'SNAPSHOT') {
+    return 'info';
   }
   if (classification === 'NO MATCH' || classification === 'WARNING') {
     return 'warning';
@@ -329,6 +364,59 @@ function LineSamples({ lines }: { lines: SettlementApprovalLine[] }) {
         </OperationalTableRow>
       ))}
     </OperationalTable>
+  );
+}
+
+function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
+  const lines = safeArray(approval.lines);
+
+  if (!lines.length) {
+    return <p className="page-description">No approval lines returned for this settlement approval.</p>;
+  }
+
+  return (
+    <section className="op-panel-section settlement-approval-lines-section">
+      <div>
+        <p className="eyebrow">Loaded approval snapshot</p>
+        <h3>Selected settlement rows</h3>
+        <p className="page-description">
+          These rows come from the SettlementApprovalLine snapshot. Current candidate previews do not recalculate these totals.
+        </p>
+      </div>
+      <OperationalTable
+        columns={['Order', 'Ledger row', 'Type', 'Amount', 'Commission', 'VAT', 'Payable impact', 'Status']}
+        className="settlement-approval-lines-table"
+        stickyHeader={false}
+      >
+        {lines.map((line) => {
+          const status = getApprovalLineStatus(line);
+          const shopifyOrderId = readSnapshotString(line, 'sourceShopifyOrderId');
+          const allocationId = readSnapshotString(line, 'vendorAllocationId');
+
+          return (
+            <OperationalTableRow key={line.id ?? `${line.financeLedgerEntryId}-${line.lineType}`}>
+              <span>
+                <strong>{getApprovalLineOrderLabel(line)}</strong>
+                <small>{shopifyOrderId ? `Shopify ${shopifyOrderId}` : 'Shopify id unavailable'}</small>
+                <small>{allocationId ? `Allocation ${allocationId}` : 'Allocation unavailable'}</small>
+              </span>
+              <span>
+                <strong>{line.financeLedgerEntryId}</strong>
+              </span>
+              <span>{line.lineType}</span>
+              <span>{formatMinor(line.amountMinor, approval.currency)}</span>
+              <span>{formatMinor(line.commissionMinor, approval.currency)}</span>
+              <span>{formatMinor(line.commissionVatMinor, approval.currency)}</span>
+              <span>{formatMinor(line.payableImpactMinor, approval.currency)}</span>
+              <span>
+                <strong>{valueOrDash(status.derived)}</strong>
+                <small>Stored {valueOrDash(status.stored)}</small>
+              </span>
+            </OperationalTableRow>
+          );
+        })}
+      </OperationalTable>
+    </section>
   );
 }
 
@@ -792,7 +880,7 @@ export function AdminSettlementApprovalsPage() {
   }, [diagnostics, invoiceRecords, selectedApprovalId]);
   const productDetail = extractProductDetail(logoPreview?.logoPayloadPreview ?? null);
   const currentTotals = getApprovalTotals(approval);
-  const workspaceTotals = preview
+  const previewTotals = preview
     ? {
         grossSalesMinor: preview.summary.grossSalesMinor,
         refundTotalMinor: preview.summary.refundTotalMinor,
@@ -801,7 +889,8 @@ export function AdminSettlementApprovalsPage() {
         netPayableMinor: preview.summary.netPayableMinor,
         currency: preview.summary.currency,
       }
-    : currentTotals;
+    : null;
+  const workspaceTotals = currentTotals ?? previewTotals;
   const dbWarnings = getDatabaseWarnings(health);
   const previewRowsLockedInActiveApproval = Boolean(
     preview &&
@@ -920,10 +1009,10 @@ export function AdminSettlementApprovalsPage() {
     : logoPreview
       ? 'Ready'
       : 'Waiting';
-  const workspaceRows = preview
-    ? `${formatNumber(preview.summary.eligibleRowCount)} eligible`
-    : approval
+  const workspaceRows = approval
       ? formatNumber(approval.lines.length)
+      : preview
+        ? `${formatNumber(preview.summary.eligibleRowCount)} eligible`
       : 'Not previewed';
   const workspaceGrossSales = workspaceTotals
     ? formatMinor(workspaceTotals.grossSalesMinor, workspaceTotals.currency)
@@ -932,7 +1021,7 @@ export function AdminSettlementApprovalsPage() {
     ? formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)
     : 'Not previewed';
   const workspaceApprovalStatus = approval?.status ?? 'not created';
-  const workspaceQualityLabel = candidateQualityClassification;
+  const workspaceQualityLabel = approval ? 'SNAPSHOT' : candidateQualityClassification;
   const selectedOrdersOrAllocations = (() => {
     if (candidateScopeMode === 'selected_orders') {
       return formatStringList([...selectedOrderNumberList, ...selectedShopifyOrderIdList]);
@@ -1279,6 +1368,8 @@ export function AdminSettlementApprovalsPage() {
     if (result) {
       setApproval(result);
       setVendorId(result.vendorId);
+      setPreview(null);
+      setMixedVatAcknowledged(false);
       rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
@@ -1293,6 +1384,8 @@ export function AdminSettlementApprovalsPage() {
     if (result) {
       setApproval(result);
       setVendorId(result.vendorId);
+      setPreview(null);
+      setMixedVatAcknowledged(false);
       rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
@@ -1547,9 +1640,15 @@ export function AdminSettlementApprovalsPage() {
 
         <main className="settlement-summary-panel">
           <div>
-            <p className="eyebrow">Settlement Summary</p>
-            <h2>Operational totals</h2>
+            <p className="eyebrow">{approval ? 'Loaded approval snapshot' : 'Current candidate preview'}</p>
+            <h2>{approval ? 'Approval snapshot totals' : 'Operational totals'}</h2>
           </div>
+          {approval && preview ? (
+            <div className="settlement-alert op-tone-info">
+              <strong>Current candidate preview is separate from the loaded approval snapshot.</strong>
+              <p>The totals below remain the saved approval truth. Preview results can be empty when those rows are already locked.</p>
+            </div>
+          ) : null}
           {workspaceTotals ? (
             <div className="op-kpi-row settlement-summary-cards">
               <KPIStatCard label="Gross sales" value={formatMinor(workspaceTotals.grossSalesMinor, workspaceTotals.currency)} tone="info" />
@@ -1560,8 +1659,15 @@ export function AdminSettlementApprovalsPage() {
           ) : (
             <p className="settlement-preview-empty">Preview not generated yet.</p>
           )}
+          {approval ? <ApprovalSnapshotLines approval={approval} /> : null}
           {preview ? (
-            <>
+            <section className="settlement-current-preview-section">
+              {approval ? (
+                <div>
+                  <p className="eyebrow">Current candidate preview</p>
+                  <h3>Candidate quality</h3>
+                </div>
+              ) : null}
               <CandidateQualityCard
                 preview={preview}
                 classification={candidateQualityClassification}
@@ -1575,7 +1681,7 @@ export function AdminSettlementApprovalsPage() {
                 onOpenApproval={(id) => void handleOpenRecentApproval(id)}
               />
               <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
-            </>
+            </section>
           ) : null}
         </main>
 
