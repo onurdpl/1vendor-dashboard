@@ -664,6 +664,69 @@ describe('OrdersPage control center', () => {
     openMock.mockRestore();
   });
 
+  it('does not store stale shipment feedback when a label action finishes after another order is selected', async () => {
+    const awaitingShipmentOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1002',
+      status: 'Pending',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      fulfillmentActionState: 'awaiting_shipment',
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+    };
+    const secondOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1003',
+      sourceShopifyOrderId: 'gid://shopify/Order/1003',
+      sourceShopifyOrderNumber: '#1003',
+      customer: 'Second Customer',
+      date: '2026-05-07T09:20:00Z',
+    };
+    const createdShipment = {
+      ...shipmentExecution,
+      id: 'shipment-created',
+      allocationId: 'ORD-A-1002',
+      labelUrl: 'https://labels.example/new-label.pdf',
+    };
+    const shipmentResult = deferred<ShipmentExecution>();
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder), toSummary(secondOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => {
+      if (orderId === 'ORD-A-1003') {
+        return secondOrder;
+      }
+      return awaitingShipmentOrder;
+    });
+    createShipmentExecutionMock.mockReturnValue(shipmentResult.promise);
+
+    renderOrdersPage();
+
+    const labelButton = await screen.findByRole('button', { name: /Kargo etiketi yazdır/i });
+    await userEvent.click(labelButton);
+    await userEvent.click(screen.getByText('Second Customer'));
+
+    await act(async () => {
+      shipmentResult.resolve(createdShipment);
+      await shipmentResult.promise;
+    });
+
+    await waitFor(() =>
+      expect(openMock).toHaveBeenCalledWith('https://labels.example/new-label.pdf', '_blank', 'noopener,noreferrer'),
+    );
+    expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByText('Acme Supply Co.')[0]);
+
+    expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+
+    openMock.mockRestore();
+  });
+
   it('clears shipment label success feedback when vendor context changes', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -734,6 +797,97 @@ describe('OrdersPage control center', () => {
 
     await waitFor(() =>
       expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' })),
+    );
+    expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+
+    openMock.mockRestore();
+  });
+
+  it('does not restore stale shipment feedback when a label action finishes after vendor context changes', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-a');
+    const vendorAOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1002',
+      status: 'Pending',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      fulfillmentActionState: 'awaiting_shipment',
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+    };
+    const vendorBOrder = {
+      ...orderDetail,
+      id: 'ORD-B-2001',
+      originalVendorId: 'demo-vendor-b',
+      assignedVendorId: 'demo-vendor-b',
+      vendorId: 'demo-vendor-b',
+      sourceShopifyOrderId: 'gid://shopify/Order/2001',
+      sourceShopifyOrderNumber: '#2001',
+      customer: 'Vendor B Customer',
+    };
+    const createdShipment = {
+      ...shipmentExecution,
+      id: 'shipment-created',
+      allocationId: 'ORD-A-1002',
+      vendorId: 'demo-vendor-a',
+      labelUrl: 'https://labels.example/new-label.pdf',
+    };
+    const shipmentResult = deferred<ShipmentExecution>();
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    listOrdersMock.mockImplementation(async (options) => (
+      options?.vendorId === 'demo-vendor-b' ? [toSummary(vendorBOrder)] : [toSummary(vendorAOrder)]
+    ));
+    getOrderMock.mockImplementation(async (orderId) => {
+      if (orderId === 'ORD-B-2001') {
+        return vendorBOrder;
+      }
+      return vendorAOrder;
+    });
+    createShipmentExecutionMock.mockReturnValue(shipmentResult.promise);
+
+    renderOrdersPage();
+
+    const labelButton = await screen.findByRole('button', { name: /Kargo etiketi yazdır/i });
+    await userEvent.click(labelButton);
+
+    await act(async () => {
+      setCurrentVendorId('demo-vendor-b');
+    });
+    await waitFor(() =>
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-b' })),
+    );
+
+    await act(async () => {
+      shipmentResult.resolve(createdShipment);
+      await shipmentResult.promise;
+    });
+
+    await waitFor(() =>
+      expect(openMock).toHaveBeenCalledWith('https://labels.example/new-label.pdf', '_blank', 'noopener,noreferrer'),
+    );
+    expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
+
+    await act(async () => {
+      setCurrentVendorId('demo-vendor-a');
+    });
+    await waitFor(() =>
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' })),
     );
     expect(screen.queryByText('Shipment label created and opened.')).not.toBeInTheDocument();
 

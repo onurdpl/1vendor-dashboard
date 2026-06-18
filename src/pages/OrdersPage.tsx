@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -43,6 +43,7 @@ type LabelActionFeedback = {
   message: string;
   allocationId: string;
   vendorId: string;
+  contextKey: string;
 };
 
 function formatDate(value?: string | null) {
@@ -371,6 +372,23 @@ function getOrdersWorkflowFilter(workflow: string | null) {
   return null;
 }
 
+function buildOrderActionContextKey(input: {
+  vendorId: string;
+  allocationId?: string | null;
+  sourceShopifyOrderId?: string | null;
+  sourceShopifyOrderNumber?: string | number | null;
+}) {
+  const orderNumber = input.sourceShopifyOrderNumber === null || input.sourceShopifyOrderNumber === undefined
+    ? ''
+    : String(input.sourceShopifyOrderNumber);
+  return [
+    input.vendorId,
+    input.allocationId ?? '',
+    input.sourceShopifyOrderId ?? '',
+    orderNumber,
+  ].join('|');
+}
+
 export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
@@ -516,14 +534,28 @@ export function OrdersPage() {
 
   const selectedOrder = orderDetailQuery.data ?? selectedOrderSummary;
   const selectedOrderContextId = selectedOrderSummary?.id ?? null;
+  const selectedOrderActionContextKey = selectedOrderSummary
+    ? buildOrderActionContextKey({
+        vendorId: currentVendor.vendorId,
+        allocationId: selectedOrderSummary.id,
+        sourceShopifyOrderId: selectedOrderSummary.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: selectedOrderSummary.sourceShopifyOrderNumber,
+      })
+    : null;
+  const selectedOrderActionContextKeyRef = useRef<string | null>(selectedOrderActionContextKey);
+  useEffect(() => {
+    selectedOrderActionContextKeyRef.current = selectedOrderActionContextKey;
+  }, [selectedOrderActionContextKey]);
   const visibleLabelActionFeedback =
-    labelActionFeedback?.vendorId === currentVendor.vendorId && labelActionFeedback.allocationId === selectedOrderContextId
+    labelActionFeedback?.vendorId === currentVendor.vendorId &&
+    labelActionFeedback.allocationId === selectedOrderContextId &&
+    labelActionFeedback.contextKey === selectedOrderActionContextKey
       ? labelActionFeedback
       : null;
 
   useEffect(() => {
     setLabelActionFeedback(null);
-  }, [currentVendor.vendorId, selectedOrderContextId]);
+  }, [selectedOrderActionContextKey]);
 
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipmentLabel } = useMutationAction(
     async (allocationId: string) =>
@@ -590,16 +622,31 @@ export function OrdersPage() {
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
     const shipmentExecution = (order as OrderDetail).shipmentExecution;
     const labelUrl = shipmentExecution?.labelUrl ?? null;
+    const actionContextKey = buildOrderActionContextKey({
+      vendorId: currentVendor.vendorId,
+      allocationId: order.id,
+      sourceShopifyOrderId: order.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: order.sourceShopifyOrderNumber,
+    });
+    const actionStillBelongsToCurrentSelection = () =>
+      selectedOrderActionContextKeyRef.current === actionContextKey;
     const actionFeedback = (tone: LabelActionFeedback['tone'], message: string): LabelActionFeedback => ({
       tone,
       message,
       allocationId: order.id,
       vendorId: currentVendor.vendorId,
+      contextKey: actionContextKey,
     });
+    const setCurrentLabelActionFeedback = (tone: LabelActionFeedback['tone'], message: string) => {
+      if (!actionStillBelongsToCurrentSelection()) {
+        return;
+      }
+      setLabelActionFeedback(actionFeedback(tone, message));
+    };
 
     if (labelUrl) {
       globalThis.open?.(labelUrl, '_blank', 'noopener,noreferrer');
-      setLabelActionFeedback(actionFeedback('success', 'Existing label opened. No duplicate shipment was created.'));
+      setCurrentLabelActionFeedback('success', 'Existing label opened. No duplicate shipment was created.');
       return;
     }
 
@@ -610,19 +657,19 @@ export function OrdersPage() {
           const shipment = await retryShipmentLabelMutation(shipmentExecution.id);
           if (shipment.labelUrl) {
             globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-            setLabelActionFeedback(actionFeedback('success', 'Shipment label created and opened.'));
+            setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
           } else {
-            setLabelActionFeedback(actionFeedback('warning', 'Shipment retry completed. Label is still processing.'));
+            setCurrentLabelActionFeedback('warning', 'Shipment retry completed. Label is still processing.');
           }
           await orderDetailQuery.refetch();
         } catch (mutationError) {
           const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
-          setLabelActionFeedback(actionFeedback('error', message));
+          setCurrentLabelActionFeedback('error', message);
         }
         return;
       }
 
-      setLabelActionFeedback(actionFeedback('warning', 'Shipment exists, but the label is not available yet.'));
+      setCurrentLabelActionFeedback('warning', 'Shipment exists, but the label is not available yet.');
       return;
     }
 
@@ -631,14 +678,14 @@ export function OrdersPage() {
       const shipment = await createShipmentMutation(order.id);
       if (shipment.labelUrl) {
         globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-        setLabelActionFeedback(actionFeedback('success', 'Shipment label created and opened.'));
+        setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
       } else {
-        setLabelActionFeedback(actionFeedback('warning', 'Shipment was created. Label is still processing.'));
+        setCurrentLabelActionFeedback('warning', 'Shipment was created. Label is still processing.');
       }
       await orderDetailQuery.refetch();
     } catch (mutationError) {
       const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
-      setLabelActionFeedback(actionFeedback('error', message));
+      setCurrentLabelActionFeedback('error', message);
     }
   }
 
