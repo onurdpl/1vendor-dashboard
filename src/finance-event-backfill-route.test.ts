@@ -536,12 +536,47 @@ describe('finance event backfill route', () => {
     expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('record-1', { env: {} });
   });
 
-  it('executes controlled Logo commission invoice create for admins', async () => {
-    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+  it('blocks controlled Logo commission invoice create without backend confirmation', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
     const app = {
       get: vi.fn(),
       put: vi.fn(),
-      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const blocked = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/create')?.(
+      { authUser: { role: 'admin' }, params: { id: 'record-1' }, body: {} },
+      reply,
+    );
+
+    expect(blocked).toEqual({
+      status: 400,
+      body: expect.objectContaining({
+        ok: false,
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        settlementCommissionInvoiceId: 'record-1',
+        blockers: ['Logo create confirmation is required.'],
+      }),
+    });
+    expect(executeSettlementLogoCommissionInvoiceCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('executes controlled Logo commission invoice create for admins with backend confirmation', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
     };
@@ -573,7 +608,7 @@ describe('finance event backfill route', () => {
     registerFinanceRoutes(app as never, {} as never);
 
     const allowed = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/create')?.(
-      { authUser: { role: 'admin' }, params: { id: 'record-1' } },
+      { authUser: { role: 'admin' }, params: { id: 'record-1' }, body: { confirmLogoCreate: true } },
       reply,
     );
 

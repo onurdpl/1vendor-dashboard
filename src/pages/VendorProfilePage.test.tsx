@@ -1354,7 +1354,7 @@ describe('VendorProfilePage', () => {
     expect(within(invoiceSamples).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
   });
 
-  it('requires acknowledgement before creating a Logo test invoice and renders sanitized result', async () => {
+  it('does not expose the legacy Logo test invoice create action', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -1374,27 +1374,12 @@ describe('VendorProfilePage', () => {
     await openLogoDiagnostics(billingSection as HTMLElement);
 
     await waitFor(() =>
-      expect(within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' })).toBeInTheDocument(),
+      expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
     );
-    const createButton = within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' });
-    expect(createButton).toBeDisabled();
-    expect(within(billingSection!).getByText('This section contains read-only Logo probes plus the existing test-invoice tool. It is not a settlement invoice execution flow.')).toBeInTheDocument();
-
-    await userEvent.click(within(billingSection!).getByLabelText('I understand this creates a test invoice.'));
-    expect(createButton).toBeEnabled();
-    await userEvent.click(createButton);
-
-    await waitFor(() => expect(createLogoIsbasiTestInvoiceMock).toHaveBeenCalledWith('demo-vendor-a'));
-    expect(await within(billingSection!).findByText('Logo TEST invoice creation result')).toBeInTheDocument();
-    const testInvoicePanel = within(billingSection!).getByText('Logo TEST invoice creation result')
-      .closest('.vendor-profile-logo-result');
-    expect(testInvoicePanel).not.toBeNull();
-    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-invoice-1')).toBeInTheDocument();
-    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-uuid-1')).toBeInTheDocument();
-    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-ettn-1')).toBeInTheDocument();
-    expect(within(testInvoicePanel as HTMLElement).getByText(/11\*\*\*\*\*\*11/)).toBeInTheDocument();
-    expect(within(testInvoicePanel as HTMLElement).queryByText('1111111111')).not.toBeInTheDocument();
-    expect(within(testInvoicePanel as HTMLElement).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: 'Create TEST Invoice' })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByLabelText('I understand this creates a test invoice.')).not.toBeInTheDocument();
+    expect(within(billingSection!).getByText('This section contains read-only Logo probes. Settlement invoices are created only from the Settlement Workspace flow.')).toBeInTheDocument();
+    expect(createLogoIsbasiTestInvoiceMock).not.toHaveBeenCalled();
   });
 
   it('matches the selected vendor to a Logo firm without saving anything', async () => {

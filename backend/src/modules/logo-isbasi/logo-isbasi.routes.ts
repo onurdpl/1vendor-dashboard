@@ -26,7 +26,8 @@ const REQUIRED_LOGO_ENV = [
   'LOGO_ISBASI_USERNAME',
   'LOGO_ISBASI_PASSWORD',
 ] as const;
-const LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE = 'SPORGYM-COMMISSION';
+const LEGACY_LOGO_TEST_INVOICE_DISABLED_MESSAGE =
+  'Legacy Logo test invoice creation is disabled. Use settlement commission invoice flow.';
 
 const REQUIRED_PREVIEW_FIELDS = [
   'legalCompanyName',
@@ -985,91 +986,6 @@ function buildLogoUpstreamError(mode: string, result: LogoIsbasiRawResult) {
       contentType: result.responseContentType ?? null,
       bodySnippet: result.responseBodySnippet ?? null,
     },
-  };
-}
-
-function readLogoCreateInvoiceRecord(body: unknown): unknown {
-  if (!isRecord(body)) {
-    return body;
-  }
-  for (const key of ['data', 'invoice', 'result', 'item']) {
-    if (isRecord(body[key])) {
-      return body[key];
-    }
-  }
-  return body;
-}
-
-function buildLogoTestInvoiceCreateResponse(
-  result: LogoIsbasiRawResult,
-  requestPayload: Record<string, unknown>,
-  vendorId: string,
-  warnings: string[] = [],
-) {
-  const invoiceRecord = readLogoCreateInvoiceRecord(result.body);
-  return {
-    ok: result.ok && !result.jsonParseFailed,
-    success: result.ok && !result.jsonParseFailed,
-    provider: 'LOGO_ISBASI',
-    mode: 'test_invoice_create',
-    writesPerformed: result.ok && !result.jsonParseFailed,
-    externalApiCallAttempted: true,
-    vendorId,
-    httpStatus: result.status,
-    upstreamStatus: result.status,
-    responseKeys: isRecord(result.body) ? Object.keys(result.body).sort() : [],
-    invoiceId: readRecordString(invoiceRecord, ['invoiceId', 'id', 'invoice_id', 'salesInvoiceId']),
-    uuid: readRecordString(invoiceRecord, ['uuid', 'uuId', 'UUID']),
-    ettn: readRecordString(invoiceRecord, ['ettn', 'ETTN', 'eTtn']),
-    warnings,
-    requestPayload: sanitizeLogoIsbasiInvoicePreviewPayload(requestPayload),
-    responseBody: sanitizeLogoInvoiceNestedValue(result.body),
-    ...(result.ok && !result.jsonParseFailed
-      ? {}
-      : {
-        errorCode: result.jsonParseFailed ? 'LOGO_ISBASI_JSON_PARSE_FAILED' : 'LOGO_ISBASI_UPSTREAM_NON_2XX',
-        message: result.jsonParseFailed ? 'Logo İşbaşı returned a non-JSON response.' : 'Logo İşbaşı test invoice create request failed.',
-        request: {
-          url: result.requestUrl ?? null,
-          method: result.requestMethod ?? null,
-          contentType: result.requestContentType ?? null,
-          accept: result.requestAccept ?? null,
-          queryParameters: result.queryParameters ?? [],
-        },
-        response: {
-          status: result.status,
-          contentType: result.responseContentType ?? null,
-          bodySnippet: result.responseBodySnippet ?? null,
-        },
-      }),
-  };
-}
-
-function buildLogoTestInvoicePayload(
-  requestPayload: Record<string, unknown>,
-  serviceItemCode = LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE,
-) {
-  const details = Array.isArray(requestPayload.salesInvoiceDetails)
-    ? requestPayload.salesInvoiceDetails.map((detail) => {
-        if (!isRecord(detail)) {
-          return detail;
-        }
-        return {
-          ...detail,
-          discountRate: 0,
-          discountValue: 0,
-          productDetail: {
-            itemCode: serviceItemCode,
-            itemType: 2,
-          },
-        };
-      })
-    : requestPayload.salesInvoiceDetails;
-
-  return {
-    ...requestPayload,
-    currency: 'TRY',
-    salesInvoiceDetails: details,
   };
 }
 
@@ -2072,95 +1988,16 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      if (!adminProbesEnabled()) {
-        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
-      }
-
-      const readinessError = buildLogoReadinessError(env, 'test_invoice_create');
-      if (readinessError) {
-        return reply.code(readinessError.status).send(readinessError.body);
-      }
-
-      const testTenantError = buildLogoTestTenantError(env, 'test_invoice_create');
-      if (testTenantError) {
-        return reply.code(testTenantError.status).send(testTenantError.body);
-      }
-
-      const body = isRecord(request.body) ? request.body : {};
-      if (body.confirmTestInvoice !== true) {
-        return reply.code(400).send({
-          ok: false,
-          success: false,
-          provider: 'LOGO_ISBASI',
-          mode: 'test_invoice_create',
-          writesPerformed: false,
-          externalApiCallAttempted: false,
-          errorCode: 'LOGO_ISBASI_TEST_INVOICE_CONFIRMATION_REQUIRED',
-          message: 'confirmTestInvoice=true is required before creating a Logo İşbaşı test invoice.',
-        });
-      }
-
-      const { vendorId } = request.params as { vendorId: string };
-
-      try {
-        const profile = await getVendorBillingProfile(vendorId);
-        validateBillingProfileReady(profile);
-        if (!profile?.logoIsbasiCustomerCode || !profile.logoIsbasiCustomerId) {
-          return reply.code(422).send({
-            ok: false,
-            success: false,
-            provider: 'LOGO_ISBASI',
-            mode: 'test_invoice_create',
-            writesPerformed: false,
-            externalApiCallAttempted: false,
-            vendorId,
-            errorCode: 'LOGO_ISBASI_BOUND_CUSTOMER_REQUIRED',
-            message: 'Vendor must be bound to a Logo İşbaşı customer before creating a test invoice.',
-            missingFields: [
-              ...(!profile?.logoIsbasiCustomerCode ? ['logoIsbasiCustomerCode'] : []),
-              ...(!profile?.logoIsbasiCustomerId ? ['logoIsbasiCustomerId'] : []),
-            ],
-          });
-        }
-
-        const preview = buildLogoIsbasiCommissionInvoicePreview({
-          vendorBillingProfile: profile,
-          commissionAmount: '1',
-          vatRate: '20',
-          currency: 'TL',
-          description: 'SPORGYM TEST KOMİSYON FATURASI',
-          invoiceDate: new Date().toISOString().slice(0, 10),
-        });
-        const serviceItemCode = readOptionalString(body, 'serviceItemCode') ?? LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE;
-        const testInvoiceWarnings = [
-          ...preview.warnings,
-          'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Using existing Logo service item by itemCode and itemType only.',
-        ];
-        const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload, serviceItemCode);
-
-        const client = buildLogoClient(env);
-        const login = await loginForLogoReadProbe(client, 'test_invoice_create');
-        if (!login.ok) {
-          return reply.code(login.status).send(login.body);
-        }
-
-        const result = await client.createIntegrationInvoice(login.session, testInvoicePayload);
-        const response = buildLogoTestInvoiceCreateResponse(result, testInvoicePayload, vendorId, testInvoiceWarnings);
-        return reply.code(result.ok && !result.jsonParseFailed ? 200 : 502).send(response);
-      } catch (error) {
-        return reply.code(400).send({
-          ok: false,
-          success: false,
-          provider: 'LOGO_ISBASI',
-          mode: 'test_invoice_create',
-          writesPerformed: false,
-          externalApiCallAttempted: false,
-          vendorId,
-          errorCode: 'LOGO_ISBASI_TEST_INVOICE_CREATE_FAILED',
-          message: error instanceof Error ? error.message : 'Logo İşbaşı test invoice create probe failed.',
-        });
-      }
+      return reply.code(410).send({
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'test_invoice_create',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        errorCode: 'LOGO_ISBASI_TEST_INVOICE_DISABLED',
+        message: LEGACY_LOGO_TEST_INVOICE_DISABLED_MESSAGE,
+      });
     },
   );
 }

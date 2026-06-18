@@ -1623,7 +1623,7 @@ export function AdminSettlementApprovalsPage() {
     setInvoiceRecordsWarning(null);
 
     try {
-      const result = await executeSettlementLogoCommissionInvoiceCreate(record.id);
+      const result = await executeSettlementLogoCommissionInvoiceCreate(record.id, { confirmLogoCreate: true });
       if (result.record) {
         setInvoiceRecords((current) => [result.record!, ...current.filter((item) => item.id !== result.record?.id)]);
       }

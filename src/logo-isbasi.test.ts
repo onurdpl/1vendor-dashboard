@@ -1365,7 +1365,34 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
   });
 
-  it('requires explicit confirmation before creating a Logo test invoice', async () => {
+  it('disables the legacy Logo test invoice route before any provider call', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' }, body: { confirmTestInvoice: true } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(410);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'test_invoice_create',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        errorCode: 'LOGO_ISBASI_TEST_INVOICE_DISABLED',
+        message: 'Legacy Logo test invoice creation is disabled. Use settlement commission invoice flow.',
+      }),
+    );
+  });
+
+  it('disables the legacy Logo test invoice route even without the old confirmation body', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     const { posts } = createRegisteredRoutes();
     const reply = createReply();
@@ -1375,354 +1402,17 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       reply,
     );
 
-    expect(reply.statusCode).toBe(400);
+    expect(reply.statusCode).toBe(410);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
-        success: false,
-        provider: 'LOGO_ISBASI',
-        mode: 'test_invoice_create',
         writesPerformed: false,
         externalApiCallAttempted: false,
-        errorCode: 'LOGO_ISBASI_TEST_INVOICE_CONFIRMATION_REQUIRED',
+        errorCode: 'LOGO_ISBASI_TEST_INVOICE_DISABLED',
       }),
     );
-  });
-
-  it('requires a bound Logo customer before creating a test invoice', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch');
-    getVendorBillingProfileMock.mockResolvedValue({
-      ...vendorBillingProfile,
-      logoIsbasiCustomerCode: null,
-      logoIsbasiCustomerId: null,
-    });
-    const { posts } = createRegisteredRoutes();
-    const reply = createReply();
-
-    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
-      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' }, body: { confirmTestInvoice: true } },
-      reply,
-    );
-
-    expect(reply.statusCode).toBe(422);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        success: false,
-        provider: 'LOGO_ISBASI',
-        mode: 'test_invoice_create',
-        writesPerformed: false,
-        externalApiCallAttempted: false,
-        vendorId: 'sporjinal',
-        errorCode: 'LOGO_ISBASI_BOUND_CUSTOMER_REQUIRED',
-        missingFields: ['logoIsbasiCustomerCode', 'logoIsbasiCustomerId'],
-      }),
-    );
-  });
-
-  it('blocks Logo test invoice creation before upstream call when legalEntityType is unknown', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch');
-    getVendorBillingProfileMock.mockResolvedValue({
-      ...vendorBillingProfile,
-      legalEntityType: 'unknown_kind',
-      logoIsbasiCustomerCode: 'CUST001',
-      logoIsbasiCustomerId: 'firm-1',
-    });
-    const { posts } = createRegisteredRoutes();
-    const reply = createReply();
-
-    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
-      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' }, body: { confirmTestInvoice: true } },
-      reply,
-    );
-
-    expect(reply.statusCode).toBe(400);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: false,
-        success: false,
-        provider: 'LOGO_ISBASI',
-        mode: 'test_invoice_create',
-        writesPerformed: false,
-        externalApiCallAttempted: false,
-        vendorId: 'sporjinal',
-        errorCode: 'LOGO_ISBASI_TEST_INVOICE_CREATE_FAILED',
-        message: expect.stringContaining('Unsupported legalEntityType'),
-      }),
-    );
-  });
-
-  it('creates exactly one Logo test invoice with sanitized request and response diagnostics', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          data: {
-            accessToken: 'full-secret-access-token',
-            tenantId: 'tenant-1',
-            userId: 'user-1',
-            userEmail: 'integration-user@example.test',
-            userName: 'Integration User',
-          },
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          data: {
-            invoiceId: 'logo-invoice-1',
-            uuid: 'logo-uuid-1',
-            ettn: 'logo-ettn-1',
-            tcknVkn: '6490512763',
-            accessToken: 'provider-response-token',
-          },
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-    getVendorBillingProfileMock.mockResolvedValue({
-      ...vendorBillingProfile,
-      logoIsbasiCustomerCode: 'CUST001',
-      logoIsbasiCustomerId: 'firm-1',
-    });
-    const { posts } = createRegisteredRoutes();
-    const reply = createReply();
-
-    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
-      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' }, body: { confirmTestInvoice: true } },
-      reply,
-    );
-
-    expect(reply.statusCode).toBe(200);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/invoices/integrationInvoices',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          Authorization: 'Bearer full-secret-access-token',
-          tenantId: 'tenant-1',
-          apiKey: 'api-key-secret',
-          'Content-Type': 'application/json; charset=utf-8',
-          Accept: 'application/json',
-          Lang: 'tr-TR',
-          DeviceType: 'WEB',
-          UserId: 'user-1',
-          UserEmail: 'integration-user@example.test',
-          UserName: 'Integration User',
-        }),
-      }),
-    );
-    const createBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    expect(createBody).toEqual(
-      expect.objectContaining({
-        invoiceId: 0,
-        invoiceDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2} 00:00:00$/),
-        currency: 'TRY',
-        description: 'SPORGYM TEST KOMİSYON FATURASI',
-        vatIncluded: false,
-        customer: expect.objectContaining({
-          code: 'CUST001',
-          tcknVkn: '6490512763',
-          country: 'Türkiye',
-          postalCode: '34000',
-          email: 'billing@sporjinal.test',
-          emailAddress: 'billing@sporjinal.test',
-          isPerson: false,
-          notApplyWithHolding: true,
-        }),
-        shippingAddress: expect.objectContaining({
-          title: 'Sporjinal Spor Malzemeleri A.S.',
-          name: 'Sporjinal Spor Malzemeleri A.S.',
-          address: 'Billing address 1',
-          city: 'Istanbul',
-          district: 'Atasehir',
-          country: 'Türkiye',
-          postalCode: '34000',
-          email: 'billing@sporjinal.test',
-          emailAddress: 'billing@sporjinal.test',
-          phone: '+905551112233',
-        }),
-        eGovernmentInvoice: {
-          eGovernmentType: 0,
-          invoiceTypeForEinvoice: 2,
-          eInvoiceProfile: 1,
-        },
-        eArchivePortalInvoice: {
-          eGovernmentType: 0,
-          dispatchIncluded: false,
-        },
-        salesInvoiceDetails: [
-          expect.objectContaining({
-            quantity: 1,
-            taxRate: 20,
-            price: 1,
-            description: 'SPORGYM TEST KOMİSYON FATURASI',
-            discountRate: 0,
-            discountValue: 0,
-            productDetail: {
-              itemCode: 'SPORGYM-COMMISSION',
-              itemType: 2,
-            },
-          }),
-        ],
-      }),
-    );
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: true,
-        success: true,
-        provider: 'LOGO_ISBASI',
-        mode: 'test_invoice_create',
-        writesPerformed: true,
-        externalApiCallAttempted: true,
-        vendorId: 'sporjinal',
-        httpStatus: 200,
-        upstreamStatus: 200,
-        responseKeys: ['data'],
-        invoiceId: 'logo-invoice-1',
-        uuid: 'logo-uuid-1',
-        ettn: 'logo-ettn-1',
-        warnings: expect.arrayContaining([
-          'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Using existing Logo service item by itemCode and itemType only.',
-        ]),
-        requestPayload: expect.objectContaining({
-          currency: 'TRY',
-          customer: expect.objectContaining({
-            code: 'CUST001',
-            tcknVkn: '64******63',
-            isPerson: false,
-          }),
-          salesInvoiceDetails: [
-            expect.objectContaining({
-              discountRate: 0,
-              discountValue: 0,
-              productDetail: {
-                itemCode: 'SPORGYM-COMMISSION',
-                itemType: 2,
-              },
-            }),
-          ],
-          eGovernmentInvoice: {
-            eGovernmentType: 0,
-            invoiceTypeForEinvoice: 2,
-            eInvoiceProfile: 1,
-          },
-          eArchivePortalInvoice: {
-            eGovernmentType: 0,
-            dispatchIncluded: false,
-          },
-        }),
-        responseBody: expect.objectContaining({
-          data: expect.objectContaining({
-            tcknVkn: '64******63',
-            accessToken: '[redacted]',
-          }),
-        }),
-      }),
-    );
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain('6490512763');
-    expect(serialized).not.toContain('full-secret-access-token');
-    expect(serialized).not.toContain('provider-response-token');
-    expect(serialized).not.toContain('api-key-secret');
-  });
-
-  it('uses an existing Logo service item code for test invoice create when provided', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          data: {
-            accessToken: 'full-secret-access-token',
-            tenantId: 'tenant-1',
-          },
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          data: {
-            invoiceId: 'logo-invoice-2',
-          },
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
-    getVendorBillingProfileMock.mockResolvedValue({
-      ...vendorBillingProfile,
-      logoIsbasiCustomerCode: 'CUST001',
-      logoIsbasiCustomerId: 'firm-1',
-    });
-    const { posts } = createRegisteredRoutes();
-    const reply = createReply();
-
-    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
-      {
-        authUser: { role: 'admin' },
-        params: { vendorId: 'sporjinal' },
-        body: { confirmTestInvoice: true, serviceItemCode: 'SERVICE-COMMISSION' },
-      },
-      reply,
-    );
-
-    expect(reply.statusCode).toBe(200);
-    const createBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    expect(createBody).toEqual(
-      expect.objectContaining({
-        currency: 'TRY',
-        customer: expect.objectContaining({
-          code: 'CUST001',
-        }),
-        eGovernmentInvoice: {
-          eGovernmentType: 0,
-          invoiceTypeForEinvoice: 2,
-          eInvoiceProfile: 1,
-        },
-        eArchivePortalInvoice: {
-          eGovernmentType: 0,
-          dispatchIncluded: false,
-        },
-        salesInvoiceDetails: [
-          expect.objectContaining({
-            quantity: 1,
-            taxRate: 20,
-            price: 1,
-            description: 'SPORGYM TEST KOMİSYON FATURASI',
-            productDetail: {
-              itemCode: 'SERVICE-COMMISSION',
-              itemType: 2,
-            },
-          }),
-        ],
-      }),
-    );
-    expect(result).toEqual(
-      expect.objectContaining({
-        requestPayload: expect.objectContaining({
-          salesInvoiceDetails: [
-            expect.objectContaining({
-              productDetail: {
-                itemCode: 'SERVICE-COMMISSION',
-                itemType: 2,
-              },
-            }),
-          ],
-        }),
-        warnings: expect.arrayContaining([
-          'Using existing Logo service item by itemCode and itemType only.',
-        ]),
-      }),
-    );
-    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
   });
 
   it('does not bind when Logo firm matching is not exact', async () => {

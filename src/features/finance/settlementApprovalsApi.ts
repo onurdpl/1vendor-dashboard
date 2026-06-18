@@ -431,9 +431,12 @@ export function getSettlementCommissionInvoiceDiagnostics(id: string) {
   );
 }
 
-export function executeSettlementLogoCommissionInvoiceCreate(id: string) {
+export function executeSettlementLogoCommissionInvoiceCreate(
+  id: string,
+  input: { confirmLogoCreate: true },
+) {
   return apiClient.post<ExecuteSettlementLogoCommissionInvoiceCreateResponse>(
     `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/create`,
-    {},
+    input,
   );
 }

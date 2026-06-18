@@ -1517,7 +1517,9 @@ describe('Finance Settlement approval admin UI', () => {
     await userEvent.click(createButton);
 
     await waitFor(() =>
-      expect(executeSettlementLogoCommissionInvoiceCreateMock).toHaveBeenCalledWith('invoice-record-1'),
+      expect(executeSettlementLogoCommissionInvoiceCreateMock).toHaveBeenCalledWith('invoice-record-1', {
+        confirmLogoCreate: true,
+      }),
     );
     await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
     expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1');

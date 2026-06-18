@@ -593,6 +593,22 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const { id } = request.params as { id: string };
+      const body = isRecord(request.body) ? request.body : {};
+      if (body.confirmLogoCreate !== true) {
+        return reply.code(400).send({
+          ok: false,
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          settlementCommissionInvoiceId: id,
+          status: 'blocked',
+          blockers: ['Logo create confirmation is required.'],
+          warnings: [],
+          environmentGuard: null,
+          record: null,
+          providerResult: null,
+        });
+      }
+
       return executeSettlementLogoCommissionInvoiceCreate(id, { env });
     },
   );
