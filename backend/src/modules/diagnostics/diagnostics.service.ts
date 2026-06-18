@@ -94,20 +94,20 @@ type InvoiceExecutionArchiveRow = {
   status: string;
   createdAt: string;
   updatedAt: string;
-  providerInvoiceGuid: string | null;
   providerInvoiceNo: string | null;
+  providerInvoiceId: string | null;
+  providerUuid: string | null;
+  providerInvoiceGuid: string | null;
   hasRequestSnapshot: boolean;
   hasResponseSnapshot: boolean;
   hasErrorSnapshot: boolean;
-  financeLedgerEntry: {
-    vendorId: string | null;
-    sourceShopifyOrderId: string | null;
-    sourceShopifyOrderNumber: string | null;
-    entryType: string | null;
-    amount: string | null;
-    settlementStatus: string | null;
-    payoutStatus: string | null;
-  } | null;
+  vendorId: string | null;
+  sourceShopifyOrderId: string | null;
+  sourceShopifyOrderNumber: string | null;
+  entryType: string | null;
+  amount: string | null;
+  settlementStatus: string | null;
+  payoutStatus: string | null;
 };
 
 function toIsoString(value: Date | null | undefined) {
@@ -273,7 +273,6 @@ export async function getInvoiceExecutionArchiveDiagnostic(env: AppEnv) {
     ok: true,
     writesPerformed: false,
     databaseIdentity,
-    generatedAt,
     warnings: financeAuditMetadata.warnings,
   };
 
@@ -318,36 +317,44 @@ export async function getInvoiceExecutionArchiveDiagnostic(env: AppEnv) {
       status: String(row.status),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      providerInvoiceGuid: row.providerInvoiceGuid,
       providerInvoiceNo: row.providerInvoiceNo,
+      providerInvoiceId: null,
+      providerUuid: null,
+      providerInvoiceGuid: row.providerInvoiceGuid,
       hasRequestSnapshot: hasJsonSnapshot(row.requestSnapshot),
       hasResponseSnapshot: hasJsonSnapshot(row.responseSnapshot),
       hasErrorSnapshot: hasErrorSnapshot(String(row.status), row.responseSnapshot),
-      financeLedgerEntry: row.financeLedgerEntry
-        ? {
-            vendorId: row.financeLedgerEntry.vendorId,
-            sourceShopifyOrderId: row.financeLedgerEntry.vendorAllocation?.sourceShopifyOrderId ?? null,
-            sourceShopifyOrderNumber: row.financeLedgerEntry.vendorAllocation?.sourceShopifyOrderNumber ?? null,
-            entryType: row.financeLedgerEntry.entryType,
-            amount: row.financeLedgerEntry.amount.toString(),
-            settlementStatus: String(row.financeLedgerEntry.settlementStatus),
-            payoutStatus: String(row.financeLedgerEntry.payoutStatus),
-          }
-        : null,
+      vendorId: row.financeLedgerEntry?.vendorId ?? null,
+      sourceShopifyOrderId: row.financeLedgerEntry?.vendorAllocation?.sourceShopifyOrderId ?? null,
+      sourceShopifyOrderNumber: row.financeLedgerEntry?.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+      entryType: row.financeLedgerEntry?.entryType ?? null,
+      amount: row.financeLedgerEntry?.amount.toString() ?? null,
+      settlementStatus: row.financeLedgerEntry ? String(row.financeLedgerEntry.settlementStatus) : null,
+      payoutStatus: row.financeLedgerEntry ? String(row.financeLedgerEntry.payoutStatus) : null,
     }));
 
     return {
       ...base,
-      totalArchivedRows: archiveRows.length,
-      archiveRows,
+      archiveMetadata: {
+        generatedAt,
+        totalRows: archiveRows.length,
+        writesPerformed: false,
+      },
+      archiveStatus: archiveRows.length > 0 ? 'READY_FOR_EXPORT' as const : 'NO_ROWS' as const,
+      rows: archiveRows,
       error: null,
     };
   } catch (error) {
     return {
       ...base,
       ok: false,
-      totalArchivedRows: null,
-      archiveRows: [],
+      archiveMetadata: {
+        generatedAt,
+        totalRows: null,
+        writesPerformed: false,
+      },
+      archiveStatus: 'UNKNOWN' as const,
+      rows: [],
       error: normalizeDiagnosticError(error),
     };
   }

@@ -290,8 +290,12 @@ describe('InvoiceExecution cleanup readiness diagnostic', () => {
         databaseSourceLabel: 'remote',
         schemaReady: true,
       },
-      totalArchivedRows: 2,
-      archiveRows: [
+      archiveMetadata: {
+        totalRows: 2,
+        writesPerformed: false,
+      },
+      archiveStatus: 'READY_FOR_EXPORT',
+      rows: [
         {
           id: 'invoice-execution-1',
           financeLedgerEntryId: 'ledger-1',
@@ -299,37 +303,63 @@ describe('InvoiceExecution cleanup readiness diagnostic', () => {
           status: 'CREATED',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-02T00:00:00.000Z',
-          providerInvoiceGuid: 'guid-1',
           providerInvoiceNo: 'BH-1001',
+          providerInvoiceId: null,
+          providerUuid: null,
+          providerInvoiceGuid: 'guid-1',
           hasRequestSnapshot: true,
           hasResponseSnapshot: true,
           hasErrorSnapshot: false,
-          financeLedgerEntry: {
-            vendorId: 'yalispor',
-            sourceShopifyOrderId: 'gid://shopify/Order/1081',
-            sourceShopifyOrderNumber: '#1081',
-            entryType: 'sale',
-            amount: '7598.00',
-            settlementStatus: 'PAYABLE',
-            payoutStatus: 'PENDING',
-          },
+          vendorId: 'yalispor',
+          sourceShopifyOrderId: 'gid://shopify/Order/1081',
+          sourceShopifyOrderNumber: '#1081',
+          entryType: 'sale',
+          amount: '7598.00',
+          settlementStatus: 'PAYABLE',
+          payoutStatus: 'PENDING',
         },
         {
           id: 'invoice-execution-2',
           financeLedgerEntryId: 'ledger-2',
           provider: 'BIZIMHESAP',
           status: 'FAILED',
-          providerInvoiceGuid: null,
           providerInvoiceNo: null,
+          providerInvoiceId: null,
+          providerUuid: null,
+          providerInvoiceGuid: null,
           hasRequestSnapshot: true,
           hasResponseSnapshot: true,
           hasErrorSnapshot: true,
-          financeLedgerEntry: null,
+          vendorId: null,
+          sourceShopifyOrderId: null,
+          sourceShopifyOrderNumber: null,
+          entryType: null,
+          amount: null,
+          settlementStatus: null,
+          payoutStatus: null,
         },
       ],
       error: null,
     });
-    expect(typeof result.generatedAt).toBe('string');
+    expect(typeof result.archiveMetadata.generatedAt).toBe('string');
+  });
+
+  it('returns NO_ROWS when archive has no rows', async () => {
+    prismaMock.invoiceExecution.findMany.mockResolvedValue([]);
+
+    const result = await getInvoiceExecutionArchiveDiagnostic(buildEnv());
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      archiveMetadata: {
+        totalRows: 0,
+        writesPerformed: false,
+      },
+      archiveStatus: 'NO_ROWS',
+      rows: [],
+      error: null,
+    });
   });
 
   it('omits request and response snapshot bodies from archive output', async () => {
@@ -378,8 +408,12 @@ describe('InvoiceExecution cleanup readiness diagnostic', () => {
     expect(result).toMatchObject({
       ok: false,
       writesPerformed: false,
-      totalArchivedRows: null,
-      archiveRows: [],
+      archiveMetadata: {
+        totalRows: null,
+        writesPerformed: false,
+      },
+      archiveStatus: 'UNKNOWN',
+      rows: [],
       error: 'archive query failed',
     });
   });

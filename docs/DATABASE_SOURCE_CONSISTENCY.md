@@ -62,3 +62,5 @@ When readiness returns `ARCHIVE_REQUIRED`, save the production output from:
 `GET /admin/diagnostics/cleanup/invoice-execution-archive`
 
 This endpoint is admin-only and read-only. It returns safe metadata only: row ids, provider/status, provider invoice identifiers, timestamps, snapshot presence booleans, and linked finance ledger/order identifiers. It must not be replaced by a local DB archive because local rows do not prove production history.
+
+C4 `InvoiceExecution` schema removal must not begin until the production archive endpoint exists, the production endpoint output has been exported, and the export has been reviewed. The archive endpoint intentionally excludes full request/response snapshot bodies, provider payloads, credentials, tokens, API keys, PDF content, and other secrets.
