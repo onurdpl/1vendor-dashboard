@@ -745,6 +745,21 @@ const createRequestSnapshotResponse = {
   },
 };
 
+const activeInvoiceBlockerMessage =
+  'SettlementApproval already has an active LOGO_ISBASI commission invoice record (invoice-record-1, PENDING).';
+
+const activeInvoiceBlockerRequestSnapshotResponse = {
+  ok: false,
+  writesPerformed: false,
+  settlementApprovalId: 'approval-1',
+  provider: 'logo_isbasi',
+  status: 'blocked' as const,
+  blockers: [activeInvoiceBlockerMessage],
+  warnings: [],
+  record: null,
+  requestSnapshot: null,
+};
+
 const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
   ok: true,
   writesPerformed: false,
@@ -1336,6 +1351,71 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Request Snapshot Stored')).toBeInTheDocument();
     expect(screen.getAllByText('settlement-logo-request-v1').length).toBeGreaterThan(0);
     expect(screen.getByText('immutable_settlement_truth')).toBeInTheDocument();
+  });
+
+  it('hydrates commission invoice records after an active invoice blocker', async () => {
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
+    persistSettlementLogoCommissionInvoiceRequestSnapshotMock.mockResolvedValue(activeInvoiceBlockerRequestSnapshotResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Store Request Snapshot' })).toBeEnabled());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Store Request Snapshot' }));
+
+    await waitFor(() =>
+      expect(persistSettlementLogoCommissionInvoiceRequestSnapshotMock).toHaveBeenCalledWith('approval-1'),
+    );
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByText(activeInvoiceBlockerMessage)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Commission Invoice Records' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('invoice-record-1')).toBeInTheDocument();
+    expect(screen.getAllByText('Pending').length).toBeGreaterThan(0);
+    expect(screen.queryByText('No invoice records loaded yet.')).not.toBeInTheDocument();
+  });
+
+  it('loads commission invoice records from the tab without mutation', async () => {
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Commission Invoice Records' }));
+    expect(screen.getByText('No invoice records loaded yet.')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Load records \(read-only\)/i }));
+
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByText('invoice-record-1')).toBeInTheDocument();
+    expect(screen.getAllByText('Pending').length).toBeGreaterThan(0);
+    expect(persistSettlementLogoCommissionInvoiceRequestSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves active invoice blocker when record hydration fails', async () => {
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
+    persistSettlementLogoCommissionInvoiceRequestSnapshotMock.mockResolvedValue(activeInvoiceBlockerRequestSnapshotResponse);
+    getSettlementCommissionInvoiceRecordsMock.mockRejectedValueOnce(new Error('Records endpoint unavailable.'));
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Store Request Snapshot' })).toBeEnabled());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Store Request Snapshot' }));
+
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByText(activeInvoiceBlockerMessage)).toBeInTheDocument();
+    expect(screen.getByText('Could not load existing invoice records.')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Commission Invoice Records' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('No invoice records loaded yet.')).toBeInTheDocument();
   });
 
   it('keeps approval workflow context after a zero-eligible preview with active locked rows', async () => {

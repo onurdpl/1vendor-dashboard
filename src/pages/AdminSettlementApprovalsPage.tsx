@@ -80,9 +80,14 @@ type DraftFailureSummary = {
 };
 
 const NO_ELIGIBLE_SETTLEMENT_ROWS_MESSAGE = 'No eligible settlement rows are available for approval.';
+const ACTIVE_LOGO_COMMISSION_INVOICE_BLOCKER = /active LOGO_ISBASI commission invoice record/i;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
+}
+
+function hasActiveLogoCommissionInvoiceBlocker(blockers: string[] | null | undefined) {
+  return safeArray<string>(blockers).some((blocker) => ACTIVE_LOGO_COMMISSION_INVOICE_BLOCKER.test(blocker));
 }
 
 function formatMinor(value: number | null | undefined, currency = 'TRY') {
@@ -823,6 +828,7 @@ export function AdminSettlementApprovalsPage() {
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draftFailureSummary, setDraftFailureSummary] = useState<DraftFailureSummary | null>(null);
+  const [invoiceRecordsWarning, setInvoiceRecordsWarning] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
 
@@ -1345,6 +1351,7 @@ export function AdminSettlementApprovalsPage() {
     setBusyAction(action);
     setError(null);
     setDraftFailureSummary(null);
+    setInvoiceRecordsWarning(null);
     setSuccess(null);
     try {
       const result = await callback();
@@ -1357,6 +1364,42 @@ export function AdminSettlementApprovalsPage() {
       setError(message);
       if (action === 'createDraft') {
         setDraftFailureSummary(buildDraftFailureSummary(preview, message));
+      }
+      return null;
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function loadCommissionInvoiceRecordsForApproval(
+    id: string,
+    options: {
+      preserveMessages?: boolean;
+      successMessage?: string;
+      warningOnFailure?: string;
+    } = {},
+  ) {
+    setBusyAction('invoiceRecords');
+    setInvoiceRecordsWarning(null);
+    setActiveTab('invoices');
+    if (!options.preserveMessages) {
+      setError(null);
+      setDraftFailureSummary(null);
+      setSuccess(null);
+    }
+
+    try {
+      const result = await getSettlementCommissionInvoiceRecords(id);
+      setInvoiceRecords(result.records);
+      if (options.successMessage) {
+        setSuccess(options.successMessage);
+      }
+      return result;
+    } catch (requestError) {
+      if (options.preserveMessages) {
+        setInvoiceRecordsWarning(options.warningOnFailure ?? 'Could not load existing invoice records.');
+      } else {
+        setError(getErrorMessage(requestError));
       }
       return null;
     } finally {
@@ -1492,6 +1535,12 @@ export function AdminSettlementApprovalsPage() {
     }
     if (!result.ok || !result.record) {
       setError(result.blockers.join(' ') || 'Immutable request snapshot could not be stored.');
+      if (hasActiveLogoCommissionInvoiceBlocker(result.blockers)) {
+        await loadCommissionInvoiceRecordsForApproval(selectedApprovalId, {
+          preserveMessages: true,
+          warningOnFailure: 'Could not load existing invoice records.',
+        });
+      }
       return;
     }
     const storedRecord = result.record;
@@ -1505,15 +1554,9 @@ export function AdminSettlementApprovalsPage() {
       setError('Settlement approval id is required.');
       return;
     }
-    const result = await runAction(
-      'invoiceRecords',
-      () => getSettlementCommissionInvoiceRecords(selectedApprovalId),
-      'Commission invoice records loaded.',
-    );
-    if (result) {
-      setInvoiceRecords(result.records);
-      setActiveTab('invoices');
-    }
+    await loadCommissionInvoiceRecordsForApproval(selectedApprovalId, {
+      successMessage: 'Commission invoice records loaded.',
+    });
   }
 
   async function handleDiagnostics(recordId: string) {
@@ -1536,6 +1579,11 @@ export function AdminSettlementApprovalsPage() {
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
 
       {error ? <SettlementDraftFailurePanel message={error} summary={draftFailureSummary} /> : null}
+      {invoiceRecordsWarning ? (
+        <div className="settlement-alert op-tone-warning">
+          <strong>{invoiceRecordsWarning}</strong>
+        </div>
+      ) : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
       <section
@@ -1888,7 +1936,20 @@ export function AdminSettlementApprovalsPage() {
 
         {activeTab === 'invoices' ? (
           <article className="settlement-tab-panel" role="tabpanel">
-            <h3>Commission Invoice Records</h3>
+            <div className="settlement-quality-heading">
+              <div>
+                <h3>Commission Invoice Records</h3>
+                <p className="page-description">Read-only list of local settlement commission invoice records.</p>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary button-compact"
+                onClick={() => void handleInvoiceRecords()}
+                disabled={busyAction !== null || !selectedApprovalId}
+              >
+                Load records (read-only)
+              </button>
+            </div>
             {activeInvoiceRecords.length ? (
               <div className="settlement-alert op-tone-warning">
                 <strong>Active commission invoice record exists.</strong>
