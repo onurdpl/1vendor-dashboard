@@ -41,6 +41,8 @@ type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'h
 type LabelActionFeedback = {
   tone: 'success' | 'warning' | 'error';
   message: string;
+  allocationId: string;
+  vendorId: string;
 };
 
 function formatDate(value?: string | null) {
@@ -513,6 +515,15 @@ export function OrdersPage() {
   );
 
   const selectedOrder = orderDetailQuery.data ?? selectedOrderSummary;
+  const selectedOrderContextId = selectedOrderSummary?.id ?? null;
+  const visibleLabelActionFeedback =
+    labelActionFeedback?.vendorId === currentVendor.vendorId && labelActionFeedback.allocationId === selectedOrderContextId
+      ? labelActionFeedback
+      : null;
+
+  useEffect(() => {
+    setLabelActionFeedback(null);
+  }, [currentVendor.vendorId, selectedOrderContextId]);
 
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipmentLabel } = useMutationAction(
     async (allocationId: string) =>
@@ -579,10 +590,16 @@ export function OrdersPage() {
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
     const shipmentExecution = (order as OrderDetail).shipmentExecution;
     const labelUrl = shipmentExecution?.labelUrl ?? null;
+    const actionFeedback = (tone: LabelActionFeedback['tone'], message: string): LabelActionFeedback => ({
+      tone,
+      message,
+      allocationId: order.id,
+      vendorId: currentVendor.vendorId,
+    });
 
     if (labelUrl) {
       globalThis.open?.(labelUrl, '_blank', 'noopener,noreferrer');
-      setLabelActionFeedback({ tone: 'success', message: 'Existing label opened. No duplicate shipment was created.' });
+      setLabelActionFeedback(actionFeedback('success', 'Existing label opened. No duplicate shipment was created.'));
       return;
     }
 
@@ -593,22 +610,19 @@ export function OrdersPage() {
           const shipment = await retryShipmentLabelMutation(shipmentExecution.id);
           if (shipment.labelUrl) {
             globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-            setLabelActionFeedback({ tone: 'success', message: 'Shipment label created and opened.' });
+            setLabelActionFeedback(actionFeedback('success', 'Shipment label created and opened.'));
           } else {
-            setLabelActionFeedback({ tone: 'warning', message: 'Shipment retry completed. Label is still processing.' });
+            setLabelActionFeedback(actionFeedback('warning', 'Shipment retry completed. Label is still processing.'));
           }
           await orderDetailQuery.refetch();
         } catch (mutationError) {
           const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
-          setLabelActionFeedback({ tone: 'error', message });
+          setLabelActionFeedback(actionFeedback('error', message));
         }
         return;
       }
 
-      setLabelActionFeedback({
-        tone: 'warning',
-        message: 'Shipment exists, but the label is not available yet.',
-      });
+      setLabelActionFeedback(actionFeedback('warning', 'Shipment exists, but the label is not available yet.'));
       return;
     }
 
@@ -617,14 +631,14 @@ export function OrdersPage() {
       const shipment = await createShipmentMutation(order.id);
       if (shipment.labelUrl) {
         globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-        setLabelActionFeedback({ tone: 'success', message: 'Shipment label created and opened.' });
+        setLabelActionFeedback(actionFeedback('success', 'Shipment label created and opened.'));
       } else {
-        setLabelActionFeedback({ tone: 'warning', message: 'Shipment was created. Label is still processing.' });
+        setLabelActionFeedback(actionFeedback('warning', 'Shipment was created. Label is still processing.'));
       }
       await orderDetailQuery.refetch();
     } catch (mutationError) {
       const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
-      setLabelActionFeedback({ tone: 'error', message });
+      setLabelActionFeedback(actionFeedback('error', message));
     }
   }
 
@@ -635,7 +649,7 @@ export function OrdersPage() {
     if (shipmentExecution?.labelUrl) {
       return 'Etiketi yazdır';
     }
-    if (shipmentExecution?.shipmentStatus === 'failed' || labelActionFeedback?.tone === 'error') {
+    if (shipmentExecution?.shipmentStatus === 'failed' || visibleLabelActionFeedback?.tone === 'error') {
       return 'Tekrar dene';
     }
     return 'Kargo etiketi yazdır';
@@ -939,9 +953,9 @@ export function OrdersPage() {
                   </span>
                   <span className="orders-smart-label-arrow" aria-hidden="true">›</span>
                 </button>
-                {labelActionFeedback ? (
-                  <p className={`orders-smart-label-feedback orders-smart-label-${labelActionFeedback.tone}`}>
-                    {labelActionFeedback.message}
+                {visibleLabelActionFeedback ? (
+                  <p className={`orders-smart-label-feedback orders-smart-label-${visibleLabelActionFeedback.tone}`}>
+                    {visibleLabelActionFeedback.message}
                   </p>
                 ) : null}
               </section>
