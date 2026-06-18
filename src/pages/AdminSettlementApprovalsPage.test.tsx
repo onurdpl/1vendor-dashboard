@@ -955,9 +955,11 @@ describe('Finance Settlement approval admin UI', () => {
 
     expect(screen.getByRole('heading', { name: 'Approval snapshot totals' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Selected settlement rows')).toHaveClass('settlement-approval-lines-list');
     expect(screen.getAllByText('#1081').length).toBeGreaterThan(0);
     expect(screen.getByText('fle-sale-1081-a')).toBeInTheDocument();
-    expect(screen.getByText(/Allocation alloc-yalispor-1081-a/)).toBeInTheDocument();
+    expect(screen.getByText('alloc-yalispor-1081-a')).toBeInTheDocument();
+    expect(screen.getAllByText('TRY 3,115.18').length).toBeGreaterThan(0);
   });
 
   it('loads settlement preview totals and sample lines', async () => {

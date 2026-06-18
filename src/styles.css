@@ -12319,20 +12319,92 @@ summary.provider-response-heading::-webkit-details-marker {
   margin: 0;
 }
 
-.settlement-approval-lines-table .op-table-head,
-.settlement-approval-lines-table .op-table-row {
-  grid-template-columns:
-    minmax(150px, 1.4fr)
-    minmax(150px, 1.3fr)
-    minmax(70px, 0.6fr)
-    repeat(4, minmax(86px, 0.8fr))
-    minmax(120px, 1fr);
+.settlement-approval-lines-list {
+  display: grid;
+  gap: var(--space-2);
 }
 
-.settlement-approval-lines-table small {
+.settlement-approval-line-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: var(--space-2);
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-approval-line-identity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.settlement-approval-line-identity div,
+.settlement-approval-line-money-grid div {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-xs);
+  background: var(--op-surface);
+}
+
+.settlement-approval-line-identity span,
+.settlement-approval-line-money-grid dt {
+  margin: 0 0 2px;
+  color: var(--op-muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settlement-approval-line-identity strong,
+.settlement-approval-line-money-grid dd {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  color: var(--op-text-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.settlement-approval-line-identity small {
   display: block;
   color: var(--op-muted);
+  font-size: 0.72rem;
   overflow-wrap: anywhere;
+}
+
+.settlement-approval-line-money-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.settlement-approval-line-money-grid dd {
+  font-size: 0.76rem;
+}
+
+@media (max-width: 1180px) {
+  .settlement-approval-line-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .settlement-approval-line-identity,
+  .settlement-approval-line-money-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settlement-approvals-table .op-table-head,

@@ -383,39 +383,68 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
           These rows come from the SettlementApprovalLine snapshot. Current candidate previews do not recalculate these totals.
         </p>
       </div>
-      <OperationalTable
-        columns={['Order', 'Ledger row', 'Type', 'Amount', 'Commission', 'VAT', 'Payable impact', 'Status']}
-        className="settlement-approval-lines-table"
-        stickyHeader={false}
-      >
+      <div className="settlement-approval-lines-list" aria-label="Selected settlement rows">
         {lines.map((line) => {
           const status = getApprovalLineStatus(line);
           const shopifyOrderId = readSnapshotString(line, 'sourceShopifyOrderId');
           const allocationId = readSnapshotString(line, 'vendorAllocationId');
+          const orderLabel = getApprovalLineOrderLabel(line);
 
           return (
-            <OperationalTableRow key={line.id ?? `${line.financeLedgerEntryId}-${line.lineType}`}>
-              <span>
-                <strong>{getApprovalLineOrderLabel(line)}</strong>
-                <small>{shopifyOrderId ? `Shopify ${shopifyOrderId}` : 'Shopify id unavailable'}</small>
-                <small>{allocationId ? `Allocation ${allocationId}` : 'Allocation unavailable'}</small>
-              </span>
-              <span>
-                <strong>{line.financeLedgerEntryId}</strong>
-              </span>
-              <span>{line.lineType}</span>
-              <span>{formatMinor(line.amountMinor, approval.currency)}</span>
-              <span>{formatMinor(line.commissionMinor, approval.currency)}</span>
-              <span>{formatMinor(line.commissionVatMinor, approval.currency)}</span>
-              <span>{formatMinor(line.payableImpactMinor, approval.currency)}</span>
-              <span>
-                <strong>{valueOrDash(status.derived)}</strong>
-                <small>Stored {valueOrDash(status.stored)}</small>
-              </span>
-            </OperationalTableRow>
+            <article
+              key={line.id ?? `${line.financeLedgerEntryId}-${line.lineType}`}
+              className="settlement-approval-line-card"
+              aria-label={`Settlement row ${orderLabel}`}
+            >
+              <div className="settlement-approval-line-identity">
+                <div>
+                  <span>Order</span>
+                  <strong>{orderLabel}</strong>
+                </div>
+                <div>
+                  <span>Ledger row</span>
+                  <strong>{line.financeLedgerEntryId}</strong>
+                </div>
+                <div>
+                  <span>Shopify id</span>
+                  <strong>{shopifyOrderId ?? 'Unavailable'}</strong>
+                </div>
+                <div>
+                  <span>Allocation</span>
+                  <strong>{allocationId ?? 'Unavailable'}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>{valueOrDash(status.derived)}</strong>
+                  <small>Stored {valueOrDash(status.stored)}</small>
+                </div>
+              </div>
+              <dl className="settlement-approval-line-money-grid">
+                <div>
+                  <dt>Type</dt>
+                  <dd>{line.lineType}</dd>
+                </div>
+                <div>
+                  <dt>Amount</dt>
+                  <dd>{formatMinor(line.amountMinor, approval.currency)}</dd>
+                </div>
+                <div>
+                  <dt>Commission</dt>
+                  <dd>{formatMinor(line.commissionMinor, approval.currency)}</dd>
+                </div>
+                <div>
+                  <dt>VAT</dt>
+                  <dd>{formatMinor(line.commissionVatMinor, approval.currency)}</dd>
+                </div>
+                <div>
+                  <dt>Payable impact</dt>
+                  <dd>{formatMinor(line.payableImpactMinor, approval.currency)}</dd>
+                </div>
+              </dl>
+            </article>
           );
         })}
-      </OperationalTable>
+      </div>
     </section>
   );
 }
