@@ -1139,7 +1139,7 @@ describe('settlement commission invoice record foundation', () => {
           requestSnapshotPresent: true,
           payloadPresent: true,
           snapshotSource: 'immutable_settlement_truth',
-          blockers: ['SettlementCommissionInvoice status must be PENDING before Logo execution. Current status: UNKNOWN.'],
+          blockers: ['SettlementCommissionInvoice status must be PENDING or FAILED before Logo execution. Current status: UNKNOWN.'],
         },
         unknown: {
           reason: 'provider timeout after request sent',

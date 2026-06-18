@@ -75,8 +75,13 @@ export function validateLogoExecutionContractRecord(
     blockers.push('SettlementCommissionInvoice provider must be LOGO_ISBASI before Logo execution.');
   }
 
-  if (record.status !== SettlementCommissionInvoiceStatus.PENDING) {
-    blockers.push(`SettlementCommissionInvoice status must be PENDING before Logo execution. Current status: ${record.status}.`);
+  if (
+    record.status !== SettlementCommissionInvoiceStatus.PENDING &&
+    record.status !== SettlementCommissionInvoiceStatus.FAILED
+  ) {
+    blockers.push(
+      `SettlementCommissionInvoice status must be PENDING or FAILED before Logo execution. Current status: ${record.status}.`,
+    );
   }
 
   if (!requestSnapshotPresent) {

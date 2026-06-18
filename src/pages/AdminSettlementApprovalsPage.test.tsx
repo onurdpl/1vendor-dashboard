@@ -9,6 +9,7 @@ import {
   approveSettlementApproval,
   cancelSettlementApproval,
   createSettlementApprovalDraft,
+  executeSettlementLogoCommissionInvoiceCreate,
   getDatabaseHealth,
   getSettlementApproval,
   getSettlementApprovalAudit,
@@ -37,6 +38,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     previewSettlementApproval: vi.fn(),
     createSettlementApprovalDraft: vi.fn(),
     persistSettlementLogoCommissionInvoiceRequestSnapshot: vi.fn(),
+    executeSettlementLogoCommissionInvoiceCreate: vi.fn(),
     getSettlementApproval: vi.fn(),
     approveSettlementApproval: vi.fn(),
     cancelSettlementApproval: vi.fn(),
@@ -52,6 +54,7 @@ const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
 const createSettlementApprovalDraftMock = vi.mocked(createSettlementApprovalDraft);
 const persistSettlementLogoCommissionInvoiceRequestSnapshotMock = vi.mocked(persistSettlementLogoCommissionInvoiceRequestSnapshot);
+const executeSettlementLogoCommissionInvoiceCreateMock = vi.mocked(executeSettlementLogoCommissionInvoiceCreate);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
 const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
 const cancelSettlementApprovalMock = vi.mocked(cancelSettlementApproval);
@@ -853,6 +856,57 @@ const diagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
   },
 };
 
+const allowedDiagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
+  ...diagnosticsResponse,
+  record: {
+    ...diagnosticsResponse.record,
+    environmentGuard: {
+      allowed: true,
+      environment: 'test',
+      tenantValidation: {
+        expectedTenantIdPresent: true,
+        expectedTenantId: 'tenant-1',
+        actualTenantIdPresent: true,
+        actualTenantId: 'tenant-1',
+        status: 'matched',
+      },
+      blockers: [],
+    },
+    executionContract: {
+      ...diagnosticsResponse.record.executionContract,
+      ok: true,
+      status: 'READY',
+      blockers: [],
+    },
+  },
+};
+
+const createdLogoInvoiceResponse = {
+  ok: true,
+  writesPerformed: true,
+  externalApiCallAttempted: true,
+  settlementCommissionInvoiceId: 'invoice-record-1',
+  status: 'created',
+  blockers: [],
+  warnings: [],
+  environmentGuard: allowedDiagnosticsResponse.record.environmentGuard,
+  record: {
+    ...createRequestSnapshotResponse.record,
+    status: 'created' as const,
+    providerInvoiceId: 'logo-invoice-1',
+    providerUuid: 'logo-uuid-1',
+    providerEttn: 'logo-ettn-1',
+    invoiceNo: 'ABC202600001',
+  },
+  providerResult: {
+    httpStatus: 200,
+    invoiceId: 'logo-invoice-1',
+    uuid: 'logo-uuid-1',
+    ettn: 'logo-ettn-1',
+    invoiceNo: 'ABC202600001',
+  },
+};
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/admin/finance/settlement-approvals']}>
@@ -901,6 +955,7 @@ describe('Finance Settlement approval admin UI', () => {
     getSettlementApprovalAuditMock.mockResolvedValue(auditResponse);
     previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(logoPreviewResponse);
     persistSettlementLogoCommissionInvoiceRequestSnapshotMock.mockResolvedValue(createRequestSnapshotResponse);
+    executeSettlementLogoCommissionInvoiceCreateMock.mockResolvedValue(createdLogoInvoiceResponse);
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValue(invoiceRecordsResponse);
     getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(diagnosticsResponse);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
@@ -1402,6 +1457,109 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('No invoice records loaded yet.')).toBeInTheDocument();
   });
 
+  it('disables Logo create when environment guard diagnostics are blocked', async () => {
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Store Request Snapshot' })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: 'Store Request Snapshot' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Commission Invoice Records' }));
+
+    expect(screen.getByRole('button', { name: 'Create Logo Invoice' })).toBeDisabled();
+    expect(screen.getByText('Read diagnostics before Logo create.')).toBeInTheDocument();
+
+    const invoicePanel = screen.getByText('invoice-record-1').closest('.settlement-tab-panel') ?? document.body;
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: /Read diagnostics \(read-only\)/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByText('LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.').length,
+      ).toBeGreaterThan(0),
+    );
+    expect(screen.getByRole('button', { name: 'Create Logo Invoice' })).toBeDisabled();
+    expect(executeSettlementLogoCommissionInvoiceCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation before creating a Logo invoice and refreshes records and diagnostics after success', async () => {
+    previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
+    getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(allowedDiagnosticsResponse);
+    getSettlementCommissionInvoiceRecordsMock.mockResolvedValue({
+      ...invoiceRecordsResponse,
+      records: [createdLogoInvoiceResponse.record],
+    });
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Store Request Snapshot' })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: 'Store Request Snapshot' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Commission Invoice Records' }));
+
+    const invoicePanel = screen.getByText('invoice-record-1').closest('.settlement-tab-panel') ?? document.body;
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: /Read diagnostics \(read-only\)/i }));
+    await waitFor(() => expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1'));
+
+    const createButton = screen.getByRole('button', { name: 'Create Logo Invoice' });
+    expect(createButton).toBeDisabled();
+    await userEvent.click(screen.getByLabelText('I understand this will call Logo İşbaşı and may create a real invoice.'));
+    expect(createButton).toBeEnabled();
+
+    await userEvent.click(createButton);
+
+    await waitFor(() =>
+      expect(executeSettlementLogoCommissionInvoiceCreateMock).toHaveBeenCalledWith('invoice-record-1'),
+    );
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
+    expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1');
+    expect(screen.getByText('Logo invoice created: ABC202600001.')).toBeInTheDocument();
+    expect(screen.getByText('ABC202600001')).toBeInTheDocument();
+  });
+
+  it('does not show Logo create for UNKNOWN or CREATED records', async () => {
+    getSettlementCommissionInvoiceRecordsMock.mockResolvedValue({
+      ...invoiceRecordsResponse,
+      records: [
+        {
+          ...createRequestSnapshotResponse.record,
+          id: 'unknown-record',
+          status: 'unknown',
+          unknownReason: 'Reconciliation required.',
+          unknownAt: '2026-06-12T10:06:00.000Z',
+        },
+        {
+          ...createRequestSnapshotResponse.record,
+          id: 'created-record',
+          status: 'created',
+          invoiceNo: 'ABC202600001',
+        },
+      ],
+    });
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Approve Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Audit' }));
+    await waitFor(() => expect(getSettlementApprovalAuditMock).toHaveBeenCalledWith('approval-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'Run Logo Readiness' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Load Commission Invoice Records' }));
+
+    await waitFor(() => expect(screen.getByText('unknown-record')).toBeInTheDocument());
+    expect(screen.getByText('created-record')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Logo Invoice' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Not available').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('keeps approval workflow context after a zero-eligible preview with active locked rows', async () => {
     previewSettlementApprovalMock
       .mockResolvedValueOnce(previewResponse)
@@ -1474,10 +1632,10 @@ describe('Finance Settlement approval admin UI', () => {
     }));
   });
 
-  it('does not reference any Logo create route in the settlement approval UI files', () => {
+  it('does not reference legacy or test Logo create routes in the settlement approval UI files', () => {
     const pageSource = readFileSync('src/pages/AdminSettlementApprovalsPage.tsx', 'utf8');
     const apiSource = readFileSync('src/features/finance/settlementApprovalsApi.ts', 'utf8');
 
-    expect(`${pageSource}\n${apiSource}`).not.toMatch(/test-create-invoice|create-invoice|\/logo[^'\"]*create/i);
+    expect(`${pageSource}\n${apiSource}`).not.toMatch(/test-create-invoice|create-invoice/i);
   });
 });

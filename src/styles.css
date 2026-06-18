@@ -12586,7 +12586,25 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-invoice-table .op-table-head,
 .settlement-invoice-table .op-table-row {
-  grid-template-columns: minmax(150px, 1.4fr) minmax(100px, 0.8fr) minmax(88px, 0.7fr) minmax(100px, 0.9fr) minmax(56px, 0.5fr) minmax(160px, 1fr);
+  grid-template-columns:
+    minmax(148px, 1fr)
+    minmax(86px, 0.55fr)
+    minmax(82px, 0.55fr)
+    minmax(92px, 0.62fr)
+    minmax(78px, 0.55fr)
+    minmax(48px, 0.4fr)
+    minmax(130px, 0.8fr)
+    minmax(250px, 1.6fr);
+}
+
+.settlement-logo-create-cell {
+  display: grid;
+  gap: 8px;
+}
+
+.settlement-logo-create-confirmation {
+  align-items: start;
+  line-height: 1.3;
 }
 
 .settlement-tab-list {

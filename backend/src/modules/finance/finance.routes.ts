@@ -34,6 +34,7 @@ import {
   findBySettlementApproval as findSettlementCommissionInvoiceRecords,
   getSettlementCommissionInvoiceDiagnostics,
 } from './settlement-commission-invoice-record.service.js';
+import { executeSettlementLogoCommissionInvoiceCreate } from './settlement-logo-commission-invoice-create.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -578,6 +579,21 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(404).send({ message: 'Settlement commission invoice record not found.' });
       }
       return diagnostics;
+    },
+  );
+
+  app.post(
+    '/admin/finance/commission-invoices/:id/logo-isbasi/create',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return executeSettlementLogoCommissionInvoiceCreate(id, { env });
     },
   );
 

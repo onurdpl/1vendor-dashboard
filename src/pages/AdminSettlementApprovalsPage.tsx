@@ -13,6 +13,7 @@ import {
   approveSettlementApproval,
   cancelSettlementApproval,
   createSettlementApprovalDraft,
+  executeSettlementLogoCommissionInvoiceCreate,
   getDatabaseHealth,
   getSettlementApproval,
   getSettlementApprovalAudit,
@@ -44,7 +45,8 @@ type ActionName =
   | 'logoPreview'
   | 'requestSnapshot'
   | 'invoiceRecords'
-  | 'invoiceDiagnostics';
+  | 'invoiceDiagnostics'
+  | 'logoCreate';
 
 type WorkflowStepStatus = 'Waiting' | 'Ready' | 'Completed' | 'Blocked' | 'Warning';
 
@@ -88,6 +90,38 @@ function getErrorMessage(error: unknown) {
 
 function hasActiveLogoCommissionInvoiceBlocker(blockers: string[] | null | undefined) {
   return safeArray<string>(blockers).some((blocker) => ACTIVE_LOGO_COMMISSION_INVOICE_BLOCKER.test(blocker));
+}
+
+function isLogoCreateEligibleRecord(record: SettlementCommissionInvoiceRecord) {
+  const status = record.status.toLowerCase();
+  return (
+    record.provider === 'logo_isbasi' &&
+    (status === 'pending' || status === 'failed') &&
+    Boolean(record.requestSnapshot?.requestSnapshotPresent)
+  );
+}
+
+function getLogoCreateReadinessBlockers(
+  record: SettlementCommissionInvoiceRecord,
+  diagnostic: SettlementCommissionInvoiceDiagnostics | undefined,
+) {
+  const blockers: string[] = [];
+  if (!diagnostic) {
+    blockers.push('Read diagnostics before Logo create.');
+    return blockers;
+  }
+  if (!diagnostic.record.environmentGuard) {
+    blockers.push('Environment guard diagnostics are missing.');
+  } else if (!diagnostic.record.environmentGuard.allowed) {
+    blockers.push(...diagnostic.record.environmentGuard.blockers);
+  }
+  if (!diagnostic.record.executionContract.ok) {
+    blockers.push(...diagnostic.record.executionContract.blockers);
+  }
+  if (diagnostic.record.status.toLowerCase() !== record.status.toLowerCase()) {
+    blockers.push('Diagnostics status is stale. Read diagnostics again before Logo create.');
+  }
+  return Array.from(new Set(blockers));
 }
 
 function formatMinor(value: number | null | undefined, currency = 'TRY') {
@@ -831,6 +865,7 @@ export function AdminSettlementApprovalsPage() {
   const [invoiceRecordsWarning, setInvoiceRecordsWarning] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
+  const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setVendorId((current) => current || appReadiness.currentVendor.vendorId || 'yalispor');
@@ -1377,9 +1412,12 @@ export function AdminSettlementApprovalsPage() {
       preserveMessages?: boolean;
       successMessage?: string;
       warningOnFailure?: string;
+      manageBusy?: boolean;
     } = {},
   ) {
-    setBusyAction('invoiceRecords');
+    if (options.manageBusy !== false) {
+      setBusyAction('invoiceRecords');
+    }
     setInvoiceRecordsWarning(null);
     setActiveTab('invoices');
     if (!options.preserveMessages) {
@@ -1403,7 +1441,9 @@ export function AdminSettlementApprovalsPage() {
       }
       return null;
     } finally {
-      setBusyAction(null);
+      if (options.manageBusy !== false) {
+        setBusyAction(null);
+      }
     }
   }
 
@@ -1567,6 +1607,57 @@ export function AdminSettlementApprovalsPage() {
     );
     if (result) {
       setDiagnostics((current) => ({ ...current, [recordId]: result }));
+    }
+  }
+
+  async function handleCreateLogoInvoice(record: SettlementCommissionInvoiceRecord) {
+    if (!logoCreateConfirmations[record.id]) {
+      setError('Explicit Logo invoice create confirmation is required.');
+      return;
+    }
+
+    setBusyAction('logoCreate');
+    setError(null);
+    setDraftFailureSummary(null);
+    setSuccess(null);
+    setInvoiceRecordsWarning(null);
+
+    try {
+      const result = await executeSettlementLogoCommissionInvoiceCreate(record.id);
+      if (result.record) {
+        setInvoiceRecords((current) => [result.record!, ...current.filter((item) => item.id !== result.record?.id)]);
+      }
+      if (selectedApprovalId) {
+        await loadCommissionInvoiceRecordsForApproval(selectedApprovalId, {
+          preserveMessages: true,
+          warningOnFailure: 'Could not refresh existing invoice records.',
+          manageBusy: false,
+        });
+      }
+      try {
+        const refreshedDiagnostics = await getSettlementCommissionInvoiceDiagnostics(record.id);
+        setDiagnostics((current) => ({ ...current, [record.id]: refreshedDiagnostics }));
+      } catch {
+        setInvoiceRecordsWarning('Could not refresh invoice diagnostics after Logo create.');
+      }
+
+      setActiveTab('invoices');
+      setLogoCreateConfirmations((current) => ({ ...current, [record.id]: false }));
+      if (result.status === 'created') {
+        setSuccess(
+          `Logo invoice created${result.providerResult?.invoiceNo ? `: ${result.providerResult.invoiceNo}` : ''}.`,
+        );
+      } else if (result.status === 'failed') {
+        setError(result.record?.failureMessage || result.record?.failureCode || 'Logo invoice create failed.');
+      } else if (result.status === 'unknown') {
+        setError(result.blockers.join(' ') || 'Logo invoice create outcome is UNKNOWN. Reconciliation is required.');
+      } else {
+        setError(result.blockers.join(' ') || 'Logo invoice create was blocked.');
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -1950,33 +2041,76 @@ export function AdminSettlementApprovalsPage() {
             ) : null}
             {invoiceRecords.length ? (
               <OperationalTable
-                columns={['Record', 'Provider', 'Status', 'Request snapshot', 'Invoice no', 'Retry', 'Diagnostics']}
+                columns={['Record', 'Provider', 'Status', 'Request snapshot', 'Invoice no', 'Retry', 'Diagnostics', 'Logo create']}
                 className="settlement-invoice-table"
                 stickyHeader={false}
               >
-                {invoiceRecords.map((record) => (
-                  <OperationalTableRow key={record.id}>
-                    <span>
-                      <strong>{record.id}</strong>
-                      <small>{formatDate(record.createdAt)}</small>
-                    </span>
-                    <span>{safeStatusLabel(record.provider)}</span>
-                    <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
-                    <span>{record.requestSnapshot?.requestSnapshotPresent ? 'Stored' : 'Missing'}</span>
-                    <span>{valueOrDash(record.invoiceNo)}</span>
-                    <span>{formatNumber(record.retryCount)}</span>
-                    <span>
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => void handleDiagnostics(record.id)}
-                        disabled={busyAction !== null}
-                      >
-                        Read diagnostics (read-only)
-                      </button>
-                    </span>
-                  </OperationalTableRow>
-                ))}
+                {invoiceRecords.map((record) => {
+                  const diagnostic = diagnostics[record.id];
+                  const showLogoCreate = isLogoCreateEligibleRecord(record);
+                  const logoCreateBlockers = showLogoCreate ? getLogoCreateReadinessBlockers(record, diagnostic) : [];
+                  const logoCreateAllowed = showLogoCreate && logoCreateBlockers.length === 0;
+                  return (
+                    <OperationalTableRow key={record.id}>
+                      <span>
+                        <strong>{record.id}</strong>
+                        <small>{formatDate(record.createdAt)}</small>
+                      </span>
+                      <span>{safeStatusLabel(record.provider)}</span>
+                      <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
+                      <span>{record.requestSnapshot?.requestSnapshotPresent ? 'Stored' : 'Missing'}</span>
+                      <span>{valueOrDash(record.invoiceNo)}</span>
+                      <span>{formatNumber(record.retryCount)}</span>
+                      <span>
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          onClick={() => void handleDiagnostics(record.id)}
+                          disabled={busyAction !== null}
+                        >
+                          Read diagnostics (read-only)
+                        </button>
+                      </span>
+                      <span className="settlement-logo-create-cell">
+                        {showLogoCreate ? (
+                          <>
+                            <label className="op-checkbox-row settlement-logo-create-confirmation">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(logoCreateConfirmations[record.id])}
+                                onChange={(event) => {
+                                  const checked = event.currentTarget.checked;
+                                  setLogoCreateConfirmations((current) => ({
+                                    ...current,
+                                    [record.id]: checked,
+                                  }));
+                                }}
+                              />
+                              <span>I understand this will call Logo İşbaşı and may create a real invoice.</span>
+                            </label>
+                            {logoCreateBlockers.length ? (
+                              <ReadinessList title="Create blockers" items={logoCreateBlockers} tone="danger" />
+                            ) : null}
+                            <button
+                              type="button"
+                              className="button button-primary button-compact"
+                              onClick={() => void handleCreateLogoInvoice(record)}
+                              disabled={
+                                busyAction !== null ||
+                                !logoCreateAllowed ||
+                                !logoCreateConfirmations[record.id]
+                              }
+                            >
+                              Create Logo Invoice
+                            </button>
+                          </>
+                        ) : (
+                          <span className="settlement-compact-empty">Not available</span>
+                        )}
+                      </span>
+                    </OperationalTableRow>
+                  );
+                })}
               </OperationalTable>
             ) : (
               <p className="settlement-compact-empty">No invoice records loaded yet.</p>

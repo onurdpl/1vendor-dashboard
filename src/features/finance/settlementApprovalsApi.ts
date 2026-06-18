@@ -338,6 +338,25 @@ export type SettlementCommissionInvoiceDiagnostics = {
   };
 };
 
+export type ExecuteSettlementLogoCommissionInvoiceCreateResponse = {
+  ok: boolean;
+  writesPerformed: boolean;
+  externalApiCallAttempted: boolean;
+  settlementCommissionInvoiceId: string;
+  status: 'blocked' | 'created' | 'failed' | 'unknown' | string;
+  blockers: string[];
+  warnings: string[];
+  environmentGuard: SettlementCommissionInvoiceDiagnostics['record']['environmentGuard'] | null;
+  record: SettlementCommissionInvoiceRecord | null;
+  providerResult: {
+    httpStatus: number | null;
+    invoiceId: string | null;
+    uuid: string | null;
+    ettn: string | null;
+    invoiceNo: string | null;
+  } | null;
+};
+
 export type SettlementApprovalPreviewInput = {
   vendorId: string;
   periodStart?: string | null;
@@ -409,5 +428,12 @@ export function getSettlementCommissionInvoiceRecords(id: string) {
 export function getSettlementCommissionInvoiceDiagnostics(id: string) {
   return apiClient.get<SettlementCommissionInvoiceDiagnostics>(
     `/admin/finance/commission-invoices/${encodeURIComponent(id)}`,
+  );
+}
+
+export function executeSettlementLogoCommissionInvoiceCreate(id: string) {
+  return apiClient.post<ExecuteSettlementLogoCommissionInvoiceCreateResponse>(
+    `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/create`,
+    {},
   );
 }

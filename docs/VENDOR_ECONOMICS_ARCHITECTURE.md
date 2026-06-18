@@ -190,6 +190,18 @@ Readiness must pass all hard guards:
 - No active non-cancelled `SettlementCommissionInvoice` already exists for the settlement/provider.
 - Environment guard allows execution.
 
+Controlled create behavior:
+
+- Logo readiness is read-only and must not call Logo create.
+- The immutable request snapshot route stores a local `SettlementCommissionInvoice` artifact only; it does not call Logo.
+- `POST /admin/finance/commission-invoices/:id/logo-isbasi/create` is the controlled provider-write boundary.
+- Execution uses only persisted `SettlementCommissionInvoice.requestSnapshotJson.logoPayload`; payloads are not rebuilt during create.
+- `PENDING` records can execute once.
+- `FAILED` records can retry through the same stored payload and increment retry metadata before the provider call.
+- `UNKNOWN`, `CREATED`, and `CANCELLED` records cannot execute.
+- `UNKNOWN` means the provider outcome or local persistence outcome is ambiguous and requires reconciliation before any retry.
+- The create endpoint requires the Logo execution environment guard, expected tenant id, and authenticated tenant validation before provider write.
+
 ## Return Shipping Policy
 
 Current implementation facts:
@@ -212,12 +224,13 @@ UNKNOWN:
 
 ## Open Risks / Next Phases
 
-Phase 3.3B - Controlled Logo Create.
+Phase 3.3B - Controlled Logo Create foundation.
 
-- Implement real Logo Create from persisted `SettlementCommissionInvoice.requestSnapshotJson.logoPayload`.
-- Do not rebuild payloads at execution time.
-- Persist provider identifiers and safe response snapshot.
-- Mark ambiguous provider timeout outcomes as UNKNOWN.
+- Controlled provider create exists for an existing `PENDING` or retryable `FAILED` `SettlementCommissionInvoice`.
+- Provider success persists provider identifiers and safe response snapshot.
+- Clear provider failures persist `FAILED`.
+- Timeout, network ambiguity, successful non-JSON responses, and local persistence ambiguity persist or report `UNKNOWN`.
+- Admin UI exposes create only after diagnostics show environment guard and execution contract are ready and an explicit operator confirmation is checked.
 
 Phase 3.4 - Invoice Status Sync.
 

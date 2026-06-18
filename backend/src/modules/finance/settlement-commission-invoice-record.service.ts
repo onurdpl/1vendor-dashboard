@@ -546,7 +546,11 @@ export async function markCreated(
   input: MarkSettlementCommissionInvoiceCreatedInput,
 ): Promise<SettlementCommissionInvoiceRecordDto> {
   const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
-  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.PENDING], 'markCreated');
+  assertRecordStatus(
+    existing,
+    [SettlementCommissionInvoiceStatus.PENDING, SettlementCommissionInvoiceStatus.FAILED],
+    'markCreated',
+  );
   const record = await prisma.settlementCommissionInvoice.update({
     where: {
       id: input.settlementCommissionInvoiceId,
@@ -593,7 +597,11 @@ export async function markUnknown(
   input: MarkSettlementCommissionInvoiceUnknownInput,
 ): Promise<SettlementCommissionInvoiceRecordDto> {
   const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
-  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.PENDING], 'markUnknown');
+  assertRecordStatus(
+    existing,
+    [SettlementCommissionInvoiceStatus.PENDING, SettlementCommissionInvoiceStatus.FAILED],
+    'markUnknown',
+  );
   const record = await prisma.settlementCommissionInvoice.update({
     where: {
       id: input.settlementCommissionInvoiceId,
