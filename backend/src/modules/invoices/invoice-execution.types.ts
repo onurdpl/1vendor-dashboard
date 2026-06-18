@@ -102,6 +102,8 @@ export type InvoiceExecutionPreviewDto = {
   executionEnabled: boolean;
   providerEnabled: boolean;
   providerConfigured: boolean;
+  legacyRuntimeDisabled: boolean;
+  disabledReason: string | null;
   configuration: {
     firmIdConfigured: boolean;
     apiKeyConfigured: boolean;

@@ -2,6 +2,7 @@
 
 > Revised Phase 20A is documented in `docs/PHASE_20A_CUSTOMER_INVOICE_VISIBILITY.md`.
 > BizimHesap AddInvoice is now treated as draft/accounting sync visibility unless final invoice visibility is proven by a future provider flow.
+> Current status: legacy `InvoiceExecution` / BizimHesap customer accounting sync create and retry runtime paths are disabled. Historical records and response-summary diagnostics are retained. Active settlement commission invoices use the settlement approval -> Logo İşbaşı commission invoice flow.
 
 ## Purpose
 
@@ -70,14 +71,16 @@ BIZIMHESAP_ADD_INVOICE_URL=
 BIZIMHESAP_ACCESS_TOKEN=
 ```
 
-When disabled, execution attempts are recorded as failed with a safe response snapshot. This protects production from accidental outbound accounting calls while keeping the orchestration path auditable.
+Legacy execution attempts are now blocked before provider calls or `InvoiceExecution` writes. This protects production from accidental outbound accounting calls while preserving historical diagnostics.
 
-BizimHesap live execution requires both the generic invoice gate and the provider gate:
+BizimHesap live execution is disabled by current marketplace finance policy. The old environment gates are retained for historical configuration visibility only:
 
 - `INVOICE_EXECUTION_ENABLED=true`
 - `BIZIMHESAP_ENABLED=true`
 
-Keep `BIZIMHESAP_ENABLED=false` for production dry-run preparation and preview-only validation. The backend reads `BIZIMHESAP_FIRM_ID` and `BIZIMHESAP_API_KEY` without logging either value. `BIZIMHESAP_BASE_URL` can be used to derive the AddInvoice URL, while `BIZIMHESAP_ADD_INVOICE_URL` remains available as an explicit override.
+Even if both gates are true, `POST /admin/invoices/create` and `POST /admin/invoices/:id/retry` return: `Legacy customer accounting sync is disabled. Use settlement Logo commission invoice flow.`
+
+Keep `BIZIMHESAP_ENABLED=false` for production dry-run preparation and preview-only validation. The backend reads `BIZIMHESAP_FIRM_ID` and `BIZIMHESAP_API_KEY` without logging either value. `BIZIMHESAP_BASE_URL` can be used to derive the historical AddInvoice URL, while `BIZIMHESAP_ADD_INVOICE_URL` remains available as an explicit override.
 
 ## Dry-Run Preview
 
@@ -188,7 +191,7 @@ Phase 20A does not:
 ## Future Direction
 
 Future phases can add:
-- production BizimHesap credential setup and live AddInvoice smoke
+- reactivation design for legacy customer invoice sync only if the business explicitly reopens that flow
 - Paraşüt and BirFatura adapters
 - provider status polling
 - provider PDF refresh

@@ -204,12 +204,11 @@ function getRecommendationForAttentionItem(item: OperationsAttentionItemDto): Pi
   }
 
   if (item.type === 'finance') {
-    const invoiceRelated = title.includes('invoice');
     return {
-      type: invoiceRelated ? 'invoice_retry' : 'finance_review',
-      title: invoiceRelated ? 'Review invoice visibility' : 'Review payout issue',
+      type: 'finance_review',
+      title: 'Review payout issue',
       description: `${item.objectReference} needs finance operator review.`,
-      recommendedAction: invoiceRelated ? 'Open finance and review invoice status' : 'Open finance and review payout status',
+      recommendedAction: 'Open finance and review payout status',
       vendorVisible: false,
     };
   }
@@ -958,15 +957,6 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       OR: [
         { payoutStatus: 'HOLD' },
         { settlementStatus: { in: ['HELD', 'DISPUTED'] } },
-        {
-          invoiceExecutions: {
-            some: {
-              status: {
-                in: ['FAILED', 'UNKNOWN'],
-              },
-            },
-          },
-        },
       ],
     },
     include: {
@@ -980,7 +970,6 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
           refundRecords: true,
         },
       },
-      invoiceExecutions: true,
     },
     orderBy: {
       updatedAt: 'desc',
@@ -989,14 +978,13 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
   });
 
   for (const entry of financeEntries) {
-    const failedInvoice = entry.invoiceExecutions.find((execution) => execution.status === 'FAILED' || execution.status === 'UNKNOWN');
     const ageHours = hoursSince(entry.updatedAt, now);
     attentionItems.push({
       id: `attention-finance-${entry.id}`,
       type: 'finance',
       severity: deriveOperationalSeverity({
         ageHours,
-        status: failedInvoice ? 'failed' : entry.payoutStatus === 'HOLD' || entry.settlementStatus === 'HELD' ? 'held' : 'disputed',
+        status: entry.payoutStatus === 'HOLD' || entry.settlementStatus === 'HELD' ? 'held' : 'disputed',
       }),
       vendorId: entry.vendorId,
       vendorName: entry.vendor.name,
@@ -1005,11 +993,11 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
         ? `Order ${entry.vendorAllocation.order.sourceShopifyOrderNumber}`
         : entry.id,
       objectId: entry.id,
-      status: failedInvoice ? failedInvoice.status.toLowerCase() : entry.settlementStatus.toLowerCase(),
+      status: entry.settlementStatus.toLowerCase(),
       ageHours,
-      title: failedInvoice ? 'Invoice visibility issue' : 'Payout review needed',
+      title: 'Payout review needed',
       description: entry.description ?? 'Finance row requires admin review.',
-      recommendedAction: failedInvoice ? 'Review invoice sync' : 'Review payout status',
+      recommendedAction: 'Review payout status',
       destinationPath: '/finance',
       createdAt: entry.updatedAt.toISOString(),
     });

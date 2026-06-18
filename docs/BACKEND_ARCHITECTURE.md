@@ -1205,15 +1205,17 @@ Frontend note:
   - `providerCapabilities`
 - Visibility states include `invoice_missing`, `accounting_sync_pending`, `accounting_synced`, `invoice_linked`, `invoice_visibility_incomplete`, `provider_failed`, and `cancelled`.
 - Duplicate prevention is enforced with a unique finance-ledger/provider key.
-- Admin invoice endpoints:
+- Legacy admin invoice endpoints:
   - `POST /admin/invoices/preview`
   - `POST /admin/invoices/create`
   - `POST /admin/invoices/:id/retry`
   - `GET /admin/invoices/:id/response-summary`
 - Preview is dry-run only: it returns the deterministic BizimHesap payload and configuration presence booleans without creating provider records, creating `InvoiceExecution` rows, calling BizimHesap, or exposing FirmId/API keys.
 - Response summaries are admin-only and expose HTTP/content-type/body-key metadata plus persisted-field presence booleans. They do not return raw provider values or secrets.
-- Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, visibility status, invoice number, PDF availability, and sync semantics.
-- Admins can inspect safe provider response summaries for failed/unknown visibility states. Vendors do not see provider response internals.
+- `POST /admin/invoices/create` and `POST /admin/invoices/:id/retry` are disabled by policy and return: `Legacy customer accounting sync is disabled. Use settlement Logo commission invoice flow.`
+- The disabled create/retry paths must not create `InvoiceExecution` rows, update existing rows, or call BizimHesap.
+- Finance dashboard records may still include latest invoice execution references as historical diagnostics. They are not part of settlement approval, Logo readiness, settlement commission invoices, or payout.
+- Admins can inspect safe provider response summaries for failed/unknown historical visibility states. Vendors do not see provider response internals.
 - Invoice execution configuration is disabled by default:
   - `INVOICE_EXECUTION_ENABLED=false`
   - `INVOICE_PROVIDER=bizimhesap`
@@ -1223,7 +1225,8 @@ Frontend note:
   - `BIZIMHESAP_BASE_URL`
   - `BIZIMHESAP_ADD_INVOICE_URL`
   - `BIZIMHESAP_ACCESS_TOKEN`
-- Live BizimHesap calls require both `INVOICE_EXECUTION_ENABLED=true` and `BIZIMHESAP_ENABLED=true`.
+- `INVOICE_EXECUTION_ENABLED` and `BIZIMHESAP_ENABLED` are retained for historical configuration visibility, but they no longer enable legacy customer accounting sync execution.
+- Settlement commission invoices use the settlement approval → Logo İşbaşı commission invoice lifecycle instead.
 - BizimHesap success parsing supports the documented `guid` and `url` fields, legacy casing aliases, nested response wrappers, and simple XML-style provider responses. If invoice number is not returned, `providerInvoiceNo` remains null.
 - Phase 20A preserves these boundaries:
   - no automatic invoice creation

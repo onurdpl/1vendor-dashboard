@@ -101,12 +101,21 @@ describe('operational attention derivation', () => {
           vendorVisible: true,
         }),
         expect.objectContaining({
-          type: 'invoice_retry',
+          type: 'finance_review',
+          title: 'Review payout issue',
+          recommendedAction: 'Open finance and review payout status',
           vendorVisible: false,
         }),
         expect.objectContaining({
           type: 'vendor_risk',
           vendorVisible: false,
+        }),
+      ]),
+    );
+    expect(recommendations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'invoice_retry',
         }),
       ]),
     );

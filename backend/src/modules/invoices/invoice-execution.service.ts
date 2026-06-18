@@ -22,6 +22,13 @@ import type {
   PreviewInvoiceExecutionDto,
 } from './invoice-execution.types.js';
 
+export const LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE =
+  'Legacy customer accounting sync is disabled. Use settlement Logo commission invoice flow.';
+
+function isLegacyInvoiceExecutionRuntimeDisabled() {
+  return true;
+}
+
 type FinanceLedgerForInvoice = FinanceLedgerEntry & {
   vendorAllocation: {
     id: string;
@@ -332,6 +339,10 @@ export async function createInvoiceExecution(
     adapter?: InvoiceProviderAdapter;
   },
 ): Promise<InvoiceExecutionDto> {
+  if (isLegacyInvoiceExecutionRuntimeDisabled()) {
+    throw new Error(LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE);
+  }
+
   if (!input.financeLedgerEntryId) {
     throw new Error('financeLedgerEntryId is required.');
   }
@@ -400,9 +411,11 @@ export async function previewInvoiceExecutionPayload(
   return {
     provider: mapInvoiceProvider(provider),
     dryRun: true,
-    executionEnabled: options.env.INVOICE_EXECUTION_ENABLED,
+    executionEnabled: false,
     providerEnabled: options.env.BIZIMHESAP_ENABLED,
     providerConfigured: Boolean(options.env.BIZIMHESAP_FIRM_ID && options.env.BIZIMHESAP_API_KEY && hasConfiguredBizimHesapUrl(options.env)),
+    legacyRuntimeDisabled: true,
+    disabledReason: LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE,
     configuration: {
       firmIdConfigured: Boolean(options.env.BIZIMHESAP_FIRM_ID),
       apiKeyConfigured: Boolean(options.env.BIZIMHESAP_API_KEY),
@@ -420,6 +433,10 @@ export async function retryInvoiceExecution(
     adapter?: InvoiceProviderAdapter;
   },
 ): Promise<InvoiceExecutionDto> {
+  if (isLegacyInvoiceExecutionRuntimeDisabled()) {
+    throw new Error(LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE);
+  }
+
   const execution = await prisma.invoiceExecution.findUnique({
     where: {
       id: invoiceExecutionId,

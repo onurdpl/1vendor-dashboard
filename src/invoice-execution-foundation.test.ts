@@ -18,6 +18,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const {
   createInvoiceExecution,
   getInvoiceExecutionResponseSummary,
+  LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE,
   mapInvoiceExecution,
   previewInvoiceExecutionPayload,
   retryInvoiceExecution,
@@ -175,67 +176,26 @@ describe('invoice execution foundation', () => {
     });
   });
 
-  it('creates invoice execution from a sale ledger row and persists provider identifiers', async () => {
-    const execution = await createInvoiceExecution(
-      {
-        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-        provider: 'bizimhesap',
-      },
-      {
-        env,
-        vendorId: 'sporjinal',
-        adapter,
-      },
-    );
-
-    expect(prismaMock.invoiceExecution.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          id: 'invoice-bizimhesap-fin-sporjinal-sale-7616544244049',
+  it('blocks legacy invoice execution creation before DB writes or provider calls', async () => {
+    await expect(
+      createInvoiceExecution(
+        {
           financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-          provider: 'BIZIMHESAP',
-          status: 'PENDING',
-          requestSnapshot: expect.objectContaining({
-            AddInvoice: expect.objectContaining({
-              References: expect.objectContaining({
-                FinanceLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-                ShopifyOrderNumber: '1021',
-              }),
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(adapter.createInvoice).toHaveBeenCalledWith(
-      expect.objectContaining({
-        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-      }),
-    );
-    expect(prismaMock.invoiceExecution.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'CREATED',
-          providerInvoiceGuid: 'BH-GUID-1',
-          providerInvoiceNo: 'BH-1001',
-          providerPdfUrl: 'https://provider.example/invoice.pdf',
-        }),
-      }),
-    );
-    expect(execution).toMatchObject({
-      provider: 'bizimhesap',
-      status: 'created',
-      visibilityStatus: 'invoice_linked',
-      visibilityLabel: 'Accounting visibility linked',
-      finalInvoiceState: 'draft_or_synced',
-      syncSemantics: 'draft_accounting_sync',
-      providerCapabilities: expect.objectContaining({
-        supportsDraftSubmission: true,
-        supportsFinalInvoiceVisibility: false,
-        supportsPdfLink: true,
-      }),
-      providerInvoiceGuid: 'BH-GUID-1',
-      providerPdfUrl: 'https://provider.example/invoice.pdf',
-    });
+          provider: 'bizimhesap',
+        },
+        {
+          env,
+          vendorId: 'sporjinal',
+          adapter,
+        },
+      ),
+    ).rejects.toThrow(LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE);
+
+    expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.update).not.toHaveBeenCalled();
+    expect(adapter.createInvoice).not.toHaveBeenCalled();
   });
 
   it('previews BizimHesap invoice payload without creating an execution or exposing secrets', async () => {
@@ -253,9 +213,11 @@ describe('invoice execution foundation', () => {
     expect(preview).toMatchObject({
       provider: 'bizimhesap',
       dryRun: true,
-      executionEnabled: true,
+      executionEnabled: false,
       providerEnabled: true,
       providerConfigured: true,
+      legacyRuntimeDisabled: true,
+      disabledReason: LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE,
       configuration: {
         firmIdConfigured: true,
         apiKeyConfigured: true,
@@ -287,161 +249,17 @@ describe('invoice execution foundation', () => {
     expect(adapter.createInvoice).not.toHaveBeenCalled();
   });
 
-  it('prevents duplicate invoice execution for the same ledger row and provider', async () => {
-    prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce(buildExecution());
-
+  it('blocks legacy invoice execution retry before DB writes or provider calls', async () => {
     await expect(
-      createInvoiceExecution(
-        {
-          financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-          provider: 'bizimhesap',
-        },
-        {
-          env,
-          vendorId: 'sporjinal',
-          adapter,
-        },
-      ),
-    ).rejects.toThrow('Invoice execution already exists');
-    expect(adapter.createInvoice).not.toHaveBeenCalled();
-  });
-
-  it('records provider failures without mutating the finance ledger linkage', async () => {
-    adapter.createInvoice.mockRejectedValueOnce(new Error('Provider unavailable'));
-
-    const execution = await createInvoiceExecution(
-      {
-        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-        provider: 'bizimhesap',
-      },
-      {
+      retryInvoiceExecution('invoice-bizimhesap-fin-sporjinal-sale-7616544244049', {
         env,
-        vendorId: 'sporjinal',
         adapter,
-      },
-    );
-
-    expect(prismaMock.invoiceExecution.update).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        where: {
-          id: 'invoice-bizimhesap-fin-sporjinal-sale-7616544244049',
-        },
-        data: expect.objectContaining({
-          status: 'FAILED',
-          responseSnapshot: expect.objectContaining({
-            error: 'Provider unavailable',
-          }),
-        }),
       }),
-    );
-    expect(execution.status).toBe('failed');
-  });
+    ).rejects.toThrow(LEGACY_INVOICE_EXECUTION_DISABLED_MESSAGE);
 
-  it('does not mark provider HTTP success as created when guid and PDF URL are missing', async () => {
-    adapter.createInvoice.mockResolvedValueOnce({
-      providerInvoiceGuid: null,
-      providerInvoiceNo: null,
-      providerPdfUrl: null,
-      responseSnapshot: {
-        status: 200,
-        ok: true,
-        contentType: 'application/json',
-        parsedBodyType: 'object',
-        bodyKeys: ['eInvoiceNo', 'error', 'guid', 'url'],
-        body: {
-          eInvoiceNo: '',
-          error: '',
-          guid: '',
-          url: '',
-        },
-      },
-    });
-
-    const execution = await createInvoiceExecution(
-      {
-        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-        provider: 'bizimhesap',
-      },
-      {
-        env,
-        vendorId: 'sporjinal',
-        adapter,
-      },
-    );
-
-    expect(prismaMock.invoiceExecution.update).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'UNKNOWN',
-          providerInvoiceGuid: null,
-          providerPdfUrl: null,
-          responseSnapshot: expect.objectContaining({
-            error: 'BizimHesap AddInvoice returned HTTP success without provider GUID or PDF URL.',
-          }),
-        }),
-      }),
-    );
-    expect(execution.status).toBe('unknown');
-    expect(execution.visibilityStatus).toBe('invoice_visibility_incomplete');
-    expect(execution.finalInvoiceState).toBe('visibility_unknown');
-  });
-
-  it('preserves vendor isolation during invoice creation', async () => {
-    await expect(
-      createInvoiceExecution(
-        {
-          financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
-          provider: 'bizimhesap',
-        },
-        {
-          env,
-          vendorId: 'other-vendor',
-          adapter,
-        },
-      ),
-    ).rejects.toThrow('Finance ledger row does not belong to the selected vendor.');
+    expect(prismaMock.invoiceExecution.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.invoiceExecution.update).not.toHaveBeenCalled();
     expect(adapter.createInvoice).not.toHaveBeenCalled();
-  });
-
-  it('retries failed invoice executions against the same execution row', async () => {
-    prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce({
-      ...buildExecution({ status: 'FAILED', providerInvoiceGuid: null }),
-      financeLedgerEntry: buildLedgerEntry(),
-    });
-
-    const execution = await retryInvoiceExecution('invoice-bizimhesap-fin-sporjinal-sale-7616544244049', {
-      env,
-      adapter,
-    });
-
-    expect(prismaMock.invoiceExecution.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          id: 'invoice-bizimhesap-fin-sporjinal-sale-7616544244049',
-        },
-        data: expect.objectContaining({
-          status: 'PENDING',
-          responseSnapshot: expect.any(Object),
-        }),
-      }),
-    );
-    expect(execution.status).toBe('created');
-  });
-
-  it('allows retry for inconsistent created executions without provider identifiers', async () => {
-    prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce({
-      ...buildExecution({ status: 'CREATED', providerInvoiceGuid: null }),
-      providerPdfUrl: null,
-      financeLedgerEntry: buildLedgerEntry(),
-    });
-
-    const execution = await retryInvoiceExecution('invoice-bizimhesap-fin-sporjinal-sale-7616544244049', {
-      env,
-      adapter,
-    });
-
-    expect(adapter.createInvoice).toHaveBeenCalledOnce();
-    expect(execution.status).toBe('created');
   });
 
   it('passes BizimHesap FirmId and API key through the provider request without logging them in snapshots', async () => {
