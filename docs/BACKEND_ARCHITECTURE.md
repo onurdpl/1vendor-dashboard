@@ -1189,7 +1189,6 @@ Frontend note:
 - Provider enum:
   - `BIZIMHESAP`
   - future-ready `PARASUT`
-  - future-ready `BIRFATURA`
 - Status enum:
   - `PENDING`
   - `CREATED`

@@ -1259,7 +1259,7 @@ export type PayoutBatch = {
 
 export type InvoiceExecutionReference = {
   id: string;
-  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  provider: 'bizimhesap' | 'parasut';
   status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
   visibilityStatus:
     | 'invoice_missing'
@@ -1302,7 +1302,7 @@ export type InvoiceExecutionReference = {
 
 export type InvoiceExecutionResponseSummary = {
   id: string;
-  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  provider: 'bizimhesap' | 'parasut';
   status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
   providerInvoiceGuidPresent: boolean;
   providerInvoiceNoPresent: boolean;

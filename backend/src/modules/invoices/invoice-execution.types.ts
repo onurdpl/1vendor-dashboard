@@ -1,4 +1,4 @@
-export type InvoiceExecutionProviderDto = 'bizimhesap' | 'parasut' | 'birfatura';
+export type InvoiceExecutionProviderDto = 'bizimhesap' | 'parasut';
 export type InvoiceExecutionStatusDto = 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
 
 export type InvoiceVisibilityStatusDto =

@@ -402,9 +402,6 @@ function getProviderName(provider?: string) {
   if (provider === 'parasut') {
     return 'Paraşüt';
   }
-  if (provider === 'birfatura') {
-    return 'BirFatura';
-  }
   return 'Not linked';
 }
 

@@ -234,7 +234,6 @@ enum AutomationActionType {
 enum InvoiceExecutionProvider {
   BIZIMHESAP
   PARASUT
-  BIRFATURA
 }
 
 enum PaymentProvider {

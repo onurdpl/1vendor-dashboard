@@ -13,7 +13,7 @@ export type InvoiceProviderCreateResult = {
 };
 
 export interface InvoiceProviderAdapter {
-  provider: 'BIZIMHESAP' | 'PARASUT' | 'BIRFATURA';
+  provider: 'BIZIMHESAP' | 'PARASUT';
   createInvoice(input: InvoiceProviderCreateInput): Promise<InvoiceProviderCreateResult>;
   cancelInvoice(providerInvoiceGuid: string): Promise<Record<string, unknown>>;
   getInvoiceStatus(providerInvoiceGuid: string): Promise<Record<string, unknown>>;

@@ -111,7 +111,7 @@ export type PayoutBatchReferenceDto = {
 
 export type InvoiceExecutionReferenceDto = {
   id: string;
-  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  provider: 'bizimhesap' | 'parasut';
   status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
   visibilityStatus:
     | 'invoice_missing'

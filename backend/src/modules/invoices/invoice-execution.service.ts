@@ -75,9 +75,6 @@ function normalizeProvider(provider?: InvoiceExecutionProviderDto): InvoiceExecu
   if (normalized === 'parasut') {
     return InvoiceExecutionProvider.PARASUT;
   }
-  if (normalized === 'birfatura') {
-    return InvoiceExecutionProvider.BIRFATURA;
-  }
 
   throw new Error('Unsupported invoice provider.');
 }
