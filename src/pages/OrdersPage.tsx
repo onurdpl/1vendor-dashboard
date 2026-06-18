@@ -36,6 +36,7 @@ import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/s
 import { useMutationAction } from '../hooks/useMutationAction';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
+import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 
 type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type LabelActionFeedback = {
@@ -645,8 +646,12 @@ export function OrdersPage() {
     };
 
     if (labelUrl) {
-      globalThis.open?.(labelUrl, '_blank', 'noopener,noreferrer');
-      setCurrentLabelActionFeedback('success', 'Existing label opened. No duplicate shipment was created.');
+      const labelOpenResult = openShipmentLabel(labelUrl);
+      if (labelOpenResult.opened) {
+        setCurrentLabelActionFeedback('success', 'Existing label opened. No duplicate shipment was created.');
+      } else {
+        setCurrentLabelActionFeedback('error', labelOpenResult.error);
+      }
       return;
     }
 
@@ -656,8 +661,12 @@ export function OrdersPage() {
           setLabelActionFeedback(null);
           const shipment = await retryShipmentLabelMutation(shipmentExecution.id);
           if (shipment.labelUrl) {
-            globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-            setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
+            const labelOpenResult = openShipmentLabel(shipment.labelUrl);
+            if (labelOpenResult.opened) {
+              setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
+            } else {
+              setCurrentLabelActionFeedback('error', labelOpenResult.error);
+            }
           } else {
             setCurrentLabelActionFeedback('warning', 'Shipment retry completed. Label is still processing.');
           }
@@ -677,8 +686,12 @@ export function OrdersPage() {
       setLabelActionFeedback(null);
       const shipment = await createShipmentMutation(order.id);
       if (shipment.labelUrl) {
-        globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
-        setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
+        const labelOpenResult = openShipmentLabel(shipment.labelUrl);
+        if (labelOpenResult.opened) {
+          setCurrentLabelActionFeedback('success', 'Shipment label created and opened.');
+        } else {
+          setCurrentLabelActionFeedback('error', labelOpenResult.error);
+        }
       } else {
         setCurrentLabelActionFeedback('warning', 'Shipment was created. Label is still processing.');
       }
@@ -1024,7 +1037,19 @@ export function OrdersPage() {
                   </div>
                   <div>
                     <span>Label</span>
-                    <strong>{labelUrl ? <a className="inline-link" href={labelUrl}>Open label</a> : 'Unavailable'}</strong>
+                    <strong>
+                      {labelUrl ? (
+                        <button
+                          type="button"
+                          className="inline-link inline-button-link"
+                          onClick={() => void handleSmartLabelAction(selectedOrder)}
+                        >
+                          Open label
+                        </button>
+                      ) : (
+                        'Unavailable'
+                      )}
+                    </strong>
                   </div>
                   <div>
                     <span>Last update</span>

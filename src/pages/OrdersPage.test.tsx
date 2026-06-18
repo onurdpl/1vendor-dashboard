@@ -193,6 +193,49 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function buildPdfBase64(content = '%PDF-1.4 shipment label') {
+  return globalThis.btoa(content);
+}
+
+function stubObjectUrl(blobUrl = 'blob:shipment-label') {
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const createObjectURL = vi.fn(() => blobUrl);
+  const revokeObjectURL = vi.fn();
+
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: createObjectURL,
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: revokeObjectURL,
+  });
+
+  return {
+    createObjectURL,
+    revokeObjectURL,
+    restore() {
+      if (originalCreateObjectURL) {
+        Object.defineProperty(URL, 'createObjectURL', {
+          configurable: true,
+          value: originalCreateObjectURL,
+        });
+      } else {
+        Reflect.deleteProperty(URL, 'createObjectURL');
+      }
+      if (originalRevokeObjectURL) {
+        Object.defineProperty(URL, 'revokeObjectURL', {
+          configurable: true,
+          value: originalRevokeObjectURL,
+        });
+      } else {
+        Reflect.deleteProperty(URL, 'revokeObjectURL');
+      }
+    },
+  };
+}
+
 describe('OrdersPage control center', () => {
   beforeEach(() => {
     cleanup();
@@ -570,6 +613,99 @@ describe('OrdersPage control center', () => {
     expect(createShipmentExecutionMock).not.toHaveBeenCalled();
 
     openMock.mockRestore();
+  });
+
+  it('opens shipment label PDF data URLs through object URLs instead of direct data URLs', async () => {
+    const pdfBase64 = buildPdfBase64();
+    const dataUrl = `data:application/pdf;base64,${pdfBase64}`;
+    const detailWithDataLabel = {
+      ...orderDetail,
+      shipmentExecution: {
+        ...shipmentExecution,
+        labelUrl: dataUrl,
+      },
+    };
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    const objectUrl = stubObjectUrl('blob:shipment-label-data-url');
+    listOrdersMock.mockResolvedValue([toSummary(detailWithDataLabel)]);
+    getOrderMock.mockResolvedValue(detailWithDataLabel);
+
+    try {
+      renderOrdersPage();
+
+      const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+      await userEvent.click(labelButton);
+
+      expect(objectUrl.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      expect(openMock).toHaveBeenCalledWith('blob:shipment-label-data-url', '_blank', 'noopener,noreferrer');
+      expect(openMock).not.toHaveBeenCalledWith(dataUrl, '_blank', 'noopener,noreferrer');
+      expect(await screen.findByText('Existing label opened. No duplicate shipment was created.')).toBeInTheDocument();
+      expect(document.body.innerHTML).not.toContain(pdfBase64);
+      expect(document.body.innerHTML).not.toContain('data:application/pdf');
+    } finally {
+      openMock.mockRestore();
+      objectUrl.restore();
+    }
+  });
+
+  it('opens raw base64 shipment label PDFs through object URLs', async () => {
+    const pdfBase64 = buildPdfBase64('%PDF-1.4 raw shipment label');
+    const detailWithRawBase64Label = {
+      ...orderDetail,
+      shipmentExecution: {
+        ...shipmentExecution,
+        labelUrl: pdfBase64,
+      },
+    };
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    const objectUrl = stubObjectUrl('blob:shipment-label-raw-base64');
+    listOrdersMock.mockResolvedValue([toSummary(detailWithRawBase64Label)]);
+    getOrderMock.mockResolvedValue(detailWithRawBase64Label);
+
+    try {
+      renderOrdersPage();
+
+      const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+      await userEvent.click(labelButton);
+
+      expect(objectUrl.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      expect(openMock).toHaveBeenCalledWith('blob:shipment-label-raw-base64', '_blank', 'noopener,noreferrer');
+      expect(openMock).not.toHaveBeenCalledWith(pdfBase64, '_blank', 'noopener,noreferrer');
+      expect(document.body.innerHTML).not.toContain(pdfBase64);
+    } finally {
+      openMock.mockRestore();
+      objectUrl.restore();
+    }
+  });
+
+  it('shows a readable error for unsupported shipment label data without rendering the payload', async () => {
+    const invalidLabel = 'not-a-pdf-label-payload';
+    const detailWithInvalidLabel = {
+      ...orderDetail,
+      shipmentExecution: {
+        ...shipmentExecution,
+        labelUrl: invalidLabel,
+      },
+    };
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    const objectUrl = stubObjectUrl();
+    listOrdersMock.mockResolvedValue([toSummary(detailWithInvalidLabel)]);
+    getOrderMock.mockResolvedValue(detailWithInvalidLabel);
+
+    try {
+      renderOrdersPage();
+
+      const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+      await userEvent.click(labelButton);
+
+      expect(openMock).not.toHaveBeenCalled();
+      expect(objectUrl.createObjectURL).not.toHaveBeenCalled();
+      expect(await screen.findByText('Shipment label data is not a supported PDF link.')).toBeInTheDocument();
+      expect(document.body.innerHTML).not.toContain(invalidLabel);
+    } finally {
+      openMock.mockRestore();
+      objectUrl.restore();
+    }
   });
 
   it('uses the existing shipment create flow for the smart label action when no shipment exists', async () => {

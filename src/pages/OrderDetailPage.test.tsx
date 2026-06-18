@@ -5134,7 +5134,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('Same as tracking')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
-    expect(screen.getByRole('link', { name: 'Open label PDF' })).toHaveAttribute('href', 'https://app.tryoto.example/label-1028.pdf');
+    expect(screen.getByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
   });
 
@@ -5190,10 +5190,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://tracking.tryoto.example/RET-TRACK-1028',
     );
-    expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
-      'href',
-      'https://app.tryoto.example/return-label-1028.pdf',
-    );
+    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
@@ -5440,10 +5437,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(probeTryOtoReturnDetailsMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Try OTO return label found in return details.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
-      'href',
-      'https://app.tryoto.example/return-label-1028.pdf',
-    );
+    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
   });
 
   it('does not report forward shipment labels as return labels after return details probe', async () => {
@@ -5544,7 +5538,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect((await screen.findAllByText('Return label is not available from getReturnDetails yet.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: pending/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Provider id: yes · Barcode:.*Label: yes/)).not.toBeInTheDocument();
   });
 
@@ -5667,10 +5661,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(summary).getByText('200')).toBeInTheDocument();
     expect(within(summary).getByText('Label/PDF/URL')).toBeInTheDocument();
     expect(within(summary).getByText('Tracking/barcode')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
-      'href',
-      'https://app.tryoto.example/return-label-1028.pdf',
-    );
+    expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
   });
 
   it('keeps AWB print fallback when the probe returns no label URL', async () => {
@@ -6126,7 +6117,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('Printable return label unavailable')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
   });

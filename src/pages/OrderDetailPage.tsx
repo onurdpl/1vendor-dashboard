@@ -57,6 +57,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
+import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import type {
   KargonomiLocationLookupDiagnostics,
   NavlungoAuthDiagnostics,
@@ -1799,6 +1800,15 @@ export function OrderDetailPage() {
   const tryOtoAutoRefreshInFlightRef = useRef(false);
   const refreshShipmentStatusMutationRef = useRef<((shipmentExecutionId: string) => Promise<ShipmentExecution>) | null>(null);
   const refetchOrderRef = useRef<(() => unknown) | null>(null);
+  function handleOpenShipmentLabel(labelValue: string) {
+    const result = openShipmentLabel(labelValue);
+    if (result.opened) {
+      showFeedback('Shipment label opened.', 'success');
+    } else {
+      showFeedback(result.error, 'error');
+    }
+  }
+
   const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     ({ signal }) => {
@@ -6388,9 +6398,13 @@ export function OrderDetailPage() {
                             <span>Label</span>
                             {visibleShipmentExecution?.labelUrl ? (
                               <>
-                                <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                                <button
+                                  type="button"
+                                  className="inline-link inline-button-link"
+                                  onClick={() => handleOpenShipmentLabel(visibleShipmentExecution.labelUrl!)}
+                                >
                                   Open label PDF
-                                </a>
+                                </button>
                                 {kargonomiShipmentCancelled ? <small>Cancelled / stale</small> : null}
                               </>
                             ) : (
@@ -6567,14 +6581,13 @@ export function OrderDetailPage() {
 	                                  <div className="summary-row">
 	                                    <span>Return label status</span>
 	                                    {visibleShipmentExecution.returnShipment.labelUrl ? (
-	                                      <a
-	                                        className="inline-link"
-	                                        href={visibleShipmentExecution.returnShipment.labelUrl}
-	                                        target="_blank"
-	                                        rel="noreferrer"
+	                                      <button
+	                                        type="button"
+	                                        className="inline-link inline-button-link"
+	                                        onClick={() => handleOpenShipmentLabel(visibleShipmentExecution.returnShipment!.labelUrl!)}
 	                                      >
 	                                        Open return label PDF
-	                                      </a>
+	                                      </button>
 	                                    ) : (
 	                                      <>
 	                                        <strong className="muted">Not available</strong>
@@ -7641,9 +7654,13 @@ export function OrderDetailPage() {
                     {visibleShipmentExecution?.labelUrl ? (
                       <div className="summary-row">
                         <span>Label</span>
-                        <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                        <button
+                          type="button"
+                          className="inline-link inline-button-link"
+                          onClick={() => handleOpenShipmentLabel(visibleShipmentExecution.labelUrl!)}
+                        >
                           Open label PDF
-                        </a>
+                        </button>
                       </div>
                     ) : null}
 	                    {visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
@@ -7683,9 +7700,13 @@ export function OrderDetailPage() {
 	                          <div className="summary-row">
 	                            <span>Return label status</span>
 	                            {visibleShipmentExecution.returnShipment.labelUrl ? (
-	                              <a className="inline-link" href={visibleShipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
+	                              <button
+	                                type="button"
+	                                className="inline-link inline-button-link"
+	                                onClick={() => handleOpenShipmentLabel(visibleShipmentExecution.returnShipment!.labelUrl!)}
+	                              >
 	                                Open return label PDF
-	                              </a>
+	                              </button>
 	                            ) : (
 	                              <>
 	                                <strong className="muted">Not available</strong>

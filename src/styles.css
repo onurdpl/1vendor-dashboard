@@ -2541,6 +2541,15 @@ h3 {
   text-decoration: underline;
 }
 
+.inline-button-link {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
 .vendor-blocked-panel {
   border-color: rgba(239, 68, 68, 0.2);
   background: rgba(239, 68, 68, 0.08);
