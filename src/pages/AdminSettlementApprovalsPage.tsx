@@ -101,6 +101,18 @@ function isLogoCreateEligibleRecord(record: SettlementCommissionInvoiceRecord) {
   );
 }
 
+function isCreatedCommissionInvoiceRecord(record: SettlementCommissionInvoiceRecord | null | undefined) {
+  return record?.provider === 'logo_isbasi' && record.status.toLowerCase() === 'created';
+}
+
+function getProviderReference(record: SettlementCommissionInvoiceRecord | null | undefined) {
+  return record?.invoiceNo || record?.providerUuid || record?.providerInvoiceId || record?.providerEttn || null;
+}
+
+function getInvoiceRecordStatusTone(record: SettlementCommissionInvoiceRecord) {
+  return isCreatedCommissionInvoiceRecord(record) ? 'success' as const : undefined;
+}
+
 function getLogoCreateReadinessBlockers(
   record: SettlementCommissionInvoiceRecord,
   diagnostic: SettlementCommissionInvoiceDiagnostics | undefined,
@@ -122,6 +134,13 @@ function getLogoCreateReadinessBlockers(
     blockers.push('Diagnostics status is stale. Read diagnostics again before Logo create.');
   }
   return Array.from(new Set(blockers));
+}
+
+function getExecutionContractDisplay(record: SettlementCommissionInvoiceDiagnostics['record']) {
+  if (record.status.toLowerCase() === 'created') {
+    return 'Not executable because invoice is already CREATED.';
+  }
+  return record.executionContract.ok ? 'Ready' : 'Blocked';
 }
 
 function formatMinor(value: number | null | undefined, currency = 'TRY') {
@@ -926,6 +945,10 @@ export function AdminSettlementApprovalsPage() {
     () => invoiceRecords.filter((record) => record.status.toLowerCase() !== 'cancelled'),
     [invoiceRecords],
   );
+  const createdInvoiceRecord = useMemo(
+    () => activeInvoiceRecords.find((record) => isCreatedCommissionInvoiceRecord(record)) ?? null,
+    [activeInvoiceRecords],
+  );
   const storedImmutableRequestSnapshot = useMemo(() => {
     const diagnosticsSnapshot = Object.values(diagnostics)
       .find((item) =>
@@ -1075,7 +1098,7 @@ export function AdminSettlementApprovalsPage() {
     logoPreview.immutableRequestSnapshot.requestSnapshotPresent &&
     !storedImmutableRequestSnapshot,
   );
-  const invoiceRecordsStepStatus: WorkflowStepStatus = invoiceRecords.length || storedImmutableRequestSnapshot
+  const invoiceRecordsStepStatus: WorkflowStepStatus = createdInvoiceRecord || invoiceRecords.length || storedImmutableRequestSnapshot
     ? 'Completed'
     : logoPreview
       ? 'Ready'
@@ -1239,6 +1262,9 @@ export function AdminSettlementApprovalsPage() {
     if (approval.status === 'cancelled') {
       return 'Settlement is cancelled. Select or create another approval.';
     }
+    if (createdInvoiceRecord) {
+      return 'Logo commission invoice has been created. Review created invoice record.';
+    }
     if (!audit) {
       return 'Next: Load Audit Snapshot.';
     }
@@ -1283,6 +1309,14 @@ export function AdminSettlementApprovalsPage() {
     }
     if (approval.status === 'cancelled') {
       return { label: 'Select another approval', disabled: true };
+    }
+    if (createdInvoiceRecord) {
+      return {
+        label: 'Review created invoice record',
+        detail: 'Logo create execution is complete for this settlement.',
+        onClick: () => setActiveTab('invoices'),
+        disabled: busyAction !== null,
+      };
     }
     if (!audit) {
       return {
@@ -1447,6 +1481,21 @@ export function AdminSettlementApprovalsPage() {
     }
   }
 
+  async function hydrateCommissionInvoiceRecordsForLoadedApproval(id: string) {
+    setInvoiceRecordsWarning(null);
+    try {
+      const result = await getSettlementCommissionInvoiceRecords(id);
+      if (result.records.some((record) => isCreatedCommissionInvoiceRecord(record))) {
+        setInvoiceRecords(result.records);
+        setActiveTab('invoices');
+      }
+      return result;
+    } catch {
+      setInvoiceRecordsWarning('Could not load existing invoice records.');
+      return null;
+    }
+  }
+
   async function handlePreview() {
     setMixedVatAcknowledged(false);
     const result = await runAction('preview', () => previewSettlementApproval(buildSettlementApprovalInput()), 'Preview loaded.');
@@ -1490,6 +1539,7 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(null);
       setInvoiceRecords([]);
       setDiagnostics({});
+      await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
 
@@ -1506,6 +1556,7 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(null);
       setInvoiceRecords([]);
       setDiagnostics({});
+      await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
 
@@ -2033,6 +2084,19 @@ export function AdminSettlementApprovalsPage() {
                 <p className="page-description">Read-only list of local settlement commission invoice records.</p>
               </div>
             </div>
+            {createdInvoiceRecord ? (
+              <div className="settlement-alert op-tone-success">
+                <strong>Logo commission invoice was created.</strong>
+                <p>
+                  Provider UUID {valueOrDash(createdInvoiceRecord.providerUuid)}
+                  {' · '}
+                  Invoice no {valueOrDash(createdInvoiceRecord.invoiceNo)}
+                </p>
+                {!createdInvoiceRecord.invoiceNo ? (
+                  <p>Invoice number not returned yet; provider UUID is available for reconciliation.</p>
+                ) : null}
+              </div>
+            ) : null}
             {activeInvoiceRecords.length ? (
               <div className="settlement-alert op-tone-warning">
                 <strong>Active commission invoice record exists.</strong>
@@ -2041,7 +2105,7 @@ export function AdminSettlementApprovalsPage() {
             ) : null}
             {invoiceRecords.length ? (
               <OperationalTable
-                columns={['Record', 'Provider', 'Status', 'Request snapshot', 'Invoice no', 'Retry', 'Diagnostics', 'Logo create']}
+                columns={['Record', 'Provider', 'Status', 'Request snapshot', 'Provider reference', 'Retry', 'Diagnostics', 'Logo create']}
                 className="settlement-invoice-table"
                 stickyHeader={false}
               >
@@ -2050,6 +2114,7 @@ export function AdminSettlementApprovalsPage() {
                   const showLogoCreate = isLogoCreateEligibleRecord(record);
                   const logoCreateBlockers = showLogoCreate ? getLogoCreateReadinessBlockers(record, diagnostic) : [];
                   const logoCreateAllowed = showLogoCreate && logoCreateBlockers.length === 0;
+                  const providerReference = getProviderReference(record);
                   return (
                     <OperationalTableRow key={record.id}>
                       <span>
@@ -2057,9 +2122,17 @@ export function AdminSettlementApprovalsPage() {
                         <small>{formatDate(record.createdAt)}</small>
                       </span>
                       <span>{safeStatusLabel(record.provider)}</span>
-                      <span><StatusBadge status={record.status}>{safeStatusLabel(record.status)}</StatusBadge></span>
+                      <span><StatusBadge status={record.status} tone={getInvoiceRecordStatusTone(record)}>{safeStatusLabel(record.status)}</StatusBadge></span>
                       <span>{record.requestSnapshot?.requestSnapshotPresent ? 'Stored' : 'Missing'}</span>
-                      <span>{valueOrDash(record.invoiceNo)}</span>
+                      <span>
+                        <strong>{valueOrDash(providerReference)}</strong>
+                        {record.providerUuid && record.providerUuid !== providerReference ? (
+                          <small>Provider UUID {record.providerUuid}</small>
+                        ) : null}
+                        {!record.invoiceNo && record.providerUuid ? (
+                          <small>Invoice number not returned yet.</small>
+                        ) : null}
+                      </span>
                       <span>{formatNumber(record.retryCount)}</span>
                       <span>
                         <button
@@ -2104,6 +2177,8 @@ export function AdminSettlementApprovalsPage() {
                               Create Logo Invoice
                             </button>
                           </>
+                        ) : isCreatedCommissionInvoiceRecord(record) ? (
+                          <span className="settlement-compact-empty">Invoice already created.</span>
                         ) : (
                           <span className="settlement-compact-empty">Not available</span>
                         )}
@@ -2131,7 +2206,7 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Tenant configured" value={item.record.environmentGuard ? String(item.record.environmentGuard.expectedTenantConfigured) : '—'} />
                       <MetadataRow label="Tenant returned" value={item.record.environmentGuard ? String(item.record.environmentGuard.actualTenantPresent) : '—'} />
                       <MetadataRow label="Environment warnings" value={item.record.environmentGuard?.warnings.length ? item.record.environmentGuard.warnings.join(' ') : '—'} />
-                      <MetadataRow label="Execution contract" value={item.record.executionContract.ok ? 'Ready' : 'Blocked'} />
+                      <MetadataRow label="Execution contract" value={getExecutionContractDisplay(item.record)} />
                       <MetadataRow label="Contract status" value={safeStatusLabel(item.record.executionContract.recordStatus)} />
                       <MetadataRow label="Payload present" value={valueOrDash(item.record.executionContract.payloadPresent)} />
                       <MetadataRow label="Request snapshot" value={`${item.record.snapshots.request.requestSnapshotPresent ? 'Present' : 'Missing'} · ${item.record.snapshots.request.type}`} />
@@ -2147,7 +2222,14 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
                     </MetadataGroup>
                     <ReadinessList title="Environment guard blockers" items={item.record.environmentGuard?.blockers ?? []} tone="danger" />
-                    <ReadinessList title="Execution contract blockers" items={item.record.executionContract.blockers} tone="danger" />
+                    {item.record.status.toLowerCase() === 'created' ? (
+                      <div className="settlement-alert op-tone-success">
+                        <strong>Execution complete</strong>
+                        <p>Not executable because invoice is already CREATED.</p>
+                      </div>
+                    ) : (
+                      <ReadinessList title="Execution contract blockers" items={item.record.executionContract.blockers} tone="danger" />
+                    )}
                   </Fragment>
                 ))}
               </details>

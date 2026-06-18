@@ -693,6 +693,36 @@ const invoiceRecordsResponse: SettlementCommissionInvoiceRecordsResponse = {
   ],
 };
 
+const createdInvoiceRecordMissingNumber = {
+  ...invoiceRecordsResponse.records[0],
+  id: 'created-record',
+  settlementApprovalId: 'approval-2',
+  status: 'created',
+  providerInvoiceId: 'logo-invoice-1',
+  providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+  providerEttn: null,
+  invoiceNo: null,
+  requestSnapshot: {
+    ...invoiceRecordsResponse.records[0].requestSnapshot,
+    requestSnapshotPresent: true,
+    snapshotSource: 'immutable_settlement_truth' as const,
+    payloadBuilderVersion: 'settlement-logo-request-v1',
+  },
+  responseSnapshot: {
+    present: true,
+    type: 'object',
+    topLevelKeys: ['action', 'body', 'capturedAt', 'identifiers', 'ok', 'provider'],
+    approximateSizeBytes: 512,
+  },
+};
+
+const createdInvoiceRecordsResponse: SettlementCommissionInvoiceRecordsResponse = {
+  ok: true,
+  writesPerformed: false,
+  settlementApprovalId: 'approval-2',
+  records: [createdInvoiceRecordMissingNumber],
+};
+
 const createRequestSnapshotResponse = {
   ok: true,
   writesPerformed: true,
@@ -895,6 +925,40 @@ const allowedDiagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
   },
 };
 
+const createdDiagnosticsResponse: SettlementCommissionInvoiceDiagnostics = {
+  ...allowedDiagnosticsResponse,
+  record: {
+    ...allowedDiagnosticsResponse.record,
+    id: 'created-record',
+    settlementApprovalId: 'approval-2',
+    status: 'created',
+    providerIdentifiers: {
+      providerInvoiceId: 'logo-invoice-1',
+      providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+      providerEttn: null,
+      invoiceNo: null,
+    },
+    executionContract: {
+      ...allowedDiagnosticsResponse.record.executionContract,
+      ok: false,
+      status: 'BLOCKED',
+      recordStatus: 'CREATED',
+      blockers: [
+        'SettlementCommissionInvoice status must be PENDING or FAILED before Logo execution. Current status: CREATED.',
+      ],
+    },
+    snapshots: {
+      ...allowedDiagnosticsResponse.record.snapshots,
+      response: {
+        present: true,
+        type: 'object',
+        topLevelKeys: ['action', 'body', 'capturedAt', 'identifiers', 'ok', 'provider'],
+        approximateSizeBytes: 512,
+      },
+    },
+  },
+};
+
 const createdLogoInvoiceResponse = {
   ok: true,
   writesPerformed: true,
@@ -1019,6 +1083,35 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Load Audit' })).toBeEnabled();
     expect(screen.getByText('Next: Load Audit Snapshot.')).toBeInTheDocument();
+  });
+
+  it('opening an approval with a created invoice record hydrates terminal invoice state', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
+    getSettlementCommissionInvoiceRecordsMock.mockResolvedValueOnce(createdInvoiceRecordsResponse);
+    getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValueOnce(createdDiagnosticsResponse);
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const openButtons = await screen.findAllByRole('button', { name: 'Open' });
+    await userEvent.click(openButtons[0]);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-2'));
+    expect(screen.getByRole('tab', { name: 'Commission Invoice Records' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Logo commission invoice was created.')).toBeInTheDocument();
+    expect(screen.getAllByText('82691C7B-28D6-4E30-95C9-C0658E90F090').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Invoice number not returned yet; provider UUID is available for reconciliation.').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Create Logo Invoice' })).not.toBeInTheDocument();
+    expect(screen.getByText('Logo commission invoice has been created. Review created invoice record.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review created invoice record' })).toBeEnabled();
+
+    const invoicePanel = screen.getByText('created-record').closest('.settlement-tab-panel') ?? document.body;
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: /Read diagnostics \(read-only\)/i }));
+
+    await waitFor(() => expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('created-record'));
+    expect(screen.getAllByText('Not executable because invoice is already CREATED.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Execution complete')).toBeInTheDocument();
+    expect(screen.queryByText('Execution contract blockers')).not.toBeInTheDocument();
   });
 
   it('opening an approved approval replaces an existing preview panel', async () => {
@@ -1573,7 +1666,8 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(screen.getByText('unknown-record')).toBeInTheDocument());
     expect(screen.getByText('created-record')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create Logo Invoice' })).not.toBeInTheDocument();
-    expect(screen.getAllByText('Not available').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Invoice already created.')).toBeInTheDocument();
+    expect(screen.getAllByText('Not available').length).toBeGreaterThanOrEqual(1);
   });
 
   it('keeps approval workflow context after a zero-eligible preview with active locked rows', async () => {
