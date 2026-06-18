@@ -264,9 +264,9 @@ Phase 5 - Marketplace Economics / Operational Cost Ledger.
 - `docs/PHASE_18C_PAYOUT_BATCH_PREPARATION.md`
 - `docs/PHASE_18D_VENDOR_BALANCE_WORKSPACE.md`
 - `docs/PHASE_18E_EXTERNAL_SHIPPING_COSTS.md`
-- `docs/PHASE_20A_INVOICE_EXECUTION_FOUNDATION.md`
-- `docs/PHASE_20A_CUSTOMER_INVOICE_VISIBILITY.md`
-- `docs/PARASUT_MARKETPLACE_DISCOVERY.md`
+- `docs/archive/legacy-finance/PHASE_20A_INVOICE_EXECUTION_FOUNDATION.md`
+- `docs/archive/legacy-finance/PHASE_20A_CUSTOMER_INVOICE_VISIBILITY.md`
+- `docs/archive/legacy-finance/PARASUT_MARKETPLACE_DISCOVERY.md`
 - `docs/DATABASE_SOURCE_CONSISTENCY.md`
 - `backend/prisma/schema.prisma`
 - `backend/src/modules/finance/settlement-approval.service.ts`
