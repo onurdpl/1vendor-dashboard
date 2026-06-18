@@ -415,7 +415,7 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
                 </div>
                 <div>
                   <span>Status</span>
-                  <strong>{valueOrDash(status.derived)}</strong>
+                  <StatusBadge status={String(status.derived ?? 'unknown')}>{safeStatusLabel(status.derived ?? 'Unknown')}</StatusBadge>
                   <small>Stored {valueOrDash(status.stored)}</small>
                 </div>
               </div>
@@ -1535,142 +1535,148 @@ export function AdminSettlementApprovalsPage() {
       {error ? <SettlementDraftFailurePanel message={error} summary={draftFailureSummary} /> : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
-      <section className="settlement-workspace-grid">
-        <aside className="settlement-context-panel">
-          <div>
-            <p className="eyebrow">Candidate Builder</p>
-            <h2>Candidate source</h2>
-          </div>
-          <div className="op-toolbar settlement-toolbar" aria-label="Settlement vendor controls">
-            <label>
-              <span>Vendor</span>
-              <input value={vendorId} onChange={(event) => setVendorId(event.target.value)} placeholder="yalispor" />
-            </label>
-            <label>
-              <span>Draft notes</span>
-              <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
-            </label>
-          </div>
-          <section className="settlement-candidate-scope">
-            <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Source">
-              {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
-                <label key={scope}>
-                  <input
-                    type="radio"
-                    name="candidateScope"
-                    value={scope}
-                    checked={candidateScopeMode === scope}
-                    onChange={() => {
-                      setCandidateScopeMode(scope);
-                      setMixedVatAcknowledged(false);
-                    }}
-                  />
-                  <span>{getScopeLabel(scope)}</span>
-                </label>
-              ))}
+      <section
+        className={`settlement-workspace-grid${approval ? ' is-loaded-approval-layout' : ''}`}
+        aria-label="Settlement workspace layout"
+      >
+        <div className="settlement-left-rail">
+          <aside className="settlement-context-panel">
+            <div>
+              <p className="eyebrow">Candidate Builder</p>
+              <h2>Candidate source</h2>
             </div>
-            {candidateScopeMode === 'date_range' ? (
-              <div className="op-toolbar settlement-toolbar" aria-label="Settlement date range controls">
-                <label>
-                  <span>Period start</span>
-                  <input
-                    type="date"
-                    value={periodStart}
-                    onChange={(event) => {
-                      setPeriodStart(event.target.value);
-                      setMixedVatAcknowledged(false);
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Period end</span>
-                  <input
-                    type="date"
-                    value={periodEnd}
-                    onChange={(event) => {
-                      setPeriodEnd(event.target.value);
-                      setMixedVatAcknowledged(false);
-                    }}
-                  />
-                </label>
+            <div className="op-toolbar settlement-toolbar" aria-label="Settlement vendor controls">
+              <label>
+                <span>Vendor</span>
+                <input value={vendorId} onChange={(event) => setVendorId(event.target.value)} placeholder="yalispor" />
+              </label>
+              <label>
+                <span>Draft notes</span>
+                <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal admin note" />
+              </label>
+            </div>
+            <section className="settlement-candidate-scope">
+              <div className="settlement-scope-options" role="radiogroup" aria-label="Candidate Source">
+                {(['vendor_wide', 'date_range', 'selected_orders', 'selected_allocations'] as CandidateScopeMode[]).map((scope) => (
+                  <label key={scope}>
+                    <input
+                      type="radio"
+                      name="candidateScope"
+                      value={scope}
+                      checked={candidateScopeMode === scope}
+                      onChange={() => {
+                        setCandidateScopeMode(scope);
+                        setMixedVatAcknowledged(false);
+                      }}
+                    />
+                    <span>{getScopeLabel(scope)}</span>
+                  </label>
+                ))}
               </div>
-            ) : null}
-            {candidateScopeMode === 'date_range' && !candidateScopeReady ? (
+              {candidateScopeMode === 'date_range' ? (
+                <div className="op-toolbar settlement-toolbar" aria-label="Settlement date range controls">
+                  <label>
+                    <span>Period start</span>
+                    <input
+                      type="date"
+                      value={periodStart}
+                      onChange={(event) => {
+                        setPeriodStart(event.target.value);
+                        setMixedVatAcknowledged(false);
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span>Period end</span>
+                    <input
+                      type="date"
+                      value={periodEnd}
+                      onChange={(event) => {
+                        setPeriodEnd(event.target.value);
+                        setMixedVatAcknowledged(false);
+                      }}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {candidateScopeMode === 'date_range' && !candidateScopeReady ? (
+                <div className="settlement-alert op-tone-warning">
+                  <strong>Date Range mode requires a period start or period end before preview.</strong>
+                </div>
+              ) : null}
+              {candidateScopeMode === 'selected_orders' ? (
+                <div className="settlement-selection-grid">
+                  <label>
+                    <span>Order numbers</span>
+                    <textarea
+                      value={selectedOrderNumbers}
+                      onChange={(event) => {
+                        setSelectedOrderNumbers(event.target.value);
+                        setMixedVatAcknowledged(false);
+                      }}
+                      placeholder="#1074, #1075"
+                      rows={3}
+                    />
+                  </label>
+                  <label>
+                    <span>Shopify order ids</span>
+                    <textarea
+                      value={selectedShopifyOrderIds}
+                      onChange={(event) => {
+                        setSelectedShopifyOrderIds(event.target.value);
+                        setMixedVatAcknowledged(false);
+                      }}
+                      placeholder="gid://shopify/Order/..."
+                      rows={3}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {candidateScopeMode === 'selected_allocations' ? (
+                <div className="settlement-selection-grid">
+                  <label>
+                    <span>Allocation ids</span>
+                    <textarea
+                      value={selectedAllocationIds}
+                      onChange={(event) => {
+                        setSelectedAllocationIds(event.target.value);
+                        setMixedVatAcknowledged(false);
+                      }}
+                      placeholder="allocation id, one per line or comma-separated"
+                      rows={3}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </section>
+            <div className="settlement-filter-summary" aria-label="Selected candidate filters">
+              <div className="settlement-chip-row">
+                {candidateFilterChips.map((chip) => (
+                  <span key={chip} className="settlement-chip">{chip}</span>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="button button-secondary button-compact"
+                onClick={clearPeriodFilters}
+                disabled={busyAction !== null || (candidateScopeMode === 'vendor_wide' && !periodStart && !periodEnd && !selectedOrderNumbers && !selectedShopifyOrderIds && !selectedAllocationIds)}
+              >
+                Clear filters
+              </button>
+            </div>
+            {previewRowsLockedInActiveApproval ? (
               <div className="settlement-alert op-tone-warning">
-                <strong>Date Range mode requires a period start or period end before preview.</strong>
+                <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>
               </div>
             ) : null}
-            {candidateScopeMode === 'selected_orders' ? (
-              <div className="settlement-selection-grid">
-                <label>
-                  <span>Order numbers</span>
-                  <textarea
-                    value={selectedOrderNumbers}
-                    onChange={(event) => {
-                      setSelectedOrderNumbers(event.target.value);
-                      setMixedVatAcknowledged(false);
-                    }}
-                    placeholder="#1074, #1075"
-                    rows={3}
-                  />
-                </label>
-                <label>
-                  <span>Shopify order ids</span>
-                  <textarea
-                    value={selectedShopifyOrderIds}
-                    onChange={(event) => {
-                      setSelectedShopifyOrderIds(event.target.value);
-                      setMixedVatAcknowledged(false);
-                    }}
-                    placeholder="gid://shopify/Order/..."
-                    rows={3}
-                  />
-                </label>
-              </div>
-            ) : null}
-            {candidateScopeMode === 'selected_allocations' ? (
-              <div className="settlement-selection-grid">
-                <label>
-                  <span>Allocation ids</span>
-                  <textarea
-                    value={selectedAllocationIds}
-                    onChange={(event) => {
-                      setSelectedAllocationIds(event.target.value);
-                      setMixedVatAcknowledged(false);
-                    }}
-                    placeholder="allocation id, one per line or comma-separated"
-                    rows={3}
-                  />
-                </label>
-              </div>
-            ) : null}
-          </section>
-          <div className="settlement-filter-summary" aria-label="Selected candidate filters">
-            <div className="settlement-chip-row">
-              {candidateFilterChips.map((chip) => (
-                <span key={chip} className="settlement-chip">{chip}</span>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="button button-secondary button-compact"
-              onClick={clearPeriodFilters}
-              disabled={busyAction !== null || (candidateScopeMode === 'vendor_wide' && !periodStart && !periodEnd && !selectedOrderNumbers && !selectedShopifyOrderIds && !selectedAllocationIds)}
-            >
-              Clear filters
-            </button>
-          </div>
-          {previewRowsLockedInActiveApproval ? (
-            <div className="settlement-alert op-tone-warning">
-              <strong>No eligible rows remain because rows are already locked in an active settlement approval.</strong>
-            </div>
-          ) : null}
-        </aside>
+          </aside>
+          {approval ? <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} /> : null}
+        </div>
 
         <main className="settlement-summary-panel">
           <div>
             <p className="eyebrow">{approval ? 'Loaded approval snapshot' : 'Current candidate preview'}</p>
-            <h2>{approval ? 'Approval snapshot totals' : 'Operational totals'}</h2>
+            <h2>{approval ? 'Loaded Approval Snapshot' : 'Operational totals'}</h2>
           </div>
           {approval && preview ? (
             <div className="settlement-alert op-tone-info">
@@ -1714,7 +1720,7 @@ export function AdminSettlementApprovalsPage() {
           ) : null}
         </main>
 
-        <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} />
+        {!approval ? <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} /> : null}
       </section>
 
       <WorkflowProgress steps={workflowSteps} />

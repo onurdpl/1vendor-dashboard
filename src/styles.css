@@ -11919,6 +11919,28 @@ summary.provider-response-heading::-webkit-details-marker {
   align-items: start;
 }
 
+.settlement-workspace-grid.is-loaded-approval-layout {
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+}
+
+.settlement-left-rail {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  align-self: start;
+}
+
+.settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail {
+  position: sticky;
+  top: var(--space-3);
+}
+
+.settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail .settlement-context-panel,
+.settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail .settlement-next-action {
+  position: static;
+  min-width: 0;
+}
+
 .settlement-context-panel,
 .settlement-summary-panel,
 .settlement-next-action,
@@ -12326,7 +12348,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-approval-line-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.1fr);
   gap: var(--space-2);
   align-items: stretch;
   width: 100%;
@@ -12384,19 +12406,24 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-approval-line-money-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(64px, 0.7fr) repeat(4, minmax(92px, 1fr));
   gap: 6px;
   min-width: 0;
   margin: 0;
 }
 
 .settlement-approval-line-money-grid dd {
-  font-size: 0.76rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1380px) {
   .settlement-approval-line-card {
     grid-template-columns: 1fr;
+  }
+
+  .settlement-approval-line-money-grid {
+    grid-template-columns: repeat(5, minmax(82px, 1fr));
   }
 }
 
@@ -12523,6 +12550,10 @@ summary.provider-response-heading::-webkit-details-marker {
   .settlement-workspace-header,
   .settlement-workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail {
+    position: static;
   }
 
   .settlement-executive-summary {

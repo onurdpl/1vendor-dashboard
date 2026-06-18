@@ -953,13 +953,15 @@ describe('Finance Settlement approval admin UI', () => {
     expect(within(executiveSummary).queryByText('EMPTY')).not.toBeInTheDocument();
     expect(screen.queryByText('No eligible rows remain because rows are already locked in an active settlement approval.')).not.toBeInTheDocument();
 
-    expect(screen.getByRole('heading', { name: 'Approval snapshot totals' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Settlement workspace layout')).toHaveClass('is-loaded-approval-layout');
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
     expect(screen.getByLabelText('Selected settlement rows')).toHaveClass('settlement-approval-lines-list');
     expect(screen.getAllByText('#1081').length).toBeGreaterThan(0);
     expect(screen.getByText('fle-sale-1081-a')).toBeInTheDocument();
     expect(screen.getByText('alloc-yalispor-1081-a')).toBeInTheDocument();
     expect(screen.getAllByText('TRY 3,115.18').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Approve Settlement' })).toBeEnabled();
   });
 
   it('loads settlement preview totals and sample lines', async () => {
