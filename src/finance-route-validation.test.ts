@@ -316,10 +316,19 @@ describe('finance route validation', () => {
         shippingMode: 'fixed',
       }),
     );
-    expect(upsertVendorFinancialProfileMock).toHaveBeenCalledWith('sporjinal', {
-      commissionPercent: 10,
-      shippingMode,
-    });
+    expect(upsertVendorFinancialProfileMock).toHaveBeenCalledWith(
+      'sporjinal',
+      {
+        commissionPercent: 10,
+        shippingMode,
+      },
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          userId: null,
+          email: null,
+        }),
+      }),
+    );
   });
 
   it('preserves existing behavior when shippingMode is omitted', async () => {
@@ -334,9 +343,18 @@ describe('finance route validation', () => {
         source: 'configured',
       }),
     );
-    expect(upsertVendorFinancialProfileMock).toHaveBeenCalledWith('sporjinal', {
-      commissionPercent: 12,
-    });
+    expect(upsertVendorFinancialProfileMock).toHaveBeenCalledWith(
+      'sporjinal',
+      {
+        commissionPercent: 12,
+      },
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          userId: null,
+          email: null,
+        }),
+      }),
+    );
   });
 
   it.each([

@@ -284,7 +284,12 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           return reply.code(400).send({ message: shippingModeValidation.message });
         }
 
-        return await upsertVendorFinancialProfile(vendorId, (request.body ?? {}) as VendorFinancialProfileUpdateDto);
+        return await upsertVendorFinancialProfile(vendorId, (request.body ?? {}) as VendorFinancialProfileUpdateDto, {
+          actor: {
+            userId: request.authUser?.id ?? null,
+            email: request.authUser?.email ?? null,
+          },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Vendor financial profile could not be saved.';
         return reply.code(400).send({ message });

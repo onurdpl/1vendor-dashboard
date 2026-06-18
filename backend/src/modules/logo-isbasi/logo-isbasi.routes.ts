@@ -1968,6 +1968,11 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           logoIsbasiCustomerId: matchResponse.exactMatch.id,
           logoIsbasiEinvoiceEligible: matchResponse.exactMatch.eInvoiceResponsible,
           logoIsbasiLastCheckedAt: boundAt,
+        }, {
+          actor: {
+            userId: request.authUser?.id ?? null,
+            email: request.authUser?.email ?? null,
+          },
         });
 
         return {

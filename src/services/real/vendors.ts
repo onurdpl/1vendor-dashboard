@@ -14,6 +14,7 @@ import type {
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorProfileAuditLog,
 } from '../../lib/api/contracts';
 
 export function getVendorBillingProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
@@ -29,6 +30,26 @@ export function updateVendorBillingProfile(vendorId: string, input: VendorBillin
   return apiClient.put<VendorBillingProfile>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/billing-profile`,
     input,
+  );
+}
+
+export function listVendorProfileAuditLogs(
+  vendorId: string,
+  options: { section?: string | null; limit?: number; signal?: AbortSignal } = {},
+) {
+  const searchParams = new URLSearchParams();
+  if (options.section) {
+    searchParams.set('section', options.section);
+  }
+  if (options.limit) {
+    searchParams.set('limit', String(options.limit));
+  }
+  const query = searchParams.toString();
+  return apiClient.get<VendorProfileAuditLog[]>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/profile-audit-logs${query ? `?${query}` : ''}`,
+    {
+      signal: options.signal,
+    },
   );
 }
 

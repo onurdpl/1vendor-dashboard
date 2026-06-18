@@ -11510,6 +11510,118 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 700;
 }
 
+.vendor-profile-audit-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+  padding: 10px 12px;
+}
+
+.vendor-profile-audit-metadata > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vendor-profile-audit-metadata span,
+.vendor-profile-audit-history small {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.vendor-profile-audit-metadata strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 0.86rem;
+}
+
+.vendor-profile-audit-anchor {
+  scroll-margin-top: 18px;
+}
+
+.vendor-profile-audit-empty {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.vendor-profile-audit-empty p {
+  margin: 0;
+  color: #64748b;
+}
+
+.vendor-profile-audit-history {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vendor-profile-audit-history li {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 12px;
+}
+
+.vendor-profile-audit-history-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.vendor-profile-audit-history-heading > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vendor-profile-audit-history-heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.vendor-profile-audit-history-heading span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.vendor-profile-audit-diff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.vendor-profile-audit-diff span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
 .vendor-profile-billing-form {
   display: grid;
   gap: 14px;
@@ -11820,6 +11932,12 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .vendor-profile-logo-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vendor-profile-audit-metadata,
+  .vendor-profile-audit-history-heading,
+  .vendor-profile-audit-diff {
     grid-template-columns: 1fr;
   }
 }

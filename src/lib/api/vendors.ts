@@ -9,6 +9,13 @@ export function updateVendorBillingProfile(vendorId: string, input: VendorBillin
   return runtimeServices.vendors.updateBillingProfile(vendorId, input);
 }
 
+export function listVendorProfileAuditLogs(
+  vendorId: string,
+  options: { section?: string | null; limit?: number; signal?: AbortSignal } = {},
+) {
+  return runtimeServices.vendors.profileAuditLogs(vendorId, options);
+}
+
 export function probeLogoIsbasiLogin() {
   return runtimeServices.vendors.probeLogoIsbasiLogin();
 }

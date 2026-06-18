@@ -314,6 +314,14 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realVendors.getVendorBillingProfile(vendorId, { signal: options.signal })
         : Promise.resolve(null),
+    profileAuditLogs: (vendorId = getCurrentVendorId(), options: ReadRequestOptions & { section?: string | null; limit?: number } = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.listVendorProfileAuditLogs(vendorId, {
+            signal: options.signal,
+            section: options.section,
+            limit: options.limit,
+          })
+        : Promise.resolve([]),
     updateBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.updateVendorBillingProfile(vendorId, input)

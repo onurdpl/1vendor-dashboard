@@ -44,7 +44,12 @@ export function registerVendorBillingProfileRoutes(app: FastifyInstance, env: Ap
 
       const { vendorId } = request.params as { vendorId: string };
       try {
-        return await upsertVendorBillingProfile(vendorId, (request.body ?? {}) as VendorBillingProfileInputDto);
+        return await upsertVendorBillingProfile(vendorId, (request.body ?? {}) as VendorBillingProfileInputDto, {
+          actor: {
+            userId: request.authUser?.id ?? null,
+            email: request.authUser?.email ?? null,
+          },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Vendor billing profile could not be saved.';
         return reply.code(400).send({ message });

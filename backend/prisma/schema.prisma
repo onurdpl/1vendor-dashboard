@@ -249,6 +249,20 @@ enum InvoiceExecutionStatus {
   UNKNOWN
 }
 
+enum VendorProfileSnapshotImpact {
+  FUTURE_LEDGER_ROWS_ONLY
+  FUTURE_SETTLEMENT_APPROVALS_ONLY
+  FUTURE_COMMISSION_INVOICES_ONLY
+  FUTURE_SHIPMENTS_ONLY
+  FUTURE_RETURNS_ONLY
+  FUTURE_SHIPMENTS_AND_RETURNS_ONLY
+  EXISTING_SETTLEMENTS_UNCHANGED
+  PROVIDER_REBIND_REQUIRED
+  FUTURE_PAYOUT_RELEVANT
+  DIAGNOSTIC_ONLY
+  UNKNOWN
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -286,6 +300,7 @@ model Vendor {
   payoutBatches         PayoutBatch[]
   settlementApprovals   SettlementApproval[]
   settlementCommissionInvoices SettlementCommissionInvoice[]
+  profileAuditLogs      VendorProfileAuditLog[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
   notifications         NotificationIntent[]
@@ -406,6 +421,26 @@ model VendorBillingProfile {
   vendor                     Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId])
+}
+
+model VendorProfileAuditLog {
+  id              String                      @id @default(cuid())
+  vendorId        String
+  section         String
+  fieldName       String
+  oldValue        Json?
+  newValue        Json?
+  changedByUserId String?
+  changedByEmail  String?
+  changedAt       DateTime                    @default(now())
+  reason          String?
+  snapshotImpact  VendorProfileSnapshotImpact
+  source          String
+  vendor          Vendor                      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, changedAt])
+  @@index([vendorId, section])
+  @@index([fieldName])
 }
 
 model VendorPaymentProviderSeller {

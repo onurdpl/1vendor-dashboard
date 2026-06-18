@@ -1240,12 +1240,21 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
 
     expect(reply.statusCode).toBe(200);
-    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith('sporjinal', {
-      logoIsbasiCustomerCode: 'CUST001',
-      logoIsbasiCustomerId: 'firm-1',
-      logoIsbasiEinvoiceEligible: true,
-      logoIsbasiLastCheckedAt: expect.any(Date),
-    });
+    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith(
+      'sporjinal',
+      {
+        logoIsbasiCustomerCode: 'CUST001',
+        logoIsbasiCustomerId: 'firm-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: expect.any(Date),
+      },
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          userId: null,
+          email: null,
+        }),
+      }),
+    );
     expect(result).toEqual(
       expect.objectContaining({
         ok: true,
@@ -1323,12 +1332,21 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
 
     expect(reply.statusCode).toBe(200);
-    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith('sporjinal', {
-      logoIsbasiCustomerCode: 'CUST005',
-      logoIsbasiCustomerId: 'firm-5',
-      logoIsbasiEinvoiceEligible: false,
-      logoIsbasiLastCheckedAt: expect.any(Date),
-    });
+    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith(
+      'sporjinal',
+      {
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+        logoIsbasiEinvoiceEligible: false,
+        logoIsbasiLastCheckedAt: expect.any(Date),
+      },
+      expect.objectContaining({
+        actor: expect.objectContaining({
+          userId: null,
+          email: null,
+        }),
+      }),
+    );
     expect(result).toEqual(
       expect.objectContaining({
         matchStatus: 'exact_match',

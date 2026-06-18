@@ -28,6 +28,10 @@ import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
 import { splitShopifyWorldwideAddress2 } from '../shopify/shopify-worldwide-address.service.js';
 import { createFulfillmentService } from '../fulfillments/fulfillment.service.js';
+import {
+  auditVendorProfileChanges,
+  type VendorProfileAuditActor,
+} from '../vendors/vendor-profile-audit-log.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type { ProbeShopifyReturnLabelUploadResult } from '../shopify/shopify-admin.types.js';
 import type {
@@ -2487,9 +2491,15 @@ export async function getVendorShippingConfig(vendorId: string): Promise<VendorS
 export async function upsertVendorShippingConfig(
   vendorId: string,
   input: VendorShippingConfigUpdateDto,
+  auditContext: {
+    actor?: VendorProfileAuditActor | null;
+    reason?: string | null;
+    source?: string;
+  } = {},
 ): Promise<VendorShippingConfigDto> {
   const defaultConfig = mapShippingConfig(null, vendorId);
   const existingConfig = await getStoredShippingConfig(vendorId);
+  const beforeConfig = mapShippingConfig(existingConfig, vendorId);
   const preferredProvider = normalizeProvider(input.preferredProvider ?? defaultConfig.preferredProvider);
   const defaultDesi = input.defaultDesi ?? Number(defaultConfig.defaultDesi);
   const shippingVatPercent = input.shippingVatPercent ?? Number(defaultConfig.shippingVatPercent);
@@ -2637,7 +2647,18 @@ export async function upsertVendorShippingConfig(
     });
   });
 
-  return mapShippingConfig(config, vendorId);
+  const mappedConfig = mapShippingConfig(config, vendorId);
+  await auditVendorProfileChanges({
+    vendorId,
+    section: 'shipping_operations',
+    before: beforeConfig as unknown as Record<string, unknown>,
+    after: mappedConfig as unknown as Record<string, unknown>,
+    actor: auditContext.actor,
+    reason: auditContext.reason,
+    source: auditContext.source ?? 'admin_shipping_config_update',
+  });
+
+  return mappedConfig;
 }
 
 type KargonomiWarehouseDetailClient = Pick<KargonomiHttpClient, 'getWarehouse' | 'listStates' | 'listCities'>;

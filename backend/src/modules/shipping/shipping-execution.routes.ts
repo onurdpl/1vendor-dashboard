@@ -583,7 +583,12 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
 
       const { vendorId } = request.params as { vendorId: string };
       try {
-        return await upsertVendorShippingConfig(vendorId, (request.body ?? {}) as VendorShippingConfigUpdateDto);
+        return await upsertVendorShippingConfig(vendorId, (request.body ?? {}) as VendorShippingConfigUpdateDto, {
+          actor: {
+            userId: request.authUser?.id ?? null,
+            email: request.authUser?.email ?? null,
+          },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Vendor shipping configuration could not be saved.';
         return reply.code(400).send({ message });

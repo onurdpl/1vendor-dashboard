@@ -1376,6 +1376,34 @@ export type VendorBillingProfileInput = {
   logoIsbasiCustomerCode?: string | null;
 };
 
+export type VendorProfileSnapshotImpact =
+  | 'FUTURE_LEDGER_ROWS_ONLY'
+  | 'FUTURE_SETTLEMENT_APPROVALS_ONLY'
+  | 'FUTURE_COMMISSION_INVOICES_ONLY'
+  | 'FUTURE_SHIPMENTS_ONLY'
+  | 'FUTURE_RETURNS_ONLY'
+  | 'FUTURE_SHIPMENTS_AND_RETURNS_ONLY'
+  | 'EXISTING_SETTLEMENTS_UNCHANGED'
+  | 'PROVIDER_REBIND_REQUIRED'
+  | 'FUTURE_PAYOUT_RELEVANT'
+  | 'DIAGNOSTIC_ONLY'
+  | 'UNKNOWN';
+
+export type VendorProfileAuditLog = {
+  id: string;
+  vendorId: string;
+  section: string;
+  fieldName: string;
+  oldValue: unknown;
+  newValue: unknown;
+  changedByUserId: string | null;
+  changedByEmail: string | null;
+  changedAt: string;
+  reason: string | null;
+  snapshotImpact: VendorProfileSnapshotImpact;
+  source: string;
+};
+
 export type LogoIsbasiLoginProbeResult = {
   ok: boolean;
   provider: 'LOGO_ISBASI';

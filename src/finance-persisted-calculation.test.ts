@@ -11,6 +11,9 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     upsert: vi.fn(),
   },
+  vendorProfileAuditLog: {
+    createMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -194,6 +197,8 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.payoutBatch.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.upsert.mockReset();
+    prismaMock.vendorProfileAuditLog.createMany.mockReset();
+    prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
 
     prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
     prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async () => activeProfile);
@@ -267,6 +272,23 @@ describe('persisted vendor finance calculations', () => {
       deductShippingEnabled: true,
       shippingMode: 'external_provider',
       fixedShippingFee: 88,
+    });
+
+    expect(prismaMock.vendorProfileAuditLog.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'finance_policy',
+          fieldName: 'commissionPercent',
+          snapshotImpact: 'FUTURE_LEDGER_ROWS_ONLY',
+        }),
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'finance_policy',
+          fieldName: 'fixedShippingFee',
+          snapshotImpact: 'FUTURE_LEDGER_ROWS_ONLY',
+        }),
+      ]),
     });
 
     const dashboard = await getVendorFinanceDashboard('sporjinal');

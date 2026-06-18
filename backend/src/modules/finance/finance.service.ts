@@ -1,5 +1,9 @@
 import { prisma } from '../../db/prisma.js';
 import {
+  auditVendorProfileChanges,
+  type VendorProfileAuditActor,
+} from '../vendors/vendor-profile-audit-log.service.js';
+import {
   calculateVendorPayout,
   DEFAULT_VENDOR_FINANCIAL_PROFILE,
   type ShippingMode,
@@ -1538,6 +1542,11 @@ function normalizeSettlementDelayDaysInput(value: number | undefined, fallback: 
 export async function upsertVendorFinancialProfile(
   vendorId: string,
   input: VendorFinancialProfileUpdateDto,
+  auditContext: {
+    actor?: VendorProfileAuditActor | null;
+    reason?: string | null;
+    source?: string;
+  } = {},
 ): Promise<VendorFinancialProfileDto> {
   const existing = await getVendorFinancialProfile(vendorId);
   const commissionPercent = normalizePercent(input.commissionPercent, toNumber(existing.commissionPercent));
@@ -1583,5 +1592,25 @@ export async function upsertVendorFinancialProfile(
     },
   });
 
-  return mapProfile(profile, vendorId);
+  const mappedProfile = mapProfile(profile, vendorId);
+  await auditVendorProfileChanges({
+    vendorId,
+    section: 'finance_policy',
+    before: existing as unknown as Record<string, unknown>,
+    after: mappedProfile as unknown as Record<string, unknown>,
+    fields: [
+      'commissionPercent',
+      'commissionVatPercent',
+      'deductShippingEnabled',
+      'shippingMode',
+      'fixedShippingFee',
+      'settlementDelayDays',
+      'active',
+    ],
+    actor: auditContext.actor,
+    reason: auditContext.reason,
+    source: auditContext.source ?? 'admin_finance_policy_update',
+  });
+
+  return mappedProfile;
 }

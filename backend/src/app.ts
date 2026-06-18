@@ -33,6 +33,7 @@ import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integration/vendor-integration.docs.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
+import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.routes.js';
 import { registerLogoIsbasiRoutes } from './modules/logo-isbasi/logo-isbasi.routes.js';
@@ -443,6 +444,7 @@ export function createApp() {
   registerVendorIntegrationDocsRoutes(app);
   registerVendorIntegrationRoutes(app, env);
   registerVendorBillingProfileRoutes(app, env);
+  registerVendorProfileAuditLogRoutes(app, env);
   registerPaymentReturnRoutes(app);
   registerParasutProbeRoutes(app, env);
   registerParatikaProbeRoutes(app, env);

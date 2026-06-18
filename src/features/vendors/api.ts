@@ -8,6 +8,7 @@ export {
   fetchLogoIsbasiInvoicePdf,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
+  listVendorProfileAuditLogs,
   matchVendorLogoIsbasiFirm,
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
@@ -30,4 +31,6 @@ export type {
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorProfileAuditLog,
+  VendorProfileSnapshotImpact,
 } from '../../lib/api/contracts';

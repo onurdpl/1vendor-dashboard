@@ -1,5 +1,9 @@
 import type { VendorBillingProfile } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import {
+  auditVendorProfileChanges,
+  type VendorProfileAuditActor,
+} from './vendor-profile-audit-log.service.js';
 
 export type VendorBillingProfileDto = {
   id: string;
@@ -152,15 +156,17 @@ export async function getVendorBillingProfile(vendorId: string): Promise<VendorB
 export async function upsertVendorBillingProfile(
   vendorId: string,
   input: VendorBillingProfileInputDto,
+  auditContext: {
+    actor?: VendorProfileAuditActor | null;
+    reason?: string | null;
+    source?: string;
+  } = {},
 ): Promise<VendorBillingProfileDto> {
   await assertVendorExists(vendorId);
   const data = normalizeBillingProfileInput(input);
   const existing = await prisma.vendorBillingProfile.findUnique({
     where: {
       vendorId,
-    },
-    select: {
-      logoIsbasiCustomerCode: true,
     },
   });
   const logoCustomerCodeChanged = existing
@@ -186,14 +192,52 @@ export async function upsertVendorBillingProfile(
     },
   });
 
-  return mapBillingProfile(profile);
+  const mappedProfile = mapBillingProfile(profile);
+  await auditVendorProfileChanges({
+    vendorId,
+    section: 'billing_legal_profile',
+    before: existing ? mapBillingProfile(existing) as unknown as Record<string, unknown> : null,
+    after: mappedProfile as unknown as Record<string, unknown>,
+    fields: [
+      'legalCompanyName',
+      'taxNumber',
+      'taxOffice',
+      'billingAddress',
+      'billingCity',
+      'billingDistrict',
+      'iban',
+      'authorizedPerson',
+      'billingEmail',
+      'billingPhone',
+      'legalEntityType',
+      'logoIsbasiCustomerCode',
+      'logoIsbasiCustomerId',
+      'logoIsbasiEinvoiceEligible',
+      'logoIsbasiLastCheckedAt',
+    ],
+    actor: auditContext.actor,
+    reason: auditContext.reason,
+    source: auditContext.source ?? 'admin_billing_profile_update',
+  });
+
+  return mappedProfile;
 }
 
 export async function bindLogoIsbasiFirmToVendor(
   vendorId: string,
   input: VendorLogoIsbasiBindingInput,
+  auditContext: {
+    actor?: VendorProfileAuditActor | null;
+    reason?: string | null;
+    source?: string;
+  } = {},
 ): Promise<VendorBillingProfileDto> {
   await assertVendorExists(vendorId);
+  const existing = await prisma.vendorBillingProfile.findUnique({
+    where: {
+      vendorId,
+    },
+  });
   const profile = await prisma.vendorBillingProfile.update({
     where: {
       vendorId,
@@ -206,7 +250,24 @@ export async function bindLogoIsbasiFirmToVendor(
     },
   });
 
-  return mapBillingProfile(profile);
+  const mappedProfile = mapBillingProfile(profile);
+  await auditVendorProfileChanges({
+    vendorId,
+    section: 'logo_binding',
+    before: existing ? mapBillingProfile(existing) as unknown as Record<string, unknown> : null,
+    after: mappedProfile as unknown as Record<string, unknown>,
+    fields: [
+      'logoIsbasiCustomerCode',
+      'logoIsbasiCustomerId',
+      'logoIsbasiEinvoiceEligible',
+      'logoIsbasiLastCheckedAt',
+    ],
+    actor: auditContext.actor,
+    reason: auditContext.reason,
+    source: auditContext.source ?? 'logo_isbasi_firm_bind',
+  });
+
+  return mappedProfile;
 }
 
 export const __vendorBillingProfileTesting = {

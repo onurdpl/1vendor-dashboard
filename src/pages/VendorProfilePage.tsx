@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -25,6 +25,7 @@ import {
   fetchLogoIsbasiInvoicePdf,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
+  listVendorProfileAuditLogs,
   matchVendorLogoIsbasiFirm,
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
@@ -52,6 +53,7 @@ import type {
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorFinancialProfile,
+  VendorProfileAuditLog,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -79,6 +81,87 @@ type ReadinessSection = {
 
 function formatValue(value: string | null | undefined, fallback = 'Not configured') {
   return value && value.trim() ? value.trim() : fallback;
+}
+
+function formatAuditDate(value: string | null | undefined) {
+  if (!value) {
+    return 'No recorded changes';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
+}
+
+function formatAuditDisplayValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return 'Not configured';
+  }
+  if (typeof value === 'string') {
+    return value.trim() || 'Not configured';
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function formatAuditSection(value: string) {
+  switch (value) {
+    case 'finance_policy':
+      return 'Finance Policy';
+    case 'billing_legal_profile':
+      return 'Billing / Legal Profile';
+    case 'logo_binding':
+      return 'Logo Binding';
+    case 'shipping_operations':
+      return 'Shipping Operations';
+    default:
+      return value;
+  }
+}
+
+function formatSnapshotImpact(value: string | null | undefined) {
+  switch (value) {
+    case 'FUTURE_LEDGER_ROWS_ONLY':
+      return 'Future ledger rows only';
+    case 'FUTURE_SETTLEMENT_APPROVALS_ONLY':
+      return 'Future settlement approvals only';
+    case 'FUTURE_COMMISSION_INVOICES_ONLY':
+      return 'Future commission invoices only';
+    case 'FUTURE_SHIPMENTS_ONLY':
+      return 'Future shipments only';
+    case 'FUTURE_RETURNS_ONLY':
+      return 'Future returns only';
+    case 'FUTURE_SHIPMENTS_AND_RETURNS_ONLY':
+      return 'Future shipments and returns only';
+    case 'EXISTING_SETTLEMENTS_UNCHANGED':
+      return 'Existing settlements unchanged';
+    case 'PROVIDER_REBIND_REQUIRED':
+      return 'Provider rebind required';
+    case 'FUTURE_PAYOUT_RELEVANT':
+      return 'Future payout relevant';
+    case 'DIAGNOSTIC_ONLY':
+      return 'Diagnostic only';
+    case 'UNKNOWN':
+      return 'Unknown impact';
+    default:
+      return 'No audit impact recorded';
+  }
+}
+
+function auditImpactTone(value: string | null | undefined): 'success' | 'warning' | 'info' | 'attention' | 'neutral' {
+  if (value === 'PROVIDER_REBIND_REQUIRED' || value === 'UNKNOWN') {
+    return 'warning';
+  }
+  if (value === 'FUTURE_PAYOUT_RELEVANT') {
+    return 'attention';
+  }
+  if (value) {
+    return 'info';
+  }
+  return 'neutral';
 }
 
 type BillingProfileFormState = {
@@ -692,6 +775,96 @@ function LocationValue({
   );
 }
 
+function VendorProfileAuditMetadata({
+  title,
+  log,
+  onViewChanges,
+}: {
+  title: string;
+  log: VendorProfileAuditLog | null;
+  onViewChanges: () => void;
+}) {
+  return (
+    <div className="vendor-profile-audit-metadata" aria-label={`${title} change metadata`}>
+      <div>
+        <span>{title}</span>
+        <strong>{formatAuditDate(log?.changedAt)}</strong>
+        <small>Changed by {log?.changedByEmail ?? 'Not recorded'}</small>
+      </div>
+      <div>
+        <span>Impact</span>
+        <StatusBadge tone={auditImpactTone(log?.snapshotImpact)}>
+          {formatSnapshotImpact(log?.snapshotImpact)}
+        </StatusBadge>
+      </div>
+      <button type="button" className="button button-secondary button-compact" onClick={onViewChanges}>
+        View changes
+      </button>
+    </div>
+  );
+}
+
+function VendorProfileAuditHistory({
+  logs,
+  isLoading,
+  isError,
+  error,
+  onRetry,
+}: {
+  logs: VendorProfileAuditLog[];
+  isLoading: boolean;
+  isError: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (isError) {
+    return (
+      <SectionErrorRetry
+        title="Configuration history unavailable"
+        description={error ?? 'Unable to load vendor profile audit logs.'}
+        onRetry={onRetry}
+      />
+    );
+  }
+
+  if (isLoading) {
+    return <SectionSkeleton title="Loading configuration history" description="Fetching immutable vendor profile audit logs." />;
+  }
+
+  if (!logs.length) {
+    return (
+      <div className="vendor-profile-audit-empty">
+        <strong>No profile changes recorded yet.</strong>
+        <p>Future admin edits will appear here as immutable audit events.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="vendor-profile-audit-history" aria-label="Vendor configuration history">
+      {logs.map((log) => (
+        <li key={log.id}>
+          <div className="vendor-profile-audit-history-heading">
+            <div>
+              <strong>{formatAuditSection(log.section)} · {log.fieldName}</strong>
+              <span>{formatAuditDate(log.changedAt)} · {log.changedByEmail ?? 'Actor not recorded'}</span>
+            </div>
+            <StatusBadge tone={auditImpactTone(log.snapshotImpact)}>{formatSnapshotImpact(log.snapshotImpact)}</StatusBadge>
+          </div>
+          <div className="vendor-profile-audit-diff">
+            <span>Old: {formatAuditDisplayValue(log.oldValue)}</span>
+            <span>New: {formatAuditDisplayValue(log.newValue)}</span>
+          </div>
+          <small>
+            Source: {log.source}
+            {log.reason ? ` · Reason: ${log.reason}` : ''}
+          </small>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function findOpenVendorProfileTicket(tickets: SupportTicket[] | null, vendorId: string) {
   return (tickets ?? []).find((ticket) => {
     if (ticket.vendorId !== vendorId || !OPEN_SUPPORT_STATUSES.has(ticket.status)) {
@@ -791,6 +964,7 @@ function ReadinessChecklistCard({
 
 export function VendorProfilePage() {
   const navigate = useNavigate();
+  const auditHistoryRef = useRef<HTMLElement | null>(null);
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
@@ -838,6 +1012,11 @@ export function VendorProfilePage() {
     ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
     { enabled: appReadiness.ready && isAdmin },
   );
+  const auditLogQuery = useQueryResource(
+    queryKeys.vendorProfile.auditLogs(currentVendor.vendorId),
+    ({ signal }) => listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 }),
+    { enabled: appReadiness.ready && isAdmin },
+  );
   const supportQuery = useQueryResource(
     queryKeys.vendorProfile.supportTickets(currentVendor.vendorId),
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
@@ -853,6 +1032,20 @@ export function VendorProfilePage() {
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
   );
+  const profileAuditLogs = useMemo(() => safeArray<VendorProfileAuditLog>(auditLogQuery.data), [auditLogQuery.data]);
+  const latestAuditBySection = useMemo(() => {
+    const bySection = new Map<string, VendorProfileAuditLog>();
+    for (const log of profileAuditLogs) {
+      if (!bySection.has(log.section)) {
+        bySection.set(log.section, log);
+      }
+    }
+    return bySection;
+  }, [profileAuditLogs]);
+  const latestBillingAudit = latestAuditBySection.get('billing_legal_profile') ?? null;
+  const latestLogoBindingAudit = latestAuditBySection.get('logo_binding') ?? null;
+  const latestFinanceAudit = latestAuditBySection.get('finance_policy') ?? null;
+  const latestShippingAudit = latestAuditBySection.get('shipping_operations') ?? null;
   const existingProfileTicket = useMemo(
     () => findOpenVendorProfileTicket(supportTickets, currentVendor.vendorId),
     [currentVendor.vendorId, supportTickets],
@@ -1067,6 +1260,7 @@ export function VendorProfilePage() {
       onSuccess: async (savedProfile) => {
         queryClient.setQueryData(queryKeys.vendorProfile.billingProfile(currentVendor.vendorId), savedProfile);
         setSavedBillingProfile(savedProfile);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
         setBillingEditOpen(false);
         setBillingFormError(null);
         setBillingForm(buildBillingProfileFormState(savedProfile));
@@ -1084,6 +1278,7 @@ export function VendorProfilePage() {
       onSuccess: async (savedProfile) => {
         queryClient.setQueryData(queryKeys.vendorProfile.financeProfile(currentVendor.vendorId), savedProfile);
         setSavedFinanceProfile(savedProfile);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
         setFinancePolicyEditOpen(false);
         setFinancePolicyFormError(null);
         setFinancePolicyForm(buildFinancePolicyFormState(savedProfile));
@@ -1377,6 +1572,7 @@ export function VendorProfilePage() {
             : current;
         });
         void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.billingProfile(currentVendor.vendorId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) });
         showFeedback('Logo İşbaşı firm binding updated.', 'success');
       },
       onError: (error) => {
@@ -1477,6 +1673,10 @@ export function VendorProfilePage() {
 
   function handleOpenReadinessAction(path: string) {
     navigate(path);
+  }
+
+  function handleViewProfileChanges() {
+    auditHistoryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function handleOpenBillingEdit() {
@@ -1678,6 +1878,16 @@ export function VendorProfilePage() {
                 />
                 <MetadataRow label="Logo İşbaşı last checked" value={formatValue(billingProfile?.logoIsbasiLastCheckedAt)} />
               </MetadataGroup>
+              <VendorProfileAuditMetadata
+                title="Billing / Legal Profile last changed"
+                log={latestBillingAudit}
+                onViewChanges={handleViewProfileChanges}
+              />
+              <VendorProfileAuditMetadata
+                title="Logo Binding last changed"
+                log={latestLogoBindingAudit}
+                onViewChanges={handleViewProfileChanges}
+              />
               <div className="vendor-profile-integration-list">
                 <div>
                   <span>Commission invoice billing source</span>
@@ -2968,6 +3178,11 @@ export function VendorProfilePage() {
                 <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
                 <MetadataRow label="Policy active" value={formatBoolean(financeProfile.active)} />
               </MetadataGroup>
+              <VendorProfileAuditMetadata
+                title="Finance Policy last changed"
+                log={latestFinanceAudit}
+                onViewChanges={handleViewProfileChanges}
+              />
               <div className="vendor-profile-integration-list">
                 <div>
                   <span>Finance policy configured</span>
@@ -3108,16 +3323,23 @@ export function VendorProfilePage() {
           ) : shippingQuery.isInitialLoading || !shippingConfig ? (
             <SectionSkeleton title="Loading shipping setup" description="Fetching provider and warehouse configuration." />
           ) : (
-            <MetadataGroup>
-              <MetadataRow label="Preferred provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
-              <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
-              <MetadataRow label="Managed by" value={formatSource(shippingConfig.source)} />
-              <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
-              <MetadataRow label="Cargo integration ID" value={formatValue(shippingConfig.cargoIntegrationId)} />
-              <MetadataRow label="Default warehouse ID" value={formatValue(shippingConfig.defaultWarehouseId)} />
-              <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
-              <MetadataRow label="Provider configuration status" value={metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'} />
-            </MetadataGroup>
+            <>
+              <MetadataGroup>
+                <MetadataRow label="Preferred provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
+                <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
+                <MetadataRow label="Managed by" value={formatSource(shippingConfig.source)} />
+                <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
+                <MetadataRow label="Cargo integration ID" value={formatValue(shippingConfig.cargoIntegrationId)} />
+                <MetadataRow label="Default warehouse ID" value={formatValue(shippingConfig.defaultWarehouseId)} />
+                <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
+                <MetadataRow label="Provider configuration status" value={metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'} />
+              </MetadataGroup>
+              <VendorProfileAuditMetadata
+                title="Shipping Operations last changed"
+                log={latestShippingAudit}
+                onViewChanges={handleViewProfileChanges}
+              />
+            </>
           )}
         </OperationalSection>
 
@@ -3204,10 +3426,32 @@ export function VendorProfilePage() {
                   value={<LocationValue id={navlungoReturnRecipientAddressId} location={returnDestinationLocation} />}
                 />
               </MetadataGroup>
+              <VendorProfileAuditMetadata
+                title="Warehouse and Returns last changed"
+                log={latestShippingAudit}
+                onViewChanges={handleViewProfileChanges}
+              />
             </>
           )}
         </OperationalSection>
       </div>
+
+      {isAdmin ? (
+        <OperationalSection
+          title="Vendor Configuration History"
+          description="Immutable audit timeline for admin-owned vendor profile and provider configuration changes."
+        >
+          <section ref={auditHistoryRef} className="vendor-profile-audit-anchor" aria-label="Vendor configuration change history">
+            <VendorProfileAuditHistory
+              logs={profileAuditLogs}
+              isLoading={auditLogQuery.isInitialLoading}
+              isError={auditLogQuery.isError}
+              error={auditLogQuery.error}
+              onRetry={() => void auditLogQuery.refetch()}
+            />
+          </section>
+        </OperationalSection>
+      ) : null}
 
       <OperationalSection
         title="Support and correction workflow"

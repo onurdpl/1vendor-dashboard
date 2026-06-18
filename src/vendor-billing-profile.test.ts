@@ -9,6 +9,10 @@ const prismaMock = vi.hoisted(() => ({
     upsert: vi.fn(),
     update: vi.fn(),
   },
+  vendorProfileAuditLog: {
+    createMany: vi.fn(),
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -114,6 +118,8 @@ describe('vendor billing profile service', () => {
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(null);
     prismaMock.vendorBillingProfile.upsert.mockResolvedValue(billingProfileRecord());
     prismaMock.vendorBillingProfile.update.mockResolvedValue(billingProfileRecord());
+    prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
+    prismaMock.vendorProfileAuditLog.findMany.mockResolvedValue([]);
   });
 
   it('returns null when a vendor has no billing profile yet', async () => {
@@ -244,6 +250,59 @@ describe('vendor billing profile service', () => {
         billingDistrict: 'Kadikoy',
       }),
     );
+    expect(prismaMock.vendorProfileAuditLog.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'billing_legal_profile',
+          fieldName: 'legalCompanyName',
+          snapshotImpact: 'FUTURE_SETTLEMENT_APPROVALS_ONLY',
+        }),
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'billing_legal_profile',
+          fieldName: 'billingEmail',
+          snapshotImpact: 'FUTURE_SETTLEMENT_APPROVALS_ONLY',
+        }),
+      ]),
+    });
+  });
+
+  it('does not write audit rows when normalized billing values are unchanged', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(
+      billingProfileRecord({
+        legalCompanyName: 'Sporjinal Ltd',
+        taxNumber: '2222222222',
+        taxOffice: 'Besiktas',
+        billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
+        logoIsbasiCustomerCode: 'CUST001',
+      }),
+    );
+    prismaMock.vendorBillingProfile.upsert.mockResolvedValue(
+      billingProfileRecord({
+        legalCompanyName: 'Sporjinal Ltd',
+        taxNumber: '2222222222',
+        taxOffice: 'Besiktas',
+        billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
+        logoIsbasiCustomerCode: 'CUST001',
+      }),
+    );
+
+    await upsertVendorBillingProfile('sporjinal', {
+      legalCompanyName: ' Sporjinal Ltd ',
+      taxNumber: ' 2222222222 ',
+      taxOffice: ' Besiktas ',
+      billingAddress: ' Address 2 ',
+      billingCity: ' Istanbul ',
+      billingDistrict: ' Kadikoy ',
+      logoIsbasiCustomerCode: ' CUST001 ',
+    });
+
+    expect(prismaMock.vendorProfileAuditLog.createMany).not.toHaveBeenCalled();
   });
 
   it('clears stale Logo İşbaşı binding fields when customer code changes manually', async () => {
@@ -348,6 +407,14 @@ describe('vendor billing profile service', () => {
   });
 
   it('binds and rebinds Logo İşbaşı firm identity through the dedicated binding path', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(
+      billingProfileRecord({
+        logoIsbasiCustomerCode: 'CUST001',
+        logoIsbasiCustomerId: 'firm-1',
+        logoIsbasiEinvoiceEligible: false,
+        logoIsbasiLastCheckedAt: new Date('2026-06-04T10:00:00.000Z'),
+      }),
+    );
     prismaMock.vendorBillingProfile.update.mockResolvedValue(
       billingProfileRecord({
         logoIsbasiCustomerCode: 'CUST005',
@@ -381,6 +448,22 @@ describe('vendor billing profile service', () => {
         logoIsbasiLastCheckedAt: '2026-06-05T10:00:00.000Z',
       }),
     );
+    expect(prismaMock.vendorProfileAuditLog.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'logo_binding',
+          fieldName: 'logoIsbasiCustomerCode',
+          snapshotImpact: 'PROVIDER_REBIND_REQUIRED',
+        }),
+        expect.objectContaining({
+          vendorId: 'sporjinal',
+          section: 'logo_binding',
+          fieldName: 'logoIsbasiCustomerId',
+          snapshotImpact: 'PROVIDER_REBIND_REQUIRED',
+        }),
+      ]),
+    });
   });
 
   it('fails closed when the vendor does not exist', async () => {

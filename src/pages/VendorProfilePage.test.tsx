@@ -18,6 +18,7 @@ import type {
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorFinancialProfile,
+  VendorProfileAuditLog,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
@@ -40,6 +41,7 @@ const updateVendorFinancialProfileMock = vi.fn<
 const getFinanceDashboardMock = vi.fn();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
+const listVendorProfileAuditLogsMock = vi.fn<() => Promise<VendorProfileAuditLog[]>>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
 const discoverLogoIsbasiIncomingEinvoicesMock = vi.fn<() => Promise<LogoIsbasiIncomingEinvoiceListProbeResult>>();
@@ -86,6 +88,7 @@ vi.mock('../features/vendors/api', async () => {
   return {
     ...actual,
     getVendorBillingProfile: () => getVendorBillingProfileMock(),
+    listVendorProfileAuditLogs: () => listVendorProfileAuditLogsMock(),
     updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       updateVendorBillingProfileMock(vendorId, input),
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
@@ -173,6 +176,65 @@ const billingProfile: VendorBillingProfile = {
   createdAt: '2026-06-05T10:00:00Z',
   updatedAt: '2026-06-05T10:00:00Z',
 };
+
+const profileAuditLogs: VendorProfileAuditLog[] = [
+  {
+    id: 'audit-finance-1',
+    vendorId: 'demo-vendor-a',
+    section: 'finance_policy',
+    fieldName: 'commissionVatPercent',
+    oldValue: '18.00',
+    newValue: '20.00',
+    changedByUserId: 'admin-user-1',
+    changedByEmail: 'admin@example.test',
+    changedAt: '2026-06-12T09:00:00Z',
+    reason: null,
+    snapshotImpact: 'FUTURE_LEDGER_ROWS_ONLY',
+    source: 'admin_finance_policy_update',
+  },
+  {
+    id: 'audit-billing-1',
+    vendorId: 'demo-vendor-a',
+    section: 'billing_legal_profile',
+    fieldName: 'legalCompanyName',
+    oldValue: 'Old Demo Ltd.',
+    newValue: 'Demo Vendor A Ltd.',
+    changedByUserId: 'admin-user-1',
+    changedByEmail: 'admin@example.test',
+    changedAt: '2026-06-11T09:00:00Z',
+    reason: null,
+    snapshotImpact: 'FUTURE_SETTLEMENT_APPROVALS_ONLY',
+    source: 'admin_billing_profile_update',
+  },
+  {
+    id: 'audit-logo-1',
+    vendorId: 'demo-vendor-a',
+    section: 'logo_binding',
+    fieldName: 'logoIsbasiCustomerId',
+    oldValue: null,
+    newValue: 'LOGO-ID-1',
+    changedByUserId: 'admin-user-1',
+    changedByEmail: 'admin@example.test',
+    changedAt: '2026-06-10T09:00:00Z',
+    reason: null,
+    snapshotImpact: 'PROVIDER_REBIND_REQUIRED',
+    source: 'logo_isbasi_firm_bind',
+  },
+  {
+    id: 'audit-shipping-1',
+    vendorId: 'demo-vendor-a',
+    section: 'shipping_operations',
+    fieldName: 'defaultWarehouseId',
+    oldValue: null,
+    newValue: '55574',
+    changedByUserId: 'admin-user-1',
+    changedByEmail: 'admin@example.test',
+    changedAt: '2026-06-09T09:00:00Z',
+    reason: null,
+    snapshotImpact: 'FUTURE_SHIPMENTS_AND_RETURNS_ONLY',
+    source: 'admin_shipping_config_update',
+  },
+];
 
 function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
@@ -279,6 +341,8 @@ describe('VendorProfilePage', () => {
     );
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
+    listVendorProfileAuditLogsMock.mockReset();
+    listVendorProfileAuditLogsMock.mockResolvedValue(profileAuditLogs);
     updateVendorBillingProfileMock.mockReset();
     updateVendorBillingProfileMock.mockImplementation((vendorId, input) =>
       Promise.resolve({
@@ -753,6 +817,34 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
     expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer code')).not.toBeInTheDocument();
+  });
+
+  it('renders vendor profile audit metadata and immutable history for admin users', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    expect(await screen.findByText('Finance Policy last changed')).toBeInTheDocument();
+    expect(screen.getByText('Billing / Legal Profile last changed')).toBeInTheDocument();
+    expect(screen.getByText('Logo Binding last changed')).toBeInTheDocument();
+    expect(screen.getAllByText('Shipping Operations last changed').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Vendor Configuration History' })).toBeInTheDocument();
+    expect(screen.getByText('Finance Policy · commissionVatPercent')).toBeInTheDocument();
+    expect(screen.getByText('Old: 18.00')).toBeInTheDocument();
+    expect(screen.getByText('New: 20.00')).toBeInTheDocument();
+    expect(screen.getAllByText('Future ledger rows only').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider rebind required').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'View changes' }).length).toBeGreaterThan(0);
+    expect(listVendorProfileAuditLogsMock).toHaveBeenCalled();
   });
 
   it('renders and saves admin Finance Policy controls through the existing finance profile API', async () => {
