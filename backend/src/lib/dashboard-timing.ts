@@ -70,7 +70,6 @@ function classifyExternalProvider(url: URL) {
 
   if (host.includes('myshopify.com') || path.includes('/admin/api/')) return 'shopify';
   if (host.includes('paratika')) return 'paratika';
-  if (host.includes('parasut')) return 'parasut';
   if (host.includes('navlungo')) return 'navlungo';
   if (host.includes('kargonomi') || host.includes('kargoentegrator') || host.includes('kargo-entegrator')) return 'kargonomi';
   if (host.includes('lidio')) return 'lidio';

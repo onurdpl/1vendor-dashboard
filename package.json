@@ -32,7 +32,6 @@
     "backend:kargonomi:probe": "npm --prefix backend run kargonomi:probe",
     "kargonomi:lookup-probe": "npm --prefix backend run kargonomi:lookup-probe",
     "navlungo:create-post-probe": "npm --prefix backend run navlungo:create-post-probe",
-    "parasut:commission-probe": "npm --prefix backend run parasut:commission-probe",
     "lidio:sandbox-probe": "npm --prefix backend run lidio:sandbox-probe",
     "probe:odoo:order": "tsx backend/scripts/probe-odoo-order.ts",
     "vendor-integration:create-token": "npm --prefix backend run vendor-integration:create-token",

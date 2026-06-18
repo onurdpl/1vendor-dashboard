@@ -24,7 +24,6 @@
     "kargonomi:probe": "npm run build && node scripts/kargonomi-forward-probe.mjs",
     "kargonomi:lookup-probe": "npm run build && node scripts/kargonomi-location-lookup-probe.mjs",
     "navlungo:create-post-probe": "npm run build && node scripts/navlungo-create-post-probe.mjs",
-    "parasut:commission-probe": "npm run build && node scripts/parasut-commission-invoice-probe.mjs",
     "lidio:sandbox-probe": "npm run build && node scripts/lidio-sandbox-probe.mjs",
     "lidio:create-subseller-probe": "npm run build && node scripts/lidio-create-subseller-probe.mjs",
     "lidio:marketplace-payment-probe": "npm run build && node scripts/lidio-marketplace-payment-probe.mjs",
