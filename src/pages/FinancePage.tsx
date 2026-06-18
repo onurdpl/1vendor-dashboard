@@ -23,11 +23,9 @@ import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
-  createInvoiceExecution,
   getFinanceDashboard,
   getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
-  retryInvoiceExecution,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -46,14 +44,6 @@ import { formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestam
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 
 type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
-
-const DEFAULT_BIZIMHESAP_CAPABILITIES: InvoiceExecution['providerCapabilities'] = {
-  supportsDraftSubmission: true,
-  supportsFinalInvoiceVisibility: false,
-  supportsPdfLink: true,
-  supportsStatusSync: false,
-  note: 'BizimHesap AddInvoice is treated as accounting draft/sync visibility; finalized invoice authority is reconciled separately.',
-};
 
 type VendorProfileFormInput = {
   commissionPercent: number;
@@ -418,41 +408,15 @@ function getProviderName(provider?: string) {
   return 'Not linked';
 }
 
-function getInvoiceVisibilityLabel(record?: FinanceTransaction | null) {
-  if (!record || record.category !== 'Invoice') {
-    return 'Not applicable';
-  }
-  if (!record.invoiceExecution) {
-    return 'Invoice visibility missing';
-  }
-  return record.invoiceExecution.visibilityLabel ?? getInvoiceStatusLabel(record.invoiceExecution.status);
-}
-
-function getInvoiceVisibilityTone(execution?: InvoiceExecution | null) {
-  if (!execution) {
-    return 'attention' as const;
-  }
-  if (execution.visibilityStatus === 'provider_failed' || execution.status === 'failed') {
-    return 'danger' as const;
-  }
-  if (execution.visibilityStatus === 'invoice_linked' || execution.visibilityStatus === 'accounting_synced') {
-    return 'success' as const;
-  }
-  if (execution.visibilityStatus === 'cancelled') {
-    return 'neutral' as const;
-  }
-  return 'attention' as const;
-}
-
 function getFinalInvoiceStateLabel(state?: InvoiceExecution['finalInvoiceState']) {
   if (state === 'finalized_visible') {
-    return 'Final invoice visible';
+    return 'Provider final record visible';
   }
   if (state === 'draft_or_synced') {
-    return 'Accounting sync only';
+    return 'Legacy draft record only';
   }
   if (state === 'failed') {
-    return 'Sync issue';
+    return 'Provider issue';
   }
   if (state === 'cancelled') {
     return 'Cancelled';
@@ -465,16 +429,12 @@ function getFinalInvoiceStateLabel(state?: InvoiceExecution['finalInvoiceState']
 
 function getSyncSemanticsLabel(semantics?: InvoiceExecution['syncSemantics']) {
   if (semantics === 'draft_accounting_sync') {
-    return 'Draft/accounting sync';
+    return 'Legacy draft record';
   }
   if (semantics === 'final_invoice_visibility') {
-    return 'Final invoice visibility';
+    return 'Provider final visibility';
   }
-  return 'Not synced';
-}
-
-function getProviderCapabilities(execution?: InvoiceExecution | null) {
-  return execution?.providerCapabilities ?? DEFAULT_BIZIMHESAP_CAPABILITIES;
+  return 'Not recorded';
 }
 
 function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
@@ -714,41 +674,6 @@ export function FinancePage() {
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
     },
   );
-  const createInvoiceMutation = useMutationAction(
-    (financeLedgerEntryId: string) => createInvoiceExecution(financeLedgerEntryId),
-    {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
-      onSuccess: async (execution) => {
-        await refetch();
-        showFeedback(
-          execution.status === 'created'
-            ? `${execution.visibilityLabel ?? 'Accounting sync recorded'} for this finance row.`
-            : `Accounting sync recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
-          execution.status === 'failed' ? 'error' : 'success',
-        );
-      },
-      onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Accounting sync could not be created.', 'error'),
-    },
-  );
-  const retryInvoiceMutation = useMutationAction(
-    (invoiceExecutionId: string) => retryInvoiceExecution(invoiceExecutionId),
-    {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
-      onSuccess: async (execution) => {
-        await refetch();
-        showFeedback(
-          execution.status === 'created'
-            ? `${execution.visibilityLabel ?? 'Accounting sync recorded'} for this finance row.`
-            : `Accounting sync retry recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
-          execution.status === 'failed' ? 'error' : 'success',
-        );
-      },
-      onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Accounting sync could not be retried.', 'error'),
-    },
-  );
-
   useEffect(() => {
     if (!finance?.profile) {
       return;
@@ -868,7 +793,6 @@ export function FinancePage() {
     ({ signal }) => getInvoiceExecutionResponseSummary(selectedRecord!.invoiceExecution!.id, { signal }),
     { enabled: shouldLoadInvoiceResponseSummary },
   );
-  const selectedInvoiceCapabilities = getProviderCapabilities(selectedRecord?.invoiceExecution ?? null);
   const invoiceResponseSummary = invoiceResponseSummaryQuery.data?.response ?? null;
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const relatedSupportTickets = useMemo(
@@ -890,8 +814,6 @@ export function FinancePage() {
     [currentVendor.vendorId, isAdmin, selectedRecord, supportTickets],
   );
   const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
-  const hasSelectedRecordActions =
-    Boolean(selectedRecord?.invoiceExecution?.providerPdfUrl) || Boolean(isAdmin && selectedRecord?.category === 'Invoice');
   const selectedOrderSettlementHref = selectedRecord ? buildOrderSettlementHref(selectedRecord) : null;
   const selectedFinanceGuidance = selectedRecord
     ? getFinanceWorkflowAction({
@@ -969,27 +891,6 @@ export function FinancePage() {
   }
   const financeRecommendations: OperationsRecommendation[] = [];
   if (selectedRecord && isAdmin) {
-    if (selectedRecord.invoiceExecution && ['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)) {
-      financeRecommendations.push({
-        id: `finance-rec-invoice-${selectedRecord.invoiceExecution.id}`,
-        type: 'invoice_retry',
-        severity: selectedRecord.invoiceExecution.status === 'failed' ? 'critical' : 'warning',
-        title: 'Review invoice visibility',
-        description: `Customer invoice visibility is ${getInvoiceVisibilityLabel(selectedRecord)} for this finance row.`,
-        recommendedAction: 'Review invoice status and retry accounting sync only when safe',
-        relatedObjectType: 'Finance row',
-        relatedObjectId: selectedRecord.id,
-        vendor: {
-          id: currentVendor.vendorId,
-          name: currentVendor.vendorName,
-        },
-        createdFromSignal: `finance:${selectedRecord.id}:invoice`,
-        deepLink: buildFinanceHref(selectedRecord),
-        vendorVisible: false,
-        createdAt: selectedRecord.date,
-      });
-    }
-
     if (selectedRecord.status === 'Pending' || selectedRecord.settlement?.status === 'held' || selectedRecord.settlement?.status === 'disputed') {
       financeRecommendations.push({
         id: `finance-rec-payout-${selectedRecord.id}`,
@@ -1427,11 +1328,6 @@ export function FinancePage() {
               ) : null}
               <div className="op-detail-status-row">
                 <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>{getPayoutActivityStatusLabel(selectedRecord, financeAudience)}</StatusBadge>
-                {isAdmin && selectedRecord.category === 'Invoice' ? (
-                  <StatusBadge tone={getInvoiceVisibilityTone(selectedRecord.invoiceExecution)}>
-                    {getInvoiceVisibilityLabel(selectedRecord)}
-                  </StatusBadge>
-                ) : null}
                 <strong
                   className={
                     isRefundRecord(selectedRecord) || selectedRecord.category === 'Adjustment'
@@ -1450,59 +1346,6 @@ export function FinancePage() {
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
               <AdminCollaborationNotes contextType="finance" contextId={selectedRecord.id} currentUser={currentUser} />
-              {isAdmin ? (
-                <div className="finance-detail-card finance-invoice-card">
-                  <div className="finance-detail-card-heading">
-                    <h4>Customer invoice/accounting</h4>
-                    <StatusBadge tone={getInvoiceVisibilityTone(selectedRecord.invoiceExecution)}>
-                      {getInvoiceVisibilityLabel(selectedRecord)}
-                    </StatusBadge>
-                  </div>
-                  <div className="finance-detail-rows">
-                    <MetadataRow label="Provider" value={getProviderName(selectedRecord.invoiceExecution?.provider)} />
-                    <MetadataRow label="Provider status" value={selectedRecord.invoiceExecution?.visibilityLabel ?? 'Not synced'} />
-                    <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not available'} />
-                    <MetadataRow
-                      label="PDF"
-                      value={
-                        selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                          <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
-                        ) : (
-                          'Not available'
-                        )
-                      }
-                    />
-                    <MetadataRow
-                      label="Final invoice state"
-                      value={getFinalInvoiceStateLabel(selectedRecord.invoiceExecution?.finalInvoiceState)}
-                    />
-                    <MetadataRow
-                      label="Accounting sync"
-                      value={getSyncSemanticsLabel(selectedRecord.invoiceExecution?.syncSemantics)}
-                    />
-                    <MetadataRow label="Provider note" value={selectedInvoiceCapabilities.note} />
-                    {shouldLoadInvoiceResponseSummary ? (
-                      <div className="finance-provider-summary" aria-label="Provider issue summary">
-                        <strong>Provider issue</strong>
-                        {invoiceResponseSummaryQuery.isLoading ? (
-                          <span>Loading safe response summary...</span>
-                        ) : invoiceResponseSummary ? (
-                          <>
-                            <span>HTTP: {invoiceResponseSummary.httpStatus ?? 'Unknown'}</span>
-                            <span>Content type: {invoiceResponseSummary.contentType ?? 'Unknown'}</span>
-                            <span>Keys: {invoiceResponseSummary.bodyKeys.length ? invoiceResponseSummary.bodyKeys.join(', ') : '—'}</span>
-                            <span>Provider error: {invoiceResponseSummary.providerError ?? '—'}</span>
-                            <span>GUID present: {invoiceResponseSummary.parsedGuidPresent ? 'yes' : 'no'}</span>
-                            <span>PDF present: {invoiceResponseSummary.parsedPdfUrlPresent ? 'yes' : 'no'}</span>
-                          </>
-                        ) : (
-                          <span>No provider response summary available.</span>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Settlement preview</h4>
@@ -1597,47 +1440,62 @@ export function FinancePage() {
                 </details>
               ) : null}
 
-              {hasSelectedRecordActions ? (
-                <div className="finance-detail-card finance-actions-card">
-                  <div className="finance-detail-card-heading">
-                    <h4>Actions</h4>
+              {isAdmin && selectedRecord.invoiceExecution ? (
+                <details className="finance-support-history finance-legacy-accounting-diagnostics">
+                  <summary>
+                    <span>
+                      <strong>Diagnostics</strong>
+                      <small>Legacy invoice sync record</small>
+                    </span>
+                    <StatusBadge tone="neutral">{getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)}</StatusBadge>
+                  </summary>
+                  <div className="finance-detail-rows">
+                    <MetadataRow label="Legacy provider" value={getProviderName(selectedRecord.invoiceExecution.provider)} />
+                    <MetadataRow label="Legacy status" value={getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)} />
+                    <MetadataRow label="Legacy reference" value={selectedRecord.invoiceExecution.providerInvoiceNo ?? 'Not available'} />
+                    <MetadataRow
+                      label="Legacy document"
+                      value={
+                        selectedRecord.invoiceExecution.providerPdfUrl ? (
+                          <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">Open legacy document</a>
+                        ) : (
+                          'Not available'
+                        )
+                      }
+                    />
+                    <MetadataRow
+                      label="Legacy final state"
+                      value={getFinalInvoiceStateLabel(selectedRecord.invoiceExecution.finalInvoiceState)}
+                    />
+                    <MetadataRow
+                      label="Legacy sync mode"
+                      value={getSyncSemanticsLabel(selectedRecord.invoiceExecution.syncSemantics)}
+                    />
+                    <MetadataRow
+                      label="Scope note"
+                      value="Diagnostics only. Not used by settlement approval, Logo readiness, commission invoices, or payout."
+                    />
+                    {shouldLoadInvoiceResponseSummary ? (
+                      <div className="finance-provider-summary" aria-label="Provider issue summary">
+                        <strong>Provider issue</strong>
+                        {invoiceResponseSummaryQuery.isLoading ? (
+                          <span>Loading safe response summary...</span>
+                        ) : invoiceResponseSummary ? (
+                          <>
+                            <span>HTTP: {invoiceResponseSummary.httpStatus ?? 'Unknown'}</span>
+                            <span>Content type: {invoiceResponseSummary.contentType ?? 'Unknown'}</span>
+                            <span>Keys: {invoiceResponseSummary.bodyKeys.length ? invoiceResponseSummary.bodyKeys.join(', ') : '—'}</span>
+                            <span>Provider error: {invoiceResponseSummary.providerError ?? '—'}</span>
+                            <span>GUID present: {invoiceResponseSummary.parsedGuidPresent ? 'yes' : 'no'}</span>
+                            <span>PDF present: {invoiceResponseSummary.parsedPdfUrlPresent ? 'yes' : 'no'}</span>
+                          </>
+                        ) : (
+                          <span>No provider response summary available.</span>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
-                  <OperationalActionGroup>
-                    {selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                      <a className="button button-secondary button-compact" href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">
-                        Download PDF
-                      </a>
-                    ) : null}
-                    {isAdmin && selectedRecord.category === 'Invoice' ? (
-                      <>
-                        <button
-                          type="button"
-                          className="button button-primary button-compact"
-                          disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
-                          onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
-                        >
-                          {createInvoiceMutation.isPending ? 'Syncing...' : 'Sync accounting draft'}
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary button-compact"
-                          disabled={
-                            retryInvoiceMutation.isPending ||
-                            !selectedRecord.invoiceExecution ||
-                            !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
-                          }
-                          onClick={() => {
-                            if (selectedRecord.invoiceExecution) {
-                              retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
-                            }
-                          }}
-                        >
-                          {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry accounting sync'}
-                        </button>
-                      </>
-                    ) : null}
-                  </OperationalActionGroup>
-                </div>
+                </details>
               ) : null}
 
               {isAdmin && selectedRecord.category === 'Invoice' ? (

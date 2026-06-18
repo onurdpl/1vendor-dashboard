@@ -223,7 +223,7 @@ function buildInvoiceExecution(
     providerPdfUrl: null,
     status: 'created',
     visibilityStatus: 'accounting_synced',
-    visibilityLabel: 'Accounting sync recorded',
+    visibilityLabel: 'Legacy record stored',
     reconciliationState: 'invoice_visibility_incomplete',
     finalInvoiceState: 'draft_or_synced',
     syncSemantics: 'draft_accounting_sync',
@@ -232,7 +232,7 @@ function buildInvoiceExecution(
       supportsFinalInvoiceVisibility: false,
       supportsPdfLink: true,
       supportsStatusSync: false,
-      note: 'BizimHesap AddInvoice is treated as accounting draft/sync visibility; finalized invoice authority is reconciled separately.',
+      note: 'Legacy provider diagnostics are retained for support visibility only.',
     },
     createdAt: '2026-05-13T12:00:00Z',
     updatedAt: '2026-05-13T12:00:00Z',
@@ -410,14 +410,16 @@ describe('FinancePage control center', () => {
     await screen.findByText('#1002');
     await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
 
-    expect(await screen.findByText('Customer invoice/accounting')).toBeInTheDocument();
+    expect(await screen.findByText('Settlement preview')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
-    expect(screen.getByText('Settlement preview')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sync accounting draft/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry accounting sync/i })).not.toBeInTheDocument();
     const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
     expect(inspectorBody?.querySelector(':scope > .admin-collab-card')).toBeTruthy();
-    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
-    expect(inspectorBody?.querySelectorAll(':scope > .finance-detail-card').length).toBeGreaterThanOrEqual(3);
+    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeFalsy();
+    expect(inspectorBody?.querySelectorAll(':scope > .finance-detail-card').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
 
@@ -434,7 +436,7 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Settlement impact').length).toBeGreaterThan(0);
   });
 
-  it('renders recommendation, invoice, and settlement sections in the same finance inspector stack', async () => {
+  it('renders recommendation and settlement sections in the same finance inspector stack', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       transactions: [
@@ -457,12 +459,14 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByText('Suggested next steps')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review settlement');
-    expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.getByText('Settlement preview')).toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sync accounting draft/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry accounting sync/i })).not.toBeInTheDocument();
 
     const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
     expect(inspectorBody?.querySelector(':scope > .operational-recommendations-card')).toBeTruthy();
-    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
+    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeFalsy();
     expect(
       Array.from(inspectorBody?.querySelectorAll(':scope > .finance-detail-card') ?? []).some((section) =>
         section.textContent?.includes('Settlement preview'),
@@ -659,7 +663,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect((await screen.findAllByText('Invoice visibility incomplete')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Diagnostics')).toBeInTheDocument();
+    expect(screen.getByText('Legacy invoice sync record')).toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
     await waitFor(() =>
       expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown', expect.any(Object)),
     );
