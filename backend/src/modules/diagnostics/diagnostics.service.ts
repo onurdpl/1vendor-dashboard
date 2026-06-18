@@ -1,6 +1,7 @@
-import { OperationalJobStatus, OperationalJobType, type OperationalJob, type WebhookEvent } from '@prisma/client';
+import { OperationalJobStatus, OperationalJobType, Prisma, type OperationalJob, type WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
+import { buildFinanceAuditRuntimeMetadata } from '../../config/database-source-diagnostics.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
@@ -68,8 +69,140 @@ const SUPPORTED_RECOVER_TOPICS = new Set([
 
 const PAYLOAD_PREVIEW_LIMIT = 1200;
 
+const INVOICE_EXECUTION_READINESS_COLUMNS = [
+  'id',
+  'provider',
+  'status',
+  'createdAt',
+] as const;
+
+export type InvoiceExecutionCleanupReadinessClassification =
+  | 'READY_TO_REMOVE'
+  | 'ARCHIVE_REQUIRED'
+  | 'UNKNOWN';
+
+type InvoiceExecutionGroupCount = {
+  provider: string;
+  status: string;
+  count: number;
+};
+
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function toCount(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function normalizeDiagnosticError(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return 'InvoiceExecution cleanup readiness query failed.';
+}
+
+async function checkInvoiceExecutionSchemaReady() {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ column_name: string }>>(Prisma.sql`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'InvoiceExecution'
+        AND column_name IN (${Prisma.join([...INVOICE_EXECUTION_READINESS_COLUMNS])})
+    `);
+    const present = new Set(rows.map((row) => row.column_name));
+    return INVOICE_EXECUTION_READINESS_COLUMNS.every((column) => present.has(column));
+  } catch {
+    return false;
+  }
+}
+
+export async function getInvoiceExecutionCleanupReadiness(env: AppEnv) {
+  const schemaReady = await checkInvoiceExecutionSchemaReady();
+  const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
+    environment: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    schemaReady,
+  });
+  const databaseIdentity = {
+    databaseHost: financeAuditMetadata.databaseHost,
+    databaseName: financeAuditMetadata.databaseName,
+    databaseSourceLabel: financeAuditMetadata.databaseSourceLabel,
+    schemaReady: financeAuditMetadata.schemaReady,
+  };
+
+  const base = {
+    ok: true,
+    writesPerformed: false,
+    databaseIdentity,
+    warnings: financeAuditMetadata.warnings,
+  };
+
+  try {
+    const [aggregate, groupedCounts] = await Promise.all([
+      prisma.invoiceExecution.aggregate({
+        _count: {
+          _all: true,
+        },
+        _min: {
+          createdAt: true,
+        },
+        _max: {
+          createdAt: true,
+        },
+      }),
+      prisma.invoiceExecution.groupBy({
+        by: ['provider', 'status'],
+        _count: {
+          _all: true,
+        },
+        orderBy: [
+          {
+            provider: 'asc',
+          },
+          {
+            status: 'asc',
+          },
+        ],
+      }),
+    ]);
+
+    const totalInvoiceExecutionRows = toCount(aggregate._count?._all);
+    const rowsExist = totalInvoiceExecutionRows > 0;
+    const cleanupReadiness: InvoiceExecutionCleanupReadinessClassification = rowsExist
+      ? 'ARCHIVE_REQUIRED'
+      : 'READY_TO_REMOVE';
+    const countsByProviderStatus: InvoiceExecutionGroupCount[] = groupedCounts.map((group) => ({
+      provider: String(group.provider),
+      status: String(group.status),
+      count: toCount(group._count?._all),
+    }));
+
+    return {
+      ...base,
+      totalInvoiceExecutionRows,
+      countsByProviderStatus,
+      oldestCreatedAt: toIsoString(aggregate._min?.createdAt ?? null),
+      newestCreatedAt: toIsoString(aggregate._max?.createdAt ?? null),
+      rowsExist,
+      cleanupReadiness,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      ok: false,
+      totalInvoiceExecutionRows: null,
+      countsByProviderStatus: [],
+      oldestCreatedAt: null,
+      newestCreatedAt: null,
+      rowsExist: null,
+      cleanupReadiness: 'UNKNOWN' as const,
+      error: normalizeDiagnosticError(error),
+    };
+  }
 }
 
 function inferNeedsAttention(status: string, errorMessage: string | null) {

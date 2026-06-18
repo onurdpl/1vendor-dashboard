@@ -9,6 +9,7 @@ import {
   getOrderAddressPersistenceDiagnostic,
   getOrderDistrictReadinessDiagnostic,
   getOrderWebhookEventsDiagnostic,
+  getInvoiceExecutionCleanupReadiness,
   getReturnVisibilityDiagnostic,
   getReconciliationDiagnostics,
   listShopifyWebhookSubscriptionDiagnostics,
@@ -104,6 +105,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return withDashboardRouteTiming('GET /admin/diagnostics/reconciliation', () => getReconciliationDiagnostics());
+    },
+  );
+
+  app.get(
+    '/admin/diagnostics/cleanup/invoice-execution-readiness',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return getInvoiceExecutionCleanupReadiness(env);
     },
   );
 

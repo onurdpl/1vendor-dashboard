@@ -42,3 +42,17 @@ If `databaseSourceLabel` is `local`, do not use the results as deployed truth.
 A deployed audit should be run through the deployed backend or direct read-only deployed DB access. Public health endpoints can confirm DB reachability and expose secret-safe DB identity, but row-level checks still require authenticated admin access or read-only database credentials.
 
 Do not infer deployed `VendorBillingProfile`, Logo binding, settlement approval, invoice record, or payout state from local database evidence.
+
+## InvoiceExecution Cleanup Readiness
+
+C4 `InvoiceExecution` removal requires production evidence from:
+
+`GET /admin/diagnostics/cleanup/invoice-execution-readiness`
+
+The endpoint is admin-only and read-only. It reports secret-safe database identity, total `InvoiceExecution` row count, provider/status counts, oldest/newest timestamps, and a cleanup readiness classification:
+
+- `READY_TO_REMOVE`: no production rows were found
+- `ARCHIVE_REQUIRED`: production rows exist and must be exported or archived before schema removal
+- `UNKNOWN`: the readiness query failed or the table/model is unavailable
+
+Local `InvoiceExecution` row counts are not valid production evidence for C4 schema removal.
