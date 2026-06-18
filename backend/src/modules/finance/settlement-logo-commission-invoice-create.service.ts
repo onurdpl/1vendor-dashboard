@@ -230,7 +230,7 @@ async function loginForLogoCreate(client: LogoCreateClient) {
   const result = await client.login();
   const login = sanitizeLoginResponse(result.body);
   const extracted = extractSessionFromLoginResponse(result.body);
-  const missingSessionFields = extracted.missing;
+  const missingSessionFields = extracted.missing.filter((field) => field !== 'tenantId');
   const ok = result.ok && !result.jsonParseFailed && missingSessionFields.length === 0;
 
   if (!ok) {
@@ -254,7 +254,7 @@ async function loginForLogoCreate(client: LogoCreateClient) {
     login,
     session: {
       accessToken: extracted.accessToken!,
-      tenantId: extracted.tenantId!,
+      tenantId: extracted.tenantId,
       userId: extracted.userId,
       userEmail: extracted.userEmail,
       userName: extracted.userName,
@@ -356,11 +356,15 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
     });
   }
 
-  const initialGuard = validateLogoExecutionEnvironment({ env: options.env });
+  const initialGuard = validateLogoExecutionEnvironment({
+    env: options.env,
+    deferTenantValidationUntilLogin: true,
+  });
   if (!initialGuard.allowed) {
     return buildBlockedResult({
       settlementCommissionInvoiceId,
       blockers: initialGuard.blockers,
+      warnings: initialGuard.warnings,
       environmentGuard: initialGuard,
     });
   }
@@ -370,7 +374,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
     return buildBlockedResult({
       settlementCommissionInvoiceId,
       blockers: ['Logo İşbaşı credentials are required before invoice execution.'],
-      warnings: [`Missing env: ${missingCredentials.join(', ')}`],
+      warnings: [...initialGuard.warnings, `Missing env: ${missingCredentials.join(', ')}`],
       environmentGuard: initialGuard,
     });
   }
@@ -383,6 +387,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
     return buildBlockedResult({
       settlementCommissionInvoiceId,
       blockers: [`Logo İşbaşı login failed before invoice create: ${safeErrorMessage(error)}`],
+      warnings: initialGuard.warnings,
       environmentGuard: initialGuard,
       externalApiCallAttempted: true,
     });
@@ -392,6 +397,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
     return buildBlockedResult({
       settlementCommissionInvoiceId,
       blockers: login.blockers,
+      warnings: initialGuard.warnings,
       environmentGuard: initialGuard,
       externalApiCallAttempted: true,
     });
@@ -405,6 +411,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
     return buildBlockedResult({
       settlementCommissionInvoiceId,
       blockers: tenantGuard.blockers,
+      warnings: tenantGuard.warnings,
       environmentGuard: tenantGuard,
       externalApiCallAttempted: true,
     });
@@ -436,7 +443,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       settlementCommissionInvoiceId,
       status: 'unknown',
       blockers: ['Logo create outcome is UNKNOWN. Reconciliation is required before retry.'],
-      warnings: [],
+      warnings: tenantGuard.warnings,
       environmentGuard: tenantGuard,
       record: unknown,
       providerResult: null,
@@ -466,7 +473,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       settlementCommissionInvoiceId,
       status: 'failed',
       blockers: [],
-      warnings: [],
+      warnings: tenantGuard.warnings,
       environmentGuard: tenantGuard,
       record: failed,
       providerResult: {
@@ -492,7 +499,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       settlementCommissionInvoiceId,
       status: 'unknown',
       blockers: ['Logo create outcome is UNKNOWN. Reconciliation is required before retry.'],
-      warnings: [],
+      warnings: tenantGuard.warnings,
       environmentGuard: tenantGuard,
       record: unknown,
       providerResult: {
@@ -521,7 +528,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       settlementCommissionInvoiceId,
       status: 'created',
       blockers: [],
-      warnings: [],
+      warnings: tenantGuard.warnings,
       environmentGuard: tenantGuard,
       record: created,
       providerResult: {
@@ -549,7 +556,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
         settlementCommissionInvoiceId,
         status: 'unknown',
         blockers: ['Logo create may have succeeded, but local CREATED persistence failed. Reconciliation is required.'],
-        warnings: [],
+        warnings: tenantGuard.warnings,
         environmentGuard: tenantGuard,
         record: unknown,
         providerResult: {

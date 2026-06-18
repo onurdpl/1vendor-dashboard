@@ -2127,7 +2127,10 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
                       <MetadataRow label="Environment guard" value={item.record.environmentGuard?.allowed ? 'Allowed' : 'Blocked'} />
                       <MetadataRow label="Logo environment" value={valueOrDash(item.record.environmentGuard?.environment)} />
-                      <MetadataRow label="Tenant validation" value={valueOrDash(item.record.environmentGuard?.tenantValidation.status)} />
+                      <MetadataRow label="Tenant validation" value={valueOrDash(item.record.environmentGuard?.tenantValidationStatus ?? item.record.environmentGuard?.tenantValidation.status)} />
+                      <MetadataRow label="Tenant configured" value={item.record.environmentGuard ? String(item.record.environmentGuard.expectedTenantConfigured) : '—'} />
+                      <MetadataRow label="Tenant returned" value={item.record.environmentGuard ? String(item.record.environmentGuard.actualTenantPresent) : '—'} />
+                      <MetadataRow label="Environment warnings" value={item.record.environmentGuard?.warnings.length ? item.record.environmentGuard.warnings.join(' ') : '—'} />
                       <MetadataRow label="Execution contract" value={item.record.executionContract.ok ? 'Ready' : 'Blocked'} />
                       <MetadataRow label="Contract status" value={safeStatusLabel(item.record.executionContract.recordStatus)} />
                       <MetadataRow label="Payload present" value={valueOrDash(item.record.executionContract.payloadPresent)} />

@@ -272,6 +272,35 @@ describe('settlement commission invoice record foundation', () => {
     prismaMock.invoiceExecution.create.mockReset();
   });
 
+  it('allows Logo execution environment without expected tenant and returns skipped warning', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: undefined,
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      allowed: true,
+      environment: 'test',
+      expectedTenantConfigured: false,
+      actualTenantPresent: false,
+      tenantValidationStatus: 'skipped',
+      tenantValidation: {
+        expectedTenantConfigured: false,
+        expectedTenantIdPresent: false,
+        actualTenantPresent: false,
+        actualTenantIdPresent: false,
+        status: 'skipped',
+        tenantValidationStatus: 'skipped',
+      },
+      blockers: [],
+      warnings: ['Tenant validation skipped because LOGO_ISBASI_EXPECTED_TENANT_ID is not configured.'],
+    });
+  });
+
   it('blocks Logo execution when create is disabled', () => {
     const result = validateLogoExecutionEnvironment({
       env: {
@@ -286,10 +315,37 @@ describe('settlement commission invoice record foundation', () => {
     expect(result).toMatchObject({
       allowed: false,
       environment: 'test',
+      tenantValidationStatus: 'passed',
       tenantValidation: {
-        status: 'matched',
+        status: 'passed',
       },
       blockers: ['LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.'],
+    });
+  });
+
+  it('blocks Logo execution when expected tenant is configured but login returned no tenant id', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: 'tenant-1',
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      tenantValidationStatus: 'blocked_missing_actual',
+      tenantValidation: {
+        expectedTenantConfigured: true,
+        expectedTenantId: 'tenant-1',
+        actualTenantPresent: false,
+        actualTenantId: null,
+        status: 'blocked_missing_actual',
+        tenantValidationStatus: 'blocked_missing_actual',
+      },
+      blockers: ['Logo tenant id was not returned by login response; cannot validate expected tenant.'],
+      warnings: [],
     });
   });
 
@@ -305,8 +361,10 @@ describe('settlement commission invoice record foundation', () => {
     });
 
     expect(result.allowed).toBe(false);
+    expect(result.tenantValidationStatus).toBe('blocked_mismatch');
     expect(result.tenantValidation).toMatchObject({
-      status: 'mismatch',
+      status: 'blocked_mismatch',
+      tenantValidationStatus: 'blocked_mismatch',
       expectedTenantId: 'tenant-prod-1',
       actualTenantId: 'tenant-other',
     });
@@ -329,14 +387,59 @@ describe('settlement commission invoice record foundation', () => {
     expect(result).toEqual({
       allowed: true,
       environment: 'test',
+      expectedTenantConfigured: true,
+      actualTenantPresent: true,
+      tenantValidationStatus: 'passed',
       tenantValidation: {
+        expectedTenantConfigured: true,
         expectedTenantIdPresent: true,
         expectedTenantId: 'tenant-1',
+        actualTenantPresent: true,
         actualTenantIdPresent: true,
         actualTenantId: 'tenant-1',
-        status: 'matched',
+        tenantValidationStatus: 'passed',
+        status: 'passed',
       },
       blockers: [],
+      warnings: [],
+    });
+  });
+
+  it('blocks Logo execution when create environment is invalid', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'sandbox',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: undefined,
+        LOGO_ISBASI_BASE_URL: 'https://soho-isbasi-mwv2-test.logo-paas.com',
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      environment: null,
+      tenantValidationStatus: 'skipped',
+      blockers: ['LOGO_ISBASI_CREATE_ENVIRONMENT must be test or production before Logo invoice execution.'],
+      warnings: ['Tenant validation skipped because LOGO_ISBASI_EXPECTED_TENANT_ID is not configured.'],
+    });
+  });
+
+  it('blocks Logo execution when base URL is missing', () => {
+    const result = validateLogoExecutionEnvironment({
+      env: {
+        LOGO_ISBASI_CREATE_ENABLED: true,
+        LOGO_ISBASI_CREATE_ENVIRONMENT: 'test',
+        LOGO_ISBASI_EXPECTED_TENANT_ID: undefined,
+        LOGO_ISBASI_BASE_URL: undefined,
+      } as never,
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      environment: 'test',
+      tenantValidationStatus: 'skipped',
+      blockers: ['LOGO_ISBASI_BASE_URL is required before Logo invoice execution.'],
+      warnings: ['Tenant validation skipped because LOGO_ISBASI_EXPECTED_TENANT_ID is not configured.'],
     });
   });
 
@@ -1128,10 +1231,15 @@ describe('settlement commission invoice record foundation', () => {
         environmentGuard: {
           allowed: false,
           environment: 'test',
+          tenantValidationStatus: 'blocked_missing_actual',
           tenantValidation: {
-            status: 'not_checked',
+            status: 'blocked_missing_actual',
           },
-          blockers: ['LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.'],
+          blockers: [
+            'LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.',
+            'Logo tenant id was not returned by login response; cannot validate expected tenant.',
+          ],
+          warnings: [],
         },
         executionContract: {
           ok: false,

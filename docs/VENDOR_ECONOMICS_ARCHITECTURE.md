@@ -89,7 +89,7 @@ Settlement Commission Invoice Request Snapshot = immutable execution artifact.
 - Environment guard:
   - `LOGO_ISBASI_CREATE_ENABLED`
   - `LOGO_ISBASI_CREATE_ENVIRONMENT`
-  - `LOGO_ISBASI_EXPECTED_TENANT_ID`
+  - optional `LOGO_ISBASI_EXPECTED_TENANT_ID` tenant validation when Logo login returns a tenant id
   - `LOGO_ISBASI_BASE_URL`
 - Execution contract validator requiring:
   - `SettlementCommissionInvoice.status = PENDING`
@@ -200,7 +200,7 @@ Controlled create behavior:
 - `FAILED` records can retry through the same stored payload and increment retry metadata before the provider call.
 - `UNKNOWN`, `CREATED`, and `CANCELLED` records cannot execute.
 - `UNKNOWN` means the provider outcome or local persistence outcome is ambiguous and requires reconciliation before any retry.
-- The create endpoint requires the Logo execution environment guard, expected tenant id, and authenticated tenant validation before provider write.
+- The create endpoint requires the Logo execution environment guard before provider write. Tenant validation is conditional: when `LOGO_ISBASI_EXPECTED_TENANT_ID` is configured, Logo login must return a matching tenant id; when it is not configured, diagnostics report tenant validation as skipped.
 
 ## Return Shipping Policy
 

@@ -57,7 +57,7 @@ export type LogoIsbasiSessionExtraction = {
 
 export type LogoIsbasiAuthenticatedSession = {
   accessToken: string;
-  tenantId: string;
+  tenantId: string | null;
   userId?: string | null;
   userEmail?: string | null;
   userName?: string | null;
@@ -265,7 +265,7 @@ export class LogoIsbasiClient {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
-        tenantId: session.tenantId,
+        ...(session.tenantId ? { tenantId: session.tenantId } : {}),
         apiKey: this.config.apiKey,
         'Content-Type': 'application/json',
       },
@@ -285,7 +285,7 @@ export class LogoIsbasiClient {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
-        tenantId: session.tenantId,
+        ...(session.tenantId ? { tenantId: session.tenantId } : {}),
         apiKey: this.config.apiKey,
       },
     });
@@ -330,7 +330,7 @@ export class LogoIsbasiClient {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
-        tenantId: session.tenantId,
+        ...(session.tenantId ? { tenantId: session.tenantId } : {}),
         apiKey: this.config.apiKey,
         'Content-Type': 'application/json; charset=utf-8',
         Accept: 'application/json',
@@ -377,7 +377,7 @@ export class LogoIsbasiClient {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
-        tenantId: session.tenantId,
+        ...(session.tenantId ? { tenantId: session.tenantId } : {}),
         apiKey: this.config.apiKey,
         'Content-Type': 'application/json; charset=utf-8',
         Accept: 'application/json',
@@ -416,13 +416,15 @@ export class LogoIsbasiClient {
     };
     const headers: Record<string, string> = {
       Authorization: `Bearer ${session.accessToken}`,
-      tenantId: session.tenantId,
       apiKey: this.config.apiKey,
       'Content-Type': 'application/json;charset=utf-8',
       Accept: 'application/json',
       Lang: 'tr-TR',
       DeviceType: 'WEB',
     };
+    if (session.tenantId) {
+      headers.tenantId = session.tenantId;
+    }
     if (session.userId) {
       headers.UserId = session.userId;
     }
@@ -454,13 +456,15 @@ export class LogoIsbasiClient {
     const requestUrl = `${this.baseUrl}/api/v1.0/invoices/integrationInvoices`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${session.accessToken}`,
-      tenantId: session.tenantId,
       apiKey: this.config.apiKey,
       'Content-Type': 'application/json; charset=utf-8',
       Accept: 'application/json',
       Lang: 'tr-TR',
       DeviceType: 'WEB',
     };
+    if (session.tenantId) {
+      headers.tenantId = session.tenantId;
+    }
     if (session.userId) {
       headers.UserId = session.userId;
     }
@@ -495,12 +499,14 @@ export class LogoIsbasiClient {
     const accept = 'text/plain, application/pdf';
     const headers: Record<string, string> = {
       Authorization: `Bearer ${session.accessToken}`,
-      tenantId: session.tenantId,
       apiKey: this.config.apiKey,
       Accept: accept,
       Lang: 'tr-TR',
       DeviceType: 'WEB',
     };
+    if (session.tenantId) {
+      headers.tenantId = session.tenantId;
+    }
     if (session.userId) {
       headers.UserId = session.userId;
     }

@@ -2,19 +2,32 @@ import type { AppEnv } from '../../config/env.js';
 
 export type LogoExecutionEnvironment = 'test' | 'production';
 
+export type LogoExecutionTenantValidationStatus =
+  | 'skipped'
+  | 'passed'
+  | 'blocked_missing_actual'
+  | 'blocked_mismatch';
+
 export type LogoExecutionTenantValidation = {
+  expectedTenantConfigured: boolean;
   expectedTenantIdPresent: boolean;
   expectedTenantId: string | null;
+  actualTenantPresent: boolean;
   actualTenantIdPresent: boolean;
   actualTenantId: string | null;
-  status: 'not_checked' | 'matched' | 'mismatch' | 'missing_expected_tenant';
+  tenantValidationStatus: LogoExecutionTenantValidationStatus;
+  status: LogoExecutionTenantValidationStatus;
 };
 
 export type LogoExecutionEnvironmentGuardResult = {
   allowed: boolean;
   environment: LogoExecutionEnvironment | null;
+  expectedTenantConfigured: boolean;
+  actualTenantPresent: boolean;
+  tenantValidationStatus: LogoExecutionTenantValidationStatus;
   tenantValidation: LogoExecutionTenantValidation;
   blockers: string[];
+  warnings: string[];
 };
 
 export type ValidateLogoExecutionEnvironmentInput = {
@@ -26,7 +39,11 @@ export type ValidateLogoExecutionEnvironmentInput = {
     | 'LOGO_ISBASI_BASE_URL'
   >;
   actualTenantId?: string | null;
+  deferTenantValidationUntilLogin?: boolean;
 };
+
+const TENANT_VALIDATION_SKIPPED_WARNING =
+  'Tenant validation skipped because LOGO_ISBASI_EXPECTED_TENANT_ID is not configured.';
 
 function readString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -40,34 +57,46 @@ function normalizeEnvironment(value: unknown): LogoExecutionEnvironment | null {
 function buildTenantValidation(input: {
   expectedTenantId: string | null;
   actualTenantId: string | null;
+  deferTenantValidationUntilLogin?: boolean;
 }): LogoExecutionTenantValidation {
   if (!input.expectedTenantId) {
     return {
+      expectedTenantConfigured: false,
       expectedTenantIdPresent: false,
       expectedTenantId: null,
+      actualTenantPresent: Boolean(input.actualTenantId),
       actualTenantIdPresent: Boolean(input.actualTenantId),
       actualTenantId: input.actualTenantId,
-      status: 'missing_expected_tenant',
+      tenantValidationStatus: 'skipped',
+      status: 'skipped',
     };
   }
 
   if (!input.actualTenantId) {
+    const status = input.deferTenantValidationUntilLogin ? 'skipped' : 'blocked_missing_actual';
     return {
+      expectedTenantConfigured: true,
       expectedTenantIdPresent: true,
       expectedTenantId: input.expectedTenantId,
+      actualTenantPresent: false,
       actualTenantIdPresent: false,
       actualTenantId: null,
-      status: 'not_checked',
+      tenantValidationStatus: status,
+      status,
     };
   }
 
   const matched = input.expectedTenantId === input.actualTenantId;
+  const status = matched ? 'passed' : 'blocked_mismatch';
   return {
+    expectedTenantConfigured: true,
     expectedTenantIdPresent: true,
     expectedTenantId: input.expectedTenantId,
+    actualTenantPresent: true,
     actualTenantIdPresent: true,
     actualTenantId: input.actualTenantId,
-    status: matched ? 'matched' : 'mismatch',
+    tenantValidationStatus: status,
+    status,
   };
 }
 
@@ -78,8 +107,13 @@ export function validateLogoExecutionEnvironment(
   const baseUrl = readString(input.env.LOGO_ISBASI_BASE_URL);
   const expectedTenantId = readString(input.env.LOGO_ISBASI_EXPECTED_TENANT_ID);
   const actualTenantId = readString(input.actualTenantId);
-  const tenantValidation = buildTenantValidation({ expectedTenantId, actualTenantId });
+  const tenantValidation = buildTenantValidation({
+    expectedTenantId,
+    actualTenantId,
+    deferTenantValidationUntilLogin: input.deferTenantValidationUntilLogin,
+  });
   const blockers: string[] = [];
+  const warnings: string[] = [];
 
   if (input.env.LOGO_ISBASI_CREATE_ENABLED !== true) {
     blockers.push('LOGO_ISBASI_CREATE_ENABLED must be true before Logo invoice execution.');
@@ -93,18 +127,26 @@ export function validateLogoExecutionEnvironment(
     blockers.push('LOGO_ISBASI_BASE_URL is required before Logo invoice execution.');
   }
 
-  if (tenantValidation.status === 'missing_expected_tenant') {
-    blockers.push('LOGO_ISBASI_EXPECTED_TENANT_ID is required before Logo invoice execution.');
+  if (!tenantValidation.expectedTenantConfigured) {
+    warnings.push(TENANT_VALIDATION_SKIPPED_WARNING);
   }
 
-  if (tenantValidation.status === 'mismatch') {
+  if (tenantValidation.status === 'blocked_missing_actual') {
+    blockers.push('Logo tenant id was not returned by login response; cannot validate expected tenant.');
+  }
+
+  if (tenantValidation.status === 'blocked_mismatch') {
     blockers.push('Logo tenant mismatch. Authenticated Logo tenant does not match LOGO_ISBASI_EXPECTED_TENANT_ID.');
   }
 
   return {
     allowed: blockers.length === 0,
     environment,
+    expectedTenantConfigured: tenantValidation.expectedTenantConfigured,
+    actualTenantPresent: tenantValidation.actualTenantPresent,
+    tenantValidationStatus: tenantValidation.tenantValidationStatus,
     tenantValidation,
     blockers,
+    warnings,
   };
 }

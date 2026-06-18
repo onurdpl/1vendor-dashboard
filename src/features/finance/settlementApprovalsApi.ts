@@ -286,18 +286,25 @@ export type SettlementCommissionInvoiceDiagnostics = {
     provider: string;
     status: string;
     retryCount: number;
-    environmentGuard: {
-      allowed: boolean;
-      environment: 'test' | 'production' | null;
-      tenantValidation: {
-        expectedTenantIdPresent: boolean;
-        expectedTenantId: string | null;
-        actualTenantIdPresent: boolean;
-        actualTenantId: string | null;
-        status: 'not_checked' | 'matched' | 'mismatch' | 'missing_expected_tenant';
-      };
-      blockers: string[];
-    } | null;
+      environmentGuard: {
+        allowed: boolean;
+        environment: 'test' | 'production' | null;
+        expectedTenantConfigured: boolean;
+        actualTenantPresent: boolean;
+        tenantValidationStatus: 'skipped' | 'passed' | 'blocked_missing_actual' | 'blocked_mismatch';
+        tenantValidation: {
+          expectedTenantConfigured: boolean;
+          expectedTenantIdPresent: boolean;
+          expectedTenantId: string | null;
+          actualTenantPresent: boolean;
+          actualTenantIdPresent: boolean;
+          actualTenantId: string | null;
+          tenantValidationStatus: 'skipped' | 'passed' | 'blocked_missing_actual' | 'blocked_mismatch';
+          status: 'skipped' | 'passed' | 'blocked_missing_actual' | 'blocked_mismatch';
+        };
+        blockers: string[];
+        warnings: string[];
+      } | null;
     executionContract: {
       ok: boolean;
       writesPerformed: false;

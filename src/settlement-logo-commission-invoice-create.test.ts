@@ -222,6 +222,77 @@ describe('controlled settlement Logo commission invoice create', () => {
     });
   });
 
+  it('does not require expected tenant env when other create guards pass', async () => {
+    const pending = buildRecord();
+    prismaMock.settlementCommissionInvoice.findUnique
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(pending);
+    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
+      buildRecord({
+        status: SettlementCommissionInvoiceStatus.CREATED,
+        providerInvoiceId: 'logo-invoice-1',
+        providerUuid: 'logo-uuid-1',
+        providerEttn: 'logo-ettn-1',
+        invoiceNo: 'ABC202600001',
+        responseSnapshotJson: { ok: true },
+      }),
+    );
+    const client = buildClient();
+
+    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+      env: buildEnv({ LOGO_ISBASI_EXPECTED_TENANT_ID: undefined }),
+      client,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'created',
+      warnings: ['Tenant validation skipped because LOGO_ISBASI_EXPECTED_TENANT_ID is not configured.'],
+      environmentGuard: {
+        allowed: true,
+        expectedTenantConfigured: false,
+        actualTenantPresent: true,
+        tenantValidationStatus: 'skipped',
+      },
+    });
+    expect(client.createIntegrationInvoice).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks when expected tenant is configured but Logo login returns no tenant id', async () => {
+    const pending = buildRecord();
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValueOnce(pending);
+    const client = buildClient();
+    client.login.mockResolvedValueOnce({
+      status: 200,
+      ok: true,
+      jsonParseFailed: false,
+      body: {
+        data: {
+          accessToken: 'access-token',
+          userId: 'user-1',
+        },
+      },
+    });
+
+    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+      env: buildEnv(),
+      client,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'blocked',
+      blockers: ['Logo tenant id was not returned by login response; cannot validate expected tenant.'],
+      environmentGuard: {
+        allowed: false,
+        expectedTenantConfigured: true,
+        actualTenantPresent: false,
+        tenantValidationStatus: 'blocked_missing_actual',
+      },
+    });
+    expect(client.createIntegrationInvoice).not.toHaveBeenCalled();
+  });
+
   it('marks clear provider failure as FAILED', async () => {
     const pending = buildRecord();
     prismaMock.settlementCommissionInvoice.findUnique
