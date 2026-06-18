@@ -56,3 +56,9 @@ The endpoint is admin-only and read-only. It reports secret-safe database identi
 - `UNKNOWN`: the readiness query failed or the table/model is unavailable
 
 Local `InvoiceExecution` row counts are not valid production evidence for C4 schema removal.
+
+When readiness returns `ARCHIVE_REQUIRED`, save the production output from:
+
+`GET /admin/diagnostics/cleanup/invoice-execution-archive`
+
+This endpoint is admin-only and read-only. It returns safe metadata only: row ids, provider/status, provider invoice identifiers, timestamps, snapshot presence booleans, and linked finance ledger/order identifiers. It must not be replaced by a local DB archive because local rows do not prove production history.

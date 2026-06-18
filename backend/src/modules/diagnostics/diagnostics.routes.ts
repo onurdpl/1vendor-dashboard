@@ -9,6 +9,7 @@ import {
   getOrderAddressPersistenceDiagnostic,
   getOrderDistrictReadinessDiagnostic,
   getOrderWebhookEventsDiagnostic,
+  getInvoiceExecutionArchiveDiagnostic,
   getInvoiceExecutionCleanupReadiness,
   getReturnVisibilityDiagnostic,
   getReconciliationDiagnostics,
@@ -119,6 +120,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return getInvoiceExecutionCleanupReadiness(env);
+    },
+  );
+
+  app.get(
+    '/admin/diagnostics/cleanup/invoice-execution-archive',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return getInvoiceExecutionArchiveDiagnostic(env);
     },
   );
 

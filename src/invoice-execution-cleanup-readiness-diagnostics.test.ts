@@ -5,6 +5,7 @@ const prismaMock = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
   invoiceExecution: {
     aggregate: vi.fn(),
+    findMany: vi.fn(),
     groupBy: vi.fn(),
   },
 }));
@@ -13,9 +14,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { getInvoiceExecutionCleanupReadiness } = await import(
-  '../backend/src/modules/diagnostics/diagnostics.service.js'
-);
+const {
+  getInvoiceExecutionArchiveDiagnostic,
+  getInvoiceExecutionCleanupReadiness,
+} = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
 const { registerDiagnosticsRoutes } = await import('../backend/src/modules/diagnostics/diagnostics.routes.js');
 
 function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
@@ -79,6 +81,25 @@ function registerCleanupRoute(env: AppEnv) {
   };
   registerDiagnosticsRoutes(app as never, env);
   return gets.get('/admin/diagnostics/cleanup/invoice-execution-readiness');
+}
+
+function registerArchiveRoute(env: AppEnv) {
+  const gets = new Map<
+    string,
+    (request: { authUser?: { role?: string } }, reply: ReturnType<typeof buildReply>) => unknown
+  >();
+  const app = {
+    get: vi.fn((path: string, ...args: unknown[]) => {
+      const handler = args.at(-1) as (
+        request: { authUser?: { role?: string } },
+        reply: ReturnType<typeof buildReply>,
+      ) => unknown;
+      gets.set(path, handler);
+    }),
+    post: vi.fn(),
+  };
+  registerDiagnosticsRoutes(app as never, env);
+  return gets.get('/admin/diagnostics/cleanup/invoice-execution-archive');
 }
 
 function buildReply() {
@@ -215,6 +236,151 @@ describe('InvoiceExecution cleanup readiness diagnostic', () => {
       cleanupReadiness: 'READY_TO_REMOVE',
       writesPerformed: false,
       totalInvoiceExecutionRows: 0,
+    });
+  });
+
+  it('returns safe archive rows with linked ledger identifiers', async () => {
+    prismaMock.invoiceExecution.findMany.mockResolvedValue([
+      {
+        id: 'invoice-execution-1',
+        financeLedgerEntryId: 'ledger-1',
+        provider: 'BIZIMHESAP',
+        status: 'CREATED',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        providerInvoiceGuid: 'guid-1',
+        providerInvoiceNo: 'BH-1001',
+        requestSnapshot: { AddInvoice: { SecretBody: 'do-not-return' } },
+        responseSnapshot: { status: 200, body: { Guid: 'guid-1' } },
+        financeLedgerEntry: {
+          vendorId: 'yalispor',
+          entryType: 'sale',
+          amount: { toString: () => '7598.00' },
+          settlementStatus: 'PAYABLE',
+          payoutStatus: 'PENDING',
+          vendorAllocation: {
+            sourceShopifyOrderId: 'gid://shopify/Order/1081',
+            sourceShopifyOrderNumber: '#1081',
+          },
+        },
+      },
+      {
+        id: 'invoice-execution-2',
+        financeLedgerEntryId: 'ledger-2',
+        provider: 'BIZIMHESAP',
+        status: 'FAILED',
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-02-02T00:00:00.000Z'),
+        providerInvoiceGuid: null,
+        providerInvoiceNo: null,
+        requestSnapshot: { AddInvoice: {} },
+        responseSnapshot: { error: 'do-not-return' },
+        financeLedgerEntry: null,
+      },
+    ]);
+
+    const result = await getInvoiceExecutionArchiveDiagnostic(buildEnv());
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      databaseIdentity: {
+        databaseHost: 'db.example.internal',
+        databaseName: 'vendor_dashboard_h8fb',
+        databaseSourceLabel: 'remote',
+        schemaReady: true,
+      },
+      totalArchivedRows: 2,
+      archiveRows: [
+        {
+          id: 'invoice-execution-1',
+          financeLedgerEntryId: 'ledger-1',
+          provider: 'BIZIMHESAP',
+          status: 'CREATED',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+          providerInvoiceGuid: 'guid-1',
+          providerInvoiceNo: 'BH-1001',
+          hasRequestSnapshot: true,
+          hasResponseSnapshot: true,
+          hasErrorSnapshot: false,
+          financeLedgerEntry: {
+            vendorId: 'yalispor',
+            sourceShopifyOrderId: 'gid://shopify/Order/1081',
+            sourceShopifyOrderNumber: '#1081',
+            entryType: 'sale',
+            amount: '7598.00',
+            settlementStatus: 'PAYABLE',
+            payoutStatus: 'PENDING',
+          },
+        },
+        {
+          id: 'invoice-execution-2',
+          financeLedgerEntryId: 'ledger-2',
+          provider: 'BIZIMHESAP',
+          status: 'FAILED',
+          providerInvoiceGuid: null,
+          providerInvoiceNo: null,
+          hasRequestSnapshot: true,
+          hasResponseSnapshot: true,
+          hasErrorSnapshot: true,
+          financeLedgerEntry: null,
+        },
+      ],
+      error: null,
+    });
+    expect(typeof result.generatedAt).toBe('string');
+  });
+
+  it('omits request and response snapshot bodies from archive output', async () => {
+    prismaMock.invoiceExecution.findMany.mockResolvedValue([
+      {
+        id: 'invoice-execution-1',
+        financeLedgerEntryId: 'ledger-1',
+        provider: 'BIZIMHESAP',
+        status: 'FAILED',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        providerInvoiceGuid: null,
+        providerInvoiceNo: null,
+        requestSnapshot: { AddInvoice: { ApiKey: 'secret-key', Customer: 'hidden' } },
+        responseSnapshot: { status: 500, body: { message: 'hidden provider body' } },
+        financeLedgerEntry: null,
+      },
+    ]);
+
+    const result = await getInvoiceExecutionArchiveDiagnostic(buildEnv());
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain('requestSnapshot');
+    expect(serialized).not.toContain('responseSnapshot');
+    expect(serialized).not.toContain('AddInvoice');
+    expect(serialized).not.toContain('secret-key');
+    expect(serialized).not.toContain('hidden provider body');
+  });
+
+  it('requires admin access on the archive route', async () => {
+    const handler = registerArchiveRoute(buildEnv());
+    const result = await handler?.({ authUser: { role: 'vendor' } }, buildReply());
+
+    expect(result).toMatchObject({
+      status: 403,
+      body: { message: 'Forbidden' },
+    });
+    expect(prismaMock.invoiceExecution.findMany).not.toHaveBeenCalled();
+  });
+
+  it('handles archive query failure safely', async () => {
+    prismaMock.invoiceExecution.findMany.mockRejectedValue(new Error('archive query failed'));
+
+    const result = await getInvoiceExecutionArchiveDiagnostic(buildEnv());
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      totalArchivedRows: null,
+      archiveRows: [],
+      error: 'archive query failed',
     });
   });
 });

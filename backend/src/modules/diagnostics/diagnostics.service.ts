@@ -87,6 +87,29 @@ type InvoiceExecutionGroupCount = {
   count: number;
 };
 
+type InvoiceExecutionArchiveRow = {
+  id: string;
+  financeLedgerEntryId: string;
+  provider: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  providerInvoiceGuid: string | null;
+  providerInvoiceNo: string | null;
+  hasRequestSnapshot: boolean;
+  hasResponseSnapshot: boolean;
+  hasErrorSnapshot: boolean;
+  financeLedgerEntry: {
+    vendorId: string | null;
+    sourceShopifyOrderId: string | null;
+    sourceShopifyOrderNumber: string | null;
+    entryType: string | null;
+    amount: string | null;
+    settlementStatus: string | null;
+    payoutStatus: string | null;
+  } | null;
+};
+
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
@@ -101,6 +124,33 @@ function normalizeDiagnosticError(error: unknown) {
     return error.message;
   }
   return 'InvoiceExecution cleanup readiness query failed.';
+}
+
+function hasJsonSnapshot(value: unknown) {
+  return value !== null && value !== undefined && value !== Prisma.JsonNull;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasErrorSnapshot(status: string, responseSnapshot: unknown) {
+  if (status.trim().toUpperCase() === 'FAILED') {
+    return true;
+  }
+  if (!isRecord(responseSnapshot)) {
+    return false;
+  }
+
+  const errorKeys = new Set([
+    'error',
+    'errormessage',
+    'providererror',
+    'failure',
+    'failuremessage',
+    'exception',
+  ]);
+  return Object.keys(responseSnapshot).some((key) => errorKeys.has(key.replace(/[^a-z0-9]/gi, '').toLowerCase()));
 }
 
 async function checkInvoiceExecutionSchemaReady() {
@@ -200,6 +250,104 @@ export async function getInvoiceExecutionCleanupReadiness(env: AppEnv) {
       newestCreatedAt: null,
       rowsExist: null,
       cleanupReadiness: 'UNKNOWN' as const,
+      error: normalizeDiagnosticError(error),
+    };
+  }
+}
+
+export async function getInvoiceExecutionArchiveDiagnostic(env: AppEnv) {
+  const schemaReady = await checkInvoiceExecutionSchemaReady();
+  const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
+    environment: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    schemaReady,
+  });
+  const databaseIdentity = {
+    databaseHost: financeAuditMetadata.databaseHost,
+    databaseName: financeAuditMetadata.databaseName,
+    databaseSourceLabel: financeAuditMetadata.databaseSourceLabel,
+    schemaReady: financeAuditMetadata.schemaReady,
+  };
+  const generatedAt = new Date().toISOString();
+  const base = {
+    ok: true,
+    writesPerformed: false,
+    databaseIdentity,
+    generatedAt,
+    warnings: financeAuditMetadata.warnings,
+  };
+
+  try {
+    const rows = await prisma.invoiceExecution.findMany({
+      orderBy: {
+        createdAt: 'asc',
+      },
+      select: {
+        id: true,
+        financeLedgerEntryId: true,
+        provider: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        providerInvoiceGuid: true,
+        providerInvoiceNo: true,
+        requestSnapshot: true,
+        responseSnapshot: true,
+        financeLedgerEntry: {
+          select: {
+            vendorId: true,
+            entryType: true,
+            amount: true,
+            settlementStatus: true,
+            payoutStatus: true,
+            vendorAllocation: {
+              select: {
+                sourceShopifyOrderId: true,
+                sourceShopifyOrderNumber: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const archiveRows: InvoiceExecutionArchiveRow[] = rows.map((row) => ({
+      id: row.id,
+      financeLedgerEntryId: row.financeLedgerEntryId,
+      provider: String(row.provider),
+      status: String(row.status),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      providerInvoiceGuid: row.providerInvoiceGuid,
+      providerInvoiceNo: row.providerInvoiceNo,
+      hasRequestSnapshot: hasJsonSnapshot(row.requestSnapshot),
+      hasResponseSnapshot: hasJsonSnapshot(row.responseSnapshot),
+      hasErrorSnapshot: hasErrorSnapshot(String(row.status), row.responseSnapshot),
+      financeLedgerEntry: row.financeLedgerEntry
+        ? {
+            vendorId: row.financeLedgerEntry.vendorId,
+            sourceShopifyOrderId: row.financeLedgerEntry.vendorAllocation?.sourceShopifyOrderId ?? null,
+            sourceShopifyOrderNumber: row.financeLedgerEntry.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+            entryType: row.financeLedgerEntry.entryType,
+            amount: row.financeLedgerEntry.amount.toString(),
+            settlementStatus: String(row.financeLedgerEntry.settlementStatus),
+            payoutStatus: String(row.financeLedgerEntry.payoutStatus),
+          }
+        : null,
+    }));
+
+    return {
+      ...base,
+      totalArchivedRows: archiveRows.length,
+      archiveRows,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      ok: false,
+      totalArchivedRows: null,
+      archiveRows: [],
       error: normalizeDiagnosticError(error),
     };
   }
