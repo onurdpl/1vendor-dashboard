@@ -1379,22 +1379,6 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.queryByText('No invoice records loaded yet.')).not.toBeInTheDocument();
   });
 
-  it('loads commission invoice records from the tab without mutation', async () => {
-    renderPage();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Create Draft' }));
-    await userEvent.click(screen.getByRole('tab', { name: 'Commission Invoice Records' }));
-    expect(screen.getByText('No invoice records loaded yet.')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: /Load records \(read-only\)/i }));
-
-    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
-    expect(screen.getByText('invoice-record-1')).toBeInTheDocument();
-    expect(screen.getAllByText('Pending').length).toBeGreaterThan(0);
-    expect(persistSettlementLogoCommissionInvoiceRequestSnapshotMock).not.toHaveBeenCalled();
-  });
-
   it('preserves active invoice blocker when record hydration fails', async () => {
     previewSettlementLogoCommissionInvoiceMock.mockResolvedValue(readyLogoPreviewResponse);
     persistSettlementLogoCommissionInvoiceRequestSnapshotMock.mockResolvedValue(activeInvoiceBlockerRequestSnapshotResponse);

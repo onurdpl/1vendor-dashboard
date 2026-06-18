@@ -1941,14 +1941,6 @@ export function AdminSettlementApprovalsPage() {
                 <h3>Commission Invoice Records</h3>
                 <p className="page-description">Read-only list of local settlement commission invoice records.</p>
               </div>
-              <button
-                type="button"
-                className="button button-secondary button-compact"
-                onClick={() => void handleInvoiceRecords()}
-                disabled={busyAction !== null || !selectedApprovalId}
-              >
-                Load records (read-only)
-              </button>
             </div>
             {activeInvoiceRecords.length ? (
               <div className="settlement-alert op-tone-warning">
