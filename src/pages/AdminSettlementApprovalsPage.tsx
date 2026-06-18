@@ -73,6 +73,14 @@ type HeaderMetric = {
 
 type SelectedOrderDiagnostic = NonNullable<SettlementApprovalPreview['selectedOrderDiagnostics']>[number];
 
+type DraftFailureSummary = {
+  headline: string;
+  reasons: string[];
+  details: Array<{ label: string; value: string }>;
+};
+
+const NO_ELIGIBLE_SETTLEMENT_ROWS_MESSAGE = 'No eligible settlement rows are available for approval.';
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
 }
@@ -105,6 +113,12 @@ function formatPercentList(values: number[] | null | undefined) {
 
 function formatStringList(values: string[] | null | undefined) {
   return values?.length ? values.join(', ') : 'None';
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))));
 }
 
 function parseMultiValueInput(value: string) {
@@ -208,6 +222,84 @@ function getApprovalTotals(approval: SettlementApproval | null) {
     netPayableMinor: approval.netPayableMinor,
     currency: approval.currency,
   };
+}
+
+function buildDraftFailureSummary(
+  preview: SettlementApprovalPreview | null,
+  errorMessage: string,
+): DraftFailureSummary | null {
+  if (errorMessage !== NO_ELIGIBLE_SETTLEMENT_ROWS_MESSAGE || !preview || preview.summary.eligibleRowCount !== 0) {
+    return null;
+  }
+
+  const diagnostics = safeArray<SelectedOrderDiagnostic>(preview.selectedOrderDiagnostics);
+  const excludedDiagnostics = diagnostics.filter((diagnostic) => !diagnostic.candidateIncluded);
+  const reasons = uniqueStrings(excludedDiagnostics.map((diagnostic) => diagnostic.excludedReason));
+
+  if (!reasons.length && preview.summary.excludedActiveApprovalRowCount > 0) {
+    reasons.push('Row already belongs to an active settlement approval.');
+  }
+
+  if (!reasons.length) {
+    return null;
+  }
+
+  const matchedExcludedDiagnostics = excludedDiagnostics.filter((diagnostic) => diagnostic.matched);
+  const singleSelectedOrder = matchedExcludedDiagnostics.length === 1
+    ? matchedExcludedDiagnostics[0]
+    : null;
+  const excludedRowCount = excludedDiagnostics.length || preview.summary.excludedActiveApprovalRowCount;
+  const headline = singleSelectedOrder
+    ? `Order ${singleSelectedOrder.requestedIdentifier} is not yet eligible.`
+    : `${formatNumber(excludedRowCount)} settlement ${excludedRowCount === 1 ? 'row was' : 'rows were'} excluded.`;
+
+  return {
+    headline,
+    reasons,
+    details: singleSelectedOrder
+      ? [
+          { label: 'Current status', value: valueOrDash(singleSelectedOrder.currentSettlementStatus) },
+          { label: 'Derived status', value: valueOrDash(singleSelectedOrder.derivedSettlementStatus) },
+        ]
+      : [],
+  };
+}
+
+function SettlementDraftFailurePanel({
+  message,
+  summary,
+}: {
+  message: string;
+  summary: DraftFailureSummary | null;
+}) {
+  if (!summary) {
+    return <SectionErrorRetry title="Finance action failed" description={message} />;
+  }
+
+  return (
+    <div className="op-empty-state op-tone-danger">
+      <h3>Settlement approval cannot be created.</h3>
+      <p>{summary.headline}</p>
+      {summary.details.length ? (
+        <dl className="settlement-inline-metadata">
+          {summary.details.map((detail) => (
+            <Fragment key={detail.label}>
+              <dt>{detail.label}</dt>
+              <dd>{detail.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : null}
+      <div className="settlement-error-reasons">
+        <strong>{summary.reasons.length === 1 ? 'Reason' : 'Reasons'}</strong>
+        <ul>
+          {summary.reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 function LineSamples({ lines }: { lines: SettlementApprovalLine[] }) {
@@ -613,6 +705,7 @@ export function AdminSettlementApprovalsPage() {
   const [diagnostics, setDiagnostics] = useState<Record<string, SettlementCommissionInvoiceDiagnostics>>({});
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [draftFailureSummary, setDraftFailureSummary] = useState<DraftFailureSummary | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
 
@@ -1131,6 +1224,7 @@ export function AdminSettlementApprovalsPage() {
   async function runAction<T>(action: ActionName, callback: () => Promise<T>, successMessage?: string) {
     setBusyAction(action);
     setError(null);
+    setDraftFailureSummary(null);
     setSuccess(null);
     try {
       const result = await callback();
@@ -1139,7 +1233,11 @@ export function AdminSettlementApprovalsPage() {
       }
       return result;
     } catch (requestError) {
-      setError(getErrorMessage(requestError));
+      const message = getErrorMessage(requestError);
+      setError(message);
+      if (action === 'createDraft') {
+        setDraftFailureSummary(buildDraftFailureSummary(preview, message));
+      }
       return null;
     } finally {
       setBusyAction(null);
@@ -1312,7 +1410,7 @@ export function AdminSettlementApprovalsPage() {
 
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
 
-      {error ? <SectionErrorRetry title="Finance action failed" description={error} /> : null}
+      {error ? <SettlementDraftFailurePanel message={error} summary={draftFailureSummary} /> : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
       <section className="settlement-workspace-grid">

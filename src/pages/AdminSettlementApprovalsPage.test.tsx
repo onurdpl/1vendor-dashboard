@@ -257,6 +257,88 @@ const ineligibleSelectedOrderPreviewResponse: SettlementApprovalPreview = {
   ],
 };
 
+const settlementDelaySelectedOrderPreviewResponse: SettlementApprovalPreview = {
+  ...ineligibleSelectedOrderPreviewResponse,
+  candidateSelectionSummary: {
+    ...ineligibleSelectedOrderPreviewResponse.candidateSelectionSummary,
+    requestedOrders: ['#1081'],
+    matchedOrders: ['#1081'],
+  },
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1081',
+      matched: true,
+      matchedOrderNumber: '#1081',
+      matchedShopifyOrderId: 'shopify-order-1081',
+      financeLedgerEntryId: 'fle-sale-1081',
+      candidateIncluded: false,
+      excludedReason: 'Settlement delay period has not elapsed',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'accruing',
+    },
+  ],
+};
+
+const multiReasonExcludedPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  candidateScope: 'selected_orders',
+  candidateSelectionSummary: {
+    requestedOrders: ['#1081', '#1082'],
+    matchedOrders: ['#1081', '#1082'],
+    unmatchedOrders: [],
+    requestedAllocations: [],
+    matchedAllocations: [],
+    unmatchedAllocations: [],
+    candidateRowCount: 2,
+  },
+  summary: {
+    ...previewResponse.summary,
+    grossSalesMinor: 0,
+    refundTotalMinor: 0,
+    commissionMinor: 0,
+    commissionVatMinor: 0,
+    netPayableMinor: 0,
+    eligibleRowCount: 0,
+    excludedActiveApprovalRowCount: 1,
+    detectedCommissionRates: [],
+    detectedCommissionVatRates: [],
+    detectedShippingModes: [],
+    detectedFinancialProfileSnapshotIds: [],
+    candidateQualityWarnings: [],
+  },
+  lines: [],
+  selectedOrderDiagnostics: [
+    {
+      requestedIdentifier: '#1081',
+      matched: true,
+      matchedOrderNumber: '#1081',
+      matchedShopifyOrderId: 'shopify-order-1081',
+      financeLedgerEntryId: 'fle-sale-1081',
+      candidateIncluded: false,
+      excludedReason: 'Settlement delay period has not elapsed',
+      lockedApprovalId: null,
+      lockedApprovalStatus: null,
+      currentSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'accruing',
+    },
+    {
+      requestedIdentifier: '#1082',
+      matched: true,
+      matchedOrderNumber: '#1082',
+      matchedShopifyOrderId: 'shopify-order-1082',
+      financeLedgerEntryId: 'fle-sale-1082',
+      candidateIncluded: false,
+      excludedReason: 'Row already belongs to an active settlement approval.',
+      lockedApprovalId: 'approval-locked-1082',
+      lockedApprovalStatus: 'APPROVED',
+      currentSettlementStatus: 'PAYABLE',
+      derivedSettlementStatus: 'payable',
+    },
+  ],
+};
+
 const lockedSelectedOrderPreviewResponse: SettlementApprovalPreview = {
   ...ineligibleSelectedOrderPreviewResponse,
   summary: {
@@ -928,6 +1010,65 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('fle-sale-1074')).toBeInTheDocument();
     expect(screen.getAllByText('EMPTY').length).toBeGreaterThan(0);
     expect(screen.queryByText('CLEAN')).not.toBeInTheDocument();
+  });
+
+  it('surfaces the selected-order exclusion reason when draft creation has no eligible rows', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(settlementDelaySelectedOrderPreviewResponse);
+    createSettlementApprovalDraftMock.mockRejectedValue(new Error('No eligible settlement rows are available for approval.'));
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1081');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await waitFor(() => expect(screen.getByText('Settlement delay period has not elapsed')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create Draft' }));
+
+    await waitFor(() => expect(createSettlementApprovalDraftMock).toHaveBeenCalled());
+    expect(screen.getByRole('heading', { name: 'Settlement approval cannot be created.' })).toBeInTheDocument();
+    expect(screen.getByText('Order #1081 is not yet eligible.')).toBeInTheDocument();
+    expect(screen.getAllByText('Current status').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('ACCRUING').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Derived status').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('accruing').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement delay period has not elapsed').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Finance action failed')).not.toBeInTheDocument();
+  });
+
+  it('summarizes multiple draft exclusion reasons compactly', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(multiReasonExcludedPreviewResponse);
+    createSettlementApprovalDraftMock.mockRejectedValue(new Error('No eligible settlement rows are available for approval.'));
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1081, #1082');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+
+    await waitFor(() => expect(screen.getByText('Selected Order Diagnostics')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Create Draft' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Settlement approval cannot be created.' })).toBeInTheDocument());
+    expect(screen.getByText('2 settlement rows were excluded.')).toBeInTheDocument();
+    expect(screen.getByText('Reasons')).toBeInTheDocument();
+    expect(screen.getAllByText('Settlement delay period has not elapsed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Row already belongs to an active settlement approval.').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the generic draft failure fallback when no diagnostic reason exists', async () => {
+    previewSettlementApprovalMock.mockResolvedValue({
+      ...unmatchedSelectedOrderPreviewResponse,
+      selectedOrderDiagnostics: [],
+    });
+    createSettlementApprovalDraftMock.mockRejectedValue(new Error('No eligible settlement rows are available for approval.'));
+    renderPage();
+
+    await userEvent.click(screen.getByLabelText(/Orders/i));
+    await userEvent.type(screen.getByLabelText(/Order numbers/i), '#1081');
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create Draft' }));
+
+    await waitFor(() => expect(screen.getByText('Finance action failed')).toBeInTheDocument());
+    expect(screen.getByText('No eligible settlement rows are available for approval.')).toBeInTheDocument();
   });
 
   it('shows selected-order locked approval diagnostics and opens the linked approval', async () => {

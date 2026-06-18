@@ -11973,6 +11973,40 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.82rem;
 }
 
+.settlement-inline-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: var(--space-2) 0 0;
+}
+
+.settlement-inline-metadata dt,
+.settlement-inline-metadata dd {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.settlement-inline-metadata dt {
+  color: var(--op-muted);
+  font-weight: 800;
+}
+
+.settlement-inline-metadata dd {
+  color: var(--op-text);
+}
+
+.settlement-error-reasons {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--space-2);
+  font-size: 0.82rem;
+}
+
+.settlement-error-reasons ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .settlement-toolbar label {
   display: grid;
   gap: 3px;
