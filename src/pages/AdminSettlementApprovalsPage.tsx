@@ -922,6 +922,7 @@ export function AdminSettlementApprovalsPage() {
   const workspaceTotals = currentTotals ?? previewTotals;
   const dbWarnings = getDatabaseWarnings(health);
   const previewRowsLockedInActiveApproval = Boolean(
+    !approval &&
     preview &&
     preview.summary.eligibleRowCount === 0 &&
     preview.summary.excludedActiveApprovalRowCount > 0,
@@ -1051,6 +1052,7 @@ export function AdminSettlementApprovalsPage() {
     : 'Not previewed';
   const workspaceApprovalStatus = approval?.status ?? 'not created';
   const workspaceQualityLabel = approval ? 'SNAPSHOT' : candidateQualityClassification;
+  const workspaceState = approval ? 'approval' : preview ? 'preview' : 'empty';
   const selectedOrdersOrAllocations = (() => {
     if (candidateScopeMode === 'selected_orders') {
       return formatStringList([...selectedOrderNumberList, ...selectedShopifyOrderIdList]);
@@ -1379,6 +1381,7 @@ export function AdminSettlementApprovalsPage() {
     if (result) {
       setApproval(result);
       setApprovalId(result.id);
+      setPreview(null);
       rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
@@ -1536,7 +1539,7 @@ export function AdminSettlementApprovalsPage() {
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
       <section
-        className={`settlement-workspace-grid${approval ? ' is-loaded-approval-layout' : ''}`}
+        className={`settlement-workspace-grid is-${workspaceState}-state${approval ? ' is-loaded-approval-layout' : ''}`}
         aria-label="Settlement workspace layout"
       >
         <div className="settlement-left-rail">
@@ -1670,57 +1673,74 @@ export function AdminSettlementApprovalsPage() {
               </div>
             ) : null}
           </aside>
-          {approval ? <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} /> : null}
+          <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} />
         </div>
 
-        <main className="settlement-summary-panel">
-          <div>
-            <p className="eyebrow">{approval ? 'Loaded approval snapshot' : 'Current candidate preview'}</p>
-            <h2>{approval ? 'Loaded Approval Snapshot' : 'Operational totals'}</h2>
-          </div>
-          {approval && preview ? (
-            <div className="settlement-alert op-tone-info">
-              <strong>Current candidate preview is separate from the loaded approval snapshot.</strong>
-              <p>The totals below remain the saved approval truth. Preview results can be empty when those rows are already locked.</p>
-            </div>
-          ) : null}
-          {workspaceTotals ? (
-            <div className="op-kpi-row settlement-summary-cards">
-              <KPIStatCard label="Gross sales" value={formatMinor(workspaceTotals.grossSalesMinor, workspaceTotals.currency)} tone="info" />
-              <KPIStatCard label="Commission" value={formatMinor(workspaceTotals.commissionMinor, workspaceTotals.currency)} tone="info" />
-              <KPIStatCard label="Commission VAT" value={formatMinor(workspaceTotals.commissionVatMinor, workspaceTotals.currency)} tone="info" />
-              <KPIStatCard label="Net payable" value={formatMinor(workspaceTotals.netPayableMinor, workspaceTotals.currency)} tone="success" />
-            </div>
-          ) : (
-            <p className="settlement-preview-empty">Preview not generated yet.</p>
-          )}
-          {approval ? <ApprovalSnapshotLines approval={approval} /> : null}
-          {preview ? (
-            <section className="settlement-current-preview-section">
-              {approval ? (
+        <main className="settlement-summary-panel" aria-label="Settlement workspace main panel">
+          {approval ? (
+            <>
+              <div className="settlement-state-heading">
                 <div>
-                  <p className="eyebrow">Current candidate preview</p>
-                  <h3>Candidate quality</h3>
+                  <p className="eyebrow">Loaded approval snapshot</p>
+                  <h2>Loaded Approval Snapshot</h2>
+                  <p className="page-description">
+                    These totals and rows come from SettlementApprovalLine snapshots. Current candidate preview does not recalculate this saved approval truth.
+                  </p>
                 </div>
-              ) : null}
-              <CandidateQualityCard
-                preview={preview}
-                classification={candidateQualityClassification}
-                reasons={candidateQualityReasons}
-                requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
-                acknowledged={mixedVatAcknowledged}
-                onAcknowledgedChange={setMixedVatAcknowledged}
-              />
-              <SelectedOrderDiagnostics
-                diagnostics={selectedOrderDiagnostics}
-                onOpenApproval={(id) => void handleOpenRecentApproval(id)}
-              />
-              <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
-            </section>
-          ) : null}
+                <StatusBadge status={approval.status}>{safeStatusLabel(approval.status)}</StatusBadge>
+              </div>
+              <div className="op-kpi-row settlement-summary-cards">
+                <KPIStatCard label="Gross sales" value={formatMinor(approval.grossSalesMinor, approval.currency)} tone="info" />
+                <KPIStatCard label="Commission" value={formatMinor(approval.commissionMinor, approval.currency)} tone="info" />
+                <KPIStatCard label="Commission VAT" value={formatMinor(approval.commissionVatMinor, approval.currency)} tone="info" />
+                <KPIStatCard label="Net payable" value={formatMinor(approval.netPayableMinor, approval.currency)} tone="success" />
+              </div>
+              <ApprovalSnapshotLines approval={approval} />
+            </>
+          ) : preview ? (
+            <>
+              <div>
+                <p className="eyebrow">Current candidate preview</p>
+                <h2>Current Candidate Preview</h2>
+                <p className="page-description">
+                  Operational totals, quality warnings, and diagnostics reflect the current candidate selection only.
+                </p>
+              </div>
+              <section className="settlement-current-preview-section">
+                <div>
+                  <h3>Operational Totals</h3>
+                </div>
+                <div className="op-kpi-row settlement-summary-cards">
+                  <KPIStatCard label="Gross sales" value={formatMinor(preview.summary.grossSalesMinor, preview.summary.currency)} tone="info" />
+                  <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
+                  <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
+                  <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone="success" />
+                </div>
+                <CandidateQualityCard
+                  preview={preview}
+                  classification={candidateQualityClassification}
+                  reasons={candidateQualityReasons}
+                  requiresAcknowledgement={candidateQualityClassification === 'BLOCKED'}
+                  acknowledged={mixedVatAcknowledged}
+                  onAcknowledgedChange={setMixedVatAcknowledged}
+                />
+                <SelectedOrderDiagnostics
+                  diagnostics={selectedOrderDiagnostics}
+                  onOpenApproval={(id) => void handleOpenRecentApproval(id)}
+                />
+                <ReadinessList title="Candidate quality warnings" items={candidateQualityWarnings} tone="warning" />
+              </section>
+            </>
+          ) : (
+            <>
+              <div>
+                <p className="eyebrow">Current candidate preview</p>
+                <h2>Current Candidate Preview</h2>
+              </div>
+              <p className="settlement-preview-empty">Preview not generated yet.</p>
+            </>
+          )}
         </main>
-
-        {!approval ? <NextActionPanel recommendedNextAction={recommendedNextAction} recommendedAction={recommendedAction} /> : null}
       </section>
 
       <WorkflowProgress steps={workflowSteps} />

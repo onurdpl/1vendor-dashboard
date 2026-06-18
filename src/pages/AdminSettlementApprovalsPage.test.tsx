@@ -900,7 +900,7 @@ describe('Finance Settlement approval admin UI', () => {
 
     expect(screen.getByRole('heading', { name: 'Settlement Workspace' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Candidate source' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Operational totals' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Current Candidate Preview' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Audit' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logo Readiness' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Commission Invoice Records' })).toBeInTheDocument();
@@ -908,6 +908,8 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Next: Preview settlement candidates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Preview Settlement' })).toBeInTheDocument();
     expect(screen.getByText('Preview not generated yet.')).toBeInTheDocument();
+    expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Selected settlement rows' })).not.toBeInTheDocument();
     expect(screen.queryByText('TRY 0.00')).not.toBeInTheDocument();
     expect(screen.getByText('Candidate Selected')).toBeInTheDocument();
     expect(screen.getByText('Invoice Records')).toBeInTheDocument();
@@ -928,8 +930,28 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
     expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-2');
     expect(screen.getAllByText('Open in workspace').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Load Audit' })).toBeEnabled();
     expect(screen.getByText('Next: Load Audit Snapshot.')).toBeInTheDocument();
+  });
+
+  it('opening an approved approval replaces an existing preview panel', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+    await waitFor(() => expect(screen.getByText('Candidate Quality')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Current Candidate Preview' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Open' })[0]);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
   });
 
   it('opens a draft approval with snapshot totals and lines after an empty preview', async () => {
@@ -955,6 +977,8 @@ describe('Finance Settlement approval admin UI', () => {
 
     expect(screen.getByLabelText('Settlement workspace layout')).toHaveClass('is-loaded-approval-layout');
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
     expect(screen.getByLabelText('Selected settlement rows')).toHaveClass('settlement-approval-lines-list');
     expect(screen.getAllByText('#1081').length).toBeGreaterThan(0);
@@ -981,6 +1005,8 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getAllByText(/1,200\.00/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor-wide preview can include historical or test rows.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('profile-current').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Current Candidate Preview' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Loaded Approval Snapshot' })).not.toBeInTheDocument();
     expect(screen.getByText('Candidate Quality')).toBeInTheDocument();
     expect(screen.getAllByText('CLEAN').length).toBeGreaterThan(0);
     expect(screen.getByText('Candidate snapshots are uniform for VAT, shipping mode, and financial profile group.')).toBeInTheDocument();
@@ -1335,14 +1361,15 @@ describe('Finance Settlement approval admin UI', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
 
     await waitFor(() => expect(previewSettlementApprovalMock).toHaveBeenCalledTimes(2));
-    expect(screen.getByText('No eligible rows remain because rows are already locked in an active settlement approval.')).toBeInTheDocument();
-    expect(screen.getAllByText('12').length).toBeGreaterThan(0);
     const executiveSummary = screen.getByLabelText('Settlement executive summary');
     expect(within(executiveSummary).getByText('SNAPSHOT')).toBeInTheDocument();
     expect(within(executiveSummary).getByText('TRY 1,200.00')).toBeInTheDocument();
     expect(within(executiveSummary).getByText('TRY 956.00')).toBeInTheDocument();
     expect(within(executiveSummary).queryByText('EMPTY')).not.toBeInTheDocument();
-    expect(screen.getByText('Current candidate preview is separate from the loaded approval snapshot.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
+    expect(screen.queryByText('No eligible rows remain because rows are already locked in an active settlement approval.')).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-1');
     await userEvent.click(screen.getByRole('tab', { name: 'Audit' }));
     expect(screen.getByText('Derived payable because fulfillment evidence exists.')).toBeInTheDocument();

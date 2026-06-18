@@ -12032,7 +12032,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(250px, 0.7fr) minmax(420px, 1.4fr) minmax(260px, 0.62fr);
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
 }
@@ -12045,6 +12045,8 @@ summary.provider-response-heading::-webkit-details-marker {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
+  position: sticky;
+  top: var(--space-3);
   align-self: start;
 }
 
@@ -12053,8 +12055,8 @@ summary.provider-response-heading::-webkit-details-marker {
   top: var(--space-3);
 }
 
-.settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail .settlement-context-panel,
-.settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail .settlement-next-action {
+.settlement-left-rail .settlement-context-panel,
+.settlement-left-rail .settlement-next-action {
   position: static;
   min-width: 0;
 }
@@ -12082,6 +12084,18 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-summary-panel {
   border-color: var(--op-border-strong);
+}
+
+.settlement-state-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.settlement-state-heading .page-description {
+  max-width: 760px;
 }
 
 .settlement-summary-cards {
@@ -12671,6 +12685,10 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail {
+    position: static;
+  }
+
+  .settlement-left-rail {
     position: static;
   }
 
