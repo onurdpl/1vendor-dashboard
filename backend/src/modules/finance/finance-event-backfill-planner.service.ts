@@ -12,6 +12,7 @@ const SALE_EVENT_TYPES = [
 const REFUND_EVENT_TYPES = [
   FinanceEventType.REFUND_RECORDED,
   FinanceEventType.COMMISSION_REVERSED,
+  FinanceEventType.COMMISSION_VAT_REVERSED,
   FinanceEventType.VENDOR_PAYABLE_REVERSED,
 ] as const;
 

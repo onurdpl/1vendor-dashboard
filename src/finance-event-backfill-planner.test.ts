@@ -169,11 +169,11 @@ describe('finance event backfill planner', () => {
       ]),
     );
     expect(plan.samples.safeRefundBackfill).toEqual([
-      expect.objectContaining({
-        financeLedgerEntryId: 'fin-sporjinal-refund-safe',
-        missingEventTypes: ['REFUND_RECORDED', 'COMMISSION_REVERSED', 'VENDOR_PAYABLE_REVERSED'],
-      }),
-    ]);
+        expect.objectContaining({
+          financeLedgerEntryId: 'fin-sporjinal-refund-safe',
+          missingEventTypes: ['REFUND_RECORDED', 'COMMISSION_REVERSED', 'COMMISSION_VAT_REVERSED', 'VENDOR_PAYABLE_REVERSED'],
+        }),
+      ]);
     expect(plan.samples.unsafeRefundMissingSale).toEqual([
       expect.objectContaining({
         financeLedgerEntryId: 'fin-sporjinal-refund-unsafe',

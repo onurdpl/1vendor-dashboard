@@ -499,29 +499,36 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             },
           };
 
-          await createEventsIdempotently(
-            [
-              {
-                ...baseEvent,
-                eventType: FinanceEventType.REFUND_RECORDED,
-                amountMinor: refundOffset.refundMinor,
-                idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
-              },
-              {
-                ...baseEvent,
-                eventType: FinanceEventType.COMMISSION_REVERSED,
-                amountMinor: -refundOffset.commissionReversalMinor,
-                idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
-              },
-              {
-                ...baseEvent,
-                eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
-                amountMinor: -refundOffset.vendorPayableReversalMinor,
-                idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
-              },
-            ],
-            tx,
-          );
+          const refundEvents = [
+            {
+              ...baseEvent,
+              eventType: FinanceEventType.REFUND_RECORDED,
+              amountMinor: refundOffset.refundMinor,
+              idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
+            },
+            {
+              ...baseEvent,
+              eventType: FinanceEventType.COMMISSION_REVERSED,
+              amountMinor: -refundOffset.commissionReversalMinor,
+              idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
+            },
+            refundOffset.commissionVatReversalMinor > 0
+              ? {
+                  ...baseEvent,
+                  eventType: FinanceEventType.COMMISSION_VAT_REVERSED,
+                  amountMinor: -refundOffset.commissionVatReversalMinor,
+                  idempotencyKey: `${refundLedgerId}:COMMISSION_VAT_REVERSED`,
+                }
+              : null,
+            {
+              ...baseEvent,
+              eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
+              amountMinor: -refundOffset.vendorPayableReversalMinor,
+              idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
+            },
+          ].filter((event): event is NonNullable<typeof event> => Boolean(event));
+
+          await createEventsIdempotently(refundEvents, tx);
         }
       }
 

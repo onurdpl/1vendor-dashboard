@@ -96,7 +96,7 @@ function setupOrder() {
     commissionPercentSnapshot: 10,
     commissionVatPercentSnapshot: 18,
   });
-  txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 3 });
+  txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 4 });
   txMock.vendorBalanceEvent.upsert.mockResolvedValueOnce({
     id: 'vendor-debt-created',
     vendorId: 'sporjinal',
@@ -241,6 +241,15 @@ describe('Shopify refund return linking', () => {
           idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_REVERSED',
         }),
         expect.objectContaining({
+          eventType: 'COMMISSION_VAT_REVERSED',
+          amountMinor: -6118,
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_VAT_REVERSED',
+          metadataJson: expect.objectContaining({
+            commissionVatReversalMinor: 6118,
+            commissionVatPercentSnapshot: 18,
+          }),
+        }),
+        expect.objectContaining({
           eventType: 'VENDOR_PAYABLE_REVERSED',
           amountMinor: -299792,
           idempotencyKey: 'fin-sporjinal-refund-1074533826897:VENDOR_PAYABLE_REVERSED',
@@ -252,6 +261,55 @@ describe('Shopify refund return linking', () => {
       ],
     });
     expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not emit a noisy commission VAT reversal event when refund VAT reversal is zero', async () => {
+    setupOrder();
+    txMock.financeLedgerEntry.findFirst.mockReset();
+    txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 0,
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        id: '1074533826897',
+        order_id: '7621834670417',
+        created_at: '2026-05-16T14:37:38Z',
+        note: null,
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: '20346971095377',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: '20346971095377',
+              sku: 'DJ1196-002-42',
+              title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+              variant_title: 'Siyah / 42',
+            },
+          },
+        ],
+      },
+    });
+
+    const createManyCall = txMock.financeEvent.createMany.mock.calls[0]?.[0];
+    expect(createManyCall.data).toHaveLength(3);
+    expect(createManyCall.data.map((event: { eventType: string }) => event.eventType)).toEqual([
+      'REFUND_RECORDED',
+      'COMMISSION_REVERSED',
+      'VENDOR_PAYABLE_REVERSED',
+    ]);
+    expect(createManyCall.data).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'COMMISSION_VAT_REVERSED',
+        }),
+      ]),
+    );
   });
 
   it('does not create duplicate refund finance events when the refund ledger row already exists', async () => {
