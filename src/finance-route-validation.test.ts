@@ -15,6 +15,14 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
   markPayoutBatchReview: vi.fn(),
+  PayoutBatchTransitionRevalidationError: class PayoutBatchTransitionRevalidationError extends Error {
+    blockers: unknown[];
+
+    constructor(blockers: unknown[]) {
+      super('Payout batch requires revision because financial facts changed after batch creation.');
+      this.blockers = blockers;
+    }
+  },
   preparePayoutBatch: vi.fn(),
   upsertShipmentShippingCost: vi.fn(),
   upsertVendorFinancialProfile: upsertVendorFinancialProfileMock,

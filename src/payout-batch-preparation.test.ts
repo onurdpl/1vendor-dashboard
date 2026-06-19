@@ -10,6 +10,8 @@ const prismaMock = vi.hoisted(() => ({
   },
   payoutBatch: {
     create: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
   },
 }));
 
@@ -17,7 +19,11 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { preparePayoutBatch } = await import('../backend/src/modules/finance/finance.service.js');
+const {
+  PayoutBatchTransitionRevalidationError,
+  markPayoutBatchReview,
+  preparePayoutBatch,
+} = await import('../backend/src/modules/finance/finance.service.js');
 
 function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
@@ -31,12 +37,14 @@ function buildEntry(input: {
   deliveredAt?: Date | null;
   settlementDelayDaysSnapshot?: number;
   batched?: boolean;
+  payoutStatus?: 'PENDING' | 'PAID' | 'HOLD';
+  settlementHoldReason?: string | null;
   relatedSalePaid?: boolean;
   relatedSaleActiveApproval?: boolean;
   relatedSaleActivePayoutBatch?: boolean;
   activeSettlementApproval?: boolean;
   approvedRefundOffsetRepresented?: boolean;
-  refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
+  refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
     status: string;
@@ -58,7 +66,7 @@ function buildEntry(input: {
     vendorId: 'demo-vendor-a',
     entryType: input.entryType,
     amount: input.amount,
-    payoutStatus: 'PENDING',
+    payoutStatus: input.payoutStatus ?? 'PENDING',
     commissionPercentSnapshot: input.entryType === 'sale' ? 10 : null,
     commissionVatPercentSnapshot: input.entryType === 'sale' ? 0 : null,
     deductShippingEnabledSnapshot: false,
@@ -70,7 +78,7 @@ function buildEntry(input: {
     accruedAt: new Date('2026-05-13T09:00:00Z'),
     payableAt: eligibleAt,
     settledAt: null,
-    settlementHoldReason: null,
+    settlementHoldReason: input.settlementHoldReason ?? null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
     vendorAllocation: {
       allocationStatus: 'ACTIVE',
@@ -121,11 +129,56 @@ function buildEntry(input: {
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
       })),
     },
-    payoutBatchLines: input.batched ? [{ id: `line-${input.id}` }] : [],
+    payoutBatchLines: input.batched
+      ? [{ id: `line-${input.id}`, payoutBatch: { id: 'batch-review', status: 'DRAFT' } }]
+      : [],
     settlementApprovalLines: input.activeSettlementApproval
       ? [{ settlementApproval: { id: `approval-${input.id}`, status: 'APPROVED' } }]
       : [],
   };
+}
+
+function buildTransitionLine(input: {
+  id?: string;
+  entry: ReturnType<typeof buildEntry> | null;
+  amountSnapshot?: number;
+  financeLedgerEntryId?: string;
+}) {
+  return {
+    id: input.id ?? `batch-line-${input.financeLedgerEntryId ?? input.entry?.id ?? 'missing'}`,
+    financeLedgerEntryId: input.financeLedgerEntryId ?? input.entry?.id ?? 'missing-ledger',
+    amountSnapshot: input.amountSnapshot ?? 900,
+    createdAt: new Date('2026-05-13T11:00:00Z'),
+    financeLedgerEntry: input.entry,
+  };
+}
+
+function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[]) {
+  return {
+    id: 'batch-review',
+    vendorId: 'demo-vendor-a',
+    status: 'DRAFT',
+    grossAmount: 1000,
+    commissionAmount: 100,
+    commissionVatAmount: 0,
+    shippingDeductionAmount: 0,
+    refundAmount: 0,
+    netAmount: lines.reduce((sum, line) => sum + Number(line.amountSnapshot ?? 0), 0),
+    currency: 'TRY',
+    createdByUserId: 'admin-user',
+    createdAt: new Date('2026-05-13T11:00:00Z'),
+    updatedAt: new Date('2026-05-13T11:00:00Z'),
+    lines,
+  };
+}
+
+function mockTransitionBatch(batch: ReturnType<typeof buildTransitionBatch>) {
+  prismaMock.payoutBatch.findUnique.mockResolvedValue(batch);
+  prismaMock.payoutBatch.update.mockResolvedValue({
+    ...batch,
+    status: 'REVIEW',
+    updatedAt: new Date('2026-05-13T11:05:00Z'),
+  });
 }
 
 describe('payout batch preparation', () => {
@@ -134,6 +187,8 @@ describe('payout batch preparation', () => {
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.payoutBatch.create.mockReset();
+    prismaMock.payoutBatch.findUnique.mockReset();
+    prismaMock.payoutBatch.update.mockReset();
 
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
@@ -564,6 +619,186 @@ describe('payout batch preparation', () => {
     );
     expect(batch).toMatchObject({
       id: 'batch-processed-refund',
+      lineCount: 1,
+    });
+  });
+
+  it('moves a clean draft payout batch to review', async () => {
+    const sale = buildEntry({ id: 'sale-clean-review', entryType: 'sale', amount: 1000, batched: true });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    const reviewed = await markPayoutBatchReview('batch-review');
+
+    expect(prismaMock.payoutBatch.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'batch-review' },
+        data: { status: 'REVIEW' },
+      }),
+    );
+    expect(reviewed).toMatchObject({
+      id: 'batch-review',
+      status: 'review',
+      lineCount: 1,
+    });
+  });
+
+  it('blocks review when a refund arrived after batch creation', async () => {
+    const sale = buildEntry({
+      id: 'sale-late-refund',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      refundRecords: [{
+        id: 'refund-late',
+        sourceShopifyRefundId: 'refund-late',
+        amount: 100,
+        createdAt: new Date('2026-05-14T11:00:00Z'),
+      }],
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      message: 'Payout batch requires revision because financial facts changed after batch creation.',
+      blockers: [expect.objectContaining({ code: 'refund_arrived_after_batch_creation' })],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when a related refund row is held for payout offset', async () => {
+    const sale = buildEntry({ id: 'sale-refund-hold', entryType: 'sale', amount: 1000, batched: true }) as any;
+    sale.vendorAllocation.financeEntries = [
+      {
+        id: 'refund-held',
+        entryType: 'refund',
+        payoutStatus: 'HOLD',
+        settlementStatus: 'PARTIALLY_REFUNDED',
+        settlementHoldReason: 'Refund offset required before payout.',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 0,
+        payoutBatchLines: [],
+        settlementApprovalLines: [],
+      },
+    ];
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    try {
+      await markPayoutBatchReview('batch-review');
+      throw new Error('Expected transition to fail.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PayoutBatchTransitionRevalidationError);
+      expect(error).toMatchObject({
+        blockers: [expect.objectContaining({ code: 'refund_offset_required_before_payout' })],
+      });
+    }
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when the payout amount snapshot no longer matches current truth', async () => {
+    const sale = buildEntry({ id: 'sale-amount-changed', entryType: 'sale', amount: 1000, batched: true });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 899 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [expect.objectContaining({ code: 'payout_amount_changed_since_batch_creation' })],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when an approved return hold is active', async () => {
+    const sale = buildEntry({
+      id: 'sale-active-return-hold',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      returnRecords: [{
+        id: 'return-approved',
+        status: 'requested',
+        returnLifecycleStatus: 'approved',
+      }],
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    try {
+      await markPayoutBatchReview('batch-review');
+      throw new Error('Expected transition to fail.');
+    } catch (error) {
+      expect(error).toMatchObject({
+        blockers: expect.arrayContaining([expect.objectContaining({ code: 'approved_return_hold_active' })]),
+      });
+    }
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when a ledger row is already paid', async () => {
+    const sale = buildEntry({
+      id: 'sale-paid-after-batch',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      payoutStatus: 'PAID',
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    try {
+      await markPayoutBatchReview('batch-review');
+      throw new Error('Expected transition to fail.');
+    } catch (error) {
+      expect(error).toMatchObject({
+        blockers: expect.arrayContaining([expect.objectContaining({ code: 'ledger_row_paid' })]),
+      });
+    }
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when a ledger row is missing', async () => {
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: null, amountSnapshot: 900, financeLedgerEntryId: 'missing-ledger' }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [expect.objectContaining({
+        code: 'ledger_row_missing',
+        financeLedgerEntryId: 'missing-ledger',
+      })],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unchanged refund offset line valid during review transition', async () => {
+    const refund = buildEntry({
+      id: 'refund-offset-in-batch',
+      entryType: 'refund',
+      amount: 100,
+      batched: true,
+      refundRecords: [{
+        id: 'refund-before-batch',
+        sourceShopifyRefundId: 'refund-before-batch',
+        amount: 100,
+        createdAt: new Date('2026-05-12T11:00:00Z'),
+      }],
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: refund, amountSnapshot: -90 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    const reviewed = await markPayoutBatchReview('batch-review');
+
+    expect(prismaMock.payoutBatch.update).toHaveBeenCalled();
+    expect(reviewed).toMatchObject({
+      status: 'review',
       lineCount: 1,
     });
   });

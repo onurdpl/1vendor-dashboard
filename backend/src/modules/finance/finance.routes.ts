@@ -13,6 +13,7 @@ import {
   getVendorReturnFinanceRecords,
   listPayoutBatches,
   markPayoutBatchReview,
+  PayoutBatchTransitionRevalidationError,
   preparePayoutBatch,
   upsertShipmentShippingCost,
   upsertVendorFinancialProfile,
@@ -381,7 +382,17 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const { id } = request.params as { id: string };
-      return markPayoutBatchReview(id);
+      try {
+        return await markPayoutBatchReview(id);
+      } catch (error) {
+        if (error instanceof PayoutBatchTransitionRevalidationError) {
+          return reply.code(409).send({
+            message: error.message,
+            blockers: error.blockers,
+          });
+        }
+        throw error;
+      }
     },
   );
 

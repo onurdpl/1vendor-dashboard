@@ -1,4 +1,5 @@
 import { prisma } from '../../db/prisma.js';
+import type { Prisma } from '@prisma/client';
 import {
   auditVendorProfileChanges,
   type VendorProfileAuditActor,
@@ -40,6 +41,38 @@ import {
 } from './refund-offset.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
+const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
+  'Payout batch requires revision because financial facts changed after batch creation.';
+const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
+
+type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile'>;
+
+export type PayoutBatchTransitionBlockerCode =
+  | 'refund_arrived_after_batch_creation'
+  | 'refund_offset_required_before_payout'
+  | 'payout_amount_changed_since_batch_creation'
+  | 'approved_return_hold_active'
+  | 'ledger_row_paid'
+  | 'ledger_row_no_longer_eligible'
+  | 'ledger_row_missing';
+
+export type PayoutBatchTransitionBlocker = {
+  code: PayoutBatchTransitionBlockerCode;
+  reason: string;
+  payoutBatchLineId: string;
+  financeLedgerEntryId: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export class PayoutBatchTransitionRevalidationError extends Error {
+  blockers: PayoutBatchTransitionBlocker[];
+
+  constructor(blockers: PayoutBatchTransitionBlocker[]) {
+    super(PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE);
+    this.name = 'PayoutBatchTransitionRevalidationError';
+    this.blockers = blockers;
+  }
+}
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -48,6 +81,10 @@ function toAmountString(value: number) {
 function toNumber(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function toMinorUnits(value: unknown) {
+  return Math.round(toNumber(value) * 100);
 }
 
 function toPercentString(value: number) {
@@ -1759,6 +1796,354 @@ export async function preparePayoutBatch(
   });
 }
 
+function buildPayoutBatchTransitionBlocker(input: {
+  code: PayoutBatchTransitionBlockerCode;
+  reason: string;
+  payoutBatchLineId: string;
+  financeLedgerEntryId: string | null;
+  metadata?: Record<string, unknown>;
+}): PayoutBatchTransitionBlocker {
+  return {
+    code: input.code,
+    reason: input.reason,
+    payoutBatchLineId: input.payoutBatchLineId,
+    financeLedgerEntryId: input.financeLedgerEntryId,
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  };
+}
+
+function isCurrentPayoutBatchLine(
+  line: { payoutBatch?: { id?: string | null; status?: string | null } | null },
+  payoutBatchId: string,
+) {
+  return line.payoutBatch?.id === payoutBatchId;
+}
+
+function stripCurrentPayoutBatchEvidence<T extends {
+  payoutBatchLines?: Array<{ payoutBatch?: { id?: string | null; status?: string | null } | null }>;
+  vendorAllocation?: {
+    financeEntries?: Array<RefundOffsetSaleLedgerSnapshot & {
+      payoutBatchLines?: Array<{ payoutBatch?: { id?: string | null; status?: string | null } | null }>;
+    }>;
+  } | null;
+}>(entry: T, payoutBatchId: string) {
+  return {
+    ...entry,
+    payoutBatchLines: (entry.payoutBatchLines ?? []).filter((line) => !isCurrentPayoutBatchLine(line, payoutBatchId)),
+    vendorAllocation: entry.vendorAllocation
+      ? {
+          ...entry.vendorAllocation,
+          financeEntries: (entry.vendorAllocation.financeEntries ?? []).map((ledgerEntry) => ({
+            ...ledgerEntry,
+            payoutBatchLines: (ledgerEntry.payoutBatchLines ?? []).filter(
+              (line) => !isCurrentPayoutBatchLine(line, payoutBatchId),
+            ),
+          })),
+        }
+      : entry.vendorAllocation,
+  };
+}
+
+function hasRefundRecordCreatedAfterBatch(entry: {
+  vendorAllocation?: {
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; createdAt?: Date | null }>;
+  } | null;
+}, batchCreatedAt: Date) {
+  return (entry.vendorAllocation?.refundRecords ?? []).filter((refundRecord) =>
+    refundRecord.createdAt ? refundRecord.createdAt.getTime() > batchCreatedAt.getTime() : false
+  );
+}
+
+function getRefundOffsetRequiredLedgerEntries(entry: {
+  id?: string | null;
+  entryType?: string | null;
+  payoutStatus?: string | null;
+  settlementHoldReason?: string | null;
+  vendorAllocation?: {
+    financeEntries?: Array<{
+      id?: string | null;
+      entryType?: string | null;
+      payoutStatus?: string | null;
+      settlementHoldReason?: string | null;
+    }>;
+  } | null;
+}) {
+  const entries = [
+    entry,
+    ...(entry.vendorAllocation?.financeEntries ?? []),
+  ];
+
+  return entries.filter((ledgerEntry) =>
+    normalizeType(ledgerEntry.entryType ?? '') === 'refund' &&
+    mapStatus(ledgerEntry.payoutStatus ?? '') === 'hold' &&
+    ledgerEntry.settlementHoldReason === REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON
+  );
+}
+
+function allocationIsCancelled(entry: {
+  vendorAllocation?: {
+    allocationStatus?: string | null;
+  } | null;
+}) {
+  const status = mapStatus(entry.vendorAllocation?.allocationStatus ?? '');
+  return status === 'cancelled' || status === 'canceled';
+}
+
+function addPayoutAmountChangedBlocker(input: {
+  blockers: PayoutBatchTransitionBlocker[];
+  payoutBatchLineId: string;
+  financeLedgerEntryId: string;
+  expectedAmount: number;
+  amountSnapshot: unknown;
+}) {
+  const expectedMinor = toMinorUnits(input.expectedAmount);
+  const snapshotMinor = toMinorUnits(input.amountSnapshot);
+  if (expectedMinor === snapshotMinor) {
+    return;
+  }
+
+  input.blockers.push(buildPayoutBatchTransitionBlocker({
+    code: 'payout_amount_changed_since_batch_creation',
+    reason: 'Payout amount changed since batch creation.',
+    payoutBatchLineId: input.payoutBatchLineId,
+    financeLedgerEntryId: input.financeLedgerEntryId,
+    metadata: {
+      expectedAmount: toAmountString(expectedMinor / 100),
+      amountSnapshot: toAmountString(snapshotMinor / 100),
+    },
+  }));
+}
+
+async function validatePayoutBatchBeforeTransitionWithClient(
+  db: FinanceDbClient,
+  payoutBatchId: string,
+): Promise<void> {
+  const batch = await db.payoutBatch.findUnique({
+    where: {
+      id: payoutBatchId,
+    },
+    include: {
+      lines: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+        include: {
+          financeLedgerEntry: {
+            include: {
+              vendorAllocation: {
+                include: {
+                  fulfillment: true,
+                  refundRecords: true,
+                  returnRecords: {
+                    select: {
+                      id: true,
+                      status: true,
+                      returnLifecycleStatus: true,
+                      sourceShopifyRefundId: true,
+                    },
+                  },
+                  financeEntries: {
+                    select: {
+                      id: true,
+                      entryType: true,
+                      payoutStatus: true,
+                      settlementStatus: true,
+                      settlementHoldReason: true,
+                      commissionPercentSnapshot: true,
+                      commissionVatPercentSnapshot: true,
+                      payoutBatchLines: {
+                        where: {
+                          payoutBatch: {
+                            status: {
+                              in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                            },
+                          },
+                        },
+                        select: {
+                          payoutBatch: {
+                            select: {
+                              id: true,
+                              status: true,
+                            },
+                          },
+                        },
+                      },
+                      settlementApprovalLines: {
+                        where: {
+                          settlementApproval: {
+                            status: {
+                              in: ['DRAFT', 'APPROVED'],
+                            },
+                          },
+                        },
+                        select: {
+                          settlementApproval: {
+                            select: {
+                              id: true,
+                              status: true,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              payoutBatchLines: {
+                where: {
+                  payoutBatch: {
+                    status: {
+                      in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                    },
+                  },
+                },
+                select: {
+                  payoutBatch: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+              settlementApprovalLines: {
+                where: {
+                  settlementApproval: {
+                    status: {
+                      in: ['DRAFT', 'APPROVED'],
+                    },
+                  },
+                },
+                select: {
+                  settlementApproval: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!batch) {
+    throw new Error('Payout batch not found.');
+  }
+
+  const storedProfile = await db.vendorFinancialProfile.findFirst({
+    where: {
+      vendorId: batch.vendorId,
+      active: true,
+    },
+  });
+  const profile = mapProfile(storedProfile, batch.vendorId);
+  const blockers: PayoutBatchTransitionBlocker[] = [];
+
+  for (const line of batch.lines) {
+    const ledgerEntry = line.financeLedgerEntry;
+    if (!ledgerEntry) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'ledger_row_missing',
+        reason: 'Ledger row no longer exists.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+      }));
+      continue;
+    }
+
+    const transitionEntry = stripCurrentPayoutBatchEvidence(ledgerEntry, batch.id);
+    const ledgerEntryId = ledgerEntry.id;
+    const type = normalizeType(transitionEntry.entryType);
+    const payoutStatus = mapStatus(transitionEntry.payoutStatus ?? '');
+
+    if (payoutStatus === 'paid') {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'ledger_row_paid',
+        reason: 'Ledger row already paid.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+      }));
+    }
+
+    const lateRefundRecords = hasRefundRecordCreatedAfterBatch(transitionEntry, batch.createdAt);
+    if (lateRefundRecords.length > 0) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'refund_arrived_after_batch_creation',
+        reason: 'Refund arrived after payout batch creation.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          refundRecordIds: lateRefundRecords.map((refundRecord) => refundRecord.sourceShopifyRefundId ?? refundRecord.id),
+        },
+      }));
+    }
+
+    const refundHoldEntries = getRefundOffsetRequiredLedgerEntries(transitionEntry);
+    if (refundHoldEntries.length > 0) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'refund_offset_required_before_payout',
+        reason: REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          refundLedgerEntryIds: refundHoldEntries.map((refundEntry) => refundEntry.id).filter(Boolean),
+        },
+      }));
+    }
+
+    if (hasApprovedOpenReturnHold(transitionEntry)) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'approved_return_hold_active',
+        reason: 'Approved return hold is active.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+      }));
+    }
+
+    if (
+      (type !== 'sale' && type !== 'refund') ||
+      allocationIsCancelled(transitionEntry) ||
+      (payoutStatus === 'hold' && transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
+      !isEntryEligibleForPayoutBatch(transitionEntry)
+    ) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'ledger_row_no_longer_eligible',
+        reason: 'Ledger row is no longer eligible for payout.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          entryType: transitionEntry.entryType,
+          payoutStatus: transitionEntry.payoutStatus,
+          settlementStatus: transitionEntry.settlementStatus,
+          settlementHoldReason: transitionEntry.settlementHoldReason,
+        },
+      }));
+    }
+
+    if (type === 'sale' || type === 'refund') {
+      addPayoutAmountChangedBlocker({
+        blockers,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        expectedAmount: calculateEntryBatchAmounts(transitionEntry, profile).netAmount,
+        amountSnapshot: line.amountSnapshot,
+      });
+    }
+  }
+
+  if (blockers.length > 0) {
+    throw new PayoutBatchTransitionRevalidationError(blockers);
+  }
+}
+
+export async function validatePayoutBatchBeforeTransition(payoutBatchId: string): Promise<void> {
+  return prisma.$transaction(async (tx) => validatePayoutBatchBeforeTransitionWithClient(tx, payoutBatchId));
+}
+
 export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
   const batch = await prisma.payoutBatch.update({
     where: {
@@ -1780,23 +2165,27 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
 }
 
 export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatchDto> {
-  const batch = await prisma.payoutBatch.update({
-    where: {
-      id: batchId,
-    },
-    data: {
-      status: 'REVIEW',
-    },
-    include: {
-      lines: {
-        orderBy: {
-          createdAt: 'asc',
+  return prisma.$transaction(async (tx) => {
+    await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
+
+    const batch = await tx.payoutBatch.update({
+      where: {
+        id: batchId,
+      },
+      data: {
+        status: 'REVIEW',
+      },
+      include: {
+        lines: {
+          orderBy: {
+            createdAt: 'asc',
+          },
         },
       },
-    },
-  });
+    });
 
-  return mapPayoutBatch(batch);
+    return mapPayoutBatch(batch);
+  });
 }
 
 function normalizePercent(value: number | undefined, fallback: number) {
