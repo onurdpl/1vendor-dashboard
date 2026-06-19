@@ -102,6 +102,10 @@ export type PendingRefundAdjustmentApplicationPreviewRecord = {
   originalSettlementApprovalId: string | null;
   originalSettlementCommissionInvoiceId: string | null;
   amountMinor: number;
+  originalAmountMinor: number;
+  appliedAmountMinor: number;
+  remainingAmountMinor: number;
+  status: 'pending' | 'partially_applied';
   currencyCode: string;
   reason: string;
   previewImpactMinor: number;
@@ -547,10 +551,10 @@ export async function previewPendingRefundAdjustmentApplication(input: {
   const rows = await db.settlementRefundAdjustment.findMany({
     where: {
       vendorId: input.vendorId,
-      status: SettlementRefundAdjustmentStatus.PENDING,
-      appliedSettlementApprovalId: null,
-      appliedSettlementApprovalLineId: null,
-      amountMinor: {
+      status: {
+        in: [SettlementRefundAdjustmentStatus.PENDING, SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED],
+      },
+      remainingAmountMinor: {
         gt: 0,
       },
       ...(currencyCode ? { currencyCode } : {}),
@@ -567,6 +571,10 @@ export async function previewPendingRefundAdjustmentApplication(input: {
       originalSettlementApprovalId: true,
       originalSettlementCommissionInvoiceId: true,
       amountMinor: true,
+      originalAmountMinor: true,
+      appliedAmountMinor: true,
+      remainingAmountMinor: true,
+      status: true,
       currencyCode: true,
       reason: true,
     },
@@ -579,9 +587,13 @@ export async function previewPendingRefundAdjustmentApplication(input: {
     originalSettlementApprovalId: row.originalSettlementApprovalId,
     originalSettlementCommissionInvoiceId: row.originalSettlementCommissionInvoiceId,
     amountMinor: row.amountMinor,
+    originalAmountMinor: row.originalAmountMinor ?? row.amountMinor,
+    appliedAmountMinor: row.appliedAmountMinor ?? 0,
+    remainingAmountMinor: row.remainingAmountMinor ?? row.amountMinor,
+    status: (row.status ?? SettlementRefundAdjustmentStatus.PENDING).toLowerCase() as 'pending' | 'partially_applied',
     currencyCode: row.currencyCode,
     reason: row.reason,
-    previewImpactMinor: row.amountMinor,
+    previewImpactMinor: row.remainingAmountMinor ?? row.amountMinor,
   }));
   const pendingAdjustmentTotalMinor = records.reduce((total, record) => total + record.previewImpactMinor, 0);
   const currentCandidateNetPayableMinor = Number.isFinite(input.currentCandidateNetPayableMinor)
@@ -600,7 +612,7 @@ export async function previewPendingRefundAdjustmentApplication(input: {
     currencyCode: currencyCode ?? records[0]?.currencyCode ?? null,
     records,
     notes: [
-      'Preview only — not applied until Phase 3.5C.',
+      'Preview only — partial applications are created only when an admin creates a settlement draft.',
       'Existing settlement totals are unchanged by this read-only preview.',
     ],
   };

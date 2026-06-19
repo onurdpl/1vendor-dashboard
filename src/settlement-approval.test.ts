@@ -14,11 +14,18 @@ const prismaMock = vi.hoisted(() => ({
   },
   settlementApprovalLine: {
     count: vi.fn(),
+    update: vi.fn(),
   },
   settlementRefundAdjustment: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
+    update: vi.fn(),
     updateMany: vi.fn(),
+  },
+  settlementRefundAdjustmentApplication: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    update: vi.fn(),
   },
   vendorBillingProfile: {
     findUnique: vi.fn(),
@@ -260,11 +267,28 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApproval.findUnique.mockReset();
     prismaMock.settlementApproval.update.mockReset();
     prismaMock.settlementApprovalLine.count.mockReset();
+    prismaMock.settlementApprovalLine.update.mockReset();
     prismaMock.settlementRefundAdjustment.findMany.mockReset();
     prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([]);
     prismaMock.settlementRefundAdjustment.findUnique.mockReset();
+    prismaMock.settlementRefundAdjustment.update.mockReset();
     prismaMock.settlementRefundAdjustment.updateMany.mockReset();
     prismaMock.settlementRefundAdjustment.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.settlementRefundAdjustmentApplication.create.mockReset();
+    prismaMock.settlementRefundAdjustmentApplication.create.mockResolvedValue({
+      id: 'application-1',
+      settlementRefundAdjustmentId: 'adjustment-1',
+      settlementApprovalId: 'settlement-approval-1',
+      settlementApprovalLineId: 'line-1',
+      amountMinor: 40000,
+      currencyCode: 'TRY',
+      status: 'ACTIVE',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+    });
+    prismaMock.settlementRefundAdjustmentApplication.findMany.mockReset();
+    prismaMock.settlementRefundAdjustmentApplication.findMany.mockResolvedValue([]);
+    prismaMock.settlementRefundAdjustmentApplication.update.mockReset();
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
@@ -1111,7 +1135,8 @@ describe('settlement approval foundation', () => {
             }),
             expect.objectContaining({
               financeLedgerEntryId: 'refund-ledger-1086',
-              settlementRefundAdjustmentId: 'adjustment-1',
+              settlementRefundAdjustmentId: null,
+              settlementRefundAdjustmentApplicationId: null,
               lineType: 'REFUND_ADJUSTMENT',
               amountMinor: 40000,
               commissionMinor: 0,
@@ -1127,16 +1152,35 @@ describe('settlement approval foundation', () => {
         },
       }),
     }));
+    expect(prismaMock.settlementRefundAdjustmentApplication.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        settlementApprovalId: 'settlement-approval-1',
+        settlementApprovalLineId: 'line-1',
+        amountMinor: 40000,
+        currencyCode: 'TRY',
+        status: 'ACTIVE',
+      }),
+    });
+    expect(prismaMock.settlementApprovalLine.update).toHaveBeenCalledWith({
+      where: { id: 'line-1' },
+      data: { settlementRefundAdjustmentApplicationId: 'application-1' },
+    });
     expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'adjustment-1',
         vendorId: 'vendor-a',
-        status: 'PENDING',
-        appliedSettlementApprovalId: null,
-        appliedSettlementApprovalLineId: null,
+        status: {
+          in: ['PENDING', 'PARTIALLY_APPLIED'],
+        },
+        remainingAmountMinor: {
+          gte: 40000,
+        },
       },
       data: {
         status: 'APPLIED',
+        appliedAmountMinor: { increment: 40000 },
+        remainingAmountMinor: { decrement: 40000 },
         appliedSettlementApprovalId: 'settlement-approval-1',
         appliedSettlementApprovalLineId: 'line-1',
       },
@@ -1144,7 +1188,6 @@ describe('settlement approval foundation', () => {
     expect(approval.netPayableMinor).toBe(48000);
     expect(approval.lines).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        settlementRefundAdjustmentId: 'adjustment-1',
         lineType: 'REFUND_ADJUSTMENT',
         payableImpactMinor: -40000,
       }),
@@ -1174,7 +1217,7 @@ describe('settlement approval foundation', () => {
     expect(prismaMock.settlementRefundAdjustment.updateMany).not.toHaveBeenCalled();
   });
 
-  it('blocks pending refund adjustments that exceed current settlement payable', async () => {
+  it('partially applies pending refund adjustments when they exceed current settlement payable', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({ id: 'sale-small', entryType: 'sale', amount: 100 }),
     ]);
@@ -1187,16 +1230,71 @@ describe('settlement approval foundation', () => {
         originalSettlementApprovalId: null,
         originalSettlementCommissionInvoiceId: null,
         amountMinor: 10000,
+        originalAmountMinor: 10000,
+        appliedAmountMinor: 0,
+        remainingAmountMinor: 10000,
         currencyCode: 'TRY',
         reason: 'Refund after approved settlement requires future settlement adjustment.',
       },
     ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementRefundAdjustmentApplication.create.mockResolvedValueOnce({
+      id: 'application-partial',
+      settlementRefundAdjustmentId: 'adjustment-1',
+      settlementApprovalId: 'settlement-approval-1',
+      settlementApprovalLineId: 'line-1',
+      amountMinor: 8800,
+      currencyCode: 'TRY',
+      status: 'ACTIVE',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+    });
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-1',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        settlementApprovalId: 'settlement-approval-1',
+        ...line,
+      })),
+    }));
 
-    await expect(createDraftApproval({ vendorId: 'vendor-a' })).rejects.toThrow(
-      'Pending refund adjustments exceed settlement payable; partial application is not implemented.',
-    );
-    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
-    expect(prismaMock.settlementRefundAdjustment.updateMany).not.toHaveBeenCalled();
+    const approval = await createDraftApproval({ vendorId: 'vendor-a' });
+
+    expect(approval.netPayableMinor).toBe(0);
+    expect(prismaMock.settlementRefundAdjustmentApplication.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        amountMinor: 8800,
+      }),
+    });
+    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'PARTIALLY_APPLIED',
+        appliedAmountMinor: { increment: 8800 },
+        remainingAmountMinor: { decrement: 8800 },
+        appliedSettlementApprovalId: null,
+        appliedSettlementApprovalLineId: null,
+      }),
+    }));
   });
 
   it('fails draft creation if an adjustment cannot be marked applied safely', async () => {
@@ -1691,15 +1789,24 @@ describe('settlement approval foundation', () => {
         }),
       }),
     );
-    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith({
+    expect(prismaMock.settlementRefundAdjustmentApplication.findMany).toHaveBeenCalledWith({
+      where: {
+        settlementApprovalId: 'approval-1',
+        status: 'ACTIVE',
+      },
+      include: {
+        settlementRefundAdjustment: true,
+      },
+    });
+    expect(prismaMock.settlementRefundAdjustment.findMany).toHaveBeenCalledWith({
       where: {
         appliedSettlementApprovalId: 'approval-1',
         status: 'APPLIED',
       },
-      data: {
-        status: 'PENDING',
-        appliedSettlementApprovalId: null,
-        appliedSettlementApprovalLineId: null,
+      select: {
+        id: true,
+        originalAmountMinor: true,
+        amountMinor: true,
       },
     });
   });
@@ -1752,7 +1859,7 @@ describe('settlement approval foundation', () => {
     );
     expect(cancelled.status).toBe('cancelled');
     expect(prismaMock.settlementApproval.update).toHaveBeenCalled();
-    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prismaMock.settlementRefundAdjustment.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         appliedSettlementApprovalId: 'approval-1',
         status: 'APPLIED',

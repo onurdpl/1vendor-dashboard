@@ -1540,7 +1540,7 @@ describe('Finance Settlement approval admin UI', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Pending Refund Adjustments' })).toBeInTheDocument());
-    expect(screen.getByText('Preview only — not applied until Phase 3.5C.')).toBeInTheDocument();
+    expect(screen.getByText('Preview only — partial applications are created only when an admin creates a settlement draft.')).toBeInTheDocument();
     expect(screen.getByText('These deductions are preview-only and are not applied until the adjustment application phase.')).toBeInTheDocument();
     expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
     expect(screen.getByText('Original order: order-1086')).toBeInTheDocument();

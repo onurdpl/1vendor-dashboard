@@ -3,6 +3,8 @@ import {
   SettlementApprovalLineType,
   SettlementApprovalStatus,
   SettlementCommissionInvoiceStatus,
+  SettlementRefundAdjustmentApplicationStatus,
+  SettlementRefundAdjustmentStatus,
   type SettlementApproval,
   type SettlementApprovalLine,
 } from '@prisma/client';
@@ -143,6 +145,7 @@ type SettlementApprovalRevalidationLedgerRow = SettlementApprovalLedgerRow & {
 type SettlementApprovalLineDraft = {
   financeLedgerEntryId: string;
   settlementRefundAdjustmentId?: string | null;
+  settlementRefundAdjustmentApplicationId?: string | null;
   lineType: SettlementApprovalLineType;
   amountMinor: number;
   commissionMinor: number;
@@ -611,15 +614,16 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
 
 function buildRefundAdjustmentLine(
   record: PendingRefundAdjustmentApplicationPreview['records'][number],
+  applyAmountMinor: number,
 ): SettlementApprovalLineDraft {
+  const remainingAfterApply = Math.max(record.remainingAmountMinor - applyAmountMinor, 0);
   return {
     financeLedgerEntryId: record.refundFinanceLedgerEntryId,
-    settlementRefundAdjustmentId: record.adjustmentId,
     lineType: SettlementApprovalLineType.REFUND_ADJUSTMENT,
-    amountMinor: record.amountMinor,
+    amountMinor: applyAmountMinor,
     commissionMinor: 0,
     commissionVatMinor: 0,
-    payableImpactMinor: -record.previewImpactMinor,
+    payableImpactMinor: -applyAmountMinor,
     storedSettlementStatus: 'pending_adjustment',
     derivedSettlementStatus: 'refund_adjustment_applied',
     payoutStatus: null,
@@ -638,10 +642,15 @@ function buildRefundAdjustmentLine(
       originalSettlementCommissionInvoiceId: record.originalSettlementCommissionInvoiceId,
       entryType: 'refund_adjustment',
       amountMinor: record.amountMinor,
+      originalAmountMinor: record.originalAmountMinor,
+      appliedAmountMinorBefore: record.appliedAmountMinor,
+      remainingAmountMinorBefore: record.remainingAmountMinor,
+      appliedAmountMinor: applyAmountMinor,
+      remainingAmountMinorAfter: remainingAfterApply,
       commissionMinor: 0,
       commissionVatMinor: 0,
-      payableImpactMinor: -record.previewImpactMinor,
-      adjustmentStatus: 'APPLIED',
+      payableImpactMinor: -applyAmountMinor,
+      adjustmentStatus: remainingAfterApply === 0 ? 'APPLIED' : 'PARTIALLY_APPLIED',
       settlementStatus: 'pending_adjustment',
       resolvedSettlementStatus: 'refund_adjustment_applied',
       eligibilityDecision: 'included',
@@ -737,6 +746,48 @@ async function validateRefundAdjustmentApprovalLine(
 
   if (normalizeStatus(row.payoutStatus) === 'paid') {
     reasons.push(buildRevalidationReason(line, 'ledger_paid', 'Ledger row already paid'));
+  }
+
+  const applicationId = (line as SettlementApprovalLine & { settlementRefundAdjustmentApplicationId?: string | null })
+    .settlementRefundAdjustmentApplicationId
+    ?? readSnapshotString(readSnapshotRecord(line.sourceSnapshotJson).settlementRefundAdjustmentApplicationId);
+  if (applicationId) {
+    const application = await tx.settlementRefundAdjustmentApplication.findUnique({
+      where: { id: applicationId },
+      include: {
+        settlementRefundAdjustment: true,
+      },
+    });
+    if (!application || application.status !== SettlementRefundAdjustmentApplicationStatus.ACTIVE) {
+      reasons.push(buildRevalidationReason(line, 'refund_adjustment_application_missing', 'Settlement refund adjustment application is not active'));
+      return reasons;
+    }
+    if (application.settlementApprovalId !== approval.id || application.settlementApprovalLineId !== line.id) {
+      reasons.push(buildRevalidationReason(line, 'refund_adjustment_application_mismatch', 'Settlement refund adjustment application is linked to a different approval line'));
+    }
+    if (application.settlementRefundAdjustment.vendorId !== approval.vendorId) {
+      reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Settlement refund adjustment vendor changed since draft creation'));
+    }
+    if (application.settlementRefundAdjustment.refundFinanceLedgerEntryId !== line.financeLedgerEntryId) {
+      reasons.push(buildRevalidationReason(line, 'refund_adjustment_ledger_mismatch', 'Settlement refund adjustment is linked to a different refund ledger row'));
+    }
+    if (
+      application.settlementRefundAdjustment.status !== SettlementRefundAdjustmentStatus.APPLIED &&
+      application.settlementRefundAdjustment.status !== SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED
+    ) {
+      reasons.push(buildRevalidationReason(line, 'refund_adjustment_not_applied', 'Settlement refund adjustment is not applied'));
+    }
+    if (
+      line.lineType !== SettlementApprovalLineType.REFUND_ADJUSTMENT ||
+      line.amountMinor !== application.amountMinor ||
+      line.commissionMinor !== 0 ||
+      line.commissionVatMinor !== 0 ||
+      line.payableImpactMinor !== -application.amountMinor
+    ) {
+      reasons.push(buildRevalidationReason(line, 'settlement_amount_changed', 'Settlement refund adjustment amount changed since draft creation'));
+    }
+
+    return reasons;
   }
 
   const adjustmentId = line.settlementRefundAdjustmentId
@@ -1801,6 +1852,9 @@ function mapApproval(
       id: line.id,
       financeLedgerEntryId: line.financeLedgerEntryId,
       settlementRefundAdjustmentId: line.settlementRefundAdjustmentId,
+      settlementRefundAdjustmentApplicationId:
+        (line as SettlementApprovalLine & { settlementRefundAdjustmentApplicationId?: string | null })
+          .settlementRefundAdjustmentApplicationId ?? null,
       lineType: line.lineType,
       amountMinor: line.amountMinor,
       commissionMinor: line.commissionMinor,
@@ -1885,11 +1939,25 @@ export async function createDraftApproval(
         }
         throw new Error('No eligible settlement rows are available for approval.');
       }
-      if (preview.pendingRefundAdjustments.pendingAdjustmentTotalMinor > preview.summary.netPayableMinor) {
-        throw new Error('Pending refund adjustments exceed settlement payable; partial application is not implemented.');
+      let availablePayableMinor = Math.max(preview.summary.netPayableMinor, 0);
+      const appliedAdjustmentPlans: Array<{
+        record: PendingRefundAdjustmentApplicationPreview['records'][number];
+        applyAmountMinor: number;
+      }> = [];
+      for (const record of preview.pendingRefundAdjustments.records) {
+        if (availablePayableMinor <= 0) {
+          break;
+        }
+        const applyAmountMinor = Math.min(record.remainingAmountMinor, availablePayableMinor);
+        if (applyAmountMinor <= 0) {
+          continue;
+        }
+        appliedAdjustmentPlans.push({ record, applyAmountMinor });
+        availablePayableMinor -= applyAmountMinor;
       }
-
-      const adjustmentLines = preview.pendingRefundAdjustments.records.map(buildRefundAdjustmentLine);
+      const adjustmentLines = appliedAdjustmentPlans.map((plan) =>
+        buildRefundAdjustmentLine(plan.record, plan.applyAmountMinor),
+      );
       const settlementLines = [...preview.lines, ...adjustmentLines];
       const settlementTotals = summarizeLines(settlementLines);
 
@@ -1898,18 +1966,9 @@ export async function createDraftApproval(
           OR: [
             {
               financeLedgerEntryId: {
-                in: settlementLines.map((line) => line.financeLedgerEntryId),
+                in: preview.lines.map((line) => line.financeLedgerEntryId),
               },
             },
-            ...(adjustmentLines.length
-              ? [{
-                  settlementRefundAdjustmentId: {
-                    in: adjustmentLines
-                      .map((line) => line.settlementRefundAdjustmentId)
-                      .filter((id): id is string => Boolean(id)),
-                  },
-                }]
-              : []),
           ],
           settlementApproval: {
             status: {
@@ -1960,13 +2019,18 @@ export async function createDraftApproval(
             pendingRefundAdjustmentCount: preview.summary.pendingRefundAdjustmentCount,
             pendingRefundAdjustmentTotalMinor: preview.summary.pendingRefundAdjustmentTotalMinor,
             netAfterPendingRefundAdjustmentsMinor: preview.summary.netAfterPendingRefundAdjustmentsMinor,
-            appliedRefundAdjustments: preview.pendingRefundAdjustments.records,
+            appliedRefundAdjustments: appliedAdjustmentPlans.map((plan) => ({
+              ...plan.record,
+              appliedAmountMinor: plan.applyAmountMinor,
+              remainingAmountMinorAfter: plan.record.remainingAmountMinor - plan.applyAmountMinor,
+            })),
             writesPerformed: false,
           },
           lines: {
             create: settlementLines.map((line) => ({
               financeLedgerEntryId: line.financeLedgerEntryId,
               settlementRefundAdjustmentId: line.settlementRefundAdjustmentId ?? null,
+              settlementRefundAdjustmentApplicationId: line.settlementRefundAdjustmentApplicationId ?? null,
               lineType: line.lineType,
               amountMinor: line.amountMinor,
               commissionMinor: line.commissionMinor,
@@ -1981,20 +2045,60 @@ export async function createDraftApproval(
         },
       });
 
-      const appliedAdjustmentLines = approval.lines.filter((line) => line.settlementRefundAdjustmentId);
-      for (const line of appliedAdjustmentLines) {
+      for (const plan of appliedAdjustmentPlans) {
+        const line = approval.lines.find((candidate) => {
+          if (candidate.lineType !== SettlementApprovalLineType.REFUND_ADJUSTMENT) {
+            return false;
+          }
+          const snapshot = readSnapshotRecord(candidate.sourceSnapshotJson);
+          return readSnapshotString(snapshot.settlementRefundAdjustmentId) === plan.record.adjustmentId;
+        });
+        if (!line) {
+          throw new Error('Pending refund adjustment line could not be linked safely.');
+        }
+        const application = await tx.settlementRefundAdjustmentApplication.create({
+          data: {
+            settlementRefundAdjustmentId: plan.record.adjustmentId,
+            settlementApprovalId: approval.id,
+            settlementApprovalLineId: line.id,
+            amountMinor: plan.applyAmountMinor,
+            currencyCode: plan.record.currencyCode,
+            status: SettlementRefundAdjustmentApplicationStatus.ACTIVE,
+          },
+        });
+        await tx.settlementApprovalLine.update({
+          where: { id: line.id },
+          data: {
+            settlementRefundAdjustmentApplicationId: application.id,
+          },
+        });
+        const remainingAfterApply = plan.record.remainingAmountMinor - plan.applyAmountMinor;
         const result = await tx.settlementRefundAdjustment.updateMany({
           where: {
-            id: line.settlementRefundAdjustmentId!,
+            id: plan.record.adjustmentId,
             vendorId: input.vendorId,
-            status: 'PENDING',
-            appliedSettlementApprovalId: null,
-            appliedSettlementApprovalLineId: null,
+            status: {
+              in: [
+                SettlementRefundAdjustmentStatus.PENDING,
+                SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED,
+              ],
+            },
+            remainingAmountMinor: {
+              gte: plan.applyAmountMinor,
+            },
           },
           data: {
-            status: 'APPLIED',
-            appliedSettlementApprovalId: approval.id,
-            appliedSettlementApprovalLineId: line.id,
+            status: remainingAfterApply === 0
+              ? SettlementRefundAdjustmentStatus.APPLIED
+              : SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED,
+            appliedAmountMinor: {
+              increment: plan.applyAmountMinor,
+            },
+            remainingAmountMinor: {
+              decrement: plan.applyAmountMinor,
+            },
+            appliedSettlementApprovalId: remainingAfterApply === 0 ? approval.id : null,
+            appliedSettlementApprovalLineId: remainingAfterApply === 0 ? line.id : null,
           },
         });
         if (result.count !== 1) {
@@ -2002,7 +2106,12 @@ export async function createDraftApproval(
         }
       }
 
-      return mapApproval(approval, true);
+      const refreshedApproval = await tx.settlementApproval.findUnique({
+        where: { id: approval.id },
+        include: { lines: true },
+      });
+
+      return mapApproval(refreshedApproval ?? approval, true);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -2108,17 +2217,74 @@ export async function cancelSettlementApproval(
         },
       });
 
-      await tx.settlementRefundAdjustment.updateMany({
+      const activeApplications = await tx.settlementRefundAdjustmentApplication.findMany({
         where: {
-          appliedSettlementApprovalId: id,
-          status: 'APPLIED',
+          settlementApprovalId: id,
+          status: SettlementRefundAdjustmentApplicationStatus.ACTIVE,
         },
-        data: {
-          status: 'PENDING',
-          appliedSettlementApprovalId: null,
-          appliedSettlementApprovalLineId: null,
+        include: {
+          settlementRefundAdjustment: true,
         },
       });
+
+      for (const application of activeApplications) {
+        await tx.settlementRefundAdjustmentApplication.update({
+          where: { id: application.id },
+          data: {
+            status: SettlementRefundAdjustmentApplicationStatus.CANCELLED,
+          },
+        });
+        const appliedAfterCancel = Math.max(
+          application.settlementRefundAdjustment.appliedAmountMinor - application.amountMinor,
+          0,
+        );
+        const remainingAfterCancel = application.settlementRefundAdjustment.remainingAmountMinor + application.amountMinor;
+        await tx.settlementRefundAdjustment.update({
+          where: { id: application.settlementRefundAdjustmentId },
+          data: {
+            appliedAmountMinor: {
+              decrement: application.amountMinor,
+            },
+            remainingAmountMinor: {
+              increment: application.amountMinor,
+            },
+            status: appliedAfterCancel === 0
+              ? SettlementRefundAdjustmentStatus.PENDING
+              : (remainingAfterCancel > 0
+                  ? SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED
+                  : SettlementRefundAdjustmentStatus.APPLIED),
+            appliedSettlementApprovalId:
+              application.settlementRefundAdjustment.appliedSettlementApprovalId === id ? null : undefined,
+            appliedSettlementApprovalLineId:
+              application.settlementRefundAdjustment.appliedSettlementApprovalId === id ? null : undefined,
+          },
+        });
+      }
+
+      const legacyAppliedAdjustments = await tx.settlementRefundAdjustment.findMany({
+        where: {
+          appliedSettlementApprovalId: id,
+          status: SettlementRefundAdjustmentStatus.APPLIED,
+        },
+        select: {
+          id: true,
+          originalAmountMinor: true,
+          amountMinor: true,
+        },
+      });
+      for (const adjustment of legacyAppliedAdjustments) {
+        const originalAmountMinor = adjustment.originalAmountMinor || adjustment.amountMinor;
+        await tx.settlementRefundAdjustment.update({
+          where: { id: adjustment.id },
+          data: {
+            status: SettlementRefundAdjustmentStatus.PENDING,
+            appliedAmountMinor: 0,
+            remainingAmountMinor: originalAmountMinor,
+            appliedSettlementApprovalId: null,
+            appliedSettlementApprovalLineId: null,
+          },
+        });
+      }
 
       return mapApproval(cancelled, true);
     },

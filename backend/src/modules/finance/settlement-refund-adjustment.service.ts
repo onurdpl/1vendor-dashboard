@@ -1,4 +1,4 @@
-import { Prisma, SettlementRefundAdjustmentStatus } from '@prisma/client';
+import { Prisma, SettlementRefundAdjustmentApplicationStatus, SettlementRefundAdjustmentStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { calculateRefundOffsetAmounts } from './refund-offset.service.js';
 
@@ -8,6 +8,17 @@ type SettlementRefundAdjustmentDbClient = Pick<
   Prisma.TransactionClient,
   'financeLedgerEntry' | 'settlementRefundAdjustment'
 >;
+
+type AdjustmentApplicationDto = {
+  id: string;
+  settlementApprovalId: string;
+  settlementApprovalLineId: string;
+  amountMinor: number;
+  currencyCode: string;
+  status: 'active' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
+};
 
 type LinkedAdjustmentRow = {
   id: string;
@@ -23,6 +34,19 @@ type LinkedAdjustmentRow = {
   blockedReason: string | null;
   createdAt: Date;
   updatedAt: Date;
+  originalAmountMinor?: number;
+  appliedAmountMinor?: number;
+  remainingAmountMinor?: number;
+  applications?: Array<{
+    id: string;
+    settlementApprovalId: string;
+    settlementApprovalLineId: string;
+    amountMinor: number;
+    currencyCode: string;
+    status: SettlementRefundAdjustmentApplicationStatus;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 };
 
 export type SettlementRefundAdjustmentDto = {
@@ -34,8 +58,11 @@ export type SettlementRefundAdjustmentDto = {
   originalSettlementApprovalId: string | null;
   originalSettlementApprovalLineId: string | null;
   originalSettlementCommissionInvoiceId: string | null;
-  status: 'pending' | 'applied' | 'blocked' | 'cancelled';
+  status: 'pending' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
   amountMinor: number;
+  originalAmountMinor: number;
+  appliedAmountMinor: number;
+  remainingAmountMinor: number;
   currencyCode: string;
   reason: string;
   createdAt: string;
@@ -44,6 +71,7 @@ export type SettlementRefundAdjustmentDto = {
   appliedSettlementApprovalLineId: string | null;
   blockedReason: string | null;
   createdBy: string | null;
+  applications: AdjustmentApplicationDto[];
 };
 
 function normalize(value: unknown) {
@@ -52,6 +80,10 @@ function normalize(value: unknown) {
 
 function statusToDto(status: SettlementRefundAdjustmentStatus): SettlementRefundAdjustmentDto['status'] {
   return status.toLowerCase() as SettlementRefundAdjustmentDto['status'];
+}
+
+function applicationStatusToDto(status: SettlementRefundAdjustmentApplicationStatus): AdjustmentApplicationDto['status'] {
+  return status.toLowerCase() as AdjustmentApplicationDto['status'];
 }
 
 function mapAdjustment(adjustment: {
@@ -65,6 +97,9 @@ function mapAdjustment(adjustment: {
   originalSettlementCommissionInvoiceId: string | null;
   status: SettlementRefundAdjustmentStatus;
   amountMinor: number;
+  originalAmountMinor?: number;
+  appliedAmountMinor?: number;
+  remainingAmountMinor?: number;
   currencyCode: string;
   reason: string;
   createdAt: Date;
@@ -73,7 +108,22 @@ function mapAdjustment(adjustment: {
   appliedSettlementApprovalLineId: string | null;
   blockedReason: string | null;
   createdBy: string | null;
+  applications?: Array<{
+    id: string;
+    settlementApprovalId: string;
+    settlementApprovalLineId: string;
+    amountMinor: number;
+    currencyCode: string;
+    status: SettlementRefundAdjustmentApplicationStatus;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
 }): SettlementRefundAdjustmentDto {
+  const originalAmountMinor = adjustment.originalAmountMinor ?? adjustment.amountMinor;
+  const appliedAmountMinor = adjustment.appliedAmountMinor ?? (
+    adjustment.status === SettlementRefundAdjustmentStatus.APPLIED ? adjustment.amountMinor : 0
+  );
+  const remainingAmountMinor = adjustment.remainingAmountMinor ?? Math.max(originalAmountMinor - appliedAmountMinor, 0);
   return {
     id: adjustment.id,
     refundRecordId: adjustment.refundRecordId,
@@ -85,6 +135,9 @@ function mapAdjustment(adjustment: {
     originalSettlementCommissionInvoiceId: adjustment.originalSettlementCommissionInvoiceId,
     status: statusToDto(adjustment.status),
     amountMinor: adjustment.amountMinor,
+    originalAmountMinor,
+    appliedAmountMinor,
+    remainingAmountMinor,
     currencyCode: adjustment.currencyCode,
     reason: adjustment.reason,
     createdAt: adjustment.createdAt.toISOString(),
@@ -93,6 +146,16 @@ function mapAdjustment(adjustment: {
     appliedSettlementApprovalLineId: adjustment.appliedSettlementApprovalLineId,
     blockedReason: adjustment.blockedReason,
     createdBy: adjustment.createdBy,
+    applications: (adjustment.applications ?? []).map((application) => ({
+      id: application.id,
+      settlementApprovalId: application.settlementApprovalId,
+      settlementApprovalLineId: application.settlementApprovalLineId,
+      amountMinor: application.amountMinor,
+      currencyCode: application.currencyCode,
+      status: applicationStatusToDto(application.status),
+      createdAt: application.createdAt.toISOString(),
+      updatedAt: application.updatedAt.toISOString(),
+    })),
   };
 }
 
@@ -275,6 +338,9 @@ export async function createSettlementRefundAdjustmentForRefundLedger(
       originalSettlementCommissionInvoiceId: originalInvoice?.id ?? null,
       status: SettlementRefundAdjustmentStatus.PENDING,
       amountMinor: amount,
+      originalAmountMinor: amount,
+      appliedAmountMinor: 0,
+      remainingAmountMinor: amount,
       currencyCode,
       reason,
       createdBy: input.createdBy ?? 'system:shopify_refunds_create',
@@ -298,6 +364,11 @@ export async function listSettlementRefundAdjustments(input: {
       where,
       orderBy: { createdAt: 'desc' },
       take: input.limit ?? 100,
+      include: {
+        applications: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     }),
     prisma.settlementRefundAdjustment.groupBy({
       by: ['status'],
@@ -323,6 +394,9 @@ export function mapLinkedSettlementRefundAdjustments(rows: LinkedAdjustmentRow[]
     id: row.id,
     status: statusToDto(row.status),
     amountMinor: row.amountMinor,
+    originalAmountMinor: row.originalAmountMinor ?? row.amountMinor,
+    appliedAmountMinor: row.appliedAmountMinor ?? 0,
+    remainingAmountMinor: row.remainingAmountMinor ?? row.amountMinor,
     currencyCode: row.currencyCode,
     reason: row.reason,
     originalSettlementApprovalId: row.originalSettlementApprovalId,
@@ -331,6 +405,16 @@ export function mapLinkedSettlementRefundAdjustments(rows: LinkedAdjustmentRow[]
     appliedSettlementApprovalId: row.appliedSettlementApprovalId,
     appliedSettlementApprovalLineId: row.appliedSettlementApprovalLineId,
     blockedReason: row.blockedReason,
+    applications: (row.applications ?? []).map((application) => ({
+      id: application.id,
+      settlementApprovalId: application.settlementApprovalId,
+      settlementApprovalLineId: application.settlementApprovalLineId,
+      amountMinor: application.amountMinor,
+      currencyCode: application.currencyCode,
+      status: applicationStatusToDto(application.status),
+      createdAt: application.createdAt.toISOString(),
+      updatedAt: application.updatedAt.toISOString(),
+    })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }));

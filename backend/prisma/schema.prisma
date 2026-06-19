@@ -106,8 +106,14 @@ enum SettlementCommissionInvoiceStatus {
 
 enum SettlementRefundAdjustmentStatus {
   PENDING
+  PARTIALLY_APPLIED
   APPLIED
   BLOCKED
+  CANCELLED
+}
+
+enum SettlementRefundAdjustmentApplicationStatus {
+  ACTIVE
   CANCELLED
 }
 
@@ -918,6 +924,7 @@ model SettlementApproval {
   sourceSnapshotJson Json
   vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines              SettlementApprovalLine[]
+  refundAdjustmentApplications SettlementRefundAdjustmentApplication[]
   commissionInvoices SettlementCommissionInvoice[]
   originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalRefundAdjustments")
   appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalRefundAdjustments")
@@ -933,6 +940,7 @@ model SettlementApprovalLine {
   settlementApprovalId String
   financeLedgerEntryId String
   settlementRefundAdjustmentId String?            @unique
+  settlementRefundAdjustmentApplicationId String? @unique
   lineType             SettlementApprovalLineType
   amountMinor          Int
   commissionMinor      Int
@@ -943,6 +951,8 @@ model SettlementApprovalLine {
   financeLedgerEntry   FinanceLedgerEntry         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
   originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalLineRefundAdjustments")
   appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalLineRefundAdjustments")
+  refundAdjustmentApplication SettlementRefundAdjustmentApplication? @relation("RefundAdjustmentApplicationLine")
+  refundAdjustmentApplicationLink SettlementRefundAdjustmentApplication? @relation("LineRefundAdjustmentApplicationLink", fields: [settlementRefundAdjustmentApplicationId], references: [id], onDelete: SetNull)
 
   @@unique([settlementApprovalId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
@@ -1017,6 +1027,9 @@ model SettlementRefundAdjustment {
   reason                               String
   createdAt                            DateTime                       @default(now())
   updatedAt                            DateTime                       @updatedAt
+  originalAmountMinor                   Int                            @default(0)
+  appliedAmountMinor                    Int                            @default(0)
+  remainingAmountMinor                  Int                            @default(0)
   appliedSettlementApprovalId          String?
   appliedSettlementApprovalLineId      String?
   blockedReason                        String?
@@ -1030,6 +1043,7 @@ model SettlementRefundAdjustment {
   originalSettlementCommissionInvoice  SettlementCommissionInvoice?   @relation(fields: [originalSettlementCommissionInvoiceId], references: [id], onDelete: SetNull)
   appliedSettlementApproval            SettlementApproval?            @relation("AppliedSettlementApprovalRefundAdjustments", fields: [appliedSettlementApprovalId], references: [id], onDelete: SetNull)
   appliedSettlementApprovalLine        SettlementApprovalLine?        @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
+  applications                          SettlementRefundAdjustmentApplication[]
 
   @@index([vendorId, status])
   @@index([refundRecordId])
@@ -1037,6 +1051,26 @@ model SettlementRefundAdjustment {
   @@index([originalSettlementApprovalId])
   @@index([originalSettlementCommissionInvoiceId])
   @@index([appliedSettlementApprovalId])
+  @@index([createdAt])
+}
+
+model SettlementRefundAdjustmentApplication {
+  id                           String                                      @id @default(cuid())
+  settlementRefundAdjustmentId String
+  settlementApprovalId         String
+  settlementApprovalLineId     String                                      @unique
+  amountMinor                  Int
+  currencyCode                 String                                      @default("TRY")
+  status                       SettlementRefundAdjustmentApplicationStatus @default(ACTIVE)
+  createdAt                    DateTime                                    @default(now())
+  updatedAt                    DateTime                                    @updatedAt
+  settlementRefundAdjustment   SettlementRefundAdjustment                  @relation(fields: [settlementRefundAdjustmentId], references: [id], onDelete: Cascade)
+  settlementApproval           SettlementApproval                          @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
+  settlementApprovalLine       SettlementApprovalLine                      @relation("RefundAdjustmentApplicationLine", fields: [settlementApprovalLineId], references: [id], onDelete: Cascade)
+  settlementApprovalLineLink   SettlementApprovalLine?                     @relation("LineRefundAdjustmentApplicationLink")
+
+  @@index([settlementRefundAdjustmentId, status])
+  @@index([settlementApprovalId])
   @@index([createdAt])
 }
 

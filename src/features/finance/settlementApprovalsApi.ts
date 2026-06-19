@@ -27,6 +27,7 @@ export type SettlementApprovalLine = {
   id?: string;
   financeLedgerEntryId: string;
   settlementRefundAdjustmentId?: string | null;
+  settlementRefundAdjustmentApplicationId?: string | null;
   lineType: 'SALE' | 'REFUND' | string;
   amountMinor: number;
   commissionMinor: number;
@@ -115,6 +116,10 @@ export type SettlementApprovalPreview = {
       originalSettlementApprovalId: string | null;
       originalSettlementCommissionInvoiceId: string | null;
       amountMinor: number;
+      originalAmountMinor?: number;
+      appliedAmountMinor?: number;
+      remainingAmountMinor?: number;
+      status?: 'pending' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
       currencyCode: string;
       reason: string;
       previewImpactMinor: number;

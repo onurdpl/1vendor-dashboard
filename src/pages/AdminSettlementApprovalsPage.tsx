@@ -480,6 +480,8 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
           const allocationId = readSnapshotString(line, 'vendorAllocationId');
           const orderLabel = getApprovalLineOrderLabel(line);
           const adjustmentId = line.settlementRefundAdjustmentId ?? readSnapshotString(line, 'settlementRefundAdjustmentId');
+          const adjustmentApplicationId =
+            line.settlementRefundAdjustmentApplicationId ?? readSnapshotString(line, 'settlementRefundAdjustmentApplicationId');
           const isRefundAdjustmentLine = String(line.lineType).toUpperCase() === 'REFUND_ADJUSTMENT';
 
           return (
@@ -515,6 +517,7 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
                     <span>Adjustment</span>
                     <StatusBadge tone="success">APPLIED</StatusBadge>
                     <small>{valueOrDash(adjustmentId)}</small>
+                    {adjustmentApplicationId ? <small>Application {adjustmentApplicationId}</small> : null}
                   </div>
                 ) : null}
               </div>
@@ -913,7 +916,7 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
         <div>
           <h3>Pending Refund Adjustments</h3>
           <p className="page-description">
-            Preview only — not applied until Phase 3.5C.
+            Preview only — partial applications are created only when an admin creates a settlement draft.
           </p>
         </div>
         <StatusBadge tone={count > 0 ? 'warning' : 'neutral'}>{formatNumber(count)}</StatusBadge>
@@ -936,8 +939,12 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
                 <span>Original order: {record.originalOrderId}</span>
                 <span>Refund record: {record.refundRecordId}</span>
                 <span>Refund ledger: {record.refundFinanceLedgerEntryId}</span>
+                <span>Status: {record.status ? safeStatusLabel(record.status) : 'Pending'}</span>
               </div>
               <div>
+                <SummaryField label="Original" value={formatMinor(record.originalAmountMinor ?? record.amountMinor, record.currencyCode)} />
+                <SummaryField label="Applied" value={formatMinor(record.appliedAmountMinor ?? 0, record.currencyCode)} />
+                <SummaryField label="Remaining" value={formatMinor(record.remainingAmountMinor ?? record.previewImpactMinor, record.currencyCode)} />
                 <SummaryField label="Preview impact" value={formatMinor(record.previewImpactMinor, record.currencyCode)} />
                 <SummaryField label="Linked settlement" value={valueOrDash(record.originalSettlementApprovalId)} />
                 <SummaryField label="Linked commission invoice" value={valueOrDash(record.originalSettlementCommissionInvoiceId)} />

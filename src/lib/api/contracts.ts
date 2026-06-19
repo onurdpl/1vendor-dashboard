@@ -1267,8 +1267,11 @@ export type PayoutBatch = {
 
 export type SettlementRefundAdjustmentReference = {
   id: string;
-  status: 'pending' | 'applied' | 'blocked' | 'cancelled';
+  status: 'pending' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
   amountMinor: number;
+  originalAmountMinor: number;
+  appliedAmountMinor: number;
+  remainingAmountMinor: number;
   currencyCode: string;
   reason: string;
   originalSettlementApprovalId: string | null;
@@ -1279,6 +1282,16 @@ export type SettlementRefundAdjustmentReference = {
   blockedReason: string | null;
   createdAt: string;
   updatedAt: string;
+  applications?: Array<{
+    id: string;
+    settlementApprovalId: string;
+    settlementApprovalLineId: string;
+    amountMinor: number;
+    currencyCode: string;
+    status: 'active' | 'cancelled';
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 export type PayoutBatchSummary = {

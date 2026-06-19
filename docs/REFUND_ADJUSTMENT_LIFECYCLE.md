@@ -14,7 +14,8 @@ Phase 3.5A adds the refund adjustment foundation for refunds that arrive after a
 
 ```text
 PENDING
-  -> APPLIED   (future Phase 3.5C)
+  -> PARTIALLY_APPLIED
+  -> APPLIED
   -> BLOCKED   (future operational review)
   -> CANCELLED (future administrative cancellation)
 ```
@@ -127,7 +128,7 @@ Application rules:
 - currency must match the settlement currency,
 - already applied, blocked, or cancelled adjustments are excluded,
 - adjustment-only settlement drafts are blocked,
-- adjustments that exceed the current settlement payable are blocked until partial application is implemented.
+- adjustments that exceed the current settlement payable are partially applied in Phase 3.5D.
 
 Applied line behavior:
 
@@ -140,3 +141,48 @@ Applied line behavior:
 - the adjustment is updated to `APPLIED` with the applied settlement approval and line ids.
 
 Existing Logo commission invoices remain unchanged. Phase 3.5C does not create Logo credit invoices, cancel Logo invoices, call Logo, call Shopify, or mutate original sale/refund ledger amounts.
+
+## Phase 3.5D Partial Application
+
+Phase 3.5D allows a pending refund adjustment to be applied over multiple future settlement drafts.
+
+Example:
+
+```text
+Adjustment: 9,726
+Current settlement payable: 6,000
+
+Draft creation:
+- apply 6,000
+- keep 3,726 remaining
+- adjustment status = PARTIALLY_APPLIED
+
+Next settlement payable: 10,000
+
+Draft creation:
+- apply 3,726
+- keep 0 remaining
+- adjustment status = APPLIED
+```
+
+Application rules:
+
+- `remainingAmountMinor` is the source for future application.
+- `applyAmountMinor = min(remainingAmountMinor, availablePayableMinor)`.
+- adjustment-only drafts remain blocked.
+- settlement net payable is not allowed to go negative.
+- adjustment overflow does not create vendor debt.
+- vendor debt is reserved for refund-after-payout or refund-after-settled-payment scenarios.
+
+Application history:
+
+- every applied slice creates a `SettlementRefundAdjustmentApplication`,
+- each application links one `SettlementApprovalLine` to the parent `SettlementRefundAdjustment`,
+- active applications can be cancelled only through settlement approval cancellation,
+- cancellation restores only the cancelled application amount to the parent adjustment and marks that application `CANCELLED`.
+
+Visibility:
+
+- preview and diagnostics show original, applied, and remaining amounts,
+- Finance Detail and Return Detail show application history,
+- `GET /admin/finance/refund-adjustments` includes `applications[]`.

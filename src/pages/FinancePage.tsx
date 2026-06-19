@@ -1582,10 +1582,21 @@ export function FinancePage() {
                           label="Amount"
                           value={<span className="finance-deduction-value">{formatMinorCurrency(adjustment.amountMinor, adjustment.currencyCode)}</span>}
                         />
+                        <MetadataRow label="Original amount" value={formatMinorCurrency(adjustment.originalAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} />
+                        <MetadataRow label="Applied amount" value={formatMinorCurrency(adjustment.appliedAmountMinor ?? 0, adjustment.currencyCode)} />
+                        <MetadataRow label="Remaining amount" value={formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} />
                         <MetadataRow label="Reason" value={adjustment.reason} />
                         <MetadataRow label="Linked settlement" value={adjustment.originalSettlementApprovalId ?? 'Not linked'} />
                         <MetadataRow label="Linked commission invoice" value={adjustment.originalSettlementCommissionInvoiceId ?? 'Not linked'} />
                         <MetadataRow label="Applied settlement" value={adjustment.appliedSettlementApprovalId ?? 'Not applied yet'} />
+                        {adjustment.applications?.length ? (
+                          <MetadataRow
+                            label="Applications"
+                            value={adjustment.applications
+                              .map((application) => `${application.status}: ${formatMinorCurrency(application.amountMinor, application.currencyCode)} (${application.settlementApprovalId})`)
+                              .join(', ')}
+                          />
+                        ) : null}
                       </MetadataGroup>
                     ))}
                   </div>

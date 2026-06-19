@@ -1468,9 +1468,11 @@ export function ReturnDetailPage() {
                 {returnRequest.settlementRefundAdjustments.map((adjustment) => (
                   <div key={adjustment.id}>
                     <span>{formatAdjustmentStatus(adjustment.status)}</span>
-                    <strong>{formatMinorCurrency(adjustment.amountMinor, adjustment.currencyCode)}</strong>
+                    <strong>{formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} remaining</strong>
                     <small>
                       {adjustment.reason}
+                      {` · Original ${formatMinorCurrency(adjustment.originalAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)}`}
+                      {` · Applied ${formatMinorCurrency(adjustment.appliedAmountMinor ?? 0, adjustment.currencyCode)}`}
                       {adjustment.originalSettlementApprovalId
                         ? ` · Settlement ${adjustment.originalSettlementApprovalId}`
                         : ''}

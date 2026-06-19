@@ -327,6 +327,10 @@ describe('refund adjustment eligibility diagnostics', () => {
             originalSettlementApprovalId: 'settlement-approval-1',
             originalSettlementCommissionInvoiceId: 'commission-invoice-1',
             amountMinor: 88000,
+            originalAmountMinor: 88000,
+            appliedAmountMinor: 0,
+            remainingAmountMinor: 88000,
+            status: 'PENDING',
             currencyCode: 'TRY',
             reason: 'Refund after invoiced settlement requires future settlement adjustment.',
           },
@@ -338,6 +342,10 @@ describe('refund adjustment eligibility diagnostics', () => {
             originalSettlementApprovalId: null,
             originalSettlementCommissionInvoiceId: null,
             amountMinor: 12000,
+            originalAmountMinor: 20000,
+            appliedAmountMinor: 8000,
+            remainingAmountMinor: 12000,
+            status: 'PARTIALLY_APPLIED',
             currencyCode: 'TRY',
             reason: 'Refund after approved settlement requires future settlement adjustment.',
           },
@@ -364,10 +372,10 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(db.settlementRefundAdjustment.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         vendorId: 'yalispor',
-        status: 'PENDING',
-        appliedSettlementApprovalId: null,
-        appliedSettlementApprovalLineId: null,
-        amountMinor: { gt: 0 },
+        status: {
+          in: ['PENDING', 'PARTIALLY_APPLIED'],
+        },
+        remainingAmountMinor: { gt: 0 },
         currencyCode: 'TRY',
       }),
     }));
@@ -397,10 +405,10 @@ describe('refund adjustment eligibility diagnostics', () => {
       take: 25,
       where: {
         vendorId: 'sporjinal',
-        status: 'PENDING',
-        appliedSettlementApprovalId: null,
-        appliedSettlementApprovalLineId: null,
-        amountMinor: { gt: 0 },
+        status: {
+          in: ['PENDING', 'PARTIALLY_APPLIED'],
+        },
+        remainingAmountMinor: { gt: 0 },
         currencyCode: 'TRY',
       },
     }));
