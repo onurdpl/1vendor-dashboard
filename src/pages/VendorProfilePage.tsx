@@ -186,7 +186,6 @@ type FinancePolicyFormState = {
   settlementDelayDays: string;
   settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
   weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
-  monthlySettlementDay: string;
   autoSettlementDraftEnabled: boolean;
   autoSettlementApproveEnabled: boolean;
   autoSettlementInvoiceEnabled: boolean;
@@ -224,7 +223,6 @@ const EMPTY_FINANCE_POLICY_FORM: FinancePolicyFormState = {
   settlementDelayDays: '21',
   settlementFrequencyType: 'WEEKLY',
   weeklySettlementDay: 'WEDNESDAY',
-  monthlySettlementDay: '28',
   autoSettlementDraftEnabled: false,
   autoSettlementApproveEnabled: false,
   autoSettlementInvoiceEnabled: false,
@@ -302,7 +300,6 @@ function buildFinancePolicyFormState(profile: VendorFinancialProfile | null): Fi
     settlementDelayDays: String(profile?.settlementDelayDays ?? 21),
     settlementFrequencyType: profile?.settlementFrequencyType ?? 'WEEKLY',
     weeklySettlementDay: profile?.weeklySettlementDay ?? 'WEDNESDAY',
-    monthlySettlementDay: String(profile?.monthlySettlementDay ?? 28),
     autoSettlementDraftEnabled: profile?.autoSettlementDraftEnabled ?? false,
     autoSettlementApproveEnabled: profile?.autoSettlementApproveEnabled ?? false,
     autoSettlementInvoiceEnabled: profile?.autoSettlementInvoiceEnabled ?? false,
@@ -325,7 +322,6 @@ function parseFinancePolicyPercent(value: string, label: string) {
 
 function buildFinancePolicyInput(form: FinancePolicyFormState) {
   const fixedShippingFee = form.fixedShippingFee.trim() ? Number(form.fixedShippingFee) : null;
-  const monthlySettlementDay = form.monthlySettlementDay.trim() ? Number(form.monthlySettlementDay) : null;
   return {
     commissionPercent: Number(form.commissionPercent),
     commissionVatPercent: Number(form.commissionVatPercent),
@@ -335,7 +331,6 @@ function buildFinancePolicyInput(form: FinancePolicyFormState) {
     settlementDelayDays: Number(form.settlementDelayDays),
     settlementFrequencyType: form.settlementFrequencyType,
     weeklySettlementDay: form.weeklySettlementDay,
-    monthlySettlementDay,
     autoSettlementDraftEnabled: form.autoSettlementDraftEnabled,
     autoSettlementApproveEnabled: form.autoSettlementApproveEnabled,
     autoSettlementInvoiceEnabled: form.autoSettlementInvoiceEnabled,
@@ -368,18 +363,6 @@ function validateFinancePolicyForm(form: FinancePolicyFormState) {
     settlementDelayDays > 365
   ) {
     return 'Settlement delay days must be between 0 and 365.';
-  }
-
-  if (form.settlementFrequencyType === 'MONTHLY') {
-    const monthlySettlementDay = Number(form.monthlySettlementDay);
-    if (
-      !form.monthlySettlementDay.trim() ||
-      !Number.isFinite(monthlySettlementDay) ||
-      monthlySettlementDay < 1 ||
-      monthlySettlementDay > 31
-    ) {
-      return 'Monthly settlement day must be between 1 and 31.';
-    }
   }
 
   return null;
@@ -699,9 +682,6 @@ function formatSettlementFrequency(value: VendorFinancialProfile['settlementFreq
   if (value === 'BIWEEKLY') {
     return 'Biweekly';
   }
-  if (value === 'MONTHLY') {
-    return 'Monthly';
-  }
   return 'Weekly';
 }
 
@@ -711,9 +691,6 @@ function formatSettlementWeekday(value: VendorFinancialProfile['weeklySettlement
 }
 
 function formatSettlementSchedule(profile: VendorFinancialProfile) {
-  if (profile.settlementFrequencyType === 'MONTHLY') {
-    return `Monthly on day ${profile.monthlySettlementDay ?? 28}`;
-  }
   return `${formatSettlementFrequency(profile.settlementFrequencyType)} on ${formatSettlementWeekday(profile.weeklySettlementDay)}`;
 }
 
@@ -3168,7 +3145,6 @@ export function VendorProfilePage() {
                       >
                         <option value="WEEKLY">Weekly</option>
                         <option value="BIWEEKLY">Biweekly</option>
-                        <option value="MONTHLY">Monthly</option>
                       </select>
                     </label>
                     <label>
@@ -3181,7 +3157,6 @@ export function VendorProfilePage() {
                             event.target.value as FinancePolicyFormState['weeklySettlementDay'],
                           )
                         }
-                        disabled={financePolicyForm.settlementFrequencyType === 'MONTHLY'}
                       >
                         <option value="MONDAY">Monday</option>
                         <option value="TUESDAY">Tuesday</option>
@@ -3189,18 +3164,6 @@ export function VendorProfilePage() {
                         <option value="THURSDAY">Thursday</option>
                         <option value="FRIDAY">Friday</option>
                       </select>
-                    </label>
-                    <label>
-                      Monthly settlement day
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
-                        step="1"
-                        value={financePolicyForm.monthlySettlementDay}
-                        onChange={(event) => handleFinancePolicyFormChange('monthlySettlementDay', event.target.value)}
-                        disabled={financePolicyForm.settlementFrequencyType !== 'MONTHLY'}
-                      />
                     </label>
                     <label className="vendor-profile-checkbox-field vendor-profile-billing-form-wide">
                       <input

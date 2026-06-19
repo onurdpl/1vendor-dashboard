@@ -57,7 +57,6 @@ const FINANCE_POLICY_FIELDS = new Set([
 const SETTLEMENT_SCHEDULE_FIELDS = new Set([
   'settlementFrequencyType',
   'weeklySettlementDay',
-  'monthlySettlementDay',
   'autoSettlementDraftEnabled',
   'autoSettlementApproveEnabled',
 ]);

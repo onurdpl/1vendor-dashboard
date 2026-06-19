@@ -145,7 +145,6 @@ function buildVendorFinance(vendorId: VendorId): VendorFinanceDashboard {
       settlementDelayDays: 21,
       settlementFrequencyType: 'WEEKLY',
       weeklySettlementDay: 'WEDNESDAY',
-      monthlySettlementDay: 28,
       autoSettlementDraftEnabled: false,
       autoSettlementApproveEnabled: false,
       autoSettlementInvoiceEnabled: false,

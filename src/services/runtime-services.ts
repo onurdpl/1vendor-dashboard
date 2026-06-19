@@ -2202,7 +2202,6 @@ export const runtimeServices = {
             settlementDelayDays: input.settlementDelayDays,
             settlementFrequencyType: input.settlementFrequencyType,
             weeklySettlementDay: input.weeklySettlementDay,
-            monthlySettlementDay: input.monthlySettlementDay,
             autoSettlementDraftEnabled: input.autoSettlementDraftEnabled,
             autoSettlementApproveEnabled: input.autoSettlementApproveEnabled,
             autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled,

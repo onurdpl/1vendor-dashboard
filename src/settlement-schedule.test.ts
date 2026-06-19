@@ -31,7 +31,6 @@ function profileRow(overrides: Record<string, unknown> = {}) {
     settlementDelayDays: 21,
     settlementFrequencyType: 'WEEKLY',
     weeklySettlementDay: 'WEDNESDAY',
-    monthlySettlementDay: 28,
     autoSettlementDraftEnabled: true,
     autoSettlementApproveEnabled: false,
     autoSettlementInvoiceEnabled: false,
@@ -122,7 +121,6 @@ describe('settlement schedule service', () => {
       settlementDelayDays: 21,
       settlementFrequencyType: 'WEEKLY' as const,
       weeklySettlementDay: 'WEDNESDAY' as const,
-      monthlySettlementDay: 28,
       autoSettlementDraftEnabled: true,
       autoSettlementApproveEnabled: false,
       autoSettlementInvoiceEnabled: false,
@@ -132,19 +130,18 @@ describe('settlement schedule service', () => {
     expect(evaluateSettlementScheduleDue(schedule, toSettlementRunDate('2026-01-22')).due).toBe(false);
   });
 
-  it('detects monthly schedule by configured day of month', () => {
+  it('detects biweekly schedule by configured weekday and deterministic ISO week parity', () => {
     const schedule = {
-      settlementDelayDays: 30,
-      settlementFrequencyType: 'MONTHLY' as const,
-      weeklySettlementDay: 'MONDAY' as const,
-      monthlySettlementDay: 28,
+      settlementDelayDays: 14,
+      settlementFrequencyType: 'BIWEEKLY' as const,
+      weeklySettlementDay: 'WEDNESDAY' as const,
       autoSettlementDraftEnabled: true,
       autoSettlementApproveEnabled: false,
       autoSettlementInvoiceEnabled: false,
     };
 
-    expect(evaluateSettlementScheduleDue(schedule, toSettlementRunDate('2026-02-28')).due).toBe(true);
-    expect(evaluateSettlementScheduleDue(schedule, toSettlementRunDate('2026-02-27')).due).toBe(false);
+    expect(evaluateSettlementScheduleDue(schedule, toSettlementRunDate('2026-01-21')).due).toBe(true);
+    expect(evaluateSettlementScheduleDue(schedule, toSettlementRunDate('2026-01-28')).due).toBe(false);
   });
 
   it('dry-runs due vendors with date-range settlement preview as of the run date', async () => {

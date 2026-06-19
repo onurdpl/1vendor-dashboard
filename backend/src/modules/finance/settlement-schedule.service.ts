@@ -6,14 +6,13 @@ import {
   type SettlementApprovalPreviewDto,
 } from './settlement-approval.service.js';
 
-export type SettlementFrequencyTypeDto = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+export type SettlementFrequencyTypeDto = 'WEEKLY' | 'BIWEEKLY';
 export type SettlementWeekdayDto = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY';
 
 export type SettlementScheduleProfileDto = {
   settlementDelayDays: number;
   settlementFrequencyType: SettlementFrequencyTypeDto;
   weeklySettlementDay: SettlementWeekdayDto;
-  monthlySettlementDay: number | null;
   autoSettlementDraftEnabled: boolean;
   autoSettlementApproveEnabled: boolean;
   autoSettlementInvoiceEnabled: boolean;
@@ -88,7 +87,6 @@ type SettlementScheduleProfileRow = {
   settlementDelayDays: number;
   settlementFrequencyType: string;
   weeklySettlementDay: string;
-  monthlySettlementDay: number | null;
   autoSettlementDraftEnabled: boolean;
   autoSettlementApproveEnabled: boolean;
   autoSettlementInvoiceEnabled: boolean;
@@ -109,7 +107,6 @@ type SettlementScheduleCreateDraftsInput = SettlementScheduleRequestInput & {
 };
 
 const WEEKDAYS: SettlementWeekdayDto[] = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
-const DEFAULT_MONTHLY_SETTLEMENT_DAY = 28;
 
 function pad2(value: number) {
   return String(value).padStart(2, '0');
@@ -175,14 +172,10 @@ function getIsoWeekNumber(date: Date) {
 function normalizeProfile(row: SettlementScheduleProfileRow): SettlementScheduleProfileDto {
   return {
     settlementDelayDays: row.settlementDelayDays,
-    settlementFrequencyType:
-      row.settlementFrequencyType === 'BIWEEKLY' || row.settlementFrequencyType === 'MONTHLY'
-        ? row.settlementFrequencyType
-        : 'WEEKLY',
+    settlementFrequencyType: row.settlementFrequencyType === 'BIWEEKLY' ? 'BIWEEKLY' : 'WEEKLY',
     weeklySettlementDay: WEEKDAYS.includes(row.weeklySettlementDay as SettlementWeekdayDto)
       ? row.weeklySettlementDay as SettlementWeekdayDto
       : 'WEDNESDAY',
-    monthlySettlementDay: row.monthlySettlementDay ?? DEFAULT_MONTHLY_SETTLEMENT_DAY,
     autoSettlementDraftEnabled: row.autoSettlementDraftEnabled,
     autoSettlementApproveEnabled: row.autoSettlementApproveEnabled,
     autoSettlementInvoiceEnabled: row.autoSettlementInvoiceEnabled,
@@ -191,17 +184,6 @@ function normalizeProfile(row: SettlementScheduleProfileRow): SettlementSchedule
 
 export function evaluateSettlementScheduleDue(profile: SettlementScheduleProfileDto, runDate: Date) {
   const runWeekday = getSettlementWeekday(runDate);
-  if (profile.settlementFrequencyType === 'MONTHLY') {
-    const monthlyDay = profile.monthlySettlementDay ?? DEFAULT_MONTHLY_SETTLEMENT_DAY;
-    const due = runDate.getUTCDate() === monthlyDay;
-    return {
-      due,
-      reason: due
-        ? `Monthly settlement day ${monthlyDay} is due.`
-        : `Monthly settlement day ${monthlyDay} is not due on day ${runDate.getUTCDate()}.`,
-    };
-  }
-
   if (!runWeekday || runWeekday !== profile.weeklySettlementDay) {
     return {
       due: false,
@@ -251,7 +233,6 @@ async function listScheduleProfiles(input: SettlementScheduleRequestInput): Prom
       settlementDelayDays: true,
       settlementFrequencyType: true,
       weeklySettlementDay: true,
-      monthlySettlementDay: true,
       autoSettlementDraftEnabled: true,
       autoSettlementApproveEnabled: true,
       autoSettlementInvoiceEnabled: true,

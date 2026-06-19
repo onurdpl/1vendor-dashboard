@@ -73,7 +73,6 @@ enum ShippingDeductionMode {
 enum SettlementFrequencyType {
   WEEKLY
   BIWEEKLY
-  MONTHLY
 }
 
 enum SettlementWeekday {
@@ -424,7 +423,6 @@ model VendorFinancialProfile {
   settlementDelayDays    Int                   @default(21)
   settlementFrequencyType SettlementFrequencyType @default(WEEKLY)
   weeklySettlementDay    SettlementWeekday     @default(WEDNESDAY)
-  monthlySettlementDay   Int?
   autoSettlementDraftEnabled Boolean            @default(false)
   autoSettlementApproveEnabled Boolean          @default(false)
   autoSettlementInvoiceEnabled Boolean          @default(false)

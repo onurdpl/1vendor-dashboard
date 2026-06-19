@@ -1390,9 +1390,8 @@ export type VendorFinancialProfile = {
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee: string | null;
   settlementDelayDays: number;
-  settlementFrequencyType: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+  settlementFrequencyType: 'WEEKLY' | 'BIWEEKLY';
   weeklySettlementDay: 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY';
-  monthlySettlementDay: number | null;
   autoSettlementDraftEnabled: boolean;
   autoSettlementApproveEnabled: boolean;
   autoSettlementInvoiceEnabled: boolean;

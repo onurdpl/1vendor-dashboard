@@ -76,7 +76,6 @@ const financeDashboard: FinanceDashboard = {
     settlementDelayDays: 21,
     settlementFrequencyType: 'WEEKLY',
     weeklySettlementDay: 'WEDNESDAY',
-    monthlySettlementDay: 28,
     autoSettlementDraftEnabled: false,
     autoSettlementApproveEnabled: false,
     autoSettlementInvoiceEnabled: false,

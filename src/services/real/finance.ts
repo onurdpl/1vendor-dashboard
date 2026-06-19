@@ -331,7 +331,6 @@ export async function updateVendorFinancialProfile(
     settlementDelayDays: number;
     settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
     weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
-    monthlySettlementDay: number | null;
     autoSettlementDraftEnabled: boolean;
     autoSettlementApproveEnabled: boolean;
     autoSettlementInvoiceEnabled: boolean;

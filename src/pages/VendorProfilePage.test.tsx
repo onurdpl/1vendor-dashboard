@@ -37,7 +37,6 @@ const updateVendorFinancialProfileMock = vi.fn<
       settlementDelayDays: number;
       settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
       weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
-      monthlySettlementDay: number | null;
       autoSettlementDraftEnabled: boolean;
       autoSettlementApproveEnabled: boolean;
       autoSettlementInvoiceEnabled: boolean;
@@ -159,7 +158,6 @@ const financeProfile: VendorFinancialProfile = {
   settlementDelayDays: 21,
   settlementFrequencyType: 'WEEKLY',
   weeklySettlementDay: 'WEDNESDAY',
-  monthlySettlementDay: 28,
   autoSettlementDraftEnabled: false,
   autoSettlementApproveEnabled: false,
   autoSettlementInvoiceEnabled: false,
@@ -349,7 +347,6 @@ describe('VendorProfilePage', () => {
         settlementDelayDays: input.settlementDelayDays,
         settlementFrequencyType: input.settlementFrequencyType,
         weeklySettlementDay: input.weeklySettlementDay,
-        monthlySettlementDay: input.monthlySettlementDay,
         autoSettlementDraftEnabled: input.autoSettlementDraftEnabled,
         autoSettlementApproveEnabled: input.autoSettlementApproveEnabled,
         autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled,
@@ -887,7 +884,6 @@ describe('VendorProfilePage', () => {
         settlementDelayDays: input.settlementDelayDays,
         settlementFrequencyType: input.settlementFrequencyType,
         weeklySettlementDay: input.weeklySettlementDay,
-        monthlySettlementDay: input.monthlySettlementDay,
         autoSettlementDraftEnabled: input.autoSettlementDraftEnabled,
         autoSettlementApproveEnabled: input.autoSettlementApproveEnabled,
         autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled,
@@ -915,7 +911,7 @@ describe('VendorProfilePage', () => {
     expect(within(financeSection!).getByLabelText('Settlement delay days')).toHaveValue(21);
     expect(within(financeSection!).getByLabelText('Settlement frequency')).toHaveValue('WEEKLY');
     expect(within(financeSection!).getByLabelText('Weekly settlement day')).toHaveValue('WEDNESDAY');
-    expect(within(financeSection!).getByLabelText('Monthly settlement day')).toHaveValue(28);
+    expect(within(financeSection!).queryByLabelText('Monthly settlement day')).not.toBeInTheDocument();
     expect(within(financeSection!).getByLabelText(/Deduct shipping after fulfillment/i)).toBeChecked();
 
     await userEvent.clear(within(financeSection!).getByLabelText('Commission %'));
@@ -939,7 +935,6 @@ describe('VendorProfilePage', () => {
         settlementDelayDays: 14,
         settlementFrequencyType: 'BIWEEKLY',
         weeklySettlementDay: 'MONDAY',
-        monthlySettlementDay: 28,
         autoSettlementDraftEnabled: true,
         autoSettlementApproveEnabled: false,
         autoSettlementInvoiceEnabled: false,

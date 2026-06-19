@@ -1140,7 +1140,6 @@ export function FinancePage() {
       settlementDelayDays: 21,
       settlementFrequencyType: 'WEEKLY' as const,
       weeklySettlementDay: 'WEDNESDAY' as const,
-      monthlySettlementDay: 28,
       autoSettlementDraftEnabled: false,
       autoSettlementApproveEnabled: false,
       autoSettlementInvoiceEnabled: false,
