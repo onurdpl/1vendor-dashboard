@@ -112,6 +112,16 @@ function getProviderReference(record: SettlementCommissionInvoiceRecord | null |
   return record?.invoiceNo || record?.providerUuid || record?.providerInvoiceId || record?.providerEttn || null;
 }
 
+function hasReconciledInvoiceFacts(record: SettlementCommissionInvoiceRecord | null | undefined) {
+  const evidence = record?.reconciliationEvidence;
+  return Boolean(
+    evidence?.invoiceNo ||
+    evidence?.invoiceDate ||
+    evidence?.invoiceTotalMinor !== null && evidence?.invoiceTotalMinor !== undefined ||
+    evidence?.invoiceCurrency,
+  );
+}
+
 function getInvoiceRecordStatusTone(record: SettlementCommissionInvoiceRecord) {
   return isCreatedCommissionInvoiceRecord(record) ? 'success' as const : undefined;
 }
@@ -1710,12 +1720,13 @@ export function AdminSettlementApprovalsPage() {
         setInvoiceRecordsWarning('Could not refresh invoice diagnostics after Logo create.');
       }
 
-      setActiveTab('invoices');
-      setLogoCreateConfirmations((current) => ({ ...current, [record.id]: false }));
-      if (result.status === 'created') {
-        setSuccess(
-          `Logo invoice created${result.providerResult?.invoiceNo ? `: ${result.providerResult.invoiceNo}` : ''}.`,
-        );
+	      setActiveTab('invoices');
+	      setLogoCreateConfirmations((current) => ({ ...current, [record.id]: false }));
+	      if (result.status === 'created') {
+	        const invoiceNo = result.reconciliation.invoiceNo ?? result.providerResult?.invoiceNo;
+	        setSuccess(
+	          `Logo invoice created${invoiceNo ? `: ${invoiceNo}` : ''}.`,
+	        );
       } else if (result.status === 'failed') {
         setError(result.record?.failureMessage || result.record?.failureCode || 'Logo invoice create failed.');
       } else if (result.status === 'unknown') {
@@ -2110,6 +2121,23 @@ export function AdminSettlementApprovalsPage() {
                   {' · '}
                   Invoice no {valueOrDash(createdInvoiceRecord.invoiceNo)}
                 </p>
+                {hasReconciledInvoiceFacts(createdInvoiceRecord) ? (
+                  <p>
+                    Reconciled from Logo sales invoice list
+                    {' · '}
+                    Date {formatDate(createdInvoiceRecord.reconciliationEvidence?.invoiceDate)}
+                    {' · '}
+                    Total {
+                      createdInvoiceRecord.reconciliationEvidence?.invoiceTotalMinor === null ||
+                      createdInvoiceRecord.reconciliationEvidence?.invoiceTotalMinor === undefined
+                        ? '—'
+                        : formatMinor(
+                          createdInvoiceRecord.reconciliationEvidence.invoiceTotalMinor,
+                          createdInvoiceRecord.reconciliationEvidence.invoiceCurrency ?? 'TRY',
+                        )
+                    }
+                  </p>
+                ) : null}
                 {!createdInvoiceRecord.invoiceNo ? (
                   <p>Invoice number not returned yet; provider UUID is available for reconciliation.</p>
                 ) : null}
@@ -2142,15 +2170,32 @@ export function AdminSettlementApprovalsPage() {
                       <span>{safeStatusLabel(record.provider)}</span>
                       <span><StatusBadge status={record.status} tone={getInvoiceRecordStatusTone(record)}>{safeStatusLabel(record.status)}</StatusBadge></span>
                       <span>{record.requestSnapshot?.requestSnapshotPresent ? 'Stored' : 'Missing'}</span>
-                      <span>
-                        <strong>{valueOrDash(providerReference)}</strong>
-                        {record.providerUuid && record.providerUuid !== providerReference ? (
-                          <small>Provider UUID {record.providerUuid}</small>
-                        ) : null}
-                        {!record.invoiceNo && record.providerUuid ? (
-                          <small>Invoice number not returned yet.</small>
-                        ) : null}
-                      </span>
+	                      <span>
+	                        <strong>{valueOrDash(providerReference)}</strong>
+	                        {record.providerUuid && record.providerUuid !== providerReference ? (
+	                          <small>Provider UUID {record.providerUuid}</small>
+	                        ) : null}
+	                        {record.reconciliationStatus ? (
+	                          <small>Reconciliation {safeStatusLabel(record.reconciliationStatus)}</small>
+	                        ) : null}
+	                        {record.reconciliationEvidence?.invoiceDate ? (
+	                          <small>Invoice date {formatDate(record.reconciliationEvidence.invoiceDate)}</small>
+	                        ) : null}
+	                        {record.reconciliationEvidence?.invoiceTotalMinor !== null &&
+	                        record.reconciliationEvidence?.invoiceTotalMinor !== undefined ? (
+	                          <small>
+	                            Invoice total {
+	                              formatMinor(
+	                                record.reconciliationEvidence.invoiceTotalMinor,
+	                                record.reconciliationEvidence.invoiceCurrency ?? 'TRY',
+	                              )
+	                            }
+	                          </small>
+	                        ) : null}
+	                        {!record.invoiceNo && record.providerUuid ? (
+	                          <small>Invoice number not returned yet.</small>
+	                        ) : null}
+	                      </span>
                       <span>{formatNumber(record.retryCount)}</span>
                       <span>
                         <button
@@ -2244,10 +2289,25 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
                       <MetadataRow label="UNKNOWN reason" value={valueOrDash(item.record.unknown.reason)} />
                       <MetadataRow label="UNKNOWN at" value={formatDate(item.record.unknown.unknownAt)} />
-                      <MetadataRow label="Reconciliation state" value={valueOrDash(item.record.unknown.reconciliationState)} />
-                      <MetadataRow label="Reconciled at" value={formatDate(item.record.unknown.reconciledAt)} />
-                      <MetadataRow label="Reconciliation evidence" value={`${item.record.unknown.reconciliationEvidence.present ? 'Present' : 'Missing'} · ${item.record.unknown.reconciliationEvidence.type}`} />
-                      <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
+	                      <MetadataRow label="Reconciliation state" value={valueOrDash(item.record.unknown.reconciliationState)} />
+	                      <MetadataRow label="Reconciled at" value={formatDate(item.record.unknown.reconciledAt)} />
+	                      <MetadataRow label="Reconciliation evidence" value={`${item.record.unknown.reconciliationEvidence.present ? 'Present' : 'Missing'} · ${item.record.unknown.reconciliationEvidence.type}`} />
+	                      <MetadataRow label="Reconciled invoice no" value={valueOrDash(item.record.unknown.reconciliationEvidenceSafe?.invoiceNo)} />
+	                      <MetadataRow label="Reconciled invoice date" value={formatDate(item.record.unknown.reconciliationEvidenceSafe?.invoiceDate)} />
+	                      <MetadataRow
+	                        label="Reconciled invoice total"
+	                        value={
+	                          item.record.unknown.reconciliationEvidenceSafe?.invoiceTotalMinor === null ||
+	                          item.record.unknown.reconciliationEvidenceSafe?.invoiceTotalMinor === undefined
+	                            ? '—'
+	                            : formatMinor(
+	                              item.record.unknown.reconciliationEvidenceSafe.invoiceTotalMinor,
+	                              item.record.unknown.reconciliationEvidenceSafe.invoiceCurrency ?? 'TRY',
+	                            )
+	                        }
+	                      />
+	                      <MetadataRow label="Reconciled currency" value={valueOrDash(item.record.unknown.reconciliationEvidenceSafe?.invoiceCurrency)} />
+	                      <MetadataRow label="Failure" value={valueOrDash(item.record.failure.failureMessage ?? item.record.failure.failureCode)} />
                     </MetadataGroup>
                     <ReadinessList title="Environment guard blockers" items={item.record.environmentGuard?.blockers ?? []} tone="danger" />
                     {item.record.status.toLowerCase() === 'created' ? (

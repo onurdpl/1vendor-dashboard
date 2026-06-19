@@ -306,8 +306,8 @@ describe('Logo sales invoice sync preview', () => {
       invoiceDate: '2026-06-13T09:00:00',
       invoiceTotalMinor: 24025,
       invoiceCurrency: 'TRY',
-      documentStatus: 'Created',
-      documentStatusCode: 5,
+      documentStatus: null,
+      documentStatusCode: null,
       gibStatus: 'Henüz GİB’e Gönderilmedi',
       gibStatusCode: 105,
     });

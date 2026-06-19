@@ -226,15 +226,16 @@ export type SettlementCommissionInvoiceRecord = {
   providerUuid: string | null;
   providerEttn: string | null;
   invoiceNo: string | null;
-  failureCode: string | null;
-  failureMessage: string | null;
-  failedAt: string | null;
-  unknownReason?: string | null;
-  unknownAt?: string | null;
-  reconciliationStatus?: string | null;
-  reconciliationEvidenceSnapshot?: SettlementCommissionInvoiceSnapshotMetadata;
-  reconciledAt?: string | null;
-  reconciledBy?: string | null;
+	  failureCode: string | null;
+	  failureMessage: string | null;
+	  failedAt: string | null;
+	  unknownReason?: string | null;
+	  unknownAt?: string | null;
+	  reconciliationStatus?: string | null;
+	  reconciliationEvidenceSnapshot?: SettlementCommissionInvoiceSnapshotMetadata;
+	  reconciliationEvidence?: SettlementCommissionInvoiceReconciliationEvidence | null;
+	  reconciledAt?: string | null;
+	  reconciledBy?: string | null;
   retryCount: number;
   lastRetriedAt: string | null;
   cancelledAt: string | null;
@@ -248,6 +249,21 @@ export type SettlementCommissionInvoiceSnapshotMetadata = {
   type: string;
   topLevelKeys: string[];
   approximateSizeBytes: number;
+};
+
+export type SettlementCommissionInvoiceReconciliationEvidence = {
+  reconciliationStatus: string | null;
+  matched: boolean | null;
+  invoiceNo: string | null;
+  invoiceDate: string | null;
+  invoiceTotalMinor: number | null;
+  invoiceCurrency: string | null;
+  gibStatus: string | null;
+  gibStatusCode: number | null;
+  documentStatus: string | null;
+  documentStatusCode: number | null;
+  documentType: string | null;
+  warnings: string[];
 };
 
 export type SettlementCommissionInvoiceRequestSnapshotMetadata = SettlementCommissionInvoiceSnapshotMetadata & {
@@ -338,10 +354,11 @@ export type SettlementCommissionInvoiceDiagnostics = {
       reason: string | null;
       unknownAt: string | null;
       reconciliationState: string | null;
-      reconciledAt: string | null;
-      reconciledBy: string | null;
-      reconciliationEvidence: SettlementCommissionInvoiceSnapshotMetadata;
-    };
+	      reconciledAt: string | null;
+	      reconciledBy: string | null;
+	      reconciliationEvidence: SettlementCommissionInvoiceSnapshotMetadata;
+	      reconciliationEvidenceSafe: SettlementCommissionInvoiceReconciliationEvidence | null;
+	    };
   };
 };
 
@@ -352,17 +369,27 @@ export type ExecuteSettlementLogoCommissionInvoiceCreateResponse = {
   settlementCommissionInvoiceId: string;
   status: 'blocked' | 'created' | 'failed' | 'unknown' | string;
   blockers: string[];
-  warnings: string[];
-  environmentGuard: SettlementCommissionInvoiceDiagnostics['record']['environmentGuard'] | null;
-  record: SettlementCommissionInvoiceRecord | null;
-  providerResult: {
-    httpStatus: number | null;
-    invoiceId: string | null;
-    uuid: string | null;
-    ettn: string | null;
-    invoiceNo: string | null;
-  } | null;
-};
+	  warnings: string[];
+	  environmentGuard: SettlementCommissionInvoiceDiagnostics['record']['environmentGuard'] | null;
+	  record: SettlementCommissionInvoiceRecord | null;
+	  providerResult: {
+	    httpStatus: number | null;
+	    invoiceId: string | null;
+	    uuid: string | null;
+	    ettn: string | null;
+	    invoiceNo: string | null;
+	  } | null;
+	  reconciliation: {
+	    attempted: boolean;
+	    status: string | null;
+	    matched: boolean;
+	    invoiceNo: string | null;
+	    invoiceDate: string | null;
+	    invoiceTotalMinor: number | null;
+	    invoiceCurrency: string | null;
+	    warnings: string[];
+	  };
+	};
 
 export type LogoOutgoingInvoiceSyncPreview = {
   ok: boolean;

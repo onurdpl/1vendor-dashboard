@@ -394,9 +394,8 @@ function readDocumentStatus(invoice: ProviderInvoiceRecord) {
       'documentStatusDescription',
       'statusDescription',
       'connectStatusDescription',
-      'status',
     ]),
-    code: readRecordNumber(invoice, ['documentStatusCode', 'connectStatusCode', 'statusCode']),
+    code: readRecordNumber(invoice, ['documentStatusCode', 'connectStatusCode']),
   };
 }
 
@@ -573,7 +572,9 @@ function mapFields(
 }
 
 function safeProviderFields(rows: ProviderInvoiceRecord[]) {
-  return uniqueStrings(rows.flatMap((row) => Object.keys(row))).sort();
+  return uniqueStrings(rows.flatMap((row) => Object.keys(row)))
+    .filter((key) => !/(access|refresh)?token|password|secret|api[_-]?key|authorization|raw(payload|body|response)?/i.test(key))
+    .sort();
 }
 
 async function fetchSalesInvoicePages(input: {

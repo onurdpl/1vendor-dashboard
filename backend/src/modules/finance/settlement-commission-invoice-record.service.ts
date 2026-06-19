@@ -42,6 +42,7 @@ export type SettlementCommissionInvoiceRecordDto = {
   unknownAt: string | null;
   reconciliationStatus: string | null;
   reconciliationEvidenceSnapshot: SnapshotMetadata;
+  reconciliationEvidence: SettlementCommissionInvoiceReconciliationEvidenceDto | null;
   reconciledAt: string | null;
   reconciledBy: string | null;
   retryCount: number;
@@ -79,6 +80,18 @@ export type MarkSettlementCommissionInvoiceUnknownInput = {
   settlementCommissionInvoiceId: string;
   unknownReason: string;
   responseSnapshotJson?: Prisma.InputJsonValue | null;
+};
+
+export type ApplySettlementCommissionInvoiceReconciliationInput = {
+  settlementCommissionInvoiceId: string;
+  reconciliationStatus: string;
+  reconciliationEvidenceJson: Prisma.InputJsonValue;
+  providerInvoiceId?: string | null;
+  providerUuid?: string | null;
+  providerEttn?: string | null;
+  invoiceNo?: string | null;
+  documentStatus?: string | null;
+  reconciledBy?: string | null;
 };
 
 export type ResolveSettlementCommissionInvoiceUnknownAsCreatedInput = MarkSettlementCommissionInvoiceCreatedInput & {
@@ -165,6 +178,7 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
       reconciledAt: string | null;
       reconciledBy: string | null;
       reconciliationEvidence: SnapshotMetadata;
+      reconciliationEvidenceSafe: SettlementCommissionInvoiceReconciliationEvidenceDto | null;
     };
   };
 };
@@ -181,6 +195,21 @@ type RequestSnapshotMetadata = SnapshotMetadata & {
   payloadBuilderVersion: string | null;
   requestBuiltAt: string | null;
   snapshotSource: 'immutable_settlement_truth' | null;
+};
+
+type SettlementCommissionInvoiceReconciliationEvidenceDto = {
+  reconciliationStatus: string | null;
+  matched: boolean | null;
+  invoiceNo: string | null;
+  invoiceDate: string | null;
+  invoiceTotalMinor: number | null;
+  invoiceCurrency: string | null;
+  gibStatus: string | null;
+  gibStatusCode: number | null;
+  documentStatus: string | null;
+  documentStatusCode: number | null;
+  documentType: string | null;
+  warnings: string[];
 };
 
 function toIso(value: Date | null | undefined) {
@@ -201,6 +230,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim());
+}
+
+function getNestedRecord(value: unknown, keys: string[]) {
+  let current: unknown = value;
+  for (const key of keys) {
+    if (!isRecord(current)) {
+      return null;
+    }
+    current = current[key];
+  }
+  return isRecord(current) ? current : null;
+}
+
+function getReconciliationEvidenceDto(value: unknown): SettlementCommissionInvoiceReconciliationEvidenceDto | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const mappedFields = getNestedRecord(value, ['mappedFields']) ?? {};
+  return {
+    reconciliationStatus: readString(value.reconciliationStatus),
+    matched: readBoolean(value.matched),
+    invoiceNo: readString(mappedFields.invoiceNoCandidate),
+    invoiceDate: readString(mappedFields.invoiceDate),
+    invoiceTotalMinor: readNumber(mappedFields.invoiceTotalMinor),
+    invoiceCurrency: readString(mappedFields.invoiceCurrency),
+    gibStatus: readString(mappedFields.gibStatus),
+    gibStatusCode: readNumber(mappedFields.gibStatusCode),
+    documentStatus: readString(mappedFields.documentStatus),
+    documentStatusCode: readNumber(mappedFields.documentStatusCode),
+    documentType: readString(mappedFields.documentType),
+    warnings: readStringArray(value.warnings),
+  };
 }
 
 function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInvoiceRecordDto {
@@ -230,6 +313,7 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     unknownAt: toIso(record.unknownAt),
     reconciliationStatus: record.reconciliationStatus,
     reconciliationEvidenceSnapshot: getSnapshotMetadata(record.reconciliationEvidenceJson),
+    reconciliationEvidence: getReconciliationEvidenceDto(record.reconciliationEvidenceJson),
     reconciledAt: toIso(record.reconciledAt),
     reconciledBy: record.reconciledBy,
     retryCount: record.retryCount,
@@ -617,6 +701,39 @@ export async function markUnknown(
   return mapRecord(record);
 }
 
+export async function applySettlementCommissionInvoiceReconciliation(
+  input: ApplySettlementCommissionInvoiceReconciliationInput,
+): Promise<SettlementCommissionInvoiceRecordDto> {
+  assertReconciliationEvidence(input.reconciliationEvidenceJson);
+  const existing = await getRequiredRecord(input.settlementCommissionInvoiceId);
+  assertRecordStatus(existing, [SettlementCommissionInvoiceStatus.CREATED], 'applySettlementCommissionInvoiceReconciliation');
+  const incomingInvoiceNo = readString(input.invoiceNo);
+  const existingInvoiceNo = readString(existing.invoiceNo);
+  const hasInvoiceNoConflict = Boolean(
+    incomingInvoiceNo &&
+    existingInvoiceNo &&
+    incomingInvoiceNo !== existingInvoiceNo,
+  );
+  const record = await prisma.settlementCommissionInvoice.update({
+    where: {
+      id: input.settlementCommissionInvoiceId,
+    },
+    data: {
+      providerInvoiceId: input.providerInvoiceId ?? existing.providerInvoiceId,
+      providerUuid: input.providerUuid ?? existing.providerUuid,
+      providerEttn: input.providerEttn ?? existing.providerEttn,
+      invoiceNo: hasInvoiceNoConflict ? existing.invoiceNo : incomingInvoiceNo ?? existing.invoiceNo,
+      documentStatus: input.documentStatus ?? existing.documentStatus,
+      reconciliationStatus: hasInvoiceNoConflict ? 'conflict' : input.reconciliationStatus,
+      reconciliationEvidenceJson: input.reconciliationEvidenceJson,
+      reconciledAt: new Date(),
+      reconciledBy: input.reconciledBy ?? 'system',
+    },
+  });
+
+  return mapRecord(record);
+}
+
 export async function resolveUnknownAsCreated(
   input: ResolveSettlementCommissionInvoiceUnknownAsCreatedInput,
 ): Promise<SettlementCommissionInvoiceRecordDto> {
@@ -763,6 +880,7 @@ export async function getSettlementCommissionInvoiceDiagnostics(
         reconciledAt: toIso(record.reconciledAt),
         reconciledBy: record.reconciledBy,
         reconciliationEvidence: getSnapshotMetadata(record.reconciliationEvidenceJson),
+        reconciliationEvidenceSafe: getReconciliationEvidenceDto(record.reconciliationEvidenceJson),
       },
     },
   };

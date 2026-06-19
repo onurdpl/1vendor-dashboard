@@ -19,14 +19,30 @@ import {
 } from '../logo-isbasi/logo-execution-environment-guard.service.js';
 import { validateLogoExecutionContractRecord } from './settlement-logo-execution-contract.service.js';
 import {
+  applySettlementCommissionInvoiceReconciliation,
   incrementRetry,
   markCreated,
   markFailed,
   markUnknown,
   type SettlementCommissionInvoiceRecordDto,
 } from './settlement-commission-invoice-record.service.js';
+import {
+  previewSettlementLogoOutgoingInvoiceSync,
+  type LogoOutgoingInvoiceSyncPreviewResult,
+} from './settlement-logo-outgoing-invoice-sync-preview.service.js';
 
-type LogoCreateClient = Pick<LogoIsbasiClient, 'login' | 'createIntegrationInvoice'>;
+type LogoCreateClient = Pick<LogoIsbasiClient, 'login' | 'createIntegrationInvoice' | 'listSalesInvoices'>;
+
+type LogoCreateReconciliationResult = {
+  attempted: boolean;
+  status: string | null;
+  matched: boolean;
+  invoiceNo: string | null;
+  invoiceDate: string | null;
+  invoiceTotalMinor: number | null;
+  invoiceCurrency: string | null;
+  warnings: string[];
+};
 
 export type ExecuteSettlementLogoCommissionInvoiceCreateResult = {
   ok: boolean;
@@ -45,6 +61,7 @@ export type ExecuteSettlementLogoCommissionInvoiceCreateResult = {
     ettn: string | null;
     invoiceNo: string | null;
   } | null;
+  reconciliation: LogoCreateReconciliationResult;
 };
 
 export type ExecuteSettlementLogoCommissionInvoiceCreateOptions = {
@@ -154,7 +171,168 @@ function buildBlockedResult(input: {
     environmentGuard: input.environmentGuard ?? null,
     record: null,
     providerResult: null,
+    reconciliation: buildSkippedReconciliation(),
   };
+}
+
+function buildSkippedReconciliation(): LogoCreateReconciliationResult {
+  return {
+    attempted: false,
+    status: null,
+    matched: false,
+    invoiceNo: null,
+    invoiceDate: null,
+    invoiceTotalMinor: null,
+    invoiceCurrency: null,
+    warnings: [],
+  };
+}
+
+function buildReconciliationFromPreview(input: {
+  preview: LogoOutgoingInvoiceSyncPreviewResult;
+  status: string;
+  warnings?: string[];
+}) {
+  return {
+    attempted: true,
+    status: input.status,
+    matched: input.preview.search.matched,
+    invoiceNo: input.preview.mappedFields.invoiceNoCandidate,
+    invoiceDate: input.preview.mappedFields.invoiceDate,
+    invoiceTotalMinor: input.preview.mappedFields.invoiceTotalMinor,
+    invoiceCurrency: input.preview.mappedFields.invoiceCurrency,
+    warnings: Array.from(new Set(input.warnings ?? input.preview.warnings)),
+  };
+}
+
+function buildReconciliationEvidence(input: {
+  preview: LogoOutgoingInvoiceSyncPreviewResult;
+  status: string;
+  warnings: string[];
+}): Prisma.InputJsonObject {
+  return {
+    provider: 'LOGO_ISBASI',
+    action: 'salesInvoiceListReconciliation',
+    sourceEndpoint: '/api/v1.0/invoices/invoices',
+    reconciliationStatus: input.status,
+    matched: input.preview.search.matched,
+    ambiguity: input.preview.search.ambiguity,
+    warnings: input.warnings,
+    search: input.preview.search,
+    record: input.preview.record,
+    mappedFields: input.preview.mappedFields,
+    matchedInvoice: input.preview.matchedInvoice,
+    candidateCount: input.preview.candidateInvoices.length,
+    candidateInvoices: input.preview.candidateInvoices.slice(0, 20),
+    providerFieldsObserved: input.preview.providerFieldsObserved,
+  } as Prisma.InputJsonObject;
+}
+
+function buildFailedReconciliationEvidence(input: {
+  error: unknown;
+  warnings: string[];
+}): Prisma.InputJsonObject {
+  return {
+    provider: 'LOGO_ISBASI',
+    action: 'salesInvoiceListReconciliation',
+    sourceEndpoint: '/api/v1.0/invoices/invoices',
+    reconciliationStatus: 'failed',
+    matched: false,
+    ambiguity: false,
+    warnings: input.warnings,
+    errorMessage: safeErrorMessage(input.error),
+  } as Prisma.InputJsonObject;
+}
+
+async function reconcileCreatedSalesInvoice(input: {
+  settlementCommissionInvoiceId: string;
+  env: AppEnv;
+  client: LogoCreateClient;
+  createdRecord: SettlementCommissionInvoiceRecordDto;
+}) {
+  try {
+    const preview = await previewSettlementLogoOutgoingInvoiceSync(input.settlementCommissionInvoiceId, {
+      env: input.env,
+      client: input.client,
+    });
+    const hasInvoiceNoConflict = Boolean(
+      preview.search.matched &&
+      preview.record?.invoiceNo &&
+      preview.mappedFields.invoiceNoCandidate &&
+      preview.record.invoiceNo !== preview.mappedFields.invoiceNoCandidate,
+    );
+    const status = hasInvoiceNoConflict
+      ? 'conflict'
+      : preview.search.matched
+        ? 'matched'
+        : preview.search.ambiguity
+          ? 'ambiguous'
+          : 'not_found';
+    const warnings = hasInvoiceNoConflict
+      ? ['Logo sales invoice reconciliation found a different invoice number; existing invoiceNo was not overwritten.']
+      : preview.search.matched
+        ? preview.warnings
+        : preview.search.ambiguity
+          ? ['Logo sales invoice reconciliation found multiple matching invoices; no invoice fields were persisted.']
+          : ['Logo sales invoice reconciliation did not find a matching sales invoice yet.'];
+    const evidence = buildReconciliationEvidence({ preview, status, warnings });
+    const reconciledRecord = await applySettlementCommissionInvoiceReconciliation({
+      settlementCommissionInvoiceId: input.settlementCommissionInvoiceId,
+      reconciliationStatus: status,
+      reconciliationEvidenceJson: evidence,
+      providerInvoiceId: preview.search.matched ? preview.mappedFields.providerInvoiceId : null,
+      providerUuid: preview.search.matched ? preview.mappedFields.providerUuid : null,
+      providerEttn: preview.search.matched ? preview.mappedFields.providerEttn : null,
+      invoiceNo: preview.search.matched ? preview.mappedFields.invoiceNoCandidate : null,
+      documentStatus: preview.search.matched ? preview.mappedFields.documentStatus : null,
+      reconciledBy: 'system',
+    });
+    return {
+      record: reconciledRecord,
+      reconciliation: buildReconciliationFromPreview({
+        preview,
+        status: reconciledRecord.reconciliationStatus ?? status,
+        warnings,
+      }),
+    };
+  } catch (error) {
+    const warnings = [`Logo sales invoice reconciliation failed after create: ${safeErrorMessage(error)}`];
+    try {
+      const failedRecord = await applySettlementCommissionInvoiceReconciliation({
+        settlementCommissionInvoiceId: input.settlementCommissionInvoiceId,
+        reconciliationStatus: 'failed',
+        reconciliationEvidenceJson: buildFailedReconciliationEvidence({ error, warnings }),
+        reconciledBy: 'system',
+      });
+      return {
+        record: failedRecord,
+        reconciliation: {
+          attempted: true,
+          status: 'failed',
+          matched: false,
+          invoiceNo: null,
+          invoiceDate: null,
+          invoiceTotalMinor: null,
+          invoiceCurrency: null,
+          warnings,
+        },
+      };
+    } catch {
+      return {
+        record: input.createdRecord,
+        reconciliation: {
+          attempted: true,
+          status: 'failed',
+          matched: false,
+          invoiceNo: null,
+          invoiceDate: null,
+          invoiceTotalMinor: null,
+          invoiceCurrency: null,
+          warnings,
+        },
+      };
+    }
+  }
 }
 
 function getMissingCredentialEnv(env: AppEnv) {
@@ -447,6 +625,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       environmentGuard: tenantGuard,
       record: unknown,
       providerResult: null,
+      reconciliation: buildSkippedReconciliation(),
     };
   }
 
@@ -483,6 +662,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
         ettn: identifiers.ettn,
         invoiceNo: identifiers.invoiceNo,
       },
+      reconciliation: buildSkippedReconciliation(),
     };
   }
 
@@ -509,6 +689,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
         ettn: identifiers.ettn,
         invoiceNo: identifiers.invoiceNo,
       },
+      reconciliation: buildSkippedReconciliation(),
     };
   }
 
@@ -521,6 +702,12 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       invoiceNo: identifiers.invoiceNo,
       responseSnapshotJson,
     });
+    const reconciliationResult = await reconcileCreatedSalesInvoice({
+      settlementCommissionInvoiceId,
+      env: options.env,
+      client,
+      createdRecord: created,
+    });
     return {
       ok: true,
       writesPerformed: true,
@@ -528,9 +715,9 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
       settlementCommissionInvoiceId,
       status: 'created',
       blockers: [],
-      warnings: tenantGuard.warnings,
+      warnings: Array.from(new Set([...tenantGuard.warnings, ...reconciliationResult.reconciliation.warnings])),
       environmentGuard: tenantGuard,
-      record: created,
+      record: reconciliationResult.record,
       providerResult: {
         httpStatus: result.status,
         invoiceId: identifiers.invoiceId,
@@ -538,6 +725,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
         ettn: identifiers.ettn,
         invoiceNo: identifiers.invoiceNo,
       },
+      reconciliation: reconciliationResult.reconciliation,
     };
   } catch (error) {
     try {
@@ -566,6 +754,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
           ettn: identifiers.ettn,
           invoiceNo: identifiers.invoiceNo,
         },
+        reconciliation: buildSkippedReconciliation(),
       };
     } catch (unknownError) {
       return {
@@ -587,6 +776,7 @@ export async function executeSettlementLogoCommissionInvoiceCreate(
           ettn: identifiers.ettn,
           invoiceNo: identifiers.invoiceNo,
         },
+        reconciliation: buildSkippedReconciliation(),
       };
     }
   }

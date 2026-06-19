@@ -152,7 +152,87 @@ function buildClient() {
       responseBodySnippet: '{"ok":true}',
       queryParameters: [],
     }),
+    listSalesInvoices: vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      jsonParseFailed: false,
+      body: {
+        data: {
+          data: [buildSalesInvoice()],
+          totalCount: 1,
+        },
+      },
+      requestUrl: 'https://logo.test/api/v1.0/invoices/invoices',
+      requestMethod: 'POST',
+      requestContentType: 'application/json; charset=utf-8',
+      requestAccept: 'application/json',
+      responseContentType: 'application/json',
+      responseBodySnippet: '{"ok":true}',
+      queryParameters: [],
+    }),
   };
+}
+
+function buildSalesInvoice(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'logo-invoice-1',
+    invoiceId: 'logo-invoice-1',
+    salesInvoiceId: '750',
+    uuid: 'logo-uuid-1',
+    uuId: 'logo-uuid-1',
+    invoiceNumber: 'REE2026000000068',
+    date: '2026-06-18T17:45:00',
+    amount: 1367.64,
+    currency: 'TL',
+    gibStatus: '0',
+    eType: 'SALES_INVOICE',
+    ...overrides,
+  };
+}
+
+function buildReconciliationEvidence(overrides: Record<string, unknown> = {}) {
+  return {
+    provider: 'LOGO_ISBASI',
+    action: 'salesInvoiceListReconciliation',
+    reconciliationStatus: 'matched',
+    matched: true,
+    warnings: [],
+    mappedFields: {
+      invoiceNoCandidate: 'REE2026000000068',
+      invoiceDate: '2026-06-18T17:45:00',
+      invoiceTotalMinor: 136764,
+      invoiceCurrency: 'TL',
+      gibStatus: '0',
+      gibStatusCode: null,
+      documentStatus: null,
+      documentStatusCode: null,
+      documentType: 'SALES_INVOICE',
+    },
+    ...overrides,
+  };
+}
+
+function buildCreatedRecord(overrides: Record<string, unknown> = {}) {
+  return buildRecord({
+    status: SettlementCommissionInvoiceStatus.CREATED,
+    providerInvoiceId: 'logo-invoice-1',
+    providerUuid: 'logo-uuid-1',
+    providerEttn: 'logo-ettn-1',
+    invoiceNo: null,
+    responseSnapshotJson: { ok: true },
+    ...overrides,
+  });
+}
+
+function buildReconciledRecord(overrides: Record<string, unknown> = {}) {
+  return buildCreatedRecord({
+    invoiceNo: 'REE2026000000068',
+    reconciliationStatus: 'matched',
+    reconciliationEvidenceJson: buildReconciliationEvidence(),
+    reconciledAt: new Date('2026-06-18T18:00:00.000Z'),
+    reconciledBy: 'system',
+    ...overrides,
+  });
 }
 
 describe('controlled settlement Logo commission invoice create', () => {
@@ -163,22 +243,19 @@ describe('controlled settlement Logo commission invoice create', () => {
     prismaMock.settlementCommissionInvoice.findFirst.mockResolvedValue({ id: 'settlement-invoice-1', status: 'PENDING' });
   });
 
-  it('calls Logo once for a PENDING record with guard pass and marks CREATED', async () => {
-    const pending = buildRecord();
-    prismaMock.settlementCommissionInvoice.findUnique
-      .mockResolvedValueOnce(pending)
-      .mockResolvedValueOnce(pending);
-    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
-      buildRecord({
-        status: SettlementCommissionInvoiceStatus.CREATED,
-        providerInvoiceId: 'logo-invoice-1',
-        providerUuid: 'logo-uuid-1',
-        providerEttn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-        responseSnapshotJson: { ok: true },
-      }),
-    );
-    const client = buildClient();
+	  it('calls Logo once for a PENDING record with guard pass and marks CREATED', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const reconciled = buildReconciledRecord();
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(reconciled);
+	    const client = buildClient();
 
     const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
       env: buildEnv(),
@@ -193,50 +270,75 @@ describe('controlled settlement Logo commission invoice create', () => {
       providerResult: {
         httpStatus: 200,
         invoiceId: 'logo-invoice-1',
-        uuid: 'logo-uuid-1',
-        ettn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-      },
-      record: {
-        status: 'created',
-        providerInvoiceId: 'logo-invoice-1',
-        providerUuid: 'logo-uuid-1',
-        providerEttn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-      },
-    });
+	        uuid: 'logo-uuid-1',
+	        ettn: 'logo-ettn-1',
+	        invoiceNo: 'ABC202600001',
+	      },
+	      reconciliation: {
+	        attempted: true,
+	        status: 'matched',
+	        matched: true,
+	        invoiceNo: 'REE2026000000068',
+	        invoiceDate: '2026-06-18T17:45:00',
+	        invoiceTotalMinor: 136764,
+	        invoiceCurrency: 'TL',
+	      },
+	      record: {
+	        status: 'created',
+	        providerInvoiceId: 'logo-invoice-1',
+	        providerUuid: 'logo-uuid-1',
+	        providerEttn: 'logo-ettn-1',
+	        invoiceNo: 'REE2026000000068',
+	        reconciliationStatus: 'matched',
+	      },
+	    });
     expect(client.createIntegrationInvoice).toHaveBeenCalledTimes(1);
     expect(client.createIntegrationInvoice).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: 'tenant-1' }),
       pending.requestSnapshotJson.logoPayload,
     );
-    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
-      where: { id: 'settlement-invoice-1' },
-      data: expect.objectContaining({
-        status: SettlementCommissionInvoiceStatus.CREATED,
-        providerInvoiceId: 'logo-invoice-1',
-        providerUuid: 'logo-uuid-1',
-        providerEttn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-      }),
-    });
-  });
+	    expect(client.listSalesInvoices).toHaveBeenCalledTimes(1);
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(1, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        status: SettlementCommissionInvoiceStatus.CREATED,
+	        providerInvoiceId: 'logo-invoice-1',
+	        providerUuid: 'logo-uuid-1',
+	        providerEttn: 'logo-ettn-1',
+	        invoiceNo: 'ABC202600001',
+	      }),
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        invoiceNo: 'REE2026000000068',
+	        reconciliationStatus: 'matched',
+	        reconciliationEvidenceJson: expect.objectContaining({
+	          action: 'salesInvoiceListReconciliation',
+	          mappedFields: expect.objectContaining({
+	            invoiceNoCandidate: 'REE2026000000068',
+	            invoiceDate: '2026-06-18T17:45:00',
+	            invoiceTotalMinor: 136764,
+	            invoiceCurrency: 'TL',
+	          }),
+	        }),
+	        reconciledBy: 'system',
+	      }),
+	    });
+	  });
 
-  it('does not require expected tenant env when other create guards pass', async () => {
-    const pending = buildRecord();
-    prismaMock.settlementCommissionInvoice.findUnique
-      .mockResolvedValueOnce(pending)
-      .mockResolvedValueOnce(pending);
-    prismaMock.settlementCommissionInvoice.update.mockResolvedValue(
-      buildRecord({
-        status: SettlementCommissionInvoiceStatus.CREATED,
-        providerInvoiceId: 'logo-invoice-1',
-        providerUuid: 'logo-uuid-1',
-        providerEttn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-        responseSnapshotJson: { ok: true },
-      }),
-    );
+	  it('does not require expected tenant env when other create guards pass', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const reconciled = buildReconciledRecord();
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(reconciled);
     const client = buildClient();
 
     const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
@@ -489,30 +591,39 @@ describe('controlled settlement Logo commission invoice create', () => {
     expect(client.createIntegrationInvoice).not.toHaveBeenCalled();
   });
 
-  it('allows FAILED retry, increments retry count, and marks CREATED on success', async () => {
-    const failed = buildRecord({
-      status: SettlementCommissionInvoiceStatus.FAILED,
-      retryCount: 1,
-      failureCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
-    });
-    prismaMock.settlementCommissionInvoice.findUnique
-      .mockResolvedValueOnce(failed)
-      .mockResolvedValueOnce(failed)
-      .mockResolvedValueOnce(failed);
-    prismaMock.settlementCommissionInvoice.update
-      .mockResolvedValueOnce(buildRecord({
-        status: SettlementCommissionInvoiceStatus.FAILED,
+	  it('allows FAILED retry, increments retry count, and marks CREATED on success', async () => {
+	    const failed = buildRecord({
+	      status: SettlementCommissionInvoiceStatus.FAILED,
+	      retryCount: 1,
+	      failureCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
+	    });
+	    const created = buildCreatedRecord({
+	      retryCount: 2,
+	    });
+	    const reconciled = buildReconciledRecord({
+	      retryCount: 2,
+	    });
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(failed)
+	      .mockResolvedValueOnce(failed)
+	      .mockResolvedValueOnce(failed)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(buildRecord({
+	        status: SettlementCommissionInvoiceStatus.FAILED,
         retryCount: 2,
         lastRetriedAt: new Date('2026-06-12T10:08:00.000Z'),
       }))
-      .mockResolvedValueOnce(buildRecord({
-        status: SettlementCommissionInvoiceStatus.CREATED,
-        retryCount: 2,
-        providerInvoiceId: 'logo-invoice-1',
-        providerUuid: 'logo-uuid-1',
-        providerEttn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-      }));
+	      .mockResolvedValueOnce(buildRecord({
+	        status: SettlementCommissionInvoiceStatus.CREATED,
+	        retryCount: 2,
+	        providerInvoiceId: 'logo-invoice-1',
+	        providerUuid: 'logo-uuid-1',
+	        providerEttn: 'logo-ettn-1',
+	        invoiceNo: 'ABC202600001',
+	      }))
+	      .mockResolvedValueOnce(reconciled);
     const client = buildClient();
 
     const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
@@ -520,14 +631,16 @@ describe('controlled settlement Logo commission invoice create', () => {
       client,
     });
 
-    expect(result).toMatchObject({
-      ok: true,
-      status: 'created',
-      record: {
-        status: 'created',
-        retryCount: 2,
-      },
-    });
+	    expect(result).toMatchObject({
+	      ok: true,
+	      status: 'created',
+	      record: {
+	        status: 'created',
+	        retryCount: 2,
+	        invoiceNo: 'REE2026000000068',
+	        reconciliationStatus: 'matched',
+	      },
+	    });
     expect(client.createIntegrationInvoice).toHaveBeenCalledTimes(1);
     expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(1, {
       where: { id: 'settlement-invoice-1' },
@@ -538,11 +651,274 @@ describe('controlled settlement Logo commission invoice create', () => {
         lastRetriedAt: expect.any(Date),
       },
     });
-    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
-      where: { id: 'settlement-invoice-1' },
-      data: expect.objectContaining({
-        status: SettlementCommissionInvoiceStatus.CREATED,
-      }),
-    });
-  });
-});
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        status: SettlementCommissionInvoiceStatus.CREATED,
+	      }),
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(3, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        reconciliationStatus: 'matched',
+	        invoiceNo: 'REE2026000000068',
+	      }),
+	    });
+	  });
+
+	  it('keeps CREATED and records non-blocking warning when automatic reconciliation finds no match', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const notFound = buildCreatedRecord({
+	      reconciliationStatus: 'not_found',
+	      reconciliationEvidenceJson: buildReconciliationEvidence({
+	        reconciliationStatus: 'not_found',
+	        matched: false,
+	        warnings: ['Logo sales invoice reconciliation did not find a matching sales invoice yet.'],
+	      }),
+	    });
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(notFound);
+	    const client = buildClient();
+	    client.listSalesInvoices.mockResolvedValueOnce({
+	      status: 200,
+	      ok: true,
+	      jsonParseFailed: false,
+	      body: {
+	        data: {
+	          data: [buildSalesInvoice({ id: 'other-id', invoiceId: 'other-id', salesInvoiceId: 'other-sales', uuid: 'other-uuid', uuId: 'other-uuid' })],
+	          totalCount: 1,
+	        },
+	      },
+	    });
+
+	    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+	      env: buildEnv(),
+	      client,
+	    });
+
+	    expect(result).toMatchObject({
+	      ok: true,
+	      status: 'created',
+	      reconciliation: {
+	        attempted: true,
+	        status: 'not_found',
+	        matched: false,
+	      },
+	      warnings: ['Logo sales invoice reconciliation did not find a matching sales invoice yet.'],
+	      record: {
+	        status: 'created',
+	        reconciliationStatus: 'not_found',
+	      },
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        reconciliationStatus: 'not_found',
+	        invoiceNo: null,
+	      }),
+	    });
+	  });
+
+	  it('keeps CREATED and records non-blocking warning when automatic reconciliation is ambiguous', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const ambiguous = buildCreatedRecord({
+	      reconciliationStatus: 'ambiguous',
+	      reconciliationEvidenceJson: buildReconciliationEvidence({
+	        reconciliationStatus: 'ambiguous',
+	        matched: false,
+	        ambiguity: true,
+	        warnings: ['Logo sales invoice reconciliation found multiple matching invoices; no invoice fields were persisted.'],
+	      }),
+	    });
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(ambiguous);
+	    const client = buildClient();
+	    client.listSalesInvoices.mockResolvedValueOnce({
+	      status: 200,
+	      ok: true,
+	      jsonParseFailed: false,
+	      body: {
+	        data: {
+	          data: [
+	            buildSalesInvoice({ id: 'logo-invoice-1' }),
+	            buildSalesInvoice({ id: 'logo-invoice-1', invoiceId: 'logo-invoice-1-b' }),
+	          ],
+	          totalCount: 2,
+	        },
+	      },
+	    });
+
+	    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+	      env: buildEnv(),
+	      client,
+	    });
+
+	    expect(result).toMatchObject({
+	      ok: true,
+	      status: 'created',
+	      reconciliation: {
+	        attempted: true,
+	        status: 'ambiguous',
+	        matched: false,
+	      },
+	      warnings: ['Logo sales invoice reconciliation found multiple matching invoices; no invoice fields were persisted.'],
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        reconciliationStatus: 'ambiguous',
+	        invoiceNo: null,
+	      }),
+	    });
+	  });
+
+	  it('does not overwrite an existing invoiceNo when reconciliation finds a different invoice number', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord({ invoiceNo: 'ABC202600001' });
+	    const conflict = buildCreatedRecord({
+	      invoiceNo: 'ABC202600001',
+	      reconciliationStatus: 'conflict',
+	      reconciliationEvidenceJson: buildReconciliationEvidence(),
+	    });
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(conflict);
+	    const client = buildClient();
+
+	    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+	      env: buildEnv(),
+	      client,
+	    });
+
+	    expect(result).toMatchObject({
+	      ok: true,
+	      status: 'created',
+	      reconciliation: {
+	        attempted: true,
+	        status: 'conflict',
+	        matched: true,
+	        invoiceNo: 'REE2026000000068',
+	      },
+	      record: {
+	        invoiceNo: 'ABC202600001',
+	        reconciliationStatus: 'conflict',
+	      },
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        invoiceNo: 'ABC202600001',
+	        reconciliationStatus: 'conflict',
+	      }),
+	    });
+	  });
+
+	  it('does not persist raw provider sales invoice payload in reconciliation evidence', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const reconciled = buildReconciledRecord();
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(reconciled);
+	    const client = buildClient();
+	    client.listSalesInvoices.mockResolvedValueOnce({
+	      status: 200,
+	      ok: true,
+	      jsonParseFailed: false,
+	      body: {
+	        data: {
+	          data: [
+	            buildSalesInvoice({
+	              rawPayload: { accessToken: 'secret-token' },
+	              apiKey: 'secret-api-key',
+	            }),
+	          ],
+	          totalCount: 1,
+	        },
+	      },
+	    });
+
+	    await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+	      env: buildEnv(),
+	      client,
+	    });
+
+	    const reconciliationUpdate = prismaMock.settlementCommissionInvoice.update.mock.calls[1][0];
+	    expect(JSON.stringify(reconciliationUpdate.data.reconciliationEvidenceJson)).not.toContain('rawPayload');
+	    expect(JSON.stringify(reconciliationUpdate.data.reconciliationEvidenceJson)).not.toContain('secret-token');
+	    expect(JSON.stringify(reconciliationUpdate.data.reconciliationEvidenceJson)).not.toContain('secret-api-key');
+	  });
+
+	  it('keeps CREATED when automatic reconciliation fails after successful create', async () => {
+	    const pending = buildRecord();
+	    const created = buildCreatedRecord();
+	    const failedReconciliation = buildCreatedRecord({
+	      reconciliationStatus: 'failed',
+	      reconciliationEvidenceJson: buildReconciliationEvidence({
+	        reconciliationStatus: 'failed',
+	        matched: false,
+	        warnings: ['Logo sales invoice reconciliation failed after create: sales list unavailable'],
+	      }),
+	    });
+	    prismaMock.settlementCommissionInvoice.findUnique
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(pending)
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(created);
+	    prismaMock.settlementCommissionInvoice.update
+	      .mockResolvedValueOnce(created)
+	      .mockResolvedValueOnce(failedReconciliation);
+	    const client = buildClient();
+	    client.listSalesInvoices.mockRejectedValueOnce(new Error('sales list unavailable'));
+
+	    const result = await executeSettlementLogoCommissionInvoiceCreate('settlement-invoice-1', {
+	      env: buildEnv(),
+	      client,
+	    });
+
+	    expect(result).toMatchObject({
+	      ok: true,
+	      status: 'created',
+	      reconciliation: {
+	        attempted: true,
+	        status: 'failed',
+	        matched: false,
+	      },
+	      warnings: ['Logo sales invoice reconciliation failed after create: sales list unavailable'],
+	      record: {
+	        status: 'created',
+	        reconciliationStatus: 'failed',
+	      },
+	    });
+	    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenNthCalledWith(2, {
+	      where: { id: 'settlement-invoice-1' },
+	      data: expect.objectContaining({
+	        reconciliationStatus: 'failed',
+	      }),
+	    });
+	  });
+	});

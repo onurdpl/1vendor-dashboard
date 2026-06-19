@@ -1069,22 +1069,47 @@ const createdLogoInvoiceResponse = {
   blockers: [],
   warnings: [],
   environmentGuard: allowedDiagnosticsResponse.record.environmentGuard,
-  record: {
-    ...createRequestSnapshotResponse.record,
-    status: 'created' as const,
-    providerInvoiceId: 'logo-invoice-1',
-    providerUuid: 'logo-uuid-1',
-    providerEttn: 'logo-ettn-1',
-    invoiceNo: 'ABC202600001',
-  },
+	  record: {
+	    ...createRequestSnapshotResponse.record,
+	    status: 'created' as const,
+	    providerInvoiceId: 'logo-invoice-1',
+	    providerUuid: 'logo-uuid-1',
+	    providerEttn: 'logo-ettn-1',
+	    invoiceNo: 'REE2026000000068',
+	    reconciliationStatus: 'matched',
+	    reconciliationEvidence: {
+	      reconciliationStatus: 'matched',
+	      matched: true,
+	      invoiceNo: 'REE2026000000068',
+	      invoiceDate: '2026-06-18T17:45:00',
+	      invoiceTotalMinor: 136764,
+	      invoiceCurrency: 'TL',
+	      gibStatus: '0',
+	      gibStatusCode: null,
+	      documentStatus: null,
+	      documentStatusCode: null,
+	      documentType: 'SALES_INVOICE',
+	      warnings: [],
+	    },
+	  },
   providerResult: {
     httpStatus: 200,
     invoiceId: 'logo-invoice-1',
     uuid: 'logo-uuid-1',
     ettn: 'logo-ettn-1',
-    invoiceNo: 'ABC202600001',
-  },
-};
+	    invoiceNo: 'ABC202600001',
+	  },
+	  reconciliation: {
+	    attempted: true,
+	    status: 'matched',
+	    matched: true,
+	    invoiceNo: 'REE2026000000068',
+	    invoiceDate: '2026-06-18T17:45:00',
+	    invoiceTotalMinor: 136764,
+	    invoiceCurrency: 'TL',
+	    warnings: [],
+	  },
+	};
 
 function renderPage() {
   return render(
@@ -1757,8 +1782,11 @@ describe('Finance Settlement approval admin UI', () => {
     );
     await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-1'));
     expect(getSettlementCommissionInvoiceDiagnosticsMock).toHaveBeenCalledWith('invoice-record-1');
-    expect(screen.getByText('Logo invoice created: ABC202600001.')).toBeInTheDocument();
-    expect(screen.getByText('ABC202600001')).toBeInTheDocument();
+	    expect(screen.getByText('Logo invoice created: REE2026000000068.')).toBeInTheDocument();
+	    expect(screen.getByText('REE2026000000068')).toBeInTheDocument();
+	    expect(screen.getByText(/Reconciliation Matched/i)).toBeInTheDocument();
+	    expect(screen.getByText(/Invoice date/)).toBeInTheDocument();
+	    expect(screen.getByText(/Invoice total/)).toBeInTheDocument();
   });
 
   it('does not show Logo create for UNKNOWN or CREATED records', async () => {

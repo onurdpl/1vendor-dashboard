@@ -683,14 +683,24 @@ describe('finance event backfill route', () => {
         warnings: [],
       },
       record: { id: 'record-1', status: 'created', invoiceNo: 'ABC202600001' },
-      providerResult: {
-        httpStatus: 200,
-        invoiceId: 'logo-invoice-1',
-        uuid: 'logo-uuid-1',
-        ettn: 'logo-ettn-1',
-        invoiceNo: 'ABC202600001',
-      },
-    };
+	      providerResult: {
+	        httpStatus: 200,
+	        invoiceId: 'logo-invoice-1',
+	        uuid: 'logo-uuid-1',
+	        ettn: 'logo-ettn-1',
+	        invoiceNo: 'ABC202600001',
+	      },
+	      reconciliation: {
+	        attempted: true,
+	        status: 'matched',
+	        matched: true,
+	        invoiceNo: 'REE2026000000068',
+	        invoiceDate: '2026-06-18T17:45:00',
+	        invoiceTotalMinor: 136764,
+	        invoiceCurrency: 'TL',
+	        warnings: [],
+	      },
+	    };
     executeSettlementLogoCommissionInvoiceCreateMock.mockResolvedValueOnce(result);
 
     registerFinanceRoutes(app as never, {} as never);
