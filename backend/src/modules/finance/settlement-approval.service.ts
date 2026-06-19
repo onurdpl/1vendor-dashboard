@@ -20,6 +20,11 @@ import {
   MISSING_DELIVERY_DATE_REASON,
   SETTLEMENT_DELAY_PENDING_REASON,
 } from './settlement-delay-eligibility.service.js';
+import {
+  calculateRefundOffsetAmounts,
+  getUnsettledRefundOffsetEligibility,
+  type RefundOffsetSaleLedgerSnapshot,
+} from './refund-offset.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -109,6 +114,7 @@ type SettlementApprovalLedgerRow = {
       returnLifecycleStatus: string | null;
       sourceShopifyRefundId: string | null;
     }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
   } | null;
   settlementApprovalLines: Array<{
     id: string;
@@ -339,13 +345,46 @@ function sumRefundImpact(refundRecords: Array<{ amount: unknown }> | undefined) 
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
 
-function resolveSettlementStatus(row: SettlementApprovalLedgerRow) {
+function getValidRefundRecord(row: SettlementApprovalLedgerRow) {
+  return row.vendorAllocation?.refundRecords.find((refund) => refund.sourceShopifyRefundId || refund.id) ?? null;
+}
+
+function getRelatedSaleLedgerEntry(row: SettlementApprovalLedgerRow) {
+  return row.vendorAllocation?.financeEntries?.find((entry) =>
+    normalizeType(entry.entryType ?? '') === 'sale' && entry.id !== row.id
+  ) ?? null;
+}
+
+function getRefundOffsetEligibility(
+  row: SettlementApprovalLedgerRow,
+  currentSettlementApprovalId?: string | null,
+) {
+  return getUnsettledRefundOffsetEligibility({
+    refundRecord: getValidRefundRecord(row),
+    relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(row),
+    currentSettlementApprovalId,
+  });
+}
+
+function resolveRefundCommissionSnapshot(row: SettlementApprovalLedgerRow) {
+  const relatedSale = getRelatedSaleLedgerEntry(row);
+  return {
+    commissionPercentSnapshot: row.commissionPercentSnapshot ?? relatedSale?.commissionPercentSnapshot ?? null,
+    commissionVatPercentSnapshot: row.commissionVatPercentSnapshot ?? relatedSale?.commissionVatPercentSnapshot ?? null,
+  };
+}
+
+function resolveSettlementStatus(row: SettlementApprovalLedgerRow, currentSettlementApprovalId?: string | null) {
+  const type = normalizeType(row.entryType);
   const payoutStatus = normalizeStatus(row.payoutStatus);
-  if (payoutStatus === 'hold') {
-    return 'held';
-  }
   if (payoutStatus === 'paid') {
     return 'settled';
+  }
+  if (type === 'refund' && getRefundOffsetEligibility(row, currentSettlementApprovalId).eligible) {
+    return 'partially_refunded';
+  }
+  if (payoutStatus === 'hold') {
+    return 'held';
   }
 
   const storedStatus = normalizeStatus(row.settlementStatus);
@@ -353,7 +392,6 @@ function resolveSettlementStatus(row: SettlementApprovalLedgerRow) {
     return storedStatus;
   }
 
-  const type = normalizeType(row.entryType);
   if (type === 'refund' || sumRefundImpact(row.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
   }
@@ -366,12 +404,18 @@ function resolveSettlementStatus(row: SettlementApprovalLedgerRow) {
   return storedStatus || 'pending';
 }
 
-function rowIsEligible(row: SettlementApprovalLedgerRow) {
+function rowIsEligible(row: SettlementApprovalLedgerRow, currentSettlementApprovalId?: string | null) {
   const type = normalizeType(row.entryType);
   if (type !== 'sale' && type !== 'refund') {
     return false;
   }
-  const settlementStatus = resolveSettlementStatus(row);
+  if (normalizeStatus(row.payoutStatus) === 'paid') {
+    return false;
+  }
+  if (type === 'refund' && !getRefundOffsetEligibility(row, currentSettlementApprovalId).eligible) {
+    return false;
+  }
+  const settlementStatus = resolveSettlementStatus(row, currentSettlementApprovalId);
   return (settlementStatus === 'payable' || settlementStatus === 'partially_refunded') && !hasApprovedOpenReturnHold(row);
 }
 
@@ -399,19 +443,24 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
   const fulfillmentEvidencePresent = hasFulfillmentEvidence(row.vendorAllocation);
   const shippingEvidencePresent = hasShippingEvidence(row.vendorAllocation);
   const settlementDelay = evaluateSaleSettlementDelay(row);
+  const refundOffsetEligibility = type === 'refund' ? getRefundOffsetEligibility(row) : null;
   const derivedSettlementStatus = resolveSettlementStatus(row);
   let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row) ? 'included' : 'excluded';
   let eligibilityReason = 'Excluded because row is not payable or partially refunded.';
 
   if (type !== 'sale' && type !== 'refund') {
     eligibilityReason = 'Excluded because row type is not sale or refund.';
+  } else if (rowHasActiveApproval(row)) {
+    eligibilityDecision = 'excluded';
+    eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
+  } else if (type === 'refund' && refundOffsetEligibility?.eligible) {
+    eligibilityReason = refundOffsetEligibility.reason;
+  } else if (type === 'refund' && refundOffsetEligibility && !refundOffsetEligibility.eligible) {
+    eligibilityReason = refundOffsetEligibility.reason;
   } else if (payoutStatus === 'hold') {
     eligibilityReason = 'Excluded because payout status is HOLD.';
   } else if (hasApprovedOpenReturnHold(row)) {
     eligibilityReason = APPROVED_OPEN_RETURN_HOLD_REASON;
-  } else if (rowHasActiveApproval(row)) {
-    eligibilityDecision = 'excluded';
-    eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
   } else if (derivedSettlementStatus === 'partially_refunded') {
     eligibilityReason = 'Derived partially refunded because refund records exist.';
   } else if (settlementDelay.applies && settlementDelay.blockerReason === MISSING_DELIVERY_DATE_REASON) {
@@ -469,14 +518,18 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
   const type = normalizeType(row.entryType);
   const eligibilityExplanation = buildSettlementEligibilityExplanation(row);
   if (type === 'refund') {
-    const refundMinor = toMinorUnits(toNumber(row.amount));
+    const snapshots = resolveRefundCommissionSnapshot(row);
+    const refundOffset = calculateRefundOffsetAmounts({
+      refundAmount: row.amount,
+      ...snapshots,
+    });
     return {
       financeLedgerEntryId: row.id,
       lineType: SettlementApprovalLineType.REFUND,
-      amountMinor: refundMinor,
-      commissionMinor: 0,
-      commissionVatMinor: 0,
-      payableImpactMinor: -refundMinor,
+      amountMinor: refundOffset.refundMinor,
+      commissionMinor: -refundOffset.commissionReversalMinor,
+      commissionVatMinor: -refundOffset.commissionVatReversalMinor,
+      payableImpactMinor: -refundOffset.vendorPayableReversalMinor,
       ...eligibilityExplanation,
       sourceSnapshotJson: {
         financeLedgerEntryId: row.id,
@@ -485,9 +538,18 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
         settlementStatus: row.settlementStatus,
         resolvedSettlementStatus: resolveSettlementStatus(row),
         ...eligibilityExplanation,
+        refundOffsetReason: getRefundOffsetEligibility(row).reason,
+        refundOffsetAppliedBeforeSettlement: true,
         vendorAllocationId: row.vendorAllocation?.id ?? null,
         sourceShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
         sourceShopifyOrderNumber: row.vendorAllocation?.sourceShopifyOrderNumber ?? null,
+        commissionPercentSnapshot:
+          snapshots.commissionPercentSnapshot === null ? null : String(snapshots.commissionPercentSnapshot),
+        commissionVatPercentSnapshot:
+          snapshots.commissionVatPercentSnapshot === null ? null : String(snapshots.commissionVatPercentSnapshot),
+        commissionReversalMinor: refundOffset.commissionReversalMinor,
+        commissionVatReversalMinor: refundOffset.commissionVatReversalMinor,
+        vendorPayableReversalMinor: refundOffset.vendorPayableReversalMinor,
       },
     };
   }
@@ -680,7 +742,7 @@ function validateApprovalLineAgainstCurrentLedger(
     ));
   }
 
-  if (!rowIsEligible(row)) {
+  if (!rowIsEligible(row, approval.id)) {
     const explanation = buildSettlementEligibilityExplanation(row);
     const alreadyExplained = reasons.some((reason) =>
       [
@@ -792,6 +854,52 @@ async function loadCurrentLedgerRowForApprovalLine(
               status: true,
               returnLifecycleStatus: true,
               sourceShopifyRefundId: true,
+            },
+          },
+          financeEntries: {
+            where: {
+              entryType: 'sale',
+            },
+            select: {
+              id: true,
+              entryType: true,
+              payoutStatus: true,
+              settlementStatus: true,
+              commissionPercentSnapshot: true,
+              commissionVatPercentSnapshot: true,
+              payoutBatchLines: {
+                where: {
+                  payoutBatch: {
+                    status: {
+                      in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                    },
+                  },
+                },
+                select: {
+                  payoutBatch: {
+                    select: {
+                      status: true,
+                    },
+                  },
+                },
+              },
+              settlementApprovalLines: {
+                where: {
+                  settlementApproval: {
+                    status: {
+                      in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
+                    },
+                  },
+                },
+                select: {
+                  settlementApproval: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -1240,6 +1348,52 @@ async function buildApprovalPreview(
               sourceShopifyRefundId: true,
             },
           },
+          financeEntries: {
+            where: {
+              entryType: 'sale',
+            },
+            select: {
+              id: true,
+              entryType: true,
+              payoutStatus: true,
+              settlementStatus: true,
+              commissionPercentSnapshot: true,
+              commissionVatPercentSnapshot: true,
+              payoutBatchLines: {
+                where: {
+                  payoutBatch: {
+                    status: {
+                      in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                    },
+                  },
+                },
+                select: {
+                  payoutBatch: {
+                    select: {
+                      status: true,
+                    },
+                  },
+                },
+              },
+              settlementApprovalLines: {
+                where: {
+                  settlementApproval: {
+                    status: {
+                      in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
+                    },
+                  },
+                },
+                select: {
+                  settlementApproval: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       settlementApprovalLines: {
@@ -1351,6 +1505,52 @@ async function buildApprovalPreview(
                 sourceShopifyRefundId: true,
               },
             },
+            financeEntries: {
+              where: {
+                entryType: 'sale',
+              },
+              select: {
+                id: true,
+                entryType: true,
+                payoutStatus: true,
+                settlementStatus: true,
+                commissionPercentSnapshot: true,
+                commissionVatPercentSnapshot: true,
+                payoutBatchLines: {
+                  where: {
+                    payoutBatch: {
+                      status: {
+                        in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                      },
+                    },
+                  },
+                  select: {
+                    payoutBatch: {
+                      select: {
+                        status: true,
+                      },
+                    },
+                  },
+                },
+                settlementApprovalLines: {
+                  where: {
+                    settlementApproval: {
+                      status: {
+                        in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
+                      },
+                    },
+                  },
+                  select: {
+                    settlementApproval: {
+                      select: {
+                        id: true,
+                        status: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         settlementApprovalLines: {
@@ -1379,7 +1579,7 @@ async function buildApprovalPreview(
     : [];
 
   const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
-  const eligibleRows = candidateSelection.rows.filter(rowIsEligible);
+  const eligibleRows = candidateSelection.rows.filter((row) => rowIsEligible(row));
   const unapprovedRows = eligibleRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map(buildLine);
   const totals = summarizeLines(lines);

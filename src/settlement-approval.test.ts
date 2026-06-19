@@ -65,6 +65,9 @@ function buildLedgerRow(input: {
   shippingModeSnapshot?: string | null;
   financialProfileIdSnapshot?: string | null;
   settlementDelayDaysSnapshot?: number | null;
+  relatedSalePaid?: boolean;
+  relatedSaleActiveApproval?: boolean;
+  relatedSaleActivePayoutBatch?: boolean;
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
 }) {
@@ -118,11 +121,33 @@ function buildLedgerRow(input: {
         fulfilledAt: fulfilled ? createdAt : null,
         shipmentUpdatedAt: deliveredAt,
       },
-      refundRecords: input.refundRecords ?? [],
+      refundRecords: input.refundRecords ?? (
+        input.entryType === 'refund'
+          ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
+          : []
+      ),
       returnRecords: (input.returnRecords ?? []).map((record) => ({
         ...record,
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
       })),
+      financeEntries: input.entryType === 'refund'
+        ? [
+            {
+              id: `sale-for-${input.id}`,
+              entryType: 'sale',
+              payoutStatus: input.relatedSalePaid ? 'PAID' : 'PENDING',
+              settlementStatus: input.relatedSalePaid ? 'SETTLED' : 'PAYABLE',
+              commissionPercentSnapshot: input.commissionPercentSnapshot ?? 10,
+              commissionVatPercentSnapshot: input.commissionVatPercentSnapshot ?? 20,
+              payoutBatchLines: input.relatedSaleActivePayoutBatch
+                ? [{ payoutBatch: { status: 'DRAFT' } }]
+                : [],
+              settlementApprovalLines: input.relatedSaleActiveApproval
+                ? [{ settlementApproval: { id: `approval-sale-for-${input.id}`, status: 'APPROVED' } }]
+                : [],
+            },
+          ]
+        : [],
     },
     settlementApprovalLines: input.activeApproval
       ? [
@@ -257,9 +282,9 @@ describe('settlement approval foundation', () => {
       eligibleRowCount: 2,
       grossSalesMinor: 100000,
       refundTotalMinor: 10000,
-      commissionMinor: 10000,
-      commissionVatMinor: 2000,
-      netPayableMinor: 78000,
+      commissionMinor: 9000,
+      commissionVatMinor: 1800,
+      netPayableMinor: 79200,
       detectedCommissionRates: [10],
       detectedCommissionVatRates: [20],
       detectedShippingModes: ['DISABLED'],
@@ -287,10 +312,12 @@ describe('settlement approval foundation', () => {
       expect.objectContaining({
         financeLedgerEntryId: 'refund-1',
         lineType: 'REFUND',
-        payableImpactMinor: -10000,
+        commissionMinor: -1000,
+        commissionVatMinor: -200,
+        payableImpactMinor: -8800,
         storedSettlementStatus: 'PARTIALLY_REFUNDED',
         derivedSettlementStatus: 'partially_refunded',
-        eligibilityReason: 'Derived partially refunded because refund records exist.',
+        eligibilityReason: 'Refund offset applied before settlement.',
         refundDetected: true,
       }),
     ]);
@@ -353,6 +380,42 @@ describe('settlement approval foundation', () => {
       'sale-cancelled-return',
       'sale-closed-return',
     ]);
+  });
+
+  it('excludes refund rows from settlement offset when the related sale is already paid', () => {
+    const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'refund-after-paid-sale',
+        entryType: 'refund',
+        amount: 100,
+        payoutStatus: 'HOLD',
+        relatedSalePaid: true,
+      }),
+    );
+
+    expect(explanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Refund after settlement requires vendor debt handling.',
+    });
+  });
+
+  it('excludes refund rows from settlement offset when the related sale is already in an active approval', () => {
+    const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'refund-after-approved-settlement',
+        entryType: 'refund',
+        amount: 100,
+        payoutStatus: 'HOLD',
+        relatedSaleActiveApproval: true,
+      }),
+    );
+
+    expect(explanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Refund after settlement requires vendor debt handling.',
+    });
   });
 
   it('applies sale-time settlement delay snapshots to settlement preview eligibility', async () => {
@@ -880,9 +943,9 @@ describe('settlement approval foundation', () => {
           status: 'DRAFT',
           grossSalesMinor: 100000,
           refundTotalMinor: 10000,
-          commissionMinor: 10000,
-          commissionVatMinor: 2000,
-          netPayableMinor: 78000,
+          commissionMinor: 9000,
+          commissionVatMinor: 1800,
+          netPayableMinor: 79200,
           sourceSnapshotJson: expect.objectContaining({
             candidateScope: 'vendor_wide',
             settlementBillingSnapshot: expect.objectContaining({
@@ -928,11 +991,15 @@ describe('settlement approval foundation', () => {
               expect.objectContaining({
                 financeLedgerEntryId: 'refund-1',
                 lineType: 'REFUND',
-                payableImpactMinor: -10000,
+                commissionMinor: -1000,
+                commissionVatMinor: -200,
+                payableImpactMinor: -8800,
                 sourceSnapshotJson: expect.objectContaining({
                   storedSettlementStatus: 'PARTIALLY_REFUNDED',
                   derivedSettlementStatus: 'partially_refunded',
-                  eligibilityReason: 'Derived partially refunded because refund records exist.',
+                  eligibilityReason: 'Refund offset applied before settlement.',
+                  refundOffsetAppliedBeforeSettlement: true,
+                  vendorPayableReversalMinor: 8800,
                 }),
               }),
             ],
@@ -948,9 +1015,9 @@ describe('settlement approval foundation', () => {
       writesPerformed: true,
       status: 'draft',
       grossSalesMinor: 100000,
-      commissionMinor: 10000,
-      commissionVatMinor: 2000,
-      netPayableMinor: 78000,
+      commissionMinor: 9000,
+      commissionVatMinor: 1800,
+      netPayableMinor: 79200,
     });
     expect(prismaMock.vendorBillingProfile.findUnique).toHaveBeenCalledWith({
       where: {
@@ -1343,8 +1410,8 @@ describe('settlement approval foundation', () => {
     await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
       reasons: [
         expect.objectContaining({
-          code: 'settlement_row_not_eligible',
-          reason: 'Excluded because payout status is HOLD.',
+          code: 'settlement_amount_changed',
+          reason: 'Settlement amount changed since draft creation',
         }),
       ],
     });

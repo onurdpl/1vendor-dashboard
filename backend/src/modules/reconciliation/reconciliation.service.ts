@@ -8,6 +8,7 @@ import type {
   ReconciliationAllocationResult,
   ReconciliationFieldChange,
 } from './reconciliation.types.js';
+import { getUnsettledRefundOffsetEligibility } from '../finance/refund-offset.service.js';
 
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
@@ -162,7 +163,20 @@ export function createReconciliationService(env: AppEnv) {
             },
             refundRecords: true,
             returnRecords: true,
-            financeEntries: true,
+            financeEntries: {
+              include: {
+                payoutBatchLines: {
+                  include: {
+                    payoutBatch: true,
+                  },
+                },
+                settlementApprovalLines: {
+                  include: {
+                    settlementApproval: true,
+                  },
+                },
+              },
+            },
           },
           orderBy: {
             createdAt: 'asc',
@@ -390,6 +404,11 @@ export function createReconciliationService(env: AppEnv) {
         const expectedLedgerId = `fin-${allocation.assignedVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
         const hasLedger = allocation.financeEntries.some((entry) => entry.id === expectedLedgerId);
         if (!hasLedger && refundRecord.amount) {
+          const saleLedgerEntry = allocation.financeEntries.find((entry) => entry.entryType === 'sale') ?? null;
+          const refundOffsetEligibility = getUnsettledRefundOffsetEligibility({
+            refundRecord,
+            relatedSaleLedgerEntry: saleLedgerEntry,
+          });
           const change = {
             scope: refundRecord.id,
             field: 'financeLedgerEntry',
@@ -403,7 +422,11 @@ export function createReconciliationService(env: AppEnv) {
               vendorId: allocation.assignedVendorId,
               entryType: 'refund',
               amount: refundRecord.amount,
-              payoutStatus: 'HOLD',
+              payoutStatus: refundOffsetEligibility.eligible ? 'PENDING' : 'HOLD',
+              commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
+              commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
+              settlementStatus: 'PARTIALLY_REFUNDED',
+              settlementHoldReason: refundOffsetEligibility.eligible ? null : refundOffsetEligibility.reason,
               description: `Reconciled refund ledger for Shopify refund ${refundRecord.sourceShopifyRefundId}`,
             },
           });

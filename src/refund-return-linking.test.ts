@@ -202,6 +202,23 @@ describe('Shopify refund return linking', () => {
       },
     });
 
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          payoutStatus: 'PENDING',
+          settlementStatus: 'PARTIALLY_REFUNDED',
+          commissionPercentSnapshot: 10,
+          commissionVatPercentSnapshot: 18,
+        }),
+        create: expect.objectContaining({
+          payoutStatus: 'PENDING',
+          settlementStatus: 'PARTIALLY_REFUNDED',
+          commissionPercentSnapshot: 10,
+          commissionVatPercentSnapshot: 18,
+        }),
+      }),
+    );
+
     expect(txMock.financeEvent.createMany).toHaveBeenCalledWith({
       skipDuplicates: true,
       data: [
@@ -217,8 +234,12 @@ describe('Shopify refund return linking', () => {
         }),
         expect.objectContaining({
           eventType: 'VENDOR_PAYABLE_REVERSED',
-          amountMinor: -305910,
+          amountMinor: -299792,
           idempotencyKey: 'fin-sporjinal-refund-1074533826897:VENDOR_PAYABLE_REVERSED',
+          metadataJson: expect.objectContaining({
+            commissionVatReversalMinor: 6118,
+            vendorPayableReversalMinor: 299792,
+          }),
         }),
       ],
     });
@@ -263,5 +284,58 @@ describe('Shopify refund return linking', () => {
     });
 
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps refund ledger held when the related sale is already paid', async () => {
+    setupOrder();
+    txMock.financeLedgerEntry.findFirst.mockReset();
+    txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+      entryType: 'sale',
+      payoutStatus: 'PAID',
+      settlementStatus: 'SETTLED',
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 18,
+      payoutBatchLines: [],
+      settlementApprovalLines: [],
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        id: '1074533826897',
+        order_id: '7621834670417',
+        created_at: '2026-05-16T14:37:38Z',
+        note: null,
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: '20346971095377',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: '20346971095377',
+              sku: 'DJ1196-002-42',
+              title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+              variant_title: 'Siyah / 42',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          payoutStatus: 'HOLD',
+          settlementHoldReason: 'Refund after settlement requires vendor debt handling.',
+        }),
+        create: expect.objectContaining({
+          payoutStatus: 'HOLD',
+          settlementHoldReason: 'Refund after settlement requires vendor debt handling.',
+        }),
+      }),
+    );
   });
 });

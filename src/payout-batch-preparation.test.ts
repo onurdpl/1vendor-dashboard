@@ -31,6 +31,9 @@ function buildEntry(input: {
   deliveredAt?: Date | null;
   settlementDelayDaysSnapshot?: number;
   batched?: boolean;
+  relatedSalePaid?: boolean;
+  relatedSaleActiveApproval?: boolean;
+  relatedSaleActivePayoutBatch?: boolean;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
   returnRecords?: Array<{
     id: string;
@@ -75,7 +78,29 @@ function buildEntry(input: {
         fulfilledAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
         shipmentUpdatedAt: deliveredAt,
       },
-      refundRecords: input.refundRecords ?? [],
+      refundRecords: input.refundRecords ?? (
+        input.entryType === 'refund'
+          ? [{ id: `refund-record-${input.id}`, sourceShopifyRefundId: `refund-${input.id}`, amount: input.amount }]
+          : []
+      ),
+      financeEntries: input.entryType === 'refund'
+        ? [
+            {
+              id: `sale-for-${input.id}`,
+              entryType: 'sale',
+              payoutStatus: input.relatedSalePaid ? 'PAID' : 'PENDING',
+              settlementStatus: input.relatedSalePaid ? 'SETTLED' : 'PAYABLE',
+              commissionPercentSnapshot: 10,
+              commissionVatPercentSnapshot: 0,
+              payoutBatchLines: input.relatedSaleActivePayoutBatch
+                ? [{ payoutBatch: { status: 'DRAFT' } }]
+                : [],
+              settlementApprovalLines: input.relatedSaleActiveApproval
+                ? [{ settlementApproval: { id: `approval-sale-for-${input.id}`, status: 'APPROVED' } }]
+                : [],
+            },
+          ]
+        : [],
       returnRecords: (input.returnRecords ?? []).map((record) => ({
         ...record,
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
@@ -141,13 +166,13 @@ describe('payout batch preparation', () => {
         data: expect.objectContaining({
           vendorId: 'demo-vendor-a',
           grossAmount: 1000,
-          commissionAmount: 100,
+          commissionAmount: 90,
           refundAmount: 100,
-          netAmount: 800,
+          netAmount: 810,
           lines: {
             create: [
               { financeLedgerEntryId: 'sale-payable', amountSnapshot: 900 },
-              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -100 },
+              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -90 },
             ],
           },
         }),
@@ -158,7 +183,7 @@ describe('payout batch preparation', () => {
       status: 'draft',
       grossAmount: '1000.00',
       refundAmount: '100.00',
-      netAmount: '800.00',
+      netAmount: '810.00',
       lineCount: 2,
     });
   });
@@ -166,6 +191,17 @@ describe('payout batch preparation', () => {
   it('prevents duplicate active batch inclusion', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildEntry({ id: 'sale-already-batched', entryType: 'sale', amount: 1000, batched: true }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'No eligible payable ledger rows',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('does not offset refund rows when the related sale is already paid', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({ id: 'refund-after-paid-sale', entryType: 'refund', amount: 100, relatedSalePaid: true }),
     ]);
 
     await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
@@ -219,12 +255,13 @@ describe('payout batch preparation', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           grossAmount: 500,
+          commissionAmount: 40,
           refundAmount: 100,
-          netAmount: 350,
+          netAmount: 360,
           lines: {
             create: [
               { financeLedgerEntryId: 'sale-14-day-delay', amountSnapshot: 450 },
-              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -100 },
+              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -90 },
             ],
           },
         }),
@@ -233,7 +270,7 @@ describe('payout batch preparation', () => {
     expect(batch).toMatchObject({
       id: 'batch-delay',
       lineCount: 2,
-      netAmount: '350.00',
+      netAmount: '360.00',
     });
   });
 
@@ -299,12 +336,13 @@ describe('payout batch preparation', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           grossAmount: 500,
+          commissionAmount: 40,
           refundAmount: 100,
-          netAmount: 350,
+          netAmount: 360,
           lines: {
             create: [
               { financeLedgerEntryId: 'sale-requested-return', amountSnapshot: 450 },
-              { financeLedgerEntryId: 'refund-row', amountSnapshot: -100 },
+              { financeLedgerEntryId: 'refund-row', amountSnapshot: -90 },
             ],
           },
         }),
@@ -313,7 +351,7 @@ describe('payout batch preparation', () => {
     expect(batch).toMatchObject({
       id: 'batch-open-return',
       lineCount: 2,
-      netAmount: '350.00',
+      netAmount: '360.00',
     });
   });
 

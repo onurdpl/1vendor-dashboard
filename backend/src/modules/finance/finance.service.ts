@@ -31,6 +31,11 @@ import {
   evaluateSaleSettlementDelay,
   normalizeSettlementDelayDays,
 } from './settlement-delay-eligibility.service.js';
+import {
+  calculateRefundOffsetAmounts,
+  getUnsettledRefundOffsetEligibility,
+  type RefundOffsetSaleLedgerSnapshot,
+} from './refund-offset.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
@@ -389,6 +394,52 @@ function sumRefundImpact(refundRecords: Array<{ amount?: unknown }> | undefined)
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
 
+function getValidRefundRecord(entry: {
+  vendorAllocation?: {
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
+  } | null;
+}) {
+  return entry.vendorAllocation?.refundRecords?.find((refund) => refund.sourceShopifyRefundId || refund.id) ?? null;
+}
+
+function getRelatedSaleLedgerEntry(entry: {
+  id?: string | null;
+  vendorAllocation?: {
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+  } | null;
+}) {
+  return entry.vendorAllocation?.financeEntries?.find((ledgerEntry) =>
+    normalizeType(ledgerEntry.entryType ?? '') === 'sale' && ledgerEntry.id !== entry.id
+  ) ?? null;
+}
+
+function getRefundOffsetEligibility(entry: {
+  id?: string | null;
+  vendorAllocation?: {
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+  } | null;
+}) {
+  return getUnsettledRefundOffsetEligibility({
+    refundRecord: getValidRefundRecord(entry),
+    relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(entry),
+  });
+}
+
+function resolveRefundCommissionSnapshot(entry: {
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  vendorAllocation?: {
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+  } | null;
+}) {
+  const relatedSale = getRelatedSaleLedgerEntry(entry);
+  return {
+    commissionPercentSnapshot: entry.commissionPercentSnapshot ?? relatedSale?.commissionPercentSnapshot ?? null,
+    commissionVatPercentSnapshot: entry.commissionVatPercentSnapshot ?? relatedSale?.commissionVatPercentSnapshot ?? null,
+  };
+}
+
 function normalizeSettlementStatus(status: string | null | undefined): SettlementDto['status'] {
   const normalized = status?.trim().toLowerCase() ?? 'pending';
   if (
@@ -405,6 +456,7 @@ function normalizeSettlementStatus(status: string | null | undefined): Settlemen
 }
 
 function getSettlementStatus(entry: {
+  id?: string | null;
   entryType: string;
   payoutStatus?: string | null;
   settlementStatus?: string | null;
@@ -415,6 +467,7 @@ function getSettlementStatus(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
     returnRecords?: Array<{
       status?: string | null;
       returnLifecycleStatus?: string | null;
@@ -422,12 +475,16 @@ function getSettlementStatus(entry: {
     }>;
   } | null;
 }): SettlementDto['status'] {
+  const type = normalizeType(entry.entryType);
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
-  if (payoutStatus === 'hold') {
-    return 'held';
-  }
   if (payoutStatus === 'paid') {
     return 'settled';
+  }
+  if (type === 'refund' && getRefundOffsetEligibility(entry).eligible) {
+    return 'partially_refunded';
+  }
+  if (payoutStatus === 'hold') {
+    return 'held';
   }
 
   const storedStatus = normalizeSettlementStatus(entry.settlementStatus);
@@ -435,7 +492,6 @@ function getSettlementStatus(entry: {
     return storedStatus;
   }
 
-  const type = normalizeType(entry.entryType);
   if (type === 'refund' || sumRefundImpact(entry.vendorAllocation?.refundRecords) > 0) {
     return 'partially_refunded';
   }
@@ -449,6 +505,7 @@ function getSettlementStatus(entry: {
 }
 
 function buildSettlement(entry: {
+  id?: string | null;
   entryType: string;
   payoutStatus?: string | null;
   settlementStatus?: string | null;
@@ -465,6 +522,7 @@ function buildSettlement(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
     returnRecords?: Array<{
       status?: string | null;
       returnLifecycleStatus?: string | null;
@@ -504,6 +562,7 @@ function buildSettlement(entry: {
 }
 
 function isEntryEligibleForPayoutBatch(entry: {
+  id?: string | null;
   entryType: string;
   payoutStatus?: string | null;
   settlementStatus?: string | null;
@@ -521,6 +580,7 @@ function isEntryEligibleForPayoutBatch(entry: {
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
     returnRecords?: Array<{
       status?: string | null;
       returnLifecycleStatus?: string | null;
@@ -538,6 +598,9 @@ function isEntryEligibleForPayoutBatch(entry: {
   if (mapStatus(entry.payoutStatus ?? '') === 'paid') {
     return false;
   }
+  if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible) {
+    return false;
+  }
 
   const settlement = buildSettlement(entry);
   return settlement.status === 'payable' || settlement.status === 'partially_refunded';
@@ -545,6 +608,7 @@ function isEntryEligibleForPayoutBatch(entry: {
 
 function calculateEntryBatchAmounts(
   entry: {
+    id?: string | null;
     entryType: string;
     amount: unknown;
     commissionPercentSnapshot?: unknown;
@@ -563,20 +627,29 @@ function calculateEntryBatchAmounts(
       shippingStatus?: string | null;
       fulfillment?: { fulfilledAt: Date | null } | null;
       refundRecords?: Array<{ amount?: unknown }>;
+      financeEntries?: RefundOffsetSaleLedgerSnapshot[];
     } | null;
   },
   activeProfile: VendorFinancialProfileDto,
 ) {
   const type = normalizeType(entry.entryType);
   if (type === 'refund') {
-    const refundAmount = toNumber(entry.amount);
+    const snapshots = resolveRefundCommissionSnapshot(entry);
+    const refundOffset = calculateRefundOffsetAmounts({
+      refundAmount: entry.amount,
+      ...snapshots,
+    });
+    const refundAmount = refundOffset.refundMinor / 100;
+    const commissionAmount = -(refundOffset.commissionReversalMinor / 100);
+    const commissionVatAmount = -(refundOffset.commissionVatReversalMinor / 100);
+    const vendorPayableReversalAmount = refundOffset.vendorPayableReversalMinor / 100;
     return {
       grossAmount: 0,
-      commissionAmount: 0,
-      commissionVatAmount: 0,
+      commissionAmount,
+      commissionVatAmount,
       shippingDeductionAmount: 0,
       refundAmount,
-      netAmount: -refundAmount,
+      netAmount: -vendorPayableReversalAmount,
     };
   }
 
@@ -1324,6 +1397,52 @@ export async function preparePayoutBatch(
             include: {
               fulfillment: true,
               refundRecords: true,
+              financeEntries: {
+                where: {
+                  entryType: 'sale',
+                },
+                select: {
+                  id: true,
+                  entryType: true,
+                  payoutStatus: true,
+                  settlementStatus: true,
+                  commissionPercentSnapshot: true,
+                  commissionVatPercentSnapshot: true,
+                  payoutBatchLines: {
+                    where: {
+                      payoutBatch: {
+                        status: {
+                          in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                        },
+                      },
+                    },
+                    select: {
+                      payoutBatch: {
+                        select: {
+                          status: true,
+                        },
+                      },
+                    },
+                  },
+                  settlementApprovalLines: {
+                    where: {
+                      settlementApproval: {
+                        status: {
+                          in: ['DRAFT', 'APPROVED'],
+                        },
+                      },
+                    },
+                    select: {
+                      settlementApproval: {
+                        select: {
+                          id: true,
+                          status: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
               returnRecords: {
                 select: {
                   id: true,

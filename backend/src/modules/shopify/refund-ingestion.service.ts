@@ -1,6 +1,10 @@
 import { prisma } from '../../db/prisma.js';
 import { FinanceEventType } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
+import {
+  calculateRefundOffsetAmounts,
+  getUnsettledRefundOffsetEligibility,
+} from '../finance/refund-offset.service.js';
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
@@ -339,6 +343,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           },
           select: {
             id: true,
+            payoutStatus: true,
           },
         });
         const saleLedgerEntry = await tx.financeLedgerEntry.findFirst({
@@ -348,10 +353,61 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             entryType: 'sale',
           },
           select: {
+            id: true,
+            entryType: true,
+            payoutStatus: true,
+            settlementStatus: true,
             commissionPercentSnapshot: true,
             commissionVatPercentSnapshot: true,
+            payoutBatchLines: {
+              where: {
+                payoutBatch: {
+                  status: {
+                    in: ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'],
+                  },
+                },
+              },
+              select: {
+                payoutBatch: {
+                  select: {
+                    status: true,
+                  },
+                },
+              },
+            },
+            settlementApprovalLines: {
+              where: {
+                settlementApproval: {
+                  status: {
+                    in: ['DRAFT', 'APPROVED'],
+                  },
+                },
+              },
+              select: {
+                settlementApproval: {
+                  select: {
+                    id: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
         });
+        const refundOffsetEligibility = getUnsettledRefundOffsetEligibility({
+          refundRecord: {
+            id: refundRecordId,
+            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          },
+          relatedSaleLedgerEntry: saleLedgerEntry,
+        });
+        const refundPayoutStatus =
+          existingRefundLedgerEntry?.payoutStatus === 'PAID'
+            ? 'PAID'
+            : refundOffsetEligibility.eligible
+              ? 'PENDING'
+              : 'HOLD';
+        const refundSettlementHoldReason = refundOffsetEligibility.eligible ? null : refundOffsetEligibility.reason;
 
         await tx.financeLedgerEntry.upsert({
           where: {
@@ -362,7 +418,11 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             vendorId,
             entryType: 'refund',
             amount: totalRefundAmount,
-            payoutStatus: 'HOLD',
+            payoutStatus: refundPayoutStatus,
+            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
+            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
+            settlementStatus: 'PARTIALLY_REFUNDED',
+            settlementHoldReason: refundSettlementHoldReason,
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
           },
           create: {
@@ -371,17 +431,21 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             vendorId,
             entryType: 'refund',
             amount: totalRefundAmount,
-            payoutStatus: 'HOLD',
+            payoutStatus: refundPayoutStatus,
+            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
+            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
+            settlementStatus: 'PARTIALLY_REFUNDED',
+            settlementHoldReason: refundSettlementHoldReason,
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
           },
         });
 
         if (!existingRefundLedgerEntry) {
-          const refundMinor = toMinorUnits(toNumber(totalRefundAmount));
-          const commissionPercent = toNumber(saleLedgerEntry?.commissionPercentSnapshot);
-          const commissionVatPercent = toNumber(saleLedgerEntry?.commissionVatPercentSnapshot);
-          const commissionReversalMinor = Math.round(refundMinor * (Math.max(commissionPercent, 0) / 100));
-          const vendorPayableReversalMinor = refundMinor - commissionReversalMinor;
+          const refundOffset = calculateRefundOffsetAmounts({
+            refundAmount: totalRefundAmount,
+            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
+            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
+          });
           const baseEvent = {
             vendorId,
             shopifyOrderId: shopifyOrder.id,
@@ -396,8 +460,12 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
               sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
               vendorAllocationId,
               financeLedgerEntryId: refundLedgerId,
-              commissionPercentSnapshot: commissionPercent,
-              commissionVatPercentSnapshot: commissionVatPercent,
+              commissionPercentSnapshot: refundOffset.commissionPercent,
+              commissionVatPercentSnapshot: refundOffset.commissionVatPercent,
+              commissionReversalMinor: refundOffset.commissionReversalMinor,
+              commissionVatReversalMinor: refundOffset.commissionVatReversalMinor,
+              vendorPayableReversalMinor: refundOffset.vendorPayableReversalMinor,
+              refundOffsetEligibility: refundOffsetEligibility.code,
               sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
               sourceLineItemIds,
             },
@@ -408,19 +476,19 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
               {
                 ...baseEvent,
                 eventType: FinanceEventType.REFUND_RECORDED,
-                amountMinor: refundMinor,
+                amountMinor: refundOffset.refundMinor,
                 idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
               },
               {
                 ...baseEvent,
                 eventType: FinanceEventType.COMMISSION_REVERSED,
-                amountMinor: -commissionReversalMinor,
+                amountMinor: -refundOffset.commissionReversalMinor,
                 idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
               },
               {
                 ...baseEvent,
                 eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
-                amountMinor: -vendorPayableReversalMinor,
+                amountMinor: -refundOffset.vendorPayableReversalMinor,
                 idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
               },
             ],
