@@ -1,13 +1,28 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const prismaMock = vi.hoisted(() => ({
+  vendorBalanceEvent: {
+    findMany: vi.fn(),
+  },
+}));
+
+vi.mock('../backend/src/db/prisma.js', () => ({
+  prisma: prismaMock,
+}));
 
 const {
   calculateVendorDebtMinorForRefund,
   calculateVendorDebtOffset,
   createVendorDebtForPaidRefund,
+  getVendorDebtHistory,
   getVendorBalanceSummary,
 } = await import('../backend/src/modules/finance/vendor-balance.service.js');
 
 describe('vendor balance events', () => {
+  beforeEach(() => {
+    prismaMock.vendorBalanceEvent.findMany.mockReset();
+  });
+
   it('calculates vendor debt from the existing refund offset formula', () => {
     expect(calculateVendorDebtMinorForRefund({
       refundAmount: 3399,
@@ -100,5 +115,117 @@ describe('vendor balance events', () => {
       },
       update: {},
     }));
+  });
+
+  it('builds an auditable vendor debt history with order, refund, products, and offsets', async () => {
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([
+      {
+        id: 'debt-created-1',
+        vendorId: 'vendor-a',
+        type: 'VENDOR_DEBT_CREATED',
+        amountMinor: -300000,
+        currency: 'TRY',
+        sourceType: 'shopify_refund',
+        sourceId: 'refund-record-1',
+        financeLedgerEntryId: 'ledger-refund-1',
+        refundRecordId: 'refund-record-1',
+        payoutBatchId: null,
+        metadataJson: {
+          refundMinor: 340000,
+          commissionReversalMinor: 34000,
+          commissionVatReversalMinor: 6000,
+          vendorDebtMinor: 300000,
+          formula: 'vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor',
+        },
+        createdAt: new Date('2026-06-01T10:00:00.000Z'),
+        vendor: { id: 'vendor-a', name: 'Vendor A' },
+        refundRecord: {
+          id: 'refund-record-1',
+          sourceShopifyRefundId: 'gid://shopify/Refund/1',
+          sourceShopifyOrderId: 'gid://shopify/Order/1082',
+          sourceShopifyOrderNumber: '#1082',
+          amount: 3400,
+          createdAt: new Date('2026-06-01T10:00:00.000Z'),
+          lineItems: [
+            { title: 'Running Shoe', sku: 'RUN-42', quantity: 2 },
+          ],
+          vendorAllocation: {
+            id: 'allocation-1',
+            sourceShopifyOrderId: 'gid://shopify/Order/1082',
+            sourceShopifyOrderNumber: '#1082',
+            order: { createdAt: new Date('2026-05-28T08:00:00.000Z') },
+            lineItems: [],
+          },
+        },
+        financeLedgerEntry: {
+          id: 'ledger-refund-1',
+          vendorAllocation: null,
+        },
+        payoutBatch: null,
+      },
+      {
+        id: 'debt-offset-1',
+        vendorId: 'vendor-a',
+        type: 'VENDOR_DEBT_OFFSET',
+        amountMinor: 50000,
+        currency: 'TRY',
+        sourceType: 'payout_batch',
+        sourceId: 'batch-1',
+        financeLedgerEntryId: null,
+        refundRecordId: null,
+        payoutBatchId: 'batch-1',
+        metadataJson: {
+          debtOffsetMinor: 50000,
+          remainingDebtMinor: 250000,
+        },
+        createdAt: new Date('2026-06-05T10:00:00.000Z'),
+        vendor: { id: 'vendor-a', name: 'Vendor A' },
+        refundRecord: null,
+        financeLedgerEntry: null,
+        payoutBatch: {
+          id: 'batch-1',
+          status: 'DRAFT',
+          createdAt: new Date('2026-06-05T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-05T10:00:00.000Z'),
+        },
+      },
+    ]);
+
+    const history = await getVendorDebtHistory('vendor-a');
+
+    expect(history.summary).toEqual({
+      outstandingDebtMinor: 250000,
+      totalDebtCreatedMinor: 300000,
+      totalDebtOffsetMinor: 50000,
+      remainingDebtMinor: 250000,
+      lastDebtActivityAt: '2026-06-05T10:00:00.000Z',
+    });
+    expect(history.events[1]).toMatchObject({
+      id: 'debt-created-1',
+      label: 'Debt Created',
+      orderNumber: '#1082',
+      refundReference: 'gid://shopify/Refund/1',
+      itemCount: 2,
+      productCount: 1,
+      remainingDebtAfterEventMinor: 300000,
+      products: [
+        { title: 'Running Shoe', sku: 'RUN-42', quantity: 2 },
+      ],
+      calculation: expect.objectContaining({
+        vendorDebtMinor: 300000,
+      }),
+    });
+    expect(history.events[0]).toMatchObject({
+      id: 'debt-offset-1',
+      label: 'Debt Offset Applied',
+      payoutBatchId: 'batch-1',
+      remainingDebtAfterEventMinor: 250000,
+      offsetHistory: [
+        expect.objectContaining({
+          payoutBatchId: 'batch-1',
+          offsetAmountMinor: 50000,
+        }),
+      ],
+    });
   });
 });

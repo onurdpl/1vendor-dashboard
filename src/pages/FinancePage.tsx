@@ -4,6 +4,7 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
   FilterBar,
+  MetadataGroup,
   MetadataRow,
   OperationalActionGroup,
   SectionErrorRetry,
@@ -24,11 +25,12 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   getFinanceDashboard,
+  getVendorDebtHistory,
   preparePayoutBatch,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
-import type { FinanceTransaction, OperationsRecommendation, SupportTicket } from '../lib/api/contracts';
+import type { FinanceTransaction, OperationsRecommendation, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
@@ -39,7 +41,7 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
-import { formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { formatCurrency, formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 
 type VendorProfileFormInput = {
@@ -78,8 +80,16 @@ function formatDate(value: string) {
   });
 }
 
+function formatOptionalDate(value: string | null | undefined) {
+  return value ? formatDate(value) : 'Not available';
+}
+
 function formatDateParts(value: string) {
   return formatSafeDateParts(value);
+}
+
+function formatMinorCurrency(valueMinor: number | null | undefined, currency = 'TRY') {
+  return formatCurrency(((Number(valueMinor ?? 0)) / 100).toFixed(2), currency);
 }
 
 function readFinanceString(record: FinanceTransaction, key: string) {
@@ -532,6 +542,195 @@ function isSettlementReviewWorkflowRecord(record: FinanceTransaction, audience: 
   return record.category === 'Payout' || Boolean(record.payoutBatch) || displayStatus === 'Pending review';
 }
 
+function formatDebtImpact(event: VendorDebtHistoryEvent, currency: string) {
+  if (event.type === 'VENDOR_DEBT_OFFSET') {
+    return `+${formatMinorCurrency(Math.abs(event.debtAmountMinor), currency)}`;
+  }
+  if (event.type === 'VENDOR_DEBT_CREATED') {
+    return `-${formatMinorCurrency(Math.abs(event.debtAmountMinor), currency)}`;
+  }
+  return formatMinorCurrency(event.amountMinor, currency);
+}
+
+function getDebtImpactClass(event: VendorDebtHistoryEvent) {
+  return event.type === 'VENDOR_DEBT_OFFSET' || event.type === 'DEBT_WAIVED'
+    ? 'finance-payout-value'
+    : 'finance-deduction-value';
+}
+
+function VendorDebtHistorySection({
+  history,
+  loading,
+  error,
+  selectedEvent,
+  onSelectEvent,
+}: {
+  history: Awaited<ReturnType<typeof getVendorDebtHistory>> | null;
+  loading: boolean;
+  error: string | null;
+  selectedEvent: VendorDebtHistoryEvent | null;
+  onSelectEvent: (eventId: string) => void;
+}) {
+  const currency = history?.currency ?? 'TRY';
+  const events = safeArray(history?.events);
+  const outstandingDebtMinor = history?.summary.outstandingDebtMinor ?? 0;
+  const remainingDebtMinor = history?.summary.remainingDebtMinor ?? outstandingDebtMinor;
+
+  return (
+    <section className="finance-footer-card finance-debt-history-card" aria-label="Vendor debt history">
+      <div>
+        <p className="eyebrow">Vendor debt</p>
+        <h3>Vendor Debt History</h3>
+        <p className="page-description">
+          Audit refund-after-payment debt and payout offsets without opening database records.
+        </p>
+      </div>
+      <div className="op-kpi-row finance-debt-summary-row">
+        <article className={`op-kpi ${outstandingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-neutral'}`}>
+          <span>Outstanding Debt</span>
+          <strong>{formatMinorCurrency(outstandingDebtMinor, currency)}</strong>
+          <small>{outstandingDebtMinor > 0 ? 'Vendor owes marketplace' : 'No open debt'}</small>
+        </article>
+        <article className="op-kpi op-tone-danger">
+          <span>Total Debt Created</span>
+          <strong>{formatMinorCurrency(history?.summary.totalDebtCreatedMinor ?? 0, currency)}</strong>
+        </article>
+        <article className="op-kpi op-tone-success">
+          <span>Total Debt Offset</span>
+          <strong>{formatMinorCurrency(history?.summary.totalDebtOffsetMinor ?? 0, currency)}</strong>
+        </article>
+        <article className={`op-kpi ${remainingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-success'}`}>
+          <span>Remaining Debt</span>
+          <strong>{formatMinorCurrency(remainingDebtMinor, currency)}</strong>
+          <small>{history?.summary.lastDebtActivityAt ? `Last activity ${formatDateParts(history.summary.lastDebtActivityAt).date}` : 'No activity'}</small>
+        </article>
+      </div>
+      {error ? (
+        <SectionErrorRetry
+          title="Vendor debt history unavailable"
+          description={error}
+        />
+      ) : loading ? (
+        <p className="settlement-compact-empty">Loading vendor debt history...</p>
+      ) : events.length === 0 ? (
+        <EmptyStatePanel
+          title="No vendor debt history"
+          description="Refund-after-payment debt and payout offsets will appear here when they exist."
+        />
+      ) : (
+        <>
+          <OperationalTable
+            columns={['Event Date', 'Event Type', 'Order', 'Vendor', 'Items', 'Debt Amount', 'Remaining Debt', 'Source Reference']}
+            className="finance-debt-history-table"
+            stickyHeader={false}
+          >
+            {events.map((event) => (
+              <OperationalTableRow
+                key={event.id}
+                selected={selectedEvent?.id === event.id}
+                onSelect={() => onSelectEvent(event.id)}
+              >
+                <span>
+                  <strong>{formatDateParts(event.createdAt).date}</strong>
+                  <small>{formatDateParts(event.createdAt).time}</small>
+                </span>
+                <StatusBadge tone={event.type === 'VENDOR_DEBT_OFFSET' ? 'success' : 'danger'}>{event.label}</StatusBadge>
+                <span>
+                  <strong>{event.orderNumber ?? 'No order'}</strong>
+                  <small>{event.shopifyOrderId ?? 'No Shopify id'}</small>
+                </span>
+                <span>{event.vendorName ?? event.vendorId}</span>
+                <span>
+                  <strong>{event.itemCount}</strong>
+                  <small>{event.productCount} products</small>
+                </span>
+                <strong className={getDebtImpactClass(event)}>{formatDebtImpact(event, currency)}</strong>
+                <strong className={event.remainingDebtAfterEventMinor > 0 ? 'finance-deduction-value' : 'finance-payout-value'}>
+                  {formatMinorCurrency(event.remainingDebtAfterEventMinor, currency)}
+                </strong>
+                <span className="finance-debt-source-reference">{event.sourceReference}</span>
+              </OperationalTableRow>
+            ))}
+          </OperationalTable>
+          {selectedEvent ? <VendorDebtDetailPanel event={selectedEvent} currency={currency} /> : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+function VendorDebtDetailPanel({ event, currency }: { event: VendorDebtHistoryEvent; currency: string }) {
+  return (
+    <div className="finance-debt-detail-panel" aria-label="Vendor debt detail">
+      <div className="finance-debt-detail-heading">
+        <div>
+          <p className="eyebrow">Debt audit detail</p>
+          <h4>{event.label}</h4>
+        </div>
+        <StatusBadge tone={event.remainingDebtAfterEventMinor > 0 ? 'danger' : 'success'}>
+          Remaining {formatMinorCurrency(event.remainingDebtAfterEventMinor, currency)}
+        </StatusBadge>
+      </div>
+      <div className="finance-debt-detail-grid">
+        <MetadataGroup title="Order">
+          <MetadataRow label="Order number" value={event.orderNumber ?? 'Unknown'} />
+          <MetadataRow label="Shopify order id" value={event.shopifyOrderId ?? 'Unknown'} />
+          <MetadataRow label="Vendor" value={event.vendorName ?? event.vendorId} />
+          <MetadataRow label="Created date" value={formatOptionalDate(event.orderCreatedAt)} />
+        </MetadataGroup>
+        <MetadataGroup title="Refund">
+          <MetadataRow label="Refund reference" value={event.refundReference ?? 'Not applicable'} />
+          <MetadataRow label="Refund record" value={event.refundRecordId ?? 'Not applicable'} />
+          <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
+        </MetadataGroup>
+        <MetadataGroup title="Debt Calculation">
+          <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
+          <MetadataRow label="Commission reversal" value={event.calculation.commissionReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionReversalMinor, currency)} />
+          <MetadataRow label="Commission VAT reversal" value={event.calculation.commissionVatReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionVatReversalMinor, currency)} />
+          <MetadataRow label="Vendor debt created" value={event.calculation.vendorDebtMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.vendorDebtMinor, currency)} />
+          <MetadataRow label="Debt offset" value={event.calculation.debtOffsetMinor === null ? 'Not applicable' : formatMinorCurrency(event.calculation.debtOffsetMinor, currency)} />
+          <MetadataRow label="Formula" value={event.calculation.formula ?? 'Not available'} />
+        </MetadataGroup>
+        <MetadataGroup title="Payout Offset">
+          <MetadataRow label="Payout batch" value={event.payoutBatchId ?? 'Not applicable'} />
+          <MetadataRow label="Payout batch status" value={event.payoutBatchStatus ? safeStatusLabel(event.payoutBatchStatus) : 'Not applicable'} />
+          <MetadataRow label="Source reference" value={event.sourceReference} />
+        </MetadataGroup>
+      </div>
+      <div className="finance-debt-detail-grid">
+        <section className="finance-debt-detail-list">
+          <h5>Products</h5>
+          {event.products.length ? (
+            event.products.map((product, index) => (
+              <p key={`${product.sku ?? product.title ?? 'product'}-${index}`}>
+                <strong>{product.title ?? 'Unknown product'}</strong>
+                <span>{product.sku ?? 'No SKU'} · Qty {product.quantity}</span>
+              </p>
+            ))
+          ) : (
+            <p>No product snapshot available.</p>
+          )}
+        </section>
+        <section className="finance-debt-detail-list">
+          <h5>Offset History</h5>
+          {event.offsetHistory.length ? (
+            event.offsetHistory.map((offset) => (
+              <p key={offset.id}>
+                <strong>{formatMinorCurrency(offset.offsetAmountMinor, currency)}</strong>
+                <span>
+                  {offset.payoutBatchId ?? 'No payout batch'} · Remaining {formatMinorCurrency(offset.remainingDebtAfterEventMinor, currency)}
+                </span>
+              </p>
+            ))
+          ) : (
+            <p>No payout offsets have been applied yet.</p>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function FinancePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
@@ -541,6 +740,17 @@ export function FinancePage() {
   const { data: finance, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
+    { enabled: authContextReady },
+  );
+  const {
+    data: vendorDebtHistory,
+    isLoading: debtHistoryLoading,
+    isError: debtHistoryError,
+    error: debtHistoryErrorMessage,
+    refetch: refetchVendorDebtHistory,
+  } = useQueryResource(
+    queryKeys.finance.vendorDebtHistory(currentVendor.vendorId),
+    ({ signal }) => getVendorDebtHistory({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady },
   );
   const { data: supportTickets } = useQueryResource(
@@ -553,6 +763,7 @@ export function FinancePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedDebtEventId, setSelectedDebtEventId] = useState<string | null>(null);
   const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
   const [commissionPercent, setCommissionPercent] = useState('10.00');
@@ -570,7 +781,12 @@ export function FinancePage() {
 
   useEffect(() => {
     setSelectedRecordId(null);
+    setSelectedDebtEventId(null);
   }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value]);
+
+  useEffect(() => {
+    setSelectedDebtEventId(null);
+  }, [currentVendor.vendorId]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -604,9 +820,12 @@ export function FinancePage() {
   const preparePayoutBatchMutation = useMutationAction(
     () => preparePayoutBatch(currentVendor.vendorId),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
+      invalidateQueryKeys: [
+        queryKeys.finance.summary(currentVendor.vendorId),
+        queryKeys.finance.vendorDebtHistory(currentVendor.vendorId),
+      ],
       onSuccess: async (batch) => {
-        await refetch();
+        await Promise.all([refetch(), refetchVendorDebtHistory()]);
         showFeedback(`Draft payout review ${batch.id} prepared.`, 'success');
       },
       onError: (mutationError) =>
@@ -751,6 +970,10 @@ export function FinancePage() {
     }
     return filteredRecords[0];
   }, [filteredRecords, finance?.transactions, requestedFinanceTarget, selectedRecordId]);
+  const selectedDebtEvent = useMemo(() => {
+    const events = safeArray(vendorDebtHistory?.events);
+    return events.find((event) => event.id === selectedDebtEventId) ?? events[0] ?? null;
+  }, [selectedDebtEventId, vendorDebtHistory?.events]);
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const relatedSupportTickets = useMemo(
     () =>
@@ -1284,6 +1507,13 @@ export function FinancePage() {
               )}
             </section>
           </div>
+          <VendorDebtHistorySection
+            history={vendorDebtHistory}
+            loading={debtHistoryLoading}
+            error={debtHistoryError ? debtHistoryErrorMessage : null}
+            selectedEvent={selectedDebtEvent}
+            onSelectEvent={setSelectedDebtEventId}
+          />
         </div>
 
         <SideDetailPanel

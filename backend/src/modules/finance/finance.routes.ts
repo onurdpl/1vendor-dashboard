@@ -18,6 +18,7 @@ import {
   upsertShipmentShippingCost,
   upsertVendorFinancialProfile,
 } from './finance.service.js';
+import { getVendorDebtHistory } from './vendor-balance.service.js';
 import { getFinanceEventBackfillPlan } from './finance-event-backfill-planner.service.js';
 import { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } from './finance-event-relink.service.js';
 import {
@@ -186,6 +187,23 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         withSlowEndpointTiming('GET /finance/return-records', () =>
           getVendorReturnFinanceRecords(vendorId, { shopifyRefundId, shopifyOrderNumber }),
         ),
+      );
+    },
+  );
+
+  app.get(
+    '/finance/vendor-debt-history',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      return withDashboardRouteTiming('GET /finance/vendor-debt-history', () =>
+        withSlowEndpointTiming('GET /finance/vendor-debt-history', () => getVendorDebtHistory(vendorId, 'TRY')),
       );
     },
   );

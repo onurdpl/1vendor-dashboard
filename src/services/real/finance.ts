@@ -3,6 +3,7 @@ import type {
   FinanceDashboard,
   FinanceDashboardSummary,
   FinanceTransaction,
+  VendorDebtHistory,
   PayoutBatch,
   ReturnFinanceRecordsResponse,
   VendorFinancialProfile,
@@ -276,6 +277,13 @@ export async function getFinanceProfile(options: { vendorId?: string | null; sig
   return requestOptions
     ? apiClient.get<VendorFinancialProfile>('/finance/profile', requestOptions)
     : apiClient.get<VendorFinancialProfile>('/finance/profile');
+}
+
+export async function getVendorDebtHistory(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<VendorDebtHistory> {
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<VendorDebtHistory>('/finance/vendor-debt-history', requestOptions)
+    : apiClient.get<VendorDebtHistory>('/finance/vendor-debt-history');
 }
 
 export async function getReturnFinanceRecords(options: {

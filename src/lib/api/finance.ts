@@ -1,5 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { VendorFinancialProfile } from './contracts';
+import type { VendorDebtHistory, VendorFinancialProfile } from './contracts';
 
 export function getFinanceDashboard(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
@@ -7,6 +7,10 @@ export function getFinanceDashboard(options: { vendorId?: string | null; signal?
 
 export function getFinanceProfile(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
+}
+
+export function getVendorDebtHistory(options: { vendorId?: string | null; signal?: AbortSignal } = {}): Promise<VendorDebtHistory> {
+  return runtimeServices.finance.vendorDebtHistory(options.vendorId ?? undefined, { signal: options.signal });
 }
 
 export function getReturnFinanceRecords(options: {

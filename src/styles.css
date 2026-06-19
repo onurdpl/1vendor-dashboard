@@ -3737,6 +3737,86 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+.finance-debt-history-card {
+  margin-top: var(--space-4);
+}
+
+.finance-debt-summary-row {
+  grid-template-columns: repeat(4, minmax(132px, 1fr));
+}
+
+.finance-debt-history-table .op-table-head,
+.finance-debt-history-table .op-table-row {
+  grid-template-columns:
+    minmax(108px, 0.8fr)
+    minmax(122px, 0.8fr)
+    minmax(150px, 1fr)
+    minmax(110px, 0.8fr)
+    minmax(72px, 0.5fr)
+    minmax(108px, 0.7fr)
+    minmax(108px, 0.7fr)
+    minmax(160px, 1fr);
+}
+
+.finance-debt-source-reference {
+  overflow-wrap: anywhere;
+  color: var(--op-muted);
+  font-size: 0.78rem;
+}
+
+.finance-debt-detail-panel {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.finance-debt-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.finance-debt-detail-heading h4 {
+  margin: 2px 0 0;
+  color: var(--op-text);
+}
+
+.finance-debt-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.finance-debt-detail-list {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.finance-debt-detail-list h5,
+.finance-debt-detail-list p {
+  margin: 0;
+}
+
+.finance-debt-detail-list p {
+  display: grid;
+  gap: 2px;
+}
+
+.finance-debt-detail-list span {
+  color: var(--op-muted);
+  font-size: 0.78rem;
+}
+
 .diagnostics-filter-summary {
   display: flex;
   flex-wrap: wrap;

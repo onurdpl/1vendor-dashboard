@@ -3,6 +3,7 @@ export {
   getFinanceDashboard,
   getFinanceProfile,
   getReturnFinanceRecords,
+  getVendorDebtHistory,
   preparePayoutBatch,
   updateVendorFinancialProfile,
 } from '../../lib/api/finance';
@@ -11,5 +12,6 @@ export type {
   FinanceSummary,
   FinanceTransaction,
   PayoutBatch,
+  VendorDebtHistory,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';

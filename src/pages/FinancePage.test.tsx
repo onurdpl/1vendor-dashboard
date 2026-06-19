@@ -8,6 +8,7 @@ import type { FinanceDashboard, SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
+const getVendorDebtHistoryMock = vi.fn();
 const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
@@ -18,6 +19,7 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+    getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
@@ -168,6 +170,125 @@ const financeDashboardWithOrderSettlementRoute: FinanceDashboard = {
   ],
 };
 
+const emptyVendorDebtHistory = {
+  ok: true,
+  writesPerformed: false,
+  vendorId: 'demo-vendor-a',
+  currency: 'TRY',
+  summary: {
+    outstandingDebtMinor: 0,
+    totalDebtCreatedMinor: 0,
+    totalDebtOffsetMinor: 0,
+    remainingDebtMinor: 0,
+    lastDebtActivityAt: null,
+  },
+  events: [],
+};
+
+const vendorDebtHistory = {
+  ok: true,
+  writesPerformed: false,
+  vendorId: 'demo-vendor-a',
+  currency: 'TRY',
+  summary: {
+    outstandingDebtMinor: 264000,
+    totalDebtCreatedMinor: 300000,
+    totalDebtOffsetMinor: 36000,
+    remainingDebtMinor: 264000,
+    lastDebtActivityAt: '2026-05-18T10:00:00.000Z',
+  },
+  events: [
+    {
+      id: 'vendor-debt-offset-1',
+      createdAt: '2026-05-18T10:00:00.000Z',
+      type: 'VENDOR_DEBT_OFFSET',
+      label: 'Debt Offset Applied',
+      vendorId: 'demo-vendor-a',
+      vendorName: 'Demo Vendor A',
+      orderNumber: null,
+      shopifyOrderId: null,
+      orderCreatedAt: null,
+      refundReference: null,
+      refundRecordId: null,
+      payoutBatchId: 'payout-batch-1',
+      payoutBatchStatus: 'DRAFT',
+      itemCount: 0,
+      productCount: 0,
+      products: [],
+      amountMinor: 36000,
+      debtAmountMinor: -36000,
+      remainingDebtAfterEventMinor: 264000,
+      sourceReference: 'payout-batch-1',
+      financeLedgerEntryId: null,
+      calculation: {
+        refundMinor: null,
+        commissionReversalMinor: null,
+        commissionVatReversalMinor: null,
+        vendorDebtMinor: null,
+        debtOffsetMinor: 36000,
+        formula: null,
+      },
+      offsetHistory: [
+        {
+          id: 'vendor-debt-offset-1',
+          createdAt: '2026-05-18T10:00:00.000Z',
+          payoutBatchId: 'payout-batch-1',
+          payoutBatchStatus: 'DRAFT',
+          offsetAmountMinor: 36000,
+          remainingDebtAfterEventMinor: 264000,
+        },
+      ],
+    },
+    {
+      id: 'vendor-debt-created-1',
+      createdAt: '2026-05-15T10:00:00.000Z',
+      type: 'VENDOR_DEBT_CREATED',
+      label: 'Debt Created',
+      vendorId: 'demo-vendor-a',
+      vendorName: 'Demo Vendor A',
+      orderNumber: '#1082',
+      shopifyOrderId: 'gid://shopify/Order/1082',
+      orderCreatedAt: '2026-05-10T09:00:00.000Z',
+      refundReference: 'gid://shopify/Refund/9001',
+      refundRecordId: 'refund-record-9001',
+      payoutBatchId: null,
+      payoutBatchStatus: null,
+      itemCount: 2,
+      productCount: 1,
+      products: [
+        {
+          title: 'Nike Test Shoe',
+          sku: 'NIKE-42',
+          quantity: 2,
+        },
+      ],
+      amountMinor: -300000,
+      debtAmountMinor: 300000,
+      remainingDebtAfterEventMinor: 300000,
+      sourceReference: 'gid://shopify/Refund/9001',
+      financeLedgerEntryId: 'ledger-refund-9001',
+      calculation: {
+        refundMinor: 340000,
+        commissionReversalMinor: 34000,
+        commissionVatReversalMinor: 6000,
+        vendorDebtMinor: 300000,
+        debtOffsetMinor: null,
+        formula: 'vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor',
+      },
+      offsetHistory: [
+        {
+          id: 'vendor-debt-offset-1',
+          createdAt: '2026-05-18T10:00:00.000Z',
+          payoutBatchId: 'payout-batch-1',
+          payoutBatchStatus: 'DRAFT',
+          offsetAmountMinor: 36000,
+          remainingDebtAfterEventMinor: 264000,
+        },
+      ],
+    },
+  ],
+} as const;
+
 function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
     id: 'ticket-finance-1',
@@ -287,6 +408,8 @@ describe('FinancePage control center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getFinanceDashboardMock.mockReset();
+    getVendorDebtHistoryMock.mockReset();
+    getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
     updateVendorFinancialProfileMock.mockReset();
     preparePayoutBatchMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
@@ -367,6 +490,58 @@ describe('FinancePage control center', () => {
     const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
     expect(card).toHaveClass('op-tone-danger');
     expect(screen.getByText('Debt open: $300.00')).toBeInTheDocument();
+  });
+
+  it('renders vendor debt history summary and event rows', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getVendorDebtHistoryMock.mockResolvedValue(vendorDebtHistory);
+
+    renderFinancePage();
+
+    expect(await screen.findByRole('heading', { name: 'Vendor Debt History' })).toBeInTheDocument();
+    expect(screen.getByText('Outstanding Debt')).toBeInTheDocument();
+    expect(screen.getByText('Total Debt Created')).toBeInTheDocument();
+    expect(screen.getByText('Total Debt Offset')).toBeInTheDocument();
+    expect(screen.getByText('Remaining Debt')).toBeInTheDocument();
+    expect(await screen.findByText('Debt Created')).toBeInTheDocument();
+    expect(screen.getAllByText('Debt Offset Applied').length).toBeGreaterThan(0);
+    expect(screen.getByText('#1082')).toBeInTheDocument();
+    expect(screen.getByText('gid://shopify/Refund/9001')).toBeInTheDocument();
+    expect(screen.getAllByText('payout-batch-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 products')).toBeInTheDocument();
+  });
+
+  it('opens a vendor debt detail panel with order, refund, products, calculation, and offsets', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getVendorDebtHistoryMock.mockResolvedValue(vendorDebtHistory);
+
+    renderFinancePage();
+
+    const debtCreatedRow = (await screen.findByText('Debt Created')).closest('[role="button"]');
+    expect(debtCreatedRow).not.toBeNull();
+    await userEvent.click(debtCreatedRow!);
+
+    expect(screen.getByRole('heading', { name: 'Debt Created' })).toBeInTheDocument();
+    expect(screen.getByText('Shopify order id')).toBeInTheDocument();
+    expect(screen.getAllByText('gid://shopify/Order/1082').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund reference')).toBeInTheDocument();
+    expect(screen.getAllByText('gid://shopify/Refund/9001').length).toBeGreaterThan(0);
+    expect(screen.getByText('Nike Test Shoe')).toBeInTheDocument();
+    expect(screen.getByText('NIKE-42 · Qty 2')).toBeInTheDocument();
+    expect(screen.getByText('Commission reversal')).toBeInTheDocument();
+    expect(screen.getByText('Commission VAT reversal')).toBeInTheDocument();
+    expect(screen.getByText('Vendor debt created')).toBeInTheDocument();
+    expect(screen.getByText('vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor')).toBeInTheDocument();
+    expect(screen.getAllByText(/payout-batch-1/).length).toBeGreaterThan(0);
+  });
+
+  it('renders vendor debt empty state', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
+
+    renderFinancePage();
+
+    expect(await screen.findByText('No vendor debt history')).toBeInTheDocument();
   });
 
   it('uses workflow query params to open settlement review rows and allows reset', async () => {

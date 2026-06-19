@@ -1,5 +1,5 @@
 import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
-import type { FinanceDashboard, FinanceTransaction } from './contracts';
+import type { FinanceDashboard, FinanceTransaction, VendorDebtHistory } from './contracts';
 import { listMockOrders } from './mockOrders';
 import { listMockReturns } from './mockReturns';
 
@@ -172,4 +172,113 @@ export function getMockFinanceDashboard(vendorId?: VendorId): FinanceDashboard {
 
 export function listMockFinanceTransactions(vendorId?: VendorId): FinanceTransaction[] {
   return getMockFinanceDashboard(vendorId).transactions;
+}
+
+export function getMockVendorDebtHistory(vendorId?: VendorId): VendorDebtHistory {
+  const currentVendorId = resolveVendorId(vendorId);
+  const createdAt = '2026-05-15T10:00:00.000Z';
+  const offsetAt = '2026-05-18T10:00:00.000Z';
+  return {
+    ok: true,
+    writesPerformed: false,
+    vendorId: currentVendorId,
+    currency: 'TRY',
+    summary: {
+      outstandingDebtMinor: 264000,
+      totalDebtCreatedMinor: 300000,
+      totalDebtOffsetMinor: 36000,
+      remainingDebtMinor: 264000,
+      lastDebtActivityAt: offsetAt,
+    },
+    events: [
+      {
+        id: 'mock-vendor-debt-offset-1',
+        createdAt: offsetAt,
+        type: 'VENDOR_DEBT_OFFSET',
+        label: 'Debt Offset Applied',
+        vendorId: currentVendorId,
+        vendorName: currentVendorId === 'demo-vendor-a' ? 'Demo Vendor A' : 'Demo Vendor B',
+        orderNumber: null,
+        shopifyOrderId: null,
+        orderCreatedAt: null,
+        refundReference: null,
+        refundRecordId: null,
+        payoutBatchId: 'mock-payout-batch-1',
+        payoutBatchStatus: 'DRAFT',
+        itemCount: 0,
+        productCount: 0,
+        products: [],
+        amountMinor: 36000,
+        debtAmountMinor: -36000,
+        remainingDebtAfterEventMinor: 264000,
+        sourceReference: 'mock-payout-batch-1',
+        financeLedgerEntryId: null,
+        calculation: {
+          refundMinor: null,
+          commissionReversalMinor: null,
+          commissionVatReversalMinor: null,
+          vendorDebtMinor: null,
+          debtOffsetMinor: 36000,
+          formula: null,
+        },
+        offsetHistory: [
+          {
+            id: 'mock-vendor-debt-offset-1',
+            createdAt: offsetAt,
+            payoutBatchId: 'mock-payout-batch-1',
+            payoutBatchStatus: 'DRAFT',
+            offsetAmountMinor: 36000,
+            remainingDebtAfterEventMinor: 264000,
+          },
+        ],
+      },
+      {
+        id: 'mock-vendor-debt-created-1',
+        createdAt,
+        type: 'VENDOR_DEBT_CREATED',
+        label: 'Debt Created',
+        vendorId: currentVendorId,
+        vendorName: currentVendorId === 'demo-vendor-a' ? 'Demo Vendor A' : 'Demo Vendor B',
+        orderNumber: '#1082',
+        shopifyOrderId: 'gid://shopify/Order/1082',
+        orderCreatedAt: '2026-05-10T09:00:00.000Z',
+        refundReference: 'gid://shopify/Refund/9001',
+        refundRecordId: 'mock-refund-record-1',
+        payoutBatchId: null,
+        payoutBatchStatus: null,
+        itemCount: 2,
+        productCount: 1,
+        products: [
+          {
+            title: 'Mock running shoe',
+            sku: 'MOCK-SHOE-42',
+            quantity: 2,
+          },
+        ],
+        amountMinor: -300000,
+        debtAmountMinor: 300000,
+        remainingDebtAfterEventMinor: 300000,
+        sourceReference: 'gid://shopify/Refund/9001',
+        financeLedgerEntryId: 'mock-ledger-refund-1',
+        calculation: {
+          refundMinor: 340000,
+          commissionReversalMinor: 34000,
+          commissionVatReversalMinor: 6000,
+          vendorDebtMinor: 300000,
+          debtOffsetMinor: null,
+          formula: 'vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor',
+        },
+        offsetHistory: [
+          {
+            id: 'mock-vendor-debt-offset-1',
+            createdAt: offsetAt,
+            payoutBatchId: 'mock-payout-batch-1',
+            payoutBatchStatus: 'DRAFT',
+            offsetAmountMinor: 36000,
+            remainingDebtAfterEventMinor: 264000,
+          },
+        ],
+      },
+    ],
+  };
 }

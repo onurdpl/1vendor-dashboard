@@ -5,6 +5,7 @@ const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
+const getVendorDebtHistoryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -26,6 +27,10 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   preparePayoutBatch: vi.fn(),
   upsertShipmentShippingCost: vi.fn(),
   upsertVendorFinancialProfile: upsertVendorFinancialProfileMock,
+}));
+
+vi.mock('../backend/src/modules/finance/vendor-balance.service.js', () => ({
+  getVendorDebtHistory: getVendorDebtHistoryMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -169,6 +174,20 @@ describe('finance route validation', () => {
         },
       ],
     });
+    getVendorDebtHistoryMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: false,
+      vendorId: 'sporjinal',
+      currency: 'TRY',
+      summary: {
+        outstandingDebtMinor: 264000,
+        totalDebtCreatedMinor: 300000,
+        totalDebtOffsetMinor: 36000,
+        remainingDebtMinor: 264000,
+        lastDebtActivityAt: '2026-06-19T10:00:00.000Z',
+      },
+      events: [],
+    });
   });
 
   it('returns only dashboard finance summary fields', async () => {
@@ -309,6 +328,41 @@ describe('finance route validation', () => {
       body: { message: 'Vendor context could not be resolved.' },
     });
     expect(getVendorReturnFinanceRecordsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns vendor debt history for the resolved vendor context', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/vendor-debt-history')?.(
+      {
+        vendorContext: { vendorId: 'sporjinal' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      writesPerformed: false,
+      vendorId: 'sporjinal',
+      summary: expect.objectContaining({
+        outstandingDebtMinor: 264000,
+      }),
+    }));
+    expect(getVendorDebtHistoryMock).toHaveBeenCalledWith('sporjinal', 'TRY');
+  });
+
+  it('rejects vendor debt history requests without resolved vendor context', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/vendor-debt-history')?.({}, reply);
+
+    expect(result).toEqual({
+      status: 400,
+      body: { message: 'Vendor context could not be resolved.' },
+    });
+    expect(getVendorDebtHistoryMock).not.toHaveBeenCalled();
   });
 
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {

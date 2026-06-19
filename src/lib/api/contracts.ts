@@ -1275,6 +1275,69 @@ export type PayoutBatchSummary = {
   latestBatch: PayoutBatch | null;
 };
 
+export type VendorDebtHistoryProduct = {
+  title: string | null;
+  sku: string | null;
+  quantity: number;
+};
+
+export type VendorDebtHistoryOffset = {
+  id: string;
+  createdAt: string;
+  payoutBatchId: string | null;
+  payoutBatchStatus: string | null;
+  offsetAmountMinor: number;
+  remainingDebtAfterEventMinor: number;
+};
+
+export type VendorDebtHistoryEvent = {
+  id: string;
+  createdAt: string;
+  type: string;
+  label: string;
+  vendorId: string;
+  vendorName: string | null;
+  orderNumber: string | null;
+  shopifyOrderId: string | null;
+  orderCreatedAt: string | null;
+  refundReference: string | null;
+  refundRecordId: string | null;
+  payoutBatchId: string | null;
+  payoutBatchStatus: string | null;
+  itemCount: number;
+  productCount: number;
+  products: VendorDebtHistoryProduct[];
+  amountMinor: number;
+  debtAmountMinor: number;
+  remainingDebtAfterEventMinor: number;
+  sourceReference: string;
+  financeLedgerEntryId: string | null;
+  calculation: {
+    refundMinor: number | null;
+    commissionReversalMinor: number | null;
+    commissionVatReversalMinor: number | null;
+    vendorDebtMinor: number | null;
+    debtOffsetMinor: number | null;
+    formula: string | null;
+  };
+  offsetHistory: VendorDebtHistoryOffset[];
+};
+
+export type VendorDebtHistory = {
+  ok: true;
+  writesPerformed: false;
+  vendorId: string;
+  currency: string;
+  summary: {
+    outstandingDebtMinor: number;
+    totalDebtCreatedMinor: number;
+    totalDebtOffsetMinor: number;
+    remainingDebtMinor: number;
+    lastDebtActivityAt: string | null;
+  };
+  events: VendorDebtHistoryEvent[];
+};
+
 export type VendorFinancialProfile = {
   vendorId: string;
   commissionPercent: string;

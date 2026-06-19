@@ -36,6 +36,69 @@ export type PayoutBatchSummaryDto = {
   latestBatch: PayoutBatchDto | null;
 };
 
+export type VendorDebtHistoryProductDto = {
+  title: string | null;
+  sku: string | null;
+  quantity: number;
+};
+
+export type VendorDebtHistoryOffsetDto = {
+  id: string;
+  createdAt: string;
+  payoutBatchId: string | null;
+  payoutBatchStatus: string | null;
+  offsetAmountMinor: number;
+  remainingDebtAfterEventMinor: number;
+};
+
+export type VendorDebtHistoryEventDto = {
+  id: string;
+  createdAt: string;
+  type: 'VENDOR_DEBT_CREATED' | 'VENDOR_DEBT_OFFSET' | 'MANUAL_ADJUSTMENT' | 'DEBT_WAIVED' | 'PAYABLE_EARNED' | string;
+  label: string;
+  vendorId: string;
+  vendorName: string | null;
+  orderNumber: string | null;
+  shopifyOrderId: string | null;
+  orderCreatedAt: string | null;
+  refundReference: string | null;
+  refundRecordId: string | null;
+  payoutBatchId: string | null;
+  payoutBatchStatus: string | null;
+  itemCount: number;
+  productCount: number;
+  products: VendorDebtHistoryProductDto[];
+  amountMinor: number;
+  debtAmountMinor: number;
+  remainingDebtAfterEventMinor: number;
+  sourceReference: string;
+  financeLedgerEntryId: string | null;
+  calculation: {
+    refundMinor: number | null;
+    commissionReversalMinor: number | null;
+    commissionVatReversalMinor: number | null;
+    vendorDebtMinor: number | null;
+    debtOffsetMinor: number | null;
+    formula: string | null;
+  };
+  offsetHistory: VendorDebtHistoryOffsetDto[];
+};
+
+export type VendorDebtHistoryDto = {
+  ok: true;
+  writesPerformed: false;
+  vendorId: string;
+  currency: string;
+  summary: {
+    outstandingDebtMinor: number;
+    totalDebtCreatedMinor: number;
+    totalDebtOffsetMinor: number;
+    remainingDebtMinor: number;
+    lastDebtActivityAt: string | null;
+  };
+  events: VendorDebtHistoryEventDto[];
+};
+
 export type VendorFinancialProfileDto = {
   vendorId: string;
   commissionPercent: string;

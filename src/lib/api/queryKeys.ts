@@ -51,6 +51,7 @@ export const queryKeys = {
   finance: {
     summary: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'summary', vendorId] as const,
     records: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'records', vendorId] as const,
+    vendorDebtHistory: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'vendor-debt-history', vendorId] as const,
     returnRecords: (
       vendorId = getCurrentVendorContext().vendorId,
       shopifyRefundId?: string | null,

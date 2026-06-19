@@ -3,7 +3,7 @@ import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser,
 import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
-import { getMockFinanceDashboard } from '../lib/api/mockFinance';
+import { getMockFinanceDashboard, getMockVendorDebtHistory } from '../lib/api/mockFinance';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
@@ -2157,6 +2157,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceProfile({ vendorId, signal: options.signal, headers: options.headers })
         : Promise.resolve(getMockFinanceDashboard(vendorId).profile!),
+    vendorDebtHistory: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getVendorDebtHistory({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(getMockVendorDebtHistory(vendorId)),
     returnRecords: (
       input: { shopifyRefundId?: string | null; shopifyOrderNumber?: string | number | null; vendorId?: string | null },
       options: ReadRequestOptions = {},
