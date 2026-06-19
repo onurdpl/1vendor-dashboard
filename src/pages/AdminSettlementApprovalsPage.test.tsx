@@ -17,6 +17,7 @@ import {
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
   persistSettlementLogoCommissionInvoiceRequestSnapshot,
+  previewLogoOutgoingInvoiceSync,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type SettlementApproval,
@@ -25,6 +26,7 @@ import {
   type SettlementApprovalPreview,
   type SettlementCommissionInvoiceDiagnostics,
   type SettlementCommissionInvoiceRecordsResponse,
+  type LogoOutgoingInvoiceSyncPreview,
   type SettlementLogoCommissionInvoicePreview,
 } from '../features/finance/settlementApprovalsApi';
 
@@ -46,6 +48,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     previewSettlementLogoCommissionInvoice: vi.fn(),
     getSettlementCommissionInvoiceRecords: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
+    previewLogoOutgoingInvoiceSync: vi.fn(),
     listSettlementApprovals: vi.fn(),
   };
 });
@@ -62,6 +65,7 @@ const getSettlementApprovalAuditMock = vi.mocked(getSettlementApprovalAudit);
 const previewSettlementLogoCommissionInvoiceMock = vi.mocked(previewSettlementLogoCommissionInvoice);
 const getSettlementCommissionInvoiceRecordsMock = vi.mocked(getSettlementCommissionInvoiceRecords);
 const getSettlementCommissionInvoiceDiagnosticsMock = vi.mocked(getSettlementCommissionInvoiceDiagnostics);
+const previewLogoOutgoingInvoiceSyncMock = vi.mocked(previewLogoOutgoingInvoiceSync);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 
 const previewResponse: SettlementApprovalPreview = {
@@ -723,6 +727,62 @@ const createdInvoiceRecordsResponse: SettlementCommissionInvoiceRecordsResponse 
   records: [createdInvoiceRecordMissingNumber],
 };
 
+const outgoingInvoiceSyncPreviewResponse: LogoOutgoingInvoiceSyncPreview = {
+  ok: true,
+  writesPerformed: false,
+  blockers: [],
+  warnings: [],
+  record: {
+    id: 'created-record',
+    status: 'CREATED',
+    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+    invoiceNo: null,
+    providerInvoiceId: 'logo-invoice-1',
+    providerEttn: null,
+  },
+  search: {
+    issueDateStart: '2026-06-05T10:01:00.000Z',
+    issueDateEnd: '2026-06-20T00:00:00.000Z',
+    pagesChecked: 1,
+    totalProviderCount: 1,
+    matched: true,
+    ambiguity: false,
+  },
+  matchedInvoice: {
+    uuId: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+    invoiceId: 'einvoice-row-1',
+    salesInvoiceId: '12345',
+    issueDate: '2026-06-12T12:00:00',
+    amount: 120.5,
+    currency: 'TRY',
+    status: "Henüz GİB'e Gönderilmedi",
+    statusCode: 10,
+    eGovermentType: 'EARSIV',
+    eGovermentTypeDesc: 'E-Arşiv',
+    connectStatusDescription: 'Provider waiting',
+    connectStatusCode: 20,
+    accountingStatusSummary: {},
+  },
+  providerFieldsObserved: ['amount', 'currency', 'invoiceId', 'issueDate', 'salesInvoiceId', 'status', 'statusCode', 'uuId'],
+  mappedFields: {
+    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+    providerInvoiceId: '12345',
+    providerEttn: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+    gibStatus: "Henüz GİB'e Gönderilmedi",
+    gibStatusCode: 10,
+    documentStatus: 'Provider waiting',
+    documentStatusCode: 20,
+    documentType: 'EARSIV',
+    invoiceDate: '2026-06-12T12:00:00',
+    invoiceTotalMinor: 12050,
+    invoiceCurrency: 'TRY',
+    invoiceNoCandidate: null,
+    invoiceNumberAvailable: false,
+    invoiceNumberSource: 'unknown',
+    invoiceNumberRecoveryPossible: true,
+  },
+};
+
 const createRequestSnapshotResponse = {
   ok: true,
   writesPerformed: true,
@@ -1036,6 +1096,7 @@ describe('Finance Settlement approval admin UI', () => {
     executeSettlementLogoCommissionInvoiceCreateMock.mockResolvedValue(createdLogoInvoiceResponse);
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValue(invoiceRecordsResponse);
     getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(diagnosticsResponse);
+    previewLogoOutgoingInvoiceSyncMock.mockResolvedValue(outgoingInvoiceSyncPreviewResponse);
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
   });
 
@@ -1112,6 +1173,28 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getAllByText('Not executable because invoice is already CREATED.').length).toBeGreaterThan(0);
     expect(screen.getByText('Execution complete')).toBeInTheDocument();
     expect(screen.queryByText('Execution contract blockers')).not.toBeInTheDocument();
+  });
+
+  it('previews Logo outgoing invoice sync for a created record without writing data', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
+    getSettlementCommissionInvoiceRecordsMock.mockResolvedValueOnce(createdInvoiceRecordsResponse);
+    renderPage();
+
+    const openButtons = await screen.findAllByRole('button', { name: 'Open' });
+    await userEvent.click(openButtons[0]);
+
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-2'));
+    const invoicePanel = screen.getByText('created-record').closest('.settlement-tab-panel') ?? document.body;
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: 'Preview Logo invoice sync' }));
+
+    await waitFor(() => expect(previewLogoOutgoingInvoiceSyncMock).toHaveBeenCalledWith('created-record'));
+    expect(screen.getByText('Logo invoice sync preview loaded. No data was written.')).toBeInTheDocument();
+    expect(screen.getByText('Sync preview created-record')).toBeInTheDocument();
+    expect(screen.getAllByText('82691C7B-28D6-4E30-95C9-C0658E90F090').length).toBeGreaterThan(0);
+    expect(screen.getByText("Henüz GİB'e Gönderilmedi")).toBeInTheDocument();
+    expect(screen.getByText('UNKNOWN')).toBeInTheDocument();
+    expect(screen.getByText('Invoice number is UNKNOWN.')).toBeInTheDocument();
+    expect(screen.getByText('Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.')).toBeInTheDocument();
   });
 
   it('opening an approved approval replaces an existing preview panel', async () => {

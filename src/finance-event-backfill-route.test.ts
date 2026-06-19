@@ -9,6 +9,7 @@ const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
 const getSettlementCommissionInvoiceDiagnosticsMock = vi.hoisted(() => vi.fn());
 const createPendingRecordFromImmutableRequestSnapshotMock = vi.hoisted(() => vi.fn());
 const executeSettlementLogoCommissionInvoiceCreateMock = vi.hoisted(() => vi.fn());
+const previewSettlementLogoOutgoingInvoiceSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -40,6 +41,10 @@ vi.mock('../backend/src/modules/finance/settlement-commission-invoice-record.ser
 
 vi.mock('../backend/src/modules/finance/settlement-logo-commission-invoice-create.service.js', () => ({
   executeSettlementLogoCommissionInvoiceCreate: executeSettlementLogoCommissionInvoiceCreateMock,
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-logo-outgoing-invoice-sync-preview.service.js', () => ({
+  previewSettlementLogoOutgoingInvoiceSync: previewSettlementLogoOutgoingInvoiceSyncMock,
 }));
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
@@ -79,6 +84,7 @@ describe('finance event backfill route', () => {
     getSettlementCommissionInvoiceDiagnosticsMock.mockReset();
     createPendingRecordFromImmutableRequestSnapshotMock.mockReset();
     executeSettlementLogoCommissionInvoiceCreateMock.mockReset();
+    previewSettlementLogoOutgoingInvoiceSyncMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -632,5 +638,69 @@ describe('finance event backfill route', () => {
 
     expect(allowed).toEqual(result);
     expect(executeSettlementLogoCommissionInvoiceCreateMock).toHaveBeenCalledWith('record-1', { env: {} });
+  });
+
+  it('returns read-only Logo outgoing invoice sync preview to admins', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const result = {
+      ok: true,
+      writesPerformed: false,
+      blockers: [],
+      warnings: [],
+      record: { id: 'record-1', status: 'CREATED', providerUuid: 'uuid-1', invoiceNo: null },
+      search: { matched: true, ambiguity: false },
+      matchedInvoice: { uuId: 'uuid-1' },
+      providerFieldsObserved: ['uuId'],
+      mappedFields: { providerUuid: 'uuid-1', invoiceNumberAvailable: false },
+    };
+    previewSettlementLogoOutgoingInvoiceSyncMock.mockResolvedValueOnce(result);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const response = await gets.get('/admin/finance/commission-invoices/:id/logo-isbasi/outgoing-invoice-sync-preview')?.(
+      { authUser: { role: 'admin' }, params: { id: 'record-1' } },
+      reply,
+    );
+
+    expect(response).toEqual(result);
+    expect(previewSettlementLogoOutgoingInvoiceSyncMock).toHaveBeenCalledWith('record-1', { env: {} });
+  });
+
+  it('requires admin access for Logo outgoing invoice sync preview', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const response = await gets.get('/admin/finance/commission-invoices/:id/logo-isbasi/outgoing-invoice-sync-preview')?.(
+      { authUser: { role: 'vendor' }, params: { id: 'record-1' } },
+      reply,
+    );
+
+    expect(response).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(previewSettlementLogoOutgoingInvoiceSyncMock).not.toHaveBeenCalled();
   });
 });

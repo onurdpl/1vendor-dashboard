@@ -364,6 +364,62 @@ export type ExecuteSettlementLogoCommissionInvoiceCreateResponse = {
   } | null;
 };
 
+export type LogoOutgoingInvoiceSyncPreview = {
+  ok: boolean;
+  writesPerformed: false;
+  blockers: string[];
+  warnings: string[];
+  record: {
+    id: string;
+    status: string;
+    providerUuid: string | null;
+    invoiceNo: string | null;
+    providerInvoiceId: string | null;
+    providerEttn: string | null;
+  } | null;
+  search: {
+    issueDateStart: string;
+    issueDateEnd: string;
+    pagesChecked: number;
+    totalProviderCount: number;
+    matched: boolean;
+    ambiguity: boolean;
+  };
+  matchedInvoice: null | {
+    uuId: string | null;
+    invoiceId: string | null;
+    salesInvoiceId: string | null;
+    issueDate: string | null;
+    amount: number | null;
+    currency: string | null;
+    status: string | null;
+    statusCode: number | null;
+    eGovermentType: string | null;
+    eGovermentTypeDesc: string | null;
+    connectStatusDescription: string | null;
+    connectStatusCode: number | null;
+    accountingStatusSummary: Record<string, unknown>;
+  };
+  providerFieldsObserved: string[];
+  mappedFields: {
+    providerUuid: string | null;
+    providerInvoiceId: string | null;
+    providerEttn: string | null;
+    gibStatus: string | null;
+    gibStatusCode: number | null;
+    documentStatus: string | null;
+    documentStatusCode: number | null;
+    documentType: string | null;
+    invoiceDate: string | null;
+    invoiceTotalMinor: number | null;
+    invoiceCurrency: string | null;
+    invoiceNoCandidate: string | null;
+    invoiceNumberAvailable: boolean;
+    invoiceNumberSource: string;
+    invoiceNumberRecoveryPossible: boolean;
+  };
+};
+
 export type SettlementApprovalPreviewInput = {
   vendorId: string;
   periodStart?: string | null;
@@ -445,5 +501,11 @@ export function executeSettlementLogoCommissionInvoiceCreate(
   return apiClient.post<ExecuteSettlementLogoCommissionInvoiceCreateResponse>(
     `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/create`,
     input,
+  );
+}
+
+export function previewLogoOutgoingInvoiceSync(id: string) {
+  return apiClient.get<LogoOutgoingInvoiceSyncPreview>(
+    `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/outgoing-invoice-sync-preview`,
   );
 }

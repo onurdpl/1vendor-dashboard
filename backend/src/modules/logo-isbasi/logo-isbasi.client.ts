@@ -63,6 +63,13 @@ export type LogoIsbasiAuthenticatedSession = {
   userName?: string | null;
 };
 
+export type LogoIsbasiOutgoingInvoiceListInput = {
+  issueDateStart: string;
+  issueDateEnd: string;
+  page: number;
+  pageSize: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -446,6 +453,74 @@ export class LogoIsbasiClient {
       method: 'POST',
       contentType: 'application/json;charset=utf-8',
       accept: 'application/json',
+    });
+  }
+
+  async getOutgoingInvoiceDataList(
+    session: LogoIsbasiAuthenticatedSession,
+    input: LogoIsbasiOutgoingInvoiceListInput,
+  ): Promise<LogoIsbasiRawResult> {
+    const requestUrl = `${this.baseUrl}/api/v1.0/einvoices/GetOutgoingInvoiceDataList`;
+    const requestBody = {
+      filters: [
+        {
+          columnName: 'issueDate',
+          operator: 5,
+          value: input.issueDateStart,
+        },
+        {
+          columnName: 'issueDate',
+          operator: 2,
+          value: input.issueDateEnd,
+        },
+      ],
+      sorting: {
+        issueDate: 1,
+      },
+      paging: {
+        currentPage: input.page,
+        pageSize: input.pageSize,
+      },
+      columnNames: null,
+      count: true,
+      excel: {
+        export: false,
+        allowedColumns: null,
+        lucaExport: false,
+      },
+    };
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.accessToken}`,
+      apiKey: this.config.apiKey,
+      'Content-Type': 'application/json-patch+json',
+      accept: 'text/plain',
+      Lang: 'tr-TR',
+      DeviceType: 'WEB',
+    };
+    if (session.tenantId) {
+      headers.tenantId = session.tenantId;
+    }
+    if (session.userId) {
+      headers.UserId = session.userId;
+    }
+    if (session.userEmail) {
+      headers.UserEmail = session.userEmail;
+    }
+    if (session.userName) {
+      headers.UserName = session.userName;
+    }
+
+    const response = await this.fetchImpl(requestUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+    });
+
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json-patch+json',
+      accept: 'text/plain',
     });
   }
 

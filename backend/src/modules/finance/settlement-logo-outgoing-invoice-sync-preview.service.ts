@@ -1,0 +1,526 @@
+import {
+  SettlementCommissionInvoiceProvider,
+  SettlementCommissionInvoiceStatus,
+} from '@prisma/client';
+import type { AppEnv } from '../../config/env.js';
+import { prisma } from '../../db/prisma.js';
+import {
+  extractSessionFromLoginResponse,
+  LogoIsbasiClient,
+  sanitizeLoginResponse,
+  type LogoIsbasiAuthenticatedSession,
+  type LogoIsbasiRawResult,
+} from '../logo-isbasi/logo-isbasi.client.js';
+
+const MAX_PAGES = 5;
+const PAGE_SIZE = 100;
+const SEARCH_START_OFFSET_DAYS = 7;
+const SEARCH_END_OFFSET_DAYS = 1;
+const INVOICE_NUMBER_FIELDS = ['invoiceNumber', 'invoiceNo', 'documentNumber'] as const;
+
+type LogoOutgoingInvoiceClient = Pick<LogoIsbasiClient, 'login' | 'getOutgoingInvoiceDataList'>;
+
+type ProviderInvoiceRecord = Record<string, unknown>;
+
+export type LogoOutgoingInvoiceSyncPreviewResult = {
+  ok: boolean;
+  writesPerformed: false;
+  blockers: string[];
+  warnings: string[];
+  record: {
+    id: string;
+    status: string;
+    providerUuid: string | null;
+    invoiceNo: string | null;
+    providerInvoiceId: string | null;
+    providerEttn: string | null;
+  } | null;
+  search: {
+    issueDateStart: string;
+    issueDateEnd: string;
+    pagesChecked: number;
+    totalProviderCount: number;
+    matched: boolean;
+    ambiguity: boolean;
+  };
+  matchedInvoice: null | {
+    uuId: string | null;
+    invoiceId: string | null;
+    salesInvoiceId: string | null;
+    issueDate: string | null;
+    amount: number | null;
+    currency: string | null;
+    status: string | null;
+    statusCode: number | null;
+    eGovermentType: string | null;
+    eGovermentTypeDesc: string | null;
+    connectStatusDescription: string | null;
+    connectStatusCode: number | null;
+    accountingStatusSummary: Record<string, unknown>;
+  };
+  providerFieldsObserved: string[];
+  mappedFields: {
+    providerUuid: string | null;
+    providerInvoiceId: string | null;
+    providerEttn: string | null;
+    gibStatus: string | null;
+    gibStatusCode: number | null;
+    documentStatus: string | null;
+    documentStatusCode: number | null;
+    documentType: string | null;
+    invoiceDate: string | null;
+    invoiceTotalMinor: number | null;
+    invoiceCurrency: string | null;
+    invoiceNoCandidate: string | null;
+    invoiceNumberAvailable: boolean;
+    invoiceNumberSource: string;
+    invoiceNumberRecoveryPossible: boolean;
+  };
+};
+
+export type LogoOutgoingInvoiceSyncPreviewOptions = {
+  env: AppEnv;
+  client?: LogoOutgoingInvoiceClient;
+  now?: Date;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown) {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+function readRecordString(value: unknown, keys: readonly string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    const parsed = readString(value[key]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function readRecordNumber(value: unknown, keys: readonly string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    const parsed = readNumber(value[key]);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date.getTime());
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+function buildEmptyResult(input: {
+  record?: LogoOutgoingInvoiceSyncPreviewResult['record'];
+  issueDateStart?: string;
+  issueDateEnd?: string;
+  blockers?: string[];
+  warnings?: string[];
+}): LogoOutgoingInvoiceSyncPreviewResult {
+  return {
+    ok: false,
+    writesPerformed: false,
+    blockers: input.blockers ?? [],
+    warnings: input.warnings ?? [],
+    record: input.record ?? null,
+    search: {
+      issueDateStart: input.issueDateStart ?? '',
+      issueDateEnd: input.issueDateEnd ?? '',
+      pagesChecked: 0,
+      totalProviderCount: 0,
+      matched: false,
+      ambiguity: false,
+    },
+    matchedInvoice: null,
+    providerFieldsObserved: [],
+    mappedFields: {
+      providerUuid: null,
+      providerInvoiceId: null,
+      providerEttn: null,
+      gibStatus: null,
+      gibStatusCode: null,
+      documentStatus: null,
+      documentStatusCode: null,
+      documentType: null,
+      invoiceDate: null,
+      invoiceTotalMinor: null,
+      invoiceCurrency: null,
+      invoiceNoCandidate: null,
+      invoiceNumberAvailable: false,
+      invoiceNumberSource: 'unknown',
+      invoiceNumberRecoveryPossible: false,
+    },
+  };
+}
+
+function buildLogoClient(env: AppEnv): LogoOutgoingInvoiceClient {
+  return new LogoIsbasiClient({
+    baseUrl: env.LOGO_ISBASI_BASE_URL!,
+    apiKey: env.LOGO_ISBASI_API_KEY!,
+    username: env.LOGO_ISBASI_USERNAME!,
+    password: env.LOGO_ISBASI_PASSWORD!,
+  });
+}
+
+function getMissingEnv(env: AppEnv) {
+  return [
+    !readString(env.LOGO_ISBASI_BASE_URL) ? 'LOGO_ISBASI_BASE_URL' : null,
+    !readString(env.LOGO_ISBASI_API_KEY) ? 'LOGO_ISBASI_API_KEY' : null,
+    !readString(env.LOGO_ISBASI_USERNAME) ? 'LOGO_ISBASI_USERNAME' : null,
+    !readString(env.LOGO_ISBASI_PASSWORD) ? 'LOGO_ISBASI_PASSWORD' : null,
+  ].filter((value): value is string => Boolean(value));
+}
+
+async function loginForLogoRead(client: LogoOutgoingInvoiceClient) {
+  const result = await client.login();
+  const login = sanitizeLoginResponse(result.body);
+  const extracted = extractSessionFromLoginResponse(result.body);
+  const missingSessionFields = extracted.missing.filter((field) => field !== 'tenantId');
+  const ok = result.ok && !result.jsonParseFailed && missingSessionFields.length === 0;
+
+  if (!ok) {
+    return {
+      ok: false as const,
+      blockers: [
+        result.jsonParseFailed
+          ? 'Logo İşbaşı login returned a non-JSON response.'
+          : !result.ok
+            ? 'Logo İşbaşı login request failed before outgoing invoice sync preview.'
+            : 'Logo İşbaşı login response is missing required session fields.',
+      ],
+      login,
+      session: null,
+    };
+  }
+
+  return {
+    ok: true as const,
+    blockers: [],
+    login,
+    session: {
+      accessToken: extracted.accessToken!,
+      tenantId: extracted.tenantId,
+      userId: extracted.userId,
+      userEmail: extracted.userEmail,
+      userName: extracted.userName,
+    } satisfies LogoIsbasiAuthenticatedSession,
+  };
+}
+
+function extractProviderRows(body: unknown): ProviderInvoiceRecord[] {
+  const candidates = [
+    isRecord(body) ? body.data : null,
+    isRecord(body) && isRecord(body.data) ? body.data.data : null,
+    isRecord(body) && isRecord(body.data) ? body.data.items : null,
+    isRecord(body) && isRecord(body.data) ? body.data.list : null,
+    isRecord(body) ? body.items : null,
+    isRecord(body) ? body.result : null,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isRecord);
+    }
+  }
+  return [];
+}
+
+function extractProviderCount(body: unknown, fallback: number) {
+  const candidates = [
+    isRecord(body) ? body.count : null,
+    isRecord(body) ? body.totalCount : null,
+    isRecord(body) ? body.total : null,
+    isRecord(body) && isRecord(body.data) ? body.data.count : null,
+    isRecord(body) && isRecord(body.data) ? body.data.totalCount : null,
+    isRecord(body) && isRecord(body.data) ? body.data.total : null,
+  ];
+  for (const candidate of candidates) {
+    const parsed = readNumber(candidate);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function findInvoiceNumber(invoice: ProviderInvoiceRecord) {
+  for (const key of INVOICE_NUMBER_FIELDS) {
+    const value = readString(invoice[key]);
+    if (value) {
+      return {
+        value,
+        source: key,
+      };
+    }
+  }
+  return {
+    value: null,
+    source: 'unknown',
+  };
+}
+
+function sanitizeAccountingStatus(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const output: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === null || typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+      output[key] = raw;
+    }
+  }
+  return output;
+}
+
+function mapMatchedInvoice(invoice: ProviderInvoiceRecord): NonNullable<LogoOutgoingInvoiceSyncPreviewResult['matchedInvoice']> {
+  return {
+    uuId: readRecordString(invoice, ['uuId', 'uuid', 'UUID']),
+    invoiceId: readRecordString(invoice, ['invoiceId']),
+    salesInvoiceId: readRecordString(invoice, ['salesInvoiceId']),
+    issueDate: readRecordString(invoice, ['issueDate']),
+    amount: readRecordNumber(invoice, ['amount']),
+    currency: readRecordString(invoice, ['currency']),
+    status: readRecordString(invoice, ['status']),
+    statusCode: readRecordNumber(invoice, ['statusCode']),
+    eGovermentType: readRecordString(invoice, ['eGovermentType']),
+    eGovermentTypeDesc: readRecordString(invoice, ['eGovermentTypeDesc']),
+    connectStatusDescription: readRecordString(invoice, ['connectStatusDescription']),
+    connectStatusCode: readRecordNumber(invoice, ['connectStatusCode']),
+    accountingStatusSummary: sanitizeAccountingStatus(invoice.accountingStatus),
+  };
+}
+
+function mapFields(invoice: ProviderInvoiceRecord | null): LogoOutgoingInvoiceSyncPreviewResult['mappedFields'] {
+  if (!invoice) {
+    return buildEmptyResult({}).mappedFields;
+  }
+  const matchedInvoice = mapMatchedInvoice(invoice);
+  const invoiceNumber = findInvoiceNumber(invoice);
+  return {
+    providerUuid: matchedInvoice.uuId,
+    providerInvoiceId: matchedInvoice.salesInvoiceId ?? matchedInvoice.invoiceId,
+    providerEttn: readRecordString(invoice, ['ettn', 'ETTN', 'eTtn']) ?? matchedInvoice.uuId,
+    gibStatus: matchedInvoice.status,
+    gibStatusCode: matchedInvoice.statusCode,
+    documentStatus:
+      matchedInvoice.connectStatusDescription ??
+      matchedInvoice.eGovermentTypeDesc ??
+      matchedInvoice.status,
+    documentStatusCode: matchedInvoice.connectStatusCode ?? matchedInvoice.statusCode,
+    documentType: matchedInvoice.eGovermentType,
+    invoiceDate: matchedInvoice.issueDate,
+    invoiceTotalMinor: matchedInvoice.amount === null ? null : Math.round(matchedInvoice.amount * 100),
+    invoiceCurrency: matchedInvoice.currency,
+    invoiceNoCandidate: invoiceNumber.value,
+    invoiceNumberAvailable: Boolean(invoiceNumber.value),
+    invoiceNumberSource: invoiceNumber.source,
+    invoiceNumberRecoveryPossible: Boolean(matchedInvoice.salesInvoiceId ?? matchedInvoice.invoiceId),
+  };
+}
+
+function safeProviderFields(rows: ProviderInvoiceRecord[]) {
+  return uniqueStrings(rows.flatMap((row) => Object.keys(row))).sort();
+}
+
+async function fetchOutgoingInvoicePages(input: {
+  client: LogoOutgoingInvoiceClient;
+  session: LogoIsbasiAuthenticatedSession;
+  issueDateStart: string;
+  issueDateEnd: string;
+}) {
+  const rows: ProviderInvoiceRecord[] = [];
+  let totalProviderCount = 0;
+  let pagesChecked = 0;
+
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const result: LogoIsbasiRawResult = await input.client.getOutgoingInvoiceDataList(input.session, {
+      issueDateStart: input.issueDateStart,
+      issueDateEnd: input.issueDateEnd,
+      page,
+      pageSize: PAGE_SIZE,
+    });
+    pagesChecked = page;
+
+    if (!result.ok || result.jsonParseFailed) {
+      throw new Error(
+        result.jsonParseFailed
+          ? 'Logo İşbaşı outgoing invoice list returned a non-JSON response.'
+          : `Logo İşbaşı outgoing invoice list failed with HTTP ${result.status}.`,
+      );
+    }
+
+    const pageRows = extractProviderRows(result.body);
+    rows.push(...pageRows);
+    totalProviderCount = Math.max(totalProviderCount, extractProviderCount(result.body, rows.length));
+
+    if (pageRows.length < PAGE_SIZE || rows.length >= totalProviderCount) {
+      break;
+    }
+  }
+
+  return {
+    rows,
+    totalProviderCount: totalProviderCount || rows.length,
+    pagesChecked,
+  };
+}
+
+export async function previewSettlementLogoOutgoingInvoiceSync(
+  settlementCommissionInvoiceId: string,
+  options: LogoOutgoingInvoiceSyncPreviewOptions,
+): Promise<LogoOutgoingInvoiceSyncPreviewResult> {
+  const record = await prisma.settlementCommissionInvoice.findUnique({
+    where: { id: settlementCommissionInvoiceId },
+    select: {
+      id: true,
+      createdAt: true,
+      provider: true,
+      status: true,
+      providerInvoiceId: true,
+      providerUuid: true,
+      providerEttn: true,
+      invoiceNo: true,
+    },
+  });
+
+  const now = options.now ?? new Date();
+  const issueDateStart = addDays(record?.createdAt ?? now, -SEARCH_START_OFFSET_DAYS).toISOString();
+  const issueDateEnd = addDays(now, SEARCH_END_OFFSET_DAYS).toISOString();
+  const recordDto = record
+    ? {
+        id: record.id,
+        status: record.status,
+        providerUuid: record.providerUuid,
+        invoiceNo: record.invoiceNo,
+        providerInvoiceId: record.providerInvoiceId,
+        providerEttn: record.providerEttn,
+      }
+    : null;
+
+  if (!record) {
+    return buildEmptyResult({
+      issueDateStart,
+      issueDateEnd,
+      blockers: ['SettlementCommissionInvoice record could not be found.'],
+    });
+  }
+
+  if (record.provider !== SettlementCommissionInvoiceProvider.LOGO_ISBASI) {
+    return buildEmptyResult({
+      record: recordDto,
+      issueDateStart,
+      issueDateEnd,
+      blockers: ['SettlementCommissionInvoice provider must be LOGO_ISBASI before Logo outgoing invoice sync preview.'],
+    });
+  }
+
+  if (record.status !== SettlementCommissionInvoiceStatus.CREATED) {
+    return buildEmptyResult({
+      record: recordDto,
+      issueDateStart,
+      issueDateEnd,
+      blockers: ['SettlementCommissionInvoice status must be CREATED before Logo outgoing invoice sync preview.'],
+    });
+  }
+
+  if (!record.providerUuid) {
+    return buildEmptyResult({
+      record: recordDto,
+      issueDateStart,
+      issueDateEnd,
+      blockers: ['SettlementCommissionInvoice providerUuid is required before Logo outgoing invoice sync preview.'],
+    });
+  }
+
+  const missingEnv = getMissingEnv(options.env);
+  if (missingEnv.length) {
+    return buildEmptyResult({
+      record: recordDto,
+      issueDateStart,
+      issueDateEnd,
+      blockers: [`Missing Logo İşbaşı env for outgoing invoice sync preview: ${missingEnv.join(', ')}.`],
+    });
+  }
+
+  const client = options.client ?? buildLogoClient(options.env);
+  const login = await loginForLogoRead(client);
+  if (!login.ok) {
+    return buildEmptyResult({
+      record: recordDto,
+      issueDateStart,
+      issueDateEnd,
+      blockers: login.blockers,
+    });
+  }
+
+  const pageResult = await fetchOutgoingInvoicePages({
+    client,
+    session: login.session,
+    issueDateStart,
+    issueDateEnd,
+  });
+  const providerUuid = record.providerUuid.toLowerCase();
+  const matches = pageResult.rows.filter((row) => {
+    const rowUuid = readRecordString(row, ['uuId', 'uuid', 'UUID']);
+    return rowUuid?.toLowerCase() === providerUuid;
+  });
+  const ambiguity = matches.length > 1;
+  const matched = matches.length === 1;
+  const matchedRecord = matched ? matches[0] : null;
+
+  return {
+    ok: true,
+    writesPerformed: false,
+    blockers: [],
+    warnings: ambiguity
+      ? ['Multiple Logo outgoing invoice rows matched the same provider UUID; no mapped invoice was selected.']
+      : [],
+    record: recordDto,
+    search: {
+      issueDateStart,
+      issueDateEnd,
+      pagesChecked: pageResult.pagesChecked,
+      totalProviderCount: pageResult.totalProviderCount,
+      matched,
+      ambiguity,
+    },
+    matchedInvoice: matchedRecord ? mapMatchedInvoice(matchedRecord) : null,
+    providerFieldsObserved: safeProviderFields(matched ? [matchedRecord!] : pageResult.rows),
+    mappedFields: mapFields(matchedRecord),
+  };
+}

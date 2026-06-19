@@ -21,6 +21,7 @@ import {
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
   persistSettlementLogoCommissionInvoiceRequestSnapshot,
+  previewLogoOutgoingInvoiceSync,
   previewSettlementApproval,
   previewSettlementLogoCommissionInvoice,
   type DatabaseHealthResponse,
@@ -32,6 +33,7 @@ import {
   type SettlementCommissionInvoiceDiagnostics,
   type SettlementCommissionInvoiceRecord,
   type SettlementLogoCommissionInvoicePreview,
+  type LogoOutgoingInvoiceSyncPreview,
 } from '../features/finance/settlementApprovalsApi';
 import { formatCurrency, formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
@@ -46,6 +48,7 @@ type ActionName =
   | 'requestSnapshot'
   | 'invoiceRecords'
   | 'invoiceDiagnostics'
+  | 'outgoingInvoiceSyncPreview'
   | 'logoCreate';
 
 type WorkflowStepStatus = 'Waiting' | 'Ready' | 'Completed' | 'Blocked' | 'Warning';
@@ -878,6 +881,7 @@ export function AdminSettlementApprovalsPage() {
   const [logoPreview, setLogoPreview] = useState<SettlementLogoCommissionInvoicePreview | null>(null);
   const [invoiceRecords, setInvoiceRecords] = useState<SettlementCommissionInvoiceRecord[]>([]);
   const [diagnostics, setDiagnostics] = useState<Record<string, SettlementCommissionInvoiceDiagnostics>>({});
+  const [outgoingInvoiceSyncPreviews, setOutgoingInvoiceSyncPreviews] = useState<Record<string, LogoOutgoingInvoiceSyncPreview>>({});
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draftFailureSummary, setDraftFailureSummary] = useState<DraftFailureSummary | null>(null);
@@ -1519,6 +1523,7 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(null);
       setInvoiceRecords([]);
       setDiagnostics({});
+      setOutgoingInvoiceSyncPreviews({});
     }
   }
 
@@ -1539,6 +1544,7 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(null);
       setInvoiceRecords([]);
       setDiagnostics({});
+      setOutgoingInvoiceSyncPreviews({});
       await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
@@ -1556,6 +1562,7 @@ export function AdminSettlementApprovalsPage() {
       setLogoPreview(null);
       setInvoiceRecords([]);
       setDiagnostics({});
+      setOutgoingInvoiceSyncPreviews({});
       await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
@@ -1658,6 +1665,17 @@ export function AdminSettlementApprovalsPage() {
     );
     if (result) {
       setDiagnostics((current) => ({ ...current, [recordId]: result }));
+    }
+  }
+
+  async function handleOutgoingInvoiceSyncPreview(recordId: string) {
+    const result = await runAction(
+      'outgoingInvoiceSyncPreview',
+      () => previewLogoOutgoingInvoiceSync(recordId),
+      'Logo invoice sync preview loaded. No data was written.',
+    );
+    if (result) {
+      setOutgoingInvoiceSyncPreviews((current) => ({ ...current, [recordId]: result }));
     }
   }
 
@@ -2143,6 +2161,16 @@ export function AdminSettlementApprovalsPage() {
                         >
                           Read diagnostics (read-only)
                         </button>
+                        {isCreatedCommissionInvoiceRecord(record) ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() => void handleOutgoingInvoiceSyncPreview(record.id)}
+                            disabled={busyAction !== null}
+                          >
+                            Preview Logo invoice sync
+                          </button>
+                        ) : null}
                       </span>
                       <span className="settlement-logo-create-cell">
                         {showLogoCreate ? (
@@ -2230,6 +2258,42 @@ export function AdminSettlementApprovalsPage() {
                     ) : (
                       <ReadinessList title="Execution contract blockers" items={item.record.executionContract.blockers} tone="danger" />
                     )}
+                  </Fragment>
+                ))}
+              </details>
+            ) : null}
+            {Object.entries(outgoingInvoiceSyncPreviews).length ? (
+              <details className="settlement-advanced-diagnostics" open>
+                <summary>Logo outgoing invoice sync previews</summary>
+                {Object.entries(outgoingInvoiceSyncPreviews).map(([recordId, item]) => (
+                  <Fragment key={recordId}>
+                    <MetadataGroup title={`Sync preview ${recordId}`}>
+                      <MetadataRow label="writesPerformed" value={String(item.writesPerformed)} />
+                      <MetadataRow label="Matched" value={item.search.matched ? 'Yes' : item.search.ambiguity ? 'Ambiguous' : 'No'} />
+                      <MetadataRow label="Pages checked" value={formatNumber(item.search.pagesChecked)} />
+                      <MetadataRow label="Provider count" value={formatNumber(item.search.totalProviderCount)} />
+                      <MetadataRow label="Provider UUID" value={valueOrDash(item.mappedFields.providerUuid ?? item.record?.providerUuid)} />
+                      <MetadataRow label="Provider invoice id" value={valueOrDash(item.mappedFields.providerInvoiceId)} />
+                      <MetadataRow label="GIB status" value={valueOrDash(item.mappedFields.gibStatus)} />
+                      <MetadataRow label="GIB status code" value={valueOrDash(item.mappedFields.gibStatusCode)} />
+                      <MetadataRow label="Document status" value={valueOrDash(item.mappedFields.documentStatus)} />
+                      <MetadataRow label="Document status code" value={valueOrDash(item.mappedFields.documentStatusCode)} />
+                      <MetadataRow label="Invoice date" value={formatDate(item.mappedFields.invoiceDate)} />
+                      <MetadataRow label="Invoice total" value={item.mappedFields.invoiceTotalMinor === null ? '—' : formatMinor(item.mappedFields.invoiceTotalMinor, item.mappedFields.invoiceCurrency ?? 'TRY')} />
+                      <MetadataRow label="Invoice currency" value={valueOrDash(item.mappedFields.invoiceCurrency)} />
+                      <MetadataRow label="Invoice no" value={item.mappedFields.invoiceNumberAvailable ? valueOrDash(item.mappedFields.invoiceNoCandidate) : 'UNKNOWN'} />
+                      <MetadataRow label="Invoice number source" value={valueOrDash(item.mappedFields.invoiceNumberSource)} />
+                      <MetadataRow label="Invoice number recovery possible" value={valueOrDash(item.mappedFields.invoiceNumberRecoveryPossible)} />
+                      <MetadataRow label="Fields observed" value={item.providerFieldsObserved.length ? item.providerFieldsObserved.join(', ') : '—'} />
+                    </MetadataGroup>
+                    <ReadinessList title="Sync preview blockers" items={item.blockers} tone="danger" />
+                    <ReadinessList title="Sync preview warnings" items={item.warnings} tone="warning" />
+                    {!item.mappedFields.invoiceNumberAvailable ? (
+                      <div className="settlement-alert op-tone-warning">
+                        <strong>Invoice number is UNKNOWN.</strong>
+                        <p>Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.</p>
+                      </div>
+                    ) : null}
                   </Fragment>
                 ))}
               </details>
