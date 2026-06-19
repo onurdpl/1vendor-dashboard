@@ -25,6 +25,7 @@ import {
   getUnsettledRefundOffsetEligibility,
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
+import { calculateVendorDebtOffset, getVendorBalanceSummary } from './vendor-balance.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -206,6 +207,10 @@ export type SettlementApprovalPreviewDto = {
     mixedCommissionVatRate: boolean;
     mixedShippingMode: boolean;
     candidateQualityWarnings: string[];
+    outstandingVendorDebtMinor: number;
+    debtOffsetPreviewMinor: number;
+    netPayableAfterDebtOffsetMinor: number;
+    remainingVendorDebtMinor: number;
   };
   lines: SettlementApprovalLineDto[];
 };
@@ -1584,6 +1589,11 @@ async function buildApprovalPreview(
   const lines = unapprovedRows.map(buildLine);
   const totals = summarizeLines(lines);
   const candidateQualitySummary = buildCandidateQualitySummary(unapprovedRows, input);
+  const vendorBalance = await getVendorBalanceSummary(tx, input.vendorId, totals.currency);
+  const debtPreview = calculateVendorDebtOffset({
+    grossPayableMinor: Math.max(totals.netPayableMinor, 0),
+    outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
+  });
 
   return {
     ok: true,
@@ -1603,6 +1613,11 @@ async function buildApprovalPreview(
       eligibleRowCount: lines.length,
       excludedActiveApprovalRowCount: eligibleRows.length - unapprovedRows.length,
       ...candidateQualitySummary,
+      outstandingVendorDebtMinor: vendorBalance.outstandingDebtMinor,
+      debtOffsetPreviewMinor: debtPreview.debtOffsetMinor,
+      netPayableAfterDebtOffsetMinor:
+        totals.netPayableMinor > 0 ? debtPreview.netPayableMinor : totals.netPayableMinor,
+      remainingVendorDebtMinor: debtPreview.remainingDebtMinor,
     },
     lines,
   };
@@ -1765,6 +1780,10 @@ export async function createDraftApproval(
             settlementBillingSnapshot,
             eligibleRowCount: preview.summary.eligibleRowCount,
             excludedActiveApprovalRowCount: preview.summary.excludedActiveApprovalRowCount,
+            outstandingVendorDebtMinor: preview.summary.outstandingVendorDebtMinor,
+            debtOffsetPreviewMinor: preview.summary.debtOffsetPreviewMinor,
+            netPayableAfterDebtOffsetMinor: preview.summary.netPayableAfterDebtOffsetMinor,
+            remainingVendorDebtMinor: preview.summary.remainingVendorDebtMinor,
             writesPerformed: false,
           },
           lines: {

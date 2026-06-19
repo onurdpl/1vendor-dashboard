@@ -337,6 +337,29 @@ function isZeroCurrencyValue(value: string | null | undefined) {
   return !/[1-9]/.test((value ?? '').replace(/[^\d]/g, ''));
 }
 
+function parseCurrencyValue(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+  const normalized = value.trim();
+  const numeric = Number(normalized.replace(/[^0-9.-]/g, ''));
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return normalized.startsWith('-') ? -Math.abs(numeric) : numeric;
+}
+
+function getBalanceTone(value: string | null | undefined) {
+  const numeric = parseCurrencyValue(value);
+  if (numeric > 0) {
+    return 'success' as const;
+  }
+  if (numeric < 0) {
+    return 'danger' as const;
+  }
+  return 'neutral' as const;
+}
+
 function formatDeductionValue(value: string | null | undefined) {
   if (!value) {
     return UNKNOWN_FINANCE_VALUE;
@@ -919,6 +942,15 @@ export function FinancePage() {
             tone: 'success',
           },
           {
+            icon: 'V',
+            label: 'Vendor balance',
+            value: financeValueOrUnknown(financeView.summary.vendorBalance),
+            detail: isZeroCurrencyValue(financeView.summary.outstandingVendorDebt)
+              ? 'No open debt'
+              : `Debt open: ${financeValueOrUnknown(financeView.summary.outstandingVendorDebt)}`,
+            tone: getBalanceTone(financeView.summary.vendorBalance),
+          },
+          {
             icon: 'P',
             label: 'Pending review',
             value: financeValueOrUnknown(financeView.summary.pendingPayouts ?? financeView.summary.heldBalance),
@@ -1208,6 +1240,19 @@ export function FinancePage() {
               <div className="finance-profile-summary">
                 <MetadataRow label="Rows pending review" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
                 <MetadataRow label="Estimated net" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
+                <MetadataRow
+                  label="Outstanding vendor debt"
+                  value={<span className={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount) ? undefined : 'finance-deduction-value'}>
+                    {financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)}
+                  </span>}
+                />
+                <MetadataRow label="Debt offset preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
+                <MetadataRow
+                  label="Net after debt"
+                  value={<span className={getBalanceTone(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt) === 'danger' ? 'finance-deduction-value' : 'finance-payout-value'}>
+                    {financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)}
+                  </span>}
+                />
                 <MetadataRow label="Needs review" value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
                 <MetadataRow
                   label={isVendorUser ? 'Latest review status' : 'Latest draft review'}

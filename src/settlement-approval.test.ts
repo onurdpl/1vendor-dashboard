@@ -21,6 +21,9 @@ const prismaMock = vi.hoisted(() => ({
   payoutBatch: {
     create: vi.fn(),
   },
+  vendorBalanceEvent: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -254,6 +257,8 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApprovalLine.count.mockReset();
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
+    prismaMock.vendorBalanceEvent.findMany.mockReset();
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
   });
 
   it('previews eligible settlement approval rows without writes', async () => {

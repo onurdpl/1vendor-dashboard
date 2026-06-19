@@ -78,6 +78,10 @@ export type SettlementApprovalPreview = {
     commissionMinor: number;
     commissionVatMinor: number;
     netPayableMinor: number;
+    outstandingVendorDebtMinor?: number;
+    debtOffsetPreviewMinor?: number;
+    netPayableAfterDebtOffsetMinor?: number;
+    remainingVendorDebtMinor?: number;
     currency: string;
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;

@@ -31,6 +31,9 @@ const txMock = vi.hoisted(() => ({
   financeEvent: {
     createMany: vi.fn(),
   },
+  vendorBalanceEvent: {
+    upsert: vi.fn(),
+  },
 }));
 
 const prismaMock = vi.hoisted(() => ({
@@ -94,6 +97,11 @@ function setupOrder() {
     commissionVatPercentSnapshot: 18,
   });
   txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 3 });
+  txMock.vendorBalanceEvent.upsert.mockResolvedValueOnce({
+    id: 'vendor-debt-created',
+    vendorId: 'sporjinal',
+    type: 'VENDOR_DEBT_CREATED',
+  });
 }
 
 describe('Shopify refund return linking', () => {
@@ -243,6 +251,7 @@ describe('Shopify refund return linking', () => {
         }),
       ],
     });
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
   });
 
   it('does not create duplicate refund finance events when the refund ledger row already exists', async () => {
@@ -337,6 +346,28 @@ describe('Shopify refund return linking', () => {
         }),
       }),
     );
+    expect(txMock.vendorBalanceEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          idempotencyKey: 'sporjinal:refund-sporjinal-1074533826897:VENDOR_DEBT_CREATED',
+        },
+        update: {},
+        create: expect.objectContaining({
+          vendorId: 'sporjinal',
+          type: 'VENDOR_DEBT_CREATED',
+          amountMinor: -299792,
+          currency: 'TRY',
+          sourceType: 'shopify_refund',
+          sourceId: 'refund-sporjinal-1074533826897',
+          financeLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+          refundRecordId: 'refund-sporjinal-1074533826897',
+          metadataJson: expect.objectContaining({
+            formula: 'vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor',
+            vendorDebtMinor: 299792,
+          }),
+        }),
+      }),
+    );
   });
 
   it('marks refund ledger as adjustment required when refund arrives after settlement approval before payment', async () => {
@@ -406,5 +437,6 @@ describe('Shopify refund return linking', () => {
         ]),
       }),
     );
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
   });
 });

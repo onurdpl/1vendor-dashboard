@@ -6,6 +6,7 @@ import {
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
+import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
@@ -449,6 +450,22 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             description: `Refund allocation for Shopify refund ${parsedRefund.sourceShopifyRefundId}`,
           },
         });
+
+        if (postApprovalRefundRisk.state === 'already_paid_requires_vendor_debt') {
+          await createVendorDebtForPaidRefund(tx, {
+            vendorId,
+            refundRecordId,
+            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+            financeLedgerEntryId: refundLedgerId,
+            refundAmount: totalRefundAmount,
+            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
+            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
+            currency: shopifyOrder.currency ?? 'TRY',
+            sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+            sourceShopifyOrderNumber: orderNumber,
+            vendorAllocationId,
+          });
+        }
 
         if (!existingRefundLedgerEntry) {
           const refundOffset = calculateRefundOffsetAmounts({

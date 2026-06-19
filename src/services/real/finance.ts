@@ -24,6 +24,9 @@ type FinanceDashboardDto = {
     heldBalance?: string;
     refundedBalance?: string;
     pendingSettlement?: string;
+    vendorBalance?: string;
+    outstandingVendorDebt?: string;
+    netPayableAfterDebt?: string;
   };
   profile?: VendorFinancialProfile;
   payoutBatchSummary?: FinanceDashboard['payoutBatchSummary'];
@@ -154,12 +157,31 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       heldBalance: response.summary.heldBalance ? formatCurrency(response.summary.heldBalance) : undefined,
       refundedBalance: response.summary.refundedBalance ? formatCurrency(response.summary.refundedBalance) : undefined,
       pendingSettlement: response.summary.pendingSettlement ? formatCurrency(response.summary.pendingSettlement) : undefined,
+      vendorBalance: response.summary.vendorBalance ? formatCurrency(response.summary.vendorBalance) : undefined,
+      outstandingVendorDebt: response.summary.outstandingVendorDebt
+        ? formatCurrency(response.summary.outstandingVendorDebt)
+        : undefined,
+      netPayableAfterDebt: response.summary.netPayableAfterDebt
+        ? formatCurrency(response.summary.netPayableAfterDebt)
+        : undefined,
     },
     profile: response.profile,
     payoutBatchSummary: response.payoutBatchSummary
       ? {
           ...response.payoutBatchSummary,
           eligibleNetAmount: formatCurrency(response.payoutBatchSummary.eligibleNetAmount),
+          outstandingDebtAmount: response.payoutBatchSummary.outstandingDebtAmount
+            ? formatCurrency(response.payoutBatchSummary.outstandingDebtAmount)
+            : undefined,
+          debtOffsetPreviewAmount: response.payoutBatchSummary.debtOffsetPreviewAmount
+            ? formatCurrency(response.payoutBatchSummary.debtOffsetPreviewAmount)
+            : undefined,
+          netEligibleAfterDebtOffset: response.payoutBatchSummary.netEligibleAfterDebtOffset
+            ? formatCurrency(response.payoutBatchSummary.netEligibleAfterDebtOffset)
+            : undefined,
+          remainingDebtAfterPreview: response.payoutBatchSummary.remainingDebtAfterPreview
+            ? formatCurrency(response.payoutBatchSummary.remainingDebtAfterPreview)
+            : undefined,
           latestBatch: response.payoutBatchSummary.latestBatch
             ? {
                 ...response.payoutBatchSummary.latestBatch,
@@ -168,7 +190,19 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
                 commissionVatAmount: formatCurrency(response.payoutBatchSummary.latestBatch.commissionVatAmount),
                 shippingDeductionAmount: formatCurrency(response.payoutBatchSummary.latestBatch.shippingDeductionAmount),
                 refundAmount: formatCurrency(response.payoutBatchSummary.latestBatch.refundAmount),
+                payableBeforeDebtOffset: response.payoutBatchSummary.latestBatch.payableBeforeDebtOffset
+                  ? formatCurrency(response.payoutBatchSummary.latestBatch.payableBeforeDebtOffset)
+                  : undefined,
+                outstandingDebtAmount: response.payoutBatchSummary.latestBatch.outstandingDebtAmount
+                  ? formatCurrency(response.payoutBatchSummary.latestBatch.outstandingDebtAmount)
+                  : undefined,
+                debtOffsetAmount: response.payoutBatchSummary.latestBatch.debtOffsetAmount
+                  ? formatCurrency(response.payoutBatchSummary.latestBatch.debtOffsetAmount)
+                  : undefined,
                 netAmount: formatCurrency(response.payoutBatchSummary.latestBatch.netAmount),
+                remainingDebtAmount: response.payoutBatchSummary.latestBatch.remainingDebtAmount
+                  ? formatCurrency(response.payoutBatchSummary.latestBatch.remainingDebtAmount)
+                  : undefined,
               }
             : null,
         }

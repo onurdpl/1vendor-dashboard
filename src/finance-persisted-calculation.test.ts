@@ -14,6 +14,9 @@ const prismaMock = vi.hoisted(() => ({
   vendorProfileAuditLog: {
     createMany: vi.fn(),
   },
+  vendorBalanceEvent: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -199,6 +202,8 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.vendorFinancialProfile.upsert.mockReset();
     prismaMock.vendorProfileAuditLog.createMany.mockReset();
     prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
+    prismaMock.vendorBalanceEvent.findMany.mockReset();
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
 
     prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
     prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async () => activeProfile);

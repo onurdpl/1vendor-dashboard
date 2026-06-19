@@ -1131,6 +1131,14 @@ export function AdminSettlementApprovalsPage() {
   const workspaceApprovalStatus = approval?.status ?? 'not created';
   const workspaceQualityLabel = approval ? 'SNAPSHOT' : candidateQualityClassification;
   const workspaceState = approval ? 'approval' : preview ? 'preview' : 'empty';
+  const previewDebtProjection = preview
+    ? {
+        outstandingVendorDebtMinor: preview.summary.outstandingVendorDebtMinor ?? 0,
+        debtOffsetPreviewMinor: preview.summary.debtOffsetPreviewMinor ?? 0,
+        netPayableAfterDebtOffsetMinor: preview.summary.netPayableAfterDebtOffsetMinor ?? preview.summary.netPayableMinor,
+        remainingVendorDebtMinor: preview.summary.remainingVendorDebtMinor ?? 0,
+      }
+    : null;
   const selectedOrdersOrAllocations = (() => {
     if (candidateScopeMode === 'selected_orders') {
       return formatStringList([...selectedOrderNumberList, ...selectedShopifyOrderIdList]);
@@ -1200,6 +1208,8 @@ export function AdminSettlementApprovalsPage() {
         { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'Not loaded' },
         { label: 'Excluded rows', value: preview ? formatNumber(preview.summary.excludedActiveApprovalRowCount) : 'Not loaded' },
         { label: 'Net payable', value: preview ? formatMinor(preview.summary.netPayableMinor, preview.summary.currency) : 'Not loaded' },
+        { label: 'Debt offset', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.debtOffsetPreviewMinor, preview.summary.currency) : 'Not loaded' },
+        { label: 'Net after debt', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.netPayableAfterDebtOffsetMinor, preview.summary.currency) : 'Not loaded' },
       ],
     },
     {
@@ -1934,6 +1944,10 @@ export function AdminSettlementApprovalsPage() {
                   <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone="success" />
+                  <KPIStatCard label="Outstanding debt" value={formatMinor(previewDebtProjection?.outstandingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.outstandingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
+                  <KPIStatCard label="Debt offset" value={formatMinor(previewDebtProjection?.debtOffsetPreviewMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.debtOffsetPreviewMinor ?? 0) > 0 ? 'warning' : 'neutral'} />
+                  <KPIStatCard label="Net after debt" value={formatMinor(previewDebtProjection?.netPayableAfterDebtOffsetMinor ?? preview.summary.netPayableMinor, preview.summary.currency)} tone={(previewDebtProjection?.netPayableAfterDebtOffsetMinor ?? preview.summary.netPayableMinor) > 0 ? 'success' : 'neutral'} />
+                  <KPIStatCard label="Remaining debt" value={formatMinor(previewDebtProjection?.remainingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.remainingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
                 </div>
                 <CandidateQualityCard
                   preview={preview}

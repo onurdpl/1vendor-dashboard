@@ -1229,6 +1229,9 @@ export type FinanceSummary = {
   heldBalance?: string;
   refundedBalance?: string;
   pendingSettlement?: string;
+  vendorBalance?: string;
+  outstandingVendorDebt?: string;
+  netPayableAfterDebt?: string;
 };
 
 export type PayoutBatchStatus =
@@ -1248,7 +1251,11 @@ export type PayoutBatch = {
   commissionVatAmount: string;
   shippingDeductionAmount: string;
   refundAmount: string;
+  payableBeforeDebtOffset?: string;
+  outstandingDebtAmount?: string;
+  debtOffsetAmount?: string;
   netAmount: string;
+  remainingDebtAmount?: string;
   currency: string;
   createdByUserId: string | null;
   createdAt: string;
@@ -1261,6 +1268,10 @@ export type PayoutBatchSummary = {
   eligibleRowCount: number;
   eligibleNetAmount: string;
   blockedRowCount: number;
+  outstandingDebtAmount?: string;
+  debtOffsetPreviewAmount?: string;
+  netEligibleAfterDebtOffset?: string;
+  remainingDebtAfterPreview?: string;
   latestBatch: PayoutBatch | null;
 };
 

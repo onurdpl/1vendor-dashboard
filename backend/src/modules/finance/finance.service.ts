@@ -39,13 +39,18 @@ import {
   getUnsettledRefundOffsetEligibility,
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
+import {
+  calculateVendorDebtOffset,
+  createVendorDebtOffsetForPayoutBatch,
+  getVendorBalanceSummary,
+} from './vendor-balance.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
   'Payout batch requires revision because financial facts changed after batch creation.';
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
 
-type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile'>;
+type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent'>;
 
 export type PayoutBatchTransitionBlockerCode =
   | 'refund_arrived_after_batch_creation'
@@ -798,6 +803,11 @@ function mapPayoutBatch(batch: {
   createdByUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
+  vendorBalanceEvents?: Array<{
+    type: string;
+    amountMinor: number;
+    metadataJson: Prisma.JsonValue | null;
+  }>;
   lines?: Array<{
     id: string;
     financeLedgerEntryId: string;
@@ -807,7 +817,25 @@ function mapPayoutBatch(batch: {
   _count?: { lines: number };
 }): PayoutBatchDto {
   const lineCount = batch._count?.lines ?? batch.lines?.length ?? 0;
+  const debtOffsetEvents = (batch.vendorBalanceEvents ?? []).filter((event) =>
+    event.type === 'VENDOR_DEBT_OFFSET'
+  );
+  const debtOffsetMinor = debtOffsetEvents.reduce((sum, event) => sum + event.amountMinor, 0);
+  const firstDebtOffsetMetadata = debtOffsetEvents.find((event) => event.metadataJson)?.metadataJson;
+  const metadata = firstDebtOffsetMetadata && typeof firstDebtOffsetMetadata === 'object' && !Array.isArray(firstDebtOffsetMetadata)
+    ? firstDebtOffsetMetadata as Record<string, unknown>
+    : {};
   const netAmount = toNumber(batch.netAmount);
+  const netAmountMinor = toMinorUnits(netAmount);
+  const payableBeforeDebtOffsetMinor = Number.isFinite(Number(metadata.grossPayableMinor))
+    ? Number(metadata.grossPayableMinor)
+    : netAmountMinor + debtOffsetMinor;
+  const outstandingDebtMinor = Number.isFinite(Number(metadata.outstandingDebtMinor))
+    ? Number(metadata.outstandingDebtMinor)
+    : 0;
+  const remainingDebtMinor = Number.isFinite(Number(metadata.remainingDebtMinor))
+    ? Number(metadata.remainingDebtMinor)
+    : Math.max(outstandingDebtMinor - debtOffsetMinor, 0);
 
   return {
     id: batch.id,
@@ -818,13 +846,22 @@ function mapPayoutBatch(batch: {
     commissionVatAmount: toAmountString(toNumber(batch.commissionVatAmount)),
     shippingDeductionAmount: toAmountString(toNumber(batch.shippingDeductionAmount)),
     refundAmount: toAmountString(toNumber(batch.refundAmount)),
+    payableBeforeDebtOffset: toAmountString(payableBeforeDebtOffsetMinor / 100),
+    outstandingDebtAmount: toAmountString(outstandingDebtMinor / 100),
+    debtOffsetAmount: toAmountString(debtOffsetMinor / 100),
     netAmount: toAmountString(netAmount),
+    remainingDebtAmount: toAmountString(remainingDebtMinor / 100),
     currency: batch.currency,
     createdByUserId: batch.createdByUserId,
     createdAt: batch.createdAt.toISOString(),
     updatedAt: batch.updatedAt.toISOString(),
     lineCount,
-    warning: netAmount < 0 ? 'Negative payout draft requires operator review.' : null,
+    warning:
+      remainingDebtMinor > 0
+        ? 'Vendor debt remains after this payout draft.'
+        : netAmount < 0
+          ? 'Negative payout draft requires operator review.'
+          : null,
     lines: batch.lines?.map((line) => ({
       id: line.id,
       financeLedgerEntryId: line.financeLedgerEntryId,
@@ -858,7 +895,7 @@ export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<FinanceDashboardDto> {
-  const [summaryEntries, entries, storedProfile, latestBatch] = await Promise.all([
+  const [summaryEntries, entries, storedProfile, latestBatch, vendorBalance] = await Promise.all([
     withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
@@ -1170,8 +1207,10 @@ export async function getVendorFinanceDashboard(
             lines: true,
           },
         },
+        vendorBalanceEvents: true,
       },
     })),
+    withDashboardTiming('finance.vendor_balance_fetch', () => getVendorBalanceSummary(prisma, vendorId, 'TRY')),
   ]);
   const aggregationStartedAt = startDashboardTimer();
   const profile = mapProfile(storedProfile, vendorId);
@@ -1270,6 +1309,10 @@ export async function getVendorFinanceDashboard(
       blockedRowCount: 0,
     },
   );
+  const debtPreview = calculateVendorDebtOffset({
+    grossPayableMinor: Math.max(toMinorUnits(payoutBatchEligibility.eligibleNetAmount), 0),
+    outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
+  });
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);
@@ -1319,12 +1362,27 @@ export async function getVendorFinanceDashboard(
       heldBalance: toAmountString(balanceSummary.heldBalance),
       refundedBalance: toAmountString(balanceSummary.refundedBalance),
       pendingSettlement: toAmountString(balanceSummary.pendingSettlement),
+      vendorBalance: toAmountString(vendorBalance.balanceMinor / 100),
+      outstandingVendorDebt: toAmountString(vendorBalance.outstandingDebtMinor / 100),
+      netPayableAfterDebt: toAmountString(
+        (payoutBatchEligibility.eligibleNetAmount > 0
+          ? debtPreview.netPayableMinor
+          : toMinorUnits(payoutBatchEligibility.eligibleNetAmount)) / 100,
+      ),
     },
     profile,
     payoutBatchSummary: {
       eligibleRowCount: payoutBatchEligibility.eligibleRowCount,
       eligibleNetAmount: toAmountString(payoutBatchEligibility.eligibleNetAmount),
       blockedRowCount: payoutBatchEligibility.blockedRowCount,
+      outstandingDebtAmount: toAmountString(vendorBalance.outstandingDebtMinor / 100),
+      debtOffsetPreviewAmount: toAmountString(debtPreview.debtOffsetMinor / 100),
+      netEligibleAfterDebtOffset: toAmountString(
+        (payoutBatchEligibility.eligibleNetAmount > 0
+          ? debtPreview.netPayableMinor
+          : toMinorUnits(payoutBatchEligibility.eligibleNetAmount)) / 100,
+      ),
+      remainingDebtAfterPreview: toAmountString(debtPreview.remainingDebtMinor / 100),
       latestBatch: latestBatch ? mapPayoutBatch(latestBatch) : null,
     },
     records,
@@ -1584,6 +1642,7 @@ export async function listPayoutBatches(vendorId?: string): Promise<PayoutBatchD
           lines: true,
         },
       },
+      vendorBalanceEvents: true,
     },
   });
 
@@ -1596,6 +1655,7 @@ export async function getPayoutBatch(batchId: string): Promise<PayoutBatchDto | 
       id: batchId,
     },
     include: {
+      vendorBalanceEvents: true,
       lines: {
         orderBy: {
           createdAt: 'asc',
@@ -1616,7 +1676,7 @@ export async function preparePayoutBatch(
   }
 
   return prisma.$transaction(async (tx) => {
-    const [storedProfile, entries] = await Promise.all([
+    const [storedProfile, entries, vendorBalance] = await Promise.all([
       tx.vendorFinancialProfile.findFirst({
         where: {
           vendorId: input.vendorId,
@@ -1728,6 +1788,7 @@ export async function preparePayoutBatch(
           createdAt: 'asc',
         },
       }),
+      getVendorBalanceSummary(tx, input.vendorId, 'TRY'),
     ]);
     const profile = mapProfile(storedProfile, input.vendorId);
     const eligibleEntries = entries.filter(isEntryEligibleForPayoutBatch);
@@ -1763,6 +1824,14 @@ export async function preparePayoutBatch(
         netAmount: 0,
       },
     );
+    const debtOffset = calculateVendorDebtOffset({
+      grossPayableMinor: Math.max(toMinorUnits(totals.netAmount), 0),
+      outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
+    });
+    const netAmountAfterDebtOffset =
+      totals.netAmount > 0
+        ? debtOffset.netPayableMinor / 100
+        : totals.netAmount;
 
     const batch = await tx.payoutBatch.create({
       data: {
@@ -1773,7 +1842,7 @@ export async function preparePayoutBatch(
         commissionVatAmount: totals.commissionVatAmount,
         shippingDeductionAmount: totals.shippingDeductionAmount,
         refundAmount: totals.refundAmount,
-        netAmount: totals.netAmount,
+        netAmount: netAmountAfterDebtOffset,
         currency: 'TRY',
         createdByUserId,
         lines: {
@@ -1784,6 +1853,7 @@ export async function preparePayoutBatch(
         },
       },
       include: {
+        vendorBalanceEvents: true,
         lines: {
           orderBy: {
             createdAt: 'asc',
@@ -1792,7 +1862,21 @@ export async function preparePayoutBatch(
       },
     });
 
-    return mapPayoutBatch(batch);
+    const debtOffsetEvent = await createVendorDebtOffsetForPayoutBatch(tx, {
+      vendorId: input.vendorId,
+      payoutBatchId: batch.id,
+      debtOffsetMinor: debtOffset.debtOffsetMinor,
+      grossPayableMinor: debtOffset.grossPayableMinor,
+      outstandingDebtMinor: debtOffset.outstandingDebtMinor,
+      remainingDebtMinor: debtOffset.remainingDebtMinor,
+      currency: batch.currency,
+      createdByUserId,
+    });
+
+    return mapPayoutBatch({
+      ...batch,
+      vendorBalanceEvents: debtOffsetEvent ? [debtOffsetEvent] : [],
+    });
   });
 }
 

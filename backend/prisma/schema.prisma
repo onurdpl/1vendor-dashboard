@@ -112,6 +112,14 @@ enum PayoutBatchStatus {
   PAID_PLACEHOLDER
 }
 
+enum VendorBalanceEventType {
+  PAYABLE_EARNED
+  VENDOR_DEBT_CREATED
+  VENDOR_DEBT_OFFSET
+  MANUAL_ADJUSTMENT
+  DEBT_WAIVED
+}
+
 enum FinanceEventType {
   SALE_RECORDED
   COMMISSION_RESERVED
@@ -286,6 +294,7 @@ model Vendor {
   payoutBatches         PayoutBatch[]
   settlementApprovals   SettlementApproval[]
   settlementCommissionInvoices SettlementCommissionInvoice[]
+  balanceEvents         VendorBalanceEvent[]
   profileAuditLogs      VendorProfileAuditLog[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
@@ -771,6 +780,7 @@ model RefundRecord {
   updatedAt                DateTime                @updatedAt
   vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   lineItems                ShopifyRefundLineItem[]
+  vendorBalanceEvents      VendorBalanceEvent[]
   operationalJobs          OperationalJob[]
 
   @@index([vendorAllocationId, createdAt])
@@ -841,6 +851,7 @@ model FinanceLedgerEntry {
   payoutBatchLines              PayoutBatchLine[]
   financeEvents                 FinanceEvent[]
   settlementApprovalLines       SettlementApprovalLine[]
+  vendorBalanceEvents           VendorBalanceEvent[]
   operationalSignals            OperationalSignal[]
   automationActions             AutomationAction[]
 
@@ -896,6 +907,7 @@ model SettlementApproval {
   vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines              SettlementApprovalLine[]
   commissionInvoices SettlementCommissionInvoice[]
+  vendorBalanceEvents VendorBalanceEvent[]
 
   @@index([vendorId, status])
   @@index([periodStart, periodEnd])
@@ -1074,6 +1086,7 @@ model PayoutBatch {
   updatedAt               DateTime          @updatedAt
   vendor                  Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                   PayoutBatchLine[]
+  vendorBalanceEvents     VendorBalanceEvent[]
   operationalSignals      OperationalSignal[]
   automationActions       AutomationAction[]
 
@@ -1092,6 +1105,37 @@ model PayoutBatchLine {
 
   @@unique([payoutBatchId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
+}
+
+model VendorBalanceEvent {
+  id                   String                 @id @default(cuid())
+  vendorId             String
+  type                 VendorBalanceEventType
+  amountMinor          Int
+  currency             String                 @default("TRY")
+  sourceType           String
+  sourceId             String
+  financeLedgerEntryId String?
+  refundRecordId       String?
+  payoutBatchId        String?
+  settlementApprovalId String?
+  metadataJson         Json?
+  idempotencyKey       String                 @unique
+  createdAt            DateTime               @default(now())
+  vendor               Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  financeLedgerEntry   FinanceLedgerEntry?    @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
+  refundRecord         RefundRecord?          @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
+  payoutBatch          PayoutBatch?           @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
+  settlementApproval   SettlementApproval?    @relation(fields: [settlementApprovalId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, createdAt])
+  @@index([vendorId, currency])
+  @@index([type, createdAt])
+  @@index([sourceType, sourceId])
+  @@index([financeLedgerEntryId])
+  @@index([refundRecordId])
+  @@index([payoutBatchId])
+  @@index([settlementApprovalId])
 }
 
 model WebhookEvent {

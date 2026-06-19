@@ -12,6 +12,7 @@ import {
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
+import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
@@ -439,6 +440,21 @@ export function createReconciliationService(env: AppEnv) {
               description: `Reconciled refund ledger for Shopify refund ${refundRecord.sourceShopifyRefundId}`,
             },
           });
+          if (postApprovalRefundRisk.state === 'already_paid_requires_vendor_debt') {
+            await createVendorDebtForPaidRefund(prisma, {
+              vendorId: allocation.assignedVendorId,
+              refundRecordId: refundRecord.id,
+              sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+              financeLedgerEntryId: expectedLedgerId,
+              refundAmount: refundRecord.amount,
+              commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
+              commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
+              currency: shopifyOrder.currency ?? 'TRY',
+              sourceShopifyOrderId: refundRecord.sourceShopifyOrderId,
+              sourceShopifyOrderNumber: refundRecord.sourceShopifyOrderNumber,
+              vendorAllocationId: allocation.id,
+            });
+          }
           staleFields.push(change);
           repairedFields.push(change);
           allocationResult.staleFields.push(change);

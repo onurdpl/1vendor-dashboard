@@ -13,6 +13,10 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     update: vi.fn(),
   },
+  vendorBalanceEvent: {
+    findMany: vi.fn(),
+    upsert: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -189,8 +193,16 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
+    prismaMock.vendorBalanceEvent.findMany.mockReset();
+    prismaMock.vendorBalanceEvent.upsert.mockReset();
 
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
+    prismaMock.vendorBalanceEvent.upsert.mockImplementation(async ({ create }) => ({
+      id: 'vendor-balance-event-offset',
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      ...create,
+    }));
     prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
       id: 'profile-demo-vendor-a',
       vendorId: 'demo-vendor-a',
@@ -620,6 +632,146 @@ describe('payout batch preparation', () => {
     expect(batch).toMatchObject({
       id: 'batch-processed-refund',
       lineCount: 1,
+    });
+  });
+
+  it('offsets future payout against outstanding vendor debt and carries remaining debt', async () => {
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([
+      {
+        type: 'VENDOR_DEBT_CREATED',
+        amountMinor: -100000,
+        payoutBatch: null,
+      },
+    ]);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({ id: 'sale-payable-with-debt', entryType: 'sale', amount: 1000 }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-debt-carry',
+      vendorId: data.vendorId,
+      status: data.status,
+      grossAmount: data.grossAmount,
+      commissionAmount: data.commissionAmount,
+      commissionVatAmount: data.commissionVatAmount,
+      shippingDeductionAmount: data.shippingDeductionAmount,
+      refundAmount: data.refundAmount,
+      netAmount: data.netAmount,
+      currency: data.currency,
+      createdByUserId: data.createdByUserId,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      updatedAt: new Date('2026-05-13T11:00:00Z'),
+      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+        id: `batch-line-debt-carry-${index}`,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        amountSnapshot: line.amountSnapshot,
+        createdAt: new Date('2026-05-13T11:00:00Z'),
+      })),
+    }));
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossAmount: 1000,
+          commissionAmount: 100,
+          netAmount: 0,
+          lines: {
+            create: [
+              { financeLedgerEntryId: 'sale-payable-with-debt', amountSnapshot: 900 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(prismaMock.vendorBalanceEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { idempotencyKey: 'batch-debt-carry:VENDOR_DEBT_OFFSET' },
+        create: expect.objectContaining({
+          vendorId: 'demo-vendor-a',
+          type: 'VENDOR_DEBT_OFFSET',
+          amountMinor: 90000,
+          payoutBatchId: 'batch-debt-carry',
+          metadataJson: expect.objectContaining({
+            grossPayableMinor: 90000,
+            outstandingDebtMinor: 100000,
+            remainingDebtMinor: 10000,
+          }),
+        }),
+      }),
+    );
+    expect(batch).toMatchObject({
+      id: 'batch-debt-carry',
+      netAmount: '0.00',
+      payableBeforeDebtOffset: '900.00',
+      outstandingDebtAmount: '1000.00',
+      debtOffsetAmount: '900.00',
+      remainingDebtAmount: '100.00',
+      warning: 'Vendor debt remains after this payout draft.',
+    });
+  });
+
+  it('offsets debt and clears it when payable is larger than outstanding debt', async () => {
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([
+      {
+        type: 'VENDOR_DEBT_CREATED',
+        amountMinor: -10000,
+        payoutBatch: null,
+      },
+    ]);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({ id: 'sale-clears-debt', entryType: 'sale', amount: 1000 }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-debt-cleared',
+      vendorId: data.vendorId,
+      status: data.status,
+      grossAmount: data.grossAmount,
+      commissionAmount: data.commissionAmount,
+      commissionVatAmount: data.commissionVatAmount,
+      shippingDeductionAmount: data.shippingDeductionAmount,
+      refundAmount: data.refundAmount,
+      netAmount: data.netAmount,
+      currency: data.currency,
+      createdByUserId: data.createdByUserId,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      updatedAt: new Date('2026-05-13T11:00:00Z'),
+      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+        id: `batch-line-debt-cleared-${index}`,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        amountSnapshot: line.amountSnapshot,
+        createdAt: new Date('2026-05-13T11:00:00Z'),
+      })),
+    }));
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          netAmount: 800,
+        }),
+      }),
+    );
+    expect(prismaMock.vendorBalanceEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          amountMinor: 10000,
+          metadataJson: expect.objectContaining({
+            grossPayableMinor: 90000,
+            outstandingDebtMinor: 10000,
+            remainingDebtMinor: 0,
+          }),
+        }),
+      }),
+    );
+    expect(batch).toMatchObject({
+      netAmount: '800.00',
+      payableBeforeDebtOffset: '900.00',
+      outstandingDebtAmount: '100.00',
+      debtOffsetAmount: '100.00',
+      remainingDebtAmount: '0.00',
+      warning: null,
     });
   });
 

@@ -12,6 +12,9 @@ export type FinanceSummaryDto = {
   heldBalance: string;
   refundedBalance: string;
   pendingSettlement: string;
+  vendorBalance: string;
+  outstandingVendorDebt: string;
+  netPayableAfterDebt: string;
 };
 
 export type PayoutBatchStatusDto =
@@ -26,6 +29,10 @@ export type PayoutBatchSummaryDto = {
   eligibleRowCount: number;
   eligibleNetAmount: string;
   blockedRowCount: number;
+  outstandingDebtAmount: string;
+  debtOffsetPreviewAmount: string;
+  netEligibleAfterDebtOffset: string;
+  remainingDebtAfterPreview: string;
   latestBatch: PayoutBatchDto | null;
 };
 
@@ -174,7 +181,11 @@ export type PayoutBatchDto = {
   commissionVatAmount: string;
   shippingDeductionAmount: string;
   refundAmount: string;
+  payableBeforeDebtOffset: string;
+  outstandingDebtAmount: string;
+  debtOffsetAmount: string;
   netAmount: string;
+  remainingDebtAmount: string;
   currency: string;
   createdByUserId: string | null;
   createdAt: string;

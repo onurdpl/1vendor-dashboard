@@ -325,6 +325,50 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
   });
 
+  it('renders positive vendor balance in green', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      summary: {
+        ...financeDashboard.summary,
+        vendorBalance: '$250.00',
+        outstandingVendorDebt: '$0.00',
+        netPayableAfterDebt: '$3,059.10',
+      },
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByText('$250.00')).toBeInTheDocument();
+    const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
+    expect(card).toHaveClass('op-tone-success');
+  });
+
+  it('renders negative vendor balance in red', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      summary: {
+        ...financeDashboard.summary,
+        vendorBalance: '-$300.00',
+        outstandingVendorDebt: '$300.00',
+        netPayableAfterDebt: '$2,759.10',
+      },
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        outstandingDebtAmount: '$300.00',
+        debtOffsetPreviewAmount: '$300.00',
+        netEligibleAfterDebtOffset: '$2,759.10',
+        remainingDebtAfterPreview: '$0.00',
+      },
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('-$300.00')).length).toBeGreaterThan(0);
+    const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
+    expect(card).toHaveClass('op-tone-danger');
+    expect(screen.getByText('Debt open: $300.00')).toBeInTheDocument();
+  });
+
   it('uses workflow query params to open settlement review rows and allows reset', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
@@ -731,7 +775,7 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByText('Accounting sync')).not.toBeInTheDocument();
     expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Payable|Balance|Confirmed|Final payout/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Confirmed|Final payout/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
   });
 
