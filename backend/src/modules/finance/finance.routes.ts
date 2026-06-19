@@ -27,6 +27,7 @@ import {
   getSettlementApprovalAudit,
   listSettlementApprovalsForVendor,
   previewApproval,
+  SettlementApprovalRevalidationError,
 } from './settlement-approval.service.js';
 import { previewSettlementLogoCommissionInvoice } from './settlement-commission-invoice-preview.service.js';
 import {
@@ -648,6 +649,15 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return await approveSettlementApproval(id, request.authUser.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Settlement approval could not be approved.';
+        if (error instanceof SettlementApprovalRevalidationError) {
+          return reply.code(400).send({
+            ok: false,
+            writesPerformed: false,
+            message,
+            revalidationReasons: error.reasons,
+            blockers: error.reasons.map((reason) => reason.reason),
+          });
+        }
         return reply.code(400).send({ message });
       }
     },

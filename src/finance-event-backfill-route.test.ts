@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getFinanceEventBackfillPlanMock = vi.hoisted(() => vi.fn());
 const getFinanceEventRelinkPlanMock = vi.hoisted(() => vi.fn());
 const relinkExistingFinanceEventsMock = vi.hoisted(() => vi.fn());
+const approveSettlementApprovalMock = vi.hoisted(() => vi.fn());
 const getSettlementApprovalAuditMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoCommissionInvoiceMock = vi.hoisted(() => vi.fn());
 const findSettlementCommissionInvoiceRecordsMock = vi.hoisted(() => vi.fn());
@@ -10,6 +11,15 @@ const getSettlementCommissionInvoiceDiagnosticsMock = vi.hoisted(() => vi.fn());
 const createPendingRecordFromImmutableRequestSnapshotMock = vi.hoisted(() => vi.fn());
 const executeSettlementLogoCommissionInvoiceCreateMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoOutgoingInvoiceSyncMock = vi.hoisted(() => vi.fn());
+const SettlementApprovalRevalidationErrorMock = vi.hoisted(() => class SettlementApprovalRevalidationError extends Error {
+  reasons: Array<Record<string, unknown>>;
+
+  constructor(reasons: Array<Record<string, unknown>>) {
+    super('Settlement approval cannot be approved because one or more lines are no longer valid.');
+    this.name = 'SettlementApprovalRevalidationError';
+    this.reasons = reasons;
+  }
+});
 
 vi.mock('../backend/src/modules/finance/finance-event-backfill-planner.service.js', () => ({
   getFinanceEventBackfillPlan: getFinanceEventBackfillPlanMock,
@@ -21,12 +31,13 @@ vi.mock('../backend/src/modules/finance/finance-event-relink.service.js', () => 
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-approval.service.js', () => ({
-  approveSettlementApproval: vi.fn(),
+  approveSettlementApproval: approveSettlementApprovalMock,
   cancelSettlementApproval: vi.fn(),
   createDraftApproval: vi.fn(),
   getSettlementApproval: vi.fn(),
   getSettlementApprovalAudit: getSettlementApprovalAuditMock,
   previewApproval: vi.fn(),
+  SettlementApprovalRevalidationError: SettlementApprovalRevalidationErrorMock,
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-commission-invoice-preview.service.js', () => ({
@@ -78,6 +89,7 @@ describe('finance event backfill route', () => {
     getFinanceEventBackfillPlanMock.mockReset();
     getFinanceEventRelinkPlanMock.mockReset();
     relinkExistingFinanceEventsMock.mockReset();
+    approveSettlementApprovalMock.mockReset();
     getSettlementApprovalAuditMock.mockReset();
     previewSettlementLogoCommissionInvoiceMock.mockReset();
     findSettlementCommissionInvoiceRecordsMock.mockReset();
@@ -451,6 +463,50 @@ describe('finance event backfill route', () => {
       'LOGO_ISBASI',
       { createdBy: 'admin-user' },
     );
+  });
+
+  it('returns structured revalidation reasons when settlement approval is stale', async () => {
+    const posts = new Map<string, (request: { authUser?: { id?: string; role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { id?: string; role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const reasons = [
+      {
+        settlementApprovalLineId: 'line-1',
+        financeLedgerEntryId: 'sale-1',
+        code: 'refund_arrived_after_draft',
+        reason: 'Refund arrived after draft creation',
+      },
+    ];
+    approveSettlementApprovalMock.mockRejectedValueOnce(new SettlementApprovalRevalidationErrorMock(reasons));
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const response = await posts.get('/admin/finance/settlement-approvals/:id/approve')?.(
+      { authUser: { id: 'admin-user', role: 'admin' }, params: { id: 'approval-1' } },
+      reply,
+    );
+
+    expect(response).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        writesPerformed: false,
+        message: 'Settlement approval cannot be approved because one or more lines are no longer valid.',
+        revalidationReasons: reasons,
+        blockers: ['Refund arrived after draft creation'],
+      },
+    });
+    expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1', 'admin-user');
   });
 
   it('returns settlement commission invoice records without writes', async () => {

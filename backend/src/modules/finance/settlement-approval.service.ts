@@ -23,6 +23,8 @@ import {
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
+
 type SettlementApprovalInput = {
   vendorId: string;
   periodStart?: Date | null;
@@ -117,6 +119,16 @@ type SettlementApprovalLedgerRow = {
   }>;
 };
 
+type SettlementApprovalRevalidationLedgerRow = SettlementApprovalLedgerRow & {
+  payoutBatchLines: Array<{
+    id: string;
+    payoutBatch: {
+      id: string;
+      status: string;
+    };
+  }>;
+};
+
 type SettlementApprovalLineDraft = {
   financeLedgerEntryId: string;
   lineType: SettlementApprovalLineType;
@@ -135,6 +147,25 @@ type SettlementApprovalLineDraft = {
   fulfillmentEvidencePresent: boolean;
   shippingEvidencePresent: boolean;
 };
+
+export type SettlementApprovalRevalidationReason = {
+  settlementApprovalLineId: string;
+  financeLedgerEntryId: string;
+  code: string;
+  reason: string;
+  details?: Record<string, unknown>;
+};
+
+export class SettlementApprovalRevalidationError extends Error {
+  reasons: SettlementApprovalRevalidationReason[];
+
+  constructor(reasons: SettlementApprovalRevalidationReason[]) {
+    super('Settlement approval cannot be approved because one or more lines are no longer valid.');
+    this.name = 'SettlementApprovalRevalidationError';
+    this.reasons = reasons;
+    Object.setPrototypeOf(this, SettlementApprovalRevalidationError.prototype);
+  }
+}
 
 export type SettlementApprovalLineDto = SettlementApprovalLineDraft & {
   id?: string;
@@ -527,6 +558,300 @@ function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprova
       currency: 'TRY' as const,
     },
   );
+}
+
+function buildRevalidationReason(
+  line: SettlementApprovalLine,
+  code: string,
+  reason: string,
+  details?: Record<string, unknown>,
+): SettlementApprovalRevalidationReason {
+  return {
+    settlementApprovalLineId: line.id,
+    financeLedgerEntryId: line.financeLedgerEntryId,
+    code,
+    reason,
+    ...(details ? { details } : {}),
+  };
+}
+
+function getConflictingSettlementApprovalLine(
+  row: SettlementApprovalRevalidationLedgerRow,
+  settlementApprovalId: string,
+) {
+  return row.settlementApprovalLines.find((line) => line.settlementApproval.id !== settlementApprovalId) ?? null;
+}
+
+function getSnapshotRefundCount(line: SettlementApprovalLine) {
+  return readLineExplanation(line.sourceSnapshotJson).refundCount;
+}
+
+function lineAmountsChanged(line: SettlementApprovalLine, currentLine: SettlementApprovalLineDraft) {
+  return (
+    line.lineType !== currentLine.lineType ||
+    line.amountMinor !== currentLine.amountMinor ||
+    line.commissionMinor !== currentLine.commissionMinor ||
+    line.commissionVatMinor !== currentLine.commissionVatMinor ||
+    line.payableImpactMinor !== currentLine.payableImpactMinor
+  );
+}
+
+function validateApprovalLineAgainstCurrentLedger(
+  approval: Pick<SettlementApproval, 'id' | 'vendorId'>,
+  line: SettlementApprovalLine,
+  row: SettlementApprovalRevalidationLedgerRow | null,
+) {
+  const reasons: SettlementApprovalRevalidationReason[] = [];
+  if (!row) {
+    return [
+      buildRevalidationReason(line, 'ledger_missing', 'Ledger row no longer exists'),
+    ];
+  }
+
+  if (row.vendorId !== approval.vendorId) {
+    reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Ledger row vendor changed since draft creation'));
+  }
+
+  const currentType = normalizeType(row.entryType);
+  const expectedType = line.lineType === SettlementApprovalLineType.REFUND ? 'refund' : 'sale';
+  if (currentType !== expectedType) {
+    reasons.push(buildRevalidationReason(line, 'entry_type_changed', 'Ledger row type changed since draft creation'));
+  }
+
+  const payoutStatus = normalizeStatus(row.payoutStatus);
+  if (payoutStatus === 'paid') {
+    reasons.push(buildRevalidationReason(line, 'ledger_paid', 'Ledger row already paid'));
+  }
+
+  if (row.payoutBatchLines.length > 0) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'active_payout_batch',
+      'Ledger row is already included in an active payout batch',
+      {
+        payoutBatchIds: row.payoutBatchLines.map((batchLine) => batchLine.payoutBatch.id),
+      },
+    ));
+  }
+
+  const conflictingApprovalLine = getConflictingSettlementApprovalLine(row, approval.id);
+  if (conflictingApprovalLine) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'active_settlement_approval_conflict',
+      'Ledger row is locked by another active settlement approval',
+      {
+        settlementApprovalId: conflictingApprovalLine.settlementApproval.id,
+        settlementApprovalStatus: conflictingApprovalLine.settlementApproval.status,
+      },
+    ));
+  }
+
+  if (expectedType === 'sale') {
+    const currentRefundCount = row.vendorAllocation?.refundRecords.length ?? 0;
+    const snapshotRefundCount = getSnapshotRefundCount(line);
+    if (currentRefundCount > snapshotRefundCount) {
+      reasons.push(buildRevalidationReason(
+        line,
+        'refund_arrived_after_draft',
+        'Refund arrived after draft creation',
+        {
+          snapshotRefundCount,
+          currentRefundCount,
+        },
+      ));
+    }
+
+    if (hasApprovedOpenReturnHold(row)) {
+      reasons.push(buildRevalidationReason(line, 'approved_return_hold_active', 'Approved return hold is now active'));
+    }
+  }
+
+  const settlementDelay = evaluateSaleSettlementDelay(row);
+  if (settlementDelay.applies && !settlementDelay.eligible) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'settlement_delay_not_satisfied',
+      'Settlement delay is no longer satisfied',
+      {
+        blockerReason: settlementDelay.blockerReason,
+        eligibleAt: toIso(settlementDelay.eligibleAt),
+      },
+    ));
+  }
+
+  if (!rowIsEligible(row)) {
+    const explanation = buildSettlementEligibilityExplanation(row);
+    const alreadyExplained = reasons.some((reason) =>
+      [
+        'ledger_paid',
+        'approved_return_hold_active',
+        'settlement_delay_not_satisfied',
+      ].includes(reason.code),
+    );
+    if (!alreadyExplained) {
+      reasons.push(buildRevalidationReason(
+        line,
+        'settlement_row_not_eligible',
+        explanation.eligibilityReason,
+        {
+          derivedSettlementStatus: explanation.derivedSettlementStatus,
+          payoutStatus: explanation.payoutStatus,
+        },
+      ));
+    }
+  }
+
+  if (reasons.length === 0) {
+    const currentLine = buildLine(row);
+    if (lineAmountsChanged(line, currentLine)) {
+      reasons.push(buildRevalidationReason(
+        line,
+        'settlement_amount_changed',
+        'Settlement amount changed since draft creation',
+        {
+          frozen: {
+            lineType: line.lineType,
+            amountMinor: line.amountMinor,
+            commissionMinor: line.commissionMinor,
+            commissionVatMinor: line.commissionVatMinor,
+            payableImpactMinor: line.payableImpactMinor,
+          },
+          current: {
+            lineType: currentLine.lineType,
+            amountMinor: currentLine.amountMinor,
+            commissionMinor: currentLine.commissionMinor,
+            commissionVatMinor: currentLine.commissionVatMinor,
+            payableImpactMinor: currentLine.payableImpactMinor,
+          },
+        },
+      ));
+    }
+  }
+
+  return reasons;
+}
+
+async function loadCurrentLedgerRowForApprovalLine(
+  tx: SettlementApprovalTransaction,
+  line: SettlementApprovalLine,
+): Promise<SettlementApprovalRevalidationLedgerRow | null> {
+  const row = await tx.financeLedgerEntry.findUnique({
+    where: {
+      id: line.financeLedgerEntryId,
+    },
+    select: {
+      id: true,
+      vendorId: true,
+      entryType: true,
+      amount: true,
+      payoutStatus: true,
+      description: true,
+      commissionPercentSnapshot: true,
+      commissionVatPercentSnapshot: true,
+      deductShippingEnabledSnapshot: true,
+      shippingModeSnapshot: true,
+      fixedShippingFeeSnapshot: true,
+      shippingCostSnapshot: true,
+      shippingVatAmountSnapshot: true,
+      shippingCostSourceSnapshot: true,
+      shippingCostProviderSnapshot: true,
+      financialProfileIdSnapshot: true,
+      settlementDelayDaysSnapshot: true,
+      settlementStatus: true,
+      settlementEligibleAt: true,
+      accruedAt: true,
+      payableAt: true,
+      settledAt: true,
+      settlementHoldReason: true,
+      createdAt: true,
+      vendorAllocation: {
+        select: {
+          id: true,
+          allocationStatus: true,
+          fulfillmentStatus: true,
+          shippingStatus: true,
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+          fulfillment: {
+            select: {
+              fulfilledAt: true,
+              shipmentUpdatedAt: true,
+            },
+          },
+          refundRecords: {
+            select: {
+              id: true,
+              sourceShopifyRefundId: true,
+              amount: true,
+            },
+          },
+          returnRecords: {
+            select: {
+              id: true,
+              status: true,
+              returnLifecycleStatus: true,
+              sourceShopifyRefundId: true,
+            },
+          },
+        },
+      },
+      settlementApprovalLines: {
+        where: {
+          settlementApproval: {
+            status: {
+              in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
+            },
+          },
+        },
+        select: {
+          id: true,
+          settlementApproval: {
+            select: {
+              id: true,
+              status: true,
+            },
+          },
+        },
+      },
+      payoutBatchLines: {
+        where: {
+          payoutBatch: {
+            status: {
+              in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+            },
+          },
+        },
+        select: {
+          id: true,
+          payoutBatch: {
+            select: {
+              id: true,
+              status: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return row as SettlementApprovalRevalidationLedgerRow | null;
+}
+
+export async function validateSettlementApprovalBeforeApprove(
+  tx: SettlementApprovalTransaction,
+  approval: SettlementApproval & { lines: SettlementApprovalLine[] },
+) {
+  const reasons: SettlementApprovalRevalidationReason[] = [];
+  for (const line of approval.lines) {
+    const row = await loadCurrentLedgerRowForApprovalLine(tx, line);
+    reasons.push(...validateApprovalLineAgainstCurrentLedger(approval, line, row));
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+  };
 }
 
 function sortedNumbers(values: Set<number>) {
@@ -1271,36 +1596,48 @@ export async function approveSettlementApproval(
   id: string,
   approvedBy: string | null,
 ): Promise<SettlementApprovalDto> {
-  const existing = await prisma.settlementApproval.findUnique({
-    where: {
-      id,
-    },
-    include: {
-      lines: true,
-    },
-  });
-  if (!existing) {
-    throw new Error('Settlement approval could not be found.');
-  }
-  if (existing.status !== SettlementApprovalStatus.DRAFT) {
-    throw new Error('Only draft settlement approvals can be approved.');
-  }
+  return prisma.$transaction(
+    async (tx) => {
+      const existing = await tx.settlementApproval.findUnique({
+        where: {
+          id,
+        },
+        include: {
+          lines: true,
+        },
+      });
+      if (!existing) {
+        throw new Error('Settlement approval could not be found.');
+      }
+      if (existing.status !== SettlementApprovalStatus.DRAFT) {
+        throw new Error('Only draft settlement approvals can be approved.');
+      }
 
-  const approved = await prisma.settlementApproval.update({
-    where: {
-      id,
-    },
-    data: {
-      status: SettlementApprovalStatus.APPROVED,
-      approvedBy,
-      approvedAt: new Date(),
-    },
-    include: {
-      lines: true,
-    },
-  });
+      const revalidation = await validateSettlementApprovalBeforeApprove(tx, existing);
+      if (!revalidation.ok) {
+        throw new SettlementApprovalRevalidationError(revalidation.reasons);
+      }
 
-  return mapApproval(approved, true);
+      const approved = await tx.settlementApproval.update({
+        where: {
+          id,
+        },
+        data: {
+          status: SettlementApprovalStatus.APPROVED,
+          approvedBy,
+          approvedAt: new Date(),
+        },
+        include: {
+          lines: true,
+        },
+      });
+
+      return mapApproval(approved, true);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    },
+  );
 }
 
 export async function cancelSettlementApproval(

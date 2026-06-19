@@ -4,6 +4,7 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
   financeLedgerEntry: {
     findMany: vi.fn(),
+    findUnique: vi.fn(),
   },
   settlementApproval: {
     create: vi.fn(),
@@ -33,6 +34,7 @@ const {
   getSettlementApprovalAudit,
   listSettlementApprovalsForVendor,
   previewApproval,
+  SettlementApprovalRevalidationError,
   __settlementApprovalTesting,
 } = await import('../backend/src/modules/finance/settlement-approval.service.js');
 
@@ -47,6 +49,8 @@ function buildLedgerRow(input: {
   fulfilled?: boolean;
   deliveredAt?: Date | null;
   activeApproval?: boolean;
+  activeApprovalId?: string;
+  activePayoutBatch?: boolean;
   settlementStatus?: string;
   payoutStatus?: string;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
@@ -125,8 +129,19 @@ function buildLedgerRow(input: {
           {
             id: `approval-line-${input.id}`,
             settlementApproval: {
-              id: `approval-${input.id}`,
+              id: input.activeApprovalId ?? `approval-${input.id}`,
               status: 'APPROVED',
+            },
+          },
+        ]
+      : [],
+    payoutBatchLines: input.activePayoutBatch
+      ? [
+          {
+            id: `payout-batch-line-${input.id}`,
+            payoutBatch: {
+              id: `payout-batch-${input.id}`,
+              status: 'DRAFT',
             },
           },
         ]
@@ -206,6 +221,7 @@ describe('settlement approval foundation', () => {
     prismaMock.$transaction.mockReset();
     prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
     prismaMock.financeLedgerEntry.findMany.mockReset();
+    prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.settlementApproval.create.mockReset();
     prismaMock.settlementApproval.findMany.mockReset();
     prismaMock.settlementApproval.findUnique.mockReset();
@@ -1151,6 +1167,9 @@ describe('settlement approval foundation', () => {
 
   it('approves only draft approvals without invoice or payout execution', async () => {
     prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
     prismaMock.settlementApproval.update.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
 
     const approval = await approveSettlementApproval('approval-1', 'admin-1');
@@ -1166,6 +1185,195 @@ describe('settlement approval foundation', () => {
     );
     expect(approval.status).toBe('approved');
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status and returns structured reasons when a refund arrives after draft creation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        refundRecords: [{ id: 'refund-new', sourceShopifyRefundId: 'refund-new', amount: 100 }],
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+      reasons: [
+        expect.objectContaining({
+          financeLedgerEntryId: 'sale-1',
+          code: 'refund_arrived_after_draft',
+          reason: 'Refund arrived after draft creation',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when an approved return hold appears after draft creation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        returnRecords: [{
+          id: 'return-new',
+          status: 'approved',
+          returnLifecycleStatus: 'approved',
+        }],
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'approved_return_hold_active',
+          reason: 'Approved return hold is now active',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when a ledger row is already in an active payout batch', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        activePayoutBatch: true,
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'active_payout_batch',
+          reason: 'Ledger row is already included in an active payout batch',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when a ledger row is already paid', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        payoutStatus: 'PAID',
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'ledger_paid',
+          reason: 'Ledger row already paid',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when settlement amounts changed since draft creation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1200,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'settlement_amount_changed',
+          reason: 'Settlement amount changed since draft creation',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when a refund approval line becomes stale', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue({
+      ...buildApproval({ id: 'approval-1', status: 'DRAFT' }),
+      lines: [
+        {
+          id: 'line-refund-1',
+          settlementApprovalId: 'approval-1',
+          financeLedgerEntryId: 'refund-1',
+          lineType: 'REFUND',
+          amountMinor: 10000,
+          commissionMinor: 0,
+          commissionVatMinor: 0,
+          payableImpactMinor: -10000,
+          sourceSnapshotJson: { financeLedgerEntryId: 'refund-1', refundCount: 1 },
+        },
+      ],
+    });
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'refund-1',
+        entryType: 'refund',
+        amount: 100,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        payoutStatus: 'HOLD',
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'settlement_row_not_eligible',
+          reason: 'Excluded because payout status is HOLD.',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when a ledger row is locked by another active settlement approval', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-other',
+      }),
+    );
+
+    const approvalAttempt = approveSettlementApproval('approval-1', 'admin-1');
+    await expect(approvalAttempt).rejects.toBeInstanceOf(SettlementApprovalRevalidationError);
+    await expect(approvalAttempt).rejects.toMatchObject({
+      reasons: [
+        expect.objectContaining({
+          code: 'active_settlement_approval_conflict',
+          reason: 'Ledger row is locked by another active settlement approval',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
   });
 
   it('rejects approval when approval is not draft', async () => {
