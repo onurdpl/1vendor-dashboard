@@ -14,6 +14,7 @@ import {
 
 const MAX_PAGES = 5;
 const PAGE_SIZE = 100;
+const MAX_CANDIDATE_INVOICES = 20;
 const SEARCH_START_OFFSET_DAYS = 7;
 const SEARCH_END_OFFSET_DAYS = 1;
 const INVOICE_NUMBER_FIELDS = ['invoiceNumber', 'invoiceNo', 'documentNumber'] as const;
@@ -58,6 +59,27 @@ export type LogoOutgoingInvoiceSyncPreviewResult = {
     connectStatusCode: number | null;
     accountingStatusSummary: Record<string, unknown>;
   };
+  candidateInvoices: Array<{
+    uuId: string | null;
+    invoiceId: string | null;
+    salesInvoiceId: string | null;
+    issueDate: string | null;
+    amount: number | null;
+    currency: string | null;
+    status: string | null;
+    statusCode: number | null;
+    eGovermentType: string | null;
+    eGovermentTypeDesc: string | null;
+    invoiceNumber?: string;
+    invoiceNo?: string;
+    documentNumber?: string;
+    matchSignals: {
+      uuidEqualsProviderUuid: boolean;
+      salesInvoiceIdEqualsProviderInvoiceId: boolean;
+      invoiceIdEqualsProviderInvoiceId: boolean;
+      amountNearRecordTotal: boolean;
+    };
+  }>;
   providerFieldsObserved: string[];
   mappedFields: {
     providerUuid: string | null;
@@ -167,6 +189,7 @@ function buildEmptyResult(input: {
       ambiguity: false,
     },
     matchedInvoice: null,
+    candidateInvoices: [],
     providerFieldsObserved: [],
     mappedFields: {
       providerUuid: null,
@@ -323,6 +346,70 @@ function mapMatchedInvoice(invoice: ProviderInvoiceRecord): NonNullable<LogoOutg
     connectStatusCode: readRecordNumber(invoice, ['connectStatusCode']),
     accountingStatusSummary: sanitizeAccountingStatus(invoice.accountingStatus),
   };
+}
+
+function normalizeComparable(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || null;
+}
+
+function safeOptionalInvoiceNumberFields(invoice: ProviderInvoiceRecord) {
+  const output: {
+    invoiceNumber?: string;
+    invoiceNo?: string;
+    documentNumber?: string;
+  } = {};
+  for (const key of INVOICE_NUMBER_FIELDS) {
+    const value = readString(invoice[key]);
+    if (value) {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function mapCandidateInvoice(input: {
+  invoice: ProviderInvoiceRecord;
+  recordProviderUuid: string | null;
+  recordProviderInvoiceId: string | null;
+}) {
+  const invoice = mapMatchedInvoice(input.invoice);
+  const recordProviderUuid = normalizeComparable(input.recordProviderUuid);
+  const recordProviderInvoiceId = normalizeComparable(input.recordProviderInvoiceId);
+  return {
+    uuId: invoice.uuId,
+    invoiceId: invoice.invoiceId,
+    salesInvoiceId: invoice.salesInvoiceId,
+    issueDate: invoice.issueDate,
+    amount: invoice.amount,
+    currency: invoice.currency,
+    status: invoice.status,
+    statusCode: invoice.statusCode,
+    eGovermentType: invoice.eGovermentType,
+    eGovermentTypeDesc: invoice.eGovermentTypeDesc,
+    ...safeOptionalInvoiceNumberFields(input.invoice),
+    matchSignals: {
+      uuidEqualsProviderUuid: Boolean(recordProviderUuid && normalizeComparable(invoice.uuId) === recordProviderUuid),
+      salesInvoiceIdEqualsProviderInvoiceId: Boolean(
+        recordProviderInvoiceId && normalizeComparable(invoice.salesInvoiceId) === recordProviderInvoiceId,
+      ),
+      invoiceIdEqualsProviderInvoiceId: Boolean(
+        recordProviderInvoiceId && normalizeComparable(invoice.invoiceId) === recordProviderInvoiceId,
+      ),
+      amountNearRecordTotal: false,
+    },
+  };
+}
+
+function mapCandidateInvoices(input: {
+  rows: ProviderInvoiceRecord[];
+  recordProviderUuid: string | null;
+  recordProviderInvoiceId: string | null;
+}) {
+  return input.rows.slice(0, MAX_CANDIDATE_INVOICES).map((invoice) => mapCandidateInvoice({
+    invoice,
+    recordProviderUuid: input.recordProviderUuid,
+    recordProviderInvoiceId: input.recordProviderInvoiceId,
+  }));
 }
 
 function mapFields(invoice: ProviderInvoiceRecord | null): LogoOutgoingInvoiceSyncPreviewResult['mappedFields'] {
@@ -520,6 +607,11 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
       ambiguity,
     },
     matchedInvoice: matchedRecord ? mapMatchedInvoice(matchedRecord) : null,
+    candidateInvoices: mapCandidateInvoices({
+      rows: pageResult.rows,
+      recordProviderUuid: record.providerUuid,
+      recordProviderInvoiceId: record.providerInvoiceId,
+    }),
     providerFieldsObserved: safeProviderFields(matched ? [matchedRecord!] : pageResult.rows),
     mappedFields: mapFields(matchedRecord),
   };

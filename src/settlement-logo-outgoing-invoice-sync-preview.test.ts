@@ -113,7 +113,7 @@ describe('Logo outgoing invoice sync preview', () => {
   });
 
   it('matches providerUuid against uuId case-insensitively and maps safe fields', async () => {
-    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord());
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({ providerInvoiceId: '12345' }));
     const client = buildClient();
 
     const result = await previewSettlementLogoOutgoingInvoiceSync('settlement-invoice-1', {
@@ -156,6 +156,19 @@ describe('Logo outgoing invoice sync preview', () => {
         invoiceNumberSource: 'unknown',
         invoiceNumberRecoveryPossible: true,
       },
+      candidateInvoices: [
+        {
+          uuId: '82691c7b-28d6-4e30-95c9-c0658e90f090',
+          salesInvoiceId: '12345',
+          invoiceId: 'einvoice-row-1',
+          matchSignals: {
+            uuidEqualsProviderUuid: true,
+            salesInvoiceIdEqualsProviderInvoiceId: true,
+            invoiceIdEqualsProviderInvoiceId: false,
+            amountNearRecordTotal: false,
+          },
+        },
+      ],
     });
     expect(client.getOutgoingInvoiceDataList).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: 'access-token' }),
@@ -167,6 +180,39 @@ describe('Logo outgoing invoice sync preview', () => {
       }),
     );
     expect(JSON.stringify(result)).not.toContain('hidden');
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('returns at most 20 safe candidate invoice summaries with providerInvoiceId match signals', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({ providerInvoiceId: '750' }));
+    const rows = Array.from({ length: 25 }, (_, index) => buildProviderInvoice({
+      uuId: `uuid-${index}`,
+      invoiceId: `invoice-${index}`,
+      salesInvoiceId: index === 3 ? '750' : `sales-${index}`,
+      rawPayload: { hidden: `secret-${index}` },
+    }));
+    const client = buildClient([rows]);
+
+    const result = await previewSettlementLogoOutgoingInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client,
+      now: new Date('2026-06-19T00:00:00.000Z'),
+    });
+
+    expect(result.candidateInvoices).toHaveLength(20);
+    expect(result.candidateInvoices[3]).toMatchObject({
+      uuId: 'uuid-3',
+      salesInvoiceId: '750',
+      invoiceId: 'invoice-3',
+      matchSignals: {
+        uuidEqualsProviderUuid: false,
+        salesInvoiceIdEqualsProviderInvoiceId: true,
+        invoiceIdEqualsProviderInvoiceId: false,
+        amountNearRecordTotal: false,
+      },
+    });
+    expect(JSON.stringify(result.candidateInvoices)).not.toContain('secret-');
+    expect(JSON.stringify(result.candidateInvoices)).not.toContain('rawPayload');
     expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
   });
 

@@ -400,6 +400,27 @@ export type LogoOutgoingInvoiceSyncPreview = {
     connectStatusCode: number | null;
     accountingStatusSummary: Record<string, unknown>;
   };
+  candidateInvoices: Array<{
+    uuId: string | null;
+    invoiceId: string | null;
+    salesInvoiceId: string | null;
+    issueDate: string | null;
+    amount: number | null;
+    currency: string | null;
+    status: string | null;
+    statusCode: number | null;
+    eGovermentType: string | null;
+    eGovermentTypeDesc: string | null;
+    invoiceNumber?: string;
+    invoiceNo?: string;
+    documentNumber?: string;
+    matchSignals: {
+      uuidEqualsProviderUuid: boolean;
+      salesInvoiceIdEqualsProviderInvoiceId: boolean;
+      invoiceIdEqualsProviderInvoiceId: boolean;
+      amountNearRecordTotal: boolean;
+    };
+  }>;
   providerFieldsObserved: string[];
   mappedFields: {
     providerUuid: string | null;

@@ -763,6 +763,26 @@ const outgoingInvoiceSyncPreviewResponse: LogoOutgoingInvoiceSyncPreview = {
     connectStatusCode: 20,
     accountingStatusSummary: {},
   },
+  candidateInvoices: [
+    {
+      uuId: 'some-other-uuid',
+      invoiceId: 'einvoice-row-1',
+      salesInvoiceId: '750',
+      issueDate: '2026-06-12T12:00:00',
+      amount: 120.5,
+      currency: 'TRY',
+      status: "Henüz GİB'e Gönderilmedi",
+      statusCode: 10,
+      eGovermentType: 'EARSIV',
+      eGovermentTypeDesc: 'E-Arşiv',
+      matchSignals: {
+        uuidEqualsProviderUuid: false,
+        salesInvoiceIdEqualsProviderInvoiceId: true,
+        invoiceIdEqualsProviderInvoiceId: false,
+        amountNearRecordTotal: false,
+      },
+    },
+  ],
   providerFieldsObserved: ['amount', 'currency', 'invoiceId', 'issueDate', 'salesInvoiceId', 'status', 'statusCode', 'uuId'],
   mappedFields: {
     providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
@@ -1195,6 +1215,9 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('UNKNOWN')).toBeInTheDocument();
     expect(screen.getByText('Invoice number is UNKNOWN.')).toBeInTheDocument();
     expect(screen.getByText('Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.')).toBeInTheDocument();
+    expect(screen.getByText('Candidate outgoing invoices')).toBeInTheDocument();
+    expect(screen.getByText(/salesInvoiceId 750/)).toBeInTheDocument();
+    expect(screen.getByText(/sales id match yes/)).toBeInTheDocument();
   });
 
   it('opening an approved approval replaces an existing preview panel', async () => {

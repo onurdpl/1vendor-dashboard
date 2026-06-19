@@ -2294,6 +2294,30 @@ export function AdminSettlementApprovalsPage() {
                         <p>Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.</p>
                       </div>
                     ) : null}
+                    {item.candidateInvoices.length ? (
+                      <MetadataGroup title="Candidate outgoing invoices">
+                        {item.candidateInvoices.map((candidate, index) => (
+                          <MetadataRow
+                            key={`${candidate.uuId ?? candidate.salesInvoiceId ?? candidate.invoiceId ?? index}`}
+                            label={`Candidate ${index + 1}`}
+                            value={[
+                              `UUID ${valueOrDash(candidate.uuId)}`,
+                              `salesInvoiceId ${valueOrDash(candidate.salesInvoiceId)}`,
+                              `invoiceId ${valueOrDash(candidate.invoiceId)}`,
+                              `date ${formatDate(candidate.issueDate)}`,
+                              `amount ${candidate.amount === null ? '—' : formatCurrency(String(candidate.amount), candidate.currency ?? 'TRY')}`,
+                              `status ${valueOrDash(candidate.status)}`,
+                              `uuid match ${candidate.matchSignals.uuidEqualsProviderUuid ? 'yes' : 'no'}`,
+                              `sales id match ${candidate.matchSignals.salesInvoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
+                              `invoice id match ${candidate.matchSignals.invoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
+                              candidate.invoiceNumber ? `invoiceNumber ${candidate.invoiceNumber}` : null,
+                              candidate.invoiceNo ? `invoiceNo ${candidate.invoiceNo}` : null,
+                              candidate.documentNumber ? `documentNumber ${candidate.documentNumber}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          />
+                        ))}
+                      </MetadataGroup>
+                    ) : null}
                   </Fragment>
                 ))}
               </details>
