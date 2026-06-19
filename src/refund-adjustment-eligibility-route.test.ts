@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const previewRefundAdjustmentEligibilityMock = vi.hoisted(() => vi.fn());
+const backfillPendingRefundAdjustmentsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js', () => ({
+  backfillPendingRefundAdjustments: backfillPendingRefundAdjustmentsMock,
   previewRefundAdjustmentEligibility: previewRefundAdjustmentEligibilityMock,
 }));
 
@@ -90,6 +92,7 @@ function buildReply() {
 describe('refund adjustment eligibility preview route', () => {
   beforeEach(() => {
     previewRefundAdjustmentEligibilityMock.mockReset();
+    backfillPendingRefundAdjustmentsMock.mockReset();
   });
 
   it('requires admin auth', async () => {
@@ -163,6 +166,106 @@ describe('refund adjustment eligibility preview route', () => {
       orderNumber: '#1086',
       recommendedAction: 'CREATE_PENDING_ADJUSTMENT',
       limit: 25,
+    });
+  });
+
+  it('blocks backfill without confirmation before writes', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        posts.set(path, handler);
+      }),
+      delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await posts.get('/admin/finance/refund-adjustments/backfill')?.(
+      { authUser: { role: 'admin' }, body: { confirmRefundAdjustmentBackfill: false }, query: {} },
+      buildReply(),
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        writesPerformed: false,
+        message: 'Refund adjustment backfill confirmation is required.',
+      },
+    });
+    expect(backfillPendingRefundAdjustmentsMock).not.toHaveBeenCalled();
+  });
+
+  it('requires admin auth for backfill', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        posts.set(path, handler);
+      }),
+      delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await posts.get('/admin/finance/refund-adjustments/backfill')?.(
+      { authUser: { role: 'vendor' }, body: { confirmRefundAdjustmentBackfill: true }, query: {} },
+      buildReply(),
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(backfillPendingRefundAdjustmentsMock).not.toHaveBeenCalled();
+  });
+
+  it('runs confirmed backfill for admins with filters', async () => {
+    const posts = new Map<string, (request: { authUser?: { id?: string; email?: string; role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { id?: string; email?: string; role?: string }; body?: unknown; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        posts.set(path, handler);
+      }),
+      delete: vi.fn(),
+    };
+    const backfill = {
+      ok: true,
+      writesPerformed: true,
+      summary: {
+        eligible: 1,
+        created: 1,
+        alreadyExisting: 0,
+        skipped: 0,
+        failed: 0,
+      },
+      createdRecords: [],
+      skippedRecords: [],
+    };
+    backfillPendingRefundAdjustmentsMock.mockResolvedValueOnce(backfill);
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await posts.get('/admin/finance/refund-adjustments/backfill')?.(
+      {
+        authUser: { id: 'admin-1', email: 'admin@example.com', role: 'admin' },
+        body: {
+          confirmRefundAdjustmentBackfill: true,
+          vendorId: 'yalispor',
+          orderNumber: '#1086',
+        },
+        query: { limit: '8' },
+      },
+      buildReply(),
+    );
+
+    expect(result).toBe(backfill);
+    expect(backfillPendingRefundAdjustmentsMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      orderNumber: '#1086',
+      limit: 8,
+      createdBy: 'admin-1',
     });
   });
 });

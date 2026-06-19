@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  backfillPendingRefundAdjustments,
   classifyRefundAdjustmentEligibility,
   previewRefundAdjustmentEligibility,
 } from '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js';
@@ -8,6 +9,7 @@ function refundLedgerRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'fin-yalispor-refund-1001',
     vendorId: 'yalispor',
+    entryType: 'refund',
     amount: 1000,
     createdAt: new Date('2026-06-19T10:00:00.000Z'),
     commissionPercentSnapshot: 10,
@@ -185,5 +187,130 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(result.records[0].recommendedAction).toBe('CREATE_PENDING_ADJUSTMENT');
     expect(result.summary.createPendingAdjustment).toBe(1);
     expect(result.summary.alreadyHasAdjustment).toBe(0);
+  });
+
+  it('backfills only CREATE_PENDING_ADJUSTMENT rows with pending adjustment records', async () => {
+    const findManyRows = [
+      refundLedgerRow(),
+      (() => {
+        const row = refundLedgerRow({ id: 'fin-yalispor-refund-1002' });
+        row.vendorAllocation.financeEntries[0].payoutStatus = 'PAID';
+        return row;
+      })(),
+    ];
+    const adjustmentRow = {
+      id: 'adjustment-1',
+      refundRecordId: 'refund-record-1001',
+      refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
+      vendorId: 'yalispor',
+      originalOrderId: 'order-1086',
+      originalSettlementApprovalId: 'settlement-approval-1',
+      originalSettlementApprovalLineId: 'settlement-line-1',
+      originalSettlementCommissionInvoiceId: 'commission-invoice-1',
+      status: 'PENDING',
+      amountMinor: 88000,
+      currencyCode: 'TRY',
+      reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+      createdAt: new Date('2026-06-19T12:00:00.000Z'),
+      updatedAt: new Date('2026-06-19T12:00:00.000Z'),
+      appliedSettlementApprovalId: null,
+      appliedSettlementApprovalLineId: null,
+      blockedReason: null,
+      createdBy: 'admin-user',
+    };
+    const tx = {
+      financeLedgerEntry: {
+        findUnique: vi.fn().mockResolvedValue(refundLedgerRow()),
+      },
+      settlementRefundAdjustment: {
+        upsert: vi.fn().mockResolvedValue(adjustmentRow),
+      },
+    };
+    const db = {
+      financeLedgerEntry: {
+        findMany: vi.fn().mockResolvedValue(findManyRows),
+      },
+      settlementRefundAdjustment: tx.settlementRefundAdjustment,
+      $transaction: vi.fn((callback) => callback(tx)),
+    };
+
+    const result = await backfillPendingRefundAdjustments({
+      db: db as never,
+      createdBy: 'admin-user',
+    });
+
+    expect(result.writesPerformed).toBe(true);
+    expect(result.summary).toEqual({
+      eligible: 1,
+      created: 1,
+      alreadyExisting: 0,
+      skipped: 1,
+      failed: 0,
+    });
+    expect(result.createdRecords).toEqual([
+      {
+        id: 'adjustment-1',
+        refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
+        refundRecordId: 'refund-record-1001',
+        vendorId: 'yalispor',
+        status: 'pending',
+      },
+    ]);
+    expect(tx.settlementRefundAdjustment.upsert).toHaveBeenCalledTimes(1);
+    expect(tx.settlementRefundAdjustment.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        status: 'PENDING',
+        refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
+      }),
+    }));
+  });
+
+  it('reports already existing adjustments without creating new rows', async () => {
+    const db = {
+      financeLedgerEntry: {
+        findMany: vi.fn().mockResolvedValue([
+          refundLedgerRow({
+            refundAdjustments: [{ id: 'adjustment-2', status: 'PENDING' }],
+          }),
+        ]),
+      },
+      settlementRefundAdjustment: {
+        upsert: vi.fn(),
+      },
+      $transaction: vi.fn(),
+    };
+
+    const result = await backfillPendingRefundAdjustments({ db: db as never });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary).toEqual({
+      eligible: 0,
+      created: 0,
+      alreadyExisting: 1,
+      skipped: 1,
+      failed: 0,
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns writesPerformed false when no eligible records exist', async () => {
+    const row = refundLedgerRow();
+    row.vendorAllocation.financeEntries = [];
+    const db = {
+      financeLedgerEntry: {
+        findMany: vi.fn().mockResolvedValue([row]),
+      },
+      settlementRefundAdjustment: {
+        upsert: vi.fn(),
+      },
+      $transaction: vi.fn(),
+    };
+
+    const result = await backfillPendingRefundAdjustments({ db: db as never });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary.created).toBe(0);
+    expect(result.summary.skipped).toBe(1);
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });

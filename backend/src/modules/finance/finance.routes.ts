@@ -43,6 +43,7 @@ import {
   previewSettlementLogoOutgoingInvoiceSync,
 } from './settlement-logo-outgoing-invoice-sync-preview.service.js';
 import {
+  backfillPendingRefundAdjustments,
   previewRefundAdjustmentEligibility,
   type RefundAdjustmentRecommendedAction,
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
@@ -638,6 +639,41 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         orderNumber,
         recommendedAction,
         limit: pagination.limit,
+      });
+    },
+  );
+
+  app.post(
+    '/admin/finance/refund-adjustments/backfill',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      if (!isRecord(request.body) || request.body.confirmRefundAdjustmentBackfill !== true) {
+        return reply.code(400).send({
+          ok: false,
+          writesPerformed: false,
+          message: 'Refund adjustment backfill confirmation is required.',
+        });
+      }
+
+      const vendorId = readOptionalBodyString(request.body, 'vendorId')
+        ?? readOptionalQueryString(request.query, 'vendorId');
+      const orderNumber = readOptionalBodyString(request.body, 'orderNumber')
+        ?? readOptionalQueryString(request.query, 'orderNumber');
+      const bodyLimit = isRecord(request.body) ? Number(request.body.limit) : NaN;
+      const pagination = Number.isFinite(bodyLimit) && bodyLimit > 0
+        ? { limit: Math.min(Math.floor(bodyLimit), 500), offset: 0 }
+        : resolvePagination(request.query, { limit: 100, offset: 0 });
+
+      return backfillPendingRefundAdjustments({
+        vendorId,
+        orderNumber,
+        limit: pagination.limit,
+        createdBy: request.authUser.id ?? request.authUser.email ?? 'admin',
       });
     },
   );

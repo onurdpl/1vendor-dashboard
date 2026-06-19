@@ -1,6 +1,7 @@
 import { Prisma, SettlementRefundAdjustmentStatus, VendorBalanceEventType } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { calculateRefundOffsetAmounts } from './refund-offset.service.js';
+import { createSettlementRefundAdjustmentForRefundLedger } from './settlement-refund-adjustment.service.js';
 
 const ACTIVE_COMMISSION_INVOICE_STATUSES = new Set(['PENDING', 'CREATED', 'FAILED', 'UNKNOWN']);
 
@@ -59,6 +60,38 @@ export type RefundAdjustmentEligibilityPreview = {
 };
 
 type RefundAdjustmentEligibilityDbClient = Pick<Prisma.TransactionClient, 'financeLedgerEntry'>;
+type RefundAdjustmentBackfillTransaction = Pick<
+  Prisma.TransactionClient,
+  'financeLedgerEntry' | 'settlementRefundAdjustment'
+>;
+type RefundAdjustmentBackfillDbClient = RefundAdjustmentBackfillTransaction & {
+  $transaction<T>(callback: (tx: RefundAdjustmentBackfillTransaction) => Promise<T>): Promise<T>;
+};
+
+export type RefundAdjustmentBackfillResult = {
+  ok: true;
+  writesPerformed: boolean;
+  summary: {
+    eligible: number;
+    created: number;
+    alreadyExisting: number;
+    skipped: number;
+    failed: number;
+  };
+  createdRecords: Array<{
+    id: string;
+    refundFinanceLedgerEntryId: string;
+    refundRecordId: string;
+    vendorId: string;
+    status: string;
+  }>;
+  skippedRecords: Array<{
+    refundFinanceLedgerEntryId: string;
+    refundRecordId: string | null;
+    recommendedAction: RefundAdjustmentRecommendedAction;
+    reason: string;
+  }>;
+};
 
 type RefundLedgerRow = Prisma.PromiseReturnType<typeof findRefundLedgerRows>[number];
 
@@ -372,5 +405,105 @@ export async function previewRefundAdjustmentEligibility(input: {
     writesPerformed: false,
     summary: summarize(classified),
     records: classified,
+  };
+}
+
+export async function backfillPendingRefundAdjustments(input: {
+  vendorId?: string | null;
+  orderNumber?: string | null;
+  limit?: number;
+  createdBy?: string | null;
+  db?: RefundAdjustmentBackfillDbClient;
+} = {}): Promise<RefundAdjustmentBackfillResult> {
+  const db = (input.db ?? prisma) as RefundAdjustmentBackfillDbClient;
+  const preview = await previewRefundAdjustmentEligibility({
+    vendorId: input.vendorId,
+    orderNumber: input.orderNumber,
+    limit: input.limit,
+    db,
+  });
+  const eligibleRecords = preview.records.filter((record) =>
+    record.recommendedAction === 'CREATE_PENDING_ADJUSTMENT'
+  );
+  const alreadyExistingRecords = preview.records.filter((record) =>
+    record.recommendedAction === 'ALREADY_HAS_ADJUSTMENT'
+  );
+  const skippedRecords: RefundAdjustmentBackfillResult['skippedRecords'] = preview.records
+    .filter((record) => record.recommendedAction !== 'CREATE_PENDING_ADJUSTMENT')
+    .map((record) => ({
+      refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
+      refundRecordId: record.refundRecordId,
+      recommendedAction: record.recommendedAction,
+      reason: record.blockerReason
+        ?? (record.recommendedAction === 'ALREADY_HAS_ADJUSTMENT'
+          ? 'Settlement refund adjustment already exists.'
+          : 'Refund ledger is not eligible for backfill.'),
+    }));
+  const createdRecords: RefundAdjustmentBackfillResult['createdRecords'] = [];
+  let failed = 0;
+
+  for (const record of eligibleRecords) {
+    if (!record.refundRecordId) {
+      failed += 1;
+      skippedRecords.push({
+        refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
+        refundRecordId: record.refundRecordId,
+        recommendedAction: record.recommendedAction,
+        reason: 'Refund record id is unavailable.',
+      });
+      continue;
+    }
+
+    try {
+      const adjustment = await db.$transaction((tx: RefundAdjustmentBackfillTransaction) =>
+        createSettlementRefundAdjustmentForRefundLedger(tx, {
+          refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
+          refundRecordId: record.refundRecordId as string,
+          createdBy: input.createdBy ?? 'system:refund_adjustment_backfill',
+        })
+      );
+
+      if (adjustment) {
+        createdRecords.push({
+          id: adjustment.id,
+          refundFinanceLedgerEntryId: adjustment.refundFinanceLedgerEntryId,
+          refundRecordId: adjustment.refundRecordId,
+          vendorId: adjustment.vendorId,
+          status: adjustment.status,
+        });
+      } else {
+        failed += 1;
+        skippedRecords.push({
+          refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
+          refundRecordId: record.refundRecordId,
+          recommendedAction: record.recommendedAction,
+          reason: 'Eligibility changed before adjustment could be created.',
+        });
+      }
+    } catch (error) {
+      failed += 1;
+      skippedRecords.push({
+        refundFinanceLedgerEntryId: record.refundFinanceLedgerEntryId,
+        refundRecordId: record.refundRecordId,
+        recommendedAction: record.recommendedAction,
+        reason: error instanceof Error ? error.message : 'Adjustment creation failed.',
+      });
+    }
+  }
+
+  const created = createdRecords.length;
+
+  return {
+    ok: true,
+    writesPerformed: created > 0,
+    summary: {
+      eligible: eligibleRecords.length,
+      created,
+      alreadyExisting: alreadyExistingRecords.length,
+      skipped: skippedRecords.length,
+      failed,
+    },
+    createdRecords,
+    skippedRecords,
   };
 }
