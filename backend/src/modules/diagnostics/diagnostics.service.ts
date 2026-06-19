@@ -1,4 +1,4 @@
-import { OperationalJobStatus, OperationalJobType, Prisma, type OperationalJob, type WebhookEvent } from '@prisma/client';
+import { OperationalJobStatus, OperationalJobType, type OperationalJob, type WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { buildFinanceAuditRuntimeMetadata } from '../../config/database-source-diagnostics.js';
@@ -69,295 +69,73 @@ const SUPPORTED_RECOVER_TOPICS = new Set([
 
 const PAYLOAD_PREVIEW_LIMIT = 1200;
 
-const INVOICE_EXECUTION_READINESS_COLUMNS = [
-  'id',
-  'provider',
-  'status',
-  'createdAt',
-] as const;
-
 export type InvoiceExecutionCleanupReadinessClassification =
   | 'READY_TO_REMOVE'
   | 'ARCHIVE_REQUIRED'
+  | 'REMOVED'
   | 'UNKNOWN';
 
-type InvoiceExecutionGroupCount = {
-  provider: string;
-  status: string;
-  count: number;
-};
-
-type InvoiceExecutionArchiveRow = {
-  id: string;
-  financeLedgerEntryId: string;
-  provider: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  providerInvoiceNo: string | null;
-  providerInvoiceId: string | null;
-  providerUuid: string | null;
-  providerInvoiceGuid: string | null;
-  hasRequestSnapshot: boolean;
-  hasResponseSnapshot: boolean;
-  hasErrorSnapshot: boolean;
-  vendorId: string | null;
-  sourceShopifyOrderId: string | null;
-  sourceShopifyOrderNumber: string | null;
-  entryType: string | null;
-  amount: string | null;
-  settlementStatus: string | null;
-  payoutStatus: string | null;
-};
+const INVOICE_EXECUTION_REMOVED_MESSAGE =
+  'Legacy InvoiceExecution schema was removed in C4 after production archive export.';
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
 
-function toCount(value: unknown) {
-  const numeric = Number(value ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
+function buildInvoiceExecutionRemovedDiagnosticBase(env: AppEnv) {
+  const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
+    environment: env.NODE_ENV,
+    databaseUrl: env.DATABASE_URL,
+    schemaReady: true,
+  });
+  const databaseIdentity = {
+    databaseHost: financeAuditMetadata.databaseHost,
+    databaseName: financeAuditMetadata.databaseName,
+    databaseSourceLabel: financeAuditMetadata.databaseSourceLabel,
+    schemaReady: financeAuditMetadata.schemaReady,
+  };
 
-function normalizeDiagnosticError(error: unknown) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  return 'InvoiceExecution cleanup readiness query failed.';
-}
-
-function hasJsonSnapshot(value: unknown) {
-  return value !== null && value !== undefined && value !== Prisma.JsonNull;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function hasErrorSnapshot(status: string, responseSnapshot: unknown) {
-  if (status.trim().toUpperCase() === 'FAILED') {
-    return true;
-  }
-  if (!isRecord(responseSnapshot)) {
-    return false;
-  }
-
-  const errorKeys = new Set([
-    'error',
-    'errormessage',
-    'providererror',
-    'failure',
-    'failuremessage',
-    'exception',
-  ]);
-  return Object.keys(responseSnapshot).some((key) => errorKeys.has(key.replace(/[^a-z0-9]/gi, '').toLowerCase()));
-}
-
-async function checkInvoiceExecutionSchemaReady() {
-  try {
-    const rows = await prisma.$queryRaw<Array<{ column_name: string }>>(Prisma.sql`
-      SELECT column_name
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'InvoiceExecution'
-        AND column_name IN (${Prisma.join([...INVOICE_EXECUTION_READINESS_COLUMNS])})
-    `);
-    const present = new Set(rows.map((row) => row.column_name));
-    return INVOICE_EXECUTION_READINESS_COLUMNS.every((column) => present.has(column));
-  } catch {
-    return false;
-  }
+  return {
+    ok: true,
+    writesPerformed: false,
+    databaseIdentity,
+    warnings: financeAuditMetadata.warnings,
+  };
 }
 
 export async function getInvoiceExecutionCleanupReadiness(env: AppEnv) {
-  const schemaReady = await checkInvoiceExecutionSchemaReady();
-  const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
-    environment: env.NODE_ENV,
-    databaseUrl: env.DATABASE_URL,
-    schemaReady,
-  });
-  const databaseIdentity = {
-    databaseHost: financeAuditMetadata.databaseHost,
-    databaseName: financeAuditMetadata.databaseName,
-    databaseSourceLabel: financeAuditMetadata.databaseSourceLabel,
-    schemaReady: financeAuditMetadata.schemaReady,
+  const base = buildInvoiceExecutionRemovedDiagnosticBase(env);
+  return {
+    ...base,
+    schemaRemoved: true,
+    totalInvoiceExecutionRows: null,
+    countsByProviderStatus: [],
+    oldestCreatedAt: null,
+    newestCreatedAt: null,
+    rowsExist: false,
+    cleanupReadiness: 'REMOVED' as const,
+    archiveRequired: false,
+    message: INVOICE_EXECUTION_REMOVED_MESSAGE,
+    error: null,
   };
-
-  const base = {
-    ok: true,
-    writesPerformed: false,
-    databaseIdentity,
-    warnings: financeAuditMetadata.warnings,
-  };
-
-  try {
-    const [aggregate, groupedCounts] = await Promise.all([
-      prisma.invoiceExecution.aggregate({
-        _count: {
-          _all: true,
-        },
-        _min: {
-          createdAt: true,
-        },
-        _max: {
-          createdAt: true,
-        },
-      }),
-      prisma.invoiceExecution.groupBy({
-        by: ['provider', 'status'],
-        _count: {
-          _all: true,
-        },
-        orderBy: [
-          {
-            provider: 'asc',
-          },
-          {
-            status: 'asc',
-          },
-        ],
-      }),
-    ]);
-
-    const totalInvoiceExecutionRows = toCount(aggregate._count?._all);
-    const rowsExist = totalInvoiceExecutionRows > 0;
-    const cleanupReadiness: InvoiceExecutionCleanupReadinessClassification = rowsExist
-      ? 'ARCHIVE_REQUIRED'
-      : 'READY_TO_REMOVE';
-    const countsByProviderStatus: InvoiceExecutionGroupCount[] = groupedCounts.map((group) => ({
-      provider: String(group.provider),
-      status: String(group.status),
-      count: toCount(group._count?._all),
-    }));
-
-    return {
-      ...base,
-      totalInvoiceExecutionRows,
-      countsByProviderStatus,
-      oldestCreatedAt: toIsoString(aggregate._min?.createdAt ?? null),
-      newestCreatedAt: toIsoString(aggregate._max?.createdAt ?? null),
-      rowsExist,
-      cleanupReadiness,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      ...base,
-      ok: false,
-      totalInvoiceExecutionRows: null,
-      countsByProviderStatus: [],
-      oldestCreatedAt: null,
-      newestCreatedAt: null,
-      rowsExist: null,
-      cleanupReadiness: 'UNKNOWN' as const,
-      error: normalizeDiagnosticError(error),
-    };
-  }
 }
 
 export async function getInvoiceExecutionArchiveDiagnostic(env: AppEnv) {
-  const schemaReady = await checkInvoiceExecutionSchemaReady();
-  const financeAuditMetadata = buildFinanceAuditRuntimeMetadata({
-    environment: env.NODE_ENV,
-    databaseUrl: env.DATABASE_URL,
-    schemaReady,
-  });
-  const databaseIdentity = {
-    databaseHost: financeAuditMetadata.databaseHost,
-    databaseName: financeAuditMetadata.databaseName,
-    databaseSourceLabel: financeAuditMetadata.databaseSourceLabel,
-    schemaReady: financeAuditMetadata.schemaReady,
-  };
   const generatedAt = new Date().toISOString();
-  const base = {
-    ok: true,
-    writesPerformed: false,
-    databaseIdentity,
-    warnings: financeAuditMetadata.warnings,
+  const base = buildInvoiceExecutionRemovedDiagnosticBase(env);
+  return {
+    ...base,
+    schemaRemoved: true,
+    archiveMetadata: {
+      generatedAt,
+      totalRows: 0,
+      writesPerformed: false,
+    },
+    archiveStatus: 'NOT_APPLICABLE' as const,
+    rows: [],
+    message: INVOICE_EXECUTION_REMOVED_MESSAGE,
+    error: null,
   };
-
-  try {
-    const rows = await prisma.invoiceExecution.findMany({
-      orderBy: {
-        createdAt: 'asc',
-      },
-      select: {
-        id: true,
-        financeLedgerEntryId: true,
-        provider: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-        providerInvoiceGuid: true,
-        providerInvoiceNo: true,
-        requestSnapshot: true,
-        responseSnapshot: true,
-        financeLedgerEntry: {
-          select: {
-            vendorId: true,
-            entryType: true,
-            amount: true,
-            settlementStatus: true,
-            payoutStatus: true,
-            vendorAllocation: {
-              select: {
-                sourceShopifyOrderId: true,
-                sourceShopifyOrderNumber: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const archiveRows: InvoiceExecutionArchiveRow[] = rows.map((row) => ({
-      id: row.id,
-      financeLedgerEntryId: row.financeLedgerEntryId,
-      provider: String(row.provider),
-      status: String(row.status),
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-      providerInvoiceNo: row.providerInvoiceNo,
-      providerInvoiceId: null,
-      providerUuid: null,
-      providerInvoiceGuid: row.providerInvoiceGuid,
-      hasRequestSnapshot: hasJsonSnapshot(row.requestSnapshot),
-      hasResponseSnapshot: hasJsonSnapshot(row.responseSnapshot),
-      hasErrorSnapshot: hasErrorSnapshot(String(row.status), row.responseSnapshot),
-      vendorId: row.financeLedgerEntry?.vendorId ?? null,
-      sourceShopifyOrderId: row.financeLedgerEntry?.vendorAllocation?.sourceShopifyOrderId ?? null,
-      sourceShopifyOrderNumber: row.financeLedgerEntry?.vendorAllocation?.sourceShopifyOrderNumber ?? null,
-      entryType: row.financeLedgerEntry?.entryType ?? null,
-      amount: row.financeLedgerEntry?.amount.toString() ?? null,
-      settlementStatus: row.financeLedgerEntry ? String(row.financeLedgerEntry.settlementStatus) : null,
-      payoutStatus: row.financeLedgerEntry ? String(row.financeLedgerEntry.payoutStatus) : null,
-    }));
-
-    return {
-      ...base,
-      archiveMetadata: {
-        generatedAt,
-        totalRows: archiveRows.length,
-        writesPerformed: false,
-      },
-      archiveStatus: archiveRows.length > 0 ? 'READY_FOR_EXPORT' as const : 'NO_ROWS' as const,
-      rows: archiveRows,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      ...base,
-      ok: false,
-      archiveMetadata: {
-        generatedAt,
-        totalRows: null,
-        writesPerformed: false,
-      },
-      archiveStatus: 'UNKNOWN' as const,
-      rows: [],
-      error: normalizeDiagnosticError(error),
-    };
-  }
 }
 
 function inferNeedsAttention(status: string, errorMessage: string | null) {

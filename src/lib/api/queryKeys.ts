@@ -56,8 +56,6 @@ export const queryKeys = {
       shopifyRefundId?: string | null,
       shopifyOrderNumber?: string | number | null,
     ) => ['finance', 'return-records', vendorId, shopifyRefundId ?? null, shopifyOrderNumber ?? null] as const,
-    invoiceResponseSummary: (invoiceExecutionId: string) =>
-      ['finance', 'invoice-response-summary', invoiceExecutionId] as const,
   },
   automation: {
     alerts: (vendorId = getCurrentVendorContext().vendorId) => ['automation', 'alerts', vendorId] as const,

@@ -10,7 +10,6 @@ import { setCurrentUser, setToken } from '../lib/auth';
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
-const getInvoiceExecutionResponseSummaryMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 
@@ -19,7 +18,6 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
-    getInvoiceExecutionResponseSummary: (...args: unknown[]) => getInvoiceExecutionResponseSummaryMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
@@ -212,34 +210,6 @@ function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   };
 }
 
-function buildInvoiceExecution(
-  overrides: Partial<NonNullable<FinanceDashboard['transactions'][number]['invoiceExecution']>> = {},
-): NonNullable<FinanceDashboard['transactions'][number]['invoiceExecution']> {
-  return {
-    id: 'invoice-exec-demo',
-    provider: 'bizimhesap',
-    providerInvoiceGuid: 'BH-GUID-DEMO',
-    providerInvoiceNo: null,
-    providerPdfUrl: null,
-    status: 'created',
-    visibilityStatus: 'accounting_synced',
-    visibilityLabel: 'Legacy record stored',
-    reconciliationState: 'invoice_visibility_incomplete',
-    finalInvoiceState: 'draft_or_synced',
-    syncSemantics: 'draft_accounting_sync',
-    providerCapabilities: {
-      supportsDraftSubmission: true,
-      supportsFinalInvoiceVisibility: false,
-      supportsPdfLink: true,
-      supportsStatusSync: false,
-      note: 'Legacy provider diagnostics are retained for support visibility only.',
-    },
-    createdAt: '2026-05-13T12:00:00Z',
-    updatedAt: '2026-05-13T12:00:00Z',
-    ...overrides,
-  };
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -319,7 +289,6 @@ describe('FinancePage control center', () => {
     getFinanceDashboardMock.mockReset();
     updateVendorFinancialProfileMock.mockReset();
     preparePayoutBatchMock.mockReset();
-    getInvoiceExecutionResponseSummaryMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
     listVendorSupportTicketsMock.mockReset();
@@ -620,61 +589,16 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
   });
 
-  it('shows safe provider issue details for admins on unknown invoice visibility', async () => {
-    getInvoiceExecutionResponseSummaryMock.mockResolvedValue({
-      id: 'invoice-exec-unknown',
-      provider: 'bizimhesap',
-      status: 'unknown',
-      providerInvoiceGuidPresent: false,
-      providerInvoiceNoPresent: false,
-      providerPdfUrlPresent: false,
-      response: {
-        httpStatus: 200,
-        ok: true,
-        contentType: 'application/json',
-        parsedBodyType: 'object',
-        bodyKeys: ['error', 'guid', 'url'],
-        nestedBodyKeys: ['error', 'guid', 'url'],
-        providerError: 'Provider did not return invoice artifacts.',
-        parsedGuidPresent: false,
-        parsedPdfUrlPresent: false,
-      },
-    });
-    getFinanceDashboardMock.mockResolvedValue({
-      ...financeDashboard,
-      transactions: [
-        {
-          ...financeDashboard.transactions[0],
-          invoiceExecution: buildInvoiceExecution({
-            id: 'invoice-exec-unknown',
-            providerInvoiceGuid: null,
-            providerInvoiceNo: null,
-            providerPdfUrl: null,
-            status: 'unknown',
-            visibilityStatus: 'invoice_visibility_incomplete',
-            visibilityLabel: 'Invoice visibility incomplete',
-            finalInvoiceState: 'visibility_unknown',
-          }),
-        },
-        financeDashboard.transactions[1],
-        financeDashboard.transactions[2],
-      ],
-    });
+  it('does not render legacy invoice accounting diagnostics in the active finance workflow', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
     renderFinancePage();
 
-    expect(await screen.findByText('Diagnostics')).toBeInTheDocument();
-    expect(screen.getByText('Legacy invoice sync record')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance control center' })).toBeInTheDocument();
+    expect(screen.queryByText('Legacy invoice sync record')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
-    expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown', expect.any(Object)),
-    );
-    expect(await screen.findByLabelText('Provider issue summary')).toBeInTheDocument();
-    expect(screen.getByText('Provider error: Provider did not return invoice artifacts.')).toBeInTheDocument();
-    expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
-    expect(screen.getByText('Content type: application/json')).toBeInTheDocument();
-    expect(screen.queryByText('GUID present')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Provider issue summary')).not.toBeInTheDocument();
+    expect(screen.queryByText(/BizimHesap/i)).not.toBeInTheDocument();
   });
 
   it('does not show provider issue internals to vendor users', async () => {
@@ -687,31 +611,11 @@ describe('FinancePage control center', () => {
       canSwitchVendors: false,
       defaultVendorId: 'demo-vendor-a',
     });
-    getFinanceDashboardMock.mockResolvedValue({
-      ...financeDashboard,
-      transactions: [
-        {
-          ...financeDashboard.transactions[0],
-          invoiceExecution: buildInvoiceExecution({
-            id: 'invoice-exec-unknown',
-            providerInvoiceGuid: null,
-            providerInvoiceNo: null,
-            providerPdfUrl: null,
-            status: 'unknown',
-            visibilityStatus: 'invoice_visibility_incomplete',
-            visibilityLabel: 'Invoice visibility incomplete',
-            finalInvoiceState: 'visibility_unknown',
-          }),
-        },
-        financeDashboard.transactions[1],
-        financeDashboard.transactions[2],
-      ],
-    });
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: 'Finance control center' })).toBeInTheDocument();
-    expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
     expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility is reconciled from the merchant accounting workflow.')).not.toBeInTheDocument();

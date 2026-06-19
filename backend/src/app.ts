@@ -27,7 +27,6 @@ import { registerAbandonedApprovedReturnAutoCancelScheduler } from './modules/re
 import { registerObservabilityRoutes } from './modules/observability/observability.routes.js';
 import { registerRulesRoutes } from './modules/rules/rules.routes.js';
 import { registerNotificationRoutes } from './modules/notifications/notifications.routes.js';
-import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integration/vendor-integration.docs.routes.js';
@@ -437,7 +436,6 @@ export function createApp() {
   registerObservabilityRoutes(app, env);
   registerRulesRoutes(app, env);
   registerNotificationRoutes(app, env);
-  registerInvoiceExecutionRoutes(app, env);
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
   registerVendorIntegrationDocsRoutes(app);

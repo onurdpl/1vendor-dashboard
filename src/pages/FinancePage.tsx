@@ -24,7 +24,6 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   getFinanceDashboard,
-  getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
@@ -42,8 +41,6 @@ import {
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
-
-type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
 
 type VendorProfileFormInput = {
   commissionPercent: number;
@@ -382,56 +379,6 @@ function financeValueOrUnknown(value?: string | null) {
 
 function optionalDeductionValue(value?: string | null) {
   return typeof value === 'string' && value.trim() ? formatDeductionValue(value) : UNKNOWN_FINANCE_VALUE;
-}
-
-function getInvoiceStatusLabel(status?: string) {
-  if (!status) {
-    return 'Not linked';
-  }
-
-  return status
-    .split('_')
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
-}
-
-function getProviderName(provider?: string) {
-  if (provider === 'bizimhesap') {
-    return 'BizimHesap';
-  }
-  if (provider === 'parasut') {
-    return 'Paraşüt';
-  }
-  return 'Not linked';
-}
-
-function getFinalInvoiceStateLabel(state?: InvoiceExecution['finalInvoiceState']) {
-  if (state === 'finalized_visible') {
-    return 'Provider final record visible';
-  }
-  if (state === 'draft_or_synced') {
-    return 'Legacy draft record only';
-  }
-  if (state === 'failed') {
-    return 'Provider issue';
-  }
-  if (state === 'cancelled') {
-    return 'Cancelled';
-  }
-  if (state === 'not_requested') {
-    return 'Not requested';
-  }
-  return 'Visibility unknown';
-}
-
-function getSyncSemanticsLabel(semantics?: InvoiceExecution['syncSemantics']) {
-  if (semantics === 'draft_accounting_sync') {
-    return 'Legacy draft record';
-  }
-  if (semantics === 'final_invoice_visibility') {
-    return 'Provider final visibility';
-  }
-  return 'Not recorded';
 }
 
 function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
@@ -781,16 +728,6 @@ export function FinancePage() {
     }
     return filteredRecords[0];
   }, [filteredRecords, finance?.transactions, requestedFinanceTarget, selectedRecordId]);
-  const shouldLoadInvoiceResponseSummary =
-    isAdmin &&
-    Boolean(selectedRecord?.invoiceExecution) &&
-    ['failed', 'unknown'].includes(selectedRecord?.invoiceExecution?.status ?? '');
-  const invoiceResponseSummaryQuery = useQueryResource(
-    queryKeys.finance.invoiceResponseSummary(selectedRecord?.invoiceExecution?.id ?? 'none'),
-    ({ signal }) => getInvoiceExecutionResponseSummary(selectedRecord!.invoiceExecution!.id, { signal }),
-    { enabled: shouldLoadInvoiceResponseSummary },
-  );
-  const invoiceResponseSummary = invoiceResponseSummaryQuery.data?.response ?? null;
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const relatedSupportTickets = useMemo(
     () =>
@@ -1433,64 +1370,6 @@ export function FinancePage() {
                         <small>{formatDate(getSupportLatestActivityAt(ticket))}</small>
                       </Link>
                     ))}
-                  </div>
-                </details>
-              ) : null}
-
-              {isAdmin && selectedRecord.invoiceExecution ? (
-                <details className="finance-support-history finance-legacy-accounting-diagnostics">
-                  <summary>
-                    <span>
-                      <strong>Diagnostics</strong>
-                      <small>Legacy invoice sync record</small>
-                    </span>
-                    <StatusBadge tone="neutral">{getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)}</StatusBadge>
-                  </summary>
-                  <div className="finance-detail-rows">
-                    <MetadataRow label="Legacy provider" value={getProviderName(selectedRecord.invoiceExecution.provider)} />
-                    <MetadataRow label="Legacy status" value={getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)} />
-                    <MetadataRow label="Legacy reference" value={selectedRecord.invoiceExecution.providerInvoiceNo ?? 'Not available'} />
-                    <MetadataRow
-                      label="Legacy document"
-                      value={
-                        selectedRecord.invoiceExecution.providerPdfUrl ? (
-                          <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">Open legacy document</a>
-                        ) : (
-                          'Not available'
-                        )
-                      }
-                    />
-                    <MetadataRow
-                      label="Legacy final state"
-                      value={getFinalInvoiceStateLabel(selectedRecord.invoiceExecution.finalInvoiceState)}
-                    />
-                    <MetadataRow
-                      label="Legacy sync mode"
-                      value={getSyncSemanticsLabel(selectedRecord.invoiceExecution.syncSemantics)}
-                    />
-                    <MetadataRow
-                      label="Scope note"
-                      value="Diagnostics only. Not used by settlement approval, Logo readiness, commission invoices, or payout."
-                    />
-                    {shouldLoadInvoiceResponseSummary ? (
-                      <div className="finance-provider-summary" aria-label="Provider issue summary">
-                        <strong>Provider issue</strong>
-                        {invoiceResponseSummaryQuery.isLoading ? (
-                          <span>Loading safe response summary...</span>
-                        ) : invoiceResponseSummary ? (
-                          <>
-                            <span>HTTP: {invoiceResponseSummary.httpStatus ?? 'Unknown'}</span>
-                            <span>Content type: {invoiceResponseSummary.contentType ?? 'Unknown'}</span>
-                            <span>Keys: {invoiceResponseSummary.bodyKeys.length ? invoiceResponseSummary.bodyKeys.join(', ') : '—'}</span>
-                            <span>Provider error: {invoiceResponseSummary.providerError ?? '—'}</span>
-                            <span>GUID present: {invoiceResponseSummary.parsedGuidPresent ? 'yes' : 'no'}</span>
-                            <span>PDF present: {invoiceResponseSummary.parsedPdfUrlPresent ? 'yes' : 'no'}</span>
-                          </>
-                        ) : (
-                          <span>No provider response summary available.</span>
-                        )}
-                      </div>
-                    ) : null}
                   </div>
                 </details>
               ) : null}

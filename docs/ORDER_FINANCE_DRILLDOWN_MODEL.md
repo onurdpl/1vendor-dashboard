@@ -377,7 +377,7 @@ type OrderFinanceDrilldown = {
     financeLedgerEntryId?: string;
     payoutBatchId?: string;
     shippingCostId?: string;
-    invoiceExecutionId?: string;
+    settlementCommissionInvoiceId?: string;
     previewUnknowns: string[];
     assumptions: string[];
   };

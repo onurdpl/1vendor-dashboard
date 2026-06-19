@@ -52,11 +52,8 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
     getReturnFinanceRecords: () => getReturnFinanceRecordsMock(),
-    getInvoiceExecutionResponseSummary: vi.fn(),
     attachShippingCost: vi.fn(),
-    createInvoiceExecution: vi.fn(),
     preparePayoutBatch: vi.fn(),
-    retryInvoiceExecution: vi.fn(),
     updateVendorFinancialProfile: vi.fn(),
   };
 });

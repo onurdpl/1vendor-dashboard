@@ -3,8 +3,6 @@ import type {
   FinanceDashboard,
   FinanceDashboardSummary,
   FinanceTransaction,
-  InvoiceExecutionReference,
-  InvoiceExecutionResponseSummary,
   PayoutBatch,
   ReturnFinanceRecordsResponse,
   VendorFinancialProfile,
@@ -43,7 +41,6 @@ type FinanceDashboardDto = {
     payoutCalculation?: FinanceTransaction['payoutCalculation'];
     settlement?: FinanceTransaction['settlement'];
     payoutBatch?: FinanceTransaction['payoutBatch'];
-    invoiceExecution?: FinanceTransaction['invoiceExecution'];
   }>;
 };
 
@@ -190,7 +187,6 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,
       settlement: record.settlement,
-      invoiceExecution: record.invoiceExecution ?? null,
       payoutBatch: record.payoutBatch
         ? {
             ...record.payoutBatch,
@@ -304,25 +300,4 @@ export function attachShippingCost(input: {
   sourceType: 'manual' | 'imported' | 'external_provider';
 }) {
   return apiClient.post('/admin/shipping-costs', input);
-}
-
-export function createInvoiceExecution(financeLedgerEntryId: string): Promise<InvoiceExecutionReference> {
-  return apiClient.post<InvoiceExecutionReference>('/admin/invoices/create', {
-    financeLedgerEntryId,
-    provider: 'bizimhesap',
-  });
-}
-
-export function retryInvoiceExecution(invoiceExecutionId: string): Promise<InvoiceExecutionReference> {
-  return apiClient.post<InvoiceExecutionReference>(`/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/retry`);
-}
-
-export function getInvoiceExecutionResponseSummary(
-  invoiceExecutionId: string,
-  options: { signal?: AbortSignal } = {},
-): Promise<InvoiceExecutionResponseSummary> {
-  return apiClient.get<InvoiceExecutionResponseSummary>(
-    `/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/response-summary`,
-    { signal: options.signal },
-  );
 }

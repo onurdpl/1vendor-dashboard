@@ -55,15 +55,3 @@ export function attachShippingCost(input: {
 }) {
   return runtimeServices.finance.attachShippingCost(input);
 }
-
-export function createInvoiceExecution(financeLedgerEntryId: string) {
-  return runtimeServices.finance.createInvoiceExecution(financeLedgerEntryId);
-}
-
-export function retryInvoiceExecution(invoiceExecutionId: string) {
-  return runtimeServices.finance.retryInvoiceExecution(invoiceExecutionId);
-}
-
-export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string, options: { signal?: AbortSignal } = {}) {
-  return runtimeServices.finance.getInvoiceExecutionResponseSummary(invoiceExecutionId, { signal: options.signal });
-}

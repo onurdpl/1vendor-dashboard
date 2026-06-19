@@ -23,7 +23,7 @@ This checklist is for Render production deploys of the VendorOps frontend and ba
   - `SHOPIFY_SHOP_DOMAIN`
   - `SHOPIFY_ADMIN_ACCESS_TOKEN`
   - `SHOPIFY_API_VERSION`
-  - provider gates such as `INVOICE_EXECUTION_ENABLED`, `BIZIMHESAP_ENABLED`, `SHIPPING_EXECUTION_ENABLED`, and `KARGO_ENTEGRATOR_ENABLED` only when intentionally live
+  - provider gates such as `SHIPPING_EXECUTION_ENABLED`, `KARGO_ENTEGRATOR_ENABLED`, and `LOGO_ISBASI_CREATE_ENABLED` only when intentionally live
 - Confirm production frontend variables:
   - `VITE_API_MODE=real`
   - `VITE_API_BASE_URL=<backend origin>` for standard cross-origin mode, or `VITE_API_BASE_URL=/api` for the reversible mobile same-origin proxy test

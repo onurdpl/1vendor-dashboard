@@ -257,7 +257,6 @@ describe('persisted vendor finance calculations', () => {
               }
             : null,
           payoutBatchLines: row.payoutBatchLines ?? [],
-          invoiceExecutions: row.invoiceExecutions ?? [],
         }));
       }
 
@@ -447,7 +446,6 @@ describe('persisted vendor finance calculations', () => {
         select: expect.not.objectContaining({
           description: true,
           payoutBatchLines: expect.anything(),
-          invoiceExecutions: expect.anything(),
         }),
       }),
     );

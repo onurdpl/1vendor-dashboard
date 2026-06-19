@@ -164,7 +164,6 @@ const financeDashboard = {
   vendorProfile: null,
   reconciliation: [],
   payoutBatch: null,
-  invoiceExecutions: [],
   settlementExecutions: [],
   settlementRecommendations: [],
   invoiceRecommendations: [],

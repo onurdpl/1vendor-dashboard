@@ -18,9 +18,6 @@ const prismaMock = vi.hoisted(() => ({
   vendorFinancialProfile: {
     findFirst: vi.fn(),
   },
-  invoiceExecution: {
-    create: vi.fn(),
-  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -164,7 +161,6 @@ describe('settlement Logo commission invoice preview', () => {
     prismaMock.vendorBillingProfile.create.mockReset();
     prismaMock.vendorBillingProfile.update.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
-    prismaMock.invoiceExecution.create.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
       id: 'finance-profile-1',
       vendorId: 'vendor-a',
@@ -234,7 +230,6 @@ describe('settlement Logo commission invoice preview', () => {
     expect(prismaMock.vendorBillingProfile.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('returns blockers for draft and cancelled settlements without building a final-ready payload', async () => {
@@ -432,7 +427,6 @@ describe('settlement Logo commission invoice preview', () => {
     expect(preview.executionSnapshotGuard.requiredSnapshotsPresent).toBe(false);
     expect(preview.readiness.blockers).toContain('SettlementApprovalLine line-1 is missing commissionPercentSnapshot.');
     expect(preview.executionSnapshotGuard.snapshotCompleteness.commissionPercentSnapshot.missingLineIds).toEqual(['line-1']);
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('blocks missing settlement line VAT snapshots', async () => {

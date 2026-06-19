@@ -17,9 +17,6 @@ const prismaMock = vi.hoisted(() => ({
   settlementCommissionInvoice: {
     create: vi.fn(),
   },
-  invoiceExecution: {
-    create: vi.fn(),
-  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -134,7 +131,6 @@ describe('immutable settlement Logo request snapshot builder', () => {
     prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.financeLedgerEntry.findFirst.mockReset();
     prismaMock.settlementCommissionInvoice.create.mockReset();
-    prismaMock.invoiceExecution.create.mockReset();
   });
 
   it('builds an immutable request snapshot from settlement approval, line, and billing snapshots only', async () => {
@@ -205,7 +201,6 @@ describe('immutable settlement Logo request snapshot builder', () => {
     expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('blocks when the settlement billing snapshot is missing', async () => {

@@ -45,22 +45,22 @@ Do not infer deployed `VendorBillingProfile`, Logo binding, settlement approval,
 
 ## InvoiceExecution Cleanup Readiness
 
-C4 `InvoiceExecution` removal requires production evidence from:
+C4 `InvoiceExecution` removal required production evidence from:
 
 `GET /admin/diagnostics/cleanup/invoice-execution-readiness`
 
-The endpoint is admin-only and read-only. It reports secret-safe database identity, total `InvoiceExecution` row count, provider/status counts, oldest/newest timestamps, and a cleanup readiness classification:
+Before removal, the endpoint was admin-only and read-only and reported secret-safe database identity, total `InvoiceExecution` row count, provider/status counts, oldest/newest timestamps, and a cleanup readiness classification:
 
 - `READY_TO_REMOVE`: no production rows were found
 - `ARCHIVE_REQUIRED`: production rows exist and must be exported or archived before schema removal
 - `UNKNOWN`: the readiness query failed or the table/model is unavailable
 
-Local `InvoiceExecution` row counts are not valid production evidence for C4 schema removal.
+Local `InvoiceExecution` row counts were not valid production evidence for C4 schema removal.
 
-When readiness returns `ARCHIVE_REQUIRED`, save the production output from:
+When readiness returned `ARCHIVE_REQUIRED`, production output from the archive endpoint had to be saved:
 
 `GET /admin/diagnostics/cleanup/invoice-execution-archive`
 
-This endpoint is admin-only and read-only. It returns safe metadata only: row ids, provider/status, provider invoice identifiers, timestamps, snapshot presence booleans, and linked finance ledger/order identifiers. It must not be replaced by a local DB archive because local rows do not prove production history.
+This endpoint is admin-only and read-only. Before schema removal, it returned safe metadata only: row ids, provider/status, provider invoice identifiers, timestamps, snapshot presence booleans, and linked finance ledger/order identifiers. It must not be replaced by a local DB archive because local rows do not prove production history.
 
-C4 `InvoiceExecution` schema removal must not begin until the production archive endpoint exists, the production endpoint output has been exported, and the export has been reviewed. The archive endpoint intentionally excludes full request/response snapshot bodies, provider payloads, credentials, tokens, API keys, PDF content, and other secrets.
+C4 `InvoiceExecution` schema removal proceeded only after the production archive endpoint output was exported and reviewed. After C4, the readiness/archive endpoints remain admin-only compatibility diagnostics and report the legacy schema as removed/not applicable. The archive endpoint intentionally excludes full request/response snapshot bodies, provider payloads, credentials, tokens, API keys, PDF content, and other secrets.

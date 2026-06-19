@@ -44,11 +44,10 @@ Current finance data enters the platform through these operational events:
    - Admin-only `POST /admin/payout-batches/prepare` creates a draft batch from eligible rows.
    - This is preparation/review only, not payment execution.
 
-6. Legacy invoice/accounting visibility
-   - Existing `InvoiceExecution` / BizimHesap references are historical diagnostics only.
-   - Legacy customer accounting sync creation and retry runtime paths are disabled.
-   - They do not finalize vendor settlement, Logo readiness, commission invoice state, or payout state.
-   - Active settlement commission invoices use the settlement approval → Logo İşbaşı commission invoice flow.
+6. Settlement commission invoice lifecycle
+   - Legacy `InvoiceExecution` / BizimHesap customer accounting sync was removed after production archive export.
+   - Active settlement commission invoices use the settlement approval → immutable request snapshot → Logo İşbaşı commission invoice flow.
+   - Finance ledger rows no longer expose legacy customer accounting sync diagnostics.
 
 ### Current Persisted Objects
 

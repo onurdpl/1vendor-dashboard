@@ -33,9 +33,6 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findFirst: vi.fn(),
   },
-  invoiceExecution: {
-    create: vi.fn(),
-  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -269,7 +266,6 @@ describe('settlement commission invoice record foundation', () => {
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.financeLedgerEntry.findUnique.mockReset();
     prismaMock.financeLedgerEntry.findFirst.mockReset();
-    prismaMock.invoiceExecution.create.mockReset();
   });
 
   it('allows Logo execution environment without expected tenant and returns skipped warning', () => {
@@ -584,7 +580,6 @@ describe('settlement commission invoice record foundation', () => {
     expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('blocks pending snapshot persistence when the settlement billing snapshot is missing', async () => {
@@ -717,7 +712,6 @@ describe('settlement commission invoice record foundation', () => {
     expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('blocks Logo execution contract when request snapshot is missing', async () => {

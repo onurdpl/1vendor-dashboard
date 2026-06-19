@@ -12,7 +12,6 @@ import {
 import type {
   FinanceDashboardDto,
   FinanceDashboardSummaryDto,
-  InvoiceExecutionReferenceDto,
   FinanceRecordDto,
   ReturnFinanceRecordsResponseDto,
   PayoutBatchDto,
@@ -25,11 +24,6 @@ import type {
   ShippingCostDto,
   ShippingCostInputDto,
 } from './finance.types.js';
-import {
-  deriveEffectiveInvoiceStatus,
-  deriveInvoiceVisibility,
-  mapInvoiceProvider,
-} from '../invoices/invoice-visibility.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
 import {
@@ -674,42 +668,6 @@ function mapPayoutBatchReference(line?: {
   };
 }
 
-function mapInvoiceExecutionReference(execution?: {
-  id: string;
-  provider: string;
-  status: string;
-  providerInvoiceGuid: string | null;
-  providerInvoiceNo: string | null;
-  providerPdfUrl: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}): InvoiceExecutionReferenceDto | null {
-  if (!execution) {
-    return null;
-  }
-  const provider = mapInvoiceProvider(execution.provider);
-  const status = deriveEffectiveInvoiceStatus(execution);
-  const visibility = deriveInvoiceVisibility({
-    provider,
-    status,
-    providerInvoiceGuid: execution.providerInvoiceGuid,
-    providerInvoiceNo: execution.providerInvoiceNo,
-    providerPdfUrl: execution.providerPdfUrl,
-  });
-
-  return {
-    id: execution.id,
-    provider,
-    status,
-    ...visibility,
-    providerInvoiceGuid: execution.providerInvoiceGuid,
-    providerInvoiceNo: execution.providerInvoiceNo,
-    providerPdfUrl: execution.providerPdfUrl,
-    createdAt: execution.createdAt.toISOString(),
-    updatedAt: execution.updatedAt.toISOString(),
-  };
-}
-
 export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -875,22 +833,6 @@ export async function getVendorFinanceDashboard(
           },
           take: 1,
         },
-        invoiceExecutions: {
-          select: {
-            id: true,
-            provider: true,
-            status: true,
-            providerInvoiceGuid: true,
-            providerInvoiceNo: true,
-            providerPdfUrl: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-          take: 1,
-        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -1048,7 +990,6 @@ export async function getVendorFinanceDashboard(
       payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
       settlement,
       payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
-      invoiceExecution: mapInvoiceExecutionReference(entry.invoiceExecutions?.[0]),
     };
   });
 

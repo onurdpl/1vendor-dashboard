@@ -20,9 +20,6 @@ const prismaMock = vi.hoisted(() => ({
   payoutBatch: {
     create: vi.fn(),
   },
-  invoiceExecution: {
-    create: vi.fn(),
-  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -216,7 +213,6 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApprovalLine.count.mockReset();
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
-    prismaMock.invoiceExecution.create.mockReset();
   });
 
   it('previews eligible settlement approval rows without writes', async () => {
@@ -284,7 +280,6 @@ describe('settlement approval foundation', () => {
     ]);
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('keeps payable sales eligible when no approved open return exists', async () => {
@@ -824,7 +819,6 @@ describe('settlement approval foundation', () => {
     });
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('creates a draft approval with total and line snapshots', async () => {
@@ -948,7 +942,6 @@ describe('settlement approval foundation', () => {
       },
     });
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('excludes Shopify-approved open returns from settlement approval drafts', async () => {
@@ -1173,7 +1166,6 @@ describe('settlement approval foundation', () => {
     );
     expect(approval.status).toBe('approved');
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 
   it('rejects approval when approval is not draft', async () => {
@@ -1388,6 +1380,5 @@ describe('settlement approval foundation', () => {
       ],
     });
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
   });
 });

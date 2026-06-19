@@ -1181,60 +1181,25 @@ Frontend note:
   - no AI action execution
   - no destructive remediation workflows
 
-## Customer Invoice Visibility Foundation (Revised Phase 20A)
-- Revised Phase 20A treats merchant-of-record customer invoices as platform-owned accounting visibility, not as provider-final execution authority.
-- The platform remains canonical operational and finance truth. External accounting systems are provider visibility/sync systems that may return identifiers or PDF links.
-- BizimHesap `AddInvoice` is treated as draft/accounting sync evidence unless a future provider flow proves final invoice visibility.
-- `InvoiceExecution` links provider visibility state to immutable finance sale ledger rows.
-- Provider enum:
-  - `BIZIMHESAP`
-  - future-ready `PARASUT`
-- Status enum:
-  - `PENDING`
-  - `CREATED`
-  - `FAILED`
-  - `CANCELLED`
-  - `UNKNOWN`
-- Finance records also expose derived visibility fields:
-  - `visibilityStatus`
-  - `visibilityLabel`
-  - `reconciliationState`
-  - `finalInvoiceState`
-  - `syncSemantics`
-  - `providerCapabilities`
-- Visibility states include `invoice_missing`, `accounting_sync_pending`, `accounting_synced`, `invoice_linked`, `invoice_visibility_incomplete`, `provider_failed`, and `cancelled`.
-- Duplicate prevention is enforced with a unique finance-ledger/provider key.
-- Legacy admin invoice endpoints:
-  - `POST /admin/invoices/preview`
-  - `POST /admin/invoices/create`
-  - `POST /admin/invoices/:id/retry`
-  - `GET /admin/invoices/:id/response-summary`
-- Preview is dry-run only: it returns the deterministic BizimHesap payload and configuration presence booleans without creating provider records, creating `InvoiceExecution` rows, calling BizimHesap, or exposing FirmId/API keys.
-- Response summaries are admin-only and expose HTTP/content-type/body-key metadata plus persisted-field presence booleans. They do not return raw provider values or secrets.
-- `POST /admin/invoices/create` and `POST /admin/invoices/:id/retry` are disabled by policy and return: `Legacy customer accounting sync is disabled. Use settlement Logo commission invoice flow.`
-- The disabled create/retry paths must not create `InvoiceExecution` rows, update existing rows, or call BizimHesap.
-- Finance dashboard records may still include latest invoice execution references as historical diagnostics. They are not part of settlement approval, Logo readiness, settlement commission invoices, or payout.
-- Admins can inspect safe provider response summaries for failed/unknown historical visibility states. Vendors do not see provider response internals.
-- Invoice execution configuration is disabled by default:
-  - `INVOICE_EXECUTION_ENABLED=false`
-  - `INVOICE_PROVIDER=bizimhesap`
-  - `BIZIMHESAP_ENABLED=false`
-  - `BIZIMHESAP_FIRM_ID`
-  - `BIZIMHESAP_API_KEY`
-  - `BIZIMHESAP_BASE_URL`
-  - `BIZIMHESAP_ADD_INVOICE_URL`
-  - `BIZIMHESAP_ACCESS_TOKEN`
-- `INVOICE_EXECUTION_ENABLED` and `BIZIMHESAP_ENABLED` are retained for historical configuration visibility, but they no longer enable legacy customer accounting sync execution.
-- Settlement commission invoices use the settlement approval → Logo İşbaşı commission invoice lifecycle instead.
-- BizimHesap success parsing supports the documented `guid` and `url` fields, legacy casing aliases, nested response wrappers, and simple XML-style provider responses. If invoice number is not returned, `providerInvoiceNo` remains null.
-- Phase 20A preserves these boundaries:
-  - no automatic invoice creation
-  - no invoice cancellation execution
-  - no credit note/refund invoice flow
-  - no supplier/procurement accounting
-  - no tax engine
-  - no payment reconciliation
-  - no mutation of immutable finance snapshots, settlement state, payout batches, or Shopify truth
+## Legacy Customer InvoiceExecution Removal (C4)
+- The legacy BizimHesap / `InvoiceExecution` customer accounting sync system was removed after production archive export.
+- Production archive evidence before removal:
+  - database: `vendor_dashboard_h8fb`
+  - archive status: `READY_FOR_EXPORT`
+  - rows exported: 4
+  - writes performed: false
+- Removed active surface:
+  - `InvoiceExecution` Prisma model
+  - `InvoiceExecutionProvider` and `InvoiceExecutionStatus` enums
+  - `FinanceLedgerEntry.invoiceExecutions` relation
+  - `/admin/invoices/*` routes
+  - BizimHesap adapter/runtime execution service
+  - active BizimHesap env/config keys
+  - finance dashboard invoice execution exposure
+- Archived Phase 20A documentation remains under `docs/archive/legacy-finance/` for historical context only.
+- Settlement commission invoices now use the settlement approval → Logo İşbaşı commission invoice lifecycle.
+- The active invoice lifecycle is `SettlementApproval` → immutable request snapshot → `SettlementCommissionInvoice` → controlled Logo İşbaşı execution/reconciliation.
+- The C4 cleanup readiness/archive diagnostic routes remain admin-only compatibility endpoints and report the legacy schema as removed/not applicable.
 
 ## Shipping Execution Foundation (Phase 20B)
 - Phase 20B introduces merchant-of-record shipping execution orchestration while keeping the platform as canonical operational and finance truth.

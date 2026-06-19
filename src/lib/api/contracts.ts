@@ -1257,69 +1257,6 @@ export type PayoutBatch = {
   warning: string | null;
 };
 
-export type InvoiceExecutionReference = {
-  id: string;
-  provider: 'bizimhesap' | 'parasut';
-  status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
-  visibilityStatus:
-    | 'invoice_missing'
-    | 'accounting_sync_pending'
-    | 'accounting_synced'
-    | 'invoice_linked'
-    | 'invoice_visibility_incomplete'
-    | 'provider_failed'
-    | 'cancelled';
-  visibilityLabel: string;
-  reconciliationState:
-    | 'invoice_missing'
-    | 'invoice_pending'
-    | 'accounting_sync_pending'
-    | 'invoice_linked'
-    | 'invoice_visibility_incomplete'
-    | 'provider_failed'
-    | 'cancelled';
-  finalInvoiceState:
-    | 'not_requested'
-    | 'draft_or_synced'
-    | 'finalized_visible'
-    | 'visibility_unknown'
-    | 'failed'
-    | 'cancelled';
-  syncSemantics: 'none' | 'draft_accounting_sync' | 'final_invoice_visibility';
-  providerCapabilities: {
-    supportsDraftSubmission: boolean;
-    supportsFinalInvoiceVisibility: boolean;
-    supportsPdfLink: boolean;
-    supportsStatusSync: boolean;
-    note: string;
-  };
-  providerInvoiceGuid: string | null;
-  providerInvoiceNo: string | null;
-  providerPdfUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type InvoiceExecutionResponseSummary = {
-  id: string;
-  provider: 'bizimhesap' | 'parasut';
-  status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
-  providerInvoiceGuidPresent: boolean;
-  providerInvoiceNoPresent: boolean;
-  providerPdfUrlPresent: boolean;
-  response: {
-    httpStatus: number | null;
-    ok: boolean | null;
-    contentType: string | null;
-    parsedBodyType: string | null;
-    bodyKeys: string[];
-    nestedBodyKeys: string[];
-    providerError: string | null;
-    parsedGuidPresent: boolean;
-    parsedPdfUrlPresent: boolean;
-  } | null;
-};
-
 export type PayoutBatchSummary = {
   eligibleRowCount: number;
   eligibleNetAmount: string;
@@ -1794,7 +1731,6 @@ export type FinanceTransaction = {
     netAmount: string;
     createdAt: string;
   } | null;
-  invoiceExecution?: InvoiceExecutionReference | null;
 };
 
 export type FinanceDashboard = {
