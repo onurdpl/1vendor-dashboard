@@ -4,6 +4,7 @@ import {
   SettlementApprovalStatus,
   SettlementCommissionInvoiceStatus,
   SettlementRefundAdjustmentApplicationStatus,
+  SettlementRefundAdjustmentEventType,
   SettlementRefundAdjustmentStatus,
   type SettlementApproval,
   type SettlementApprovalLine,
@@ -36,6 +37,23 @@ import {
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
+
+async function createSettlementRefundAdjustmentEvent(
+  tx: Prisma.TransactionClient,
+  input: {
+    settlementRefundAdjustmentId: string;
+    eventType: SettlementRefundAdjustmentEventType;
+    metadataJson?: Prisma.InputJsonValue;
+  },
+) {
+  await tx.settlementRefundAdjustmentEvent.create({
+    data: {
+      settlementRefundAdjustmentId: input.settlementRefundAdjustmentId,
+      eventType: input.eventType,
+      metadataJson: input.metadataJson ?? Prisma.JsonNull,
+    },
+  });
+}
 
 type SettlementApprovalInput = {
   vendorId: string;
@@ -2073,6 +2091,9 @@ export async function createDraftApproval(
           },
         });
         const remainingAfterApply = plan.record.remainingAmountMinor - plan.applyAmountMinor;
+        const nextStatus = remainingAfterApply === 0
+          ? SettlementRefundAdjustmentStatus.APPLIED
+          : SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED;
         const result = await tx.settlementRefundAdjustment.updateMany({
           where: {
             id: plan.record.adjustmentId,
@@ -2088,9 +2109,7 @@ export async function createDraftApproval(
             },
           },
           data: {
-            status: remainingAfterApply === 0
-              ? SettlementRefundAdjustmentStatus.APPLIED
-              : SettlementRefundAdjustmentStatus.PARTIALLY_APPLIED,
+            status: nextStatus,
             appliedAmountMinor: {
               increment: plan.applyAmountMinor,
             },
@@ -2104,6 +2123,20 @@ export async function createDraftApproval(
         if (result.count !== 1) {
           throw new Error('Pending refund adjustment could not be applied safely.');
         }
+        await createSettlementRefundAdjustmentEvent(tx, {
+          settlementRefundAdjustmentId: plan.record.adjustmentId,
+          eventType: nextStatus === SettlementRefundAdjustmentStatus.APPLIED
+            ? SettlementRefundAdjustmentEventType.APPLIED
+            : SettlementRefundAdjustmentEventType.PARTIALLY_APPLIED,
+          metadataJson: {
+            settlementApprovalId: approval.id,
+            settlementApprovalLineId: line.id,
+            settlementRefundAdjustmentApplicationId: application.id,
+            appliedAmountMinor: plan.applyAmountMinor,
+            remainingAmountMinorAfter: remainingAfterApply,
+            currencyCode: plan.record.currencyCode,
+          },
+        });
       }
 
       const refreshedApproval = await tx.settlementApproval.findUnique({
@@ -2257,6 +2290,19 @@ export async function cancelSettlementApproval(
               application.settlementRefundAdjustment.appliedSettlementApprovalId === id ? null : undefined,
             appliedSettlementApprovalLineId:
               application.settlementRefundAdjustment.appliedSettlementApprovalId === id ? null : undefined,
+          },
+        });
+        await createSettlementRefundAdjustmentEvent(tx, {
+          settlementRefundAdjustmentId: application.settlementRefundAdjustmentId,
+          eventType: SettlementRefundAdjustmentEventType.APPLICATION_CANCELLED,
+          metadataJson: {
+            settlementApprovalId: id,
+            settlementApprovalLineId: application.settlementApprovalLineId,
+            settlementRefundAdjustmentApplicationId: application.id,
+            cancelledAmountMinor: application.amountMinor,
+            appliedAmountMinorAfter: appliedAfterCancel,
+            remainingAmountMinorAfter: remainingAfterCancel,
+            currencyCode: application.currencyCode,
           },
         });
       }

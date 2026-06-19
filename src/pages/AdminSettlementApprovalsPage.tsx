@@ -935,9 +935,9 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
           {records.map((record) => (
             <article className="settlement-adjustment-preview-row" key={record.adjustmentId}>
               <div>
-                <strong>{record.adjustmentId}</strong>
-                <span>Original order: {record.originalOrderId}</span>
-                <span>Refund record: {record.refundRecordId}</span>
+                <strong>{record.orderLabel ?? `Order ${record.originalOrderId}`}</strong>
+                <span>{record.refundLabel ?? `Refund ${record.refundRecordId}`}</span>
+                <span>Adjustment: {record.adjustmentId}</span>
                 <span>Refund ledger: {record.refundFinanceLedgerEntryId}</span>
                 <span>Status: {record.status ? safeStatusLabel(record.status) : 'Pending'}</span>
               </div>
@@ -947,7 +947,7 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
                 <SummaryField label="Remaining" value={formatMinor(record.remainingAmountMinor ?? record.previewImpactMinor, record.currencyCode)} />
                 <SummaryField label="Preview impact" value={formatMinor(record.previewImpactMinor, record.currencyCode)} />
                 <SummaryField label="Linked settlement" value={valueOrDash(record.originalSettlementApprovalId)} />
-                <SummaryField label="Linked commission invoice" value={valueOrDash(record.originalSettlementCommissionInvoiceId)} />
+                <SummaryField label="Linked commission invoice" value={valueOrDash(record.originalCommissionInvoiceLabel ?? record.originalSettlementCommissionInvoiceId)} />
                 <SummaryField label="Reason" value={record.reason} />
               </div>
             </article>

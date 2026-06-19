@@ -1135,6 +1135,7 @@ export async function getVendorReturnById(
                   id: true,
                   status: true,
                   amountMinor: true,
+                  originalOrderId: true,
                   originalAmountMinor: true,
                   appliedAmountMinor: true,
                   remainingAmountMinor: true,
@@ -1159,6 +1160,39 @@ export async function getVendorReturnById(
                       status: true,
                       createdAt: true,
                       updatedAt: true,
+                    },
+                  },
+                  events: {
+                    orderBy: { createdAt: 'asc' },
+                    select: {
+                      id: true,
+                      eventType: true,
+                      createdAt: true,
+                      metadataJson: true,
+                    },
+                  },
+                  originalOrder: {
+                    select: { sourceShopifyOrderNumber: true },
+                  },
+                  refundRecord: {
+                    select: {
+                      sourceShopifyRefundId: true,
+                      sourceShopifyOrderNumber: true,
+                    },
+                  },
+                  originalSettlementApproval: {
+                    select: {
+                      id: true,
+                      createdAt: true,
+                      sourceSnapshotJson: true,
+                    },
+                  },
+                  originalSettlementCommissionInvoice: {
+                    select: {
+                      id: true,
+                      invoiceNo: true,
+                      providerInvoiceId: true,
+                      providerUuid: true,
                     },
                   },
                 },

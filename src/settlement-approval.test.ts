@@ -27,6 +27,9 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     update: vi.fn(),
   },
+  settlementRefundAdjustmentEvent: {
+    create: vi.fn(),
+  },
   vendorBillingProfile: {
     findUnique: vi.fn(),
   },
@@ -289,6 +292,7 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementRefundAdjustmentApplication.findMany.mockReset();
     prismaMock.settlementRefundAdjustmentApplication.findMany.mockResolvedValue([]);
     prismaMock.settlementRefundAdjustmentApplication.update.mockReset();
+    prismaMock.settlementRefundAdjustmentEvent.create.mockReset();
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
@@ -1185,6 +1189,19 @@ describe('settlement approval foundation', () => {
         appliedSettlementApprovalLineId: 'line-1',
       },
     });
+    expect(prismaMock.settlementRefundAdjustmentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        eventType: 'APPLIED',
+        metadataJson: expect.objectContaining({
+          settlementApprovalId: 'settlement-approval-1',
+          settlementApprovalLineId: 'line-1',
+          settlementRefundAdjustmentApplicationId: 'application-1',
+          appliedAmountMinor: 40000,
+          remainingAmountMinorAfter: 0,
+        }),
+      }),
+    });
     expect(approval.netPayableMinor).toBe(48000);
     expect(approval.lines).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1295,6 +1312,16 @@ describe('settlement approval foundation', () => {
         appliedSettlementApprovalLineId: null,
       }),
     }));
+    expect(prismaMock.settlementRefundAdjustmentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        eventType: 'PARTIALLY_APPLIED',
+        metadataJson: expect.objectContaining({
+          appliedAmountMinor: 8800,
+          remainingAmountMinorAfter: 1200,
+        }),
+      }),
+    });
   });
 
   it('fails draft creation if an adjustment cannot be marked applied safely', async () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const previewRefundAdjustmentEligibilityMock = vi.hoisted(() => vi.fn());
 const backfillPendingRefundAdjustmentsMock = vi.hoisted(() => vi.fn());
 const previewPendingRefundAdjustmentApplicationMock = vi.hoisted(() => vi.fn());
+const getSettlementRefundAdjustmentDetailMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js', () => ({
   backfillPendingRefundAdjustments: backfillPendingRefundAdjustmentsMock,
@@ -11,6 +12,7 @@ vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment.service.js', () => ({
+  getSettlementRefundAdjustmentDetail: getSettlementRefundAdjustmentDetailMock,
   listSettlementRefundAdjustments: vi.fn(),
 }));
 
@@ -96,6 +98,7 @@ describe('refund adjustment eligibility preview route', () => {
     previewRefundAdjustmentEligibilityMock.mockReset();
     backfillPendingRefundAdjustmentsMock.mockReset();
     previewPendingRefundAdjustmentApplicationMock.mockReset();
+    getSettlementRefundAdjustmentDetailMock.mockReset();
   });
 
   it('requires admin auth', async () => {
@@ -336,5 +339,63 @@ describe('refund adjustment eligibility preview route', () => {
       },
     });
     expect(previewPendingRefundAdjustmentApplicationMock).not.toHaveBeenCalled();
+  });
+
+  it('returns refund adjustment detail with applications and audit events for admins', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+      delete: vi.fn(),
+    };
+    const detail = {
+      ok: true,
+      writesPerformed: false,
+      adjustment: {
+        id: 'adjustment-1',
+        status: 'partially_applied',
+        applications: [{ id: 'application-1', amountMinor: 600000 }],
+        events: [{ id: 'event-1', eventType: 'partially_applied' }],
+      },
+      applications: [{ id: 'application-1', amountMinor: 600000 }],
+      auditEvents: [{ id: 'event-1', eventType: 'partially_applied' }],
+    };
+    getSettlementRefundAdjustmentDetailMock.mockResolvedValueOnce(detail);
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await gets.get('/admin/finance/refund-adjustments/:id')?.(
+      { authUser: { role: 'admin' }, params: { id: 'adjustment-1' } },
+      buildReply(),
+    );
+
+    expect(result).toBe(detail);
+    expect(getSettlementRefundAdjustmentDetailMock).toHaveBeenCalledWith('adjustment-1');
+  });
+
+  it('requires admin auth for refund adjustment detail', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; params?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+      delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await gets.get('/admin/finance/refund-adjustments/:id')?.(
+      { authUser: { role: 'vendor' }, params: { id: 'adjustment-1' } },
+      buildReply(),
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(getSettlementRefundAdjustmentDetailMock).not.toHaveBeenCalled();
   });
 });

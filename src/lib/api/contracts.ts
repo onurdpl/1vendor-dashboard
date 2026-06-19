@@ -1267,6 +1267,8 @@ export type PayoutBatch = {
 
 export type SettlementRefundAdjustmentReference = {
   id: string;
+  refundRecordId?: string;
+  originalOrderId?: string;
   status: 'pending' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
   amountMinor: number;
   originalAmountMinor: number;
@@ -1292,6 +1294,18 @@ export type SettlementRefundAdjustmentReference = {
     createdAt: string;
     updatedAt: string;
   }>;
+  events?: Array<{
+    id: string;
+    eventType: 'created' | 'partially_applied' | 'applied' | 'application_cancelled' | 'adjustment_cancelled';
+    createdAt: string;
+    metadataJson?: unknown;
+  }>;
+  references?: {
+    orderLabel: string;
+    refundLabel: string;
+    originalSettlementLabel: string | null;
+    originalCommissionInvoiceLabel: string | null;
+  };
 };
 
 export type PayoutBatchSummary = {

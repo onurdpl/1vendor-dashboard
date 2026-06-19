@@ -1,4 +1,9 @@
-import { Prisma, SettlementRefundAdjustmentApplicationStatus, SettlementRefundAdjustmentStatus } from '@prisma/client';
+import {
+  Prisma,
+  SettlementRefundAdjustmentApplicationStatus,
+  SettlementRefundAdjustmentEventType,
+  SettlementRefundAdjustmentStatus,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { calculateRefundOffsetAmounts } from './refund-offset.service.js';
 
@@ -20,12 +25,20 @@ type AdjustmentApplicationDto = {
   updatedAt: string;
 };
 
+type AdjustmentEventDto = {
+  id: string;
+  eventType: 'created' | 'partially_applied' | 'applied' | 'application_cancelled' | 'adjustment_cancelled';
+  createdAt: string;
+  metadataJson: unknown;
+};
+
 type LinkedAdjustmentRow = {
   id: string;
   status: SettlementRefundAdjustmentStatus;
   amountMinor: number;
   currencyCode: string;
   reason: string;
+  originalOrderId: string;
   originalSettlementApprovalId: string | null;
   originalSettlementApprovalLineId: string | null;
   originalSettlementCommissionInvoiceId: string | null;
@@ -47,6 +60,30 @@ type LinkedAdjustmentRow = {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  events?: Array<{
+    id: string;
+    eventType: SettlementRefundAdjustmentEventType;
+    createdAt: Date;
+    metadataJson: unknown;
+  }>;
+  originalOrder?: {
+    sourceShopifyOrderNumber: string;
+  };
+  refundRecord?: {
+    sourceShopifyRefundId: string;
+    sourceShopifyOrderNumber: string;
+  };
+  originalSettlementApproval?: {
+    id: string;
+    createdAt: Date;
+    sourceSnapshotJson: unknown;
+  } | null;
+  originalSettlementCommissionInvoice?: {
+    id: string;
+    invoiceNo: string | null;
+    providerInvoiceId: string | null;
+    providerUuid: string | null;
+  } | null;
 };
 
 export type SettlementRefundAdjustmentDto = {
@@ -72,6 +109,13 @@ export type SettlementRefundAdjustmentDto = {
   blockedReason: string | null;
   createdBy: string | null;
   applications: AdjustmentApplicationDto[];
+  events: AdjustmentEventDto[];
+  references: {
+    orderLabel: string;
+    refundLabel: string;
+    originalSettlementLabel: string | null;
+    originalCommissionInvoiceLabel: string | null;
+  };
 };
 
 function normalize(value: unknown) {
@@ -84,6 +128,43 @@ function statusToDto(status: SettlementRefundAdjustmentStatus): SettlementRefund
 
 function applicationStatusToDto(status: SettlementRefundAdjustmentApplicationStatus): AdjustmentApplicationDto['status'] {
   return status.toLowerCase() as AdjustmentApplicationDto['status'];
+}
+
+function eventTypeToDto(status: SettlementRefundAdjustmentEventType): AdjustmentEventDto['eventType'] {
+  return status.toLowerCase() as AdjustmentEventDto['eventType'];
+}
+
+function buildSettlementReference(approval: { id: string; createdAt?: Date | null; sourceSnapshotJson?: unknown } | null | undefined, fallbackId: string | null) {
+  if (!approval && !fallbackId) {
+    return null;
+  }
+  const snapshot = Boolean(approval?.sourceSnapshotJson) && typeof approval?.sourceSnapshotJson === 'object'
+    ? approval?.sourceSnapshotJson as Record<string, unknown>
+    : {};
+  const vendorId = typeof snapshot.vendorId === 'string' ? snapshot.vendorId : null;
+  const date = approval?.createdAt instanceof Date ? approval.createdAt : null;
+  if (date && vendorId) {
+    return `SET-${date.toISOString().slice(0, 10).replace(/-/g, '')}-${vendorId.toUpperCase()}`;
+  }
+  return fallbackId ? `Settlement ${fallbackId}` : null;
+}
+
+function buildInvoiceReference(invoice: {
+  id: string;
+  invoiceNo: string | null;
+  providerInvoiceId: string | null;
+  providerUuid: string | null;
+} | null | undefined, fallbackId: string | null) {
+  if (invoice?.invoiceNo) {
+    return `Invoice ${invoice.invoiceNo}`;
+  }
+  if (invoice?.providerInvoiceId) {
+    return `Invoice ${invoice.providerInvoiceId}`;
+  }
+  if (invoice?.providerUuid) {
+    return `Invoice ${invoice.providerUuid}`;
+  }
+  return fallbackId ? `Invoice ${fallbackId}` : null;
 }
 
 function mapAdjustment(adjustment: {
@@ -118,6 +199,30 @@ function mapAdjustment(adjustment: {
     createdAt: Date;
     updatedAt: Date;
   }>;
+  events?: Array<{
+    id: string;
+    eventType: SettlementRefundAdjustmentEventType;
+    createdAt: Date;
+    metadataJson: unknown;
+  }>;
+  originalOrder?: {
+    sourceShopifyOrderNumber: string;
+  };
+  refundRecord?: {
+    sourceShopifyRefundId: string;
+    sourceShopifyOrderNumber: string;
+  };
+  originalSettlementApproval?: {
+    id: string;
+    createdAt: Date;
+    sourceSnapshotJson: unknown;
+  } | null;
+  originalSettlementCommissionInvoice?: {
+    id: string;
+    invoiceNo: string | null;
+    providerInvoiceId: string | null;
+    providerUuid: string | null;
+  } | null;
 }): SettlementRefundAdjustmentDto {
   const originalAmountMinor = adjustment.originalAmountMinor ?? adjustment.amountMinor;
   const appliedAmountMinor = adjustment.appliedAmountMinor ?? (
@@ -156,7 +261,51 @@ function mapAdjustment(adjustment: {
       createdAt: application.createdAt.toISOString(),
       updatedAt: application.updatedAt.toISOString(),
     })),
+    events: (adjustment.events ?? []).map((event) => ({
+      id: event.id,
+      eventType: eventTypeToDto(event.eventType),
+      createdAt: event.createdAt.toISOString(),
+      metadataJson: event.metadataJson,
+    })),
+    references: {
+      orderLabel: adjustment.originalOrder?.sourceShopifyOrderNumber
+        ? `Order #${adjustment.originalOrder.sourceShopifyOrderNumber}`
+        : `Order ${adjustment.originalOrderId}`,
+      refundLabel: adjustment.refundRecord?.sourceShopifyRefundId
+        ? `Refund #${adjustment.refundRecord.sourceShopifyRefundId}`
+        : `Refund ${adjustment.refundRecordId}`,
+      originalSettlementLabel: buildSettlementReference(
+        adjustment.originalSettlementApproval,
+        adjustment.originalSettlementApprovalId,
+      ),
+      originalCommissionInvoiceLabel: buildInvoiceReference(
+        adjustment.originalSettlementCommissionInvoice,
+        adjustment.originalSettlementCommissionInvoiceId,
+      ),
+    },
   };
+}
+
+async function createAdjustmentEvent(
+  db: unknown,
+  input: {
+    settlementRefundAdjustmentId: string;
+    eventType: SettlementRefundAdjustmentEventType;
+    metadataJson?: Prisma.InputJsonValue;
+  },
+) {
+  const eventDelegate = (db as { settlementRefundAdjustmentEvent?: { create?: (args: unknown) => Promise<unknown> } })
+    .settlementRefundAdjustmentEvent;
+  if (!eventDelegate?.create) {
+    return;
+  }
+  await eventDelegate.create({
+    data: {
+      settlementRefundAdjustmentId: input.settlementRefundAdjustmentId,
+      eventType: input.eventType,
+      metadataJson: input.metadataJson ?? Prisma.JsonNull,
+    },
+  });
 }
 
 function chooseOriginalApprovalLine(
@@ -347,6 +496,24 @@ export async function createSettlementRefundAdjustmentForRefundLedger(
     },
   });
 
+  const isNewAdjustment = adjustment.createdAt.getTime() === adjustment.updatedAt.getTime();
+  if (isNewAdjustment) {
+    await createAdjustmentEvent(db, {
+      settlementRefundAdjustmentId: adjustment.id,
+      eventType: SettlementRefundAdjustmentEventType.CREATED,
+      metadataJson: {
+        refundFinanceLedgerEntryId: refundLedgerEntry.id,
+        refundRecordId: input.refundRecordId,
+        originalOrderId: refundLedgerEntry.vendorAllocation.order.id,
+        originalSettlementApprovalId: originalLine?.settlementApproval.id ?? null,
+        originalSettlementCommissionInvoiceId: originalInvoice?.id ?? null,
+        amountMinor: amount,
+        currencyCode,
+        source: input.createdBy ?? 'system:shopify_refunds_create',
+      },
+    });
+  }
+
   return mapAdjustment(adjustment);
 }
 
@@ -368,6 +535,33 @@ export async function listSettlementRefundAdjustments(input: {
         applications: {
           orderBy: { createdAt: 'asc' },
         },
+        events: {
+          orderBy: { createdAt: 'asc' },
+        },
+        originalOrder: {
+          select: { sourceShopifyOrderNumber: true },
+        },
+        refundRecord: {
+          select: {
+            sourceShopifyRefundId: true,
+            sourceShopifyOrderNumber: true,
+          },
+        },
+        originalSettlementApproval: {
+          select: {
+            id: true,
+            createdAt: true,
+            sourceSnapshotJson: true,
+          },
+        },
+        originalSettlementCommissionInvoice: {
+          select: {
+            id: true,
+            invoiceNo: true,
+            providerInvoiceId: true,
+            providerUuid: true,
+          },
+        },
       },
     }),
     prisma.settlementRefundAdjustment.groupBy({
@@ -387,6 +581,54 @@ export async function listSettlementRefundAdjustments(input: {
     }, {}),
     records: rows.map(mapAdjustment),
   };
+}
+
+export async function getSettlementRefundAdjustmentDetail(id: string) {
+  const adjustment = await prisma.settlementRefundAdjustment.findUnique({
+    where: { id },
+    include: {
+      applications: {
+        orderBy: { createdAt: 'asc' },
+      },
+      events: {
+        orderBy: { createdAt: 'asc' },
+      },
+      originalOrder: {
+        select: { sourceShopifyOrderNumber: true },
+      },
+      refundRecord: {
+        select: {
+          sourceShopifyRefundId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+      originalSettlementApproval: {
+        select: {
+          id: true,
+          createdAt: true,
+          sourceSnapshotJson: true,
+        },
+      },
+      originalSettlementCommissionInvoice: {
+        select: {
+          id: true,
+          invoiceNo: true,
+          providerInvoiceId: true,
+          providerUuid: true,
+        },
+      },
+    },
+  });
+
+  return adjustment
+    ? {
+        ok: true,
+        writesPerformed: false,
+        adjustment: mapAdjustment(adjustment),
+        applications: mapAdjustment(adjustment).applications,
+        auditEvents: mapAdjustment(adjustment).events,
+      }
+    : null;
 }
 
 export function mapLinkedSettlementRefundAdjustments(rows: LinkedAdjustmentRow[] | undefined) {
@@ -415,6 +657,25 @@ export function mapLinkedSettlementRefundAdjustments(rows: LinkedAdjustmentRow[]
       createdAt: application.createdAt.toISOString(),
       updatedAt: application.updatedAt.toISOString(),
     })),
+    events: (row.events ?? []).map((event) => ({
+      id: event.id,
+      eventType: eventTypeToDto(event.eventType),
+      createdAt: event.createdAt.toISOString(),
+      metadataJson: event.metadataJson,
+    })),
+    references: {
+      orderLabel: row.originalOrder?.sourceShopifyOrderNumber
+        ? `Order #${row.originalOrder.sourceShopifyOrderNumber}`
+        : `Order ${row.originalOrderId}`,
+      refundLabel: row.refundRecord?.sourceShopifyRefundId
+        ? `Refund #${row.refundRecord.sourceShopifyRefundId}`
+        : 'Refund unavailable',
+      originalSettlementLabel: buildSettlementReference(row.originalSettlementApproval, row.originalSettlementApprovalId),
+      originalCommissionInvoiceLabel: buildInvoiceReference(
+        row.originalSettlementCommissionInvoice,
+        row.originalSettlementCommissionInvoiceId,
+      ),
+    },
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }));

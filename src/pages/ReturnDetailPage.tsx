@@ -1470,14 +1470,24 @@ export function ReturnDetailPage() {
                     <span>{formatAdjustmentStatus(adjustment.status)}</span>
                     <strong>{formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} remaining</strong>
                     <small>
+                      {adjustment.references?.orderLabel ?? 'Order unavailable'}
+                      {' · '}
+                      {adjustment.references?.refundLabel ?? 'Refund unavailable'}
+                      {' · '}
                       {adjustment.reason}
                       {` · Original ${formatMinorCurrency(adjustment.originalAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)}`}
                       {` · Applied ${formatMinorCurrency(adjustment.appliedAmountMinor ?? 0, adjustment.currencyCode)}`}
+                      {` · Remaining ${formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)}`}
                       {adjustment.originalSettlementApprovalId
-                        ? ` · Settlement ${adjustment.originalSettlementApprovalId}`
+                        ? ` · ${adjustment.references?.originalSettlementLabel ?? `Settlement ${adjustment.originalSettlementApprovalId}`}`
                         : ''}
                       {adjustment.originalSettlementCommissionInvoiceId
-                        ? ` · Invoice ${adjustment.originalSettlementCommissionInvoiceId}`
+                        ? ` · ${adjustment.references?.originalCommissionInvoiceLabel ?? `Invoice ${adjustment.originalSettlementCommissionInvoiceId}`}`
+                        : ''}
+                      {adjustment.applications?.length
+                        ? ` · Applications: ${adjustment.applications
+                            .map((application) => `${formatAdjustmentStatus(application.status)} ${formatMinorCurrency(application.amountMinor, application.currencyCode)}`)
+                            .join(', ')}`
                         : ''}
                     </small>
                   </div>

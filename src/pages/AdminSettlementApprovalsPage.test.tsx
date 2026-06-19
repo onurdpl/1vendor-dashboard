@@ -1542,9 +1542,9 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Pending Refund Adjustments' })).toBeInTheDocument());
     expect(screen.getByText('Preview only — partial applications are created only when an admin creates a settlement draft.')).toBeInTheDocument();
     expect(screen.getByText('These deductions are preview-only and are not applied until the adjustment application phase.')).toBeInTheDocument();
-    expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
-    expect(screen.getByText('Original order: order-1086')).toBeInTheDocument();
-    expect(screen.getByText('Refund record: refund-record-1086')).toBeInTheDocument();
+    expect(screen.getByText('Order order-1086')).toBeInTheDocument();
+    expect(screen.getByText('Refund refund-record-1086')).toBeInTheDocument();
+    expect(screen.getByText('Adjustment: adjustment-1086')).toBeInTheDocument();
     expect(screen.getByText('Refund ledger: fin-refund-1086')).toBeInTheDocument();
     expect(screen.getAllByText('TRY 880.00').length).toBeGreaterThan(0);
     expect(screen.getAllByText('TRY 76.00').length).toBeGreaterThan(0);

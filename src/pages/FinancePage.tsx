@@ -1576,27 +1576,43 @@ export function FinancePage() {
                   </div>
                   <div className="finance-detail-rows">
                     {selectedRecord.settlementRefundAdjustments.map((adjustment) => (
-                      <MetadataGroup key={adjustment.id} title={adjustment.id}>
+                      <MetadataGroup key={adjustment.id} title={adjustment.references?.orderLabel ?? adjustment.id}>
                         <MetadataRow label="Status" value={formatAdjustmentStatus(adjustment.status)} />
+                        <MetadataRow label="Original order" value={adjustment.references?.orderLabel ?? adjustment.originalOrderId ?? 'Unavailable'} />
+                        <MetadataRow label="Original refund" value={adjustment.references?.refundLabel ?? adjustment.refundRecordId ?? 'Unavailable'} />
                         <MetadataRow
-                          label="Amount"
-                          value={<span className="finance-deduction-value">{formatMinorCurrency(adjustment.amountMinor, adjustment.currencyCode)}</span>}
+                          label="Remaining amount"
+                          value={<span className="finance-deduction-value">{formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)}</span>}
                         />
                         <MetadataRow label="Original amount" value={formatMinorCurrency(adjustment.originalAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} />
                         <MetadataRow label="Applied amount" value={formatMinorCurrency(adjustment.appliedAmountMinor ?? 0, adjustment.currencyCode)} />
-                        <MetadataRow label="Remaining amount" value={formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} />
+                        <MetadataRow
+                          label="Next settlement impact"
+                          value={(adjustment.remainingAmountMinor ?? adjustment.amountMinor) > 0
+                            ? `${formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} deduction remains`
+                            : 'Finished'}
+                        />
                         <MetadataRow label="Reason" value={adjustment.reason} />
-                        <MetadataRow label="Linked settlement" value={adjustment.originalSettlementApprovalId ?? 'Not linked'} />
-                        <MetadataRow label="Linked commission invoice" value={adjustment.originalSettlementCommissionInvoiceId ?? 'Not linked'} />
+                        <MetadataRow label="Linked settlement" value={adjustment.references?.originalSettlementLabel ?? adjustment.originalSettlementApprovalId ?? 'Not linked'} />
+                        <MetadataRow label="Linked commission invoice" value={adjustment.references?.originalCommissionInvoiceLabel ?? adjustment.originalSettlementCommissionInvoiceId ?? 'Not linked'} />
                         <MetadataRow label="Applied settlement" value={adjustment.appliedSettlementApprovalId ?? 'Not applied yet'} />
                         {adjustment.applications?.length ? (
                           <MetadataRow
-                            label="Applications"
+                            label="Application history"
                             value={adjustment.applications
-                              .map((application) => `${application.status}: ${formatMinorCurrency(application.amountMinor, application.currencyCode)} (${application.settlementApprovalId})`)
+                              .map((application) => `${formatAdjustmentStatus(application.status)} ${formatMinorCurrency(application.amountMinor, application.currencyCode)} · Settlement ${application.settlementApprovalId}`)
                               .join(', ')}
                           />
                         ) : null}
+                        {adjustment.events?.length ? (
+                          <MetadataRow
+                            label="Timeline"
+                            value={adjustment.events
+                              .map((event) => `${formatAdjustmentStatus(event.eventType)} · ${formatDateTime(event.createdAt)}`)
+                              .join(', ')}
+                          />
+                        ) : null}
+                        <MetadataRow label="Diagnostics id" value={adjustment.id} />
                       </MetadataGroup>
                     ))}
                   </div>

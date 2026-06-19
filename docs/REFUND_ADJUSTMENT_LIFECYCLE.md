@@ -186,3 +186,43 @@ Visibility:
 - preview and diagnostics show original, applied, and remaining amounts,
 - Finance Detail and Return Detail show application history,
 - `GET /admin/finance/refund-adjustments` includes `applications[]`.
+
+## Phase 3.5E Audit Trail & UX
+
+Phase 3.5E adds operator-facing audit trail visibility without changing settlement, refund, payout, vendor debt, or Logo behavior.
+
+Adjustment timeline:
+
+```text
+CREATED
+  -> PARTIALLY_APPLIED
+  -> APPLIED
+  -> APPLICATION_CANCELLED
+  -> ADJUSTMENT_CANCELLED
+```
+
+Operators can trace:
+
+```text
+Order #1086
+  -> Refund #1080642666833
+  -> SettlementRefundAdjustment
+  -> Settlement application rows
+  -> Final remaining balance / APPLIED state
+```
+
+UI behavior:
+
+- Settlement Workspace shows business-readable order, refund, and invoice labels before raw ids.
+- Finance Detail shows status, original amount, applied amount, remaining amount, next settlement impact, application history, and timeline.
+- Return Detail shows the same adjustment state next to the return context.
+- Raw ids remain available as diagnostics, not as the primary operator language.
+
+Diagnostics:
+
+```text
+GET /admin/finance/refund-adjustments
+GET /admin/finance/refund-adjustments/:id
+```
+
+The detail endpoint is read-only and returns the adjustment, applications, and audit events. It does not write data or call external providers.

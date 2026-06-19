@@ -101,6 +101,9 @@ export type PendingRefundAdjustmentApplicationPreviewRecord = {
   refundFinanceLedgerEntryId: string;
   originalSettlementApprovalId: string | null;
   originalSettlementCommissionInvoiceId: string | null;
+  orderLabel: string;
+  refundLabel: string;
+  originalCommissionInvoiceLabel: string | null;
   amountMinor: number;
   originalAmountMinor: number;
   appliedAmountMinor: number;
@@ -570,6 +573,19 @@ export async function previewPendingRefundAdjustmentApplication(input: {
       refundFinanceLedgerEntryId: true,
       originalSettlementApprovalId: true,
       originalSettlementCommissionInvoiceId: true,
+      originalOrder: {
+        select: { sourceShopifyOrderNumber: true },
+      },
+      refundRecord: {
+        select: { sourceShopifyRefundId: true },
+      },
+      originalSettlementCommissionInvoice: {
+        select: {
+          invoiceNo: true,
+          providerInvoiceId: true,
+          providerUuid: true,
+        },
+      },
       amountMinor: true,
       originalAmountMinor: true,
       appliedAmountMinor: true,
@@ -586,6 +602,17 @@ export async function previewPendingRefundAdjustmentApplication(input: {
     refundFinanceLedgerEntryId: row.refundFinanceLedgerEntryId,
     originalSettlementApprovalId: row.originalSettlementApprovalId,
     originalSettlementCommissionInvoiceId: row.originalSettlementCommissionInvoiceId,
+    orderLabel: row.originalOrder?.sourceShopifyOrderNumber
+      ? `Order #${row.originalOrder.sourceShopifyOrderNumber}`
+      : `Order ${row.originalOrderId}`,
+    refundLabel: row.refundRecord?.sourceShopifyRefundId
+      ? `Refund #${row.refundRecord.sourceShopifyRefundId}`
+      : `Refund ${row.refundRecordId}`,
+    originalCommissionInvoiceLabel: row.originalSettlementCommissionInvoice?.invoiceNo
+      ? `Invoice ${row.originalSettlementCommissionInvoice.invoiceNo}`
+      : (row.originalSettlementCommissionInvoice?.providerInvoiceId
+          ? `Invoice ${row.originalSettlementCommissionInvoice.providerInvoiceId}`
+          : (row.originalSettlementCommissionInvoiceId ? `Invoice ${row.originalSettlementCommissionInvoiceId}` : null)),
     amountMinor: row.amountMinor,
     originalAmountMinor: row.originalAmountMinor ?? row.amountMinor,
     appliedAmountMinor: row.appliedAmountMinor ?? 0,

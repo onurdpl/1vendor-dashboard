@@ -115,6 +115,9 @@ export type SettlementApprovalPreview = {
       refundFinanceLedgerEntryId: string;
       originalSettlementApprovalId: string | null;
       originalSettlementCommissionInvoiceId: string | null;
+      orderLabel?: string;
+      refundLabel?: string;
+      originalCommissionInvoiceLabel?: string | null;
       amountMinor: number;
       originalAmountMinor?: number;
       appliedAmountMinor?: number;

@@ -215,6 +215,18 @@ export type SettlementRefundAdjustmentReferenceDto = {
     createdAt: string;
     updatedAt: string;
   }>;
+  events?: Array<{
+    id: string;
+    eventType: 'created' | 'partially_applied' | 'applied' | 'application_cancelled' | 'adjustment_cancelled';
+    createdAt: string;
+    metadataJson?: unknown;
+  }>;
+  references?: {
+    orderLabel: string;
+    refundLabel: string;
+    originalSettlementLabel: string | null;
+    originalCommissionInvoiceLabel: string | null;
+  };
 };
 
 export type FinanceRecordDto = {

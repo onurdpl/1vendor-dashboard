@@ -117,6 +117,14 @@ enum SettlementRefundAdjustmentApplicationStatus {
   CANCELLED
 }
 
+enum SettlementRefundAdjustmentEventType {
+  CREATED
+  PARTIALLY_APPLIED
+  APPLIED
+  APPLICATION_CANCELLED
+  ADJUSTMENT_CANCELLED
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -1044,6 +1052,7 @@ model SettlementRefundAdjustment {
   appliedSettlementApproval            SettlementApproval?            @relation("AppliedSettlementApprovalRefundAdjustments", fields: [appliedSettlementApprovalId], references: [id], onDelete: SetNull)
   appliedSettlementApprovalLine        SettlementApprovalLine?        @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
   applications                          SettlementRefundAdjustmentApplication[]
+  events                                SettlementRefundAdjustmentEvent[]
 
   @@index([vendorId, status])
   @@index([refundRecordId])
@@ -1052,6 +1061,18 @@ model SettlementRefundAdjustment {
   @@index([originalSettlementCommissionInvoiceId])
   @@index([appliedSettlementApprovalId])
   @@index([createdAt])
+}
+
+model SettlementRefundAdjustmentEvent {
+  id                           String                            @id @default(cuid())
+  settlementRefundAdjustmentId String
+  eventType                    SettlementRefundAdjustmentEventType
+  createdAt                    DateTime                          @default(now())
+  metadataJson                 Json?
+  settlementRefundAdjustment   SettlementRefundAdjustment        @relation(fields: [settlementRefundAdjustmentId], references: [id], onDelete: Cascade)
+
+  @@index([settlementRefundAdjustmentId, createdAt])
+  @@index([eventType, createdAt])
 }
 
 model SettlementRefundAdjustmentApplication {

@@ -48,7 +48,10 @@ import {
   previewRefundAdjustmentEligibility,
   type RefundAdjustmentRecommendedAction,
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
-import { listSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
+import {
+  getSettlementRefundAdjustmentDetail,
+  listSettlementRefundAdjustments,
+} from './settlement-refund-adjustment.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -721,8 +724,8 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const status = readOptionalQueryString(request.query, 'status')?.toUpperCase();
       const vendorId = readOptionalQueryString(request.query, 'vendorId');
       const pagination = resolvePagination(request.query, { limit: 100, offset: 0 });
-      const supportedStatus = status && ['PENDING', 'APPLIED', 'BLOCKED', 'CANCELLED'].includes(status)
-        ? status as 'PENDING' | 'APPLIED' | 'BLOCKED' | 'CANCELLED'
+      const supportedStatus = status && ['PENDING', 'PARTIALLY_APPLIED', 'APPLIED', 'BLOCKED', 'CANCELLED'].includes(status)
+        ? status as 'PENDING' | 'PARTIALLY_APPLIED' | 'APPLIED' | 'BLOCKED' | 'CANCELLED'
         : null;
 
       return listSettlementRefundAdjustments({
@@ -730,6 +733,24 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         vendorId,
         limit: pagination.limit,
       });
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-adjustments/:id',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+      const { id } = request.params as { id: string };
+      const detail = await getSettlementRefundAdjustmentDetail(id);
+      if (!detail) {
+        return reply.code(404).send({ message: 'Refund adjustment not found.' });
+      }
+      return detail;
     },
   );
 
