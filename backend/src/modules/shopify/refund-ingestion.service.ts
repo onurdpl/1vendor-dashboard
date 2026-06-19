@@ -3,6 +3,7 @@ import { FinanceEventType } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import {
   calculateRefundOffsetAmounts,
+  classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
 import type {
@@ -401,13 +402,22 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           },
           relatedSaleLedgerEntry: saleLedgerEntry,
         });
+        const postApprovalRefundRisk = classifyPostApprovalRefundRisk({
+          refundRecord: {
+            id: refundRecordId,
+            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          },
+          relatedSaleLedgerEntry: saleLedgerEntry,
+        });
         const refundPayoutStatus =
           existingRefundLedgerEntry?.payoutStatus === 'PAID'
             ? 'PAID'
             : refundOffsetEligibility.eligible
               ? 'PENDING'
               : 'HOLD';
-        const refundSettlementHoldReason = refundOffsetEligibility.eligible ? null : refundOffsetEligibility.reason;
+        const refundSettlementHoldReason = refundOffsetEligibility.eligible
+          ? null
+          : postApprovalRefundRisk.reason ?? refundOffsetEligibility.reason;
 
         await tx.financeLedgerEntry.upsert({
           where: {
@@ -466,6 +476,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
               commissionVatReversalMinor: refundOffset.commissionVatReversalMinor,
               vendorPayableReversalMinor: refundOffset.vendorPayableReversalMinor,
               refundOffsetEligibility: refundOffsetEligibility.code,
+              postApprovalRefundRisk: postApprovalRefundRisk.state,
               sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
               sourceLineItemIds,
             },

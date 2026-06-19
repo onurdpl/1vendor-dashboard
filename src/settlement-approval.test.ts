@@ -400,7 +400,7 @@ describe('settlement approval foundation', () => {
     });
   });
 
-  it('excludes refund rows from settlement offset when the related sale is already in an active approval', () => {
+  it('surfaces adjustment-required reason when refund rows relate to an approved settlement', () => {
     const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
       buildLedgerRow({
         id: 'refund-after-approved-settlement',
@@ -414,7 +414,7 @@ describe('settlement approval foundation', () => {
     expect(explanation).toMatchObject({
       derivedSettlementStatus: 'held',
       eligibilityDecision: 'excluded',
-      eligibilityReason: 'Refund after settlement requires vendor debt handling.',
+      eligibilityReason: 'Refund after settlement approval requires adjustment before payout',
     });
   });
 

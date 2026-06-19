@@ -8,7 +8,10 @@ import type {
   ReconciliationAllocationResult,
   ReconciliationFieldChange,
 } from './reconciliation.types.js';
-import { getUnsettledRefundOffsetEligibility } from '../finance/refund-offset.service.js';
+import {
+  classifyPostApprovalRefundRisk,
+  getUnsettledRefundOffsetEligibility,
+} from '../finance/refund-offset.service.js';
 
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
@@ -409,6 +412,10 @@ export function createReconciliationService(env: AppEnv) {
             refundRecord,
             relatedSaleLedgerEntry: saleLedgerEntry,
           });
+          const postApprovalRefundRisk = classifyPostApprovalRefundRisk({
+            refundRecord,
+            relatedSaleLedgerEntry: saleLedgerEntry,
+          });
           const change = {
             scope: refundRecord.id,
             field: 'financeLedgerEntry',
@@ -426,7 +433,9 @@ export function createReconciliationService(env: AppEnv) {
               commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot ?? null,
               commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot ?? null,
               settlementStatus: 'PARTIALLY_REFUNDED',
-              settlementHoldReason: refundOffsetEligibility.eligible ? null : refundOffsetEligibility.reason,
+              settlementHoldReason: refundOffsetEligibility.eligible
+                ? null
+                : postApprovalRefundRisk.reason ?? refundOffsetEligibility.reason,
               description: `Reconciled refund ledger for Shopify refund ${refundRecord.sourceShopifyRefundId}`,
             },
           });

@@ -32,7 +32,9 @@ import {
   normalizeSettlementDelayDays,
 } from './settlement-delay-eligibility.service.js';
 import {
+  POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON,
   calculateRefundOffsetAmounts,
+  classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
@@ -404,10 +406,21 @@ function getValidRefundRecord(entry: {
 
 function getRelatedSaleLedgerEntry(entry: {
   id?: string | null;
+  entryType?: string | null;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
   vendorAllocation?: {
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
   } | null;
 }) {
+  if (normalizeType(entry.entryType ?? '') === 'sale') {
+    return entry;
+  }
+
   return entry.vendorAllocation?.financeEntries?.find((ledgerEntry) =>
     normalizeType(ledgerEntry.entryType ?? '') === 'sale' && ledgerEntry.id !== entry.id
   ) ?? null;
@@ -415,6 +428,13 @@ function getRelatedSaleLedgerEntry(entry: {
 
 function getRefundOffsetEligibility(entry: {
   id?: string | null;
+  entryType?: string | null;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
   vendorAllocation?: {
     refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -424,6 +444,43 @@ function getRefundOffsetEligibility(entry: {
     refundRecord: getValidRefundRecord(entry),
     relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(entry),
   });
+}
+
+function getPostApprovalRefundRisk(entry: {
+  id?: string | null;
+  entryType?: string | null;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  vendorAllocation?: {
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
+    financeEntries?: RefundOffsetSaleLedgerSnapshot[];
+  } | null;
+}) {
+  const type = normalizeType(entry.entryType ?? '');
+  const refundLedgerEntry =
+    type === 'refund'
+      ? entry
+      : entry.vendorAllocation?.financeEntries?.find((ledgerEntry) => normalizeType(ledgerEntry.entryType ?? '') === 'refund') ?? null;
+
+  return classifyPostApprovalRefundRisk({
+    refundRecord: getValidRefundRecord(entry),
+    relatedSaleLedgerEntry: getRelatedSaleLedgerEntry(entry),
+    refundLedgerEntry,
+    siblingLedgerEntries: entry.vendorAllocation?.financeEntries ?? [],
+  });
+}
+
+function refundEntryIsRepresentedByApprovedSettlement(entry: {
+  entryType?: string | null;
+  settlementApprovalLines?: Array<{ settlementApproval?: { status?: string | null } | null }>;
+}) {
+  return normalizeType(entry.entryType ?? '') === 'refund' && (entry.settlementApprovalLines ?? []).some(
+    (line) => mapStatus(line.settlementApproval?.status ?? '') === 'approved',
+  );
 }
 
 function resolveRefundCommissionSnapshot(entry: {
@@ -460,6 +517,8 @@ function getSettlementStatus(entry: {
   entryType: string;
   payoutStatus?: string | null;
   settlementStatus?: string | null;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
   settlementDelayDaysSnapshot?: unknown;
   vendorAllocation?: {
     allocationStatus?: string;
@@ -476,6 +535,10 @@ function getSettlementStatus(entry: {
   } | null;
 }): SettlementDto['status'] {
   const type = normalizeType(entry.entryType);
+  if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
+    return 'held';
+  }
+
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
   if (payoutStatus === 'paid') {
     return 'settled';
@@ -516,6 +579,8 @@ function buildSettlement(entry: {
   settlementHoldReason?: string | null;
   createdAt?: Date;
   settlementDelayDaysSnapshot?: unknown;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
@@ -531,6 +596,7 @@ function buildSettlement(entry: {
   } | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
+  const postApprovalRefundRisk = getPostApprovalRefundRisk(entry);
   const saleDelay = evaluateSaleSettlementDelay(entry);
   const payableAt =
     saleDelay.applies
@@ -544,7 +610,10 @@ function buildSettlement(entry: {
     accruing: 'Accruing until delivery evidence and settlement delay are satisfied.',
     payable: 'Delivered sale has satisfied the vendor settlement delay.',
     partially_refunded: 'Refund impact is reducing the vendor balance.',
-    held: entry.settlementHoldReason ?? 'Settlement is held for operator review.',
+    held:
+      postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
+        ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : entry.settlementHoldReason ?? 'Settlement is held for operator review.',
     settled: 'Marked settled in the operational ledger.',
     disputed: 'Settlement is disputed and requires operator review.',
   };
@@ -556,7 +625,10 @@ function buildSettlement(entry: {
     accruedAt: toIso(accruedAt),
     payableAt: toIso(payableAt),
     settledAt: toIso(entry.settledAt),
-    holdReason: entry.settlementHoldReason ?? null,
+    holdReason:
+      postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
+        ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : entry.settlementHoldReason ?? null,
     note: noteByStatus[status],
   };
 }
@@ -573,7 +645,8 @@ function isEntryEligibleForPayoutBatch(entry: {
   settlementHoldReason?: string | null;
   createdAt?: Date;
   settlementDelayDaysSnapshot?: unknown;
-  payoutBatchLines?: Array<unknown>;
+  payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
@@ -598,7 +671,10 @@ function isEntryEligibleForPayoutBatch(entry: {
   if (mapStatus(entry.payoutStatus ?? '') === 'paid') {
     return false;
   }
-  if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible) {
+  if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
+    return false;
+  }
+  if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible && !refundEntryIsRepresentedByApprovedSettlement(entry)) {
     return false;
   }
 
@@ -791,6 +867,49 @@ export async function getVendorFinanceDashboard(
                 amount: true,
               },
             },
+            financeEntries: {
+              select: {
+                id: true,
+                entryType: true,
+                payoutStatus: true,
+                settlementStatus: true,
+                commissionPercentSnapshot: true,
+                commissionVatPercentSnapshot: true,
+                payoutBatchLines: {
+                  where: {
+                    payoutBatch: {
+                      status: {
+                        in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                      },
+                    },
+                  },
+                  select: {
+                    payoutBatch: {
+                      select: {
+                        status: true,
+                      },
+                    },
+                  },
+                },
+                settlementApprovalLines: {
+                  where: {
+                    settlementApproval: {
+                      status: {
+                        in: ['DRAFT', 'APPROVED'],
+                      },
+                    },
+                  },
+                  select: {
+                    settlementApproval: {
+                      select: {
+                        id: true,
+                        status: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
             returnRecords: {
               select: {
                 id: true,
@@ -811,8 +930,30 @@ export async function getVendorFinanceDashboard(
           },
           select: {
             id: true,
+            payoutBatch: {
+              select: {
+                status: true,
+              },
+            },
           },
           take: 1,
+        },
+        settlementApprovalLines: {
+          where: {
+            settlementApproval: {
+              status: {
+                in: ['DRAFT', 'APPROVED'],
+              },
+            },
+          },
+          select: {
+            settlementApproval: {
+              select: {
+                id: true,
+                status: true,
+              },
+            },
+          },
         },
       },
       orderBy: {
@@ -881,6 +1022,49 @@ export async function getVendorFinanceDashboard(
                 createdAt: 'asc',
               },
             },
+            financeEntries: {
+              select: {
+                id: true,
+                entryType: true,
+                payoutStatus: true,
+                settlementStatus: true,
+                commissionPercentSnapshot: true,
+                commissionVatPercentSnapshot: true,
+                payoutBatchLines: {
+                  where: {
+                    payoutBatch: {
+                      status: {
+                        in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                      },
+                    },
+                  },
+                  select: {
+                    payoutBatch: {
+                      select: {
+                        status: true,
+                      },
+                    },
+                  },
+                },
+                settlementApprovalLines: {
+                  where: {
+                    settlementApproval: {
+                      status: {
+                        in: ['DRAFT', 'APPROVED'],
+                      },
+                    },
+                  },
+                  select: {
+                    settlementApproval: {
+                      select: {
+                        id: true,
+                        status: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         payoutBatchLines: {
@@ -905,6 +1089,23 @@ export async function getVendorFinanceDashboard(
             createdAt: 'desc',
           },
           take: 1,
+        },
+        settlementApprovalLines: {
+          where: {
+            settlementApproval: {
+              status: {
+                in: ['DRAFT', 'APPROVED'],
+              },
+            },
+          },
+          select: {
+            settlementApproval: {
+              select: {
+                id: true,
+                status: true,
+              },
+            },
+          },
         },
       },
       orderBy: {
@@ -1398,9 +1599,6 @@ export async function preparePayoutBatch(
               fulfillment: true,
               refundRecords: true,
               financeEntries: {
-                where: {
-                  entryType: 'sale',
-                },
                 select: {
                   id: true,
                   entryType: true,
@@ -1463,8 +1661,30 @@ export async function preparePayoutBatch(
             },
             select: {
               id: true,
+              payoutBatch: {
+                select: {
+                  status: true,
+                },
+              },
             },
             take: 1,
+          },
+          settlementApprovalLines: {
+            where: {
+              settlementApproval: {
+                status: {
+                  in: ['DRAFT', 'APPROVED'],
+                },
+              },
+            },
+            select: {
+              settlementApproval: {
+                select: {
+                  id: true,
+                  status: true,
+                },
+              },
+            },
           },
         },
         orderBy: {
@@ -1474,8 +1694,14 @@ export async function preparePayoutBatch(
     ]);
     const profile = mapProfile(storedProfile, input.vendorId);
     const eligibleEntries = entries.filter(isEntryEligibleForPayoutBatch);
+    const adjustmentRequiredEntries = entries.filter(
+      (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
+    );
 
     if (eligibleEntries.length === 0) {
+      if (adjustmentRequiredEntries.length > 0) {
+        throw new Error(POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON);
+      }
       throw new Error('No eligible payable ledger rows are available for payout batch preparation.');
     }
 

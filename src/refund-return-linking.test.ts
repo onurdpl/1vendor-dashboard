@@ -338,4 +338,73 @@ describe('Shopify refund return linking', () => {
       }),
     );
   });
+
+  it('marks refund ledger as adjustment required when refund arrives after settlement approval before payment', async () => {
+    setupOrder();
+    txMock.financeLedgerEntry.findFirst.mockReset();
+    txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+      entryType: 'sale',
+      payoutStatus: 'PENDING',
+      settlementStatus: 'PAYABLE',
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 18,
+      payoutBatchLines: [],
+      settlementApprovalLines: [{
+        settlementApproval: {
+          id: 'settlement-approval-approved',
+          status: 'APPROVED',
+        },
+      }],
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        id: '1074533826897',
+        order_id: '7621834670417',
+        created_at: '2026-05-16T14:37:38Z',
+        note: null,
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: '20346971095377',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: '20346971095377',
+              sku: 'DJ1196-002-42',
+              title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+              variant_title: 'Siyah / 42',
+            },
+          },
+        ],
+      },
+    });
+
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          payoutStatus: 'HOLD',
+          settlementHoldReason: 'Refund after settlement approval requires adjustment before payout',
+        }),
+        create: expect.objectContaining({
+          payoutStatus: 'HOLD',
+          settlementHoldReason: 'Refund after settlement approval requires adjustment before payout',
+        }),
+      }),
+    );
+    expect(txMock.financeEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            metadataJson: expect.objectContaining({
+              postApprovalRefundRisk: 'approved_settlement_adjustment_required',
+            }),
+          }),
+        ]),
+      }),
+    );
+  });
 });

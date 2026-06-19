@@ -34,6 +34,8 @@ function buildEntry(input: {
   relatedSalePaid?: boolean;
   relatedSaleActiveApproval?: boolean;
   relatedSaleActivePayoutBatch?: boolean;
+  activeSettlementApproval?: boolean;
+  approvedRefundOffsetRepresented?: boolean;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number }>;
   returnRecords?: Array<{
     id: string;
@@ -100,13 +102,29 @@ function buildEntry(input: {
                 : [],
             },
           ]
-        : [],
+        : input.approvedRefundOffsetRepresented
+          ? [
+              {
+                id: `refund-for-${input.id}`,
+                entryType: 'refund',
+                payoutStatus: 'PENDING',
+                settlementStatus: 'PARTIALLY_REFUNDED',
+                commissionPercentSnapshot: 10,
+                commissionVatPercentSnapshot: 0,
+                payoutBatchLines: [],
+                settlementApprovalLines: [{ settlementApproval: { id: `approval-refund-for-${input.id}`, status: 'APPROVED' } }],
+              },
+            ]
+          : [],
       returnRecords: (input.returnRecords ?? []).map((record) => ({
         ...record,
         sourceShopifyRefundId: record.sourceShopifyRefundId ?? null,
       })),
     },
     payoutBatchLines: input.batched ? [{ id: `line-${input.id}` }] : [],
+    settlementApprovalLines: input.activeSettlementApproval
+      ? [{ settlementApproval: { id: `approval-${input.id}`, status: 'APPROVED' } }]
+      : [],
   };
 }
 
@@ -208,6 +226,145 @@ describe('payout batch preparation', () => {
       'No eligible payable ledger rows',
     );
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks payout preparation when refund arrives after settlement approval and no unaffected rows remain', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'approved-sale-with-late-refund',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        refundRecords: [{ id: 'refund-late', sourceShopifyRefundId: 'refund-late', amount: 100 }],
+      }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'Refund after settlement approval requires adjustment before payout',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('excludes post-approval refund risk rows while preparing unaffected payout rows', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'approved-sale-with-late-refund',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        refundRecords: [{ id: 'refund-late', sourceShopifyRefundId: 'refund-late', amount: 100 }],
+      }),
+      buildEntry({ id: 'unaffected-sale', entryType: 'sale', amount: 500 }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-unaffected',
+      vendorId: data.vendorId,
+      status: data.status,
+      grossAmount: data.grossAmount,
+      commissionAmount: data.commissionAmount,
+      commissionVatAmount: data.commissionVatAmount,
+      shippingDeductionAmount: data.shippingDeductionAmount,
+      refundAmount: data.refundAmount,
+      netAmount: data.netAmount,
+      currency: data.currency,
+      createdByUserId: data.createdByUserId,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      updatedAt: new Date('2026-05-13T11:00:00Z'),
+      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+        id: `batch-line-unaffected-${index}`,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        amountSnapshot: line.amountSnapshot,
+        createdAt: new Date('2026-05-13T11:00:00Z'),
+      })),
+    }));
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossAmount: 500,
+          commissionAmount: 50,
+          refundAmount: 0,
+          netAmount: 450,
+          lines: {
+            create: [
+              { financeLedgerEntryId: 'unaffected-sale', amountSnapshot: 450 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(batch).toMatchObject({
+      id: 'batch-unaffected',
+      lineCount: 1,
+      netAmount: '450.00',
+    });
+  });
+
+  it('keeps approved refund offset lines eligible when the refund was already represented in settlement approval', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'approved-sale-with-approved-refund',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        approvedRefundOffsetRepresented: true,
+        refundRecords: [{ id: 'refund-approved', sourceShopifyRefundId: 'refund-approved', amount: 100 }],
+      }),
+      buildEntry({
+        id: 'approved-refund-offset',
+        entryType: 'refund',
+        amount: 100,
+        activeSettlementApproval: true,
+        relatedSaleActiveApproval: true,
+      }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-approved-offset',
+      vendorId: data.vendorId,
+      status: data.status,
+      grossAmount: data.grossAmount,
+      commissionAmount: data.commissionAmount,
+      commissionVatAmount: data.commissionVatAmount,
+      shippingDeductionAmount: data.shippingDeductionAmount,
+      refundAmount: data.refundAmount,
+      netAmount: data.netAmount,
+      currency: data.currency,
+      createdByUserId: data.createdByUserId,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      updatedAt: new Date('2026-05-13T11:00:00Z'),
+      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+        id: `batch-line-approved-offset-${index}`,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        amountSnapshot: line.amountSnapshot,
+        createdAt: new Date('2026-05-13T11:00:00Z'),
+      })),
+    }));
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          grossAmount: 1000,
+          commissionAmount: 90,
+          refundAmount: 100,
+          netAmount: 810,
+          lines: {
+            create: [
+              { financeLedgerEntryId: 'approved-sale-with-approved-refund', amountSnapshot: 900 },
+              { financeLedgerEntryId: 'approved-refund-offset', amountSnapshot: -90 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(batch).toMatchObject({
+      id: 'batch-approved-offset',
+      lineCount: 2,
+      netAmount: '810.00',
+    });
   });
 
   it('excludes sales from payout batch preparation before the settlement delay passes', async () => {
