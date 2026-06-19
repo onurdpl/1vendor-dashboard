@@ -548,6 +548,8 @@ export async function previewPendingRefundAdjustmentApplication(input: {
     where: {
       vendorId: input.vendorId,
       status: SettlementRefundAdjustmentStatus.PENDING,
+      appliedSettlementApprovalId: null,
+      appliedSettlementApprovalLineId: null,
       amountMinor: {
         gt: 0,
       },

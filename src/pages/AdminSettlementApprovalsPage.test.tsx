@@ -512,6 +512,44 @@ const draftApprovalWithTwoLines: SettlementApproval = {
   ],
 };
 
+const draftApprovalWithAdjustmentLine: SettlementApproval = {
+  ...draftApproval,
+  id: 'approval-adjustment-1',
+  grossSalesMinor: 120000,
+  refundTotalMinor: 0,
+  commissionMinor: 12000,
+  commissionVatMinor: 2400,
+  netPayableMinor: 55600,
+  lines: [
+    previewResponse.lines[0],
+    {
+      id: 'line-adjustment-1086',
+      financeLedgerEntryId: 'fin-refund-1086',
+      settlementRefundAdjustmentId: 'adjustment-1086',
+      lineType: 'REFUND_ADJUSTMENT',
+      amountMinor: 40000,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      payableImpactMinor: -40000,
+      sourceSnapshotJson: {
+        settlementRefundAdjustmentId: 'adjustment-1086',
+        refundRecordId: 'refund-record-1086',
+        originalOrderId: 'order-1086',
+        originalSettlementApprovalId: 'approval-original',
+        originalSettlementCommissionInvoiceId: 'commission-invoice-original',
+        settlementStatus: 'pending_adjustment',
+        resolvedSettlementStatus: 'refund_adjustment_applied',
+        adjustmentStatus: 'APPLIED',
+      },
+      storedSettlementStatus: 'pending_adjustment',
+      derivedSettlementStatus: 'refund_adjustment_applied',
+      payoutStatus: null,
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Pending refund adjustment applied to settlement draft.',
+    },
+  ],
+};
+
 const approvedApproval: SettlementApproval = {
   ...draftApproval,
   status: 'approved',
@@ -1448,6 +1486,24 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('alloc-yalispor-1081-a')).toBeInTheDocument();
     expect(screen.getAllByText('TRY 3,115.18').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Approve Settlement' })).toBeEnabled();
+  });
+
+  it('shows applied refund adjustment lines in a loaded approval snapshot', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(draftApprovalWithAdjustmentLine);
+    renderPage();
+
+    const openButtons = await screen.findAllByRole('button', { name: 'Open' });
+    await userEvent.click(openButtons[1]);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('REFUND_ADJUSTMENT')).toBeInTheDocument();
+    expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
+    expect(screen.getByText('order-1086')).toBeInTheDocument();
+    expect(screen.getByText((_content, element) =>
+      element?.textContent?.replace(/\u00a0/g, ' ') === '-TRY 400.00'
+    )).toBeInTheDocument();
+    expect(screen.getAllByText('APPLIED').length).toBeGreaterThan(0);
   });
 
   it('loads settlement preview totals and sample lines', async () => {

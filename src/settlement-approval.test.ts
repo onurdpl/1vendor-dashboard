@@ -17,6 +17,8 @@ const prismaMock = vi.hoisted(() => ({
   },
   settlementRefundAdjustment: {
     findMany: vi.fn(),
+    findUnique: vi.fn(),
+    updateMany: vi.fn(),
   },
   vendorBillingProfile: {
     findUnique: vi.fn(),
@@ -260,6 +262,9 @@ describe('settlement approval foundation', () => {
     prismaMock.settlementApprovalLine.count.mockReset();
     prismaMock.settlementRefundAdjustment.findMany.mockReset();
     prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([]);
+    prismaMock.settlementRefundAdjustment.findUnique.mockReset();
+    prismaMock.settlementRefundAdjustment.updateMany.mockReset();
+    prismaMock.settlementRefundAdjustment.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.vendorBillingProfile.findUnique.mockReset();
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
@@ -1037,6 +1042,215 @@ describe('settlement approval foundation', () => {
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
+  it('applies pending refund adjustments into a draft approval and reduces payable', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000 }),
+    ]);
+    prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([
+      {
+        id: 'adjustment-1',
+        originalOrderId: 'order-1086',
+        refundRecordId: 'refund-record-1086',
+        refundFinanceLedgerEntryId: 'refund-ledger-1086',
+        originalSettlementApprovalId: 'approval-original',
+        originalSettlementCommissionInvoiceId: 'commission-invoice-original',
+        amountMinor: 40000,
+        currencyCode: 'TRY',
+        reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+      },
+    ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-1',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        settlementApprovalId: 'settlement-approval-1',
+        ...line,
+      })),
+    }));
+
+    const approval = await createDraftApproval({ vendorId: 'vendor-a' });
+
+    expect(prismaMock.settlementApproval.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        grossSalesMinor: 100000,
+        refundTotalMinor: 0,
+        commissionMinor: 10000,
+        commissionVatMinor: 2000,
+        netPayableMinor: 48000,
+        sourceSnapshotJson: expect.objectContaining({
+          pendingRefundAdjustmentCount: 1,
+          pendingRefundAdjustmentTotalMinor: 40000,
+          netAfterPendingRefundAdjustmentsMinor: 48000,
+        }),
+        lines: {
+          create: [
+            expect.objectContaining({
+              financeLedgerEntryId: 'sale-1',
+              lineType: 'SALE',
+              payableImpactMinor: 88000,
+            }),
+            expect.objectContaining({
+              financeLedgerEntryId: 'refund-ledger-1086',
+              settlementRefundAdjustmentId: 'adjustment-1',
+              lineType: 'REFUND_ADJUSTMENT',
+              amountMinor: 40000,
+              commissionMinor: 0,
+              commissionVatMinor: 0,
+              payableImpactMinor: -40000,
+              sourceSnapshotJson: expect.objectContaining({
+                settlementRefundAdjustmentId: 'adjustment-1',
+                adjustmentStatus: 'APPLIED',
+                reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+              }),
+            }),
+          ],
+        },
+      }),
+    }));
+    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'adjustment-1',
+        vendorId: 'vendor-a',
+        status: 'PENDING',
+        appliedSettlementApprovalId: null,
+        appliedSettlementApprovalLineId: null,
+      },
+      data: {
+        status: 'APPLIED',
+        appliedSettlementApprovalId: 'settlement-approval-1',
+        appliedSettlementApprovalLineId: 'line-1',
+      },
+    });
+    expect(approval.netPayableMinor).toBe(48000);
+    expect(approval.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        lineType: 'REFUND_ADJUSTMENT',
+        payableImpactMinor: -40000,
+      }),
+    ]));
+  });
+
+  it('blocks adjustment-only settlement drafts', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
+    prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([
+      {
+        id: 'adjustment-1',
+        originalOrderId: 'order-1086',
+        refundRecordId: 'refund-record-1086',
+        refundFinanceLedgerEntryId: 'refund-ledger-1086',
+        originalSettlementApprovalId: null,
+        originalSettlementCommissionInvoiceId: null,
+        amountMinor: 40000,
+        currencyCode: 'TRY',
+        reason: 'Refund after approved settlement requires future settlement adjustment.',
+      },
+    ]);
+
+    await expect(createDraftApproval({ vendorId: 'vendor-a' })).rejects.toThrow(
+      'Adjustment-only settlement drafts are not supported yet.',
+    );
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks pending refund adjustments that exceed current settlement payable', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-small', entryType: 'sale', amount: 100 }),
+    ]);
+    prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([
+      {
+        id: 'adjustment-1',
+        originalOrderId: 'order-1086',
+        refundRecordId: 'refund-record-1086',
+        refundFinanceLedgerEntryId: 'refund-ledger-1086',
+        originalSettlementApprovalId: null,
+        originalSettlementCommissionInvoiceId: null,
+        amountMinor: 10000,
+        currencyCode: 'TRY',
+        reason: 'Refund after approved settlement requires future settlement adjustment.',
+      },
+    ]);
+
+    await expect(createDraftApproval({ vendorId: 'vendor-a' })).rejects.toThrow(
+      'Pending refund adjustments exceed settlement payable; partial application is not implemented.',
+    );
+    expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('fails draft creation if an adjustment cannot be marked applied safely', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000 }),
+    ]);
+    prismaMock.settlementRefundAdjustment.findMany.mockResolvedValue([
+      {
+        id: 'adjustment-1',
+        originalOrderId: 'order-1086',
+        refundRecordId: 'refund-record-1086',
+        refundFinanceLedgerEntryId: 'refund-ledger-1086',
+        originalSettlementApprovalId: 'approval-original',
+        originalSettlementCommissionInvoiceId: 'commission-invoice-original',
+        amountMinor: 40000,
+        currencyCode: 'TRY',
+        reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+      },
+    ]);
+    prismaMock.settlementApprovalLine.count.mockResolvedValue(0);
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(buildBillingProfile());
+    prismaMock.settlementApproval.create.mockImplementation(async ({ data }) => ({
+      id: 'settlement-approval-1',
+      createdAt: new Date('2026-06-01T11:00:00.000Z'),
+      updatedAt: new Date('2026-06-01T11:00:00.000Z'),
+      vendorId: data.vendorId,
+      periodStart: data.periodStart,
+      periodEnd: data.periodEnd,
+      status: data.status,
+      currency: data.currency,
+      grossSalesMinor: data.grossSalesMinor,
+      refundTotalMinor: data.refundTotalMinor,
+      commissionMinor: data.commissionMinor,
+      commissionVatMinor: data.commissionVatMinor,
+      netPayableMinor: data.netPayableMinor,
+      approvedBy: null,
+      approvedAt: null,
+      cancelledBy: null,
+      cancelledAt: null,
+      notes: data.notes,
+      sourceSnapshotJson: data.sourceSnapshotJson,
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        settlementApprovalId: 'settlement-approval-1',
+        ...line,
+      })),
+    }));
+    prismaMock.settlementRefundAdjustment.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(createDraftApproval({ vendorId: 'vendor-a' })).rejects.toThrow(
+      'Pending refund adjustment could not be applied safely.',
+    );
+  });
+
   it('excludes Shopify-approved open returns from settlement approval drafts', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildLedgerRow({
@@ -1477,6 +1691,17 @@ describe('settlement approval foundation', () => {
         }),
       }),
     );
+    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith({
+      where: {
+        appliedSettlementApprovalId: 'approval-1',
+        status: 'APPLIED',
+      },
+      data: {
+        status: 'PENDING',
+        appliedSettlementApprovalId: null,
+        appliedSettlementApprovalLineId: null,
+      },
+    });
   });
 
   it.each([
@@ -1527,6 +1752,12 @@ describe('settlement approval foundation', () => {
     );
     expect(cancelled.status).toBe('cancelled');
     expect(prismaMock.settlementApproval.update).toHaveBeenCalled();
+    expect(prismaMock.settlementRefundAdjustment.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        appliedSettlementApprovalId: 'approval-1',
+        status: 'APPLIED',
+      },
+    }));
   });
 
   it('excludes rows already linked to active approvals from new preview', async () => {

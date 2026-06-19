@@ -115,3 +115,28 @@ This phase still does not:
 - call Shopify, Logo, or any provider.
 
 The preview prepares Phase 3.5C, where adjustment lines can become part of a settlement approval through an explicit application flow.
+
+## Phase 3.5C Settlement Application
+
+Phase 3.5C applies eligible `PENDING` adjustments when a new settlement approval draft is created for the same vendor.
+
+Application rules:
+
+- only `PENDING` adjustments are considered,
+- adjustment amount must be positive,
+- currency must match the settlement currency,
+- already applied, blocked, or cancelled adjustments are excluded,
+- adjustment-only settlement drafts are blocked,
+- adjustments that exceed the current settlement payable are blocked until partial application is implemented.
+
+Applied line behavior:
+
+- `SettlementApprovalLine.lineType = REFUND_ADJUSTMENT`,
+- `amountMinor` stores the positive adjustment amount,
+- `commissionMinor = 0`,
+- `commissionVatMinor = 0`,
+- `payableImpactMinor = -amountMinor`,
+- the approval line stores `settlementRefundAdjustmentId`,
+- the adjustment is updated to `APPLIED` with the applied settlement approval and line ids.
+
+Existing Logo commission invoices remain unchanged. Phase 3.5C does not create Logo credit invoices, cancel Logo invoices, call Logo, call Shopify, or mutate original sale/refund ledger amounts.

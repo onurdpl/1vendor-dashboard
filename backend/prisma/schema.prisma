@@ -89,6 +89,7 @@ enum SettlementApprovalStatus {
 enum SettlementApprovalLineType {
   SALE
   REFUND
+  REFUND_ADJUSTMENT
 }
 
 enum SettlementCommissionInvoiceProvider {
@@ -931,6 +932,7 @@ model SettlementApprovalLine {
   id                   String                     @id @default(cuid())
   settlementApprovalId String
   financeLedgerEntryId String
+  settlementRefundAdjustmentId String?            @unique
   lineType             SettlementApprovalLineType
   amountMinor          Int
   commissionMinor      Int

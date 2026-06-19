@@ -142,6 +142,7 @@ type SettlementApprovalRevalidationLedgerRow = SettlementApprovalLedgerRow & {
 
 type SettlementApprovalLineDraft = {
   financeLedgerEntryId: string;
+  settlementRefundAdjustmentId?: string | null;
   lineType: SettlementApprovalLineType;
   amountMinor: number;
   commissionMinor: number;
@@ -608,6 +609,48 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
   };
 }
 
+function buildRefundAdjustmentLine(
+  record: PendingRefundAdjustmentApplicationPreview['records'][number],
+): SettlementApprovalLineDraft {
+  return {
+    financeLedgerEntryId: record.refundFinanceLedgerEntryId,
+    settlementRefundAdjustmentId: record.adjustmentId,
+    lineType: SettlementApprovalLineType.REFUND_ADJUSTMENT,
+    amountMinor: record.amountMinor,
+    commissionMinor: 0,
+    commissionVatMinor: 0,
+    payableImpactMinor: -record.previewImpactMinor,
+    storedSettlementStatus: 'pending_adjustment',
+    derivedSettlementStatus: 'refund_adjustment_applied',
+    payoutStatus: null,
+    eligibilityDecision: 'included',
+    eligibilityReason: 'Pending refund adjustment applied to settlement draft.',
+    refundDetected: true,
+    refundCount: 1,
+    fulfillmentEvidencePresent: false,
+    shippingEvidencePresent: false,
+    sourceSnapshotJson: {
+      settlementRefundAdjustmentId: record.adjustmentId,
+      financeLedgerEntryId: record.refundFinanceLedgerEntryId,
+      refundRecordId: record.refundRecordId,
+      originalOrderId: record.originalOrderId,
+      originalSettlementApprovalId: record.originalSettlementApprovalId,
+      originalSettlementCommissionInvoiceId: record.originalSettlementCommissionInvoiceId,
+      entryType: 'refund_adjustment',
+      amountMinor: record.amountMinor,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      payableImpactMinor: -record.previewImpactMinor,
+      adjustmentStatus: 'APPLIED',
+      settlementStatus: 'pending_adjustment',
+      resolvedSettlementStatus: 'refund_adjustment_applied',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Pending refund adjustment applied to settlement draft.',
+      reason: record.reason,
+    },
+  };
+}
+
 function summarizeLines(lines: SettlementApprovalLineDraft[]): SettlementApprovalTotalsDto {
   return lines.reduce(
     (summary, line) => ({
@@ -671,6 +714,85 @@ function lineAmountsChanged(line: SettlementApprovalLine, currentLine: Settlemen
   );
 }
 
+async function validateRefundAdjustmentApprovalLine(
+  tx: SettlementApprovalTransaction,
+  approval: Pick<SettlementApproval, 'id' | 'vendorId'>,
+  line: SettlementApprovalLine,
+  row: SettlementApprovalRevalidationLedgerRow | null,
+) {
+  const reasons: SettlementApprovalRevalidationReason[] = [];
+  if (!row) {
+    return [
+      buildRevalidationReason(line, 'ledger_missing', 'Ledger row no longer exists'),
+    ];
+  }
+
+  if (row.vendorId !== approval.vendorId) {
+    reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Ledger row vendor changed since draft creation'));
+  }
+
+  if (normalizeType(row.entryType) !== 'refund') {
+    reasons.push(buildRevalidationReason(line, 'entry_type_changed', 'Refund adjustment line is no longer linked to a refund ledger row'));
+  }
+
+  if (normalizeStatus(row.payoutStatus) === 'paid') {
+    reasons.push(buildRevalidationReason(line, 'ledger_paid', 'Ledger row already paid'));
+  }
+
+  const adjustmentId = line.settlementRefundAdjustmentId
+    ?? readSnapshotString(readSnapshotRecord(line.sourceSnapshotJson).settlementRefundAdjustmentId);
+  if (!adjustmentId) {
+    reasons.push(buildRevalidationReason(line, 'refund_adjustment_missing', 'Settlement refund adjustment link is missing'));
+    return reasons;
+  }
+
+  const adjustment = await tx.settlementRefundAdjustment.findUnique({
+    where: {
+      id: adjustmentId,
+    },
+    select: {
+      id: true,
+      vendorId: true,
+      status: true,
+      amountMinor: true,
+      refundFinanceLedgerEntryId: true,
+      appliedSettlementApprovalId: true,
+      appliedSettlementApprovalLineId: true,
+    },
+  });
+  if (!adjustment) {
+    reasons.push(buildRevalidationReason(line, 'refund_adjustment_missing', 'Settlement refund adjustment no longer exists'));
+    return reasons;
+  }
+
+  if (adjustment.vendorId !== approval.vendorId) {
+    reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Settlement refund adjustment vendor changed since draft creation'));
+  }
+  if (adjustment.status !== 'APPLIED') {
+    reasons.push(buildRevalidationReason(line, 'refund_adjustment_not_applied', 'Settlement refund adjustment is not marked APPLIED'));
+  }
+  if (adjustment.refundFinanceLedgerEntryId !== line.financeLedgerEntryId) {
+    reasons.push(buildRevalidationReason(line, 'refund_adjustment_ledger_mismatch', 'Settlement refund adjustment is linked to a different refund ledger row'));
+  }
+  if (
+    adjustment.appliedSettlementApprovalId !== approval.id ||
+    adjustment.appliedSettlementApprovalLineId !== line.id
+  ) {
+    reasons.push(buildRevalidationReason(line, 'refund_adjustment_application_mismatch', 'Settlement refund adjustment is applied to a different settlement approval line'));
+  }
+  if (
+    line.lineType !== SettlementApprovalLineType.REFUND_ADJUSTMENT ||
+    line.amountMinor !== adjustment.amountMinor ||
+    line.commissionMinor !== 0 ||
+    line.commissionVatMinor !== 0 ||
+    line.payableImpactMinor !== -adjustment.amountMinor
+  ) {
+    reasons.push(buildRevalidationReason(line, 'settlement_amount_changed', 'Settlement refund adjustment amount changed since draft creation'));
+  }
+
+  return reasons;
+}
+
 function validateApprovalLineAgainstCurrentLedger(
   approval: Pick<SettlementApproval, 'id' | 'vendorId'>,
   line: SettlementApprovalLine,
@@ -681,6 +803,10 @@ function validateApprovalLineAgainstCurrentLedger(
     return [
       buildRevalidationReason(line, 'ledger_missing', 'Ledger row no longer exists'),
     ];
+  }
+
+  if (line.lineType === SettlementApprovalLineType.REFUND_ADJUSTMENT) {
+    return reasons;
   }
 
   if (row.vendorId !== approval.vendorId) {
@@ -966,7 +1092,11 @@ export async function validateSettlementApprovalBeforeApprove(
   const reasons: SettlementApprovalRevalidationReason[] = [];
   for (const line of approval.lines) {
     const row = await loadCurrentLedgerRowForApprovalLine(tx, line);
-    reasons.push(...validateApprovalLineAgainstCurrentLedger(approval, line, row));
+    if (line.lineType === SettlementApprovalLineType.REFUND_ADJUSTMENT) {
+      reasons.push(...await validateRefundAdjustmentApprovalLine(tx, approval, line, row));
+    } else {
+      reasons.push(...validateApprovalLineAgainstCurrentLedger(approval, line, row));
+    }
   }
 
   return {
@@ -1670,6 +1800,7 @@ function mapApproval(
     lines: approval.lines.map((line) => ({
       id: line.id,
       financeLedgerEntryId: line.financeLedgerEntryId,
+      settlementRefundAdjustmentId: line.settlementRefundAdjustmentId,
       lineType: line.lineType,
       amountMinor: line.amountMinor,
       commissionMinor: line.commissionMinor,
@@ -1749,14 +1880,37 @@ export async function createDraftApproval(
     async (tx) => {
       const preview = await buildApprovalPreview(input, tx);
       if (preview.lines.length === 0) {
+        if (preview.pendingRefundAdjustments.pendingAdjustmentCount > 0) {
+          throw new Error('Adjustment-only settlement drafts are not supported yet.');
+        }
         throw new Error('No eligible settlement rows are available for approval.');
       }
+      if (preview.pendingRefundAdjustments.pendingAdjustmentTotalMinor > preview.summary.netPayableMinor) {
+        throw new Error('Pending refund adjustments exceed settlement payable; partial application is not implemented.');
+      }
+
+      const adjustmentLines = preview.pendingRefundAdjustments.records.map(buildRefundAdjustmentLine);
+      const settlementLines = [...preview.lines, ...adjustmentLines];
+      const settlementTotals = summarizeLines(settlementLines);
 
       const activeLineCount = await tx.settlementApprovalLine.count({
         where: {
-          financeLedgerEntryId: {
-            in: preview.lines.map((line) => line.financeLedgerEntryId),
-          },
+          OR: [
+            {
+              financeLedgerEntryId: {
+                in: settlementLines.map((line) => line.financeLedgerEntryId),
+              },
+            },
+            ...(adjustmentLines.length
+              ? [{
+                  settlementRefundAdjustmentId: {
+                    in: adjustmentLines
+                      .map((line) => line.settlementRefundAdjustmentId)
+                      .filter((id): id is string => Boolean(id)),
+                  },
+                }]
+              : []),
+          ],
           settlementApproval: {
             status: {
               in: [SettlementApprovalStatus.DRAFT, SettlementApprovalStatus.APPROVED],
@@ -1783,11 +1937,11 @@ export async function createDraftApproval(
           periodEnd: input.periodEnd ?? null,
           status: SettlementApprovalStatus.DRAFT,
           currency: 'TRY',
-          grossSalesMinor: preview.summary.grossSalesMinor,
-          refundTotalMinor: preview.summary.refundTotalMinor,
-          commissionMinor: preview.summary.commissionMinor,
-          commissionVatMinor: preview.summary.commissionVatMinor,
-          netPayableMinor: preview.summary.netPayableMinor,
+          grossSalesMinor: settlementTotals.grossSalesMinor,
+          refundTotalMinor: settlementTotals.refundTotalMinor,
+          commissionMinor: settlementTotals.commissionMinor,
+          commissionVatMinor: settlementTotals.commissionVatMinor,
+          netPayableMinor: settlementTotals.netPayableMinor,
           notes: input.notes ?? null,
           sourceSnapshotJson: {
             vendorId: input.vendorId,
@@ -1803,11 +1957,16 @@ export async function createDraftApproval(
             debtOffsetPreviewMinor: preview.summary.debtOffsetPreviewMinor,
             netPayableAfterDebtOffsetMinor: preview.summary.netPayableAfterDebtOffsetMinor,
             remainingVendorDebtMinor: preview.summary.remainingVendorDebtMinor,
+            pendingRefundAdjustmentCount: preview.summary.pendingRefundAdjustmentCount,
+            pendingRefundAdjustmentTotalMinor: preview.summary.pendingRefundAdjustmentTotalMinor,
+            netAfterPendingRefundAdjustmentsMinor: preview.summary.netAfterPendingRefundAdjustmentsMinor,
+            appliedRefundAdjustments: preview.pendingRefundAdjustments.records,
             writesPerformed: false,
           },
           lines: {
-            create: preview.lines.map((line) => ({
+            create: settlementLines.map((line) => ({
               financeLedgerEntryId: line.financeLedgerEntryId,
+              settlementRefundAdjustmentId: line.settlementRefundAdjustmentId ?? null,
               lineType: line.lineType,
               amountMinor: line.amountMinor,
               commissionMinor: line.commissionMinor,
@@ -1821,6 +1980,27 @@ export async function createDraftApproval(
           lines: true,
         },
       });
+
+      const appliedAdjustmentLines = approval.lines.filter((line) => line.settlementRefundAdjustmentId);
+      for (const line of appliedAdjustmentLines) {
+        const result = await tx.settlementRefundAdjustment.updateMany({
+          where: {
+            id: line.settlementRefundAdjustmentId!,
+            vendorId: input.vendorId,
+            status: 'PENDING',
+            appliedSettlementApprovalId: null,
+            appliedSettlementApprovalLineId: null,
+          },
+          data: {
+            status: 'APPLIED',
+            appliedSettlementApprovalId: approval.id,
+            appliedSettlementApprovalLineId: line.id,
+          },
+        });
+        if (result.count !== 1) {
+          throw new Error('Pending refund adjustment could not be applied safely.');
+        }
+      }
 
       return mapApproval(approval, true);
     },
@@ -1882,51 +2062,70 @@ export async function cancelSettlementApproval(
   id: string,
   cancelledBy: string | null,
 ): Promise<SettlementApprovalDto> {
-  const existing = await prisma.settlementApproval.findUnique({
-    where: {
-      id,
-    },
-    include: {
-      commissionInvoices: {
+  return prisma.$transaction(
+    async (tx) => {
+      const existing = await tx.settlementApproval.findUnique({
         where: {
-          status: {
-            not: SettlementCommissionInvoiceStatus.CANCELLED,
+          id,
+        },
+        include: {
+          commissionInvoices: {
+            where: {
+              status: {
+                not: SettlementCommissionInvoiceStatus.CANCELLED,
+              },
+            },
+            select: {
+              id: true,
+            },
           },
+          lines: true,
         },
-        select: {
-          id: true,
+      });
+      if (!existing) {
+        throw new Error('Settlement approval could not be found.');
+      }
+      if (existing.status === SettlementApprovalStatus.CANCELLED) {
+        throw new Error('Settlement approval is already cancelled.');
+      }
+      const activeCommissionInvoices = (existing as typeof existing & { commissionInvoices: Array<{ id: string }> })
+        .commissionInvoices;
+      if (activeCommissionInvoices.length > 0) {
+        throw new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.');
+      }
+
+      const cancelled = await tx.settlementApproval.update({
+        where: {
+          id,
         },
-      },
-      lines: true,
-    },
-  });
-  if (!existing) {
-    throw new Error('Settlement approval could not be found.');
-  }
-  if (existing.status === SettlementApprovalStatus.CANCELLED) {
-    throw new Error('Settlement approval is already cancelled.');
-  }
-  const activeCommissionInvoices = (existing as typeof existing & { commissionInvoices: Array<{ id: string }> })
-    .commissionInvoices;
-  if (activeCommissionInvoices.length > 0) {
-    throw new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.');
-  }
+        data: {
+          status: SettlementApprovalStatus.CANCELLED,
+          cancelledBy,
+          cancelledAt: new Date(),
+        },
+        include: {
+          lines: true,
+        },
+      });
 
-  const cancelled = await prisma.settlementApproval.update({
-    where: {
-      id,
-    },
-    data: {
-      status: SettlementApprovalStatus.CANCELLED,
-      cancelledBy,
-      cancelledAt: new Date(),
-    },
-    include: {
-      lines: true,
-    },
-  });
+      await tx.settlementRefundAdjustment.updateMany({
+        where: {
+          appliedSettlementApprovalId: id,
+          status: 'APPLIED',
+        },
+        data: {
+          status: 'PENDING',
+          appliedSettlementApprovalId: null,
+          appliedSettlementApprovalLineId: null,
+        },
+      });
 
-  return mapApproval(cancelled, true);
+      return mapApproval(cancelled, true);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    },
+  );
 }
 
 export async function getSettlementApproval(id: string): Promise<SettlementApprovalDto | null> {

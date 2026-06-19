@@ -365,6 +365,8 @@ describe('refund adjustment eligibility diagnostics', () => {
       where: expect.objectContaining({
         vendorId: 'yalispor',
         status: 'PENDING',
+        appliedSettlementApprovalId: null,
+        appliedSettlementApprovalLineId: null,
         amountMinor: { gt: 0 },
         currencyCode: 'TRY',
       }),
@@ -396,6 +398,8 @@ describe('refund adjustment eligibility diagnostics', () => {
       where: {
         vendorId: 'sporjinal',
         status: 'PENDING',
+        appliedSettlementApprovalId: null,
+        appliedSettlementApprovalLineId: null,
         amountMinor: { gt: 0 },
         currencyCode: 'TRY',
       },

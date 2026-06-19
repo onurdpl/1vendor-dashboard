@@ -242,6 +242,7 @@ function getApprovalLineOrderLabel(line: SettlementApprovalLine) {
   return (
     readSnapshotString(line, 'sourceShopifyOrderNumber') ??
     readSnapshotString(line, 'sourceShopifyOrderId') ??
+    readSnapshotString(line, 'originalOrderId') ??
     'Unknown order'
   );
 }
@@ -478,6 +479,8 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
           const shopifyOrderId = readSnapshotString(line, 'sourceShopifyOrderId');
           const allocationId = readSnapshotString(line, 'vendorAllocationId');
           const orderLabel = getApprovalLineOrderLabel(line);
+          const adjustmentId = line.settlementRefundAdjustmentId ?? readSnapshotString(line, 'settlementRefundAdjustmentId');
+          const isRefundAdjustmentLine = String(line.lineType).toUpperCase() === 'REFUND_ADJUSTMENT';
 
           return (
             <article
@@ -507,6 +510,13 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
                   <StatusBadge status={String(status.derived ?? 'unknown')}>{safeStatusLabel(status.derived ?? 'Unknown')}</StatusBadge>
                   <small>Stored {valueOrDash(status.stored)}</small>
                 </div>
+                {isRefundAdjustmentLine ? (
+                  <div>
+                    <span>Adjustment</span>
+                    <StatusBadge tone="success">APPLIED</StatusBadge>
+                    <small>{valueOrDash(adjustmentId)}</small>
+                  </div>
+                ) : null}
               </div>
               <dl className="settlement-approval-line-money-grid">
                 <div>

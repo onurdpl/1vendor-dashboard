@@ -26,6 +26,7 @@ export type DatabaseHealthResponse = {
 export type SettlementApprovalLine = {
   id?: string;
   financeLedgerEntryId: string;
+  settlementRefundAdjustmentId?: string | null;
   lineType: 'SALE' | 'REFUND' | string;
   amountMinor: number;
   commissionMinor: number;
