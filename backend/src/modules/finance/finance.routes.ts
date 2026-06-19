@@ -42,6 +42,7 @@ import {
   persistSettlementLogoSalesInvoiceSync,
   previewSettlementLogoOutgoingInvoiceSync,
 } from './settlement-logo-outgoing-invoice-sync-preview.service.js';
+import { listSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -594,6 +595,31 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         settlementApprovalId: id,
         records: await findSettlementCommissionInvoiceRecords(id),
       };
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-adjustments',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const status = readOptionalQueryString(request.query, 'status')?.toUpperCase();
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      const pagination = resolvePagination(request.query, { limit: 100, offset: 0 });
+      const supportedStatus = status && ['PENDING', 'APPLIED', 'BLOCKED', 'CANCELLED'].includes(status)
+        ? status as 'PENDING' | 'APPLIED' | 'BLOCKED' | 'CANCELLED'
+        : null;
+
+      return listSettlementRefundAdjustments({
+        status: supportedStatus,
+        vendorId,
+        limit: pagination.limit,
+      });
     },
   );
 

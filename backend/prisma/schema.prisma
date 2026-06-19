@@ -103,6 +103,13 @@ enum SettlementCommissionInvoiceStatus {
   UNKNOWN
 }
 
+enum SettlementRefundAdjustmentStatus {
+  PENDING
+  APPLIED
+  BLOCKED
+  CANCELLED
+}
+
 enum PayoutBatchStatus {
   DRAFT
   REVIEW
@@ -294,6 +301,7 @@ model Vendor {
   payoutBatches         PayoutBatch[]
   settlementApprovals   SettlementApproval[]
   settlementCommissionInvoices SettlementCommissionInvoice[]
+  settlementRefundAdjustments SettlementRefundAdjustment[]
   balanceEvents         VendorBalanceEvent[]
   profileAuditLogs      VendorProfileAuditLog[]
   operationalSignals    OperationalSignal[]
@@ -537,6 +545,7 @@ model ShopifyOrder {
   webhookEvents            WebhookEvent[]
   refunds                  ShopifyRefund[]
   financeEvents            FinanceEvent[]
+  settlementRefundAdjustments SettlementRefundAdjustment[]
 }
 
 model ShopifyOrderLineItem {
@@ -781,6 +790,7 @@ model RefundRecord {
   vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   lineItems                ShopifyRefundLineItem[]
   vendorBalanceEvents      VendorBalanceEvent[]
+  settlementRefundAdjustments SettlementRefundAdjustment[]
   operationalJobs          OperationalJob[]
 
   @@index([vendorAllocationId, createdAt])
@@ -851,6 +861,7 @@ model FinanceLedgerEntry {
   payoutBatchLines              PayoutBatchLine[]
   financeEvents                 FinanceEvent[]
   settlementApprovalLines       SettlementApprovalLine[]
+  refundAdjustments             SettlementRefundAdjustment[]
   vendorBalanceEvents           VendorBalanceEvent[]
   operationalSignals            OperationalSignal[]
   automationActions             AutomationAction[]
@@ -907,6 +918,8 @@ model SettlementApproval {
   vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines              SettlementApprovalLine[]
   commissionInvoices SettlementCommissionInvoice[]
+  originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalRefundAdjustments")
+  appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalRefundAdjustments")
   vendorBalanceEvents VendorBalanceEvent[]
 
   @@index([vendorId, status])
@@ -926,6 +939,8 @@ model SettlementApprovalLine {
   sourceSnapshotJson   Json
   settlementApproval   SettlementApproval         @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
   financeLedgerEntry   FinanceLedgerEntry         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+  originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalLineRefundAdjustments")
+  appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalLineRefundAdjustments")
 
   @@unique([settlementApprovalId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
@@ -975,6 +990,7 @@ model SettlementCommissionInvoice {
   cancelledAt          DateTime?
   settlementApproval   SettlementApproval                  @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
   vendor               Vendor                              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  originalRefundAdjustments SettlementRefundAdjustment[]
 
   @@index([settlementApprovalId])
   @@index([vendorId])
@@ -982,6 +998,44 @@ model SettlementCommissionInvoice {
   @@index([status])
   @@index([providerUuid])
   @@index([invoiceNo])
+}
+
+model SettlementRefundAdjustment {
+  id                                   String                         @id @default(cuid())
+  refundRecordId                       String
+  refundFinanceLedgerEntryId           String                         @unique
+  vendorId                             String
+  originalOrderId                      String
+  originalSettlementApprovalId         String?
+  originalSettlementApprovalLineId     String?
+  originalSettlementCommissionInvoiceId String?
+  status                               SettlementRefundAdjustmentStatus @default(PENDING)
+  amountMinor                          Int
+  currencyCode                         String                         @default("TRY")
+  reason                               String
+  createdAt                            DateTime                       @default(now())
+  updatedAt                            DateTime                       @updatedAt
+  appliedSettlementApprovalId          String?
+  appliedSettlementApprovalLineId      String?
+  blockedReason                        String?
+  createdBy                            String?
+  refundRecord                         RefundRecord                   @relation(fields: [refundRecordId], references: [id], onDelete: Cascade)
+  refundFinanceLedgerEntry             FinanceLedgerEntry             @relation(fields: [refundFinanceLedgerEntryId], references: [id], onDelete: Cascade)
+  vendor                               Vendor                         @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  originalOrder                        ShopifyOrder                   @relation(fields: [originalOrderId], references: [id], onDelete: Cascade)
+  originalSettlementApproval           SettlementApproval?            @relation("OriginalSettlementApprovalRefundAdjustments", fields: [originalSettlementApprovalId], references: [id], onDelete: SetNull)
+  originalSettlementApprovalLine       SettlementApprovalLine?        @relation("OriginalSettlementApprovalLineRefundAdjustments", fields: [originalSettlementApprovalLineId], references: [id], onDelete: SetNull)
+  originalSettlementCommissionInvoice  SettlementCommissionInvoice?   @relation(fields: [originalSettlementCommissionInvoiceId], references: [id], onDelete: SetNull)
+  appliedSettlementApproval            SettlementApproval?            @relation("AppliedSettlementApprovalRefundAdjustments", fields: [appliedSettlementApprovalId], references: [id], onDelete: SetNull)
+  appliedSettlementApprovalLine        SettlementApprovalLine?        @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, status])
+  @@index([refundRecordId])
+  @@index([originalOrderId])
+  @@index([originalSettlementApprovalId])
+  @@index([originalSettlementCommissionInvoiceId])
+  @@index([appliedSettlementApprovalId])
+  @@index([createdAt])
 }
 
 model ShipmentShippingCost {

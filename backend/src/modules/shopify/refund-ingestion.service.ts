@@ -6,6 +6,7 @@ import {
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
+import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import type {
   ParsedShopifyRefundLineItem,
@@ -464,6 +465,12 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
             sourceShopifyOrderNumber: orderNumber,
             vendorAllocationId,
+          });
+        } else {
+          await createSettlementRefundAdjustmentForRefundLedger(tx, {
+            refundFinanceLedgerEntryId: refundLedgerId,
+            refundRecordId,
+            createdBy: 'system:shopify_refunds_create',
           });
         }
 

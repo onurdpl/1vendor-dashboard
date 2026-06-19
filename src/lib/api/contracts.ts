@@ -1044,6 +1044,7 @@ export type ReturnDetail = ReturnSummary & {
   refundedItems: ReturnLineItem[];
   items: ReturnLineItem[];
   timeline: Array<{ label: string; at: string }>;
+  settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
 };
 
 export type KargonomiReturnPreview = {
@@ -1262,6 +1263,22 @@ export type PayoutBatch = {
   updatedAt: string;
   lineCount: number;
   warning: string | null;
+};
+
+export type SettlementRefundAdjustmentReference = {
+  id: string;
+  status: 'pending' | 'applied' | 'blocked' | 'cancelled';
+  amountMinor: number;
+  currencyCode: string;
+  reason: string;
+  originalSettlementApprovalId: string | null;
+  originalSettlementApprovalLineId: string | null;
+  originalSettlementCommissionInvoiceId: string | null;
+  appliedSettlementApprovalId: string | null;
+  appliedSettlementApprovalLineId: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PayoutBatchSummary = {
@@ -1813,6 +1830,7 @@ export type FinanceTransaction = {
     netAmount: string;
     createdAt: string;
   } | null;
+  settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
 };
 
 export type FinanceDashboard = {
@@ -1826,7 +1844,7 @@ export type FinanceDashboardSummary = {
   summary: Pick<FinanceSummary, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
 };
 
-export type ReturnFinanceRecord = Pick<FinanceTransaction, 'id' | 'category' | 'amount' | 'status' | 'date'>;
+export type ReturnFinanceRecord = Pick<FinanceTransaction, 'id' | 'category' | 'amount' | 'status' | 'date' | 'settlementRefundAdjustments'>;
 
 export type ReturnFinanceRecordsResponse = {
   records: ReturnFinanceRecord[];

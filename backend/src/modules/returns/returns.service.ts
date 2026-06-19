@@ -23,6 +23,7 @@ import {
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import type { DashboardReturnSummaryDto, KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
+import { mapLinkedSettlementRefundAdjustments } from '../finance/settlement-refund-adjustment.service.js';
 import {
   backfillMissingLineItemImages,
   type ShopifyLineItemImageLookupService,
@@ -900,6 +901,7 @@ function getMatchingRefundRecords(record: {
       sourceShopifyRefundId: string;
       amount?: unknown;
       lineItems: Array<Parameters<typeof toRefundReturnedItem>[0]>;
+      settlementRefundAdjustments?: Parameters<typeof mapLinkedSettlementRefundAdjustments>[0];
     }>;
   };
 }) {
@@ -1128,6 +1130,26 @@ export async function getVendorReturnById(
                   shopifyOrderLineItem: true,
                 },
               },
+              settlementRefundAdjustments: {
+                select: {
+                  id: true,
+                  status: true,
+                  amountMinor: true,
+                  currencyCode: true,
+                  reason: true,
+                  originalSettlementApprovalId: true,
+                  originalSettlementApprovalLineId: true,
+                  originalSettlementCommissionInvoiceId: true,
+                  appliedSettlementApprovalId: true,
+                  appliedSettlementApprovalLineId: true,
+                  blockedReason: true,
+                  createdAt: true,
+                  updatedAt: true,
+                },
+                orderBy: {
+                  createdAt: 'desc',
+                },
+              },
             },
             orderBy: {
               createdAt: 'asc',
@@ -1193,6 +1215,9 @@ export async function getVendorReturnById(
   );
   const sourceRefundId = record.sourceShopifyRefundId ?? (isReturnRequestRecord(record) ? '' : getRefundSourceId(record));
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
+  const settlementRefundAdjustments = matchingRefundRecords.flatMap((refund) =>
+    mapLinkedSettlementRefundAdjustments(refund.settlementRefundAdjustments),
+  );
   const detailRefundedItems = buildReturnedItemsForRecord(
     {
       ...record,
@@ -1258,6 +1283,7 @@ export async function getVendorReturnById(
     requestCreatedAt: record.requestCreatedAt ? record.requestCreatedAt.toISOString() : null,
     requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
     refundedItems: detailRefundedItems,
+    settlementRefundAdjustments,
   };
 }
 

@@ -46,6 +46,7 @@ type FinanceDashboardDto = {
     payoutCalculation?: FinanceTransaction['payoutCalculation'];
     settlement?: FinanceTransaction['settlement'];
     payoutBatch?: FinanceTransaction['payoutBatch'];
+    settlementRefundAdjustments?: FinanceTransaction['settlementRefundAdjustments'];
   }>;
 };
 
@@ -60,6 +61,7 @@ type ReturnFinanceRecordsResponseDto = {
     amount: number;
     status: string;
     date: string;
+    settlementRefundAdjustments?: FinanceTransaction['settlementRefundAdjustments'];
   }>;
 };
 
@@ -225,6 +227,7 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,
       settlement: record.settlement,
+      settlementRefundAdjustments: record.settlementRefundAdjustments ?? [],
       payoutBatch: record.payoutBatch
         ? {
             ...record.payoutBatch,
@@ -312,6 +315,7 @@ export async function getReturnFinanceRecords(options: {
       amount: formatCurrency(record.amount),
       status: mapRecordStatusLabel(record.status),
       date: record.date,
+      settlementRefundAdjustments: record.settlementRefundAdjustments ?? [],
     })),
   };
 }

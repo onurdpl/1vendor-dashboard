@@ -34,6 +34,9 @@ const txMock = vi.hoisted(() => ({
   vendorBalanceEvent: {
     upsert: vi.fn(),
   },
+  settlementRefundAdjustment: {
+    upsert: vi.fn(),
+  },
 }));
 
 const prismaMock = vi.hoisted(() => ({
@@ -426,10 +429,60 @@ describe('Shopify refund return linking', () => {
         }),
       }),
     );
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
   });
 
   it('marks refund ledger as adjustment required when refund arrives after settlement approval before payment', async () => {
     setupOrder();
+    txMock.financeLedgerEntry.findUnique.mockReset();
+    txMock.financeLedgerEntry.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'fin-sporjinal-refund-1074533826897',
+        vendorId: 'sporjinal',
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        entryType: 'refund',
+        amount: 3399,
+        payoutStatus: 'HOLD',
+        settlementStatus: 'PARTIALLY_REFUNDED',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 18,
+        vendorAllocation: {
+          sourceShopifyOrderId: '7621834670417',
+          sourceShopifyOrderNumber: '#1029',
+          order: {
+            id: 'shopify-order-db-1029',
+            currency: 'TRY',
+          },
+          financeEntries: [
+            {
+              id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+              entryType: 'sale',
+              payoutStatus: 'PENDING',
+              settlementStatus: 'PAYABLE',
+              commissionPercentSnapshot: 10,
+              commissionVatPercentSnapshot: 18,
+              settlementApprovalLines: [
+                {
+                  id: 'settlement-line-sale-1',
+                  settlementApproval: {
+                    id: 'settlement-approval-approved',
+                    status: 'APPROVED',
+                    approvedAt: new Date('2026-06-18T10:00:00.000Z'),
+                    commissionInvoices: [
+                      {
+                        id: 'settlement-commission-invoice-1',
+                        status: 'CREATED',
+                        createdAt: new Date('2026-06-18T11:00:00.000Z'),
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      });
     txMock.financeLedgerEntry.findFirst.mockReset();
     txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
       id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
@@ -440,11 +493,32 @@ describe('Shopify refund return linking', () => {
       commissionVatPercentSnapshot: 18,
       payoutBatchLines: [],
       settlementApprovalLines: [{
+        id: 'settlement-line-sale-1',
         settlementApproval: {
           id: 'settlement-approval-approved',
           status: 'APPROVED',
         },
       }],
+    });
+    txMock.settlementRefundAdjustment.upsert.mockResolvedValueOnce({
+      id: 'refund-adjustment-1',
+      refundRecordId: 'refund-sporjinal-1074533826897',
+      refundFinanceLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+      vendorId: 'sporjinal',
+      originalOrderId: 'shopify-order-db-1029',
+      originalSettlementApprovalId: 'settlement-approval-approved',
+      originalSettlementApprovalLineId: 'settlement-line-sale-1',
+      originalSettlementCommissionInvoiceId: 'settlement-commission-invoice-1',
+      status: 'PENDING',
+      amountMinor: 299792,
+      currencyCode: 'TRY',
+      reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+      createdAt: new Date('2026-06-19T10:00:00.000Z'),
+      updatedAt: new Date('2026-06-19T10:00:00.000Z'),
+      appliedSettlementApprovalId: null,
+      appliedSettlementApprovalLineId: null,
+      blockedReason: null,
+      createdBy: 'system:shopify_refunds_create',
     });
     txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
 
@@ -496,5 +570,26 @@ describe('Shopify refund return linking', () => {
       }),
     );
     expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          refundFinanceLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+        },
+        update: {},
+        create: expect.objectContaining({
+          refundRecordId: 'refund-sporjinal-1074533826897',
+          refundFinanceLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+          vendorId: 'sporjinal',
+          originalOrderId: 'shopify-order-db-1029',
+          originalSettlementApprovalId: 'settlement-approval-approved',
+          originalSettlementApprovalLineId: 'settlement-line-sale-1',
+          originalSettlementCommissionInvoiceId: 'settlement-commission-invoice-1',
+          status: 'PENDING',
+          amountMinor: 299792,
+          currencyCode: 'TRY',
+          reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+        }),
+      }),
+    );
   });
 });

@@ -44,6 +44,7 @@ import {
   createVendorDebtOffsetForPayoutBatch,
   getVendorBalanceSummary,
 } from './vendor-balance.service.js';
+import { mapLinkedSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -1297,6 +1298,26 @@ export async function getVendorFinanceDashboard(
             },
           },
         },
+        refundAdjustments: {
+          select: {
+            id: true,
+            status: true,
+            amountMinor: true,
+            currencyCode: true,
+            reason: true,
+            originalSettlementApprovalId: true,
+            originalSettlementApprovalLineId: true,
+            originalSettlementCommissionInvoiceId: true,
+            appliedSettlementApprovalId: true,
+            appliedSettlementApprovalLineId: true,
+            blockedReason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -1470,6 +1491,7 @@ export async function getVendorFinanceDashboard(
       payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
       settlement,
       payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
+      settlementRefundAdjustments: mapLinkedSettlementRefundAdjustments(entry.refundAdjustments),
     };
   });
 
@@ -1610,13 +1632,33 @@ export async function getVendorReturnFinanceRecords(
       vendorId,
       OR: referenceFilters,
     },
-    select: {
-      id: true,
-      entryType: true,
-      amount: true,
-      payoutStatus: true,
-      createdAt: true,
-    },
+      select: {
+        id: true,
+        entryType: true,
+        amount: true,
+        payoutStatus: true,
+        createdAt: true,
+        refundAdjustments: {
+          select: {
+            id: true,
+            status: true,
+            amountMinor: true,
+            currencyCode: true,
+            reason: true,
+            originalSettlementApprovalId: true,
+            originalSettlementApprovalLineId: true,
+            originalSettlementCommissionInvoiceId: true,
+            appliedSettlementApprovalId: true,
+            appliedSettlementApprovalLineId: true,
+            blockedReason: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        },
+      },
     orderBy: {
       createdAt: 'desc',
     },
@@ -1629,6 +1671,7 @@ export async function getVendorReturnFinanceRecords(
       amount: toNumber(entry.amount),
       status: mapStatus(entry.payoutStatus),
       date: entry.createdAt.toISOString(),
+      settlementRefundAdjustments: mapLinkedSettlementRefundAdjustments(entry.refundAdjustments),
     })),
   };
 }

@@ -188,6 +188,22 @@ export type PayoutBatchReferenceDto = {
   createdAt: string;
 };
 
+export type SettlementRefundAdjustmentReferenceDto = {
+  id: string;
+  status: 'pending' | 'applied' | 'blocked' | 'cancelled';
+  amountMinor: number;
+  currencyCode: string;
+  reason: string;
+  originalSettlementApprovalId: string | null;
+  originalSettlementApprovalLineId: string | null;
+  originalSettlementCommissionInvoiceId: string | null;
+  appliedSettlementApprovalId: string | null;
+  appliedSettlementApprovalLineId: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FinanceRecordDto = {
   id: string;
   type: string;
@@ -202,6 +218,7 @@ export type FinanceRecordDto = {
   payoutCalculation: PayoutCalculationDto | null;
   settlement: SettlementDto;
   payoutBatch: PayoutBatchReferenceDto | null;
+  settlementRefundAdjustments: SettlementRefundAdjustmentReferenceDto[];
 };
 
 export type ReturnFinanceRecordDto = {
@@ -210,6 +227,7 @@ export type ReturnFinanceRecordDto = {
   amount: number;
   status: string;
   date: string;
+  settlementRefundAdjustments: SettlementRefundAdjustmentReferenceDto[];
 };
 
 export type ReturnFinanceRecordsResponseDto = {

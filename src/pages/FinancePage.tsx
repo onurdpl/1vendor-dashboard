@@ -599,6 +599,13 @@ function getDebtImpactClass(event: VendorDebtHistoryEvent) {
     : 'finance-deduction-value';
 }
 
+function formatAdjustmentStatus(status: string) {
+  return status
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function VendorDebtHistorySection({
   history,
   loading,
@@ -1558,6 +1565,32 @@ export function FinancePage() {
                   ) : null}
                 </div>
               </div>
+
+              {selectedRecord.settlementRefundAdjustments?.length ? (
+                <div className="finance-detail-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Refund Adjustment</h4>
+                    <StatusBadge tone="warning">
+                      {formatAdjustmentStatus(selectedRecord.settlementRefundAdjustments[0].status)}
+                    </StatusBadge>
+                  </div>
+                  <div className="finance-detail-rows">
+                    {selectedRecord.settlementRefundAdjustments.map((adjustment) => (
+                      <MetadataGroup key={adjustment.id} title={adjustment.id}>
+                        <MetadataRow label="Status" value={formatAdjustmentStatus(adjustment.status)} />
+                        <MetadataRow
+                          label="Amount"
+                          value={<span className="finance-deduction-value">{formatMinorCurrency(adjustment.amountMinor, adjustment.currencyCode)}</span>}
+                        />
+                        <MetadataRow label="Reason" value={adjustment.reason} />
+                        <MetadataRow label="Linked settlement" value={adjustment.originalSettlementApprovalId ?? 'Not linked'} />
+                        <MetadataRow label="Linked commission invoice" value={adjustment.originalSettlementCommissionInvoiceId ?? 'Not linked'} />
+                        <MetadataRow label="Applied settlement" value={adjustment.appliedSettlementApprovalId ?? 'Not applied yet'} />
+                      </MetadataGroup>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">

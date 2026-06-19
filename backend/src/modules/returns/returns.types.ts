@@ -58,6 +58,22 @@ export type RefundedItemDto = {
   refundAmount: string;
 };
 
+export type ReturnSettlementAdjustmentDto = {
+  id: string;
+  status: 'pending' | 'applied' | 'blocked' | 'cancelled';
+  amountMinor: number;
+  currencyCode: string;
+  reason: string;
+  originalSettlementApprovalId: string | null;
+  originalSettlementApprovalLineId: string | null;
+  originalSettlementCommissionInvoiceId: string | null;
+  appliedSettlementApprovalId: string | null;
+  appliedSettlementApprovalLineId: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ReturnDetailDto = ReturnSummaryDto & {
   sourceShopifyInternalOrderId: string;
   originalVendorId: string;
@@ -65,6 +81,7 @@ export type ReturnDetailDto = ReturnSummaryDto & {
   requestUpdatedAt: string | null;
   returnProviderSnapshot: Record<string, unknown> | null;
   refundedItems: RefundedItemDto[];
+  settlementRefundAdjustments: ReturnSettlementAdjustmentDto[];
 };
 
 export type KargonomiReturnPreviewDto = {

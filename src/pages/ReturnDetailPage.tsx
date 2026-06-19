@@ -54,6 +54,20 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function formatMinorCurrency(valueMinor: number, currency = 'TRY') {
+  return new Intl.NumberFormat('tr-TR', {
+    style: 'currency',
+    currency,
+  }).format((Number(valueMinor) || 0) / 100);
+}
+
+function formatAdjustmentStatus(status: string) {
+  return status
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function getStatusLabel(returnRequest: ReturnDetail) {
   const normalized = returnRequest.status?.toLowerCase() ?? '';
   if (returnRequest.sourceType === 'shopify_return_request' && normalized === 'requested') {
@@ -1439,6 +1453,36 @@ export function ReturnDetailPage() {
             links={returnCrossLinks}
             audience={audience}
           />
+          {returnRequest.settlementRefundAdjustments?.length ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Settlement Adjustment</p>
+                  <h3>Refund Adjustment</h3>
+                </div>
+                <StatusBadge tone="warning">
+                  {formatAdjustmentStatus(returnRequest.settlementRefundAdjustments[0].status)}
+                </StatusBadge>
+              </div>
+              <div className="return-review-summary-list">
+                {returnRequest.settlementRefundAdjustments.map((adjustment) => (
+                  <div key={adjustment.id}>
+                    <span>{formatAdjustmentStatus(adjustment.status)}</span>
+                    <strong>{formatMinorCurrency(adjustment.amountMinor, adjustment.currencyCode)}</strong>
+                    <small>
+                      {adjustment.reason}
+                      {adjustment.originalSettlementApprovalId
+                        ? ` · Settlement ${adjustment.originalSettlementApprovalId}`
+                        : ''}
+                      {adjustment.originalSettlementCommissionInvoiceId
+                        ? ` · Invoice ${adjustment.originalSettlementCommissionInvoiceId}`
+                        : ''}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
           {relatedFinanceError ? (
             <SectionErrorRetry
               title="Finance records could not load"

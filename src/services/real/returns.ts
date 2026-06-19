@@ -1,5 +1,11 @@
 import { apiClient } from '../../lib/api-client';
-import type { DashboardReturnSummary, KargonomiReturnPreview, ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
+import type {
+  DashboardReturnSummary,
+  KargonomiReturnPreview,
+  ReturnDetail,
+  ReturnSummary,
+  SettlementRefundAdjustmentReference,
+} from '../../lib/api/contracts';
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
@@ -79,6 +85,7 @@ type ReturnSummaryDto = {
     quantity: number;
     refundAmount: string;
   }>;
+  settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
   createdAt: string;
   updatedAt: string;
 };
@@ -377,6 +384,7 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
         : 'Shopify webhook ingestion via backend',
     refundedItems,
     items: refundedItems,
+    settlementRefundAdjustments: response.settlementRefundAdjustments ?? [],
     timeline: [
       {
         label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',
