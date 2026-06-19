@@ -110,6 +110,20 @@ const processedRefund: ReturnDetail = {
   ],
 };
 
+const awaitingReviewReturn: ReturnDetail = {
+  ...pendingReturn,
+  id: 'RET-A-AWAITING-1071',
+  sourceShopifyOrderNumber: 1071,
+  status: 'Awaiting Review',
+  vendorReceivedAt: null,
+  vendorReviewedAt: null,
+  vendorDecision: null,
+  timeline: [
+    { label: 'Return requested', at: '2026-05-10T08:20:00Z' },
+    { label: 'Awaiting review', at: '2026-05-10T08:32:00Z' },
+  ],
+};
+
 const otherVendorReturn: ReturnDetail = {
   ...processedRefund,
   id: 'RET-B-REFUND-1002',
@@ -452,6 +466,17 @@ describe('ReturnsPage control center', () => {
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('İncele return for order #1001').length).toBeGreaterThan(0);
+  });
+
+  it('counts awaiting review returns as actionable review work', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(awaitingReviewReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === awaitingReviewReturn.id ? awaitingReviewReturn : processedRefund));
+
+    renderReturnsPage();
+
+    expect((await screen.findAllByText('Awaiting Review')).length).toBeGreaterThan(0);
+    const summary = screen.getByLabelText('Returns summary');
+    expect(within(summary).getByText('Needs action').closest('article')).toHaveTextContent('1');
   });
 
   it('resolves table item names from nested row product data without selecting the row', async () => {

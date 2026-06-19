@@ -1,4 +1,4 @@
-const RETURN_REVIEW_ATTENTION_STATUSES = ['requested', 'pending', 'in_review', 'in review'] as const;
+const RETURN_REVIEW_ATTENTION_STATUSES = ['requested', 'awaiting_review', 'awaiting review', 'pending', 'in_review', 'in review'] as const;
 
 function insensitiveEquals(value: string) {
   return {

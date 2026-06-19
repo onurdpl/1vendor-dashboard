@@ -51,6 +51,8 @@ describe('dashboard summary return review counts', () => {
   it('matches Returns page active-review statuses and excludes terminal statuses', () => {
     expect(isReturnReviewAttentionStatus('requested')).toBe(true);
     expect(isReturnReviewAttentionStatus('Requested')).toBe(true);
+    expect(isReturnReviewAttentionStatus('awaiting_review')).toBe(true);
+    expect(isReturnReviewAttentionStatus('Awaiting Review')).toBe(true);
     expect(isReturnReviewAttentionStatus('pending')).toBe(true);
     expect(isReturnReviewAttentionStatus('in_review')).toBe(true);
     expect(isReturnReviewAttentionStatus('in review')).toBe(true);
@@ -60,6 +62,5 @@ describe('dashboard summary return review counts', () => {
     expect(isReturnReviewAttentionStatus('processed')).toBe(false);
     expect(isReturnReviewAttentionStatus('closed')).toBe(false);
     expect(isReturnReviewAttentionStatus('cancelled')).toBe(false);
-    expect(isReturnReviewAttentionStatus('awaiting_review')).toBe(false);
   });
 });

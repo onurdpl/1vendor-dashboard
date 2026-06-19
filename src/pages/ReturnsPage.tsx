@@ -156,7 +156,7 @@ function isPendingReturn(item: ReturnSummary) {
 
 function needsAttention(item: ReturnSummary) {
   const normalized = item.status?.toLowerCase() ?? '';
-  return normalized === 'requested' || normalized === 'pending' || normalized === 'in review';
+  return normalized === 'requested' || normalized === 'awaiting_review' || normalized === 'awaiting review' || normalized === 'pending' || normalized === 'in review';
 }
 
 function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
