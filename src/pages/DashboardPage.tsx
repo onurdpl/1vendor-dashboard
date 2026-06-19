@@ -780,6 +780,22 @@ export function DashboardPage() {
     : staleFulfillmentGroups.length > 0
       ? `${staleFulfillmentGroups.length} stale fulfillment group${staleFulfillmentGroups.length === 1 ? '' : 's'} in recent activity.`
       : 'Shipment work waiting for action.';
+  const financeQueueCard = financeQueueValue === 'Unknown'
+    ? null
+    : {
+        label: 'Finance review queue',
+        value: financeQueueValue,
+        description: financeQueueDescription,
+        guidance: getDashboardWorkflowAction('Settlement pending review'),
+        tone: 'finance',
+        to: workflowRoutes.settlementReview,
+        action: 'Open finance',
+        metadata: {
+          scope: 'Operational finance review workload',
+          timeWindow: hasNormalizedFinanceReviewCount ? 'Current settlement-review rows' : 'Current finance snapshot',
+          generatedAt: 'Current command center load',
+        },
+      };
   const queueCards = [
     {
       label: fulfillmentQueueLabel,
@@ -791,6 +807,11 @@ export function DashboardPage() {
         ? workflowRoutes.staleFulfillment
         : workflowRoutes.awaitingShipment,
       action: 'Open orders',
+      metadata: {
+        scope: 'Operational workload groups',
+        timeWindow: 'Current operational state',
+        generatedAt: 'Current command center load',
+      },
     },
     {
       label: 'Returns queue',
@@ -800,16 +821,13 @@ export function DashboardPage() {
       tone: 'returns',
       to: workflowRoutes.pendingReturnReview,
       action: 'Open returns',
+      metadata: {
+        scope: 'Operational return/refund workload',
+        timeWindow: 'Current return queue',
+        generatedAt: 'Current command center load',
+      },
     },
-    {
-      label: 'Finance review queue',
-      value: financeQueueValue,
-      description: financeQueueDescription,
-      guidance: getDashboardWorkflowAction('Settlement pending review'),
-      tone: 'finance',
-      to: workflowRoutes.settlementReview,
-      action: 'Open finance',
-    },
+    ...(financeQueueCard ? [financeQueueCard] : []),
     {
       label: supportQueueLabel,
       value: supportQueueValue,
@@ -818,6 +836,11 @@ export function DashboardPage() {
       tone: 'support',
       to: workflowRoutes.openSupportIssues,
       action: 'Open support',
+      metadata: {
+        scope: 'Operational support workload',
+        timeWindow: 'Current support tickets and notifications',
+        generatedAt: 'Current command center load',
+      },
     },
     {
       label: 'Automation issue groups',
@@ -827,6 +850,11 @@ export function DashboardPage() {
       tone: 'automation',
       to: workflowRoutes.activeAutomationIssueGroups,
       action: 'Open automation',
+      metadata: {
+        scope: 'Operational workload groups',
+        timeWindow: 'Current unresolved automation signals',
+        generatedAt: 'Current command center load',
+      },
     },
   ];
 
@@ -907,7 +935,11 @@ export function DashboardPage() {
       <OperationalSection title="Operational queues" description="Live work queues before passive reporting.">
         <div className="dashboard-queue-card-grid">
           {queueCards.map((queue) => (
-            <article key={queue.label} className={`dashboard-queue-card dashboard-queue-${queue.tone}`}>
+            <article
+              key={queue.label}
+              className={`dashboard-queue-card dashboard-queue-${queue.tone}`}
+              title={`Scope: ${queue.metadata.scope}. Time window: ${queue.metadata.timeWindow}. Generated: ${queue.metadata.generatedAt}.`}
+            >
               <span>{queue.label}</span>
               <strong>{isDashboardDataLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
               <small>{queue.description}</small>
@@ -1167,7 +1199,10 @@ export function DashboardPage() {
                 </div>
               ) : dashboardView.diagnosticsSummary ? (
                 <div className="dashboard-status-metric-list dashboard-diagnostics-rows">
-                  <div className="dashboard-status-metric-row">
+                  <div
+                    className="dashboard-status-metric-row"
+                    title="Scope: System diagnostics. Time window: Current failed webhook records. Generated: Current command center load."
+                  >
                     <span>
                       <i className={`dashboard-status-dot ${getStatusDotTone(dashboardView.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success')}`} aria-hidden="true" />
                       Failed webhooks
@@ -1219,7 +1254,10 @@ export function DashboardPage() {
                     <span>Success rate 24h</span>
                     <strong>{formatRate(dashboardView.observabilitySummary.successRate24h)}</strong>
                   </div>
-                  <div className="dashboard-status-metric-row">
+                  <div
+                    className="dashboard-status-metric-row"
+                    title="Scope: System diagnostics. Time window: Webhook failures received in the last 24 hours. Generated: Current command center load."
+                  >
                     <span>Failed webhooks 24h</span>
                     <strong>{dashboardView.observabilitySummary.failedWebhooks24h}</strong>
                   </div>

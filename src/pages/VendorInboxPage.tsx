@@ -136,10 +136,34 @@ export function VendorInboxPage() {
       </header>
 
       <div className="communication-kpi-row">
-        <KPIStatCard label="Total updates" value={summary.total} detail="Current vendor" tone="info" />
-        <KPIStatCard label="Unread" value={summary.unread} detail="Support replies" tone={summary.unread ? 'attention' : 'success'} />
-        <KPIStatCard label="Action needed" value={summary.requiresAction} detail="Vendor workflow" tone={summary.requiresAction ? 'warning' : 'success'} />
-        <KPIStatCard label="Support" value={summary.support} detail="Open conversations" tone="neutral" />
+        <KPIStatCard
+          label="Total updates"
+          value={summary.total}
+          detail="Communication events"
+          tone="info"
+          metadata={{ scope: 'Communication events', timeWindow: 'Current vendor feed', generatedAt: 'Current inbox load' }}
+        />
+        <KPIStatCard
+          label="Unread"
+          value={summary.unread}
+          detail="Unread communication events"
+          tone={summary.unread ? 'attention' : 'success'}
+          metadata={{ scope: 'Communication events', timeWindow: 'Current vendor feed', generatedAt: 'Current inbox load' }}
+        />
+        <KPIStatCard
+          label="Action needed"
+          value={summary.requiresAction}
+          detail="Communication events requiring action"
+          tone={summary.requiresAction ? 'warning' : 'success'}
+          metadata={{ scope: 'Communication events', timeWindow: 'Current vendor feed', generatedAt: 'Current inbox load' }}
+        />
+        <KPIStatCard
+          label="Support"
+          value={summary.support}
+          detail="Support communication events"
+          tone="neutral"
+          metadata={{ scope: 'Communication events', timeWindow: 'Current vendor feed', generatedAt: 'Current inbox load' }}
+        />
       </div>
 
       <OperationalToolbar>

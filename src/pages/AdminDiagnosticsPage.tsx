@@ -415,12 +415,48 @@ export function AdminDiagnosticsPage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPIStatCard label="Processed" value={webhooksQuery.data.summary.processed} detail="Completed envelopes" tone="success" />
-        <KPIStatCard label="Failed" value={webhooksQuery.data.summary.failed} detail="Backend processing failed" tone="danger" />
-        <KPIStatCard label="Received / stuck" value={combinedCounts.stuck} detail="Not yet processed" tone="attention" />
-        <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Recovery blocked" tone="warning" />
-        <KPIStatCard label="Replayable" value={combinedCounts.replayable} detail="Safe idempotent retry" tone="info" />
-        <KPIStatCard label="Retry pressure" value={combinedCounts.retryPressure} detail={`${combinedCounts.deadLetterReady} dead-letter`} tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'} />
+        <KPIStatCard
+          label="Processed"
+          value={webhooksQuery.data.summary.processed}
+          detail="Completed envelopes"
+          tone="success"
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Failed"
+          value={webhooksQuery.data.summary.failed}
+          detail="Current failed webhook records"
+          tone="danger"
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Received / stuck"
+          value={combinedCounts.stuck}
+          detail="Not yet processed"
+          tone="attention"
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current stuck received records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Missing payload"
+          value={combinedCounts.missingPayload}
+          detail="Recovery blocked"
+          tone="warning"
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current diagnostics records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Replayable"
+          value={combinedCounts.replayable}
+          detail="Safe idempotent retry"
+          tone="info"
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Retry pressure"
+          value={combinedCounts.retryPressure}
+          detail={`${combinedCounts.deadLetterReady} dead-letter`}
+          tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'}
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current operational job state', generatedAt: 'Current diagnostics load' }}
+        />
       </div>
 
       <OperationalSection

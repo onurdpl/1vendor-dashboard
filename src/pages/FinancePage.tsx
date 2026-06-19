@@ -1153,7 +1153,12 @@ export function FinancePage() {
             icon: 'B',
             label: 'Settlement estimate',
             value: financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate),
-            detail: 'Operational preview',
+            detail: 'Vendor finance ledger estimate.',
+            metadata: {
+              scope: 'Vendor finance ledger',
+              timeWindow: 'All loaded ledger rows',
+              generatedAt: 'Current finance view load',
+            },
             tone: 'success',
           },
           {
@@ -1161,22 +1166,37 @@ export function FinancePage() {
             label: 'Vendor balance',
             value: financeValueOrUnknown(financeView.summary.vendorBalance),
             detail: isZeroCurrencyValue(financeView.summary.outstandingVendorDebt)
-              ? 'No open debt'
-              : `Debt open: ${financeValueOrUnknown(financeView.summary.outstandingVendorDebt)}`,
+              ? 'Outstanding vendor balance/debt.'
+              : `Outstanding vendor balance/debt. Debt open: ${financeValueOrUnknown(financeView.summary.outstandingVendorDebt)}`,
+            metadata: {
+              scope: 'Vendor balance ledger',
+              timeWindow: 'All balance events',
+              generatedAt: 'Current finance view load',
+            },
             tone: getBalanceTone(financeView.summary.vendorBalance),
           },
           {
             icon: 'P',
             label: 'Pending review',
             value: financeValueOrUnknown(financeView.summary.pendingPayouts ?? financeView.summary.heldBalance),
-            detail: `Includes ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} estimate rows`,
+            detail: `Settlement-review candidates awaiting action. ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} estimate rows.`,
+            metadata: {
+              scope: 'Vendor finance ledger',
+              timeWindow: 'All eligible settlement-review rows',
+              generatedAt: 'Current finance view load',
+            },
             tone: 'info',
           },
           {
             icon: 'R',
             label: 'Refund deductions',
             value: formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds),
-            detail: 'This period',
+            detail: 'Recorded refund deductions',
+            metadata: {
+              scope: 'Vendor finance ledger',
+              timeWindow: financeView.summary.refundsThisMonth ? 'Current period' : 'All recorded refunds',
+              generatedAt: 'Current finance view load',
+            },
             tone: 'attention',
           },
           {
@@ -1184,19 +1204,33 @@ export function FinancePage() {
             label: isVendorUser ? 'Settlement review' : 'Draft settlement payout review',
             value: getUpcomingPayoutLabel(financeView),
             detail: isVendorUser
-              ? `${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`
-              : getUpcomingPayoutDetail(financeView),
+              ? `Latest payout preparation state. ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review.`
+              : `Latest payout preparation state. ${getUpcomingPayoutDetail(financeView)}`,
+            metadata: {
+              scope: 'Vendor payout preparation',
+              timeWindow: 'Latest payout batch plus current eligible rows',
+              generatedAt: 'Current finance view load',
+            },
             tone: 'info',
           },
           {
             icon: '!',
             label: 'Needs review',
             value: financeKpis.failed + (financeView.payoutBatchSummary?.blockedRowCount ?? 0),
-            detail: 'Action required',
+            detail: 'Finance issues requiring operator attention.',
+            metadata: {
+              scope: 'Vendor finance review signals',
+              timeWindow: 'Loaded finance rows plus payout blockers',
+              generatedAt: 'Current finance view load',
+            },
             tone: 'danger',
           },
         ].map((kpi) => (
-          <article key={kpi.label} className={`finance-kpi-card op-tone-${kpi.tone}`}>
+          <article
+            key={kpi.label}
+            className={`finance-kpi-card op-tone-${kpi.tone}`}
+            title={`Scope: ${kpi.metadata.scope}. Time window: ${kpi.metadata.timeWindow}. Generated: ${kpi.metadata.generatedAt}.`}
+          >
             <span className="finance-kpi-icon" aria-hidden="true">{kpi.icon}</span>
             <div>
               <span>{kpi.label}</span>

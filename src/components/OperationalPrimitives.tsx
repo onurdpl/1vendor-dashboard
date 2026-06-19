@@ -51,14 +51,24 @@ export function KPIStatCard({
   value,
   detail,
   tone = 'neutral',
+  metadata,
 }: {
   label: string;
   value: ReactNode;
   detail?: ReactNode;
   tone?: Tone;
+  metadata?: {
+    scope: string;
+    timeWindow: string;
+    generatedAt: string;
+  };
 }) {
+  const metadataTitle = metadata
+    ? `Scope: ${metadata.scope}. Time window: ${metadata.timeWindow}. Generated: ${metadata.generatedAt}.`
+    : undefined;
+
   return (
-    <article className={`op-kpi ${toneClass(tone)}`}>
+    <article className={`op-kpi ${toneClass(tone)}`} title={metadataTitle}>
       <span>{label}</span>
       <strong>{value}</strong>
       {detail ? <small>{detail}</small> : null}

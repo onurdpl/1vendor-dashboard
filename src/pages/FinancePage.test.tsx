@@ -441,7 +441,14 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
-    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getByText('Recorded refund deductions')).toBeInTheDocument();
+    expect(screen.queryByText('This period')).not.toBeInTheDocument();
+    const settlementEstimateLabels = screen.getAllByText('Settlement estimate');
+    expect(settlementEstimateLabels.length).toBeGreaterThan(0);
+    expect(settlementEstimateLabels[0].closest('.finance-kpi-card')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Scope: Vendor finance ledger. Time window: All loaded ledger rows.'),
+    );
     expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
   });
 
@@ -486,7 +493,7 @@ describe('FinancePage control center', () => {
     expect((await screen.findAllByText('-$300.00')).length).toBeGreaterThan(0);
     const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
     expect(card).toHaveClass('op-tone-danger');
-    expect(screen.getByText('Debt open: $300.00')).toBeInTheDocument();
+    expect(screen.getByText('Outstanding vendor balance/debt. Debt open: $300.00')).toBeInTheDocument();
   });
 
   it('renders vendor debt history summary and event rows', async () => {

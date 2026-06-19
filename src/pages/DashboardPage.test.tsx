@@ -566,8 +566,56 @@ describe('DashboardPage command center', () => {
     expect(within(supportLabel.closest('article') as HTMLElement).getByText('5')).toBeInTheDocument();
     const financeLabel = screen.getByText('Finance review queue');
     expect(within(financeLabel.closest('article') as HTMLElement).getByText('3')).toBeInTheDocument();
+    expect(financeLabel.closest('article')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Scope: Operational finance review workload. Time window: Current settlement-review rows.'),
+    );
     const automationLabel = screen.getAllByText('Automation issue groups')[0];
     expect(within(automationLabel.closest('article') as HTMLElement).getByText('4')).toBeInTheDocument();
+  });
+
+  it('hides finance review queue when real review count is unavailable', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      normalizedOperationalCounts: {
+        openSupportIssueCount: 1,
+        groupedAutomationIssueCount: 2,
+        financeReviewItemCount: null,
+        staleFulfillmentGroupCount: 1,
+        metadata: {
+          openSupportIssueCount: {
+            label: 'Open support issues',
+            source: 'support.tickets.open_grouped_by_context',
+            rawCount: 1,
+            groupedCount: 1,
+          },
+          groupedAutomationIssueCount: {
+            label: 'Automation issue groups',
+            source: 'automation.alerts_and_operational_signals.grouped',
+            rawCount: 2,
+            groupedCount: 2,
+          },
+          financeReviewItemCount: {
+            label: 'Finance review items',
+            source: 'finance.records.pending_failed_or_held',
+            rawCount: null,
+            groupedCount: null,
+          },
+          staleFulfillmentGroupCount: {
+            label: 'Stale fulfillment groups',
+            source: 'operational_signals.fulfillment_stale_grouped_by_allocation',
+            rawCount: 1,
+            groupedCount: 1,
+          },
+        },
+      },
+    });
+
+    renderDashboardPage();
+
+    await screen.findByText('Operational queues');
+    expect(screen.queryByText('Finance review queue')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
 
   it('renders accurate primary action counts without sampled badge', async () => {
