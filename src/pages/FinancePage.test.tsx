@@ -9,7 +9,6 @@ import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const getVendorDebtHistoryMock = vi.fn();
-const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -21,7 +20,6 @@ vi.mock('../features/finance/api', async () => {
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
     getVendorDebtHistory: (...args: unknown[]) => getVendorDebtHistoryMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
-    updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
 });
 
@@ -410,7 +408,6 @@ describe('FinancePage control center', () => {
     getFinanceDashboardMock.mockReset();
     getVendorDebtHistoryMock.mockReset();
     getVendorDebtHistoryMock.mockResolvedValue(emptyVendorDebtHistory);
-    updateVendorFinancialProfileMock.mockReset();
     preparePayoutBatchMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -859,15 +856,24 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
   });
 
-  it('shows editable vendor profile controls once for admins', async () => {
+  it('shows read-only finance policy context without duplicate edit controls', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
     renderFinancePage();
 
-    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
     expect(screen.getByText('Demo Vendor A marketplace terms')).toBeInTheDocument();
-    expect(within(profilePanel).getAllByLabelText(/commission %/i)).toHaveLength(1);
-    expect(screen.getByRole('button', { name: /save vendor profile/i })).toBeInTheDocument();
+    expect(await screen.findByText('Finance policy is edited from Vendor Profile. New payout estimates use the saved policy snapshot.')).toBeInTheDocument();
+    expect(screen.getByText('Commission VAT')).toBeInTheDocument();
+    expect(screen.getByText('Shipping deduction mode')).toBeInTheDocument();
+    expect(screen.getByText('Read-only finance policy')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Vendor finance profile settings')).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /commission %/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /commission VAT %/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /shipping mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /fixed shipping fee/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /settlement delay days/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /deduct shipping after fulfillment/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
   });
 
   it('shows admin payout preparation controls and prepares a draft batch', async () => {
@@ -892,8 +898,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Draft payout review' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Draft settlement payout review' })).toBeInTheDocument();
     expect(screen.getAllByText('Rows pending review').length).toBeGreaterThan(0);
+    expect(screen.getByText('Estimated payable before debt')).toBeInTheDocument();
+    expect(screen.getByText('Net after debt preview')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /prepare draft review/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /prepare draft review/i }));
 
@@ -918,11 +926,12 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
-    expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
+    expect(await screen.findByText('Read-only finance policy')).toBeInTheDocument();
     expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
     expect(screen.getByText('Latest review status')).toBeInTheDocument();
     expect(screen.queryByText('Latest review artifact')).not.toBeInTheDocument();
     expect(screen.queryByText('Draft payout review')).not.toBeInTheDocument();
+    expect(screen.queryByText('Draft settlement payout review')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
@@ -1026,242 +1035,4 @@ describe('FinancePage control center', () => {
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
 
-  it('refetches finance data after saving the vendor profile', async () => {
-    updateVendorFinancialProfileMock.mockResolvedValue({
-      ...financeDashboard.profile,
-      commissionPercent: '15.00',
-    });
-    getFinanceDashboardMock
-      .mockResolvedValueOnce(financeDashboard)
-      .mockResolvedValueOnce({
-        ...financeDashboard,
-        summary: {
-          ...financeDashboard.summary,
-          platformFee: '$491.25',
-          payoutEstimate: '$2,783.75',
-        },
-        profile: {
-          ...financeDashboard.profile!,
-          commissionPercent: '15.00',
-        },
-        transactions: [
-          financeDashboard.transactions[0],
-          {
-            ...financeDashboard.transactions[1],
-            payoutCalculation: {
-              ...financeDashboard.transactions[1].payoutCalculation!,
-              commission: '$63.75',
-              estimatedPayout: '-$488.75',
-            },
-          },
-          financeDashboard.transactions[2],
-        ],
-      });
-
-    renderFinancePage();
-
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
-    expect((await screen.findAllByText('-$425.00')).length).toBeGreaterThan(0);
-    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
-    const commissionInput = within(profilePanel).getByLabelText(/commission %/i);
-    await userEvent.clear(commissionInput);
-    await userEvent.type(commissionInput, '15');
-    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
-
-    await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
-    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('15.00%')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('-$488.75')).length).toBeGreaterThan(0);
-  });
-
-  it('refreshes selected invoice payout detail after saving commission and VAT profile changes', async () => {
-    updateVendorFinancialProfileMock.mockResolvedValue({
-      ...financeDashboard.profile,
-      commissionPercent: '15.00',
-      commissionVatPercent: '18.00',
-      deductShippingEnabled: true,
-      shippingMode: 'external_provider',
-      fixedShippingFee: '88.00',
-      source: 'configured',
-    });
-    getFinanceDashboardMock
-      .mockResolvedValueOnce(financeDashboard)
-      .mockResolvedValueOnce({
-        ...financeDashboard,
-        summary: {
-          ...financeDashboard.summary,
-          platformFee: '$509.85',
-          commissionVat: '$91.77',
-          shippingDeductions: '$0.00',
-          payoutEstimate: '$2,797.38',
-        },
-        profile: {
-          ...financeDashboard.profile!,
-          commissionPercent: '15.00',
-          commissionVatPercent: '18.00',
-          deductShippingEnabled: true,
-          shippingMode: 'external_provider',
-          fixedShippingFee: '88.00',
-          source: 'configured',
-        },
-        transactions: [
-          {
-            ...financeDashboard.transactions[0],
-            payoutCalculation: {
-              ...financeDashboard.transactions[0].payoutCalculation!,
-              commission: '$509.85',
-              commissionVat: '$91.77',
-              shippingDeduction: '$0.00',
-              estimatedPayout: '$2,797.38',
-              shippingApplied: false,
-              shippingMode: 'external_provider',
-            },
-          },
-          financeDashboard.transactions[1],
-          financeDashboard.transactions[2],
-        ],
-      });
-
-    renderFinancePage();
-
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
-    expect((await screen.findAllByText((content) => content.includes('339.90'))).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('$0.00')).length).toBeGreaterThan(0);
-
-    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
-    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '15');
-    await userEvent.clear(within(profilePanel).getByLabelText(/commission VAT %/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/commission VAT %/i), '18');
-    await userEvent.selectOptions(within(profilePanel).getByLabelText(/shipping mode/i), 'external_provider');
-    await userEvent.clear(within(profilePanel).getByLabelText(/fixed shipping fee/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/fixed shipping fee/i), '88');
-    await userEvent.click(within(profilePanel).getByLabelText(/deduct shipping after fulfillment/i));
-    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
-
-    await waitFor(() =>
-      expect(updateVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', {
-        commissionPercent: 15,
-        commissionVatPercent: 18,
-        deductShippingEnabled: true,
-        shippingMode: 'external_provider',
-        fixedShippingFee: 88,
-        settlementDelayDays: 21,
-      }),
-    );
-    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('15.00%')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText((content) => content.includes('509.85'))).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText((content) => content.includes('91.77'))).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('$2,797.38')).length).toBeGreaterThan(0);
-  });
-
-  it('sends edited form values when changing a persisted profile from 15/18 to 12/20', async () => {
-    const configuredDashboard: FinanceDashboard = {
-      ...financeDashboard,
-      summary: {
-        ...financeDashboard.summary,
-        platformFee: '$509.85',
-        commissionVat: '$91.77',
-        payoutEstimate: '$2,797.38',
-      },
-      profile: {
-        ...financeDashboard.profile!,
-        commissionPercent: '15.00',
-        commissionVatPercent: '18.00',
-        deductShippingEnabled: true,
-        shippingMode: 'external_provider',
-        fixedShippingFee: '88.00',
-        source: 'configured',
-      },
-      transactions: [
-        {
-          ...financeDashboard.transactions[0],
-          payoutCalculation: {
-            ...financeDashboard.transactions[0].payoutCalculation!,
-            commission: '$509.85',
-            commissionVat: '$91.77',
-            estimatedPayout: '$2,797.38',
-            shippingMode: 'external_provider',
-          },
-        },
-        financeDashboard.transactions[1],
-        financeDashboard.transactions[2],
-      ],
-    };
-    updateVendorFinancialProfileMock.mockResolvedValue({
-      ...configuredDashboard.profile!,
-      commissionPercent: '12.00',
-      commissionVatPercent: '20.00',
-    });
-    getFinanceDashboardMock
-      .mockResolvedValueOnce(configuredDashboard)
-      .mockResolvedValueOnce({
-        ...configuredDashboard,
-        summary: {
-          ...configuredDashboard.summary,
-          platformFee: '$407.88',
-          commissionVat: '$81.58',
-          payoutEstimate: '$2,909.54',
-        },
-        profile: {
-          ...configuredDashboard.profile!,
-          commissionPercent: '12.00',
-          commissionVatPercent: '20.00',
-        },
-        transactions: [
-          {
-            ...configuredDashboard.transactions[0],
-            payoutCalculation: {
-              ...configuredDashboard.transactions[0].payoutCalculation!,
-              commission: '$407.88',
-              commissionVat: '$81.58',
-              estimatedPayout: '$2,909.54',
-            },
-          },
-          configuredDashboard.transactions[1],
-          configuredDashboard.transactions[2],
-        ],
-      });
-
-    renderFinancePage();
-
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
-    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
-    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '12');
-    await userEvent.clear(within(profilePanel).getByLabelText(/commission VAT %/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/commission VAT %/i), '20');
-    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
-
-    await waitFor(() =>
-      expect(updateVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', {
-        commissionPercent: 12,
-        commissionVatPercent: 20,
-        deductShippingEnabled: true,
-        shippingMode: 'external_provider',
-        fixedShippingFee: 88,
-        settlementDelayDays: 21,
-      }),
-    );
-    expect((await screen.findAllByText('12.00%')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText((content) => content.includes('407.88'))).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText((content) => content.includes('81.58'))).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('$2,909.54')).length).toBeGreaterThan(0);
-  });
-
-  it('surfaces vendor profile save failures', async () => {
-    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
-    updateVendorFinancialProfileMock.mockRejectedValue(new Error('Profile save failed'));
-
-    renderFinancePage();
-
-    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
-    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
-    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '12');
-    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
-
-    expect(await screen.findByText('Profile save failed')).toBeInTheDocument();
-  });
 });

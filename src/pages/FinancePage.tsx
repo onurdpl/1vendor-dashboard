@@ -27,7 +27,6 @@ import {
   getFinanceDashboard,
   getVendorDebtHistory,
   preparePayoutBatch,
-  updateVendorFinancialProfile,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
 import type { FinanceTransaction, OperationsRecommendation, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
@@ -43,15 +42,6 @@ import {
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatCurrency, formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
-
-type VendorProfileFormInput = {
-  commissionPercent: number;
-  commissionVatPercent: number;
-  deductShippingEnabled: boolean;
-  shippingMode: 'disabled' | 'fixed' | 'external_provider';
-  fixedShippingFee: number | null;
-  settlementDelayDays: number;
-};
 
 type FinanceDeepLinkTarget = {
   type: 'ledger' | 'refund' | 'order' | 'shopifyOrder';
@@ -766,12 +756,6 @@ export function FinancePage() {
   const [selectedDebtEventId, setSelectedDebtEventId] = useState<string | null>(null);
   const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
-  const [commissionPercent, setCommissionPercent] = useState('10.00');
-  const [commissionVatPercent, setCommissionVatPercent] = useState('0.00');
-  const [deductShippingEnabled, setDeductShippingEnabled] = useState(false);
-  const [shippingMode, setShippingMode] = useState<'disabled' | 'fixed' | 'external_provider'>('disabled');
-  const [fixedShippingFee, setFixedShippingFee] = useState('');
-  const [settlementDelayDays, setSettlementDelayDays] = useState('21');
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
@@ -804,19 +788,6 @@ export function FinancePage() {
     setCategoryFilter('all');
   }
 
-  const saveProfileMutation = useMutationAction(
-    (input: VendorProfileFormInput) =>
-      updateVendorFinancialProfile(currentVendor.vendorId, input),
-    {
-      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
-      onSuccess: async () => {
-        await refetch();
-        showFeedback('Vendor financial profile saved.', 'success');
-      },
-      onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Financial profile could not be saved.', 'error'),
-    },
-  );
   const preparePayoutBatchMutation = useMutationAction(
     () => preparePayoutBatch(currentVendor.vendorId),
     {
@@ -826,7 +797,7 @@ export function FinancePage() {
       ],
       onSuccess: async (batch) => {
         await Promise.all([refetch(), refetchVendorDebtHistory()]);
-        showFeedback(`Draft payout review ${batch.id} prepared.`, 'success');
+        showFeedback(`Draft settlement payout review ${batch.id} prepared.`, 'success');
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Draft review could not be prepared.', 'error'),
@@ -860,40 +831,6 @@ export function FinancePage() {
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
     },
   );
-  useEffect(() => {
-    if (!finance?.profile) {
-      return;
-    }
-
-    setCommissionPercent(finance.profile.commissionPercent);
-    setCommissionVatPercent(finance.profile.commissionVatPercent);
-    setDeductShippingEnabled(finance.profile.deductShippingEnabled);
-    setShippingMode(finance.profile.shippingMode);
-    setFixedShippingFee(finance.profile.fixedShippingFee ?? '');
-    setSettlementDelayDays(String(finance.profile.settlementDelayDays ?? 21));
-  }, [finance?.profile]);
-
-  async function handleSaveVendorProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const nextShippingMode = String(formData.get('shippingMode') ?? 'disabled') as VendorProfileFormInput['shippingMode'];
-
-    try {
-      await saveProfileMutation.mutateAsync({
-        commissionPercent: Number(formData.get('commissionPercent') || 0),
-        commissionVatPercent: Number(formData.get('commissionVatPercent') || 0),
-        deductShippingEnabled: formData.has('deductShippingEnabled'),
-        shippingMode: nextShippingMode,
-        fixedShippingFee: String(formData.get('fixedShippingFee') ?? '').trim()
-          ? Number(formData.get('fixedShippingFee'))
-          : null,
-        settlementDelayDays: Number(formData.get('settlementDelayDays') || 21),
-      });
-    } catch {
-      // The mutation onError handler renders the compact save failure message.
-    }
-  }
-
   async function handleAttachShippingCost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedRecord) {
@@ -1189,7 +1126,7 @@ export function FinancePage() {
           },
           {
             icon: 'D',
-            label: isVendorUser ? 'Settlement review' : 'Draft payout review',
+            label: isVendorUser ? 'Settlement review' : 'Draft settlement payout review',
             value: getUpcomingPayoutLabel(financeView),
             detail: isVendorUser
               ? `${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`
@@ -1369,91 +1306,25 @@ export function FinancePage() {
               <div>
                 <p className="eyebrow">Vendor profile</p>
                 <h3>{currentVendor.vendorName} marketplace terms</h3>
-                <p className="page-description">Applies to new payout estimates from now on. Past activity keeps its original rates.</p>
+                <p className="page-description">
+                  Finance policy is edited from Vendor Profile. New payout estimates use the saved policy snapshot.
+                </p>
               </div>
               <div className="finance-profile-summary">
                 <MetadataRow label="Commission" value={`${financeView.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Tax" value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Shipping" value={financeView.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
+                <MetadataRow label="Commission VAT" value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Shipping deduction mode" value={financeView.profile?.shippingMode ? safeStatusLabel(financeView.profile.shippingMode) : 'Disabled'} />
+                <MetadataRow label="Deduct shipping after fulfillment" value={financeView.profile?.deductShippingEnabled ? 'Yes' : 'No'} />
+                <MetadataRow label="Fixed shipping fee" value={financeView.profile?.fixedShippingFee ?? 'Not configured'} />
                 <MetadataRow label="Settlement delay" value={`${financeView.profile?.settlementDelayDays ?? 21} days`} />
               </div>
-              {isAdmin ? (
-                <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
-                  <div className="op-form-grid">
-                    <label>
-                      <span>Commission %</span>
-                      <input
-                        name="commissionPercent"
-                        value={commissionPercent}
-                        onChange={(event) => setCommissionPercent(event.target.value)}
-                        inputMode="decimal"
-                      />
-                    </label>
-                    <label>
-                      <span>Commission VAT %</span>
-                      <input
-                        name="commissionVatPercent"
-                        value={commissionVatPercent}
-                        onChange={(event) => setCommissionVatPercent(event.target.value)}
-                        inputMode="decimal"
-                      />
-                    </label>
-                    <label>
-                      <span>Shipping mode</span>
-                      <select name="shippingMode" value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
-                        <option value="disabled">Disabled</option>
-                        <option value="fixed">Fixed</option>
-                        <option value="external_provider">External provider</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Fixed shipping fee</span>
-                      <input
-                        name="fixedShippingFee"
-                        value={fixedShippingFee}
-                        onChange={(event) => setFixedShippingFee(event.target.value)}
-                        inputMode="decimal"
-                      />
-                    </label>
-                    <label>
-                      <span>Settlement delay days</span>
-                      <input
-                        name="settlementDelayDays"
-                        value={settlementDelayDays}
-                        onChange={(event) => setSettlementDelayDays(event.target.value)}
-                        inputMode="numeric"
-                        min="0"
-                        max="365"
-                        type="number"
-                      />
-                    </label>
-                  </div>
-                  <label className="op-checkbox-row">
-                    <input
-                      name="deductShippingEnabled"
-                      type="checkbox"
-                      checked={deductShippingEnabled}
-                      onChange={(event) => setDeductShippingEnabled(event.target.checked)}
-                    />
-                    <span>Deduct shipping after fulfillment</span>
-                  </label>
-                  <button
-                    type="submit"
-                    className="button button-primary button-compact"
-                    disabled={saveProfileMutation.isPending}
-                  >
-                    {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
-                  </button>
-                </form>
-              ) : (
-                <StatusBadge tone="neutral">Read-only vendor profile</StatusBadge>
-              )}
+              <StatusBadge tone="neutral">Read-only finance policy</StatusBadge>
             </section>
 
             <section className="finance-footer-card">
               <div>
                 <p className="eyebrow">Settlement review</p>
-                <h3>{isVendorUser ? 'Settlement review' : 'Draft payout review'}</h3>
+                <h3>{isVendorUser ? 'Settlement review' : 'Draft settlement payout review'}</h3>
                 <p className="page-description">
                   {isVendorUser
                     ? 'A read-only view of estimate rows currently eligible for settlement review.'
@@ -1462,7 +1333,7 @@ export function FinancePage() {
               </div>
               <div className="finance-profile-summary">
                 <MetadataRow label="Rows pending review" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
-                <MetadataRow label="Estimated net" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
+                <MetadataRow label="Estimated payable before debt" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
                 <MetadataRow
                   label="Outstanding vendor debt"
                   value={<span className={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount) ? undefined : 'finance-deduction-value'}>
@@ -1471,7 +1342,7 @@ export function FinancePage() {
                 />
                 <MetadataRow label="Debt offset preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
                 <MetadataRow
-                  label="Net after debt"
+                  label="Net after debt preview"
                   value={<span className={getBalanceTone(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt) === 'danger' ? 'finance-deduction-value' : 'finance-payout-value'}>
                     {financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)}
                   </span>}
