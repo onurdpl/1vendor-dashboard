@@ -1,4 +1,5 @@
 import {
+  Prisma,
   SettlementCommissionInvoiceProvider,
   SettlementCommissionInvoiceStatus,
 } from '@prisma/client';
@@ -11,6 +12,10 @@ import {
   type LogoIsbasiAuthenticatedSession,
   type LogoIsbasiRawResult,
 } from '../logo-isbasi/logo-isbasi.client.js';
+import {
+  applySettlementCommissionInvoiceReconciliation,
+  type SettlementCommissionInvoiceRecordDto,
+} from './settlement-commission-invoice-record.service.js';
 
 const MAX_PAGES = 5;
 const PAGE_SIZE = 100;
@@ -126,6 +131,21 @@ export type LogoOutgoingInvoiceSyncPreviewOptions = {
   env: AppEnv;
   client?: LogoOutgoingInvoiceClient;
   now?: Date;
+};
+
+export type PersistSettlementLogoSalesInvoiceSyncOptions = LogoOutgoingInvoiceSyncPreviewOptions & {
+  syncedBy?: string | null;
+};
+
+export type PersistSettlementLogoSalesInvoiceSyncResult = {
+  ok: boolean;
+  writesPerformed: boolean;
+  settlementCommissionInvoiceId: string;
+  status: 'synced' | 'blocked';
+  blockers: string[];
+  warnings: string[];
+  record: SettlementCommissionInvoiceRecordDto | null;
+  preview: LogoOutgoingInvoiceSyncPreviewResult | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -779,5 +799,176 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
     }),
     providerFieldsObserved: safeProviderFields(matched ? [matchedRecord!] : pageResult.rows),
     mappedFields: mapFields(matchedRecord, recordDto!),
+  };
+}
+
+function buildBlockedSyncResult(input: {
+  settlementCommissionInvoiceId: string;
+  blockers: string[];
+  warnings?: string[];
+  preview?: LogoOutgoingInvoiceSyncPreviewResult | null;
+}): PersistSettlementLogoSalesInvoiceSyncResult {
+  return {
+    ok: false,
+    writesPerformed: false,
+    settlementCommissionInvoiceId: input.settlementCommissionInvoiceId,
+    status: 'blocked',
+    blockers: Array.from(new Set(input.blockers)),
+    warnings: Array.from(new Set(input.warnings ?? [])),
+    record: null,
+    preview: input.preview ?? null,
+  };
+}
+
+function codeToString(value: number | null | undefined) {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function findMatchedBy(preview: LogoOutgoingInvoiceSyncPreviewResult) {
+  const providerInvoiceId = normalizeComparable(preview.record?.providerInvoiceId);
+  const providerUuid = normalizeComparable(preview.record?.providerUuid);
+  const invoice = preview.matchedInvoice;
+  if (
+    providerInvoiceId &&
+    [
+      invoice?.id,
+      invoice?.invoiceId,
+      invoice?.salesInvoiceId,
+    ].some((value) => normalizeComparable(value) === providerInvoiceId)
+  ) {
+    return 'providerInvoiceId';
+  }
+  if (
+    providerUuid &&
+    [
+      invoice?.uuid,
+      invoice?.uuId,
+    ].some((value) => normalizeComparable(value) === providerUuid)
+  ) {
+    return 'providerUuid';
+  }
+  return preview.mappedFields.providerInvoiceId ? 'providerInvoiceId' : 'providerUuid';
+}
+
+function buildSyncEvidence(input: {
+  preview: LogoOutgoingInvoiceSyncPreviewResult;
+  syncedAt: Date;
+}): Prisma.InputJsonObject {
+  const mapped = input.preview.mappedFields;
+  return {
+    source: 'LOGO_SALES_INVOICE_LIST',
+    sourceEndpoint: '/api/v1.0/invoices/invoices',
+    reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+    matched: input.preview.search.matched,
+    ambiguity: input.preview.search.ambiguity,
+    matchedBy: findMatchedBy(input.preview),
+    matchedInvoiceId: mapped.providerInvoiceId,
+    matchedInvoiceNumber: mapped.invoiceNoCandidate,
+    matchedInvoiceDate: mapped.invoiceDate,
+    matchedInvoiceTotalMinor: mapped.invoiceTotalMinor,
+    matchedInvoiceCurrency: mapped.invoiceCurrency,
+    providerUuid: mapped.providerUuid,
+    providerEttn: mapped.providerEttn,
+    gibStatus: mapped.gibStatus,
+    gibStatusCode: codeToString(mapped.gibStatusCode),
+    documentStatus: mapped.documentStatus,
+    documentStatusCode: codeToString(mapped.documentStatusCode),
+    documentType: mapped.documentType,
+    invoiceNumberSource: mapped.invoiceNumberSource,
+    search: {
+      dateStart: input.preview.search.dateStart,
+      dateEnd: input.preview.search.dateEnd,
+      pagesChecked: input.preview.search.pagesChecked,
+      totalProviderCount: input.preview.search.totalProviderCount,
+    },
+    syncedAt: input.syncedAt.toISOString(),
+  };
+}
+
+export async function persistSettlementLogoSalesInvoiceSync(
+  settlementCommissionInvoiceId: string,
+  options: PersistSettlementLogoSalesInvoiceSyncOptions,
+): Promise<PersistSettlementLogoSalesInvoiceSyncResult> {
+  const preview = await previewSettlementLogoOutgoingInvoiceSync(settlementCommissionInvoiceId, options);
+
+  if (!preview.ok || preview.blockers.length) {
+    return buildBlockedSyncResult({
+      settlementCommissionInvoiceId,
+      blockers: preview.blockers.length ? preview.blockers : ['Logo sales invoice sync preview did not pass.'],
+      warnings: preview.warnings,
+      preview,
+    });
+  }
+
+  if (preview.search.ambiguity) {
+    return buildBlockedSyncResult({
+      settlementCommissionInvoiceId,
+      blockers: ['Logo sales invoice sync cannot be persisted because multiple Logo sales invoices matched this record.'],
+      warnings: preview.warnings,
+      preview,
+    });
+  }
+
+  if (!preview.search.matched) {
+    return buildBlockedSyncResult({
+      settlementCommissionInvoiceId,
+      blockers: ['Logo sales invoice sync cannot be persisted because no matching Logo sales invoice was found.'],
+      warnings: preview.warnings,
+      preview,
+    });
+  }
+
+  const existingInvoiceNo = readString(preview.record?.invoiceNo);
+  const incomingInvoiceNo = readString(preview.mappedFields.invoiceNoCandidate);
+  if (existingInvoiceNo && incomingInvoiceNo && existingInvoiceNo !== incomingInvoiceNo) {
+    return buildBlockedSyncResult({
+      settlementCommissionInvoiceId,
+      blockers: ['Existing invoiceNo differs from the Logo sales invoice match; sync is blocked to prevent overwrite.'],
+      warnings: preview.warnings,
+      preview,
+    });
+  }
+
+  const existingProviderInvoiceId = normalizeComparable(preview.record?.providerInvoiceId);
+  const incomingProviderInvoiceId = normalizeComparable(preview.mappedFields.providerInvoiceId);
+  if (existingProviderInvoiceId && incomingProviderInvoiceId && existingProviderInvoiceId !== incomingProviderInvoiceId) {
+    return buildBlockedSyncResult({
+      settlementCommissionInvoiceId,
+      blockers: ['Existing providerInvoiceId differs from the Logo sales invoice match; sync is blocked to prevent wrong invoice linkage.'],
+      warnings: preview.warnings,
+      preview,
+    });
+  }
+
+  const syncedAt = options.now ?? new Date();
+  const record = await applySettlementCommissionInvoiceReconciliation({
+    settlementCommissionInvoiceId,
+    reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+    reconciliationEvidenceJson: buildSyncEvidence({ preview, syncedAt }),
+    providerInvoiceId: preview.mappedFields.providerInvoiceId,
+    providerUuid: preview.mappedFields.providerUuid ?? preview.record?.providerUuid ?? null,
+    providerEttn: preview.mappedFields.providerEttn,
+    invoiceNo: preview.mappedFields.invoiceNoCandidate,
+    invoiceDate: preview.mappedFields.invoiceDate,
+    invoiceTotalMinor: preview.mappedFields.invoiceTotalMinor,
+    invoiceCurrency: preview.mappedFields.invoiceCurrency,
+    gibStatus: preview.mappedFields.gibStatus,
+    gibStatusCode: codeToString(preview.mappedFields.gibStatusCode),
+    documentStatus: preview.mappedFields.documentStatus,
+    documentStatusCode: codeToString(preview.mappedFields.documentStatusCode),
+    documentType: preview.mappedFields.documentType,
+    lastProviderSyncedAt: syncedAt,
+    reconciledBy: options.syncedBy ?? 'system',
+  });
+
+  return {
+    ok: true,
+    writesPerformed: true,
+    settlementCommissionInvoiceId,
+    status: 'synced',
+    blockers: [],
+    warnings: preview.warnings,
+    record,
+    preview,
   };
 }

@@ -38,7 +38,10 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
 } from './settlement-commission-invoice-record.service.js';
 import { executeSettlementLogoCommissionInvoiceCreate } from './settlement-logo-commission-invoice-create.service.js';
-import { previewSettlementLogoOutgoingInvoiceSync } from './settlement-logo-outgoing-invoice-sync-preview.service.js';
+import {
+  persistSettlementLogoSalesInvoiceSync,
+  previewSettlementLogoOutgoingInvoiceSync,
+} from './settlement-logo-outgoing-invoice-sync-preview.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -627,6 +630,40 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       const result = await previewSettlementLogoOutgoingInvoiceSync(id, { env });
       if (!result.ok && result.blockers.length) {
         return reply.code(400).send(result);
+      }
+      return result;
+    },
+  );
+
+  app.post(
+    '/admin/finance/commission-invoices/:id/logo-isbasi/sales-invoice-sync',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      const body = isRecord(request.body) ? request.body : {};
+      if (body.confirmLogoSalesInvoiceSync !== true) {
+        return reply.code(400).send({
+          ok: false,
+          writesPerformed: false,
+          settlementCommissionInvoiceId: id,
+          status: 'blocked',
+          blockers: ['Logo sales invoice sync confirmation is required.'],
+          warnings: [],
+          record: null,
+          preview: null,
+        });
+      }
+
+      const syncedBy = request.authUser.email ?? request.authUser.id ?? 'admin';
+      const result = await persistSettlementLogoSalesInvoiceSync(id, { env, syncedBy });
+      if (!result.ok) {
+        return reply.code(409).send(result);
       }
       return result;
     },

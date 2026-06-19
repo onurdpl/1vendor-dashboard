@@ -20,6 +20,7 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
+  persistLogoSalesInvoiceSync,
   persistSettlementLogoCommissionInvoiceRequestSnapshot,
   previewLogoOutgoingInvoiceSync,
   previewSettlementApproval,
@@ -49,6 +50,7 @@ type ActionName =
   | 'invoiceRecords'
   | 'invoiceDiagnostics'
   | 'outgoingInvoiceSyncPreview'
+  | 'salesInvoiceSync'
   | 'logoCreate';
 
 type WorkflowStepStatus = 'Waiting' | 'Ready' | 'Completed' | 'Blocked' | 'Warning';
@@ -113,13 +115,29 @@ function getProviderReference(record: SettlementCommissionInvoiceRecord | null |
 }
 
 function hasReconciledInvoiceFacts(record: SettlementCommissionInvoiceRecord | null | undefined) {
-  const evidence = record?.reconciliationEvidence;
+  const facts = getInvoiceFacts(record);
   return Boolean(
-    evidence?.invoiceNo ||
-    evidence?.invoiceDate ||
-    evidence?.invoiceTotalMinor !== null && evidence?.invoiceTotalMinor !== undefined ||
-    evidence?.invoiceCurrency,
+    facts.invoiceNo ||
+    facts.invoiceDate ||
+    facts.invoiceTotalMinor !== null && facts.invoiceTotalMinor !== undefined ||
+    facts.invoiceCurrency,
   );
+}
+
+function getInvoiceFacts(record: SettlementCommissionInvoiceRecord | null | undefined) {
+  const evidence = record?.reconciliationEvidence;
+  return {
+    invoiceNo: record?.invoiceNo ?? evidence?.invoiceNo ?? null,
+    invoiceDate: record?.invoiceDate ?? evidence?.invoiceDate ?? null,
+    invoiceTotalMinor: record?.invoiceTotalMinor ?? evidence?.invoiceTotalMinor ?? null,
+    invoiceCurrency: record?.invoiceCurrency ?? evidence?.invoiceCurrency ?? null,
+    gibStatus: record?.gibStatus ?? evidence?.gibStatus ?? null,
+    documentStatus: record?.documentStatus ?? evidence?.documentStatus ?? null,
+  };
+}
+
+function hasSuccessfulSalesInvoiceSyncPreview(preview: LogoOutgoingInvoiceSyncPreview | undefined) {
+  return Boolean(preview?.ok && preview.search.matched && !preview.search.ambiguity && preview.mappedFields.invoiceNumberAvailable);
 }
 
 function getInvoiceRecordStatusTone(record: SettlementCommissionInvoiceRecord) {
@@ -899,6 +917,7 @@ export function AdminSettlementApprovalsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
   const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
+  const [salesInvoiceSyncConfirmations, setSalesInvoiceSyncConfirmations] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setVendorId((current) => current || appReadiness.currentVendor.vendorId || 'yalispor');
@@ -963,6 +982,7 @@ export function AdminSettlementApprovalsPage() {
     () => activeInvoiceRecords.find((record) => isCreatedCommissionInvoiceRecord(record)) ?? null,
     [activeInvoiceRecords],
   );
+  const createdInvoiceFacts = getInvoiceFacts(createdInvoiceRecord);
   const storedImmutableRequestSnapshot = useMemo(() => {
     const diagnosticsSnapshot = Object.values(diagnostics)
       .find((item) =>
@@ -1544,6 +1564,7 @@ export function AdminSettlementApprovalsPage() {
       setInvoiceRecords([]);
       setDiagnostics({});
       setOutgoingInvoiceSyncPreviews({});
+      setSalesInvoiceSyncConfirmations({});
     }
   }
 
@@ -1565,6 +1586,7 @@ export function AdminSettlementApprovalsPage() {
       setInvoiceRecords([]);
       setDiagnostics({});
       setOutgoingInvoiceSyncPreviews({});
+      setSalesInvoiceSyncConfirmations({});
       await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
@@ -1583,6 +1605,7 @@ export function AdminSettlementApprovalsPage() {
       setInvoiceRecords([]);
       setDiagnostics({});
       setOutgoingInvoiceSyncPreviews({});
+      setSalesInvoiceSyncConfirmations({});
       await hydrateCommissionInvoiceRecordsForLoadedApproval(result.id);
     }
   }
@@ -1696,6 +1719,47 @@ export function AdminSettlementApprovalsPage() {
     );
     if (result) {
       setOutgoingInvoiceSyncPreviews((current) => ({ ...current, [recordId]: result }));
+    }
+  }
+
+  async function handleSalesInvoiceSync(record: SettlementCommissionInvoiceRecord) {
+    if (!salesInvoiceSyncConfirmations[record.id]) {
+      setError('Explicit Logo sales invoice sync confirmation is required.');
+      return;
+    }
+
+    setBusyAction('salesInvoiceSync');
+    setError(null);
+    setDraftFailureSummary(null);
+    setSuccess(null);
+    setInvoiceRecordsWarning(null);
+
+    try {
+      const result = await persistLogoSalesInvoiceSync(record.id, { confirmLogoSalesInvoiceSync: true });
+      if (result.record) {
+        setInvoiceRecords((current) => [result.record!, ...current.filter((item) => item.id !== result.record?.id)]);
+      }
+      if (selectedApprovalId) {
+        await loadCommissionInvoiceRecordsForApproval(selectedApprovalId, {
+          preserveMessages: true,
+          warningOnFailure: 'Could not refresh existing invoice records.',
+          manageBusy: false,
+        });
+      }
+      try {
+        const refreshedDiagnostics = await getSettlementCommissionInvoiceDiagnostics(record.id);
+        setDiagnostics((current) => ({ ...current, [record.id]: refreshedDiagnostics }));
+      } catch {
+        setInvoiceRecordsWarning('Could not refresh invoice diagnostics after Logo sales invoice sync.');
+      }
+      setSalesInvoiceSyncConfirmations((current) => ({ ...current, [record.id]: false }));
+      setActiveTab('invoices');
+      const syncedInvoiceNo = result.record?.invoiceNo ?? result.preview?.mappedFields.invoiceNoCandidate;
+      setSuccess(`Logo sales invoice details synced${syncedInvoiceNo ? `: ${syncedInvoiceNo}` : ''}.`);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -2133,26 +2197,28 @@ export function AdminSettlementApprovalsPage() {
                 <p>
                   Provider UUID {valueOrDash(createdInvoiceRecord.providerUuid)}
                   {' · '}
-                  Invoice no {valueOrDash(createdInvoiceRecord.invoiceNo)}
+                  Invoice no {valueOrDash(createdInvoiceFacts.invoiceNo)}
                 </p>
                 {hasReconciledInvoiceFacts(createdInvoiceRecord) ? (
                   <p>
                     Reconciled from Logo sales invoice list
                     {' · '}
-                    Date {formatDate(createdInvoiceRecord.reconciliationEvidence?.invoiceDate)}
+                    Date {formatDate(createdInvoiceFacts.invoiceDate)}
                     {' · '}
                     Total {
-                      createdInvoiceRecord.reconciliationEvidence?.invoiceTotalMinor === null ||
-                      createdInvoiceRecord.reconciliationEvidence?.invoiceTotalMinor === undefined
+                      createdInvoiceFacts.invoiceTotalMinor === null ||
+                      createdInvoiceFacts.invoiceTotalMinor === undefined
                         ? '—'
                         : formatMinor(
-                          createdInvoiceRecord.reconciliationEvidence.invoiceTotalMinor,
-                          createdInvoiceRecord.reconciliationEvidence.invoiceCurrency ?? 'TRY',
+                          createdInvoiceFacts.invoiceTotalMinor,
+                          createdInvoiceFacts.invoiceCurrency ?? 'TRY',
                         )
                     }
+                    {' · '}
+                    GIB {valueOrDash(createdInvoiceFacts.gibStatus)}
                   </p>
                 ) : null}
-                {!createdInvoiceRecord.invoiceNo ? (
+                {!createdInvoiceFacts.invoiceNo ? (
                   <p>Invoice number not returned yet; provider UUID is available for reconciliation.</p>
                 ) : null}
               </div>
@@ -2175,6 +2241,10 @@ export function AdminSettlementApprovalsPage() {
                   const logoCreateBlockers = showLogoCreate ? getLogoCreateReadinessBlockers(record, diagnostic) : [];
                   const logoCreateAllowed = showLogoCreate && logoCreateBlockers.length === 0;
                   const providerReference = getProviderReference(record);
+                  const invoiceFacts = getInvoiceFacts(record);
+                  const syncPreview = outgoingInvoiceSyncPreviews[record.id];
+                  const logoSalesInvoiceSyncReady = isCreatedCommissionInvoiceRecord(record) &&
+                    hasSuccessfulSalesInvoiceSyncPreview(syncPreview);
                   return (
                     <OperationalTableRow key={record.id}>
                       <span>
@@ -2192,19 +2262,25 @@ export function AdminSettlementApprovalsPage() {
 	                        {record.reconciliationStatus ? (
 	                          <small>Reconciliation {safeStatusLabel(record.reconciliationStatus)}</small>
 	                        ) : null}
-	                        {record.reconciliationEvidence?.invoiceDate ? (
-	                          <small>Invoice date {formatDate(record.reconciliationEvidence.invoiceDate)}</small>
+	                        {invoiceFacts.invoiceDate ? (
+	                          <small>Invoice date {formatDate(invoiceFacts.invoiceDate)}</small>
 	                        ) : null}
-	                        {record.reconciliationEvidence?.invoiceTotalMinor !== null &&
-	                        record.reconciliationEvidence?.invoiceTotalMinor !== undefined ? (
+	                        {invoiceFacts.invoiceTotalMinor !== null &&
+	                        invoiceFacts.invoiceTotalMinor !== undefined ? (
 	                          <small>
 	                            Invoice total {
 	                              formatMinor(
-	                                record.reconciliationEvidence.invoiceTotalMinor,
-	                                record.reconciliationEvidence.invoiceCurrency ?? 'TRY',
+	                                invoiceFacts.invoiceTotalMinor,
+	                                invoiceFacts.invoiceCurrency ?? 'TRY',
 	                              )
 	                            }
 	                          </small>
+	                        ) : null}
+	                        {invoiceFacts.gibStatus ? (
+	                          <small>GIB status {invoiceFacts.gibStatus}</small>
+	                        ) : null}
+	                        {invoiceFacts.documentStatus ? (
+	                          <small>Document status {invoiceFacts.documentStatus}</small>
 	                        ) : null}
 	                        {!record.invoiceNo && record.providerUuid ? (
 	                          <small>Invoice number not returned yet.</small>
@@ -2229,6 +2305,32 @@ export function AdminSettlementApprovalsPage() {
 	                          >
 	                            Preview Logo sales invoice sync
 	                          </button>
+                        ) : null}
+                        {logoSalesInvoiceSyncReady ? (
+                          <div className="settlement-sync-action">
+                            <label className="op-checkbox-row settlement-logo-create-confirmation">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(salesInvoiceSyncConfirmations[record.id])}
+                                onChange={(event) => {
+                                  const checked = event.currentTarget.checked;
+                                  setSalesInvoiceSyncConfirmations((current) => ({
+                                    ...current,
+                                    [record.id]: checked,
+                                  }));
+                                }}
+                              />
+                              <span>I understand this will update Sporgym invoice metadata from Logo read-only data.</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              onClick={() => void handleSalesInvoiceSync(record)}
+                              disabled={busyAction !== null || !salesInvoiceSyncConfirmations[record.id]}
+                            >
+                              Sync Logo sales invoice details
+                            </button>
+                          </div>
                         ) : null}
                       </span>
                       <span className="settlement-logo-create-cell">
@@ -2287,6 +2389,22 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Status" value={safeStatusLabel(item.record.status)} />
                       <MetadataRow label="Provider UUID" value={valueOrDash(item.record.providerIdentifiers.providerUuid)} />
                       <MetadataRow label="Invoice no" value={valueOrDash(item.record.providerIdentifiers.invoiceNo)} />
+                      <MetadataRow label="Persisted invoice date" value={formatDate(item.record.invoiceMetadata?.invoiceDate)} />
+                      <MetadataRow
+                        label="Persisted invoice total"
+                        value={
+                          item.record.invoiceMetadata?.invoiceTotalMinor === null ||
+                          item.record.invoiceMetadata?.invoiceTotalMinor === undefined
+                            ? '—'
+                            : formatMinor(
+                              item.record.invoiceMetadata.invoiceTotalMinor,
+                              item.record.invoiceMetadata.invoiceCurrency ?? 'TRY',
+                            )
+                        }
+                      />
+                      <MetadataRow label="Persisted GIB status" value={valueOrDash(item.record.invoiceMetadata?.gibStatus)} />
+                      <MetadataRow label="Persisted document status" value={valueOrDash(item.record.invoiceMetadata?.documentStatus)} />
+                      <MetadataRow label="Last provider sync" value={formatDate(item.record.invoiceMetadata?.lastProviderSyncedAt)} />
                       <MetadataRow label="Environment guard" value={item.record.environmentGuard?.allowed ? 'Allowed' : 'Blocked'} />
                       <MetadataRow label="Logo environment" value={valueOrDash(item.record.environmentGuard?.environment)} />
                       <MetadataRow label="Tenant validation" value={valueOrDash(item.record.environmentGuard?.tenantValidationStatus ?? item.record.environmentGuard?.tenantValidation.status)} />

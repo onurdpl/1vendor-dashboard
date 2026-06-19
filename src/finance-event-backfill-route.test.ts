@@ -11,6 +11,7 @@ const getSettlementCommissionInvoiceDiagnosticsMock = vi.hoisted(() => vi.fn());
 const createPendingRecordFromImmutableRequestSnapshotMock = vi.hoisted(() => vi.fn());
 const executeSettlementLogoCommissionInvoiceCreateMock = vi.hoisted(() => vi.fn());
 const previewSettlementLogoOutgoingInvoiceSyncMock = vi.hoisted(() => vi.fn());
+const persistSettlementLogoSalesInvoiceSyncMock = vi.hoisted(() => vi.fn());
 const SettlementApprovalRevalidationErrorMock = vi.hoisted(() => class SettlementApprovalRevalidationError extends Error {
   reasons: Array<Record<string, unknown>>;
 
@@ -55,6 +56,7 @@ vi.mock('../backend/src/modules/finance/settlement-logo-commission-invoice-creat
 }));
 
 vi.mock('../backend/src/modules/finance/settlement-logo-outgoing-invoice-sync-preview.service.js', () => ({
+  persistSettlementLogoSalesInvoiceSync: persistSettlementLogoSalesInvoiceSyncMock,
   previewSettlementLogoOutgoingInvoiceSync: previewSettlementLogoOutgoingInvoiceSyncMock,
 }));
 
@@ -105,6 +107,7 @@ describe('finance event backfill route', () => {
     createPendingRecordFromImmutableRequestSnapshotMock.mockReset();
     executeSettlementLogoCommissionInvoiceCreateMock.mockReset();
     previewSettlementLogoOutgoingInvoiceSyncMock.mockReset();
+    persistSettlementLogoSalesInvoiceSyncMock.mockReset();
   });
 
   it('returns the read-only backfill plan to admins with writesPerformed false', async () => {
@@ -776,5 +779,145 @@ describe('finance event backfill route', () => {
 
     expect(response).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(previewSettlementLogoOutgoingInvoiceSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks Logo sales invoice sync persistence without backend confirmation', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const blocked = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/sales-invoice-sync')?.(
+      { authUser: { role: 'admin' }, params: { id: 'record-1' }, body: {} },
+      reply,
+    );
+
+    expect(blocked).toEqual({
+      status: 400,
+      body: expect.objectContaining({
+        ok: false,
+        writesPerformed: false,
+        settlementCommissionInvoiceId: 'record-1',
+        blockers: ['Logo sales invoice sync confirmation is required.'],
+      }),
+    });
+    expect(persistSettlementLogoSalesInvoiceSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('persists Logo sales invoice sync for admins with backend confirmation', async () => {
+    const posts = new Map<string, (request: { authUser?: { id?: string; email?: string; role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { id?: string; email?: string; role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const result = {
+      ok: true,
+      writesPerformed: true,
+      settlementCommissionInvoiceId: 'record-1',
+      status: 'synced',
+      blockers: [],
+      warnings: [],
+      record: { id: 'record-1', status: 'created', invoiceNo: 'REE2026000000068' },
+      preview: null,
+    };
+    persistSettlementLogoSalesInvoiceSyncMock.mockResolvedValueOnce(result);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const allowed = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/sales-invoice-sync')?.(
+      {
+        authUser: { id: 'admin-1', email: 'admin@example.com', role: 'admin' },
+        params: { id: 'record-1' },
+        body: { confirmLogoSalesInvoiceSync: true },
+      },
+      reply,
+    );
+
+    expect(allowed).toEqual(result);
+    expect(persistSettlementLogoSalesInvoiceSyncMock).toHaveBeenCalledWith('record-1', {
+      env: {},
+      syncedBy: 'admin@example.com',
+    });
+  });
+
+  it('returns conflict status when Logo sales invoice sync persistence is blocked', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    const result = {
+      ok: false,
+      writesPerformed: false,
+      settlementCommissionInvoiceId: 'record-1',
+      status: 'blocked',
+      blockers: ['Logo sales invoice sync cannot be persisted because no matching Logo sales invoice was found.'],
+      warnings: [],
+      record: null,
+      preview: null,
+    };
+    persistSettlementLogoSalesInvoiceSyncMock.mockResolvedValueOnce(result);
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const blocked = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/sales-invoice-sync')?.(
+      { authUser: { role: 'admin' }, params: { id: 'record-1' }, body: { confirmLogoSalesInvoiceSync: true } },
+      reply,
+    );
+
+    expect(blocked).toEqual({ status: 409, body: result });
+  });
+
+  it('requires admin access for Logo sales invoice sync persistence', async () => {
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerFinanceRoutes(app as never, {} as never);
+
+    const response = await posts.get('/admin/finance/commission-invoices/:id/logo-isbasi/sales-invoice-sync')?.(
+      { authUser: { role: 'vendor' }, params: { id: 'record-1' }, body: { confirmLogoSalesInvoiceSync: true } },
+      reply,
+    );
+
+    expect(response).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(persistSettlementLogoSalesInvoiceSyncMock).not.toHaveBeenCalled();
   });
 });

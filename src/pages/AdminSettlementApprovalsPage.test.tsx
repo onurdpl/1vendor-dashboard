@@ -16,6 +16,7 @@ import {
   getSettlementCommissionInvoiceDiagnostics,
   getSettlementCommissionInvoiceRecords,
   listSettlementApprovals,
+  persistLogoSalesInvoiceSync,
   persistSettlementLogoCommissionInvoiceRequestSnapshot,
   previewLogoOutgoingInvoiceSync,
   previewSettlementApproval,
@@ -49,6 +50,7 @@ vi.mock('../features/finance/settlementApprovalsApi', async () => {
     getSettlementCommissionInvoiceRecords: vi.fn(),
     getSettlementCommissionInvoiceDiagnostics: vi.fn(),
     previewLogoOutgoingInvoiceSync: vi.fn(),
+    persistLogoSalesInvoiceSync: vi.fn(),
     listSettlementApprovals: vi.fn(),
   };
 });
@@ -66,6 +68,7 @@ const previewSettlementLogoCommissionInvoiceMock = vi.mocked(previewSettlementLo
 const getSettlementCommissionInvoiceRecordsMock = vi.mocked(getSettlementCommissionInvoiceRecords);
 const getSettlementCommissionInvoiceDiagnosticsMock = vi.mocked(getSettlementCommissionInvoiceDiagnostics);
 const previewLogoOutgoingInvoiceSyncMock = vi.mocked(previewLogoOutgoingInvoiceSync);
+const persistLogoSalesInvoiceSyncMock = vi.mocked(persistLogoSalesInvoiceSync);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 
 const previewResponse: SettlementApprovalPreview = {
@@ -1167,6 +1170,26 @@ describe('Finance Settlement approval admin UI', () => {
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValue(invoiceRecordsResponse);
     getSettlementCommissionInvoiceDiagnosticsMock.mockResolvedValue(diagnosticsResponse);
     previewLogoOutgoingInvoiceSyncMock.mockResolvedValue(outgoingInvoiceSyncPreviewResponse);
+    persistLogoSalesInvoiceSyncMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: true,
+      settlementCommissionInvoiceId: 'created-record',
+      status: 'synced',
+      blockers: [],
+      warnings: [],
+      record: {
+        ...createdInvoiceRecordMissingNumber,
+        invoiceNo: 'REE2026000000068',
+        invoiceDate: '2026-06-18T17:45:00.000Z',
+        invoiceTotalMinor: 136764,
+        invoiceCurrency: 'TL',
+        gibStatus: '0',
+        documentStatus: null,
+        reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+        lastProviderSyncedAt: '2026-06-19T12:00:00.000Z',
+      },
+      preview: outgoingInvoiceSyncPreviewResponse,
+    });
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
   });
 
@@ -1268,6 +1291,77 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Candidate sales invoices')).toBeInTheDocument();
     expect(screen.getByText(/salesInvoiceId 750/)).toBeInTheDocument();
     expect(screen.getByText(/sales id match yes/)).toBeInTheDocument();
+  });
+
+  it('syncs Logo sales invoice details after successful preview confirmation', async () => {
+    const successfulPreview: LogoOutgoingInvoiceSyncPreview = {
+      ...outgoingInvoiceSyncPreviewResponse,
+      mappedFields: {
+        ...outgoingInvoiceSyncPreviewResponse.mappedFields,
+        invoiceNoCandidate: 'REE2026000000068',
+        invoiceNumberAvailable: true,
+        invoiceNumberSource: 'invoiceNumber',
+        invoiceDate: '2026-06-18T17:45:00.000Z',
+        invoiceTotalMinor: 136764,
+        invoiceCurrency: 'TL',
+        gibStatus: '0',
+      },
+    };
+    const syncedRecord = {
+      ...createdInvoiceRecordMissingNumber,
+      invoiceNo: 'REE2026000000068',
+      invoiceDate: '2026-06-18T17:45:00.000Z',
+      invoiceTotalMinor: 136764,
+      invoiceCurrency: 'TL',
+      gibStatus: '0',
+      documentStatus: null,
+      reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+      lastProviderSyncedAt: '2026-06-19T12:00:00.000Z',
+    };
+    getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
+    getSettlementCommissionInvoiceRecordsMock
+      .mockResolvedValueOnce(createdInvoiceRecordsResponse)
+      .mockResolvedValueOnce({
+        ...createdInvoiceRecordsResponse,
+        records: [syncedRecord],
+      });
+    previewLogoOutgoingInvoiceSyncMock.mockResolvedValueOnce(successfulPreview);
+    persistLogoSalesInvoiceSyncMock.mockResolvedValueOnce({
+      ok: true,
+      writesPerformed: true,
+      settlementCommissionInvoiceId: 'created-record',
+      status: 'synced',
+      blockers: [],
+      warnings: [],
+      record: syncedRecord,
+      preview: successfulPreview,
+    });
+    renderPage();
+
+    const openButtons = await screen.findAllByRole('button', { name: 'Open' });
+    await userEvent.click(openButtons[0]);
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-2'));
+
+    const invoicePanel = screen.getByText('created-record').closest('.settlement-tab-panel') ?? document.body;
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: 'Preview Logo sales invoice sync' }));
+    await waitFor(() => expect(previewLogoOutgoingInvoiceSyncMock).toHaveBeenCalledWith('created-record'));
+
+    const syncButton = await within(invoicePanel as HTMLElement).findByRole('button', { name: 'Sync Logo sales invoice details' });
+    expect(syncButton).toBeDisabled();
+    await userEvent.click(within(invoicePanel as HTMLElement).getByLabelText('I understand this will update Sporgym invoice metadata from Logo read-only data.'));
+    expect(syncButton).toBeEnabled();
+    await userEvent.click(syncButton);
+
+    await waitFor(() =>
+      expect(persistLogoSalesInvoiceSyncMock).toHaveBeenCalledWith('created-record', {
+        confirmLogoSalesInvoiceSync: true,
+      }),
+    );
+    await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Logo sales invoice details synced: REE2026000000068.')).toBeInTheDocument();
+    expect(screen.getAllByText('REE2026000000068').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Invoice total TRY 1,367.64/)).toBeInTheDocument();
+    expect(screen.getByText('GIB status 0')).toBeInTheDocument();
   });
 
   it('opening an approved approval replaces an existing preview panel', async () => {

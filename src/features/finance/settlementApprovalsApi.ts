@@ -230,6 +230,15 @@ export type SettlementCommissionInvoiceRecord = {
   providerUuid: string | null;
   providerEttn: string | null;
   invoiceNo: string | null;
+  invoiceDate?: string | null;
+  invoiceTotalMinor?: number | null;
+  invoiceCurrency?: string | null;
+  gibStatus?: string | null;
+  gibStatusCode?: string | null;
+  documentStatus?: string | null;
+  documentStatusCode?: string | null;
+  documentType?: string | null;
+  lastProviderSyncedAt?: string | null;
 	  failureCode: string | null;
 	  failureMessage: string | null;
 	  failedAt: string | null;
@@ -343,6 +352,17 @@ export type SettlementCommissionInvoiceDiagnostics = {
       providerUuid: string | null;
       providerEttn: string | null;
       invoiceNo: string | null;
+    };
+    invoiceMetadata?: {
+      invoiceDate: string | null;
+      invoiceTotalMinor: number | null;
+      invoiceCurrency: string | null;
+      gibStatus: string | null;
+      gibStatusCode: string | null;
+      documentStatus: string | null;
+      documentStatusCode: string | null;
+      documentType: string | null;
+      lastProviderSyncedAt: string | null;
     };
     timestamps: Record<string, string | null>;
     snapshots: {
@@ -494,6 +514,17 @@ export type LogoOutgoingInvoiceSyncPreview = {
   };
 };
 
+export type PersistLogoSalesInvoiceSyncResponse = {
+  ok: boolean;
+  writesPerformed: boolean;
+  settlementCommissionInvoiceId: string;
+  status: 'synced' | 'blocked' | string;
+  blockers: string[];
+  warnings: string[];
+  record: SettlementCommissionInvoiceRecord | null;
+  preview: LogoOutgoingInvoiceSyncPreview | null;
+};
+
 export type SettlementApprovalPreviewInput = {
   vendorId: string;
   periodStart?: string | null;
@@ -581,5 +612,15 @@ export function executeSettlementLogoCommissionInvoiceCreate(
 export function previewLogoOutgoingInvoiceSync(id: string) {
   return apiClient.get<LogoOutgoingInvoiceSyncPreview>(
     `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/outgoing-invoice-sync-preview`,
+  );
+}
+
+export function persistLogoSalesInvoiceSync(
+  id: string,
+  input: { confirmLogoSalesInvoiceSync: true },
+) {
+  return apiClient.post<PersistLogoSalesInvoiceSyncResponse>(
+    `/admin/finance/commission-invoices/${encodeURIComponent(id)}/logo-isbasi/sales-invoice-sync`,
+    input,
   );
 }

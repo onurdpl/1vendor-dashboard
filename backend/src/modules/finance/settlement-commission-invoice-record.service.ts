@@ -28,7 +28,15 @@ export type SettlementCommissionInvoiceRecordDto = {
   providerUuid: string | null;
   providerEttn: string | null;
   invoiceNo: string | null;
+  invoiceDate: string | null;
+  invoiceTotalMinor: number | null;
+  invoiceCurrency: string | null;
+  gibStatus: string | null;
+  gibStatusCode: string | null;
   documentStatus: string | null;
+  documentStatusCode: string | null;
+  documentType: string | null;
+  lastProviderSyncedAt: string | null;
   documentContentType: string | null;
   documentSize: number | null;
   documentFetchedAt: string | null;
@@ -91,6 +99,14 @@ export type ApplySettlementCommissionInvoiceReconciliationInput = {
   providerEttn?: string | null;
   invoiceNo?: string | null;
   documentStatus?: string | null;
+  invoiceDate?: string | Date | null;
+  invoiceTotalMinor?: number | null;
+  invoiceCurrency?: string | null;
+  gibStatus?: string | null;
+  gibStatusCode?: string | null;
+  documentStatusCode?: string | null;
+  documentType?: string | null;
+  lastProviderSyncedAt?: Date | null;
   reconciledBy?: string | null;
 };
 
@@ -151,6 +167,17 @@ export type SettlementCommissionInvoiceDiagnosticsDto = {
       providerUuid: string | null;
       providerEttn: string | null;
       invoiceNo: string | null;
+    };
+    invoiceMetadata: {
+      invoiceDate: string | null;
+      invoiceTotalMinor: number | null;
+      invoiceCurrency: string | null;
+      gibStatus: string | null;
+      gibStatusCode: string | null;
+      documentStatus: string | null;
+      documentStatusCode: string | null;
+      documentType: string | null;
+      lastProviderSyncedAt: string | null;
     };
     timestamps: {
       createdAt: string;
@@ -286,6 +313,41 @@ function getReconciliationEvidenceDto(value: unknown): SettlementCommissionInvoi
   };
 }
 
+function getPersistedReconciliationEvidenceDto(
+  record: SettlementCommissionInvoice,
+): SettlementCommissionInvoiceReconciliationEvidenceDto | null {
+  const evidence = getReconciliationEvidenceDto(record.reconciliationEvidenceJson);
+  if (
+    !evidence &&
+    !record.invoiceNo &&
+    !record.invoiceDate &&
+    record.invoiceTotalMinor == null &&
+    !record.invoiceCurrency &&
+    !record.gibStatus &&
+    !record.gibStatusCode &&
+    !record.documentStatus &&
+    !record.documentStatusCode &&
+    !record.documentType
+  ) {
+    return null;
+  }
+
+  return {
+    reconciliationStatus: record.reconciliationStatus ?? evidence?.reconciliationStatus ?? null,
+    matched: evidence?.matched ?? null,
+    invoiceNo: record.invoiceNo ?? evidence?.invoiceNo ?? null,
+    invoiceDate: toIso(record.invoiceDate) ?? evidence?.invoiceDate ?? null,
+    invoiceTotalMinor: record.invoiceTotalMinor ?? evidence?.invoiceTotalMinor ?? null,
+    invoiceCurrency: record.invoiceCurrency ?? evidence?.invoiceCurrency ?? null,
+    gibStatus: record.gibStatus ?? evidence?.gibStatus ?? null,
+    gibStatusCode: readNumber(record.gibStatusCode) ?? evidence?.gibStatusCode ?? null,
+    documentStatus: record.documentStatus ?? evidence?.documentStatus ?? null,
+    documentStatusCode: readNumber(record.documentStatusCode) ?? evidence?.documentStatusCode ?? null,
+    documentType: record.documentType ?? evidence?.documentType ?? null,
+    warnings: evidence?.warnings ?? [],
+  };
+}
+
 function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInvoiceRecordDto {
   return {
     id: record.id,
@@ -299,7 +361,15 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     providerUuid: record.providerUuid,
     providerEttn: record.providerEttn,
     invoiceNo: record.invoiceNo,
+    invoiceDate: toIso(record.invoiceDate),
+    invoiceTotalMinor: record.invoiceTotalMinor ?? null,
+    invoiceCurrency: record.invoiceCurrency ?? null,
+    gibStatus: record.gibStatus ?? null,
+    gibStatusCode: record.gibStatusCode ?? null,
     documentStatus: record.documentStatus,
+    documentStatusCode: record.documentStatusCode ?? null,
+    documentType: record.documentType ?? null,
+    lastProviderSyncedAt: toIso(record.lastProviderSyncedAt),
     documentContentType: record.documentContentType,
     documentSize: record.documentSize,
     documentFetchedAt: toIso(record.documentFetchedAt),
@@ -313,7 +383,7 @@ function mapRecord(record: SettlementCommissionInvoice): SettlementCommissionInv
     unknownAt: toIso(record.unknownAt),
     reconciliationStatus: record.reconciliationStatus,
     reconciliationEvidenceSnapshot: getSnapshotMetadata(record.reconciliationEvidenceJson),
-    reconciliationEvidence: getReconciliationEvidenceDto(record.reconciliationEvidenceJson),
+    reconciliationEvidence: getPersistedReconciliationEvidenceDto(record),
     reconciledAt: toIso(record.reconciledAt),
     reconciledBy: record.reconciledBy,
     retryCount: record.retryCount,
@@ -396,6 +466,17 @@ function readRequiredText(value: string | null | undefined, fieldName: string) {
     throw new Error(`${fieldName} is required.`);
   }
   return value.trim();
+}
+
+function parseOptionalDate(value: string | Date | null | undefined, fieldName: string) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${fieldName} must be a valid date.`);
+  }
+  return parsed;
 }
 
 function assertReconciliationEvidence(value: Prisma.InputJsonValue) {
@@ -714,6 +795,7 @@ export async function applySettlementCommissionInvoiceReconciliation(
     existingInvoiceNo &&
     incomingInvoiceNo !== existingInvoiceNo,
   );
+  const invoiceDate = parseOptionalDate(input.invoiceDate, 'invoiceDate');
   const record = await prisma.settlementCommissionInvoice.update({
     where: {
       id: input.settlementCommissionInvoiceId,
@@ -723,7 +805,15 @@ export async function applySettlementCommissionInvoiceReconciliation(
       providerUuid: input.providerUuid ?? existing.providerUuid,
       providerEttn: input.providerEttn ?? existing.providerEttn,
       invoiceNo: hasInvoiceNoConflict ? existing.invoiceNo : incomingInvoiceNo ?? existing.invoiceNo,
+      invoiceDate: invoiceDate ?? existing.invoiceDate,
+      invoiceTotalMinor: input.invoiceTotalMinor ?? existing.invoiceTotalMinor,
+      invoiceCurrency: input.invoiceCurrency ?? existing.invoiceCurrency,
+      gibStatus: input.gibStatus ?? existing.gibStatus,
+      gibStatusCode: input.gibStatusCode ?? existing.gibStatusCode,
       documentStatus: input.documentStatus ?? existing.documentStatus,
+      documentStatusCode: input.documentStatusCode ?? existing.documentStatusCode,
+      documentType: input.documentType ?? existing.documentType,
+      lastProviderSyncedAt: input.lastProviderSyncedAt ?? existing.lastProviderSyncedAt,
       reconciliationStatus: hasInvoiceNoConflict ? 'conflict' : input.reconciliationStatus,
       reconciliationEvidenceJson: input.reconciliationEvidenceJson,
       reconciledAt: new Date(),
@@ -854,6 +944,17 @@ export async function getSettlementCommissionInvoiceDiagnostics(
         providerEttn: record.providerEttn,
         invoiceNo: record.invoiceNo,
       },
+      invoiceMetadata: {
+        invoiceDate: toIso(record.invoiceDate),
+        invoiceTotalMinor: record.invoiceTotalMinor ?? null,
+        invoiceCurrency: record.invoiceCurrency ?? null,
+        gibStatus: record.gibStatus ?? null,
+        gibStatusCode: record.gibStatusCode ?? null,
+        documentStatus: record.documentStatus,
+        documentStatusCode: record.documentStatusCode ?? null,
+        documentType: record.documentType ?? null,
+        lastProviderSyncedAt: toIso(record.lastProviderSyncedAt),
+      },
       timestamps: {
         createdAt: record.createdAt.toISOString(),
         updatedAt: record.updatedAt.toISOString(),
@@ -880,7 +981,7 @@ export async function getSettlementCommissionInvoiceDiagnostics(
         reconciledAt: toIso(record.reconciledAt),
         reconciledBy: record.reconciledBy,
         reconciliationEvidence: getSnapshotMetadata(record.reconciliationEvidenceJson),
-        reconciliationEvidenceSafe: getReconciliationEvidenceDto(record.reconciliationEvidenceJson),
+        reconciliationEvidenceSafe: getPersistedReconciliationEvidenceDto(record),
       },
     },
   };

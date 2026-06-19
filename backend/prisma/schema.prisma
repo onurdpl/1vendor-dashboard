@@ -944,10 +944,18 @@ model SettlementCommissionInvoice {
   providerUuid         String?
   providerEttn         String?
   invoiceNo            String?
+  invoiceDate          DateTime?
+  invoiceTotalMinor    Int?
+  invoiceCurrency      String?
+  gibStatus            String?
+  gibStatusCode        String?
   documentStatus       String?
+  documentStatusCode   String?
+  documentType         String?
   documentContentType  String?
   documentSize         Int?
   documentFetchedAt    DateTime?
+  lastProviderSyncedAt DateTime?
   documentSnapshotJson Json?
   requestSnapshotJson  Json?
   responseSnapshotJson Json?

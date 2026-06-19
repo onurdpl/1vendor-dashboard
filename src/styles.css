@@ -12687,6 +12687,12 @@ summary.provider-response-heading::-webkit-details-marker {
   line-height: 1.3;
 }
 
+.settlement-sync-action {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .settlement-tab-list {
   display: flex;
   flex-wrap: wrap;

@@ -20,7 +20,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { previewSettlementLogoOutgoingInvoiceSync } = await import(
+const {
+  persistSettlementLogoSalesInvoiceSync,
+  previewSettlementLogoOutgoingInvoiceSync,
+} = await import(
   '../backend/src/modules/finance/settlement-logo-outgoing-invoice-sync-preview.service.js'
 );
 
@@ -38,12 +41,22 @@ function buildRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: 'settlement-invoice-1',
     createdAt: new Date('2026-06-12T10:01:00.000Z'),
+    updatedAt: new Date('2026-06-12T10:01:00.000Z'),
     provider: SettlementCommissionInvoiceProvider.LOGO_ISBASI,
     status: SettlementCommissionInvoiceStatus.CREATED,
     providerInvoiceId: 'logo-invoice-local',
     providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
     providerEttn: null,
     invoiceNo: null,
+    invoiceDate: null,
+    invoiceTotalMinor: null,
+    invoiceCurrency: null,
+    gibStatus: null,
+    gibStatusCode: null,
+    documentStatus: null,
+    documentStatusCode: null,
+    documentType: null,
+    lastProviderSyncedAt: null,
     requestSnapshotJson: {
       logoPayload: {
         salesInvoiceDetails: [
@@ -358,5 +371,192 @@ describe('Logo sales invoice sync preview', () => {
     });
     expect(otherProvider.blockers).toContain('SettlementCommissionInvoice provider must be LOGO_ISBASI before Logo sales invoice sync preview.');
     expect(client.listSalesInvoices).not.toHaveBeenCalled();
+  });
+
+  it('persists matched Logo sales invoice metadata without raw provider payloads', async () => {
+    const existing = buildRecord({ providerInvoiceId: '750' });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(existing);
+    prismaMock.settlementCommissionInvoice.update.mockImplementation(({ data }) => Promise.resolve({
+      ...existing,
+      ...data,
+      updatedAt: new Date('2026-06-19T11:00:00.000Z'),
+    }));
+    const client = buildClient([[buildProviderInvoice({
+      id: '750',
+      salesInvoiceId: '750',
+      invoiceNumber: 'REE2026000000068',
+      date: '2026-06-18T17:45:00.000Z',
+      amount: 1367.64,
+      total: 1367.64,
+      currency: 'TL',
+      gibStatus: '0',
+      gibStatusCode: null,
+      documentStatus: null,
+      documentStatusCode: null,
+      connectStatusDescription: null,
+      connectStatusCode: null,
+      eGovermentType: 'SALES_INVOICE',
+      rawProviderPayload: { token: 'secret-token' },
+    })]]);
+
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client,
+      now: new Date('2026-06-19T12:00:00.000Z'),
+      syncedBy: 'admin@example.com',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: true,
+      status: 'synced',
+      record: {
+        invoiceNo: 'REE2026000000068',
+        invoiceDate: '2026-06-18T17:45:00.000Z',
+        invoiceTotalMinor: 136764,
+        invoiceCurrency: 'TL',
+        gibStatus: '0',
+        documentStatus: null,
+        documentType: 'SALES_INVOICE',
+        lastProviderSyncedAt: '2026-06-19T12:00:00.000Z',
+        reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+        reconciledBy: 'admin@example.com',
+      },
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).toHaveBeenCalledWith({
+      where: { id: 'settlement-invoice-1' },
+      data: expect.objectContaining({
+        providerInvoiceId: '750',
+        providerUuid: '82691c7b-28d6-4e30-95c9-c0658e90f090',
+        providerEttn: '82691c7b-28d6-4e30-95c9-c0658e90f090',
+        invoiceNo: 'REE2026000000068',
+        invoiceDate: new Date('2026-06-18T17:45:00.000Z'),
+        invoiceTotalMinor: 136764,
+        invoiceCurrency: 'TL',
+        gibStatus: '0',
+        documentStatus: null,
+        documentStatusCode: null,
+        documentType: 'SALES_INVOICE',
+        reconciliationStatus: 'MATCHED_FROM_LOGO_SALES_INVOICE',
+        reconciledBy: 'admin@example.com',
+        lastProviderSyncedAt: new Date('2026-06-19T12:00:00.000Z'),
+      }),
+    });
+    const updateCall = prismaMock.settlementCommissionInvoice.update.mock.calls[0][0];
+    expect(updateCall.data.reconciliationEvidenceJson).toMatchObject({
+      source: 'LOGO_SALES_INVOICE_LIST',
+      matchedBy: 'providerInvoiceId',
+      matchedInvoiceId: '750',
+      matchedInvoiceNumber: 'REE2026000000068',
+      matchedInvoiceDate: '2026-06-18T17:45:00.000Z',
+      matchedInvoiceTotalMinor: 136764,
+      matchedInvoiceCurrency: 'TL',
+      gibStatus: '0',
+      documentStatus: null,
+      syncedAt: '2026-06-19T12:00:00.000Z',
+    });
+    expect(JSON.stringify(updateCall.data.reconciliationEvidenceJson)).not.toContain('rawProviderPayload');
+    expect(JSON.stringify(updateCall.data.reconciliationEvidenceJson)).not.toContain('secret-token');
+  });
+
+  it('blocks persistence when no Logo sales invoice match is found', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({ providerInvoiceId: '750' }));
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client: buildClient([[buildProviderInvoice({ id: 'other-id', invoiceId: 'other-id', salesInvoiceId: 'other-id', uuid: 'other-uuid', uuId: 'other-uuid' })]]),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      blockers: ['Logo sales invoice sync cannot be persisted because no matching Logo sales invoice was found.'],
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks persistence when Logo sales invoice matching is ambiguous', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({ providerInvoiceId: '750' }));
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client: buildClient([[buildProviderInvoice({ id: '750' }), buildProviderInvoice({ id: '750', uuid: 'other-uuid', uuId: 'other-uuid' })]]),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      blockers: ['Logo sales invoice sync cannot be persisted because multiple Logo sales invoices matched this record.'],
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks conflicting existing invoiceNo without overwriting it', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({
+      providerInvoiceId: '750',
+      invoiceNo: 'OLD202600000001',
+    }));
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client: buildClient([[buildProviderInvoice({
+        id: '750',
+        salesInvoiceId: '750',
+        invoiceNumber: 'REE2026000000068',
+      })]]),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      blockers: ['Existing invoiceNo differs from the Logo sales invoice match; sync is blocked to prevent overwrite.'],
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks conflicting existing providerInvoiceId without changing linkage', async () => {
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(buildRecord({
+      providerInvoiceId: '750',
+      providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+    }));
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client: buildClient([[buildProviderInvoice({
+        id: '999',
+        invoiceId: '999',
+        salesInvoiceId: '999',
+        invoiceNumber: 'REE2026000000068',
+      })]]),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      writesPerformed: false,
+      blockers: ['Existing providerInvoiceId differs from the Logo sales invoice match; sync is blocked to prevent wrong invoice linkage.'],
+    });
+    expect(prismaMock.settlementCommissionInvoice.update).not.toHaveBeenCalled();
+  });
+
+  it('allows idempotent persistence when existing invoiceNo already matches', async () => {
+    const existing = buildRecord({
+      providerInvoiceId: '750',
+      invoiceNo: 'REE2026000000068',
+    });
+    prismaMock.settlementCommissionInvoice.findUnique.mockResolvedValue(existing);
+    prismaMock.settlementCommissionInvoice.update.mockImplementation(({ data }) => Promise.resolve({
+      ...existing,
+      ...data,
+    }));
+
+    const result = await persistSettlementLogoSalesInvoiceSync('settlement-invoice-1', {
+      env: buildEnv(),
+      client: buildClient([[buildProviderInvoice({
+        id: '750',
+        salesInvoiceId: '750',
+        invoiceNumber: 'REE2026000000068',
+      })]]),
+      now: new Date('2026-06-19T12:00:00.000Z'),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.writesPerformed).toBe(true);
+    expect(result.record?.invoiceNo).toBe('REE2026000000068');
   });
 });
