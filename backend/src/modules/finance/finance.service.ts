@@ -51,6 +51,20 @@ const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
 
 type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent'>;
+type SettlementCommissionInvoiceReviewSnapshot = {
+  id?: string | null;
+  status?: string | null;
+  invoiceNo?: string | null;
+  providerUuid?: string | null;
+};
+type SettlementApprovalReviewSnapshot = {
+  id?: string | null;
+  status?: string | null;
+  commissionInvoices?: SettlementCommissionInvoiceReviewSnapshot[] | null;
+};
+type SettlementApprovalLineReviewSnapshot = {
+  settlementApproval?: SettlementApprovalReviewSnapshot | null;
+};
 
 export type PayoutBatchTransitionBlockerCode =
   | 'refund_arrived_after_batch_creation'
@@ -110,6 +124,68 @@ function toIso(value: Date | null | undefined) {
 
 function mapPayoutBatchStatus(status: string) {
   return status.trim().toLowerCase() as PayoutBatchDto['status'];
+}
+
+function normalizeApprovalStatus(status: string | null | undefined) {
+  const normalized = mapStatus(status ?? '');
+  return normalized === 'draft' || normalized === 'approved' ? normalized : null;
+}
+
+function isActiveSettlementApprovalLine(line: SettlementApprovalLineReviewSnapshot) {
+  return normalizeApprovalStatus(line.settlementApproval?.status) !== null;
+}
+
+function getActiveSettlementReview(entry: {
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
+}): SettlementDto['review'] {
+  const activeLines = (entry.settlementApprovalLines ?? [])
+    .filter(isActiveSettlementApprovalLine)
+    .sort((left, right) => {
+      const leftStatus = normalizeApprovalStatus(left.settlementApproval?.status);
+      const rightStatus = normalizeApprovalStatus(right.settlementApproval?.status);
+      if (leftStatus === rightStatus) {
+        return 0;
+      }
+      return leftStatus === 'approved' ? -1 : 1;
+    });
+  const approval = activeLines[0]?.settlementApproval ?? null;
+  const approvalStatus = normalizeApprovalStatus(approval?.status);
+  if (!approval?.id || !approvalStatus) {
+    return null;
+  }
+  const commissionInvoice =
+    (approval.commissionInvoices ?? []).find((invoice) => mapStatus(invoice.status ?? '') !== 'cancelled') ?? null;
+
+  return {
+    approvalId: approval.id,
+    approvalStatus,
+    commissionInvoiceId: commissionInvoice?.id ?? null,
+    commissionInvoiceStatus: commissionInvoice?.status ? mapStatus(commissionInvoice.status) : null,
+    invoiceNo: commissionInvoice?.invoiceNo ?? null,
+    providerUuid: commissionInvoice?.providerUuid ?? null,
+  };
+}
+
+function hasActiveSettlementReview(entry: {
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
+}) {
+  return getActiveSettlementReview(entry) !== null;
+}
+
+function hasDraftSettlementReview(entry: {
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
+}) {
+  return getActiveSettlementReview(entry)?.approvalStatus === 'draft';
+}
+
+function getSettlementReviewNote(review: NonNullable<SettlementDto['review']>) {
+  if (review.commissionInvoiceStatus === 'created') {
+    return 'Settlement approval is locked and the Logo commission invoice has been created.';
+  }
+  if (review.approvalStatus === 'approved') {
+    return 'Settlement approval is locked for invoice and payout workflow.';
+  }
+  return 'Settlement row is locked in a draft settlement approval.';
 }
 
 function mapShippingMode(mode: string): ShippingMode {
@@ -454,7 +530,7 @@ function getRelatedSaleLedgerEntry(entry: {
   commissionPercentSnapshot?: unknown;
   commissionVatPercentSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
   } | null;
@@ -476,7 +552,7 @@ function getRefundOffsetEligibility(entry: {
   commissionPercentSnapshot?: unknown;
   commissionVatPercentSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -496,7 +572,7 @@ function getPostApprovalRefundRisk(entry: {
   commissionPercentSnapshot?: unknown;
   commissionVatPercentSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -518,7 +594,7 @@ function getPostApprovalRefundRisk(entry: {
 
 function refundEntryIsRepresentedByApprovedSettlement(entry: {
   entryType?: string | null;
-  settlementApprovalLines?: Array<{ settlementApproval?: { status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
 }) {
   return normalizeType(entry.entryType ?? '') === 'refund' && (entry.settlementApprovalLines ?? []).some(
     (line) => mapStatus(line.settlementApproval?.status ?? '') === 'approved',
@@ -560,7 +636,7 @@ function getSettlementStatus(entry: {
   payoutStatus?: string | null;
   settlementStatus?: string | null;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   settlementDelayDaysSnapshot?: unknown;
   vendorAllocation?: {
     allocationStatus?: string;
@@ -622,7 +698,7 @@ function buildSettlement(entry: {
   createdAt?: Date;
   settlementDelayDaysSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
@@ -638,6 +714,7 @@ function buildSettlement(entry: {
   } | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
+  const review = getActiveSettlementReview(entry);
   const postApprovalRefundRisk = getPostApprovalRefundRisk(entry);
   const saleDelay = evaluateSaleSettlementDelay(entry);
   const payableAt =
@@ -646,7 +723,7 @@ function buildSettlement(entry: {
       : entry.payableAt ?? entry.vendorAllocation?.fulfillment?.fulfilledAt ?? (status === 'payable' ? entry.createdAt : null) ?? null;
   const accruedAt = entry.accruedAt ?? (normalizeType(entry.entryType) === 'sale' ? entry.createdAt : null) ?? null;
   const eligibleAt = saleDelay.applies ? saleDelay.eligibleAt : entry.settlementEligibleAt ?? payableAt;
-  const payoutReady = status === 'payable' || status === 'partially_refunded';
+  const payoutReady = !review && (status === 'payable' || status === 'partially_refunded');
   const noteByStatus: Record<SettlementDto['status'], string> = {
     pending: 'Awaiting settlement classification.',
     accruing: 'Accruing until delivery evidence and settlement delay are satisfied.',
@@ -659,6 +736,7 @@ function buildSettlement(entry: {
     settled: 'Marked settled in the operational ledger.',
     disputed: 'Settlement is disputed and requires operator review.',
   };
+  const reviewNote = review ? getSettlementReviewNote(review) : null;
 
   return {
     status,
@@ -671,7 +749,8 @@ function buildSettlement(entry: {
       postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
         : entry.settlementHoldReason ?? null,
-    note: noteByStatus[status],
+    note: status === 'held' || status === 'disputed' ? noteByStatus[status] : reviewNote ?? noteByStatus[status],
+    review,
   };
 }
 
@@ -688,7 +767,7 @@ function isEntryEligibleForPayoutBatch(entry: {
   createdAt?: Date;
   settlementDelayDaysSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
-  settlementApprovalLines?: Array<{ settlementApproval?: { id?: string | null; status?: string | null } | null }>;
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     allocationStatus?: string;
     fulfillmentStatus?: string | null;
@@ -711,6 +790,9 @@ function isEntryEligibleForPayoutBatch(entry: {
     return false;
   }
   if (mapStatus(entry.payoutStatus ?? '') === 'paid') {
+    return false;
+  }
+  if (hasDraftSettlementReview(entry)) {
     return false;
   }
   if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
@@ -1025,6 +1107,23 @@ export async function getVendorFinanceDashboard(
               select: {
                 id: true,
                 status: true,
+                commissionInvoices: {
+                  where: {
+                    status: {
+                      not: 'CANCELLED',
+                    },
+                  },
+                  select: {
+                    id: true,
+                    status: true,
+                    invoiceNo: true,
+                    providerUuid: true,
+                  },
+                  orderBy: {
+                    createdAt: 'desc',
+                  },
+                  take: 1,
+                },
               },
             },
           },
@@ -1177,6 +1276,23 @@ export async function getVendorFinanceDashboard(
               select: {
                 id: true,
                 status: true,
+                commissionInvoices: {
+                  where: {
+                    status: {
+                      not: 'CANCELLED',
+                    },
+                  },
+                  select: {
+                    id: true,
+                    status: true,
+                    invoiceNo: true,
+                    providerUuid: true,
+                  },
+                  orderBy: {
+                    createdAt: 'desc',
+                  },
+                  take: 1,
+                },
               },
             },
           },
@@ -1281,9 +1397,19 @@ export async function getVendorFinanceDashboard(
       pendingSettlement: 0,
     },
   );
+  const pendingReviewBalance = summaryEntries.reduce((sum, entry) => {
+    const settlement = buildSettlement(entry);
+    if (!settlement.payoutReady) {
+      return sum;
+    }
+    return sum + calculateEntryBatchAmounts(entry, profile).netAmount;
+  }, 0);
   const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
   const payoutBatchEligibility = summaryEntries.reduce(
     (summary, entry) => {
+      if (hasDraftSettlementReview(entry)) {
+        return summary;
+      }
       if (!isEntryEligibleForPayoutBatch(entry)) {
         const settlement = buildSettlement(entry);
         const type = normalizeType(entry.entryType);
@@ -1357,6 +1483,7 @@ export async function getVendorFinanceDashboard(
       shippingDeductions: toAmountString(shippingDeductions),
       payoutEstimate: toAmountString(payoutEstimate),
       payoutStatus,
+      pendingReviewBalance: toAmountString(pendingReviewBalance),
       accruedBalance: toAmountString(balanceSummary.accruedBalance),
       payableBalance: toAmountString(balanceSummary.payableBalance),
       heldBalance: toAmountString(balanceSummary.heldBalance),

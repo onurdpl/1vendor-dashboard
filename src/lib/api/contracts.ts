@@ -1798,6 +1798,14 @@ export type FinanceTransaction = {
     settledAt: string | null;
     holdReason: string | null;
     note: string;
+    review?: {
+      approvalId: string;
+      approvalStatus: 'draft' | 'approved';
+      commissionInvoiceId: string | null;
+      commissionInvoiceStatus: string | null;
+      invoiceNo: string | null;
+      providerUuid: string | null;
+    } | null;
   };
   payoutBatch?: {
     id: string;

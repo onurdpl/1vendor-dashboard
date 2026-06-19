@@ -54,6 +54,19 @@ type LedgerFixture = {
   payableAt: Date | null;
   settledAt: Date | null;
   settlementHoldReason: string | null;
+  settlementApprovalLines?: Array<{
+    settlementApproval: {
+      id: string;
+      status: string;
+      commissionInvoices?: Array<{
+        id: string;
+        status: string;
+        invoiceNo?: string | null;
+        providerUuid?: string | null;
+      }>;
+    };
+  }>;
+  payoutBatchLines?: Array<unknown>;
   vendorAllocation: {
     id: string;
     allocationStatus: string;
@@ -262,6 +275,7 @@ describe('persisted vendor finance calculations', () => {
               }
             : null,
           payoutBatchLines: row.payoutBatchLines ?? [],
+          settlementApprovalLines: row.settlementApprovalLines ?? [],
         }));
       }
 
@@ -316,6 +330,63 @@ describe('persisted vendor finance calculations', () => {
     expect(historicalSale?.settlement).toMatchObject({
       status: 'payable',
       payoutReady: true,
+    });
+  });
+
+  it('excludes approved and invoiced settlement rows from settlement review while preserving payout eligibility', async () => {
+    ledgerRows = [
+      {
+        ...buildSaleFixture({
+          id: 'fin-yalispor-sale-1087',
+          amount: 7598,
+          orderId: 'gid://shopify/Order/1087',
+          orderNumber: '#1087',
+          commissionPercentSnapshot: 10,
+          commissionVatPercentSnapshot: 20,
+          createdAt: '2026-06-18T10:30:00.000Z',
+          settlementDelayDaysSnapshot: 0,
+          deliveredAt: '2026-06-18T10:45:00.000Z',
+        }),
+        settlementApprovalLines: [
+          {
+            settlementApproval: {
+              id: 'approval-1087',
+              status: 'APPROVED',
+              commissionInvoices: [
+                {
+                  id: 'commission-invoice-1087',
+                  status: 'CREATED',
+                  invoiceNo: 'REE2026000000068',
+                  providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+
+    const dashboard = await getVendorFinanceDashboard('yalispor');
+    const record = dashboard.records[0];
+
+    expect(record.settlement).toMatchObject({
+      status: 'payable',
+      payoutReady: false,
+      review: {
+        approvalId: 'approval-1087',
+        approvalStatus: 'approved',
+        commissionInvoiceId: 'commission-invoice-1087',
+        commissionInvoiceStatus: 'created',
+        invoiceNo: 'REE2026000000068',
+        providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+      },
+    });
+    expect(record.settlement.note).toContain('Logo commission invoice has been created');
+    expect(dashboard.summary.pendingReviewBalance).toBe('0.00');
+    expect(dashboard.payoutBatchSummary).toMatchObject({
+      eligibleRowCount: 1,
+      eligibleNetAmount: '6686.24',
+      blockedRowCount: 0,
     });
   });
 

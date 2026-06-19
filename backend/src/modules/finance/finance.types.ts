@@ -7,6 +7,7 @@ export type FinanceSummaryDto = {
   shippingDeductions: string;
   payoutEstimate: string;
   payoutStatus: string;
+  pendingReviewBalance: string;
   accruedBalance: string;
   payableBalance: string;
   heldBalance: string;
@@ -170,6 +171,14 @@ export type SettlementDto = {
   settledAt: string | null;
   holdReason: string | null;
   note: string;
+  review: {
+    approvalId: string;
+    approvalStatus: 'draft' | 'approved';
+    commissionInvoiceId: string | null;
+    commissionInvoiceStatus: string | null;
+    invoiceNo: string | null;
+    providerUuid: string | null;
+  } | null;
 };
 
 export type PayoutBatchReferenceDto = {

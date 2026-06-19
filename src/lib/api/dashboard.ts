@@ -269,6 +269,9 @@ function countOpenSupportIssues(tickets: SupportTicket[], vendorId: string) {
 }
 
 function isFinanceReviewItem(transaction: FinanceTransaction) {
+  if (transaction.settlement?.review) {
+    return false;
+  }
   if (transaction.status === 'Pending' || transaction.status === 'Failed') {
     return true;
   }

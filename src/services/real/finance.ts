@@ -20,6 +20,7 @@ type FinanceDashboardDto = {
     shippingDeductions?: string;
     payoutEstimate: string;
     payoutStatus: string;
+    pendingReviewBalance?: string;
     accruedBalance?: string;
     payableBalance?: string;
     heldBalance?: string;
@@ -151,7 +152,9 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       payoutEstimate,
       totalRevenue: grossSales,
       availableBalance: payoutEstimate,
-      pendingPayouts: payoutEstimate,
+      pendingPayouts: response.summary.pendingReviewBalance
+        ? formatCurrency(response.summary.pendingReviewBalance)
+        : payoutEstimate,
       refundsThisMonth: refunds,
       accruedBalance: response.summary.accruedBalance ? formatCurrency(response.summary.accruedBalance) : undefined,
       payableBalance: response.summary.payableBalance ? formatCurrency(response.summary.payableBalance) : undefined,

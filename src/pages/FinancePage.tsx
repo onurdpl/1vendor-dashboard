@@ -299,6 +299,52 @@ function getPayoutActivityDetail(record: FinanceTransaction) {
   return 'Settlement preview';
 }
 
+function getSettlementReviewDisplay(record: FinanceTransaction) {
+  const review = record.settlement?.review;
+  if (!review) {
+    return null;
+  }
+  if (review.commissionInvoiceStatus === 'created') {
+    return {
+      label: 'Commission invoiced',
+      timelineLabel: 'Logo commission invoice created',
+      timelineStatus: 'Invoiced',
+      detail: review.invoiceNo ?? review.providerUuid ?? review.commissionInvoiceId ?? review.approvalId,
+      guidance: {
+        actionLabel: 'Review commission invoice',
+        description: review.invoiceNo
+          ? `Logo commission invoice ${review.invoiceNo} is linked to this approved settlement.`
+          : 'Logo commission invoice is created; use the provider UUID for reconciliation until the invoice number is synced.',
+        tone: 'success' as const,
+      },
+    };
+  }
+  if (review.approvalStatus === 'approved') {
+    return {
+      label: 'Settlement approved',
+      timelineLabel: 'Settlement approved',
+      timelineStatus: 'Approved',
+      detail: review.approvalId,
+      guidance: {
+        actionLabel: 'Review approved settlement',
+        description: 'This row is locked in an approved settlement and is no longer a pending settlement candidate.',
+        tone: 'success' as const,
+      },
+    };
+  }
+  return {
+    label: 'Settlement draft locked',
+    timelineLabel: 'Settlement draft locked',
+    timelineStatus: 'Draft',
+    detail: review.approvalId,
+    guidance: {
+      actionLabel: 'Review draft settlement',
+      description: 'This row is locked in a draft settlement approval and is excluded from new review candidates.',
+      tone: 'info' as const,
+    },
+  };
+}
+
 function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const status = normalizeFinanceStatus(record.status);
   if (status === 'Failed' || record.settlement?.status === 'held' || record.settlement?.status === 'disputed') {
@@ -309,6 +355,10 @@ function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'adm
   }
   if (record.payoutBatch) {
     return getPayoutBatchStatusLabel(record.payoutBatch.status, audience);
+  }
+  const reviewDisplay = getSettlementReviewDisplay(record);
+  if (reviewDisplay) {
+    return reviewDisplay.label;
   }
   if (record.settlement?.payoutReady || record.settlement?.status === 'payable' || record.settlement?.status === 'partially_refunded') {
     return 'Pending review';
@@ -324,7 +374,7 @@ function getPayoutActivityTone(record: FinanceTransaction, audience: 'admin' | '
   if (label === 'Blocked') {
     return 'danger' as const;
   }
-  if (label === 'Approved' || label === 'Scheduled' || label === 'Paid') {
+  if (label === 'Approved' || label === 'Scheduled' || label === 'Paid' || label === 'Settlement approved' || label === 'Commission invoiced') {
     return 'success' as const;
   }
   if (label === 'Estimated') {
@@ -444,6 +494,7 @@ function getTotalDeductions(record: FinanceTransaction) {
 }
 
 function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineItem[] {
+  const reviewDisplay = getSettlementReviewDisplay(record);
   const items: Array<FinanceTimelineItem | null> = [
     {
       label: isRefundRecord(record) ? 'Refund impact captured' : 'Order captured',
@@ -451,9 +502,9 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
       status: normalizeFinanceStatus(record.status),
     },
     {
-      label: record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated',
+      label: reviewDisplay?.timelineLabel ?? (record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
-      status: record.settlement?.payoutReady ? 'Review' : 'Preview',
+      status: reviewDisplay?.timelineStatus ?? (record.settlement?.payoutReady ? 'Review' : 'Preview'),
     },
     record.payoutBatch
       ? {
@@ -932,11 +983,12 @@ export function FinancePage() {
   );
   const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
   const selectedOrderSettlementHref = selectedRecord ? buildOrderSettlementHref(selectedRecord) : null;
+  const selectedReviewDisplay = selectedRecord ? getSettlementReviewDisplay(selectedRecord) : null;
   const selectedFinanceGuidance = selectedRecord
-    ? getFinanceWorkflowAction({
+    ? selectedReviewDisplay?.guidance ?? getFinanceWorkflowAction({
         status: selectedRecord.status,
         settlementStatus: selectedRecord.settlement?.status,
-        payoutReady: selectedRecord.settlement?.payoutReady,
+        payoutReady: selectedRecord.settlement?.review ? false : selectedRecord.settlement?.payoutReady,
         hasRefundImpact: isRefundRecord(selectedRecord) || Boolean(selectedRecord.payoutCalculation?.refundImpact),
         audience: financeAudience,
       })
@@ -1008,7 +1060,10 @@ export function FinancePage() {
   }
   const financeRecommendations: OperationsRecommendation[] = [];
   if (selectedRecord && isAdmin) {
-    if (selectedRecord.status === 'Pending' || selectedRecord.settlement?.status === 'held' || selectedRecord.settlement?.status === 'disputed') {
+    if (
+      !selectedRecord.settlement?.review &&
+      (selectedRecord.status === 'Pending' || selectedRecord.settlement?.status === 'held' || selectedRecord.settlement?.status === 'disputed')
+    ) {
       financeRecommendations.push({
         id: `finance-rec-payout-${selectedRecord.id}`,
         type: 'finance_review',
@@ -1450,8 +1505,23 @@ export function FinancePage() {
                   />
                   <MetadataRow
                     label={isVendorUser ? 'Settlement review' : 'Payout review'}
-                    value={selectedRecord.payoutBatch ? (isVendorUser ? 'Pending review' : 'Draft review artifact') : 'No review scheduled'}
+                    value={
+                      selectedReviewDisplay
+                        ? selectedReviewDisplay.label
+                        : selectedRecord.payoutBatch
+                          ? (isVendorUser ? 'Pending review' : 'Draft review artifact')
+                          : 'No review scheduled'
+                    }
                   />
+                  {selectedRecord.settlement?.review ? (
+                    <MetadataRow label="Approval" value={selectedRecord.settlement.review.approvalId} />
+                  ) : null}
+                  {selectedReviewDisplay?.detail ? (
+                    <MetadataRow
+                      label={selectedRecord.settlement?.review?.commissionInvoiceStatus === 'created' ? 'Commission invoice reference' : 'Settlement reference'}
+                      value={selectedReviewDisplay.detail}
+                    />
+                  ) : null}
                 </div>
               </div>
 

@@ -568,6 +568,77 @@ describe('FinancePage control center', () => {
     expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Settlement review');
   });
 
+  it('shows approved commission-invoiced finance rows as locked instead of pending review', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          status: 'Pending',
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            payoutReady: false,
+            review: {
+              approvalId: 'approval-1087',
+              approvalStatus: 'approved',
+              commissionInvoiceId: 'commission-invoice-1087',
+              commissionInvoiceStatus: 'created',
+              invoiceNo: null,
+              providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+            },
+          },
+        },
+      ],
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        eligibleRowCount: 0,
+        eligibleNetAmount: '$0.00',
+        blockedRowCount: 0,
+        latestBatch: null,
+      },
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('Commission invoiced')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Logo commission invoice created')).toBeInTheDocument();
+    expect(screen.getByText('Review commission invoice')).toBeInTheDocument();
+    expect(screen.getByText('82691C7B-28D6-4E30-95C9-C0658E90F090')).toBeInTheDocument();
+    expect(screen.queryByText('Settlement awaiting review')).not.toBeInTheDocument();
+    expect(screen.queryByText('Inspect review state before draft preparation or reconciliation.')).not.toBeInTheDocument();
+  });
+
+  it('excludes approved commission-invoiced rows from the settlement review workflow queue', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          status: 'Pending',
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            payoutReady: false,
+            review: {
+              approvalId: 'approval-1087',
+              approvalStatus: 'approved',
+              commissionInvoiceId: 'commission-invoice-1087',
+              commissionInvoiceStatus: 'created',
+              invoiceNo: 'REE2026000000068',
+              providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+            },
+          },
+        },
+      ],
+    });
+
+    renderFinancePage(['/finance?workflow=settlement-review']);
+
+    expect(await screen.findByText('No settlement review rows currently pending')).toBeInTheDocument();
+    expect(screen.queryByText('#1021')).not.toBeInTheDocument();
+  });
+
   it('renders order settlement deep links for finance rows with order detail route ids', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboardWithOrderSettlementRoute);
 
