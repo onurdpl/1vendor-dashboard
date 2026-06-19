@@ -54,6 +54,14 @@ const FINANCE_POLICY_FIELDS = new Set([
   'settlementDelayDays',
 ]);
 
+const SETTLEMENT_SCHEDULE_FIELDS = new Set([
+  'settlementFrequencyType',
+  'weeklySettlementDay',
+  'monthlySettlementDay',
+  'autoSettlementDraftEnabled',
+  'autoSettlementApproveEnabled',
+]);
+
 const BILLING_LEGAL_FIELDS = new Set([
   'legalCompanyName',
   'taxNumber',
@@ -203,6 +211,14 @@ function toPrismaJson(value: Prisma.InputJsonValue | null) {
 }
 
 function fieldImpact(section: VendorProfileAuditSection, fieldName: string): VendorProfileSnapshotImpact {
+  if (SETTLEMENT_SCHEDULE_FIELDS.has(fieldName)) {
+    return VendorProfileSnapshotImpact.FUTURE_SETTLEMENT_APPROVALS_ONLY;
+  }
+
+  if (fieldName === 'autoSettlementInvoiceEnabled') {
+    return VendorProfileSnapshotImpact.FUTURE_COMMISSION_INVOICES_ONLY;
+  }
+
   if (FINANCE_POLICY_FIELDS.has(fieldName)) {
     return VendorProfileSnapshotImpact.FUTURE_LEDGER_ROWS_ONLY;
   }

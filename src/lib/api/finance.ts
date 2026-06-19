@@ -38,6 +38,12 @@ export function updateVendorFinancialProfile(
     shippingMode: VendorFinancialProfile['shippingMode'];
     fixedShippingFee: number | null;
     settlementDelayDays: number;
+    settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
+    weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
+    monthlySettlementDay: number | null;
+    autoSettlementDraftEnabled: boolean;
+    autoSettlementApproveEnabled: boolean;
+    autoSettlementInvoiceEnabled: boolean;
   },
 ) {
   return runtimeServices.finance.updateProfile(vendorId, input);

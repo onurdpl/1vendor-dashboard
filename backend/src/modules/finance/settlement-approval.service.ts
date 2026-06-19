@@ -59,6 +59,7 @@ type SettlementApprovalInput = {
   vendorId: string;
   periodStart?: Date | null;
   periodEnd?: Date | null;
+  asOfDate?: Date | null;
   notes?: string | null;
   candidateScope?: CandidateScope | null;
   selectedOrderIds?: string[];
@@ -409,7 +410,11 @@ function resolveRefundCommissionSnapshot(row: SettlementApprovalLedgerRow) {
   };
 }
 
-function resolveSettlementStatus(row: SettlementApprovalLedgerRow, currentSettlementApprovalId?: string | null) {
+function resolveSettlementStatus(
+  row: SettlementApprovalLedgerRow,
+  currentSettlementApprovalId?: string | null,
+  asOfDate?: Date | null,
+) {
   const type = normalizeType(row.entryType);
   const payoutStatus = normalizeStatus(row.payoutStatus);
   if (payoutStatus === 'paid') {
@@ -434,12 +439,16 @@ function resolveSettlementStatus(row: SettlementApprovalLedgerRow, currentSettle
     return 'held';
   }
   if (type === 'sale') {
-    return evaluateSaleSettlementDelay(row).eligible ? 'payable' : 'accruing';
+    return evaluateSaleSettlementDelay(row, asOfDate ?? undefined).eligible ? 'payable' : 'accruing';
   }
   return storedStatus || 'pending';
 }
 
-function rowIsEligible(row: SettlementApprovalLedgerRow, currentSettlementApprovalId?: string | null) {
+function rowIsEligible(
+  row: SettlementApprovalLedgerRow,
+  currentSettlementApprovalId?: string | null,
+  asOfDate?: Date | null,
+) {
   const type = normalizeType(row.entryType);
   if (type !== 'sale' && type !== 'refund') {
     return false;
@@ -450,7 +459,7 @@ function rowIsEligible(row: SettlementApprovalLedgerRow, currentSettlementApprov
   if (type === 'refund' && !getRefundOffsetEligibility(row, currentSettlementApprovalId).eligible) {
     return false;
   }
-  const settlementStatus = resolveSettlementStatus(row, currentSettlementApprovalId);
+  const settlementStatus = resolveSettlementStatus(row, currentSettlementApprovalId, asOfDate);
   return (settlementStatus === 'payable' || settlementStatus === 'partially_refunded') && !hasApprovedOpenReturnHold(row);
 }
 
@@ -460,7 +469,7 @@ function rowHasActiveApproval(row: SettlementApprovalLedgerRow) {
   );
 }
 
-export function buildSettlementEligibilityExplanation(row: SettlementApprovalLedgerRow): {
+export function buildSettlementEligibilityExplanation(row: SettlementApprovalLedgerRow, asOfDate?: Date | null): {
   storedSettlementStatus: string | null;
   derivedSettlementStatus: string;
   eligibilityDecision: 'included' | 'excluded';
@@ -477,10 +486,10 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
   const refundDetected = type === 'refund' || refundCount > 0;
   const fulfillmentEvidencePresent = hasFulfillmentEvidence(row.vendorAllocation);
   const shippingEvidencePresent = hasShippingEvidence(row.vendorAllocation);
-  const settlementDelay = evaluateSaleSettlementDelay(row);
+  const settlementDelay = evaluateSaleSettlementDelay(row, asOfDate ?? undefined);
   const refundOffsetEligibility = type === 'refund' ? getRefundOffsetEligibility(row) : null;
-  const derivedSettlementStatus = resolveSettlementStatus(row);
-  let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row) ? 'included' : 'excluded';
+  const derivedSettlementStatus = resolveSettlementStatus(row, undefined, asOfDate);
+  let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row, undefined, asOfDate) ? 'included' : 'excluded';
   let eligibilityReason = 'Excluded because row is not payable or partially refunded.';
 
   if (type !== 'sale' && type !== 'refund') {
@@ -549,9 +558,9 @@ function resolveCalculationProfile(row: SettlementApprovalLedgerRow): VendorFina
   return DEFAULT_VENDOR_FINANCIAL_PROFILE;
 }
 
-function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraft {
+function buildLine(row: SettlementApprovalLedgerRow, asOfDate?: Date | null): SettlementApprovalLineDraft {
   const type = normalizeType(row.entryType);
-  const eligibilityExplanation = buildSettlementEligibilityExplanation(row);
+  const eligibilityExplanation = buildSettlementEligibilityExplanation(row, asOfDate);
   if (type === 'refund') {
     const snapshots = resolveRefundCommissionSnapshot(row);
     const refundOffset = calculateRefundOffsetAmounts({
@@ -571,7 +580,7 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
         entryType: row.entryType,
         amount: String(row.amount),
         settlementStatus: row.settlementStatus,
-        resolvedSettlementStatus: resolveSettlementStatus(row),
+        resolvedSettlementStatus: resolveSettlementStatus(row, undefined, asOfDate),
         ...eligibilityExplanation,
         refundOffsetReason: getRefundOffsetEligibility(row).reason,
         refundOffsetAppliedBeforeSettlement: true,
@@ -610,7 +619,7 @@ function buildLine(row: SettlementApprovalLedgerRow): SettlementApprovalLineDraf
       entryType: row.entryType,
       amount: String(row.amount),
       settlementStatus: row.settlementStatus,
-      resolvedSettlementStatus: resolveSettlementStatus(row),
+      resolvedSettlementStatus: resolveSettlementStatus(row, undefined, asOfDate),
       ...eligibilityExplanation,
       vendorAllocationId: row.vendorAllocation?.id ?? null,
       sourceShopifyOrderId: row.vendorAllocation?.sourceShopifyOrderId ?? null,
@@ -1314,10 +1323,11 @@ function getActiveApprovalLine(row: SettlementApprovalLedgerRow) {
 function buildMatchedOrderDiagnostic(
   requestedIdentifier: string,
   row: SettlementApprovalLedgerRow,
+  asOfDate?: Date | null,
 ): SelectedOrderDiagnosticDto {
-  const explanation = buildSettlementEligibilityExplanation(row);
+  const explanation = buildSettlementEligibilityExplanation(row, asOfDate);
   const activeApprovalLine = getActiveApprovalLine(row);
-  const candidateIncluded = rowIsEligible(row) && !activeApprovalLine;
+  const candidateIncluded = rowIsEligible(row, undefined, asOfDate) && !activeApprovalLine;
 
   return {
     requestedIdentifier,
@@ -1338,10 +1348,11 @@ function buildUnmatchedOrderDiagnostic(
   requestedIdentifier: string,
   rows: SettlementApprovalLedgerRow[],
   crossVendorRows: SettlementApprovalLedgerRow[],
+  asOfDate?: Date | null,
 ): SelectedOrderDiagnosticDto {
   const formatMismatchRow = rows.find((row) => orderNumberFormatMismatchesIdentifier(row, requestedIdentifier));
   if (formatMismatchRow) {
-    const explanation = buildSettlementEligibilityExplanation(formatMismatchRow);
+    const explanation = buildSettlementEligibilityExplanation(formatMismatchRow, asOfDate);
     return {
       requestedIdentifier,
       matched: false,
@@ -1360,7 +1371,7 @@ function buildUnmatchedOrderDiagnostic(
 
   const crossVendorRow = crossVendorRows.find((row) => orderMatchesIdentifier(row, requestedIdentifier));
   if (crossVendorRow) {
-    const explanation = buildSettlementEligibilityExplanation(crossVendorRow);
+    const explanation = buildSettlementEligibilityExplanation(crossVendorRow, asOfDate);
     return {
       requestedIdentifier,
       matched: false,
@@ -1395,6 +1406,7 @@ function buildSelectedOrderDiagnostics(
   rows: SettlementApprovalLedgerRow[],
   input: SettlementApprovalInput,
   crossVendorRows: SettlementApprovalLedgerRow[] = [],
+  asOfDate?: Date | null,
 ): SelectedOrderDiagnosticDto[] {
   const requestedOrders = normalizeSelectionValues([
     ...(input.selectedOrderIds ?? []),
@@ -1406,15 +1418,15 @@ function buildSelectedOrderDiagnostics(
 
   return requestedOrders.map((requestedIdentifier) => {
     const matchedRows = rows.filter((row) => orderMatchesIdentifier(row, requestedIdentifier));
-    const includedRow = matchedRows.find((row) => rowIsEligible(row) && !rowHasActiveApproval(row));
-    const eligibleLockedRow = matchedRows.find((row) => rowIsEligible(row) && rowHasActiveApproval(row));
+    const includedRow = matchedRows.find((row) => rowIsEligible(row, undefined, asOfDate) && !rowHasActiveApproval(row));
+    const eligibleLockedRow = matchedRows.find((row) => rowIsEligible(row, undefined, asOfDate) && rowHasActiveApproval(row));
     const firstMatchedRow = includedRow ?? eligibleLockedRow ?? matchedRows[0];
 
     if (firstMatchedRow) {
-      return buildMatchedOrderDiagnostic(requestedIdentifier, firstMatchedRow);
+      return buildMatchedOrderDiagnostic(requestedIdentifier, firstMatchedRow, asOfDate);
     }
 
-    return buildUnmatchedOrderDiagnostic(requestedIdentifier, rows, crossVendorRows);
+    return buildUnmatchedOrderDiagnostic(requestedIdentifier, rows, crossVendorRows, asOfDate);
   });
 }
 
@@ -1791,9 +1803,9 @@ async function buildApprovalPreview(
     : [];
 
   const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
-  const eligibleRows = candidateSelection.rows.filter((row) => rowIsEligible(row));
+  const eligibleRows = candidateSelection.rows.filter((row) => rowIsEligible(row, undefined, input.asOfDate));
   const unapprovedRows = eligibleRows.filter((row) => !rowHasActiveApproval(row));
-  const lines = unapprovedRows.map(buildLine);
+  const lines = unapprovedRows.map((row) => buildLine(row, input.asOfDate));
   const totals = summarizeLines(lines);
   const candidateQualitySummary = buildCandidateQualitySummary(unapprovedRows, input);
   const vendorBalance = await getVendorBalanceSummary(tx, input.vendorId, totals.currency);
@@ -1820,6 +1832,7 @@ async function buildApprovalPreview(
       rows as SettlementApprovalLedgerRow[],
       input,
       crossVendorRows as SettlementApprovalLedgerRow[],
+      input.asOfDate,
     ),
     summary: {
       ...totals,
@@ -1940,7 +1953,7 @@ export async function previewApproval(
   vendorId: string,
   periodStart?: Date | null,
   periodEnd?: Date | null,
-  selection?: Pick<SettlementApprovalInput, 'candidateScope' | 'selectedOrderIds' | 'selectedShopifyOrderIds' | 'selectedAllocationIds'>,
+  selection?: Pick<SettlementApprovalInput, 'candidateScope' | 'selectedOrderIds' | 'selectedShopifyOrderIds' | 'selectedAllocationIds' | 'asOfDate'>,
 ): Promise<SettlementApprovalPreviewDto> {
   return buildApprovalPreview({ vendorId, periodStart, periodEnd, ...selection });
 }
@@ -2024,6 +2037,7 @@ export async function createDraftApproval(
             vendorId: input.vendorId,
             periodStart: toIso(input.periodStart),
             periodEnd: toIso(input.periodEnd),
+            asOfDate: toIso(input.asOfDate),
             candidateScope: preview.candidateScope,
             candidateSelectionSummary: preview.candidateSelectionSummary,
             generatedAt: generatedAt.toISOString(),

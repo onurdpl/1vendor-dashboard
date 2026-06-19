@@ -50,6 +50,11 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
   'Payout batch requires revision because financial facts changed after batch creation.';
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
+const DEFAULT_SETTLEMENT_FREQUENCY_TYPE = 'WEEKLY' as const;
+const DEFAULT_WEEKLY_SETTLEMENT_DAY = 'WEDNESDAY' as const;
+const DEFAULT_MONTHLY_SETTLEMENT_DAY = 28;
+const SUPPORTED_SETTLEMENT_FREQUENCY_TYPES = new Set(['WEEKLY', 'BIWEEKLY', 'MONTHLY']);
+const SUPPORTED_SETTLEMENT_WEEKDAYS = new Set(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']);
 
 type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent'>;
 type SettlementCommissionInvoiceReviewSnapshot = {
@@ -200,6 +205,30 @@ function mapShippingMode(mode: string): ShippingMode {
   return 'disabled';
 }
 
+function mapSettlementFrequencyType(value: unknown): VendorFinancialProfileDto['settlementFrequencyType'] {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (normalized === 'BIWEEKLY' || normalized === 'MONTHLY') {
+    return normalized;
+  }
+  return DEFAULT_SETTLEMENT_FREQUENCY_TYPE;
+}
+
+function mapSettlementWeekday(value: unknown): VendorFinancialProfileDto['weeklySettlementDay'] {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  if (SUPPORTED_SETTLEMENT_WEEKDAYS.has(normalized)) {
+    return normalized as VendorFinancialProfileDto['weeklySettlementDay'];
+  }
+  return DEFAULT_WEEKLY_SETTLEMENT_DAY;
+}
+
+function mapMonthlySettlementDay(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return DEFAULT_MONTHLY_SETTLEMENT_DAY;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : DEFAULT_MONTHLY_SETTLEMENT_DAY;
+}
+
 function mapProfile(profile: {
   vendorId: string;
   commissionPercent: unknown;
@@ -208,6 +237,12 @@ function mapProfile(profile: {
   shippingMode: string;
   fixedShippingFee: unknown;
   settlementDelayDays?: unknown;
+  settlementFrequencyType?: unknown;
+  weeklySettlementDay?: unknown;
+  monthlySettlementDay?: unknown;
+  autoSettlementDraftEnabled?: boolean;
+  autoSettlementApproveEnabled?: boolean;
+  autoSettlementInvoiceEnabled?: boolean;
   active: boolean;
 } | null, vendorId: string): VendorFinancialProfileDto {
   const config = profile
@@ -218,11 +253,23 @@ function mapProfile(profile: {
         shippingMode: mapShippingMode(profile.shippingMode),
         fixedShippingFee: profile.fixedShippingFee === null ? null : toNumber(profile.fixedShippingFee),
         settlementDelayDays: normalizeSettlementDelayDays(profile.settlementDelayDays),
+        settlementFrequencyType: mapSettlementFrequencyType(profile.settlementFrequencyType),
+        weeklySettlementDay: mapSettlementWeekday(profile.weeklySettlementDay),
+        monthlySettlementDay: mapMonthlySettlementDay(profile.monthlySettlementDay),
+        autoSettlementDraftEnabled: profile.autoSettlementDraftEnabled ?? false,
+        autoSettlementApproveEnabled: profile.autoSettlementApproveEnabled ?? false,
+        autoSettlementInvoiceEnabled: profile.autoSettlementInvoiceEnabled ?? false,
         active: profile.active,
         source: 'configured' as const,
       }
     : {
         ...DEFAULT_VENDOR_FINANCIAL_PROFILE,
+        settlementFrequencyType: DEFAULT_SETTLEMENT_FREQUENCY_TYPE,
+        weeklySettlementDay: DEFAULT_WEEKLY_SETTLEMENT_DAY,
+        monthlySettlementDay: DEFAULT_MONTHLY_SETTLEMENT_DAY,
+        autoSettlementDraftEnabled: false,
+        autoSettlementApproveEnabled: false,
+        autoSettlementInvoiceEnabled: false,
         active: true,
         source: 'default' as const,
       };
@@ -235,6 +282,12 @@ function mapProfile(profile: {
     shippingMode: config.shippingMode,
     fixedShippingFee: config.fixedShippingFee === null ? null : toAmountString(config.fixedShippingFee),
     settlementDelayDays: config.settlementDelayDays,
+    settlementFrequencyType: config.settlementFrequencyType,
+    weeklySettlementDay: config.weeklySettlementDay,
+    monthlySettlementDay: config.monthlySettlementDay,
+    autoSettlementDraftEnabled: config.autoSettlementDraftEnabled,
+    autoSettlementApproveEnabled: config.autoSettlementApproveEnabled,
+    autoSettlementInvoiceEnabled: config.autoSettlementInvoiceEnabled,
     active: config.active,
     source: config.source,
   };
@@ -2568,6 +2621,45 @@ function normalizeSettlementDelayDaysInput(value: number | undefined, fallback: 
   return Math.round(value);
 }
 
+function normalizeSettlementFrequencyTypeInput(
+  value: VendorFinancialProfileUpdateDto['settlementFrequencyType'],
+  fallback: VendorFinancialProfileDto['settlementFrequencyType'],
+) {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!SUPPORTED_SETTLEMENT_FREQUENCY_TYPES.has(value)) {
+    throw new Error('settlementFrequencyType must be WEEKLY, BIWEEKLY, or MONTHLY.');
+  }
+  return value;
+}
+
+function normalizeWeeklySettlementDayInput(
+  value: VendorFinancialProfileUpdateDto['weeklySettlementDay'],
+  fallback: VendorFinancialProfileDto['weeklySettlementDay'],
+) {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!SUPPORTED_SETTLEMENT_WEEKDAYS.has(value)) {
+    throw new Error('weeklySettlementDay must be MONDAY, TUESDAY, WEDNESDAY, THURSDAY, or FRIDAY.');
+  }
+  return value;
+}
+
+function normalizeMonthlySettlementDayInput(value: number | null | undefined, fallback: number | null) {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isFinite(value) || value < 1 || value > 31) {
+    throw new Error('monthlySettlementDay must be between 1 and 31.');
+  }
+  return Math.round(value);
+}
+
 export async function upsertVendorFinancialProfile(
   vendorId: string,
   input: VendorFinancialProfileUpdateDto,
@@ -2591,6 +2683,18 @@ export async function upsertVendorFinancialProfile(
     input.settlementDelayDays,
     existing.settlementDelayDays ?? DEFAULT_SETTLEMENT_DELAY_DAYS,
   );
+  const settlementFrequencyType = normalizeSettlementFrequencyTypeInput(
+    input.settlementFrequencyType,
+    existing.settlementFrequencyType ?? DEFAULT_SETTLEMENT_FREQUENCY_TYPE,
+  );
+  const weeklySettlementDay = normalizeWeeklySettlementDayInput(
+    input.weeklySettlementDay,
+    existing.weeklySettlementDay ?? DEFAULT_WEEKLY_SETTLEMENT_DAY,
+  );
+  const monthlySettlementDay = normalizeMonthlySettlementDayInput(
+    input.monthlySettlementDay,
+    existing.monthlySettlementDay ?? DEFAULT_MONTHLY_SETTLEMENT_DAY,
+  );
 
   if (fixedShippingFee !== null && (!Number.isFinite(fixedShippingFee) || fixedShippingFee < 0)) {
     throw new Error('Fixed shipping fee must be zero or greater.');
@@ -2607,6 +2711,12 @@ export async function upsertVendorFinancialProfile(
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
       settlementDelayDays,
+      settlementFrequencyType,
+      weeklySettlementDay,
+      monthlySettlementDay,
+      autoSettlementDraftEnabled: input.autoSettlementDraftEnabled ?? existing.autoSettlementDraftEnabled,
+      autoSettlementApproveEnabled: input.autoSettlementApproveEnabled ?? existing.autoSettlementApproveEnabled,
+      autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled ?? existing.autoSettlementInvoiceEnabled,
       active: input.active ?? true,
     },
     create: {
@@ -2617,6 +2727,12 @@ export async function upsertVendorFinancialProfile(
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
       settlementDelayDays,
+      settlementFrequencyType,
+      weeklySettlementDay,
+      monthlySettlementDay,
+      autoSettlementDraftEnabled: input.autoSettlementDraftEnabled ?? existing.autoSettlementDraftEnabled,
+      autoSettlementApproveEnabled: input.autoSettlementApproveEnabled ?? existing.autoSettlementApproveEnabled,
+      autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled ?? existing.autoSettlementInvoiceEnabled,
       active: input.active ?? true,
     },
   });
@@ -2634,6 +2750,12 @@ export async function upsertVendorFinancialProfile(
       'shippingMode',
       'fixedShippingFee',
       'settlementDelayDays',
+      'settlementFrequencyType',
+      'weeklySettlementDay',
+      'monthlySettlementDay',
+      'autoSettlementDraftEnabled',
+      'autoSettlementApproveEnabled',
+      'autoSettlementInvoiceEnabled',
       'active',
     ],
     actor: auditContext.actor,

@@ -329,6 +329,12 @@ export async function updateVendorFinancialProfile(
     shippingMode: VendorFinancialProfile['shippingMode'];
     fixedShippingFee: number | null;
     settlementDelayDays: number;
+    settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
+    weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
+    monthlySettlementDay: number | null;
+    autoSettlementDraftEnabled: boolean;
+    autoSettlementApproveEnabled: boolean;
+    autoSettlementInvoiceEnabled: boolean;
   },
 ): Promise<VendorFinancialProfile> {
   return apiClient.put<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, input);

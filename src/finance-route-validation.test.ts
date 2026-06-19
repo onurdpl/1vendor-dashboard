@@ -6,6 +6,8 @@ const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
 const getVendorDebtHistoryMock = vi.hoisted(() => vi.fn());
+const getSettlementScheduleDryRunMock = vi.hoisted(() => vi.fn());
+const createSettlementScheduleDraftsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -31,6 +33,11 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
 
 vi.mock('../backend/src/modules/finance/vendor-balance.service.js', () => ({
   getVendorDebtHistory: getVendorDebtHistoryMock,
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => ({
+  getSettlementScheduleDryRun: getSettlementScheduleDryRunMock,
+  createSettlementScheduleDrafts: createSettlementScheduleDraftsMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -60,6 +67,16 @@ type GetHandler = (
   request: {
     authUser?: { role?: string };
     vendorContext?: { vendorId?: string };
+    params?: Record<string, string>;
+    query?: unknown;
+  },
+  reply: ReturnType<typeof createReply>,
+) => unknown;
+
+type PostHandler = (
+  request: {
+    authUser?: { id?: string; role?: string };
+    body?: unknown;
     params?: Record<string, string>;
     query?: unknown;
   },
@@ -114,6 +131,20 @@ function createRegisteredGetRoutes() {
   return gets;
 }
 
+function createRegisteredPostRoutes() {
+  const posts = new Map<string, PostHandler>();
+  const app = {
+    get: vi.fn(),
+    post: vi.fn((path: string, _options: unknown, handler: PostHandler) => {
+      posts.set(path, handler);
+    }),
+    put: vi.fn(),
+  };
+
+  registerFinanceRoutes(app as never, {} as never);
+  return posts;
+}
+
 async function updateFinancialProfile(body: unknown) {
   const puts = createRegisteredPutRoutes();
   const reply = createReply();
@@ -142,6 +173,13 @@ describe('finance route validation', () => {
       deductShippingEnabled: true,
       shippingMode: 'fixed',
       fixedShippingFee: '30.00',
+      settlementDelayDays: 21,
+      settlementFrequencyType: 'WEEKLY',
+      weeklySettlementDay: 'WEDNESDAY',
+      monthlySettlementDay: 28,
+      autoSettlementDraftEnabled: false,
+      autoSettlementApproveEnabled: false,
+      autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
     });
@@ -160,6 +198,13 @@ describe('finance route validation', () => {
       deductShippingEnabled: true,
       shippingMode: 'fixed',
       fixedShippingFee: '30.00',
+      settlementDelayDays: 21,
+      settlementFrequencyType: 'WEEKLY',
+      weeklySettlementDay: 'WEDNESDAY',
+      monthlySettlementDay: 28,
+      autoSettlementDraftEnabled: false,
+      autoSettlementApproveEnabled: false,
+      autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
     });
@@ -187,6 +232,52 @@ describe('finance route validation', () => {
         lastDebtActivityAt: '2026-06-19T10:00:00.000Z',
       },
       events: [],
+    });
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: false,
+      runDate: '2026-01-21',
+      periodEnd: '2026-01-21T23:59:59.999Z',
+      summary: {
+        vendorsChecked: 1,
+        dueVendors: 1,
+        autoDraftEligibleVendors: 1,
+        totalEligibleLineCount: 2,
+        totalNetPayableMinor: 88000,
+      },
+      vendors: [],
+      notes: [],
+    });
+    createSettlementScheduleDraftsMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: true,
+      runDate: '2026-01-21',
+      periodEnd: '2026-01-21T23:59:59.999Z',
+      summary: {
+        vendorsChecked: 1,
+        dueVendors: 1,
+        created: 1,
+        skipped: 0,
+        failed: 0,
+      },
+      createdDrafts: [{ vendorId: 'yalispor', settlementApprovalId: 'approval-1', status: 'draft', lineCount: 2 }],
+      skipped: [],
+      failed: [],
+      dryRun: {
+        ok: true,
+        writesPerformed: false,
+        runDate: '2026-01-21',
+        periodEnd: '2026-01-21T23:59:59.999Z',
+        summary: {
+          vendorsChecked: 1,
+          dueVendors: 1,
+          autoDraftEligibleVendors: 1,
+          totalEligibleLineCount: 2,
+          totalNetPayableMinor: 88000,
+        },
+        vendors: [],
+        notes: [],
+      },
     });
   });
 
@@ -249,6 +340,13 @@ describe('finance route validation', () => {
       deductShippingEnabled: true,
       shippingMode: 'fixed',
       fixedShippingFee: '30.00',
+      settlementDelayDays: 21,
+      settlementFrequencyType: 'WEEKLY',
+      weeklySettlementDay: 'WEDNESDAY',
+      monthlySettlementDay: 28,
+      autoSettlementDraftEnabled: false,
+      autoSettlementApproveEnabled: false,
+      autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
     });
@@ -365,6 +463,107 @@ describe('finance route validation', () => {
     expect(getVendorDebtHistoryMock).not.toHaveBeenCalled();
   });
 
+  it('runs settlement schedule dry-run through the admin route', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/admin/finance/settlement-schedules/dry-run')?.(
+      {
+        authUser: { role: 'admin' },
+        query: {
+          runDate: '2026-01-21',
+          vendorId: 'yalispor',
+          limit: '10',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      writesPerformed: false,
+      runDate: '2026-01-21',
+    }));
+    expect(getSettlementScheduleDryRunMock).toHaveBeenCalledWith({
+      runDate: '2026-01-21',
+      vendorId: 'yalispor',
+      limit: 10,
+    });
+  });
+
+  it('requires admin access for settlement schedule dry-run', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/admin/finance/settlement-schedules/dry-run')?.(
+      {
+        authUser: { role: 'vendor' },
+        query: {},
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(getSettlementScheduleDryRunMock).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation for scheduled settlement draft creation', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance/settlement-schedules/create-drafts')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        body: {
+          runDate: '2026-01-21',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        message: 'confirmAutoSettlementDrafts must be true to create scheduled settlement drafts.',
+        writesPerformed: false,
+      },
+    });
+    expect(createSettlementScheduleDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it('creates scheduled settlement drafts through the admin route', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance/settlement-schedules/create-drafts')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        body: {
+          runDate: '2026-01-21',
+          vendorId: 'yalispor',
+          limit: 5,
+          confirmAutoSettlementDrafts: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      writesPerformed: true,
+    }));
+    expect(createSettlementScheduleDraftsMock).toHaveBeenCalledWith({
+      runDate: '2026-01-21',
+      vendorId: 'yalispor',
+      limit: 5,
+      confirmAutoSettlementDrafts: true,
+      createdBy: 'admin-1',
+    });
+  });
+
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {
     const response = await updateFinancialProfile({
       commissionPercent: 10,
@@ -446,6 +645,13 @@ describe('finance route validation', () => {
       deductShippingEnabled: true,
       shippingMode: 'external_provider',
       fixedShippingFee: null,
+      settlementDelayDays: 21,
+      settlementFrequencyType: 'WEEKLY',
+      weeklySettlementDay: 'WEDNESDAY',
+      monthlySettlementDay: 28,
+      autoSettlementDraftEnabled: false,
+      autoSettlementApproveEnabled: false,
+      autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
     });
@@ -467,6 +673,13 @@ describe('finance route validation', () => {
       deductShippingEnabled: true,
       shippingMode: 'external_provider',
       fixedShippingFee: null,
+      settlementDelayDays: 21,
+      settlementFrequencyType: 'WEEKLY',
+      weeklySettlementDay: 'WEDNESDAY',
+      monthlySettlementDay: 28,
+      autoSettlementDraftEnabled: false,
+      autoSettlementApproveEnabled: false,
+      autoSettlementInvoiceEnabled: false,
       active: true,
       source: 'configured',
     });

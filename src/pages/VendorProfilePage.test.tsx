@@ -35,6 +35,12 @@ const updateVendorFinancialProfileMock = vi.fn<
       shippingMode: VendorFinancialProfile['shippingMode'];
       fixedShippingFee: number | null;
       settlementDelayDays: number;
+      settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
+      weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
+      monthlySettlementDay: number | null;
+      autoSettlementDraftEnabled: boolean;
+      autoSettlementApproveEnabled: boolean;
+      autoSettlementInvoiceEnabled: boolean;
     },
   ) => Promise<VendorFinancialProfile>
 >();
@@ -151,6 +157,12 @@ const financeProfile: VendorFinancialProfile = {
   shippingMode: 'external_provider',
   fixedShippingFee: null,
   settlementDelayDays: 21,
+  settlementFrequencyType: 'WEEKLY',
+  weeklySettlementDay: 'WEDNESDAY',
+  monthlySettlementDay: 28,
+  autoSettlementDraftEnabled: false,
+  autoSettlementApproveEnabled: false,
+  autoSettlementInvoiceEnabled: false,
   active: true,
   source: 'configured',
 };
@@ -335,6 +347,12 @@ describe('VendorProfilePage', () => {
         shippingMode: input.shippingMode,
         fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
         settlementDelayDays: input.settlementDelayDays,
+        settlementFrequencyType: input.settlementFrequencyType,
+        weeklySettlementDay: input.weeklySettlementDay,
+        monthlySettlementDay: input.monthlySettlementDay,
+        autoSettlementDraftEnabled: input.autoSettlementDraftEnabled,
+        autoSettlementApproveEnabled: input.autoSettlementApproveEnabled,
+        autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled,
         active: true,
         source: 'configured',
       }),
@@ -867,6 +885,12 @@ describe('VendorProfilePage', () => {
         shippingMode: input.shippingMode,
         fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
         settlementDelayDays: input.settlementDelayDays,
+        settlementFrequencyType: input.settlementFrequencyType,
+        weeklySettlementDay: input.weeklySettlementDay,
+        monthlySettlementDay: input.monthlySettlementDay,
+        autoSettlementDraftEnabled: input.autoSettlementDraftEnabled,
+        autoSettlementApproveEnabled: input.autoSettlementApproveEnabled,
+        autoSettlementInvoiceEnabled: input.autoSettlementInvoiceEnabled,
         active: true,
         source: 'configured',
       }),
@@ -889,6 +913,9 @@ describe('VendorProfilePage', () => {
     expect(within(financeSection!).getByLabelText('Commission VAT %')).toHaveValue(20);
     expect(within(financeSection!).getByLabelText('Shipping deduction mode')).toHaveValue('external_provider');
     expect(within(financeSection!).getByLabelText('Settlement delay days')).toHaveValue(21);
+    expect(within(financeSection!).getByLabelText('Settlement frequency')).toHaveValue('WEEKLY');
+    expect(within(financeSection!).getByLabelText('Weekly settlement day')).toHaveValue('WEDNESDAY');
+    expect(within(financeSection!).getByLabelText('Monthly settlement day')).toHaveValue(28);
     expect(within(financeSection!).getByLabelText(/Deduct shipping after fulfillment/i)).toBeChecked();
 
     await userEvent.clear(within(financeSection!).getByLabelText('Commission %'));
@@ -896,6 +923,9 @@ describe('VendorProfilePage', () => {
     await userEvent.clear(within(financeSection!).getByLabelText('Settlement delay days'));
     await userEvent.type(within(financeSection!).getByLabelText('Settlement delay days'), '14');
     await userEvent.selectOptions(within(financeSection!).getByLabelText('Shipping deduction mode'), 'fixed');
+    await userEvent.selectOptions(within(financeSection!).getByLabelText('Settlement frequency'), 'BIWEEKLY');
+    await userEvent.selectOptions(within(financeSection!).getByLabelText('Weekly settlement day'), 'MONDAY');
+    await userEvent.click(within(financeSection!).getByLabelText(/Enable scheduled draft creation/i));
     await userEvent.type(within(financeSection!).getByLabelText('Fixed shipping fee'), '25');
     await userEvent.click(within(financeSection!).getByRole('button', { name: 'Save finance policy' }));
 
@@ -907,6 +937,12 @@ describe('VendorProfilePage', () => {
         shippingMode: 'fixed',
         fixedShippingFee: 25,
         settlementDelayDays: 14,
+        settlementFrequencyType: 'BIWEEKLY',
+        weeklySettlementDay: 'MONDAY',
+        monthlySettlementDay: 28,
+        autoSettlementDraftEnabled: true,
+        autoSettlementApproveEnabled: false,
+        autoSettlementInvoiceEnabled: false,
       }),
     );
     expect(await within(financeSection!).findByText('13.75%')).toBeInTheDocument();

@@ -52,6 +52,10 @@ import {
   getSettlementRefundAdjustmentDetail,
   listSettlementRefundAdjustments,
 } from './settlement-refund-adjustment.service.js';
+import {
+  createSettlementScheduleDrafts,
+  getSettlementScheduleDryRun,
+} from './settlement-schedule.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -101,6 +105,18 @@ function readOptionalQueryString(query: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function readOptionalQueryNumber(query: unknown, key: string) {
+  const value = readOptionalQueryString(query, key);
+  if (!value) {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`${key} must be a valid number.`);
+  }
+  return numeric;
+}
+
 function readOptionalBodyString(body: unknown, key: string) {
   if (!isRecord(body)) {
     return null;
@@ -108,6 +124,21 @@ function readOptionalBodyString(body: unknown, key: string) {
 
   const value = body[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readOptionalBodyNumber(body: unknown, key: string) {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, key)) {
+    return null;
+  }
+  const value = body[key];
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`${key} must be a valid number.`);
+  }
+  return numeric;
 }
 
 function readOptionalBodyStringArray(body: unknown, key: string) {
@@ -434,6 +465,61 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           });
         }
         throw error;
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-schedules/dry-run',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await getSettlementScheduleDryRun({
+          runDate: readOptionalQueryString(request.query, 'runDate'),
+          vendorId: readOptionalQueryString(request.query, 'vendorId'),
+          limit: readOptionalQueryNumber(request.query, 'limit'),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Settlement schedule dry run could not be created.';
+        return reply.code(400).send({ message, writesPerformed: false });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-schedules/create-drafts',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        if (!isRecord(request.body) || request.body.confirmAutoSettlementDrafts !== true) {
+          return reply.code(400).send({
+            message: 'confirmAutoSettlementDrafts must be true to create scheduled settlement drafts.',
+            writesPerformed: false,
+          });
+        }
+
+        return await createSettlementScheduleDrafts({
+          runDate: readOptionalBodyString(request.body, 'runDate'),
+          vendorId: readOptionalBodyString(request.body, 'vendorId'),
+          limit: readOptionalBodyNumber(request.body, 'limit'),
+          confirmAutoSettlementDrafts: true,
+          createdBy: request.authUser?.id ?? null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Scheduled settlement drafts could not be created.';
+        return reply.code(400).send({ message, writesPerformed: false });
       }
     },
   );

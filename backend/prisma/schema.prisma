@@ -70,6 +70,20 @@ enum ShippingDeductionMode {
   EXTERNAL_PROVIDER
 }
 
+enum SettlementFrequencyType {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum SettlementWeekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+}
+
 enum SettlementStatus {
   PENDING
   ACCRUING
@@ -408,6 +422,12 @@ model VendorFinancialProfile {
   shippingMode           ShippingDeductionMode @default(DISABLED)
   fixedShippingFee       Decimal?              @db.Decimal(10, 2)
   settlementDelayDays    Int                   @default(21)
+  settlementFrequencyType SettlementFrequencyType @default(WEEKLY)
+  weeklySettlementDay    SettlementWeekday     @default(WEDNESDAY)
+  monthlySettlementDay   Int?
+  autoSettlementDraftEnabled Boolean            @default(false)
+  autoSettlementApproveEnabled Boolean          @default(false)
+  autoSettlementInvoiceEnabled Boolean          @default(false)
   active                 Boolean               @default(true)
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt

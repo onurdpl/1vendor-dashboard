@@ -184,6 +184,12 @@ type FinancePolicyFormState = {
   shippingMode: VendorFinancialProfile['shippingMode'];
   fixedShippingFee: string;
   settlementDelayDays: string;
+  settlementFrequencyType: VendorFinancialProfile['settlementFrequencyType'];
+  weeklySettlementDay: VendorFinancialProfile['weeklySettlementDay'];
+  monthlySettlementDay: string;
+  autoSettlementDraftEnabled: boolean;
+  autoSettlementApproveEnabled: boolean;
+  autoSettlementInvoiceEnabled: boolean;
 };
 
 type LogoCommissionPreviewFormState = {
@@ -216,6 +222,12 @@ const EMPTY_FINANCE_POLICY_FORM: FinancePolicyFormState = {
   shippingMode: 'disabled',
   fixedShippingFee: '',
   settlementDelayDays: '21',
+  settlementFrequencyType: 'WEEKLY',
+  weeklySettlementDay: 'WEDNESDAY',
+  monthlySettlementDay: '28',
+  autoSettlementDraftEnabled: false,
+  autoSettlementApproveEnabled: false,
+  autoSettlementInvoiceEnabled: false,
 };
 
 const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
@@ -288,6 +300,12 @@ function buildFinancePolicyFormState(profile: VendorFinancialProfile | null): Fi
     shippingMode: profile?.shippingMode ?? 'disabled',
     fixedShippingFee: profile?.fixedShippingFee ?? '',
     settlementDelayDays: String(profile?.settlementDelayDays ?? 21),
+    settlementFrequencyType: profile?.settlementFrequencyType ?? 'WEEKLY',
+    weeklySettlementDay: profile?.weeklySettlementDay ?? 'WEDNESDAY',
+    monthlySettlementDay: String(profile?.monthlySettlementDay ?? 28),
+    autoSettlementDraftEnabled: profile?.autoSettlementDraftEnabled ?? false,
+    autoSettlementApproveEnabled: profile?.autoSettlementApproveEnabled ?? false,
+    autoSettlementInvoiceEnabled: profile?.autoSettlementInvoiceEnabled ?? false,
   };
 }
 
@@ -307,6 +325,7 @@ function parseFinancePolicyPercent(value: string, label: string) {
 
 function buildFinancePolicyInput(form: FinancePolicyFormState) {
   const fixedShippingFee = form.fixedShippingFee.trim() ? Number(form.fixedShippingFee) : null;
+  const monthlySettlementDay = form.monthlySettlementDay.trim() ? Number(form.monthlySettlementDay) : null;
   return {
     commissionPercent: Number(form.commissionPercent),
     commissionVatPercent: Number(form.commissionVatPercent),
@@ -314,6 +333,12 @@ function buildFinancePolicyInput(form: FinancePolicyFormState) {
     shippingMode: form.shippingMode,
     fixedShippingFee,
     settlementDelayDays: Number(form.settlementDelayDays),
+    settlementFrequencyType: form.settlementFrequencyType,
+    weeklySettlementDay: form.weeklySettlementDay,
+    monthlySettlementDay,
+    autoSettlementDraftEnabled: form.autoSettlementDraftEnabled,
+    autoSettlementApproveEnabled: form.autoSettlementApproveEnabled,
+    autoSettlementInvoiceEnabled: form.autoSettlementInvoiceEnabled,
   };
 }
 
@@ -343,6 +368,18 @@ function validateFinancePolicyForm(form: FinancePolicyFormState) {
     settlementDelayDays > 365
   ) {
     return 'Settlement delay days must be between 0 and 365.';
+  }
+
+  if (form.settlementFrequencyType === 'MONTHLY') {
+    const monthlySettlementDay = Number(form.monthlySettlementDay);
+    if (
+      !form.monthlySettlementDay.trim() ||
+      !Number.isFinite(monthlySettlementDay) ||
+      monthlySettlementDay < 1 ||
+      monthlySettlementDay > 31
+    ) {
+      return 'Monthly settlement day must be between 1 and 31.';
+    }
   }
 
   return null;
@@ -656,6 +693,28 @@ function formatShippingMode(value: string | null | undefined) {
     return 'Fixed deduction';
   }
   return 'Disabled';
+}
+
+function formatSettlementFrequency(value: VendorFinancialProfile['settlementFrequencyType'] | null | undefined) {
+  if (value === 'BIWEEKLY') {
+    return 'Biweekly';
+  }
+  if (value === 'MONTHLY') {
+    return 'Monthly';
+  }
+  return 'Weekly';
+}
+
+function formatSettlementWeekday(value: VendorFinancialProfile['weeklySettlementDay'] | null | undefined) {
+  const normalized = value?.toLowerCase().replace('_', ' ') ?? '';
+  return normalized ? normalized.replace(/^\w/, (letter) => letter.toUpperCase()) : 'Wednesday';
+}
+
+function formatSettlementSchedule(profile: VendorFinancialProfile) {
+  if (profile.settlementFrequencyType === 'MONTHLY') {
+    return `Monthly on day ${profile.monthlySettlementDay ?? 28}`;
+  }
+  return `${formatSettlementFrequency(profile.settlementFrequencyType)} on ${formatSettlementWeekday(profile.weeklySettlementDay)}`;
 }
 
 function readMetadataString(config: VendorShippingConfig | null, keys: string[]) {
@@ -2986,6 +3045,10 @@ export function VendorProfilePage() {
                 <MetadataRow label="Deduct shipping after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
                 <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
                 <MetadataRow label="Settlement delay" value={`${financeProfile.settlementDelayDays} days`} />
+                <MetadataRow label="Settlement frequency" value={formatSettlementSchedule(financeProfile)} />
+                <MetadataRow label="Auto draft" value={formatBoolean(financeProfile.autoSettlementDraftEnabled)} />
+                <MetadataRow label="Auto approve" value={`${formatBoolean(financeProfile.autoSettlementApproveEnabled)} (not executed in Phase 4A)`} />
+                <MetadataRow label="Auto invoice" value={`${formatBoolean(financeProfile.autoSettlementInvoiceEnabled)} (not executed in Phase 4A)`} />
                 <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
                 <MetadataRow label="Policy active" value={formatBoolean(financeProfile.active)} />
               </MetadataGroup>
@@ -3092,6 +3155,53 @@ export function VendorProfilePage() {
                         required
                       />
                     </label>
+                    <label>
+                      Settlement frequency
+                      <select
+                        value={financePolicyForm.settlementFrequencyType}
+                        onChange={(event) =>
+                          handleFinancePolicyFormChange(
+                            'settlementFrequencyType',
+                            event.target.value as FinancePolicyFormState['settlementFrequencyType'],
+                          )
+                        }
+                      >
+                        <option value="WEEKLY">Weekly</option>
+                        <option value="BIWEEKLY">Biweekly</option>
+                        <option value="MONTHLY">Monthly</option>
+                      </select>
+                    </label>
+                    <label>
+                      Weekly settlement day
+                      <select
+                        value={financePolicyForm.weeklySettlementDay}
+                        onChange={(event) =>
+                          handleFinancePolicyFormChange(
+                            'weeklySettlementDay',
+                            event.target.value as FinancePolicyFormState['weeklySettlementDay'],
+                          )
+                        }
+                        disabled={financePolicyForm.settlementFrequencyType === 'MONTHLY'}
+                      >
+                        <option value="MONDAY">Monday</option>
+                        <option value="TUESDAY">Tuesday</option>
+                        <option value="WEDNESDAY">Wednesday</option>
+                        <option value="THURSDAY">Thursday</option>
+                        <option value="FRIDAY">Friday</option>
+                      </select>
+                    </label>
+                    <label>
+                      Monthly settlement day
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        step="1"
+                        value={financePolicyForm.monthlySettlementDay}
+                        onChange={(event) => handleFinancePolicyFormChange('monthlySettlementDay', event.target.value)}
+                        disabled={financePolicyForm.settlementFrequencyType !== 'MONTHLY'}
+                      />
+                    </label>
                     <label className="vendor-profile-checkbox-field vendor-profile-billing-form-wide">
                       <input
                         type="checkbox"
@@ -3099,6 +3209,30 @@ export function VendorProfilePage() {
                         onChange={(event) => handleFinancePolicyFormChange('deductShippingEnabled', event.target.checked)}
                       />
                       <span>Deduct shipping after fulfillment when the selected shipping deduction mode applies.</span>
+                    </label>
+                    <label className="vendor-profile-checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={financePolicyForm.autoSettlementDraftEnabled}
+                        onChange={(event) => handleFinancePolicyFormChange('autoSettlementDraftEnabled', event.target.checked)}
+                      />
+                      <span>Enable scheduled draft creation.</span>
+                    </label>
+                    <label className="vendor-profile-checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={financePolicyForm.autoSettlementApproveEnabled}
+                        onChange={(event) => handleFinancePolicyFormChange('autoSettlementApproveEnabled', event.target.checked)}
+                      />
+                      <span>Store auto-approve preference for a future phase.</span>
+                    </label>
+                    <label className="vendor-profile-checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={financePolicyForm.autoSettlementInvoiceEnabled}
+                        onChange={(event) => handleFinancePolicyFormChange('autoSettlementInvoiceEnabled', event.target.checked)}
+                      />
+                      <span>Store auto-invoice preference for a future phase.</span>
                     </label>
                   </div>
                   {financePolicyFormError ? <p className="vendor-profile-billing-error" role="alert">{financePolicyFormError}</p> : null}
