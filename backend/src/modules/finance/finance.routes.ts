@@ -42,6 +42,10 @@ import {
   persistSettlementLogoSalesInvoiceSync,
   previewSettlementLogoOutgoingInvoiceSync,
 } from './settlement-logo-outgoing-invoice-sync-preview.service.js';
+import {
+  previewRefundAdjustmentEligibility,
+  type RefundAdjustmentRecommendedAction,
+} from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
 import { listSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
@@ -49,6 +53,17 @@ import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type { PreparePayoutBatchDto, ShippingCostInputDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
 
 const SUPPORTED_VENDOR_FINANCIAL_SHIPPING_MODES = new Set(['disabled', 'fixed', 'external_provider']);
+const SUPPORTED_REFUND_ADJUSTMENT_RECOMMENDED_ACTIONS = new Set<RefundAdjustmentRecommendedAction>([
+  'CREATE_PENDING_ADJUSTMENT',
+  'ALREADY_HAS_ADJUSTMENT',
+  'VENDOR_DEBT_REQUIRED',
+  'NOT_AFTER_APPROVED_OR_INVOICED_SETTLEMENT',
+  'MISSING_RELATED_SALE_LEDGER',
+  'MISSING_APPROVED_SETTLEMENT_LINE',
+  'MISSING_VENDOR_ALLOCATION',
+  'ZERO_OR_INVALID_AMOUNT',
+  'UNKNOWN',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -595,6 +610,35 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         settlementApprovalId: id,
         records: await findSettlementCommissionInvoiceRecords(id),
       };
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-adjustments/eligibility-preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      const orderNumber = readOptionalQueryString(request.query, 'orderNumber');
+      const requestedAction = readOptionalQueryString(request.query, 'recommendedAction')
+        ?? readOptionalQueryString(request.query, 'status');
+      const normalizedAction = requestedAction?.toUpperCase() as RefundAdjustmentRecommendedAction | undefined;
+      const recommendedAction = normalizedAction && SUPPORTED_REFUND_ADJUSTMENT_RECOMMENDED_ACTIONS.has(normalizedAction)
+        ? normalizedAction
+        : null;
+      const pagination = resolvePagination(request.query, { limit: 100, offset: 0 });
+
+      return previewRefundAdjustmentEligibility({
+        vendorId,
+        orderNumber,
+        recommendedAction,
+        limit: pagination.limit,
+      });
     },
   );
 

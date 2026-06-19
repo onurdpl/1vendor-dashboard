@@ -34,3 +34,24 @@ It does not:
 ## Audit Purpose
 
 Each adjustment records the refund ledger row, vendor, original order, amount, currency, reason, and any reliable original settlement or commission invoice link. Future phases can use the record to apply the deduction without guessing from historical invoice or settlement state.
+
+## Phase 3.5A.1 Diagnostics
+
+Phase 3.5A.1 adds read-only eligibility diagnostics and backfill preview for existing refund ledger rows.
+
+Endpoint:
+
+```text
+GET /admin/finance/refund-adjustments/eligibility-preview
+```
+
+This endpoint:
+
+- classifies refund ledger rows by recommended action,
+- explains why an adjustment can or cannot be created,
+- returns safe linkage evidence only,
+- reports `writesPerformed: false`,
+- does not create `SettlementRefundAdjustment` rows,
+- does not modify refund ingestion, settlement math, payout math, vendor debt, or Logo behavior.
+
+The preview is intended to decide Phase 3.5A.2 controlled backfill. It is not the backfill itself.
