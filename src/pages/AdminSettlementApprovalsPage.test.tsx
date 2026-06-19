@@ -139,6 +139,41 @@ const lockedRowsPreviewResponse: SettlementApprovalPreview = {
   lines: [],
 };
 
+const pendingRefundAdjustmentPreviewResponse: SettlementApprovalPreview = {
+  ...previewResponse,
+  summary: {
+    ...previewResponse.summary,
+    pendingRefundAdjustmentCount: 1,
+    pendingRefundAdjustmentTotalMinor: 88000,
+    netAfterPendingRefundAdjustmentsMinor: 7600,
+  },
+  pendingRefundAdjustments: {
+    ok: true,
+    writesPerformed: false,
+    vendorId: 'yalispor',
+    pendingAdjustmentCount: 1,
+    pendingAdjustmentTotalMinor: 88000,
+    currentCandidateNetPayableMinor: 95600,
+    netAfterPendingRefundAdjustmentsMinor: 7600,
+    currencyCode: 'TRY',
+    notes: ['Preview only — not applied until Phase 3.5C.'],
+    records: [
+      {
+        adjustmentId: 'adjustment-1086',
+        originalOrderId: 'order-1086',
+        refundRecordId: 'refund-record-1086',
+        refundFinanceLedgerEntryId: 'fin-refund-1086',
+        originalSettlementApprovalId: 'approval-1086',
+        originalSettlementCommissionInvoiceId: 'commission-invoice-1086',
+        amountMinor: 88000,
+        currencyCode: 'TRY',
+        reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+        previewImpactMinor: 88000,
+      },
+    ],
+  },
+};
+
 const mixedVatPreviewResponse: SettlementApprovalPreview = {
   ...previewResponse,
   summary: {
@@ -1440,6 +1475,25 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByText('Next: Create Draft.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create Draft' })).toBeEnabled();
     expect(screen.getByText('Preview Reviewed')).toBeInTheDocument();
+  });
+
+  it('shows pending refund adjustments as preview-only deductions without an apply action', async () => {
+    previewSettlementApprovalMock.mockResolvedValue(pendingRefundAdjustmentPreviewResponse);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Pending Refund Adjustments' })).toBeInTheDocument());
+    expect(screen.getByText('Preview only — not applied until Phase 3.5C.')).toBeInTheDocument();
+    expect(screen.getByText('These deductions are preview-only and are not applied until the adjustment application phase.')).toBeInTheDocument();
+    expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
+    expect(screen.getByText('Original order: order-1086')).toBeInTheDocument();
+    expect(screen.getByText('Refund record: refund-record-1086')).toBeInTheDocument();
+    expect(screen.getByText('Refund ledger: fin-refund-1086')).toBeInTheDocument();
+    expect(screen.getAllByText('TRY 880.00').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('TRY 76.00').length).toBeGreaterThan(0);
+    expect(screen.getByText('commission-invoice-1086')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply/i })).not.toBeInTheDocument();
   });
 
   it('renders warning candidate quality for mixed shipping modes', async () => {

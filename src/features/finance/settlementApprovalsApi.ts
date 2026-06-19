@@ -82,6 +82,9 @@ export type SettlementApprovalPreview = {
     debtOffsetPreviewMinor?: number;
     netPayableAfterDebtOffsetMinor?: number;
     remainingVendorDebtMinor?: number;
+    pendingRefundAdjustmentCount?: number;
+    pendingRefundAdjustmentTotalMinor?: number;
+    netAfterPendingRefundAdjustmentsMinor?: number;
     currency: string;
     eligibleRowCount: number;
     excludedActiveApprovalRowCount: number;
@@ -93,6 +96,29 @@ export type SettlementApprovalPreview = {
     mixedCommissionVatRate: boolean;
     mixedShippingMode: boolean;
     candidateQualityWarnings: string[];
+  };
+  pendingRefundAdjustments?: {
+    ok: true;
+    writesPerformed: false;
+    vendorId: string;
+    pendingAdjustmentCount: number;
+    pendingAdjustmentTotalMinor: number;
+    currentCandidateNetPayableMinor: number | null;
+    netAfterPendingRefundAdjustmentsMinor: number | null;
+    currencyCode: string | null;
+    records: Array<{
+      adjustmentId: string;
+      originalOrderId: string;
+      refundRecordId: string;
+      refundFinanceLedgerEntryId: string;
+      originalSettlementApprovalId: string | null;
+      originalSettlementCommissionInvoiceId: string | null;
+      amountMinor: number;
+      currencyCode: string;
+      reason: string;
+      previewImpactMinor: number;
+    }>;
+    notes: string[];
   };
   lines: SettlementApprovalLine[];
 };

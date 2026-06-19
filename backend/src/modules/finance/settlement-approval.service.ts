@@ -26,6 +26,10 @@ import {
   type RefundOffsetSaleLedgerSnapshot,
 } from './refund-offset.service.js';
 import { calculateVendorDebtOffset, getVendorBalanceSummary } from './vendor-balance.service.js';
+import {
+  previewPendingRefundAdjustmentApplication,
+  type PendingRefundAdjustmentApplicationPreview,
+} from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -211,7 +215,11 @@ export type SettlementApprovalPreviewDto = {
     debtOffsetPreviewMinor: number;
     netPayableAfterDebtOffsetMinor: number;
     remainingVendorDebtMinor: number;
+    pendingRefundAdjustmentCount: number;
+    pendingRefundAdjustmentTotalMinor: number;
+    netAfterPendingRefundAdjustmentsMinor: number;
   };
+  pendingRefundAdjustments: PendingRefundAdjustmentApplicationPreview;
   lines: SettlementApprovalLineDto[];
 };
 
@@ -1594,6 +1602,12 @@ async function buildApprovalPreview(
     grossPayableMinor: Math.max(totals.netPayableMinor, 0),
     outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
   });
+  const pendingRefundAdjustments = await previewPendingRefundAdjustmentApplication({
+    vendorId: input.vendorId,
+    currencyCode: totals.currency,
+    currentCandidateNetPayableMinor: totals.netPayableMinor,
+    db: tx,
+  });
 
   return {
     ok: true,
@@ -1618,7 +1632,12 @@ async function buildApprovalPreview(
       netPayableAfterDebtOffsetMinor:
         totals.netPayableMinor > 0 ? debtPreview.netPayableMinor : totals.netPayableMinor,
       remainingVendorDebtMinor: debtPreview.remainingDebtMinor,
+      pendingRefundAdjustmentCount: pendingRefundAdjustments.pendingAdjustmentCount,
+      pendingRefundAdjustmentTotalMinor: pendingRefundAdjustments.pendingAdjustmentTotalMinor,
+      netAfterPendingRefundAdjustmentsMinor:
+        pendingRefundAdjustments.netAfterPendingRefundAdjustmentsMinor ?? totals.netPayableMinor,
     },
+    pendingRefundAdjustments,
     lines,
   };
 }

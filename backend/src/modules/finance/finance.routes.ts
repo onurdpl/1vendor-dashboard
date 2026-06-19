@@ -44,6 +44,7 @@ import {
 } from './settlement-logo-outgoing-invoice-sync-preview.service.js';
 import {
   backfillPendingRefundAdjustments,
+  previewPendingRefundAdjustmentApplication,
   previewRefundAdjustmentEligibility,
   type RefundAdjustmentRecommendedAction,
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
@@ -611,6 +612,35 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         settlementApprovalId: id,
         records: await findSettlementCommissionInvoiceRecords(id),
       };
+    },
+  );
+
+  app.get(
+    '/admin/finance/refund-adjustments/application-preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendorId = readOptionalQueryString(request.query, 'vendorId');
+      if (!vendorId) {
+        return reply.code(400).send({
+          ok: false,
+          writesPerformed: false,
+          message: 'vendorId is required.',
+        });
+      }
+      const currencyCode = readOptionalQueryString(request.query, 'currencyCode');
+      const pagination = resolvePagination(request.query, { limit: 100, offset: 0 });
+
+      return previewPendingRefundAdjustmentApplication({
+        vendorId,
+        currencyCode,
+        limit: pagination.limit,
+      });
     },
   );
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   backfillPendingRefundAdjustments,
   classifyRefundAdjustmentEligibility,
+  previewPendingRefundAdjustmentApplication,
   previewRefundAdjustmentEligibility,
 } from '../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js';
 
@@ -312,5 +313,92 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(result.summary.created).toBe(0);
     expect(result.summary.skipped).toBe(1);
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('previews pending adjustment application without writing or changing settlement totals', async () => {
+    const db = {
+      settlementRefundAdjustment: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'adjustment-1',
+            originalOrderId: 'order-1086',
+            refundRecordId: 'refund-record-1001',
+            refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
+            originalSettlementApprovalId: 'settlement-approval-1',
+            originalSettlementCommissionInvoiceId: 'commission-invoice-1',
+            amountMinor: 88000,
+            currencyCode: 'TRY',
+            reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+          },
+          {
+            id: 'adjustment-2',
+            originalOrderId: 'order-1087',
+            refundRecordId: 'refund-record-1002',
+            refundFinanceLedgerEntryId: 'fin-yalispor-refund-1002',
+            originalSettlementApprovalId: null,
+            originalSettlementCommissionInvoiceId: null,
+            amountMinor: 12000,
+            currencyCode: 'TRY',
+            reason: 'Refund after approved settlement requires future settlement adjustment.',
+          },
+        ]),
+      },
+    };
+
+    const result = await previewPendingRefundAdjustmentApplication({
+      db: db as never,
+      vendorId: 'yalispor',
+      currencyCode: 'TRY',
+      currentCandidateNetPayableMinor: 150000,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.pendingAdjustmentCount).toBe(2);
+    expect(result.pendingAdjustmentTotalMinor).toBe(100000);
+    expect(result.netAfterPendingRefundAdjustmentsMinor).toBe(50000);
+    expect(result.records[0]).toEqual(expect.objectContaining({
+      adjustmentId: 'adjustment-1',
+      previewImpactMinor: 88000,
+      originalSettlementCommissionInvoiceId: 'commission-invoice-1',
+    }));
+    expect(db.settlementRefundAdjustment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        vendorId: 'yalispor',
+        status: 'PENDING',
+        amountMinor: { gt: 0 },
+        currencyCode: 'TRY',
+      }),
+    }));
+    expect(JSON.stringify(result)).not.toContain('requestSnapshotJson');
+    expect(JSON.stringify(result)).not.toContain('responseSnapshotJson');
+  });
+
+  it('uses pending-positive vendor and currency filters for adjustment application preview', async () => {
+    const db = {
+      settlementRefundAdjustment: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+
+    const result = await previewPendingRefundAdjustmentApplication({
+      db: db as never,
+      vendorId: 'sporjinal',
+      currencyCode: 'TRY',
+      currentCandidateNetPayableMinor: 0,
+      limit: 25,
+    });
+
+    expect(result.pendingAdjustmentCount).toBe(0);
+    expect(result.pendingAdjustmentTotalMinor).toBe(0);
+    expect(result.netAfterPendingRefundAdjustmentsMinor).toBe(0);
+    expect(db.settlementRefundAdjustment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 25,
+      where: {
+        vendorId: 'sporjinal',
+        status: 'PENDING',
+        amountMinor: { gt: 0 },
+        currencyCode: 'TRY',
+      },
+    }));
   });
 });

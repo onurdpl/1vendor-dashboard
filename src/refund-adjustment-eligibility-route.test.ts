@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const previewRefundAdjustmentEligibilityMock = vi.hoisted(() => vi.fn());
 const backfillPendingRefundAdjustmentsMock = vi.hoisted(() => vi.fn());
+const previewPendingRefundAdjustmentApplicationMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/settlement-refund-adjustment-eligibility-diagnostics.service.js', () => ({
   backfillPendingRefundAdjustments: backfillPendingRefundAdjustmentsMock,
+  previewPendingRefundAdjustmentApplication: previewPendingRefundAdjustmentApplicationMock,
   previewRefundAdjustmentEligibility: previewRefundAdjustmentEligibilityMock,
 }));
 
@@ -93,6 +95,7 @@ describe('refund adjustment eligibility preview route', () => {
   beforeEach(() => {
     previewRefundAdjustmentEligibilityMock.mockReset();
     backfillPendingRefundAdjustmentsMock.mockReset();
+    previewPendingRefundAdjustmentApplicationMock.mockReset();
   });
 
   it('requires admin auth', async () => {
@@ -267,5 +270,71 @@ describe('refund adjustment eligibility preview route', () => {
       limit: 8,
       createdBy: 'admin-1',
     });
+  });
+
+  it('returns read-only pending adjustment application preview for admins', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+      delete: vi.fn(),
+    };
+    const preview = {
+      ok: true,
+      writesPerformed: false,
+      vendorId: 'yalispor',
+      pendingAdjustmentCount: 1,
+      pendingAdjustmentTotalMinor: 88000,
+      currentCandidateNetPayableMinor: null,
+      netAfterPendingRefundAdjustmentsMinor: null,
+      currencyCode: 'TRY',
+      records: [],
+      notes: ['Preview only — not applied until Phase 3.5C.'],
+    };
+    previewPendingRefundAdjustmentApplicationMock.mockResolvedValueOnce(preview);
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await gets.get('/admin/finance/refund-adjustments/application-preview')?.(
+      { authUser: { role: 'admin' }, query: { vendorId: 'yalispor', currencyCode: 'TRY', limit: '20' } },
+      buildReply(),
+    );
+
+    expect(result).toBe(preview);
+    expect(previewPendingRefundAdjustmentApplicationMock).toHaveBeenCalledWith({
+      vendorId: 'yalispor',
+      currencyCode: 'TRY',
+      limit: 20,
+    });
+  });
+
+  it('requires vendorId for pending adjustment application preview before reading', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: ReturnType<typeof buildReply>) => unknown) => {
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+      delete: vi.fn(),
+    };
+    registerFinanceRoutes(app as never, {} as never);
+
+    const result = await gets.get('/admin/finance/refund-adjustments/application-preview')?.(
+      { authUser: { role: 'admin' }, query: {} },
+      buildReply(),
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        writesPerformed: false,
+        message: 'vendorId is required.',
+      },
+    });
+    expect(previewPendingRefundAdjustmentApplicationMock).not.toHaveBeenCalled();
   });
 });

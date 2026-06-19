@@ -12558,6 +12558,33 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: var(--space-2);
 }
 
+.settlement-adjustment-preview-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settlement-adjustment-preview-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(320px, 1.1fr);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-adjustment-preview-row > div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settlement-adjustment-preview-row strong,
+.settlement-adjustment-preview-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .settlement-approval-line-card {
   display: grid;
   grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.1fr);

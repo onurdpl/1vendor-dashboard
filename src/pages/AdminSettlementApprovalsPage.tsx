@@ -887,6 +887,62 @@ function CandidateQualityCard({
   );
 }
 
+function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApprovalPreview }) {
+  const adjustmentPreview = preview.pendingRefundAdjustments;
+  const count = adjustmentPreview?.pendingAdjustmentCount ?? preview.summary.pendingRefundAdjustmentCount ?? 0;
+  const total = adjustmentPreview?.pendingAdjustmentTotalMinor ?? preview.summary.pendingRefundAdjustmentTotalMinor ?? 0;
+  const netAfterAdjustments =
+    adjustmentPreview?.netAfterPendingRefundAdjustmentsMinor ??
+    preview.summary.netAfterPendingRefundAdjustmentsMinor ??
+    preview.summary.netPayableMinor - total;
+  const records = adjustmentPreview?.records ?? [];
+
+  return (
+    <section className="settlement-quality-card op-tone-warning" aria-label="Pending refund adjustments">
+      <div className="settlement-quality-heading">
+        <div>
+          <h3>Pending Refund Adjustments</h3>
+          <p className="page-description">
+            Preview only — not applied until Phase 3.5C.
+          </p>
+        </div>
+        <StatusBadge tone={count > 0 ? 'warning' : 'neutral'}>{formatNumber(count)}</StatusBadge>
+      </div>
+      <div className="settlement-quality-metrics">
+        <SummaryField label="Pending adjustments" value={formatNumber(count)} />
+        <SummaryField label="Preview deduction" value={formatMinor(total, preview.summary.currency)} />
+        <SummaryField label="Net after pending adjustments" value={formatMinor(netAfterAdjustments, preview.summary.currency)} />
+      </div>
+      <div className="settlement-alert op-tone-warning">
+        <strong>Preview only</strong>
+        <p>These deductions are preview-only and are not applied until the adjustment application phase.</p>
+      </div>
+      {records.length ? (
+        <div className="settlement-adjustment-preview-list">
+          {records.map((record) => (
+            <article className="settlement-adjustment-preview-row" key={record.adjustmentId}>
+              <div>
+                <strong>{record.adjustmentId}</strong>
+                <span>Original order: {record.originalOrderId}</span>
+                <span>Refund record: {record.refundRecordId}</span>
+                <span>Refund ledger: {record.refundFinanceLedgerEntryId}</span>
+              </div>
+              <div>
+                <SummaryField label="Preview impact" value={formatMinor(record.previewImpactMinor, record.currencyCode)} />
+                <SummaryField label="Linked settlement" value={valueOrDash(record.originalSettlementApprovalId)} />
+                <SummaryField label="Linked commission invoice" value={valueOrDash(record.originalSettlementCommissionInvoiceId)} />
+                <SummaryField label="Reason" value={record.reason} />
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="settlement-preview-empty">No pending refund adjustments for this vendor and currency.</p>
+      )}
+    </section>
+  );
+}
+
 export function AdminSettlementApprovalsPage() {
   const appReadiness = useAppReadiness();
   const initialVendorId = appReadiness.currentVendor.vendorId || 'yalispor';
@@ -2021,6 +2077,7 @@ export function AdminSettlementApprovalsPage() {
                   acknowledged={mixedVatAcknowledged}
                   onAcknowledgedChange={setMixedVatAcknowledged}
                 />
+                <PendingRefundAdjustmentsCard preview={preview} />
                 <SelectedOrderDiagnostics
                   diagnostics={selectedOrderDiagnostics}
                   onOpenApproval={(id) => void handleOpenRecentApproval(id)}

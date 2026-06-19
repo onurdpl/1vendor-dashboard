@@ -67,6 +67,7 @@ type RefundAdjustmentBackfillTransaction = Pick<
 type RefundAdjustmentBackfillDbClient = RefundAdjustmentBackfillTransaction & {
   $transaction<T>(callback: (tx: RefundAdjustmentBackfillTransaction) => Promise<T>): Promise<T>;
 };
+type RefundAdjustmentApplicationPreviewDbClient = Pick<Prisma.TransactionClient, 'settlementRefundAdjustment'>;
 
 export type RefundAdjustmentBackfillResult = {
   ok: true;
@@ -91,6 +92,32 @@ export type RefundAdjustmentBackfillResult = {
     recommendedAction: RefundAdjustmentRecommendedAction;
     reason: string;
   }>;
+};
+
+export type PendingRefundAdjustmentApplicationPreviewRecord = {
+  adjustmentId: string;
+  originalOrderId: string;
+  refundRecordId: string;
+  refundFinanceLedgerEntryId: string;
+  originalSettlementApprovalId: string | null;
+  originalSettlementCommissionInvoiceId: string | null;
+  amountMinor: number;
+  currencyCode: string;
+  reason: string;
+  previewImpactMinor: number;
+};
+
+export type PendingRefundAdjustmentApplicationPreview = {
+  ok: true;
+  writesPerformed: false;
+  vendorId: string;
+  pendingAdjustmentCount: number;
+  pendingAdjustmentTotalMinor: number;
+  currentCandidateNetPayableMinor: number | null;
+  netAfterPendingRefundAdjustmentsMinor: number | null;
+  currencyCode: string | null;
+  records: PendingRefundAdjustmentApplicationPreviewRecord[];
+  notes: string[];
 };
 
 type RefundLedgerRow = Prisma.PromiseReturnType<typeof findRefundLedgerRows>[number];
@@ -505,5 +532,74 @@ export async function backfillPendingRefundAdjustments(input: {
     },
     createdRecords,
     skippedRecords,
+  };
+}
+
+export async function previewPendingRefundAdjustmentApplication(input: {
+  vendorId: string;
+  currencyCode?: string | null;
+  currentCandidateNetPayableMinor?: number | null;
+  limit?: number;
+  db?: RefundAdjustmentApplicationPreviewDbClient;
+}): Promise<PendingRefundAdjustmentApplicationPreview> {
+  const db = input.db ?? prisma;
+  const currencyCode = input.currencyCode?.trim() || null;
+  const rows = await db.settlementRefundAdjustment.findMany({
+    where: {
+      vendorId: input.vendorId,
+      status: SettlementRefundAdjustmentStatus.PENDING,
+      amountMinor: {
+        gt: 0,
+      },
+      ...(currencyCode ? { currencyCode } : {}),
+    },
+    orderBy: {
+      createdAt: 'asc',
+    },
+    take: input.limit ?? 100,
+    select: {
+      id: true,
+      originalOrderId: true,
+      refundRecordId: true,
+      refundFinanceLedgerEntryId: true,
+      originalSettlementApprovalId: true,
+      originalSettlementCommissionInvoiceId: true,
+      amountMinor: true,
+      currencyCode: true,
+      reason: true,
+    },
+  });
+  const records = rows.map((row) => ({
+    adjustmentId: row.id,
+    originalOrderId: row.originalOrderId,
+    refundRecordId: row.refundRecordId,
+    refundFinanceLedgerEntryId: row.refundFinanceLedgerEntryId,
+    originalSettlementApprovalId: row.originalSettlementApprovalId,
+    originalSettlementCommissionInvoiceId: row.originalSettlementCommissionInvoiceId,
+    amountMinor: row.amountMinor,
+    currencyCode: row.currencyCode,
+    reason: row.reason,
+    previewImpactMinor: row.amountMinor,
+  }));
+  const pendingAdjustmentTotalMinor = records.reduce((total, record) => total + record.previewImpactMinor, 0);
+  const currentCandidateNetPayableMinor = Number.isFinite(input.currentCandidateNetPayableMinor)
+    ? Number(input.currentCandidateNetPayableMinor)
+    : null;
+
+  return {
+    ok: true,
+    writesPerformed: false,
+    vendorId: input.vendorId,
+    pendingAdjustmentCount: records.length,
+    pendingAdjustmentTotalMinor,
+    currentCandidateNetPayableMinor,
+    netAfterPendingRefundAdjustmentsMinor:
+      currentCandidateNetPayableMinor === null ? null : currentCandidateNetPayableMinor - pendingAdjustmentTotalMinor,
+    currencyCode: currencyCode ?? records[0]?.currencyCode ?? null,
+    records,
+    notes: [
+      'Preview only — not applied until Phase 3.5C.',
+      'Existing settlement totals are unchanged by this read-only preview.',
+    ],
   };
 }

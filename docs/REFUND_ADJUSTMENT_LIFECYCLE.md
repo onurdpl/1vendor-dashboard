@@ -85,3 +85,33 @@ This action:
 - does not call Shopify, Logo, or any provider.
 
 The backfilled `PENDING` records prepare Phase 3.5B preview and Phase 3.5C application.
+
+## Phase 3.5B Application Preview
+
+Phase 3.5B adds read-only visibility into how `PENDING` adjustments would reduce a future vendor settlement.
+
+Endpoints and surfaces:
+
+```text
+GET /admin/finance/refund-adjustments/application-preview?vendorId=<vendorId>
+POST /admin/finance/settlement-approvals/preview
+```
+
+The settlement approval preview includes a `Pending Refund Adjustments` section with:
+
+- pending adjustment count,
+- pending adjustment total,
+- current candidate net payable,
+- preview-only net after pending adjustments,
+- safe adjustment references.
+
+This phase still does not:
+
+- create settlement adjustment lines,
+- mark adjustments `APPLIED`,
+- change `SettlementApproval` totals,
+- change payout preparation,
+- change vendor debt,
+- call Shopify, Logo, or any provider.
+
+The preview prepares Phase 3.5C, where adjustment lines can become part of a settlement approval through an explicit application flow.
