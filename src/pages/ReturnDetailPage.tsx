@@ -68,6 +68,26 @@ function formatAdjustmentStatus(status: string) {
     .join(' ');
 }
 
+function getRefundAdjustmentStatusCopy(status: string | null | undefined) {
+  const normalized = String(status ?? '').toLowerCase();
+  if (normalized === 'pending') {
+    return 'Waiting for future settlement deduction';
+  }
+  if (normalized === 'partially_applied') {
+    return 'Partially deducted; remaining amount will carry forward';
+  }
+  if (normalized === 'applied') {
+    return 'Fully deducted from settlement';
+  }
+  if (normalized === 'blocked') {
+    return 'Blocked; requires finance review';
+  }
+  if (normalized === 'cancelled') {
+    return 'Cancelled';
+  }
+  return formatAdjustmentStatus(normalized || 'unknown');
+}
+
 function getStatusLabel(returnRequest: ReturnDetail) {
   const normalized = returnRequest.status?.toLowerCase() ?? '';
   if (returnRequest.sourceType === 'shopify_return_request' && normalized === 'requested') {
@@ -1470,6 +1490,8 @@ export function ReturnDetailPage() {
                     <span>{formatAdjustmentStatus(adjustment.status)}</span>
                     <strong>{formatMinorCurrency(adjustment.remainingAmountMinor ?? adjustment.amountMinor, adjustment.currencyCode)} remaining</strong>
                     <small>
+                      {getRefundAdjustmentStatusCopy(adjustment.status)}
+                      {' · '}
                       {adjustment.references?.orderLabel ?? 'Order unavailable'}
                       {' · '}
                       {adjustment.references?.refundLabel ?? 'Refund unavailable'}

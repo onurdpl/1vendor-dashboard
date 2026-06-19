@@ -286,28 +286,6 @@ function mapAdjustment(adjustment: {
   };
 }
 
-async function createAdjustmentEvent(
-  db: unknown,
-  input: {
-    settlementRefundAdjustmentId: string;
-    eventType: SettlementRefundAdjustmentEventType;
-    metadataJson?: Prisma.InputJsonValue;
-  },
-) {
-  const eventDelegate = (db as { settlementRefundAdjustmentEvent?: { create?: (args: unknown) => Promise<unknown> } })
-    .settlementRefundAdjustmentEvent;
-  if (!eventDelegate?.create) {
-    return;
-  }
-  await eventDelegate.create({
-    data: {
-      settlementRefundAdjustmentId: input.settlementRefundAdjustmentId,
-      eventType: input.eventType,
-      metadataJson: input.metadataJson ?? Prisma.JsonNull,
-    },
-  });
-}
-
 function chooseOriginalApprovalLine(
   saleLedgerEntry: {
     settlementApprovalLines: Array<{
@@ -493,26 +471,23 @@ export async function createSettlementRefundAdjustmentForRefundLedger(
       currencyCode,
       reason,
       createdBy: input.createdBy ?? 'system:shopify_refunds_create',
+      events: {
+        create: {
+          eventType: SettlementRefundAdjustmentEventType.CREATED,
+          metadataJson: {
+            refundFinanceLedgerEntryId: refundLedgerEntry.id,
+            refundRecordId: input.refundRecordId,
+            originalOrderId: refundLedgerEntry.vendorAllocation.order.id,
+            originalSettlementApprovalId: originalLine?.settlementApproval.id ?? null,
+            originalSettlementCommissionInvoiceId: originalInvoice?.id ?? null,
+            amountMinor: amount,
+            currencyCode,
+            source: input.createdBy ?? 'system:shopify_refunds_create',
+          },
+        },
+      },
     },
   });
-
-  const isNewAdjustment = adjustment.createdAt.getTime() === adjustment.updatedAt.getTime();
-  if (isNewAdjustment) {
-    await createAdjustmentEvent(db, {
-      settlementRefundAdjustmentId: adjustment.id,
-      eventType: SettlementRefundAdjustmentEventType.CREATED,
-      metadataJson: {
-        refundFinanceLedgerEntryId: refundLedgerEntry.id,
-        refundRecordId: input.refundRecordId,
-        originalOrderId: refundLedgerEntry.vendorAllocation.order.id,
-        originalSettlementApprovalId: originalLine?.settlementApproval.id ?? null,
-        originalSettlementCommissionInvoiceId: originalInvoice?.id ?? null,
-        amountMinor: amount,
-        currencyCode,
-        source: input.createdBy ?? 'system:shopify_refunds_create',
-      },
-    });
-  }
 
   return mapAdjustment(adjustment);
 }

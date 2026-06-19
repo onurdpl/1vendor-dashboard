@@ -606,6 +606,26 @@ function formatAdjustmentStatus(status: string) {
     .join(' ');
 }
 
+function getRefundAdjustmentStatusCopy(status: string | null | undefined) {
+  const normalized = String(status ?? '').toLowerCase();
+  if (normalized === 'pending') {
+    return 'Waiting for future settlement deduction';
+  }
+  if (normalized === 'partially_applied') {
+    return 'Partially deducted; remaining amount will carry forward';
+  }
+  if (normalized === 'applied') {
+    return 'Fully deducted from settlement';
+  }
+  if (normalized === 'blocked') {
+    return 'Blocked; requires finance review';
+  }
+  if (normalized === 'cancelled') {
+    return 'Cancelled';
+  }
+  return formatAdjustmentStatus(normalized || 'unknown');
+}
+
 function VendorDebtHistorySection({
   history,
   loading,
@@ -1578,6 +1598,7 @@ export function FinancePage() {
                     {selectedRecord.settlementRefundAdjustments.map((adjustment) => (
                       <MetadataGroup key={adjustment.id} title={adjustment.references?.orderLabel ?? adjustment.id}>
                         <MetadataRow label="Status" value={formatAdjustmentStatus(adjustment.status)} />
+                        <MetadataRow label="Status detail" value={getRefundAdjustmentStatusCopy(adjustment.status)} />
                         <MetadataRow label="Original order" value={adjustment.references?.orderLabel ?? adjustment.originalOrderId ?? 'Unavailable'} />
                         <MetadataRow label="Original refund" value={adjustment.references?.refundLabel ?? adjustment.refundRecordId ?? 'Unavailable'} />
                         <MetadataRow

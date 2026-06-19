@@ -1838,6 +1838,57 @@ describe('settlement approval foundation', () => {
     });
   });
 
+  it('cancels active refund adjustment applications and restores only the applied amount', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'APPROVED' }));
+    prismaMock.settlementApproval.update.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'CANCELLED' }));
+    prismaMock.settlementRefundAdjustmentApplication.findMany.mockResolvedValueOnce([
+      {
+        id: 'application-1',
+        settlementRefundAdjustmentId: 'adjustment-1',
+        settlementApprovalId: 'approval-1',
+        settlementApprovalLineId: 'line-1',
+        amountMinor: 600000,
+        currencyCode: 'TRY',
+        status: 'ACTIVE',
+        settlementRefundAdjustment: {
+          id: 'adjustment-1',
+          appliedAmountMinor: 600000,
+          remainingAmountMinor: 372654,
+          appliedSettlementApprovalId: null,
+          appliedSettlementApprovalLineId: null,
+        },
+      },
+    ]);
+
+    await cancelSettlementApproval('approval-1', 'admin-2');
+
+    expect(prismaMock.settlementRefundAdjustmentApplication.update).toHaveBeenCalledWith({
+      where: { id: 'application-1' },
+      data: { status: 'CANCELLED' },
+    });
+    expect(prismaMock.settlementRefundAdjustment.update).toHaveBeenCalledWith({
+      where: { id: 'adjustment-1' },
+      data: expect.objectContaining({
+        appliedAmountMinor: { decrement: 600000 },
+        remainingAmountMinor: { increment: 600000 },
+        status: 'PENDING',
+      }),
+    });
+    expect(prismaMock.settlementRefundAdjustmentEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        settlementRefundAdjustmentId: 'adjustment-1',
+        eventType: 'APPLICATION_CANCELLED',
+        metadataJson: expect.objectContaining({
+          settlementApprovalId: 'approval-1',
+          settlementApprovalLineId: 'line-1',
+          settlementRefundAdjustmentApplicationId: 'application-1',
+          cancelledAmountMinor: 600000,
+          remainingAmountMinorAfter: 972654,
+        }),
+      }),
+    });
+  });
+
   it.each([
     ['DRAFT', 'PENDING'],
     ['APPROVED', 'PENDING'],

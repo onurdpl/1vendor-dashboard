@@ -588,6 +588,17 @@ describe('Shopify refund return linking', () => {
           amountMinor: 299792,
           currencyCode: 'TRY',
           reason: 'Refund after invoiced settlement requires future settlement adjustment.',
+          events: {
+            create: expect.objectContaining({
+              eventType: 'CREATED',
+              metadataJson: expect.objectContaining({
+                refundFinanceLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+                refundRecordId: 'refund-sporjinal-1074533826897',
+                amountMinor: 299792,
+                currencyCode: 'TRY',
+              }),
+            }),
+          },
         }),
       }),
     );

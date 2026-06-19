@@ -112,6 +112,15 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(classifyRefundAdjustmentEligibility(row).recommendedAction).toBe('VENDOR_DEBT_REQUIRED');
   });
 
+  it('returns ZERO_OR_INVALID_AMOUNT for zero, negative, or invalid refund adjustment amounts', () => {
+    expect(classifyRefundAdjustmentEligibility(refundLedgerRow({ amount: 0 })).recommendedAction)
+      .toBe('ZERO_OR_INVALID_AMOUNT');
+    expect(classifyRefundAdjustmentEligibility(refundLedgerRow({ amount: -10 })).recommendedAction)
+      .toBe('ZERO_OR_INVALID_AMOUNT');
+    expect(classifyRefundAdjustmentEligibility(refundLedgerRow({ amount: 'not-a-number' })).recommendedAction)
+      .toBe('ZERO_OR_INVALID_AMOUNT');
+  });
+
   it('returns MISSING_RELATED_SALE_LEDGER when allocation has no sale ledger', () => {
     const row = refundLedgerRow();
     row.vendorAllocation.financeEntries = [];
@@ -188,6 +197,43 @@ describe('refund adjustment eligibility diagnostics', () => {
     expect(result.records[0].recommendedAction).toBe('CREATE_PENDING_ADJUSTMENT');
     expect(result.summary.createPendingAdjustment).toBe(1);
     expect(result.summary.alreadyHasAdjustment).toBe(0);
+  });
+
+  it('keeps multiple refunds for the same order separate by refund ledger id', async () => {
+    const first = refundLedgerRow({
+      id: 'fin-yalispor-refund-1001',
+      amount: 1000,
+    });
+    const second = refundLedgerRow({
+      id: 'fin-yalispor-refund-1002',
+      amount: 500,
+      vendorAllocation: {
+        ...refundLedgerRow().vendorAllocation,
+        refundRecords: [
+          {
+            id: 'refund-record-1002',
+            sourceShopifyRefundId: '1002',
+          },
+        ],
+      },
+    });
+    const db = {
+      financeLedgerEntry: {
+        findMany: vi.fn().mockResolvedValue([first, second]),
+      },
+    };
+
+    const result = await previewRefundAdjustmentEligibility({ db: db as never });
+
+    expect(result.summary.createPendingAdjustment).toBe(2);
+    expect(result.records.map((record) => record.refundFinanceLedgerEntryId)).toEqual([
+      'fin-yalispor-refund-1001',
+      'fin-yalispor-refund-1002',
+    ]);
+    expect(result.records.map((record) => record.refundRecordId)).toEqual([
+      'refund-record-1001',
+      'refund-record-1002',
+    ]);
   });
 
   it('backfills only CREATE_PENDING_ADJUSTMENT rows with pending adjustment records', async () => {
@@ -381,6 +427,60 @@ describe('refund adjustment eligibility diagnostics', () => {
     }));
     expect(JSON.stringify(result)).not.toContain('requestSnapshotJson');
     expect(JSON.stringify(result)).not.toContain('responseSnapshotJson');
+  });
+
+  it('reports application preview exclusions for currency mismatch and terminal statuses', async () => {
+    const db = {
+      settlementRefundAdjustment: {
+        findMany: vi.fn()
+          .mockResolvedValueOnce([
+            {
+              id: 'adjustment-try',
+              originalOrderId: 'order-1086',
+              refundRecordId: 'refund-record-1001',
+              refundFinanceLedgerEntryId: 'fin-yalispor-refund-1001',
+              originalSettlementApprovalId: null,
+              originalSettlementCommissionInvoiceId: null,
+              amountMinor: 10000,
+              originalAmountMinor: 10000,
+              appliedAmountMinor: 0,
+              remainingAmountMinor: 10000,
+              status: 'PENDING',
+              currencyCode: 'TRY',
+              reason: 'Eligible adjustment.',
+            },
+          ])
+          .mockResolvedValueOnce([
+            { status: 'PENDING', amountMinor: 10000, remainingAmountMinor: 10000, currencyCode: 'TRY' },
+            { status: 'PENDING', amountMinor: 10000, remainingAmountMinor: 10000, currencyCode: 'USD' },
+            { status: 'PENDING', amountMinor: 0, remainingAmountMinor: 0, currencyCode: 'TRY' },
+            { status: 'APPLIED', amountMinor: 10000, remainingAmountMinor: 0, currencyCode: 'TRY' },
+            { status: 'BLOCKED', amountMinor: 10000, remainingAmountMinor: 10000, currencyCode: 'TRY' },
+            { status: 'CANCELLED', amountMinor: 10000, remainingAmountMinor: 10000, currencyCode: 'TRY' },
+            { status: 'PARTIALLY_APPLIED', amountMinor: 20000, remainingAmountMinor: 5000, currencyCode: 'TRY' },
+          ]),
+      },
+    };
+
+    const result = await previewPendingRefundAdjustmentApplication({
+      db: db as never,
+      vendorId: 'yalispor',
+      currencyCode: 'TRY',
+    });
+
+    expect(result.diagnosticExclusions).toEqual({
+      eligiblePending: 1,
+      partiallyApplied: 1,
+      currencyMismatch: 1,
+      zeroOrInvalidAmount: 1,
+      alreadyApplied: 1,
+      blocked: 1,
+      cancelled: 1,
+    });
+    expect(result.notes).toEqual(expect.arrayContaining([
+      'Currency mismatches are excluded; Sporgym does not convert adjustment currencies.',
+      'Already applied, blocked, cancelled, and zero-remaining adjustments are excluded from settlement draft application.',
+    ]));
   });
 
   it('uses pending-positive vendor and currency filters for adjustment application preview', async () => {

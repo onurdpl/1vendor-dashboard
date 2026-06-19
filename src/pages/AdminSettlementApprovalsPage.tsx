@@ -305,6 +305,26 @@ function getScopeLabel(scope: string) {
   return 'Vendor';
 }
 
+function getRefundAdjustmentStatusCopy(status: string | null | undefined) {
+  const normalized = String(status ?? '').toLowerCase();
+  if (normalized === 'pending') {
+    return 'Waiting for future settlement deduction';
+  }
+  if (normalized === 'partially_applied') {
+    return 'Partially deducted; remaining amount will carry forward';
+  }
+  if (normalized === 'applied') {
+    return 'Fully deducted from settlement';
+  }
+  if (normalized === 'blocked') {
+    return 'Blocked; requires finance review';
+  }
+  if (normalized === 'cancelled') {
+    return 'Cancelled';
+  }
+  return safeStatusLabel(status ?? 'Unknown');
+}
+
 function getDatabaseSourceLabel(health: DatabaseHealthResponse | null) {
   return (
     health?.financeAuditMetadata?.databaseSourceLabel ??
@@ -909,6 +929,7 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
     preview.summary.netAfterPendingRefundAdjustmentsMinor ??
     preview.summary.netPayableMinor - total;
   const records = adjustmentPreview?.records ?? [];
+  const diagnosticExclusions = adjustmentPreview?.diagnosticExclusions;
 
   return (
     <section className="settlement-quality-card op-tone-warning" aria-label="Pending refund adjustments">
@@ -939,7 +960,7 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
                 <span>{record.refundLabel ?? `Refund ${record.refundRecordId}`}</span>
                 <span>Adjustment: {record.adjustmentId}</span>
                 <span>Refund ledger: {record.refundFinanceLedgerEntryId}</span>
-                <span>Status: {record.status ? safeStatusLabel(record.status) : 'Pending'}</span>
+                <span>Status: {getRefundAdjustmentStatusCopy(record.status ?? 'pending')}</span>
               </div>
               <div>
                 <SummaryField label="Original" value={formatMinor(record.originalAmountMinor ?? record.amountMinor, record.currencyCode)} />
@@ -956,6 +977,18 @@ function PendingRefundAdjustmentsCard({ preview }: { preview: SettlementApproval
       ) : (
         <p className="settlement-preview-empty">No pending refund adjustments for this vendor and currency.</p>
       )}
+      {diagnosticExclusions ? (
+        <div className="settlement-alert op-tone-info">
+          <strong>Adjustment diagnostics</strong>
+          <p>
+            Excluded: {formatNumber(diagnosticExclusions.currencyMismatch)} currency mismatch,
+            {' '}{formatNumber(diagnosticExclusions.zeroOrInvalidAmount)} zero/invalid,
+            {' '}{formatNumber(diagnosticExclusions.alreadyApplied)} already applied,
+            {' '}{formatNumber(diagnosticExclusions.blocked)} blocked,
+            {' '}{formatNumber(diagnosticExclusions.cancelled)} cancelled.
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }

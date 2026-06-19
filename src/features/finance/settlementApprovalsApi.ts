@@ -127,6 +127,15 @@ export type SettlementApprovalPreview = {
       reason: string;
       previewImpactMinor: number;
     }>;
+    diagnosticExclusions?: {
+      eligiblePending: number;
+      partiallyApplied: number;
+      currencyMismatch: number;
+      zeroOrInvalidAmount: number;
+      alreadyApplied: number;
+      blocked: number;
+      cancelled: number;
+    };
     notes: string[];
   };
   lines: SettlementApprovalLine[];

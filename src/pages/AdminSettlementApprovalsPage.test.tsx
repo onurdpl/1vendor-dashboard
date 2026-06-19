@@ -165,12 +165,24 @@ const pendingRefundAdjustmentPreviewResponse: SettlementApprovalPreview = {
         refundFinanceLedgerEntryId: 'fin-refund-1086',
         originalSettlementApprovalId: 'approval-1086',
         originalSettlementCommissionInvoiceId: 'commission-invoice-1086',
+        orderLabel: 'Order #1086',
+        refundLabel: 'Refund #1080642666833',
+        originalCommissionInvoiceLabel: 'Invoice REE2026000000068',
         amountMinor: 88000,
         currencyCode: 'TRY',
         reason: 'Refund after invoiced settlement requires future settlement adjustment.',
         previewImpactMinor: 88000,
       },
     ],
+    diagnosticExclusions: {
+      eligiblePending: 1,
+      partiallyApplied: 0,
+      currencyMismatch: 1,
+      zeroOrInvalidAmount: 0,
+      alreadyApplied: 2,
+      blocked: 0,
+      cancelled: 0,
+    },
   },
 };
 
@@ -1542,13 +1554,15 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Pending Refund Adjustments' })).toBeInTheDocument());
     expect(screen.getByText('Preview only — partial applications are created only when an admin creates a settlement draft.')).toBeInTheDocument();
     expect(screen.getByText('These deductions are preview-only and are not applied until the adjustment application phase.')).toBeInTheDocument();
-    expect(screen.getByText('Order order-1086')).toBeInTheDocument();
-    expect(screen.getByText('Refund refund-record-1086')).toBeInTheDocument();
+    expect(screen.getByText('Order #1086')).toBeInTheDocument();
+    expect(screen.getByText('Refund #1080642666833')).toBeInTheDocument();
     expect(screen.getByText('Adjustment: adjustment-1086')).toBeInTheDocument();
     expect(screen.getByText('Refund ledger: fin-refund-1086')).toBeInTheDocument();
+    expect(screen.getByText('Status: Waiting for future settlement deduction')).toBeInTheDocument();
+    expect(screen.getByText(/Excluded: 1 currency mismatch/)).toBeInTheDocument();
     expect(screen.getAllByText('TRY 880.00').length).toBeGreaterThan(0);
     expect(screen.getAllByText('TRY 76.00').length).toBeGreaterThan(0);
-    expect(screen.getByText('commission-invoice-1086')).toBeInTheDocument();
+    expect(screen.getByText('Invoice REE2026000000068')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /apply/i })).not.toBeInTheDocument();
   });
 

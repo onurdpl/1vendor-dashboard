@@ -226,3 +226,48 @@ GET /admin/finance/refund-adjustments/:id
 ```
 
 The detail endpoint is read-only and returns the adjustment, applications, and audit events. It does not write data or call external providers.
+
+## Phase 3.5F Edge Case Hardening
+
+Phase 3.5F verifies and hardens edge cases before closing the refund-adjustment phase.
+
+Verified guardrails:
+
+- partial refunds use the same refund payable reversal formula as refund ledger events,
+- multiple refunds for the same order remain separate by refund ledger row,
+- duplicate webhook/reconciliation replay remains idempotent through the unique refund-ledger adjustment constraint,
+- adjustment preview excludes currency mismatches and performs no currency conversion,
+- zero, negative, and invalid adjustment amounts are blocked by diagnostics,
+- `APPLIED`, `BLOCKED`, `CANCELLED`, and zero-remaining adjustments are excluded from application preview,
+- `PARTIALLY_APPLIED` adjustments use only `remainingAmountMinor`,
+- payable smaller than adjustment creates a partial application and never creates vendor debt,
+- adjustment-only settlement drafts remain unsupported and blocked,
+- settlement cancellation cancels active applications and restores only the application amount,
+- paid or settled sale refunds use vendor debt, not settlement refund adjustments.
+
+Unsupported cases:
+
+- adjustment-only settlement drafts,
+- negative settlement drafts,
+- automatic Logo credit invoices,
+- automatic commission invoice cancellation,
+- currency conversion for refund adjustments.
+
+Vendor debt boundary:
+
+```text
+Refund after approved/invoiced settlement before vendor payment
+  -> SettlementRefundAdjustment
+
+Refund after vendor payout / settled payment
+  -> VendorBalanceEvent debt path
+
+Adjustment overflow
+  -> Carry remaining adjustment forward
+  -> Never create vendor debt
+```
+
+Diagnostics:
+
+- eligibility diagnostics show missing linkage, vendor debt required, already existing adjustment, and invalid amount reasons,
+- application preview diagnostics show currency mismatch, zero/invalid, already applied, blocked, cancelled, pending, and partially applied counts.

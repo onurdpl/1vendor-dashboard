@@ -124,6 +124,15 @@ export type PendingRefundAdjustmentApplicationPreview = {
   netAfterPendingRefundAdjustmentsMinor: number | null;
   currencyCode: string | null;
   records: PendingRefundAdjustmentApplicationPreviewRecord[];
+  diagnosticExclusions: {
+    eligiblePending: number;
+    partiallyApplied: number;
+    currencyMismatch: number;
+    zeroOrInvalidAmount: number;
+    alreadyApplied: number;
+    blocked: number;
+    cancelled: number;
+  };
   notes: string[];
 };
 
@@ -595,6 +604,18 @@ export async function previewPendingRefundAdjustmentApplication(input: {
       reason: true,
     },
   });
+  const diagnosticRows = await db.settlementRefundAdjustment.findMany({
+    where: {
+      vendorId: input.vendorId,
+    },
+    take: input.limit ?? 100,
+    select: {
+      status: true,
+      amountMinor: true,
+      remainingAmountMinor: true,
+      currencyCode: true,
+    },
+  });
   const records = rows.map((row) => ({
     adjustmentId: row.id,
     originalOrderId: row.originalOrderId,
@@ -626,6 +647,41 @@ export async function previewPendingRefundAdjustmentApplication(input: {
   const currentCandidateNetPayableMinor = Number.isFinite(input.currentCandidateNetPayableMinor)
     ? Number(input.currentCandidateNetPayableMinor)
     : null;
+  const diagnosticExclusions = diagnosticRows.reduce<PendingRefundAdjustmentApplicationPreview['diagnosticExclusions']>(
+    (summary, row) => {
+      const remainingAmountMinor = row.remainingAmountMinor ?? row.amountMinor;
+      const status = normalize(row.status);
+      const isCandidateStatus = status === 'PENDING' || status === 'PARTIALLY_APPLIED';
+      const hasCurrencyMismatch = Boolean(currencyCode && row.currencyCode !== currencyCode);
+      if (isCandidateStatus && remainingAmountMinor > 0 && !hasCurrencyMismatch) {
+        if (status === 'PARTIALLY_APPLIED') {
+          summary.partiallyApplied += 1;
+        } else {
+          summary.eligiblePending += 1;
+        }
+      } else if (isCandidateStatus && hasCurrencyMismatch) {
+        summary.currencyMismatch += 1;
+      } else if (isCandidateStatus && remainingAmountMinor <= 0) {
+        summary.zeroOrInvalidAmount += 1;
+      } else if (status === 'APPLIED') {
+        summary.alreadyApplied += 1;
+      } else if (status === 'BLOCKED') {
+        summary.blocked += 1;
+      } else if (status === 'CANCELLED') {
+        summary.cancelled += 1;
+      }
+      return summary;
+    },
+    {
+      eligiblePending: 0,
+      partiallyApplied: 0,
+      currencyMismatch: 0,
+      zeroOrInvalidAmount: 0,
+      alreadyApplied: 0,
+      blocked: 0,
+      cancelled: 0,
+    },
+  );
 
   return {
     ok: true,
@@ -638,9 +694,12 @@ export async function previewPendingRefundAdjustmentApplication(input: {
       currentCandidateNetPayableMinor === null ? null : currentCandidateNetPayableMinor - pendingAdjustmentTotalMinor,
     currencyCode: currencyCode ?? records[0]?.currencyCode ?? null,
     records,
+    diagnosticExclusions,
     notes: [
       'Preview only — partial applications are created only when an admin creates a settlement draft.',
       'Existing settlement totals are unchanged by this read-only preview.',
+      'Currency mismatches are excluded; Sporgym does not convert adjustment currencies.',
+      'Already applied, blocked, cancelled, and zero-remaining adjustments are excluded from settlement draft application.',
     ],
   };
 }
