@@ -6,7 +6,7 @@ This document describes the current vendor economics and settlement execution ar
 
 Current production status:
 
-- Logo Create for settlement commission invoices is NOT implemented yet.
+- Controlled Logo Create for settlement commission invoices is implemented through `SettlementCommissionInvoice` records and immutable request snapshots.
 - Vendor payout execution is NOT implemented yet.
 - Marketplace Economics / Operational Cost Ledger is NOT implemented yet.
 
@@ -27,7 +27,7 @@ Vendor Profile
   -> Vendor Payout
 ```
 
-Only the foundation through persisted immutable request snapshots and execution safety guards is implemented today. Real Logo Create, invoice status sync, and vendor payout execution remain future phases.
+Persisted immutable request snapshots, execution safety guards, controlled Logo Create, and read-only outgoing invoice sync preview are implemented today. Invoice number/GIB status persistence and vendor payout execution remain future phases.
 
 ## Truth Model
 
@@ -80,6 +80,12 @@ Settlement Commission Invoice Request Snapshot = immutable execution artifact.
 - Immutable Logo request snapshot builder:
   - `buildSettlementLogoCommissionInvoiceRequestSnapshot(...)`
   - payload builder version: `settlement-logo-request-v1`
+  - visible Logo invoice description format:
+    - `Sporgym Pazaryeri Komisyon Hizmeti`
+    - `Dönem: <startDate> - <endDate>` when a reliable approval period or line/ledger date range exists
+    - `Vendor: <vendor display name>` with vendor id fallback
+    - `Referans: SET-<YYYYMMDD>-<VENDORID>-<short approval id>`
+  - raw `SettlementApproval.id` remains in immutable request snapshot metadata, but it is not the primary visible invoice description.
 - Persisted immutable request snapshot:
   - `createPendingRecordFromImmutableRequestSnapshot(...)`
   - `SettlementCommissionInvoice.status = PENDING`
@@ -107,8 +113,7 @@ Settlement Commission Invoice Request Snapshot = immutable execution artifact.
 
 ## Not Implemented Yet
 
-- Real Logo Create provider call for settlement commission invoices.
-- Logo invoice status sync.
+- Logo invoice number/GIB status persistence.
 - Refund-after-invoice lifecycle.
 - Vendor payout execution.
 - Bank transfer execution or confirmation.

@@ -1,4 +1,11 @@
-import { SettlementApprovalStatus, type Prisma, type SettlementApproval, type SettlementApprovalLine } from '@prisma/client';
+import {
+  SettlementApprovalStatus,
+  type FinanceLedgerEntry,
+  type Prisma,
+  type SettlementApproval,
+  type SettlementApprovalLine,
+  type Vendor,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   buildLogoIsbasiCommissionInvoicePreview,
@@ -28,7 +35,13 @@ const REQUIRED_BILLING_SNAPSHOT_FIELDS = [
 const SOURCE_ORDER_ID_SAMPLE_LIMIT = 20;
 
 type RequiredBillingSnapshotField = (typeof REQUIRED_BILLING_SNAPSHOT_FIELDS)[number];
-type SettlementApprovalForRequestSnapshot = SettlementApproval & { lines: SettlementApprovalLine[] };
+type SettlementApprovalLineForRequestSnapshot = SettlementApprovalLine & {
+  financeLedgerEntry?: Pick<FinanceLedgerEntry, 'createdAt'> | null;
+};
+type SettlementApprovalForRequestSnapshot = SettlementApproval & {
+  vendor?: Pick<Vendor, 'name'> | null;
+  lines: SettlementApprovalLineForRequestSnapshot[];
+};
 type SnapshotCompletenessItem = SettlementExecutionSnapshotGuardDto['snapshotCompleteness']['commissionPercentSnapshot'];
 
 export type SettlementLogoRequestSnapshotDiagnosticsDto = {
@@ -168,21 +181,85 @@ function sortedStrings(values: Set<string>) {
 }
 
 function buildSourcePeriod(approval: SettlementApprovalForRequestSnapshot) {
-  if (!approval.periodStart && !approval.periodEnd) {
+  const explicitStart = approval.periodStart?.toISOString().slice(0, 10) ?? null;
+  const explicitEnd = approval.periodEnd?.toISOString().slice(0, 10) ?? null;
+  if (explicitStart && explicitEnd) {
+    return {
+      startDate: explicitStart,
+      endDate: explicitEnd,
+      sourcePeriod: `${explicitStart}..${explicitEnd}`,
+    };
+  }
+
+  const sourceSnapshot = readSnapshotRecord(approval.sourceSnapshotJson);
+  const snapshotStart = readSnapshotString(sourceSnapshot.periodStart)?.slice(0, 10) ?? null;
+  const snapshotEnd = readSnapshotString(sourceSnapshot.periodEnd)?.slice(0, 10) ?? null;
+  if (snapshotStart && snapshotEnd) {
+    return {
+      startDate: snapshotStart,
+      endDate: snapshotEnd,
+      sourcePeriod: `${snapshotStart}..${snapshotEnd}`,
+    };
+  }
+
+  const lineDates = approval.lines
+    .map((line) => {
+      const snapshot = readSnapshotRecord(line.sourceSnapshotJson);
+      const snapshotDate =
+        readSnapshotString(snapshot.financeLedgerCreatedAt) ??
+        readSnapshotString(snapshot.ledgerCreatedAt) ??
+        readSnapshotString(snapshot.sourceCreatedAt) ??
+        readSnapshotString(snapshot.orderCreatedAt) ??
+        readSnapshotString(snapshot.createdAt);
+      const rawDate = line.financeLedgerEntry?.createdAt?.toISOString() ?? snapshotDate;
+      if (!rawDate) {
+        return null;
+      }
+      const parsed = new Date(rawDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+    })
+    .filter((value): value is string => Boolean(value))
+    .sort();
+
+  if (!lineDates.length) {
     return null;
   }
-  const start = approval.periodStart?.toISOString().slice(0, 10) ?? 'open-start';
-  const end = approval.periodEnd?.toISOString().slice(0, 10) ?? 'open-end';
-  return `${start}..${end}`;
+
+  const startDate = lineDates[0];
+  const endDate = lineDates[lineDates.length - 1];
+  return {
+    startDate,
+    endDate,
+    sourcePeriod: `${startDate}..${endDate}`,
+  };
+}
+
+function normalizeReferenceSegment(value: string) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'VENDOR';
+}
+
+function buildHumanReadableSettlementReference(approval: SettlementApprovalForRequestSnapshot) {
+  const period = buildSourcePeriod(approval);
+  const referenceDate = (period?.startDate ?? approval.createdAt.toISOString().slice(0, 10)).replace(/-/g, '');
+  const vendorSegment = normalizeReferenceSegment(approval.vendorId);
+  const shortApprovalId = normalizeReferenceSegment(approval.id).slice(0, 8);
+  return `SET-${referenceDate}-${vendorSegment}-${shortApprovalId}`;
 }
 
 function buildDescription(approval: SettlementApprovalForRequestSnapshot) {
   const period = buildSourcePeriod(approval);
+  const vendorDisplayName = approval.vendor?.name?.trim() || approval.vendorId;
   return [
     'Sporgym Pazaryeri Komisyon Hizmeti',
-    `SettlementApproval ${approval.id}`,
-    period ? `Period ${period}` : null,
-  ].filter(Boolean).join(' - ');
+    period ? `Dönem: ${period.startDate} - ${period.endDate}` : null,
+    `Vendor: ${vendorDisplayName}`,
+    `Referans: ${buildHumanReadableSettlementReference(approval)}`,
+  ].filter(Boolean).join('\n');
 }
 
 function getSourceOrderIds(lines: SettlementApprovalLine[]) {
@@ -396,6 +473,7 @@ function buildSettlementApprovalSnapshot(approval: SettlementApprovalForRequestS
     netPayableMinor: approval.netPayableMinor,
     approvedBy: approval.approvedBy,
     approvedAt: toIso(approval.approvedAt),
+    humanReadableReference: buildHumanReadableSettlementReference(approval),
     sourceSnapshot: {
       vendorId: sourceSnapshot.vendorId ?? approval.vendorId,
       periodStart: sourceSnapshot.periodStart ?? toIso(approval.periodStart),
@@ -414,7 +492,7 @@ function buildSettlementLineSnapshotSummary(approval: SettlementApprovalForReque
     lineCount: approval.lines.length,
     executionLineCount: guard.snapshotCompleteness.executionLineCount,
     sourceOrderIds: getSourceOrderIds(approval.lines),
-    sourcePeriod: buildSourcePeriod(approval),
+    sourcePeriod: buildSourcePeriod(approval)?.sourcePeriod ?? null,
     detectedCommissionRates: guard.detectedCommissionRates,
     detectedCommissionVatRates: guard.detectedCommissionVatRates,
     detectedShippingModes: guard.detectedShippingModes,
@@ -449,7 +527,20 @@ export async function buildSettlementLogoCommissionInvoiceRequestSnapshot(
       id: settlementApprovalId,
     },
     include: {
-      lines: true,
+      vendor: {
+        select: {
+          name: true,
+        },
+      },
+      lines: {
+        include: {
+          financeLedgerEntry: {
+            select: {
+              createdAt: true,
+            },
+          },
+        },
+      },
     },
   });
   const executionSnapshotGuard = buildStrictExecutionSnapshotGuard(approval);
@@ -508,7 +599,7 @@ export async function buildSettlementLogoCommissionInvoiceRequestSnapshot(
     description: buildDescription(approval),
     invoiceDate,
     sourceOrderIds: getSourceOrderIds(approval.lines),
-    sourcePeriod: buildSourcePeriod(approval),
+    sourcePeriod: buildSourcePeriod(approval)?.sourcePeriod ?? null,
   });
   const allWarnings = Array.from(new Set([...warnings, ...preview.warnings]));
   const logoPayload = useProvenLogoServiceReference(preview.payload) as Prisma.InputJsonObject;

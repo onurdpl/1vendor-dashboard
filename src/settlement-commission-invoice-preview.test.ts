@@ -223,7 +223,8 @@ describe('settlement Logo commission invoice preview', () => {
       sourceOrderIds: ['gid://shopify/Order/1001'],
     });
     expect(preview.logoPayloadPreview?.description).toContain('Sporgym Pazaryeri Komisyon Hizmeti');
-    expect(preview.logoPayloadPreview?.description).toContain('approval-1');
+    expect(preview.logoPayloadPreview?.description).toContain('Referans: SET-20260601-VENDOR-A-APPROVAL');
+    expect(preview.logoPayloadPreview?.description).not.toContain('SettlementApproval approval-1');
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorBillingProfile.create).not.toHaveBeenCalled();

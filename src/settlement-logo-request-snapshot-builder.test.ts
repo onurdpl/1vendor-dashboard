@@ -58,6 +58,7 @@ function buildLine(input: {
   commissionMinor?: number;
   commissionVatMinor?: number;
   vatRate?: string | null;
+  ledgerCreatedAt?: Date | null;
   sourceSnapshotOverrides?: Record<string, unknown>;
 }) {
   const lineType = input.lineType ?? 'SALE';
@@ -87,6 +88,11 @@ function buildLine(input: {
     commissionVatMinor: input.commissionVatMinor ?? (lineType === 'SALE' ? 2000 : 0),
     payableImpactMinor: lineType === 'SALE' ? 88000 : -10000,
     sourceSnapshotJson,
+    financeLedgerEntry: input.ledgerCreatedAt === undefined
+      ? null
+      : input.ledgerCreatedAt
+        ? { createdAt: input.ledgerCreatedAt }
+        : null,
   };
 }
 
@@ -110,6 +116,9 @@ function buildApproval(overrides: Record<string, unknown> = {}) {
     cancelledBy: null,
     cancelledAt: null,
     notes: null,
+    vendor: {
+      name: 'Yali Spor',
+    },
     sourceSnapshotJson: {
       vendorId: 'vendor-a',
       periodStart: '2026-06-01T00:00:00.000Z',
@@ -162,6 +171,7 @@ describe('immutable settlement Logo request snapshot builder', () => {
         commissionMinor: 10000,
         commissionVatMinor: 2000,
         netPayableMinor: 88000,
+        humanReadableReference: 'SET-20260601-VENDOR-A-APPROVAL',
       },
       settlementBillingSnapshot: {
         legalCompanyName: 'Snapshot Vendor A.S.',
@@ -175,6 +185,13 @@ describe('immutable settlement Logo request snapshot builder', () => {
       logoPayload: {
         invoiceDate: '2026-06-15 00:00:00',
         currency: 'TRY',
+        description: [
+          'Sporgym Pazaryeri Komisyon Hizmeti',
+          'Dönem: 2026-06-01 - 2026-06-30',
+          'Vendor: Yali Spor',
+          'Referans: SET-20260601-VENDOR-A-APPROVAL',
+        ].join('\n'),
+        sourcePeriod: '2026-06-01..2026-06-30',
         customer: {
           code: 'SNAPSHOT-CUSTOMER',
           name: 'Snapshot Vendor A.S.',
@@ -184,6 +201,12 @@ describe('immutable settlement Logo request snapshot builder', () => {
           {
             price: 100,
             taxRate: 20,
+            description: [
+              'Sporgym Pazaryeri Komisyon Hizmeti',
+              'Dönem: 2026-06-01 - 2026-06-30',
+              'Vendor: Yali Spor',
+              'Referans: SET-20260601-VENDOR-A-APPROVAL',
+            ].join('\n'),
             productDetail: {
               itemCode: 'SPORGYM-COMMISSION',
               itemType: 2,
@@ -194,13 +217,80 @@ describe('immutable settlement Logo request snapshot builder', () => {
     });
     expect(prismaMock.settlementApproval.findUnique).toHaveBeenCalledWith({
       where: { id: 'approval-1' },
-      include: { lines: true },
+      include: {
+        vendor: {
+          select: {
+            name: true,
+          },
+        },
+        lines: {
+          include: {
+            financeLedgerEntry: {
+              select: {
+                createdAt: true,
+              },
+            },
+          },
+        },
+      },
     });
     expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findUnique).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
+    const logoPayload = result.requestSnapshotJson?.logoPayload as Record<string, unknown>;
+    expect(String(logoPayload.description)).not.toContain('SettlementApproval approval-1');
+  });
+
+  it('omits the visible period line when no reliable period or line date exists', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({
+        periodStart: null,
+        periodEnd: null,
+        sourceSnapshotJson: {
+          vendorId: 'vendor-a',
+          generatedAt: '2026-06-01T10:00:00.000Z',
+          settlementBillingSnapshot: buildBillingSnapshot(),
+        },
+        lines: [buildLine({ id: '1001', ledgerCreatedAt: null })],
+      }),
+    );
+
+    const result = await buildSettlementLogoCommissionInvoiceRequestSnapshot('approval-1', '2026-06-15');
+    const logoPayload = result.requestSnapshotJson?.logoPayload as Record<string, unknown>;
+
+    expect(result.ok).toBe(true);
+    expect(String(logoPayload.description)).toContain('Sporgym Pazaryeri Komisyon Hizmeti');
+    expect(String(logoPayload.description)).toContain('Vendor: Yali Spor');
+    expect(String(logoPayload.description)).toContain('Referans: SET-20260601-VENDOR-A-APPROVAL');
+    expect(String(logoPayload.description)).not.toContain('Dönem:');
+    expect(logoPayload).not.toHaveProperty('sourcePeriod');
+  });
+
+  it('uses included ledger createdAt dates as the period fallback', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(
+      buildApproval({
+        periodStart: null,
+        periodEnd: null,
+        sourceSnapshotJson: {
+          vendorId: 'vendor-a',
+          generatedAt: '2026-06-01T10:00:00.000Z',
+          settlementBillingSnapshot: buildBillingSnapshot(),
+        },
+        lines: [
+          buildLine({ id: '1001', ledgerCreatedAt: new Date('2026-06-03T08:00:00.000Z') }),
+          buildLine({ id: '1002', ledgerCreatedAt: new Date('2026-06-08T08:00:00.000Z') }),
+        ],
+      }),
+    );
+
+    const result = await buildSettlementLogoCommissionInvoiceRequestSnapshot('approval-1', '2026-06-15');
+    const logoPayload = result.requestSnapshotJson?.logoPayload as Record<string, unknown>;
+
+    expect(result.ok).toBe(true);
+    expect(logoPayload.description).toContain('Dönem: 2026-06-03 - 2026-06-08');
+    expect(logoPayload.sourcePeriod).toBe('2026-06-03..2026-06-08');
   });
 
   it('blocks when the settlement billing snapshot is missing', async () => {
