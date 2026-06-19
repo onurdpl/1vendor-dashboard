@@ -1,6 +1,7 @@
 import { AllocationStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
 import type { DashboardOperationalSummaryDto } from './dashboard-summary.types.js';
 
 const NON_AWAITING_SHIPPING_STATUSES = [
@@ -12,8 +13,6 @@ const NON_AWAITING_SHIPPING_STATUSES = [
   'label created',
   'label_created',
 ];
-const RETURN_REFUND_ATTENTION_STATUSES = ['pending', 'in_review', 'in review'];
-
 function insensitiveEquals(value: string) {
   return {
     equals: value,
@@ -64,9 +63,7 @@ export async function getDashboardOperationalSummary(vendorId: string): Promise<
           vendorAllocation: {
             assignedVendorId: vendorId,
           },
-          OR: RETURN_REFUND_ATTENTION_STATUSES.map((status) => ({
-            status: insensitiveEquals(status),
-          })),
+          ...buildReturnReviewAttentionWhere(),
         },
       }),
     ),
