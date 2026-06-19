@@ -732,64 +732,85 @@ const outgoingInvoiceSyncPreviewResponse: LogoOutgoingInvoiceSyncPreview = {
   writesPerformed: false,
   blockers: [],
   warnings: [],
-  record: {
-    id: 'created-record',
-    status: 'CREATED',
-    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
-    invoiceNo: null,
-    providerInvoiceId: 'logo-invoice-1',
-    providerEttn: null,
-  },
-  search: {
-    issueDateStart: '2026-06-05T10:01:00.000Z',
-    issueDateEnd: '2026-06-20T00:00:00.000Z',
-    pagesChecked: 1,
-    totalProviderCount: 1,
-    matched: true,
-    ambiguity: false,
-  },
-  matchedInvoice: {
-    uuId: '82691C7B-28D6-4E30-95C9-C0658E90F090',
-    invoiceId: 'einvoice-row-1',
-    salesInvoiceId: '12345',
-    issueDate: '2026-06-12T12:00:00',
-    amount: 120.5,
-    currency: 'TRY',
-    status: "Henüz GİB'e Gönderilmedi",
-    statusCode: 10,
-    eGovermentType: 'EARSIV',
-    eGovermentTypeDesc: 'E-Arşiv',
-    connectStatusDescription: 'Provider waiting',
-    connectStatusCode: 20,
-    accountingStatusSummary: {},
-  },
-  candidateInvoices: [
-    {
-      uuId: 'some-other-uuid',
-      invoiceId: 'einvoice-row-1',
-      salesInvoiceId: '750',
-      issueDate: '2026-06-12T12:00:00',
-      amount: 120.5,
-      currency: 'TRY',
-      status: "Henüz GİB'e Gönderilmedi",
-      statusCode: 10,
-      eGovermentType: 'EARSIV',
-      eGovermentTypeDesc: 'E-Arşiv',
-      matchSignals: {
-        uuidEqualsProviderUuid: false,
-        salesInvoiceIdEqualsProviderInvoiceId: true,
-        invoiceIdEqualsProviderInvoiceId: false,
-        amountNearRecordTotal: false,
-      },
-    },
+	  record: {
+	    id: 'created-record',
+	    status: 'CREATED',
+	    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+	    invoiceNo: null,
+	    providerInvoiceId: 'logo-invoice-1',
+	    providerEttn: null,
+	    expectedInvoiceTotalMinor: 12050,
+	  },
+	  search: {
+	    dateStart: '2026-06-05T10:01:00.000Z',
+	    dateEnd: '2026-06-20T00:00:00.000Z',
+	    pagesChecked: 1,
+	    totalProviderCount: 1,
+	    matched: true,
+	    ambiguity: false,
+	  },
+	  matchedInvoice: {
+	    id: '750',
+	    uuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+	    uuId: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+	    invoiceId: 'einvoice-row-1',
+	    salesInvoiceId: '12345',
+	    invoiceNumber: null,
+	    invoiceNo: null,
+	    documentNumber: null,
+	    number: null,
+	    date: '2026-06-12T12:00:00',
+	    issueDate: '2026-06-12T12:00:00',
+	    amount: 120.5,
+	    total: 120.5,
+	    currency: 'TRY',
+	    status: "Henüz GİB'e Gönderilmedi",
+	    statusCode: 10,
+	    eType: 'EARSIV',
+	    eGovermentType: 'EARSIV',
+	    eGovermentTypeDesc: 'E-Arşiv',
+	    connectStatusDescription: 'Provider waiting',
+	    connectStatusCode: 20,
+	    accountingStatusSummary: {},
+	    customerDisplayName: 'Yali Spor',
+	  },
+	  candidateInvoices: [
+	    {
+	      id: '750',
+	      uuid: 'some-other-uuid',
+	      uuId: 'some-other-uuid',
+	      invoiceId: 'einvoice-row-1',
+	      salesInvoiceId: '750',
+	      date: '2026-06-12T12:00:00',
+	      issueDate: '2026-06-12T12:00:00',
+	      amount: 120.5,
+	      total: 120.5,
+	      currency: 'TRY',
+	      status: "Henüz GİB'e Gönderilmedi",
+	      statusCode: 10,
+	      eType: 'EARSIV',
+	      eGovermentType: 'EARSIV',
+	      eGovermentTypeDesc: 'E-Arşiv',
+	      type: '7',
+	      customerDisplayName: 'Yali Spor',
+	      matchSignals: {
+	        providerInvoiceIdEqualsId: false,
+	        salesInvoiceIdEqualsProviderInvoiceId: true,
+	        invoiceIdEqualsProviderInvoiceId: false,
+	        providerUuidEqualsUuid: false,
+	        providerUuidEqualsUuId: false,
+	        invoiceNumberPresent: false,
+	        amountNearRecordTotal: false,
+	      },
+	    },
   ],
   providerFieldsObserved: ['amount', 'currency', 'invoiceId', 'issueDate', 'salesInvoiceId', 'status', 'statusCode', 'uuId'],
   mappedFields: {
-    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
-    providerInvoiceId: '12345',
-    providerEttn: '82691C7B-28D6-4E30-95C9-C0658E90F090',
-    gibStatus: "Henüz GİB'e Gönderilmedi",
-    gibStatusCode: 10,
+	    providerUuid: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+	    providerInvoiceId: '12345',
+	    providerEttn: '82691C7B-28D6-4E30-95C9-C0658E90F090',
+	    gibStatus: null,
+	    gibStatusCode: null,
     documentStatus: 'Provider waiting',
     documentStatusCode: 20,
     documentType: 'EARSIV',
@@ -1195,7 +1216,7 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.queryByText('Execution contract blockers')).not.toBeInTheDocument();
   });
 
-  it('previews Logo outgoing invoice sync for a created record without writing data', async () => {
+  it('previews Logo sales invoice sync for a created record without writing data', async () => {
     getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
     getSettlementCommissionInvoiceRecordsMock.mockResolvedValueOnce(createdInvoiceRecordsResponse);
     renderPage();
@@ -1205,17 +1226,17 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(getSettlementCommissionInvoiceRecordsMock).toHaveBeenCalledWith('approval-2'));
     const invoicePanel = screen.getByText('created-record').closest('.settlement-tab-panel') ?? document.body;
-    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: 'Preview Logo invoice sync' }));
+    await userEvent.click(within(invoicePanel as HTMLElement).getByRole('button', { name: 'Preview Logo sales invoice sync' }));
 
     await waitFor(() => expect(previewLogoOutgoingInvoiceSyncMock).toHaveBeenCalledWith('created-record'));
-    expect(screen.getByText('Logo invoice sync preview loaded. No data was written.')).toBeInTheDocument();
+    expect(screen.getByText('Logo sales invoice sync preview loaded. No data was written.')).toBeInTheDocument();
     expect(screen.getByText('Sync preview created-record')).toBeInTheDocument();
     expect(screen.getAllByText('82691C7B-28D6-4E30-95C9-C0658E90F090').length).toBeGreaterThan(0);
-    expect(screen.getByText("Henüz GİB'e Gönderilmedi")).toBeInTheDocument();
-    expect(screen.getByText('UNKNOWN')).toBeInTheDocument();
+    expect(screen.getByText('Provider waiting')).toBeInTheDocument();
+    expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThan(0);
     expect(screen.getByText('Invoice number is UNKNOWN.')).toBeInTheDocument();
-    expect(screen.getByText('Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.')).toBeInTheDocument();
-    expect(screen.getByText('Candidate outgoing invoices')).toBeInTheDocument();
+    expect(screen.getByText('Logo sales invoice list did not return invoiceNumber, invoiceNo, documentNumber, or number for this match.')).toBeInTheDocument();
+    expect(screen.getByText('Candidate sales invoices')).toBeInTheDocument();
     expect(screen.getByText(/salesInvoiceId 750/)).toBeInTheDocument();
     expect(screen.getByText(/sales id match yes/)).toBeInTheDocument();
   });

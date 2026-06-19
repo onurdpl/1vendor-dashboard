@@ -719,6 +719,93 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
   });
 
+  it('lists sales invoices with the documented sync filters', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const client = new LogoIsbasiClient({
+      baseUrl: 'https://soho-isbasi-mwv2-test.logo-paas.com/',
+      apiKey: 'api-key-secret',
+      username: 'integration-user@example.test',
+      password: 'password-secret',
+      fetchImpl: fetchMock as never,
+    });
+
+    await client.listSalesInvoices(
+      {
+        accessToken: 'full-secret-access-token',
+        tenantId: 'tenant-1',
+        userId: 'user-1',
+        userEmail: 'integration-user@example.test',
+        userName: 'Integration User',
+      },
+      {
+        dateStart: '2026-06-05T00:00:00.000Z',
+        dateEnd: '2026-06-20T00:00:00.000Z',
+        page: 2,
+        pageSize: 100,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/invoices/invoices',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          ApiKey: 'api-key-secret',
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json',
+          Lang: 'tr-TR',
+          DeviceType: 'WEB',
+          UserId: 'user-1',
+          UserEmail: 'integration-user@example.test',
+          UserName: 'Integration User',
+        }),
+        body: JSON.stringify({
+          filters: [
+            {
+              columnName: 'eType/typeId',
+              operator: 17,
+              value: [1, 2, 3],
+            },
+            {
+              columnName: 'date',
+              operator: 5,
+              value: '2026-06-05T00:00:00.000Z',
+            },
+            {
+              columnName: 'date',
+              operator: 2,
+              value: '2026-06-20T00:00:00.000Z',
+            },
+            {
+              columnName: 'type',
+              operator: 17,
+              value: [7, 8],
+            },
+          ],
+          sorting: {
+            date: 1,
+          },
+          paging: {
+            currentPage: 2,
+            pageSize: 100,
+          },
+          columnNames: null,
+          count: true,
+          excel: {
+            export: false,
+            allowedColumns: null,
+            lucaExport: false,
+          },
+        }),
+      }),
+    );
+  });
+
   it('discovers sanitized Logo incoming e-invoices from the documented myInvoicesList endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(

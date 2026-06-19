@@ -17,9 +17,9 @@ const PAGE_SIZE = 100;
 const MAX_CANDIDATE_INVOICES = 20;
 const SEARCH_START_OFFSET_DAYS = 7;
 const SEARCH_END_OFFSET_DAYS = 1;
-const INVOICE_NUMBER_FIELDS = ['invoiceNumber', 'invoiceNo', 'documentNumber'] as const;
+const INVOICE_NUMBER_FIELDS = ['invoiceNumber', 'invoiceNo', 'documentNumber', 'number'] as const;
 
-type LogoOutgoingInvoiceClient = Pick<LogoIsbasiClient, 'login' | 'getOutgoingInvoiceDataList'>;
+type LogoOutgoingInvoiceClient = Pick<LogoIsbasiClient, 'login' | 'listSalesInvoices'>;
 
 type ProviderInvoiceRecord = Record<string, unknown>;
 
@@ -35,48 +35,70 @@ export type LogoOutgoingInvoiceSyncPreviewResult = {
     invoiceNo: string | null;
     providerInvoiceId: string | null;
     providerEttn: string | null;
+    expectedInvoiceTotalMinor: number | null;
   } | null;
   search: {
-    issueDateStart: string;
-    issueDateEnd: string;
+    dateStart: string;
+    dateEnd: string;
     pagesChecked: number;
     totalProviderCount: number;
     matched: boolean;
     ambiguity: boolean;
   };
   matchedInvoice: null | {
+    id: string | null;
+    uuid: string | null;
     uuId: string | null;
     invoiceId: string | null;
     salesInvoiceId: string | null;
+    invoiceNumber: string | null;
+    invoiceNo: string | null;
+    documentNumber: string | null;
+    number: string | null;
+    date: string | null;
     issueDate: string | null;
     amount: number | null;
+    total: number | null;
     currency: string | null;
     status: string | null;
     statusCode: number | null;
+    eType: string | null;
     eGovermentType: string | null;
     eGovermentTypeDesc: string | null;
     connectStatusDescription: string | null;
     connectStatusCode: number | null;
     accountingStatusSummary: Record<string, unknown>;
+    customerDisplayName: string | null;
   };
   candidateInvoices: Array<{
+    id: string | null;
+    uuid: string | null;
     uuId: string | null;
     invoiceId: string | null;
     salesInvoiceId: string | null;
+    date: string | null;
     issueDate: string | null;
     amount: number | null;
+    total: number | null;
     currency: string | null;
     status: string | null;
     statusCode: number | null;
+    eType: string | null;
     eGovermentType: string | null;
     eGovermentTypeDesc: string | null;
     invoiceNumber?: string;
     invoiceNo?: string;
     documentNumber?: string;
+    number?: string;
+    type: string | null;
+    customerDisplayName?: string;
     matchSignals: {
-      uuidEqualsProviderUuid: boolean;
-      salesInvoiceIdEqualsProviderInvoiceId: boolean;
+      providerInvoiceIdEqualsId: boolean;
       invoiceIdEqualsProviderInvoiceId: boolean;
+      salesInvoiceIdEqualsProviderInvoiceId: boolean;
+      providerUuidEqualsUuid: boolean;
+      providerUuidEqualsUuId: boolean;
+      invoiceNumberPresent: boolean;
       amountNearRecordTotal: boolean;
     };
   }>;
@@ -169,8 +191,8 @@ function addDays(date: Date, days: number) {
 
 function buildEmptyResult(input: {
   record?: LogoOutgoingInvoiceSyncPreviewResult['record'];
-  issueDateStart?: string;
-  issueDateEnd?: string;
+  dateStart?: string;
+  dateEnd?: string;
   blockers?: string[];
   warnings?: string[];
 }): LogoOutgoingInvoiceSyncPreviewResult {
@@ -181,8 +203,8 @@ function buildEmptyResult(input: {
     warnings: input.warnings ?? [],
     record: input.record ?? null,
     search: {
-      issueDateStart: input.issueDateStart ?? '',
-      issueDateEnd: input.issueDateEnd ?? '',
+      dateStart: input.dateStart ?? '',
+      dateEnd: input.dateEnd ?? '',
       pagesChecked: 0,
       totalProviderCount: 0,
       matched: false,
@@ -243,7 +265,7 @@ async function loginForLogoRead(client: LogoOutgoingInvoiceClient) {
         result.jsonParseFailed
           ? 'Logo İşbaşı login returned a non-JSON response.'
           : !result.ok
-            ? 'Logo İşbaşı login request failed before outgoing invoice sync preview.'
+            ? 'Logo İşbaşı login request failed before sales invoice sync preview.'
             : 'Logo İşbaşı login response is missing required session fields.',
       ],
       login,
@@ -330,21 +352,79 @@ function sanitizeAccountingStatus(value: unknown): Record<string, unknown> {
   return output;
 }
 
+function readCustomerDisplayName(invoice: ProviderInvoiceRecord) {
+  const direct = readRecordString(invoice, ['customerName', 'customerTitle', 'customerDisplayName', 'firmName', 'firmTitle']);
+  if (direct) {
+    return direct;
+  }
+  const customer = invoice.customer ?? invoice.firm ?? invoice.client;
+  return readRecordString(customer, ['name', 'title', 'displayName', 'companyName']);
+}
+
+function readGibStatus(invoice: ProviderInvoiceRecord) {
+  const status = readRecordString(invoice, [
+    'gibStatus',
+    'gibStatusDescription',
+    'gibState',
+    'gibStateDescription',
+    'eInvoiceStatus',
+    'eInvoiceStatusDescription',
+    'eDocumentStatus',
+    'eDocumentStatusDescription',
+    'eFaturaStatus',
+    'eFaturaStatusDescription',
+    'eArchiveStatus',
+    'eArchiveStatusDescription',
+  ]);
+  const code = readRecordNumber(invoice, [
+    'gibStatusCode',
+    'gibStateCode',
+    'eInvoiceStatusCode',
+    'eDocumentStatusCode',
+    'eFaturaStatusCode',
+    'eArchiveStatusCode',
+  ]);
+  return { status, code };
+}
+
+function readDocumentStatus(invoice: ProviderInvoiceRecord) {
+  return {
+    status: readRecordString(invoice, [
+      'documentStatus',
+      'documentStatusDescription',
+      'statusDescription',
+      'connectStatusDescription',
+      'status',
+    ]),
+    code: readRecordNumber(invoice, ['documentStatusCode', 'connectStatusCode', 'statusCode']),
+  };
+}
+
 function mapMatchedInvoice(invoice: ProviderInvoiceRecord): NonNullable<LogoOutgoingInvoiceSyncPreviewResult['matchedInvoice']> {
   return {
-    uuId: readRecordString(invoice, ['uuId', 'uuid', 'UUID']),
+    id: readRecordString(invoice, ['id']),
+    uuid: readRecordString(invoice, ['uuid', 'UUID']),
+    uuId: readRecordString(invoice, ['uuId', 'UuId']),
     invoiceId: readRecordString(invoice, ['invoiceId']),
     salesInvoiceId: readRecordString(invoice, ['salesInvoiceId']),
+    invoiceNumber: readRecordString(invoice, ['invoiceNumber']),
+    invoiceNo: readRecordString(invoice, ['invoiceNo']),
+    documentNumber: readRecordString(invoice, ['documentNumber']),
+    number: readRecordString(invoice, ['number']),
+    date: readRecordString(invoice, ['date', 'invoiceDate']),
     issueDate: readRecordString(invoice, ['issueDate']),
     amount: readRecordNumber(invoice, ['amount']),
+    total: readRecordNumber(invoice, ['total', 'totalAmount', 'grandTotal', 'payableAmount', 'netTotal']),
     currency: readRecordString(invoice, ['currency']),
     status: readRecordString(invoice, ['status']),
     statusCode: readRecordNumber(invoice, ['statusCode']),
+    eType: readRecordString(invoice, ['eType', 'eType/typeId', 'type']),
     eGovermentType: readRecordString(invoice, ['eGovermentType']),
     eGovermentTypeDesc: readRecordString(invoice, ['eGovermentTypeDesc']),
     connectStatusDescription: readRecordString(invoice, ['connectStatusDescription']),
     connectStatusCode: readRecordNumber(invoice, ['connectStatusCode']),
     accountingStatusSummary: sanitizeAccountingStatus(invoice.accountingStatus),
+    customerDisplayName: readCustomerDisplayName(invoice),
   };
 }
 
@@ -357,6 +437,7 @@ function safeOptionalInvoiceNumberFields(invoice: ProviderInvoiceRecord) {
     invoiceNumber?: string;
     invoiceNo?: string;
     documentNumber?: string;
+    number?: string;
   } = {};
   for (const key of INVOICE_NUMBER_FIELDS) {
     const value = readString(invoice[key]);
@@ -371,31 +452,47 @@ function mapCandidateInvoice(input: {
   invoice: ProviderInvoiceRecord;
   recordProviderUuid: string | null;
   recordProviderInvoiceId: string | null;
+  recordExpectedInvoiceTotalMinor: number | null;
 }) {
   const invoice = mapMatchedInvoice(input.invoice);
   const recordProviderUuid = normalizeComparable(input.recordProviderUuid);
   const recordProviderInvoiceId = normalizeComparable(input.recordProviderInvoiceId);
+  const invoiceTotalMinor = getInvoiceTotalMinor(input.invoice);
   return {
+    id: invoice.id,
+    uuid: invoice.uuid,
     uuId: invoice.uuId,
     invoiceId: invoice.invoiceId,
     salesInvoiceId: invoice.salesInvoiceId,
+    date: invoice.date,
     issueDate: invoice.issueDate,
     amount: invoice.amount,
+    total: invoice.total,
     currency: invoice.currency,
     status: invoice.status,
     statusCode: invoice.statusCode,
+    eType: invoice.eType,
     eGovermentType: invoice.eGovermentType,
     eGovermentTypeDesc: invoice.eGovermentTypeDesc,
+    type: readRecordString(input.invoice, ['type']),
+    customerDisplayName: invoice.customerDisplayName ?? undefined,
     ...safeOptionalInvoiceNumberFields(input.invoice),
     matchSignals: {
-      uuidEqualsProviderUuid: Boolean(recordProviderUuid && normalizeComparable(invoice.uuId) === recordProviderUuid),
-      salesInvoiceIdEqualsProviderInvoiceId: Boolean(
-        recordProviderInvoiceId && normalizeComparable(invoice.salesInvoiceId) === recordProviderInvoiceId,
-      ),
+      providerInvoiceIdEqualsId: Boolean(recordProviderInvoiceId && normalizeComparable(invoice.id) === recordProviderInvoiceId),
       invoiceIdEqualsProviderInvoiceId: Boolean(
         recordProviderInvoiceId && normalizeComparable(invoice.invoiceId) === recordProviderInvoiceId,
       ),
-      amountNearRecordTotal: false,
+      salesInvoiceIdEqualsProviderInvoiceId: Boolean(
+        recordProviderInvoiceId && normalizeComparable(invoice.salesInvoiceId) === recordProviderInvoiceId,
+      ),
+      providerUuidEqualsUuid: Boolean(recordProviderUuid && normalizeComparable(invoice.uuid) === recordProviderUuid),
+      providerUuidEqualsUuId: Boolean(recordProviderUuid && normalizeComparable(invoice.uuId) === recordProviderUuid),
+      invoiceNumberPresent: Boolean(findInvoiceNumber(input.invoice).value),
+      amountNearRecordTotal: Boolean(
+        input.recordExpectedInvoiceTotalMinor !== null &&
+        invoiceTotalMinor !== null &&
+        Math.abs(invoiceTotalMinor - input.recordExpectedInvoiceTotalMinor) <= 1
+      ),
     },
   };
 }
@@ -404,39 +501,74 @@ function mapCandidateInvoices(input: {
   rows: ProviderInvoiceRecord[];
   recordProviderUuid: string | null;
   recordProviderInvoiceId: string | null;
+  recordExpectedInvoiceTotalMinor: number | null;
 }) {
   return input.rows.slice(0, MAX_CANDIDATE_INVOICES).map((invoice) => mapCandidateInvoice({
     invoice,
     recordProviderUuid: input.recordProviderUuid,
     recordProviderInvoiceId: input.recordProviderInvoiceId,
+    recordExpectedInvoiceTotalMinor: input.recordExpectedInvoiceTotalMinor,
   }));
 }
 
-function mapFields(invoice: ProviderInvoiceRecord | null): LogoOutgoingInvoiceSyncPreviewResult['mappedFields'] {
+function getInvoiceTotalMinor(invoice: ProviderInvoiceRecord) {
+  const amount = readRecordNumber(invoice, ['amount', 'total', 'totalAmount', 'grandTotal', 'payableAmount', 'netTotal']);
+  return amount === null ? null : Math.round(amount * 100);
+}
+
+function getExpectedInvoiceTotalMinor(requestSnapshotJson: unknown) {
+  if (!isRecord(requestSnapshotJson) || !isRecord(requestSnapshotJson.logoPayload)) {
+    return null;
+  }
+  const details = requestSnapshotJson.logoPayload.salesInvoiceDetails;
+  if (!Array.isArray(details)) {
+    return null;
+  }
+  const total = details.reduce((sum, raw) => {
+    if (!isRecord(raw)) {
+      return null;
+    }
+    if (sum === null) {
+      return null;
+    }
+    const price = readNumber(raw.price);
+    const quantity = readNumber(raw.quantity) ?? 1;
+    const taxRate = readNumber(raw.taxRate) ?? 0;
+    if (price === null || quantity === null) {
+      return null;
+    }
+    return sum + (price * quantity * (1 + taxRate / 100));
+  }, 0 as number | null);
+  return total === null ? null : Math.round(total * 100);
+}
+
+function mapFields(
+  invoice: ProviderInvoiceRecord | null,
+  record: { providerUuid: string | null; providerInvoiceId: string | null; providerEttn: string | null },
+): LogoOutgoingInvoiceSyncPreviewResult['mappedFields'] {
   if (!invoice) {
     return buildEmptyResult({}).mappedFields;
   }
   const matchedInvoice = mapMatchedInvoice(invoice);
   const invoiceNumber = findInvoiceNumber(invoice);
+  const gibStatus = readGibStatus(invoice);
+  const documentStatus = readDocumentStatus(invoice);
   return {
-    providerUuid: matchedInvoice.uuId,
-    providerInvoiceId: matchedInvoice.salesInvoiceId ?? matchedInvoice.invoiceId,
-    providerEttn: readRecordString(invoice, ['ettn', 'ETTN', 'eTtn']) ?? matchedInvoice.uuId,
-    gibStatus: matchedInvoice.status,
-    gibStatusCode: matchedInvoice.statusCode,
-    documentStatus:
-      matchedInvoice.connectStatusDescription ??
-      matchedInvoice.eGovermentTypeDesc ??
-      matchedInvoice.status,
-    documentStatusCode: matchedInvoice.connectStatusCode ?? matchedInvoice.statusCode,
-    documentType: matchedInvoice.eGovermentType,
-    invoiceDate: matchedInvoice.issueDate,
-    invoiceTotalMinor: matchedInvoice.amount === null ? null : Math.round(matchedInvoice.amount * 100),
+    providerUuid: matchedInvoice.uuid ?? matchedInvoice.uuId ?? record.providerUuid,
+    providerInvoiceId: matchedInvoice.id ?? matchedInvoice.invoiceId ?? matchedInvoice.salesInvoiceId ?? record.providerInvoiceId,
+    providerEttn: readRecordString(invoice, ['ettn', 'ETTN', 'eTtn']) ?? matchedInvoice.uuid ?? matchedInvoice.uuId ?? record.providerEttn,
+    gibStatus: gibStatus.status,
+    gibStatusCode: gibStatus.code,
+    documentStatus: documentStatus.status,
+    documentStatusCode: documentStatus.code,
+    documentType: matchedInvoice.eGovermentType ?? matchedInvoice.eType,
+    invoiceDate: matchedInvoice.date ?? matchedInvoice.issueDate,
+    invoiceTotalMinor: getInvoiceTotalMinor(invoice),
     invoiceCurrency: matchedInvoice.currency,
     invoiceNoCandidate: invoiceNumber.value,
     invoiceNumberAvailable: Boolean(invoiceNumber.value),
     invoiceNumberSource: invoiceNumber.source,
-    invoiceNumberRecoveryPossible: Boolean(matchedInvoice.salesInvoiceId ?? matchedInvoice.invoiceId),
+    invoiceNumberRecoveryPossible: Boolean(matchedInvoice.id ?? matchedInvoice.invoiceId ?? matchedInvoice.salesInvoiceId),
   };
 }
 
@@ -444,20 +576,20 @@ function safeProviderFields(rows: ProviderInvoiceRecord[]) {
   return uniqueStrings(rows.flatMap((row) => Object.keys(row))).sort();
 }
 
-async function fetchOutgoingInvoicePages(input: {
+async function fetchSalesInvoicePages(input: {
   client: LogoOutgoingInvoiceClient;
   session: LogoIsbasiAuthenticatedSession;
-  issueDateStart: string;
-  issueDateEnd: string;
+  dateStart: string;
+  dateEnd: string;
 }) {
   const rows: ProviderInvoiceRecord[] = [];
   let totalProviderCount = 0;
   let pagesChecked = 0;
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const result: LogoIsbasiRawResult = await input.client.getOutgoingInvoiceDataList(input.session, {
-      issueDateStart: input.issueDateStart,
-      issueDateEnd: input.issueDateEnd,
+    const result: LogoIsbasiRawResult = await input.client.listSalesInvoices(input.session, {
+      dateStart: input.dateStart,
+      dateEnd: input.dateEnd,
       page,
       pageSize: PAGE_SIZE,
     });
@@ -466,8 +598,8 @@ async function fetchOutgoingInvoicePages(input: {
     if (!result.ok || result.jsonParseFailed) {
       throw new Error(
         result.jsonParseFailed
-          ? 'Logo İşbaşı outgoing invoice list returned a non-JSON response.'
-          : `Logo İşbaşı outgoing invoice list failed with HTTP ${result.status}.`,
+          ? 'Logo İşbaşı sales invoice list returned a non-JSON response.'
+          : `Logo İşbaşı sales invoice list failed with HTTP ${result.status}.`,
       );
     }
 
@@ -487,6 +619,32 @@ async function fetchOutgoingInvoicePages(input: {
   };
 }
 
+function invoiceMatchesRecord(input: {
+  invoice: ProviderInvoiceRecord;
+  recordProviderInvoiceId: string | null;
+  recordProviderUuid: string | null;
+}) {
+  const invoice = mapMatchedInvoice(input.invoice);
+  const providerInvoiceId = normalizeComparable(input.recordProviderInvoiceId);
+  const providerUuid = normalizeComparable(input.recordProviderUuid);
+  const idMatches = Boolean(
+    providerInvoiceId &&
+    [
+      invoice.id,
+      invoice.invoiceId,
+      invoice.salesInvoiceId,
+    ].some((value) => normalizeComparable(value) === providerInvoiceId),
+  );
+  const uuidMatches = Boolean(
+    providerUuid &&
+    [
+      invoice.uuid,
+      invoice.uuId,
+    ].some((value) => normalizeComparable(value) === providerUuid),
+  );
+  return idMatches || uuidMatches;
+}
+
 export async function previewSettlementLogoOutgoingInvoiceSync(
   settlementCommissionInvoiceId: string,
   options: LogoOutgoingInvoiceSyncPreviewOptions,
@@ -502,12 +660,14 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
       providerUuid: true,
       providerEttn: true,
       invoiceNo: true,
+      requestSnapshotJson: true,
     },
   });
 
   const now = options.now ?? new Date();
-  const issueDateStart = addDays(record?.createdAt ?? now, -SEARCH_START_OFFSET_DAYS).toISOString();
-  const issueDateEnd = addDays(now, SEARCH_END_OFFSET_DAYS).toISOString();
+  const dateStart = addDays(record?.createdAt ?? now, -SEARCH_START_OFFSET_DAYS).toISOString();
+  const dateEnd = addDays(now, SEARCH_END_OFFSET_DAYS).toISOString();
+  const expectedInvoiceTotalMinor = getExpectedInvoiceTotalMinor(record?.requestSnapshotJson);
   const recordDto = record
     ? {
         id: record.id,
@@ -516,13 +676,14 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
         invoiceNo: record.invoiceNo,
         providerInvoiceId: record.providerInvoiceId,
         providerEttn: record.providerEttn,
+        expectedInvoiceTotalMinor,
       }
     : null;
 
   if (!record) {
     return buildEmptyResult({
-      issueDateStart,
-      issueDateEnd,
+      dateStart,
+      dateEnd,
       blockers: ['SettlementCommissionInvoice record could not be found.'],
     });
   }
@@ -530,27 +691,27 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
   if (record.provider !== SettlementCommissionInvoiceProvider.LOGO_ISBASI) {
     return buildEmptyResult({
       record: recordDto,
-      issueDateStart,
-      issueDateEnd,
-      blockers: ['SettlementCommissionInvoice provider must be LOGO_ISBASI before Logo outgoing invoice sync preview.'],
+      dateStart,
+      dateEnd,
+      blockers: ['SettlementCommissionInvoice provider must be LOGO_ISBASI before Logo sales invoice sync preview.'],
     });
   }
 
   if (record.status !== SettlementCommissionInvoiceStatus.CREATED) {
     return buildEmptyResult({
       record: recordDto,
-      issueDateStart,
-      issueDateEnd,
-      blockers: ['SettlementCommissionInvoice status must be CREATED before Logo outgoing invoice sync preview.'],
+      dateStart,
+      dateEnd,
+      blockers: ['SettlementCommissionInvoice status must be CREATED before Logo sales invoice sync preview.'],
     });
   }
 
-  if (!record.providerUuid) {
+  if (!record.providerInvoiceId && !record.providerUuid) {
     return buildEmptyResult({
       record: recordDto,
-      issueDateStart,
-      issueDateEnd,
-      blockers: ['SettlementCommissionInvoice providerUuid is required before Logo outgoing invoice sync preview.'],
+      dateStart,
+      dateEnd,
+      blockers: ['SettlementCommissionInvoice providerInvoiceId or providerUuid is required before Logo sales invoice sync preview.'],
     });
   }
 
@@ -558,9 +719,9 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
   if (missingEnv.length) {
     return buildEmptyResult({
       record: recordDto,
-      issueDateStart,
-      issueDateEnd,
-      blockers: [`Missing Logo İşbaşı env for outgoing invoice sync preview: ${missingEnv.join(', ')}.`],
+      dateStart,
+      dateEnd,
+      blockers: [`Missing Logo İşbaşı env for sales invoice sync preview: ${missingEnv.join(', ')}.`],
     });
   }
 
@@ -569,38 +730,40 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
   if (!login.ok) {
     return buildEmptyResult({
       record: recordDto,
-      issueDateStart,
-      issueDateEnd,
+      dateStart,
+      dateEnd,
       blockers: login.blockers,
     });
   }
 
-  const pageResult = await fetchOutgoingInvoicePages({
+  const pageResult = await fetchSalesInvoicePages({
     client,
     session: login.session,
-    issueDateStart,
-    issueDateEnd,
+    dateStart,
+    dateEnd,
   });
-  const providerUuid = record.providerUuid.toLowerCase();
   const matches = pageResult.rows.filter((row) => {
-    const rowUuid = readRecordString(row, ['uuId', 'uuid', 'UUID']);
-    return rowUuid?.toLowerCase() === providerUuid;
+    return invoiceMatchesRecord({
+      invoice: row,
+      recordProviderInvoiceId: record.providerInvoiceId,
+      recordProviderUuid: record.providerUuid,
+    });
   });
   const ambiguity = matches.length > 1;
   const matched = matches.length === 1;
   const matchedRecord = matched ? matches[0] : null;
 
   return {
-    ok: true,
-    writesPerformed: false,
+	    ok: true,
+	    writesPerformed: false,
     blockers: [],
     warnings: ambiguity
-      ? ['Multiple Logo outgoing invoice rows matched the same provider UUID; no mapped invoice was selected.']
+      ? ['Multiple Logo sales invoice rows matched the same provider invoice id or UUID; no mapped invoice was selected.']
       : [],
     record: recordDto,
     search: {
-      issueDateStart,
-      issueDateEnd,
+      dateStart,
+      dateEnd,
       pagesChecked: pageResult.pagesChecked,
       totalProviderCount: pageResult.totalProviderCount,
       matched,
@@ -611,8 +774,9 @@ export async function previewSettlementLogoOutgoingInvoiceSync(
       rows: pageResult.rows,
       recordProviderUuid: record.providerUuid,
       recordProviderInvoiceId: record.providerInvoiceId,
+      recordExpectedInvoiceTotalMinor: expectedInvoiceTotalMinor,
     }),
     providerFieldsObserved: safeProviderFields(matched ? [matchedRecord!] : pageResult.rows),
-    mappedFields: mapFields(matchedRecord),
+    mappedFields: mapFields(matchedRecord, recordDto!),
   };
 }

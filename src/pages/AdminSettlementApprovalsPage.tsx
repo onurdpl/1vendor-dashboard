@@ -1672,7 +1672,7 @@ export function AdminSettlementApprovalsPage() {
     const result = await runAction(
       'outgoingInvoiceSyncPreview',
       () => previewLogoOutgoingInvoiceSync(recordId),
-      'Logo invoice sync preview loaded. No data was written.',
+      'Logo sales invoice sync preview loaded. No data was written.',
     );
     if (result) {
       setOutgoingInvoiceSyncPreviews((current) => ({ ...current, [recordId]: result }));
@@ -2167,9 +2167,9 @@ export function AdminSettlementApprovalsPage() {
                             className="button button-secondary button-compact"
                             onClick={() => void handleOutgoingInvoiceSyncPreview(record.id)}
                             disabled={busyAction !== null}
-                          >
-                            Preview Logo invoice sync
-                          </button>
+	                          >
+	                            Preview Logo sales invoice sync
+	                          </button>
                         ) : null}
                       </span>
                       <span className="settlement-logo-create-cell">
@@ -2264,7 +2264,7 @@ export function AdminSettlementApprovalsPage() {
             ) : null}
             {Object.entries(outgoingInvoiceSyncPreviews).length ? (
               <details className="settlement-advanced-diagnostics" open>
-                <summary>Logo outgoing invoice sync previews</summary>
+	                <summary>Logo sales invoice sync previews</summary>
                 {Object.entries(outgoingInvoiceSyncPreviews).map(([recordId, item]) => (
                   <Fragment key={recordId}>
                     <MetadataGroup title={`Sync preview ${recordId}`}>
@@ -2274,7 +2274,7 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Provider count" value={formatNumber(item.search.totalProviderCount)} />
                       <MetadataRow label="Provider UUID" value={valueOrDash(item.mappedFields.providerUuid ?? item.record?.providerUuid)} />
                       <MetadataRow label="Provider invoice id" value={valueOrDash(item.mappedFields.providerInvoiceId)} />
-                      <MetadataRow label="GIB status" value={valueOrDash(item.mappedFields.gibStatus)} />
+	                      <MetadataRow label="GIB status" value={item.mappedFields.gibStatus ?? 'UNKNOWN'} />
                       <MetadataRow label="GIB status code" value={valueOrDash(item.mappedFields.gibStatusCode)} />
                       <MetadataRow label="Document status" value={valueOrDash(item.mappedFields.documentStatus)} />
                       <MetadataRow label="Document status code" value={valueOrDash(item.mappedFields.documentStatusCode)} />
@@ -2288,33 +2288,36 @@ export function AdminSettlementApprovalsPage() {
                     </MetadataGroup>
                     <ReadinessList title="Sync preview blockers" items={item.blockers} tone="danger" />
                     <ReadinessList title="Sync preview warnings" items={item.warnings} tone="warning" />
-                    {!item.mappedFields.invoiceNumberAvailable ? (
-                      <div className="settlement-alert op-tone-warning">
-                        <strong>Invoice number is UNKNOWN.</strong>
-                        <p>Logo outgoing invoice list did not return invoiceNumber, invoiceNo, or documentNumber for this match.</p>
-                      </div>
-                    ) : null}
-                    {item.candidateInvoices.length ? (
-                      <MetadataGroup title="Candidate outgoing invoices">
-                        {item.candidateInvoices.map((candidate, index) => (
-                          <MetadataRow
-                            key={`${candidate.uuId ?? candidate.salesInvoiceId ?? candidate.invoiceId ?? index}`}
-                            label={`Candidate ${index + 1}`}
-                            value={[
-                              `UUID ${valueOrDash(candidate.uuId)}`,
-                              `salesInvoiceId ${valueOrDash(candidate.salesInvoiceId)}`,
-                              `invoiceId ${valueOrDash(candidate.invoiceId)}`,
-                              `date ${formatDate(candidate.issueDate)}`,
-                              `amount ${candidate.amount === null ? '—' : formatCurrency(String(candidate.amount), candidate.currency ?? 'TRY')}`,
-                              `status ${valueOrDash(candidate.status)}`,
-                              `uuid match ${candidate.matchSignals.uuidEqualsProviderUuid ? 'yes' : 'no'}`,
-                              `sales id match ${candidate.matchSignals.salesInvoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
-                              `invoice id match ${candidate.matchSignals.invoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
-                              candidate.invoiceNumber ? `invoiceNumber ${candidate.invoiceNumber}` : null,
-                              candidate.invoiceNo ? `invoiceNo ${candidate.invoiceNo}` : null,
-                              candidate.documentNumber ? `documentNumber ${candidate.documentNumber}` : null,
-                            ].filter(Boolean).join(' · ')}
-                          />
+	                    {!item.mappedFields.invoiceNumberAvailable ? (
+	                      <div className="settlement-alert op-tone-warning">
+	                        <strong>Invoice number is UNKNOWN.</strong>
+	                        <p>Logo sales invoice list did not return invoiceNumber, invoiceNo, documentNumber, or number for this match.</p>
+	                      </div>
+	                    ) : null}
+	                    {item.candidateInvoices.length ? (
+	                      <MetadataGroup title="Candidate sales invoices">
+	                        {item.candidateInvoices.map((candidate, index) => (
+	                          <MetadataRow
+	                            key={`${candidate.id ?? candidate.uuid ?? candidate.uuId ?? candidate.salesInvoiceId ?? candidate.invoiceId ?? index}`}
+	                            label={`Candidate ${index + 1}`}
+	                            value={[
+	                              `id ${valueOrDash(candidate.id)}`,
+	                              `uuid ${valueOrDash(candidate.uuid ?? candidate.uuId)}`,
+	                              `salesInvoiceId ${valueOrDash(candidate.salesInvoiceId)}`,
+	                              `invoiceId ${valueOrDash(candidate.invoiceId)}`,
+	                              `date ${formatDate(candidate.date ?? candidate.issueDate)}`,
+	                              `amount ${candidate.amount === null && candidate.total === null ? '—' : formatCurrency(String(candidate.amount ?? candidate.total), candidate.currency ?? 'TRY')}`,
+	                              `status ${valueOrDash(candidate.status)}`,
+	                              `id match ${candidate.matchSignals.providerInvoiceIdEqualsId ? 'yes' : 'no'}`,
+	                              `sales id match ${candidate.matchSignals.salesInvoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
+	                              `invoice id match ${candidate.matchSignals.invoiceIdEqualsProviderInvoiceId ? 'yes' : 'no'}`,
+	                              `uuid match ${candidate.matchSignals.providerUuidEqualsUuid || candidate.matchSignals.providerUuidEqualsUuId ? 'yes' : 'no'}`,
+	                              candidate.invoiceNumber ? `invoiceNumber ${candidate.invoiceNumber}` : null,
+	                              candidate.invoiceNo ? `invoiceNo ${candidate.invoiceNo}` : null,
+	                              candidate.documentNumber ? `documentNumber ${candidate.documentNumber}` : null,
+	                              candidate.number ? `number ${candidate.number}` : null,
+	                            ].filter(Boolean).join(' · ')}
+	                          />
                         ))}
                       </MetadataGroup>
                     ) : null}

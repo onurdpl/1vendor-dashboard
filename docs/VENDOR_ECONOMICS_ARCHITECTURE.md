@@ -27,7 +27,7 @@ Vendor Profile
   -> Vendor Payout
 ```
 
-Persisted immutable request snapshots, execution safety guards, controlled Logo Create, and read-only outgoing invoice sync preview are implemented today. Invoice number/GIB status persistence and vendor payout execution remain future phases.
+Persisted immutable request snapshots, execution safety guards, controlled Logo Create, and read-only Logo sales invoice sync preview are implemented today. Invoice number/GIB status persistence and vendor payout execution remain future phases.
 
 ## Truth Model
 

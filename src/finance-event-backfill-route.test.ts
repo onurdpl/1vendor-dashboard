@@ -704,7 +704,7 @@ describe('finance event backfill route', () => {
     expect(executeSettlementLogoCommissionInvoiceCreateMock).toHaveBeenCalledWith('record-1', { env: {} });
   });
 
-  it('returns read-only Logo outgoing invoice sync preview to admins', async () => {
+  it('returns read-only Logo sales invoice sync preview to admins', async () => {
     const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
     const app = {
       get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
@@ -742,7 +742,7 @@ describe('finance event backfill route', () => {
     expect(previewSettlementLogoOutgoingInvoiceSyncMock).toHaveBeenCalledWith('record-1', { env: {} });
   });
 
-  it('requires admin access for Logo outgoing invoice sync preview', async () => {
+  it('requires admin access for Logo sales invoice sync preview', async () => {
     const gets = new Map<string, (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
     const app = {
       get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params?: { id: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {

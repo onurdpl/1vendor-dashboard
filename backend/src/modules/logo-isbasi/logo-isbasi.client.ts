@@ -70,6 +70,13 @@ export type LogoIsbasiOutgoingInvoiceListInput = {
   pageSize: number;
 };
 
+export type LogoIsbasiSalesInvoiceListInput = {
+  dateStart: string;
+  dateEnd: string;
+  page: number;
+  pageSize: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -391,6 +398,84 @@ export class LogoIsbasiClient {
         Lang: 'tr-TR',
         DeviceType: 'WEB',
       },
+      body: JSON.stringify(requestBody),
+    });
+
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json; charset=utf-8',
+      accept: 'application/json',
+    });
+  }
+
+  async listSalesInvoices(
+    session: LogoIsbasiAuthenticatedSession,
+    input: LogoIsbasiSalesInvoiceListInput,
+  ): Promise<LogoIsbasiRawResult> {
+    const requestUrl = `${this.baseUrl}/api/v1.0/invoices/invoices`;
+    const requestBody = {
+      filters: [
+        {
+          columnName: 'eType/typeId',
+          operator: 17,
+          value: [1, 2, 3],
+        },
+        {
+          columnName: 'date',
+          operator: 5,
+          value: input.dateStart,
+        },
+        {
+          columnName: 'date',
+          operator: 2,
+          value: input.dateEnd,
+        },
+        {
+          columnName: 'type',
+          operator: 17,
+          value: [7, 8],
+        },
+      ],
+      sorting: {
+        date: 1,
+      },
+      paging: {
+        currentPage: input.page,
+        pageSize: input.pageSize,
+      },
+      columnNames: null,
+      count: true,
+      excel: {
+        export: false,
+        allowedColumns: null,
+        lucaExport: false,
+      },
+    };
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.accessToken}`,
+      ApiKey: this.config.apiKey,
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+      Lang: 'tr-TR',
+      DeviceType: 'WEB',
+    };
+    if (session.tenantId) {
+      headers.tenantId = session.tenantId;
+    }
+    if (session.userId) {
+      headers.UserId = session.userId;
+    }
+    if (session.userEmail) {
+      headers.UserEmail = session.userEmail;
+    }
+    if (session.userName) {
+      headers.UserName = session.userName;
+    }
+
+    const response = await this.fetchImpl(requestUrl, {
+      method: 'POST',
+      headers,
       body: JSON.stringify(requestBody),
     });
 
