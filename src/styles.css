@@ -12093,7 +12093,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .scheduled-settlements-summary {
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(135px, 1fr));
 }
 
 .scheduled-settlements-workspace {

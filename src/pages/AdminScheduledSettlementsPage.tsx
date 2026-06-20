@@ -286,6 +286,7 @@ export function AdminScheduledSettlementsPage() {
     [dryRun?.vendors, selectedVendorId],
   );
   const readyCount = dryRun?.vendors.filter((vendor) => getScheduleState(vendor, getDraftForVendor(approvalsByVendor, vendor.vendorId)) === 'READY').length ?? 0;
+  const draftExistsCount = dryRun?.vendors.filter((vendor) => getScheduleState(vendor, getDraftForVendor(approvalsByVendor, vendor.vendorId)) === 'DRAFT_EXISTS').length ?? 0;
 
   async function handleCreateDrafts() {
     setCreating(true);
@@ -416,7 +417,8 @@ export function AdminScheduledSettlementsPage() {
           <div className="op-kpi-row scheduled-settlements-summary" aria-label="Scheduled settlement summary">
             <KPIStatCard label="Vendors checked" value={dryRun.summary.vendorsChecked} detail="Schedule profiles inspected" />
             <KPIStatCard label="Due vendors" value={dryRun.summary.dueVendors} detail="Run date matches schedule" tone="info" />
-            <KPIStatCard label="Ready for draft" value={dryRun.summary.autoDraftEligibleVendors} detail="Can create draft" tone="success" />
+            <KPIStatCard label="Ready for draft" value={readyCount} detail="Can create draft now" tone="success" />
+            <KPIStatCard label="Draft exists" value={draftExistsCount} detail="No duplicate draft" tone="info" />
             <KPIStatCard label="Eligible rows" value={dryRun.summary.totalEligibleLineCount} detail="Preview eligible rows" />
             <KPIStatCard label="Estimated net payable" value={formatMinor(dryRun.summary.totalNetPayableMinor)} detail="Before scheduled draft creation" tone="attention" />
           </div>

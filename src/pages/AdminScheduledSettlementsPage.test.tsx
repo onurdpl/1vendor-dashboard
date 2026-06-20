@@ -261,6 +261,12 @@ function renderPage() {
   );
 }
 
+function getSummaryCard(summary: HTMLElement, label: string) {
+  const card = within(summary).getByText(label).closest('article');
+  expect(card).not.toBeNull();
+  return card as HTMLElement;
+}
+
 describe('AdminScheduledSettlementsPage', () => {
   afterEach(() => {
     cleanup();
@@ -313,13 +319,16 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(summary).getByText('Vendors checked')).toBeInTheDocument();
     expect(within(summary).getByText('Due vendors')).toBeInTheDocument();
     expect(within(summary).getByText('Ready for draft')).toBeInTheDocument();
+    expect(within(summary).getByText('Draft exists')).toBeInTheDocument();
     expect(within(summary).getByText('Estimated net payable')).toBeInTheDocument();
+    expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('1');
+    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('1');
     expect(screen.getAllByText('Ready')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Not due')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Auto draft off')[0]).toBeInTheDocument();
     expect(screen.getByText('No eligible rows')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText('Draft exists')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('Draft exists').length).toBeGreaterThan(1));
     const vendorList = screen.getByLabelText('Scheduled vendor list');
     expect(within(vendorList).getAllByText('21 days delay · Weekly · Wednesday')[0]).toBeInTheDocument();
     expect(within(vendorList).getByText((_, element) =>
@@ -330,6 +339,28 @@ describe('AdminScheduledSettlementsPage', () => {
       'href',
       '/admin/finance/settlement-approvals?approvalId=approval-existing-draft',
     );
+  });
+
+  it('keeps ready summary and header count aligned while excluding draft-exists vendors', async () => {
+    listSettlementApprovalsMock.mockImplementation((vendorId) =>
+      Promise.resolve(approvalsResponse(
+        vendorId,
+        vendorId === 'yalispor'
+          ? 'approval-yalispor-existing'
+          : vendorId === 'draft-vendor'
+            ? 'approval-existing-draft'
+            : undefined,
+      )),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText('Draft exists').length).toBeGreaterThan(1));
+    const summary = screen.getByLabelText('Scheduled settlement summary');
+    expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('0');
+    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('2');
+    expect(screen.getByText('0 ready')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
   });
 
   it('shows compact blocker chips in the vendor list and full blocker details in the drawer', async () => {
