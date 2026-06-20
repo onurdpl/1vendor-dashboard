@@ -9,29 +9,40 @@ import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
 import { ActionFeedback } from './ActionFeedback';
 
-const workspaceNavItems = [
-  { to: '/', label: 'Dashboard', icon: 'D' },
-  { to: '/vendor/profile', label: 'Profile', icon: 'P' },
-  { to: '/support/inbox', label: 'Inbox', icon: 'I' },
-  { to: '/support', label: 'Support', icon: 'S' },
-];
+type ShellIconName =
+  | 'dashboard'
+  | 'orders'
+  | 'returns'
+  | 'payments'
+  | 'inbox'
+  | 'settings'
+  | 'queue'
+  | 'settlement'
+  | 'schedule'
+  | 'support'
+  | 'analytics'
+  | 'providers'
+  | 'diagnostics'
+  | 'logout';
 
-const operationsNavItems = [
-  { to: '/orders', label: 'Orders', icon: 'O' },
-  { to: '/returns', label: 'Returns', icon: 'R' },
-  { to: '/finance', label: 'Finance', icon: 'F' },
-  { to: '/automation', label: 'Automation', icon: 'A' },
-];
+const vendorNavItems = [
+  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/orders', label: 'Orders', icon: 'orders' },
+  { to: '/returns', label: 'Returns', icon: 'returns' },
+  { to: '/finance', label: 'Payments', icon: 'payments' },
+  { to: '/support/inbox', label: 'Inbox', icon: 'inbox' },
+  { to: '/vendor/profile', label: 'Settings', icon: 'settings' },
+] satisfies Array<{ to: string; label: string; icon: ShellIconName; end?: boolean }>;
 
 const adminNavItems = [
-  { to: '/admin/operations', label: 'Operations Queue', icon: 'Q' },
-  { to: '/admin/finance/settlement-approvals', label: 'Settlement Approvals', icon: 'F' },
-  { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'T' },
-  { to: '/admin/support', label: 'Support Tickets', icon: 'S' },
-  { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'A' },
-  { to: '/admin/providers', label: 'Providers', icon: 'P' },
-  { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
-];
+  { to: '/admin/operations', label: 'Operations Queue', icon: 'queue' },
+  { to: '/admin/finance/settlement-approvals', label: 'Settlement Approvals', icon: 'settlement' },
+  { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'schedule' },
+  { to: '/admin/support', label: 'Support Tickets', icon: 'support' },
+  { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'analytics' },
+  { to: '/admin/providers', label: 'Providers', icon: 'providers' },
+  { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'diagnostics' },
+] satisfies Array<{ to: string; label: string; icon: ShellIconName }>;
 
 const missingVendorContext = {
   vendorId: '',
@@ -39,11 +50,126 @@ const missingVendorContext = {
   scope: 'missing-vendor-context',
 };
 
+function ShellIcon({ name }: { name: ShellIconName }) {
+  const commonProps = {
+    width: 20,
+    height: 20,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+
+  if (name === 'dashboard') {
+    return (
+      <svg {...commonProps}>
+        <path d="M3 11.5 12 4l9 7.5" />
+        <path d="M5.5 10.5V20h13v-9.5" />
+        <path d="M9.5 20v-5h5v5" />
+      </svg>
+    );
+  }
+
+  if (name === 'orders') {
+    return (
+      <svg {...commonProps}>
+        <path d="M6 7h12l-1 13H7L6 7Z" />
+        <path d="M9 7a3 3 0 0 1 6 0" />
+      </svg>
+    );
+  }
+
+  if (name === 'returns') {
+    return (
+      <svg {...commonProps}>
+        <path d="M9 7 4 12l5 5" />
+        <path d="M4 12h11a5 5 0 0 1 0 10h-2" />
+      </svg>
+    );
+  }
+
+  if (name === 'payments') {
+    return (
+      <svg {...commonProps}>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="M3 10h18" />
+        <path d="M7 15h4" />
+      </svg>
+    );
+  }
+
+  if (name === 'inbox') {
+    return (
+      <svg {...commonProps}>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m4 7 8 6 8-6" />
+      </svg>
+    );
+  }
+
+  if (name === 'settings') {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04-2 3.46-.06-.02a1.8 1.8 0 0 0-2.02.46l-.02.04h-4l-.02-.04a1.8 1.8 0 0 0-2.02-.46l-.06.02-2-3.46.04-.04a1.8 1.8 0 0 0 .36-2l-.02-.06L5.6 12l2.38-2.94.02-.06a1.8 1.8 0 0 0-.36-2l-.04-.04 2-3.46.06.02a1.8 1.8 0 0 0 2.02-.46l.02-.04h4l.02.04a1.8 1.8 0 0 0 2.02.46l.06-.02 2 3.46-.04.04a1.8 1.8 0 0 0-.36 2l.02.06L21.8 12l-2.38 2.94-.02.06Z" />
+      </svg>
+    );
+  }
+
+  if (name === 'logout') {
+    return (
+      <svg {...commonProps}>
+        <path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4" />
+        <path d="M15 7l5 5-5 5" />
+        <path d="M20 12H9" />
+      </svg>
+    );
+  }
+
+  if (name === 'analytics') {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 19V5" />
+        <path d="M4 19h16" />
+        <path d="M8 15v-4" />
+        <path d="M12 15V8" />
+        <path d="M16 15v-2" />
+      </svg>
+    );
+  }
+
+  if (name === 'diagnostics') {
+    return (
+      <svg {...commonProps}>
+        <path d="M12 3v18" />
+        <path d="M3 12h18" />
+        <path d="m5 5 14 14" />
+        <path d="m19 5-14 14" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...commonProps}>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="M8 9h8" />
+      <path d="M8 13h8" />
+      <path d="M8 17h5" />
+    </svg>
+  );
+}
+
+function getVendorInitial(vendorName: string) {
+  return vendorName.trim().charAt(0).toUpperCase() || 'V';
+}
+
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const appReadiness = useAppReadiness();
-  const token = appReadiness.token;
   const currentUser = appReadiness.currentUser;
   const isAdmin = currentUser?.role === 'admin';
   const isDashboardRoute = location.pathname === '/';
@@ -103,42 +229,28 @@ export function AppShell() {
           </div>
           <div>
             <div className="brand-name">VendorOps</div>
-            <div className="brand-subtitle">Shopify control center</div>
+            <div className="brand-subtitle">Vendor Dashboard</div>
           </div>
         </div>
 
-        <div className="nav-group">
-          <div className="nav-group-label">Workspace</div>
+        <div className="nav-group vendor-nav-group">
           <nav className="nav" aria-label="Primary">
-            {workspaceNavItems.map((item) => (
+            {vendorNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
-                end
+                end={item.end}
                 className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
               >
-                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                <span className="nav-icon" aria-hidden="true">
+                  <ShellIcon name={item.icon} />
+                </span>
                 {item.label}
               </NavLink>
             ))}
           </nav>
         </div>
 
-        <div className="nav-group">
-          <div className="nav-group-label">Operations</div>
-          <nav className="nav" aria-label="Operations">
-            {operationsNavItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-              >
-                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
         {isAdmin ? (
           <div className="nav-group">
             <div className="nav-group-label admin-nav-label">Admin tools</div>
@@ -149,7 +261,9 @@ export function AppShell() {
                   to={item.to}
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
                 >
-                  <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                  <span className="nav-icon" aria-hidden="true">
+                    <ShellIcon name={item.icon} />
+                  </span>
                   {item.label}
                 </NavLink>
               ))}
@@ -157,47 +271,35 @@ export function AppShell() {
           </div>
         ) : null}
 
-        <div className="vendor-card shell-card">
-          <div>
-            <div className="session-label">Operational vendor</div>
-            <div className="session-state">{currentVendor.vendorName}</div>
-            <div className="session-meta">
-              {currentUser?.name ?? 'Unknown user'} · {currentUser?.role ?? 'Unauthenticated'}
+        <div className="vendor-account-card shell-card">
+          <div className="vendor-account-main">
+            <span className="vendor-account-avatar" aria-hidden="true">
+              {getVendorInitial(currentVendor.vendorName)}
+            </span>
+            <div className="vendor-account-copy">
+              <strong>{currentVendor.vendorName}</strong>
+              <span>{currentUser?.role === 'admin' ? 'Admin' : 'Vendor'}</span>
             </div>
-            {!currentUser?.canSwitchVendors ? (
-              <div className="session-meta">Vendor scope is fixed for your account.</div>
-            ) : (
-              <div className="session-meta">Switch vendor context for orders, returns, finance, and automation.</div>
-            )}
+            {currentUser?.canSwitchVendors && visibleVendors.length > 0 ? (
+              <label className="vendor-account-switcher">
+                <span className="sr-only">Select vendor</span>
+                <select
+                  className="vendor-account-select"
+                  value={selectedVendorId}
+                  onChange={(event) => handleVendorChange(event.target.value)}
+                >
+                  {visibleVendors.map((vendor) => (
+                    <option key={vendor.vendorId} value={vendor.vendorId}>
+                      {vendor.vendorName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
-          {currentUser?.canSwitchVendors && visibleVendors.length > 0 ? (
-            <label className="vendor-switcher">
-              <span className="sr-only">Select vendor</span>
-              <select
-                className="vendor-select"
-                value={selectedVendorId}
-                onChange={(event) => handleVendorChange(event.target.value)}
-              >
-                {visibleVendors.map((vendor) => (
-                  <option key={vendor.vendorId} value={vendor.vendorId}>
-                    {vendor.vendorName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <div className="vendor-fixed-chip">{currentVendor.vendorName}</div>
-          )}
-        </div>
-
-        <div className="session-card shell-card">
-          <div>
-            <div className="session-label">Session</div>
-            <div className="session-state">{token ? 'Authenticated' : 'Unauthenticated'}</div>
-            <div className="session-meta">Signed in as {currentUser?.email ?? 'unknown'}</div>
-          </div>
-          <button type="button" className="button button-secondary" onClick={handleLogout}>
-            Logout
+          <button type="button" className="vendor-logout-button" onClick={handleLogout}>
+            <ShellIcon name="logout" />
+            Log out
           </button>
         </div>
 
