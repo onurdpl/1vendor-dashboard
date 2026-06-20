@@ -35,13 +35,13 @@ type ScheduleState =
   | 'DRAFT_EXISTS';
 
 const STATE_LABELS: Record<ScheduleState, string> = {
-  READY: 'Ready for draft creation',
-  NOT_DUE: 'Settlement day not reached',
-  AUTO_DRAFT_DISABLED: 'Auto draft disabled',
-  NO_ELIGIBLE_ROWS: 'No eligible finance rows',
-  CONFIG_MISSING: 'Schedule configuration missing',
-  BLOCKED: 'Requires review',
-  DRAFT_EXISTS: 'Draft already exists',
+  READY: 'Ready',
+  NOT_DUE: 'Not due',
+  AUTO_DRAFT_DISABLED: 'Auto draft off',
+  NO_ELIGIBLE_ROWS: 'No eligible rows',
+  CONFIG_MISSING: 'Missing config',
+  BLOCKED: 'Blocked',
+  DRAFT_EXISTS: 'Draft exists',
 };
 
 const WEEKDAY_LABELS: Record<string, string> = {
@@ -106,6 +106,33 @@ function getDraftForVendor(
 
 function getOpenSettlementHref(approvalId: string) {
   return `/admin/finance/settlement-approvals?approvalId=${encodeURIComponent(approvalId)}`;
+}
+
+function getScheduleSummary(vendor: SettlementScheduleDryRunVendor) {
+  const frequency = safeStatusLabel(vendor.schedule.settlementFrequencyType);
+  const weekday = WEEKDAY_LABELS[vendor.schedule.weeklySettlementDay] ?? safeStatusLabel(vendor.schedule.weeklySettlementDay);
+  return {
+    primary: `${vendor.schedule.settlementDelayDays} days delay`,
+    secondary: `${frequency} · ${weekday}`,
+    detail: `${vendor.schedule.settlementDelayDays} days delay · ${frequency} on ${weekday}`,
+  };
+}
+
+function getVendorBlockers(vendor: SettlementScheduleDryRunVendor) {
+  return [vendor.blockedReason, ...vendor.warnings].filter((item): item is string => Boolean(item));
+}
+
+function getAutomationStatusCopy(jobStatus: SettlementScheduleAutoDraftJobStatusResponse | null) {
+  if (!jobStatus) {
+    return 'Loading automation status.';
+  }
+  if (!jobStatus.enabled) {
+    return 'Auto draft job is disabled in this environment. Drafts will not be created automatically until the environment gate is enabled.';
+  }
+  if (jobStatus.dryRun) {
+    return 'Auto draft job is running in dry-run mode. It will preview results but will not create drafts.';
+  }
+  return 'Auto draft job is in write mode. It can create drafts after explicit confirmation.';
 }
 
 function CreateDraftsModal({
@@ -312,6 +339,9 @@ export function AdminScheduledSettlementsPage() {
 
   const jobModeLabel = jobStatus?.mode === 'WRITE' ? 'Write mode' : 'Dry-run mode';
   const jobEnabled = jobStatus?.enabled === true;
+  const selectedDraft = selectedVendor ? getDraftForVendor(approvalsByVendor, selectedVendor.vendorId) : null;
+  const selectedState = selectedVendor ? getScheduleState(selectedVendor, selectedDraft) : null;
+  const selectedBlockers = selectedVendor ? getVendorBlockers(selectedVendor) : [];
 
   return (
     <section className="op-page scheduled-settlements-page">
@@ -352,13 +382,13 @@ export function AdminScheduledSettlementsPage() {
       {jobStatusError ? <SectionErrorRetry title="Scheduled auto draft job status failed" description={jobStatusError} onRetry={() => void loadJobStatus()} /> : null}
       {jobRunError ? <SectionErrorRetry title="Scheduled auto draft job failed" description={jobRunError} /> : null}
 
-      <section className="scheduled-settlements-card scheduled-auto-draft-job" aria-label="Scheduled auto draft job">
+      <section className="scheduled-settlements-card scheduled-auto-draft-job scheduled-command-card" aria-label="Scheduled auto draft job">
         <div className="settlement-state-heading">
           <div>
             <p className="eyebrow">Automation</p>
             <h3>Scheduled Auto Draft Job</h3>
             <p className="page-description">
-              Daily job trigger for draft creation only. It never approves settlements, creates Logo invoices, or executes payouts.
+              Daily draft creation guardrail for vendors that are due and ready.
             </p>
           </div>
           <div className="scheduled-job-badges">
@@ -375,18 +405,7 @@ export function AdminScheduledSettlementsPage() {
           />
           <MetadataRow label="Last created" value={jobStatus?.lastRun ? jobStatus.lastRun.createdDraftCount : 0} />
         </div>
-        {!jobEnabled ? (
-          <p className="page-description">
-            SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false. The job is blocked until this environment gate is enabled.
-          </p>
-        ) : null}
-        {jobStatus?.notes?.length ? (
-          <ul className="scheduled-notes">
-            {jobStatus.notes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        ) : null}
+        <p className="scheduled-job-copy">{getAutomationStatusCopy(jobStatus)}</p>
         <div className="scheduled-job-actions">
           <button type="button" className="button button-primary" onClick={handleAutoDraftJobClick} disabled={!jobEnabled || jobRunning}>
             {jobRunning ? 'Running job...' : 'Run Auto Draft Job'}
@@ -399,8 +418,8 @@ export function AdminScheduledSettlementsPage() {
           <div className="op-kpi-row scheduled-settlements-summary" aria-label="Scheduled settlement summary">
             <KPIStatCard label="Vendors checked" value={dryRun.summary.vendorsChecked} detail="Schedule profiles inspected" />
             <KPIStatCard label="Due vendors" value={dryRun.summary.dueVendors} detail="Run date matches schedule" tone="info" />
-            <KPIStatCard label="Auto draft eligible" value={dryRun.summary.autoDraftEligibleVendors} detail="READY vendors" tone="success" />
-            <KPIStatCard label="Total eligible rows" value={dryRun.summary.totalEligibleLineCount} detail="Preview eligible rows" />
+            <KPIStatCard label="Ready for draft" value={dryRun.summary.autoDraftEligibleVendors} detail="Can create draft" tone="success" />
+            <KPIStatCard label="Eligible rows" value={dryRun.summary.totalEligibleLineCount} detail="Preview eligible rows" />
             <KPIStatCard label="Estimated net payable" value={formatMinor(dryRun.summary.totalNetPayableMinor)} detail="Before scheduled draft creation" tone="attention" />
           </div>
 
@@ -409,32 +428,37 @@ export function AdminScheduledSettlementsPage() {
               <div className="scheduled-settlements-card">
                 <div className="settlement-state-heading">
                   <div>
-                    <h3>Vendor Schedule Table</h3>
-                    <p className="page-description">Click a vendor row to inspect schedule timing, blockers, refund adjustments, and draft links.</p>
+                    <h3>Vendor Schedule</h3>
+                    <p className="page-description">Scan due vendors and open a row for full blocker details.</p>
                   </div>
                   <StatusBadge tone={readyCount > 0 ? 'success' : 'attention'}>{readyCount} ready</StatusBadge>
                 </div>
+                {readyCount === 0 ? (
+                  <div className="scheduled-ready-empty" role="status">
+                    <strong>No scheduled drafts ready for this run date.</strong>
+                    <span>Try the next settlement day or review vendor schedule settings.</span>
+                  </div>
+                ) : null}
                 {dryRun.vendors.length ? (
                   <OperationalTable
                     columns={[
                       'Vendor',
-                      'Delay',
-                      'Frequency',
-                      'Settlement day',
+                      'Schedule',
                       'Auto draft',
                       'State',
-                      'Eligible before',
                       'Rows',
                       'Refund adjustments',
-                      'Estimated net',
+                      'Net payable',
                       'Blockers',
-                      'Existing draft',
+                      'Draft',
                     ]}
                     className="scheduled-settlements-table"
                   >
                     {dryRun.vendors.map((vendor) => {
                       const existingDraft = getDraftForVendor(approvalsByVendor, vendor.vendorId);
                       const state = getScheduleState(vendor, existingDraft);
+                      const schedule = getScheduleSummary(vendor);
+                      const blockers = getVendorBlockers(vendor);
                       return (
                         <OperationalTableRow
                           key={vendor.vendorId}
@@ -445,24 +469,32 @@ export function AdminScheduledSettlementsPage() {
                             <strong>{getVendorName(vendor)}</strong>
                             <small>{vendor.vendorId}</small>
                           </span>
-                          <span>{vendor.schedule.settlementDelayDays} days</span>
-                          <span>{safeStatusLabel(vendor.schedule.settlementFrequencyType)}</span>
-                          <span>{WEEKDAY_LABELS[vendor.schedule.weeklySettlementDay] ?? safeStatusLabel(vendor.schedule.weeklySettlementDay)}</span>
+                          <span className="scheduled-table-schedule">
+                            <strong>{schedule.primary}</strong>
+                            <small>{schedule.secondary}</small>
+                          </span>
                           <span>{vendor.schedule.autoSettlementDraftEnabled ? 'Enabled' : 'Disabled'}</span>
                           <span><StatusBadge tone={getStateTone(state)}>{STATE_LABELS[state]}</StatusBadge></span>
-                          <span>{formatDateTime(dryRun.periodEnd, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                           <span>{vendor.eligibleLineCount}</span>
                           <span>
                             {vendor.pendingRefundAdjustmentCount > 0 ? (
                               <span className="scheduled-refund-badge" title={`Pending deduction amount: ${formatMinor(vendor.pendingRefundAdjustmentTotalMinor)}`}>
-                                Refund Adjustments: {vendor.pendingRefundAdjustmentCount}
+                                {vendor.pendingRefundAdjustmentCount} pending
                               </span>
                             ) : (
                               'None'
                             )}
                           </span>
                           <span>{formatMinor(vendor.netPayableMinor)}</span>
-                          <span>{vendor.blockedReason ?? vendor.warnings[0] ?? 'None'}</span>
+                          <span>
+                            {blockers.length ? (
+                              <span className="scheduled-blocker-chip" title={blockers.join(' ')}>
+                                {blockers.length} blocker{blockers.length === 1 ? '' : 's'}
+                              </span>
+                            ) : (
+                              'Clear'
+                            )}
+                          </span>
                           <span>
                             {existingDraft ? (
                               <Link to={getOpenSettlementHref(existingDraft.id)}>Open Settlement</Link>
@@ -480,7 +512,7 @@ export function AdminScheduledSettlementsPage() {
               </div>
 
               <div className="scheduled-settlements-card">
-                <h3>Dry Run Notes</h3>
+                    <h3>Run Notes</h3>
                 <ul className="scheduled-notes">
                   {dryRun.notes.map((note) => (
                     <li key={note}>{note}</li>
@@ -560,36 +592,47 @@ export function AdminScheduledSettlementsPage() {
             <SideDetailPanel title={selectedVendor ? getVendorName(selectedVendor) : 'Vendor detail'} eyebrow="Schedule detail">
               {selectedVendor ? (
                 <>
-                  <MetadataGroup title="Schedule configuration">
-                    <MetadataRow label="Settlement delay" value={`${selectedVendor.schedule.settlementDelayDays} days`} />
-                    <MetadataRow label="Frequency" value={safeStatusLabel(selectedVendor.schedule.settlementFrequencyType)} />
-                    <MetadataRow label="Settlement day" value={WEEKDAY_LABELS[selectedVendor.schedule.weeklySettlementDay] ?? selectedVendor.schedule.weeklySettlementDay} />
-                    <MetadataRow label="Auto draft" value={selectedVendor.schedule.autoSettlementDraftEnabled ? 'Enabled' : 'Disabled'} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Settlement timing">
+                  <div className="scheduled-detail-hero">
+                    <StatusBadge tone={selectedState ? getStateTone(selectedState) : 'neutral'}>
+                      {selectedState ? STATE_LABELS[selectedState] : 'Not selected'}
+                    </StatusBadge>
+                    <strong>{getScheduleSummary(selectedVendor).detail}</strong>
+                    <span>{selectedVendor.schedule.autoSettlementDraftEnabled ? 'Auto draft enabled' : 'Auto draft off'}</span>
+                  </div>
+                  <MetadataGroup title="Eligibility">
                     <MetadataRow label="Eligible before" value={formatDateTime(dryRun.periodEnd, { month: 'short', day: 'numeric', year: 'numeric' })} />
-                    <MetadataRow label="Run date" value={dryRun.runDate} />
-                    <MetadataRow label="Timing explanation" value={selectedVendor.dueReason} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Preview facts">
                     <MetadataRow label="Eligible rows" value={selectedVendor.eligibleLineCount} />
                     <MetadataRow label="Estimated net payable" value={formatMinor(selectedVendor.netPayableMinor)} />
-                    <MetadataRow label="Pending refund adjustments" value={`${selectedVendor.pendingRefundAdjustmentCount} (${formatMinor(selectedVendor.pendingRefundAdjustmentTotalMinor)})`} />
+                    <MetadataRow label="Run status" value={selectedState ? STATE_LABELS[selectedState] : 'Unknown'} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Timing">
+                    <MetadataRow label="Run date" value={dryRun.runDate} />
+                    <MetadataRow label="Explanation" value={selectedVendor.dueReason} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Refund adjustments">
+                    <MetadataRow label="Count" value={selectedVendor.pendingRefundAdjustmentCount} />
+                    <MetadataRow label="Amount" value={formatMinor(selectedVendor.pendingRefundAdjustmentTotalMinor)} />
                     <MetadataRow label="Net after pending adjustments" value={formatMinor(selectedVendor.netAfterPendingRefundAdjustmentsMinor)} />
                   </MetadataGroup>
-                  <MetadataGroup title="Current blockers">
-                    <MetadataRow label="State" value={STATE_LABELS[getScheduleState(selectedVendor, getDraftForVendor(approvalsByVendor, selectedVendor.vendorId))]} />
-                    <MetadataRow label="Blocker" value={selectedVendor.blockedReason ?? 'None'} />
-                    <MetadataRow label="Warnings" value={selectedVendor.warnings.length ? selectedVendor.warnings.join(', ') : 'None'} />
+                  <MetadataGroup title="Blockers">
+                    {selectedBlockers.length ? (
+                      <ul className="scheduled-detail-blockers">
+                        {selectedBlockers.map((blocker) => (
+                          <li key={blocker}>{blocker}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <MetadataRow label="Status" value="No blockers" />
+                    )}
                   </MetadataGroup>
-                  <MetadataGroup title="Existing draft links">
-                    {getDraftForVendor(approvalsByVendor, selectedVendor.vendorId) ? (
+                  <MetadataGroup title="Existing draft">
+                    {selectedDraft ? (
                       <MetadataRow
-                        label="Settlement Approval ID"
-                        value={<Link to={getOpenSettlementHref(getDraftForVendor(approvalsByVendor, selectedVendor.vendorId)!.id)}>{getDraftForVendor(approvalsByVendor, selectedVendor.vendorId)!.id}</Link>}
+                        label="Settlement"
+                        value={<Link to={getOpenSettlementHref(selectedDraft.id)}>Open Settlement</Link>}
                       />
                     ) : (
-                      <MetadataRow label="Settlement Approval ID" value="None" />
+                      <MetadataRow label="Settlement" value="None" />
                     )}
                   </MetadataGroup>
                 </>

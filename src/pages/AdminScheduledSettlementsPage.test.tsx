@@ -312,20 +312,32 @@ describe('AdminScheduledSettlementsPage', () => {
     const summary = screen.getByLabelText('Scheduled settlement summary');
     expect(within(summary).getByText('Vendors checked')).toBeInTheDocument();
     expect(within(summary).getByText('Due vendors')).toBeInTheDocument();
-    expect(within(summary).getByText('Auto draft eligible')).toBeInTheDocument();
+    expect(within(summary).getByText('Ready for draft')).toBeInTheDocument();
     expect(within(summary).getByText('Estimated net payable')).toBeInTheDocument();
-    expect(screen.getAllByText('Ready for draft creation')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('Settlement day not reached')[0]).toBeInTheDocument();
-    expect(screen.getByText('Auto draft disabled')).toBeInTheDocument();
-    expect(screen.getByText('No eligible finance rows')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready')[0]).toBeInTheDocument();
+    expect(screen.getAllByText('Not due')[0]).toBeInTheDocument();
+    expect(screen.getByText('Auto draft off')).toBeInTheDocument();
+    expect(screen.getByText('No eligible rows')).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getByText('Draft already exists')).toBeInTheDocument());
-    expect(screen.getByText('Refund Adjustments: 2')).toBeInTheDocument();
-    expect(screen.getByText('Settlement rows are already locked in an active approval.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Draft exists')).toBeInTheDocument());
+    expect(screen.getByText('2 pending')).toBeInTheDocument();
+    expect(screen.getAllByText('1 blocker')[0]).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Settlement' })).toHaveAttribute(
       'href',
       '/admin/finance/settlement-approvals?approvalId=approval-existing-draft',
     );
+  });
+
+  it('shows compact blocker chips in the table and full blocker details in the drawer', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Draft Vendor');
+    expect(screen.getAllByText('1 blocker')[0]).toBeInTheDocument();
+
+    await user.click(screen.getByText('Draft Vendor'));
+    const drawer = screen.getByRole('complementary');
+    expect(within(drawer).getByText('Settlement rows are already locked in an active approval.')).toBeInTheDocument();
   });
 
   it('renders scheduled auto draft job status and last run metadata', async () => {
@@ -335,7 +347,7 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(panel).getByText('Enabled')).toBeInTheDocument();
     expect(within(panel).getByText('Dry-run mode')).toBeInTheDocument();
     expect(within(panel).getByText('2026-06-17 · Completed')).toBeInTheDocument();
-    expect(within(panel).getByText('Dry-run mode is enabled; job trigger will not create drafts.')).toBeInTheDocument();
+    expect(within(panel).getByText('Auto draft job is running in dry-run mode. It will preview results but will not create drafts.')).toBeInTheDocument();
   });
 
   it('shows disabled scheduled auto draft job state without exposing a write action', async () => {
@@ -349,7 +361,7 @@ describe('AdminScheduledSettlementsPage', () => {
 
     const panel = await screen.findByLabelText('Scheduled auto draft job');
     expect(within(panel).getByText('Disabled')).toBeInTheDocument();
-    expect(within(panel).getByText(/SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false/)).toBeInTheDocument();
+    expect(within(panel).getByText('Auto draft job is disabled in this environment. Drafts will not be created automatically until the environment gate is enabled.')).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Run Auto Draft Job' })).toBeDisabled();
   });
 
@@ -426,17 +438,36 @@ describe('AdminScheduledSettlementsPage', () => {
 
     const drawer = screen.getByRole('complementary');
     expect(within(drawer).getByText('Sporjinal')).toBeInTheDocument();
-    expect(within(drawer).getByText('14 days')).toBeInTheDocument();
-    expect(within(drawer).getByText('Biweekly')).toBeInTheDocument();
-    expect(within(drawer).getByText('Friday')).toBeInTheDocument();
+    expect(within(drawer).getByText('14 days delay · Biweekly on Friday')).toBeInTheDocument();
+    expect(within(drawer).getAllByText('Not due')[0]).toBeInTheDocument();
     expect(within(drawer).getAllByText('Configured settlement weekday is FRIDAY; run date is WEDNESDAY.')[0]).toBeInTheDocument();
+  });
+
+  it('shows a clean empty state when no vendors are ready for the selected run date', async () => {
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ...dryRunResponse,
+      summary: {
+        ...dryRunResponse.summary,
+        autoDraftEligibleVendors: 0,
+      },
+      vendors: dryRunResponse.vendors.map((vendor) => ({
+        ...vendor,
+        canCreateDraft: false,
+        blockedReason: vendor.blockedReason ?? 'No eligible settlement rows are available for auto draft.',
+      })),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('No scheduled drafts ready for this run date.')).toBeInTheDocument();
+    expect(screen.getByText('Try the next settlement day or review vendor schedule settings.')).toBeInTheDocument();
   });
 
   it('requires confirmation before creating drafts and posts to the existing scheduled drafts endpoint client', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findAllByText('Ready for draft creation');
+    await screen.findAllByText('Ready');
     await user.click(screen.getByRole('button', { name: 'Create Scheduled Drafts' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Create settlement drafts for all READY vendors?');
 
@@ -452,7 +483,7 @@ describe('AdminScheduledSettlementsPage', () => {
   it('does not expose Logo interactions from the scheduled settlement workspace', async () => {
     renderPage();
 
-    expect((await screen.findAllByText('Vendor Schedule Table'))[0]).toBeInTheDocument();
+    expect((await screen.findAllByText('Vendor Schedule'))[0]).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /logo/i })).not.toBeInTheDocument();
   });
 });
