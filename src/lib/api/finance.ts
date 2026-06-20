@@ -1,5 +1,12 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { SettlementScheduleCreateDraftsResponse, SettlementScheduleDryRunResponse, VendorDebtHistory, VendorFinancialProfile } from './contracts';
+import type {
+  SettlementScheduleAutoDraftJobResponse,
+  SettlementScheduleAutoDraftJobStatusResponse,
+  SettlementScheduleCreateDraftsResponse,
+  SettlementScheduleDryRunResponse,
+  VendorDebtHistory,
+  VendorFinancialProfile,
+} from './contracts';
 
 export function getFinanceDashboard(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
@@ -64,6 +71,19 @@ export function createSettlementScheduleDrafts(input: {
   confirmAutoSettlementDrafts: true;
 }): Promise<SettlementScheduleCreateDraftsResponse> {
   return runtimeServices.finance.createSettlementScheduleDrafts(input);
+}
+
+export function getSettlementScheduleAutoDraftJobStatus(options: {
+  signal?: AbortSignal;
+} = {}): Promise<SettlementScheduleAutoDraftJobStatusResponse> {
+  return runtimeServices.finance.settlementScheduleAutoDraftJobStatus({ signal: options.signal });
+}
+
+export function runSettlementScheduleAutoDraftJob(input: {
+  runDate?: string | null;
+  confirmScheduledSettlementAutoDraftJob: true;
+}): Promise<SettlementScheduleAutoDraftJobResponse> {
+  return runtimeServices.finance.runSettlementScheduleAutoDraftJob(input);
 }
 
 export function preparePayoutBatch(vendorId: string) {

@@ -56,6 +56,10 @@ import {
   createSettlementScheduleDrafts,
   getSettlementScheduleDryRun,
 } from './settlement-schedule.service.js';
+import {
+  getSettlementScheduleAutoDraftJobStatus,
+  runSettlementScheduleAutoDraftJob,
+} from './settlement-schedule-job.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -519,6 +523,45 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Scheduled settlement drafts could not be created.';
+        return reply.code(400).send({ message, writesPerformed: false });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/finance/settlement-schedules/auto-draft-job-status',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return getSettlementScheduleAutoDraftJobStatus(env);
+    },
+  );
+
+  app.post(
+    '/admin/finance/settlement-schedules/run-auto-draft-job',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await runSettlementScheduleAutoDraftJob({
+          env,
+          runDate: isRecord(request.body) ? readOptionalBodyString(request.body, 'runDate') : null,
+          confirmScheduledSettlementAutoDraftJob:
+            isRecord(request.body) && request.body.confirmScheduledSettlementAutoDraftJob === true,
+          triggeredBy: request.authUser?.id ?? null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Scheduled settlement auto-draft job failed.';
         return reply.code(400).send({ message, writesPerformed: false });
       }
     },

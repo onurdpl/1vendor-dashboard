@@ -6,6 +6,8 @@ import type {
   VendorDebtHistory,
   PayoutBatch,
   ReturnFinanceRecordsResponse,
+  SettlementScheduleAutoDraftJobResponse,
+  SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
   VendorFinancialProfile,
@@ -368,6 +370,31 @@ export function createSettlementScheduleDrafts(input: {
 }): Promise<SettlementScheduleCreateDraftsResponse> {
   return apiClient.post<SettlementScheduleCreateDraftsResponse>(
     '/admin/finance/settlement-schedules/create-drafts',
+    input,
+    { skipVendorContext: true },
+  );
+}
+
+export function getSettlementScheduleAutoDraftJobStatus(options: {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}): Promise<SettlementScheduleAutoDraftJobStatusResponse> {
+  return apiClient.get<SettlementScheduleAutoDraftJobStatusResponse>(
+    '/admin/finance/settlement-schedules/auto-draft-job-status',
+    {
+      skipVendorContext: true,
+      signal: options.signal,
+      headers: options.headers,
+    },
+  );
+}
+
+export function runSettlementScheduleAutoDraftJob(input: {
+  runDate?: string | null;
+  confirmScheduledSettlementAutoDraftJob: true;
+}): Promise<SettlementScheduleAutoDraftJobResponse> {
+  return apiClient.post<SettlementScheduleAutoDraftJobResponse>(
+    '/admin/finance/settlement-schedules/run-auto-draft-job',
     input,
     { skipVendorContext: true },
   );

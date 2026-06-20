@@ -13,7 +13,11 @@ import {
 } from '../components/OperationalPrimitives';
 import {
   createSettlementScheduleDrafts,
+  getSettlementScheduleAutoDraftJobStatus,
   getSettlementScheduleDryRun,
+  runSettlementScheduleAutoDraftJob,
+  type SettlementScheduleAutoDraftJobResponse,
+  type SettlementScheduleAutoDraftJobStatusResponse,
   type SettlementScheduleCreateDraftsResponse,
   type SettlementScheduleDryRunResponse,
   type SettlementScheduleDryRunVendor,
@@ -144,6 +148,46 @@ function CreateDraftsModal({
   );
 }
 
+function AutoDraftJobModal({
+  onCancel,
+  onConfirm,
+  submitting,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+  submitting: boolean;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+
+  return (
+    <div className="scheduled-settlements-modal" role="dialog" aria-modal="true" aria-labelledby="scheduled-auto-draft-job-title">
+      <div className="scheduled-settlements-modal-card">
+        <p className="eyebrow">Scheduled auto draft job</p>
+        <h3 id="scheduled-auto-draft-job-title">Create settlement drafts for all READY vendors?</h3>
+        <p className="page-description">
+          This job creates draft settlement approvals only. It does not approve settlements, create invoices, call Logo, or execute payouts.
+        </p>
+        <label className="scheduled-settlements-confirm">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+          />
+          <span>I understand this will create settlement drafts for all READY vendors.</span>
+        </label>
+        <div className="scheduled-settlements-modal-actions">
+          <button type="button" className="button button-secondary" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </button>
+          <button type="button" className="button button-primary" onClick={onConfirm} disabled={!confirmed || submitting}>
+            {submitting ? 'Running job...' : 'Run Auto Draft Job'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminScheduledSettlementsPage() {
   const [runDate, setRunDate] = useState(todayKey);
   const [vendorFilter, setVendorFilter] = useState('');
@@ -156,6 +200,12 @@ export function AdminScheduledSettlementsPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createResult, setCreateResult] = useState<SettlementScheduleCreateDraftsResponse | null>(null);
+  const [jobStatus, setJobStatus] = useState<SettlementScheduleAutoDraftJobStatusResponse | null>(null);
+  const [jobStatusError, setJobStatusError] = useState<string | null>(null);
+  const [jobRunning, setJobRunning] = useState(false);
+  const [jobRunOpen, setJobRunOpen] = useState(false);
+  const [jobRunError, setJobRunError] = useState<string | null>(null);
+  const [jobResult, setJobResult] = useState<SettlementScheduleAutoDraftJobResponse | null>(null);
 
   async function loadDryRun(nextRunDate = runDate, nextVendorFilter = vendorFilter) {
     setLoading(true);
@@ -190,8 +240,19 @@ export function AdminScheduledSettlementsPage() {
     }
   }
 
+  async function loadJobStatus() {
+    setJobStatusError(null);
+    try {
+      const response = await getSettlementScheduleAutoDraftJobStatus();
+      setJobStatus(response);
+    } catch (requestError) {
+      setJobStatusError(requestError instanceof Error ? requestError.message : 'Scheduled auto draft job status could not be loaded.');
+    }
+  }
+
   useEffect(() => {
     void loadDryRun(runDate, vendorFilter);
+    void loadJobStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -219,6 +280,38 @@ export function AdminScheduledSettlementsPage() {
       setCreating(false);
     }
   }
+
+  async function handleRunAutoDraftJob() {
+    setJobRunning(true);
+    setJobRunError(null);
+    try {
+      const result = await runSettlementScheduleAutoDraftJob({
+        runDate,
+        confirmScheduledSettlementAutoDraftJob: true,
+      });
+      setJobResult(result);
+      setJobRunOpen(false);
+      await loadJobStatus();
+      if (result.writesPerformed) {
+        await loadDryRun(runDate, vendorFilter);
+      }
+    } catch (requestError) {
+      setJobRunError(requestError instanceof Error ? requestError.message : 'Scheduled auto draft job failed.');
+    } finally {
+      setJobRunning(false);
+    }
+  }
+
+  function handleAutoDraftJobClick() {
+    if (jobStatus?.dryRun) {
+      void handleRunAutoDraftJob();
+      return;
+    }
+    setJobRunOpen(true);
+  }
+
+  const jobModeLabel = jobStatus?.mode === 'WRITE' ? 'Write mode' : 'Dry-run mode';
+  const jobEnabled = jobStatus?.enabled === true;
 
   return (
     <section className="op-page scheduled-settlements-page">
@@ -256,6 +349,50 @@ export function AdminScheduledSettlementsPage() {
 
       {error ? <SectionErrorRetry title="Scheduled settlement dry run failed" description={error} onRetry={() => void loadDryRun()} /> : null}
       {createError ? <SectionErrorRetry title="Scheduled draft creation failed" description={createError} /> : null}
+      {jobStatusError ? <SectionErrorRetry title="Scheduled auto draft job status failed" description={jobStatusError} onRetry={() => void loadJobStatus()} /> : null}
+      {jobRunError ? <SectionErrorRetry title="Scheduled auto draft job failed" description={jobRunError} /> : null}
+
+      <section className="scheduled-settlements-card scheduled-auto-draft-job" aria-label="Scheduled auto draft job">
+        <div className="settlement-state-heading">
+          <div>
+            <p className="eyebrow">Automation</p>
+            <h3>Scheduled Auto Draft Job</h3>
+            <p className="page-description">
+              Daily job trigger for draft creation only. It never approves settlements, creates Logo invoices, or executes payouts.
+            </p>
+          </div>
+          <div className="scheduled-job-badges">
+            <StatusBadge tone={jobEnabled ? 'success' : 'attention'}>{jobEnabled ? 'Enabled' : 'Disabled'}</StatusBadge>
+            <StatusBadge tone={jobStatus?.mode === 'WRITE' ? 'warning' : 'info'}>{jobModeLabel}</StatusBadge>
+          </div>
+        </div>
+        <div className="scheduled-job-grid">
+          <MetadataRow label="Run date" value={runDate} />
+          <MetadataRow label="Writes" value={jobStatus?.dryRun === false ? 'Allowed after confirmation' : 'Disabled by dry-run mode'} />
+          <MetadataRow
+            label="Last run"
+            value={jobStatus?.lastRun ? `${jobStatus.lastRun.runDate} · ${safeStatusLabel(jobStatus.lastRun.status)}` : 'No run recorded'}
+          />
+          <MetadataRow label="Last created" value={jobStatus?.lastRun ? jobStatus.lastRun.createdDraftCount : 0} />
+        </div>
+        {!jobEnabled ? (
+          <p className="page-description">
+            SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false. The job is blocked until this environment gate is enabled.
+          </p>
+        ) : null}
+        {jobStatus?.notes?.length ? (
+          <ul className="scheduled-notes">
+            {jobStatus.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="scheduled-job-actions">
+          <button type="button" className="button button-primary" onClick={handleAutoDraftJobClick} disabled={!jobEnabled || jobRunning}>
+            {jobRunning ? 'Running job...' : 'Run Auto Draft Job'}
+          </button>
+        </div>
+      </section>
 
       {dryRun ? (
         <>
@@ -382,6 +519,42 @@ export function AdminScheduledSettlementsPage() {
                   ) : null}
                 </div>
               ) : null}
+
+              {jobResult ? (
+                <div className="scheduled-settlements-card" aria-label="Scheduled auto draft job result">
+                  <h3>Auto Draft Job Result</h3>
+                  <div className="scheduled-result-grid">
+                    <MetadataRow label="Mode" value={jobResult.mode === 'WRITE' ? 'Write' : 'Dry run'} />
+                    <MetadataRow label="Writes performed" value={jobResult.writesPerformed ? 'Yes' : 'No'} />
+                    <MetadataRow label="Created drafts" value={jobResult.summary.createdDrafts} />
+                    <MetadataRow label="Existing drafts" value={jobResult.summary.existingDrafts} />
+                    <MetadataRow label="Skipped" value={jobResult.summary.skipped} />
+                    <MetadataRow label="Blocked" value={jobResult.summary.blocked} />
+                  </div>
+                  {jobResult.notes.length ? (
+                    <ul className="scheduled-notes">
+                      {jobResult.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {jobResult.vendors.length ? (
+                    <ul className="scheduled-result-list">
+                      {jobResult.vendors.map((vendor) => (
+                        <li key={vendor.vendorId}>
+                          <span>{vendor.vendorId}</span>
+                          <span>{STATE_LABELS[vendor.state as ScheduleState] ?? safeStatusLabel(vendor.state)}</span>
+                          {vendor.createdSettlementApprovalId ? (
+                            <Link to={getOpenSettlementHref(vendor.createdSettlementApprovalId)}>Open Settlement</Link>
+                          ) : (
+                            <strong>{vendor.skippedReason ?? vendor.blockers[0] ?? 'No action'}</strong>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <SideDetailPanel title={selectedVendor ? getVendorName(selectedVendor) : 'Vendor detail'} eyebrow="Schedule detail">
@@ -435,6 +608,13 @@ export function AdminScheduledSettlementsPage() {
           submitting={creating}
           onCancel={() => setCreateOpen(false)}
           onConfirm={() => void handleCreateDrafts()}
+        />
+      ) : null}
+      {jobRunOpen ? (
+        <AutoDraftJobModal
+          submitting={jobRunning}
+          onCancel={() => setJobRunOpen(false)}
+          onConfirm={() => void handleRunAutoDraftJob()}
         />
       ) : null}
     </section>

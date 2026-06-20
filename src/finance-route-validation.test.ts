@@ -8,6 +8,8 @@ const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
 const getVendorDebtHistoryMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleDryRunMock = vi.hoisted(() => vi.fn());
 const createSettlementScheduleDraftsMock = vi.hoisted(() => vi.fn());
+const getSettlementScheduleAutoDraftJobStatusMock = vi.hoisted(() => vi.fn());
+const runSettlementScheduleAutoDraftJobMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -38,6 +40,11 @@ vi.mock('../backend/src/modules/finance/vendor-balance.service.js', () => ({
 vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => ({
   getSettlementScheduleDryRun: getSettlementScheduleDryRunMock,
   createSettlementScheduleDrafts: createSettlementScheduleDraftsMock,
+}));
+
+vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () => ({
+  getSettlementScheduleAutoDraftJobStatus: getSettlementScheduleAutoDraftJobStatusMock,
+  runSettlementScheduleAutoDraftJob: runSettlementScheduleAutoDraftJobMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -276,6 +283,35 @@ describe('finance route validation', () => {
         vendors: [],
         notes: [],
       },
+    });
+    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: false,
+      enabled: true,
+      dryRun: true,
+      mode: 'DRY_RUN',
+      lastRun: null,
+      notes: ['Dry-run mode is enabled.'],
+    });
+    runSettlementScheduleAutoDraftJobMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: false,
+      runDate: '2026-01-21',
+      mode: 'DRY_RUN',
+      enabled: true,
+      dryRun: true,
+      summary: {
+        vendorsChecked: 1,
+        dueVendors: 1,
+        readyVendors: 1,
+        createdDrafts: 0,
+        skipped: 0,
+        blocked: 0,
+        existingDrafts: 0,
+      },
+      vendors: [],
+      notes: ['No settlement drafts were created.'],
+      jobRun: null,
     });
   });
 
@@ -559,6 +595,88 @@ describe('finance route validation', () => {
       confirmAutoSettlementDrafts: true,
       createdBy: 'admin-1',
     });
+  });
+
+  it('returns scheduled auto draft job status through the admin route', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/admin/finance/settlement-schedules/auto-draft-job-status')?.(
+      {
+        authUser: { role: 'admin' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      writesPerformed: false,
+      mode: 'DRY_RUN',
+    }));
+    expect(getSettlementScheduleAutoDraftJobStatusMock).toHaveBeenCalled();
+  });
+
+  it('requires admin access for scheduled auto draft job status', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/admin/finance/settlement-schedules/auto-draft-job-status')?.(
+      {
+        authUser: { role: 'vendor' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(getSettlementScheduleAutoDraftJobStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('runs scheduled auto draft job through the admin route', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance/settlement-schedules/run-auto-draft-job')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        body: {
+          runDate: '2026-01-21',
+          confirmScheduledSettlementAutoDraftJob: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      writesPerformed: false,
+    }));
+    expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      runDate: '2026-01-21',
+      confirmScheduledSettlementAutoDraftJob: true,
+      triggeredBy: 'admin-1',
+    }));
+  });
+
+  it('requires admin access for scheduled auto draft job trigger', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance/settlement-schedules/run-auto-draft-job')?.(
+      {
+        authUser: { role: 'vendor' },
+        body: { confirmScheduledSettlementAutoDraftJob: true },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(runSettlementScheduleAutoDraftJobMock).not.toHaveBeenCalled();
   });
 
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {

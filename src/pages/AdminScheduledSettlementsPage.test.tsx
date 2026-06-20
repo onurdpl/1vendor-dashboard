@@ -3,11 +3,18 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminScheduledSettlementsPage } from './AdminScheduledSettlementsPage';
-import type { SettlementScheduleCreateDraftsResponse, SettlementScheduleDryRunResponse } from '../lib/api/contracts';
+import type {
+  SettlementScheduleAutoDraftJobResponse,
+  SettlementScheduleAutoDraftJobStatusResponse,
+  SettlementScheduleCreateDraftsResponse,
+  SettlementScheduleDryRunResponse,
+} from '../lib/api/contracts';
 import type { SettlementApprovalListResponse } from '../features/finance/settlementApprovalsApi';
 
 const getSettlementScheduleDryRunMock = vi.fn<() => Promise<SettlementScheduleDryRunResponse>>();
 const createSettlementScheduleDraftsMock = vi.fn<() => Promise<SettlementScheduleCreateDraftsResponse>>();
+const getSettlementScheduleAutoDraftJobStatusMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobStatusResponse>>();
+const runSettlementScheduleAutoDraftJobMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobResponse>>();
 const listSettlementApprovalsMock = vi.fn<(vendorId: string) => Promise<SettlementApprovalListResponse>>();
 
 vi.mock('../features/finance/api', async () => {
@@ -16,6 +23,8 @@ vi.mock('../features/finance/api', async () => {
     ...actual,
     getSettlementScheduleDryRun: () => getSettlementScheduleDryRunMock(),
     createSettlementScheduleDrafts: (input: unknown) => createSettlementScheduleDraftsMock(input as never),
+    getSettlementScheduleAutoDraftJobStatus: () => getSettlementScheduleAutoDraftJobStatusMock(),
+    runSettlementScheduleAutoDraftJob: (input: unknown) => runSettlementScheduleAutoDraftJobMock(input as never),
   };
 });
 
@@ -164,6 +173,63 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
   ],
 };
 
+const autoDraftJobStatus: SettlementScheduleAutoDraftJobStatusResponse = {
+  ok: true,
+  writesPerformed: false,
+  enabled: true,
+  dryRun: true,
+  mode: 'DRY_RUN',
+  lastRun: {
+    id: 'job-run-1',
+    runDate: '2026-06-17',
+    status: 'COMPLETED',
+    writesPerformed: false,
+    createdDraftCount: 0,
+    skippedCount: 1,
+    blockedCount: 0,
+    startedAt: '2026-06-17T01:00:00.000Z',
+    finishedAt: '2026-06-17T01:00:02.000Z',
+  },
+  notes: [
+    'Scheduled settlement auto-draft job creates draft settlement approvals only.',
+    'Dry-run mode is enabled; job trigger will not create drafts.',
+  ],
+};
+
+const autoDraftJobResult: SettlementScheduleAutoDraftJobResponse = {
+  ok: true,
+  writesPerformed: false,
+  runDate: '2026-06-24',
+  mode: 'DRY_RUN',
+  enabled: true,
+  dryRun: true,
+  summary: {
+    vendorsChecked: 5,
+    dueVendors: 4,
+    readyVendors: 1,
+    createdDrafts: 0,
+    skipped: 0,
+    blocked: 0,
+    existingDrafts: 0,
+  },
+  vendors: [
+    {
+      vendorId: 'yalispor',
+      state: 'READY',
+      due: true,
+      autoDraftEnabled: true,
+      eligibleLineCount: 2,
+      pendingRefundAdjustmentCount: 2,
+      estimatedNetPayableMinor: 623036,
+      createdSettlementApprovalId: null,
+      skippedReason: null,
+      blockers: [],
+    },
+  ],
+  notes: ['SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN is true; this response is preview-only.'],
+  jobRun: null,
+};
+
 function approvalsResponse(vendorId: string, draftId?: string): SettlementApprovalListResponse {
   return {
     ok: true,
@@ -203,8 +269,12 @@ describe('AdminScheduledSettlementsPage', () => {
   beforeEach(() => {
     getSettlementScheduleDryRunMock.mockReset();
     createSettlementScheduleDraftsMock.mockReset();
+    getSettlementScheduleAutoDraftJobStatusMock.mockReset();
+    runSettlementScheduleAutoDraftJobMock.mockReset();
     listSettlementApprovalsMock.mockReset();
     getSettlementScheduleDryRunMock.mockResolvedValue(dryRunResponse);
+    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue(autoDraftJobStatus);
+    runSettlementScheduleAutoDraftJobMock.mockResolvedValue(autoDraftJobResult);
     createSettlementScheduleDraftsMock.mockResolvedValue({
       ok: true,
       writesPerformed: true,
@@ -255,6 +325,95 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getByRole('link', { name: 'Open Settlement' })).toHaveAttribute(
       'href',
       '/admin/finance/settlement-approvals?approvalId=approval-existing-draft',
+    );
+  });
+
+  it('renders scheduled auto draft job status and last run metadata', async () => {
+    renderPage();
+
+    const panel = await screen.findByLabelText('Scheduled auto draft job');
+    expect(within(panel).getByText('Enabled')).toBeInTheDocument();
+    expect(within(panel).getByText('Dry-run mode')).toBeInTheDocument();
+    expect(within(panel).getByText('2026-06-17 · Completed')).toBeInTheDocument();
+    expect(within(panel).getByText('Dry-run mode is enabled; job trigger will not create drafts.')).toBeInTheDocument();
+  });
+
+  it('shows disabled scheduled auto draft job state without exposing a write action', async () => {
+    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
+      ...autoDraftJobStatus,
+      enabled: false,
+      lastRun: null,
+    });
+
+    renderPage();
+
+    const panel = await screen.findByLabelText('Scheduled auto draft job');
+    expect(within(panel).getByText('Disabled')).toBeInTheDocument();
+    expect(within(panel).getByText(/SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false/)).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Run Auto Draft Job' })).toBeDisabled();
+  });
+
+  it('runs scheduled auto draft job in dry-run mode without confirmation modal', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const panel = await screen.findByLabelText('Scheduled auto draft job');
+    await user.click(within(panel).getByRole('button', { name: 'Run Auto Draft Job' }));
+
+    await waitFor(() => expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmScheduledSettlementAutoDraftJob: true }),
+    ));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Scheduled auto draft job result')).toHaveTextContent('Writes performed');
+    expect(screen.getByText('SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN is true; this response is preview-only.')).toBeInTheDocument();
+  });
+
+  it('requires confirmation before running write-mode scheduled auto draft job', async () => {
+    const user = userEvent.setup();
+    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
+      ...autoDraftJobStatus,
+      dryRun: false,
+      mode: 'WRITE',
+      notes: ['Write mode is enabled; confirmation is required before drafts can be created.'],
+    });
+    runSettlementScheduleAutoDraftJobMock.mockResolvedValue({
+      ...autoDraftJobResult,
+      writesPerformed: true,
+      mode: 'WRITE',
+      dryRun: false,
+      summary: {
+        ...autoDraftJobResult.summary,
+        createdDrafts: 1,
+      },
+      vendors: [
+        {
+          ...autoDraftJobResult.vendors[0],
+          state: 'CREATED',
+          createdSettlementApprovalId: 'approval-yalispor-auto',
+        },
+      ],
+      notes: ['Scheduled settlement auto-draft job completed using existing settlement draft creation logic.'],
+    });
+
+    renderPage();
+
+    const panel = await screen.findByLabelText('Scheduled auto draft job');
+    expect(within(panel).getByText('Write mode')).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Run Auto Draft Job' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Create settlement drafts for all READY vendors?');
+    await user.click(within(dialog).getByLabelText('I understand this will create settlement drafts for all READY vendors.'));
+    await user.click(within(dialog).getByRole('button', { name: 'Run Auto Draft Job' }));
+
+    await waitFor(() => expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmScheduledSettlementAutoDraftJob: true }),
+    ));
+    const resultPanel = await screen.findByLabelText('Scheduled auto draft job result');
+    expect(resultPanel).toHaveTextContent('Created drafts');
+    expect(within(resultPanel).getByRole('link', { name: 'Open Settlement' })).toHaveAttribute(
+      'href',
+      '/admin/finance/settlement-approvals?approvalId=approval-yalispor-auto',
     );
   });
 

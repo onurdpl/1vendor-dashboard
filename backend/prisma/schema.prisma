@@ -83,6 +83,14 @@ enum SettlementWeekday {
   FRIDAY
 }
 
+enum SettlementScheduleJobRunStatus {
+  PROCESSING
+  DRY_RUN
+  COMPLETED
+  BLOCKED
+  FAILED
+}
+
 enum SettlementStatus {
   PENDING
   ACCRUING
@@ -959,6 +967,22 @@ model SettlementApproval {
   @@index([vendorId, status])
   @@index([periodStart, periodEnd])
   @@index([createdAt])
+}
+
+model SettlementScheduleJobRun {
+  id                String                         @id @default(cuid())
+  runDate           DateTime                       @unique
+  status            SettlementScheduleJobRunStatus @default(PROCESSING)
+  writesPerformed   Boolean                        @default(false)
+  createdDraftCount Int                            @default(0)
+  skippedCount      Int                            @default(0)
+  blockedCount      Int                            @default(0)
+  startedAt         DateTime                       @default(now())
+  finishedAt        DateTime?
+  metadataJson      Json?
+
+  @@index([status, startedAt])
+  @@index([finishedAt])
 }
 
 model SettlementApprovalLine {

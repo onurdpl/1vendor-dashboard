@@ -1474,6 +1474,67 @@ export type SettlementScheduleCreateDraftsResponse = {
   dryRun: SettlementScheduleDryRunResponse;
 };
 
+export type SettlementScheduleAutoDraftJobMode = 'DRY_RUN' | 'WRITE';
+
+export type SettlementScheduleAutoDraftJobVendorResult = {
+  vendorId: string;
+  state: string;
+  due: boolean;
+  autoDraftEnabled: boolean;
+  eligibleLineCount: number;
+  pendingRefundAdjustmentCount: number;
+  estimatedNetPayableMinor: number;
+  createdSettlementApprovalId: string | null;
+  skippedReason: string | null;
+  blockers: string[];
+};
+
+export type SettlementScheduleAutoDraftJobResponse = {
+  ok: boolean;
+  writesPerformed: boolean;
+  runDate: string;
+  mode: SettlementScheduleAutoDraftJobMode;
+  enabled: boolean;
+  dryRun: boolean;
+  summary: {
+    vendorsChecked: number;
+    dueVendors: number;
+    readyVendors: number;
+    createdDrafts: number;
+    skipped: number;
+    blocked: number;
+    existingDrafts: number;
+  };
+  vendors: SettlementScheduleAutoDraftJobVendorResult[];
+  notes: string[];
+  jobRun: {
+    id: string | null;
+    status: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+  } | null;
+};
+
+export type SettlementScheduleAutoDraftJobStatusResponse = {
+  ok: true;
+  writesPerformed: false;
+  enabled: boolean;
+  dryRun: boolean;
+  mode: SettlementScheduleAutoDraftJobMode;
+  lastRun: {
+    id: string;
+    runDate: string;
+    status: string;
+    writesPerformed: boolean;
+    createdDraftCount: number;
+    skippedCount: number;
+    blockedCount: number;
+    startedAt: string;
+    finishedAt: string | null;
+  } | null;
+  notes: string[];
+};
+
 export type VendorBillingProfile = {
   id: string;
   vendorId: string;

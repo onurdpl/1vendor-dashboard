@@ -2306,6 +2306,47 @@ export const runtimeServices = {
               notes: ['Draft creation used the existing scheduled settlement endpoint.'],
             },
           }),
+    settlementScheduleAutoDraftJobStatus: (options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getSettlementScheduleAutoDraftJobStatus({
+            signal: options.signal,
+            headers: options.headers,
+          })
+        : Promise.resolve({
+            ok: true as const,
+            writesPerformed: false as const,
+            enabled: false,
+            dryRun: true,
+            mode: 'DRY_RUN' as const,
+            lastRun: null,
+            notes: [
+              'Scheduled settlement auto-draft job creates draft settlement approvals only.',
+              'Mock mode keeps the job disabled.',
+            ],
+          }),
+    runSettlementScheduleAutoDraftJob: (input: Parameters<typeof realFinance.runSettlementScheduleAutoDraftJob>[0]) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.runSettlementScheduleAutoDraftJob(input)
+        : Promise.resolve({
+            ok: false,
+            writesPerformed: false,
+            runDate: input.runDate ?? new Date().toISOString().slice(0, 10),
+            mode: 'DRY_RUN' as const,
+            enabled: false,
+            dryRun: true,
+            summary: {
+              vendorsChecked: 0,
+              dueVendors: 0,
+              readyVendors: 0,
+              createdDrafts: 0,
+              skipped: 0,
+              blocked: 0,
+              existingDrafts: 0,
+            },
+            vendors: [],
+            notes: ['SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false; no drafts were created.'],
+            jobRun: null,
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

@@ -12124,6 +12124,28 @@ summary.provider-response-heading::-webkit-details-marker {
   letter-spacing: 0;
 }
 
+.scheduled-auto-draft-job {
+  margin-top: var(--space-3);
+}
+
+.scheduled-job-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.scheduled-job-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: var(--space-2);
+}
+
+.scheduled-job-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .scheduled-settlements-table .op-table-head,
 .scheduled-settlements-table .op-table-row {
   grid-template-columns:

@@ -4,9 +4,11 @@ export {
   getFinanceDashboard,
   getFinanceProfile,
   getReturnFinanceRecords,
+  getSettlementScheduleAutoDraftJobStatus,
   getSettlementScheduleDryRun,
   getVendorDebtHistory,
   preparePayoutBatch,
+  runSettlementScheduleAutoDraftJob,
   updateVendorFinancialProfile,
 } from '../../lib/api/finance';
 export type {
@@ -14,6 +16,8 @@ export type {
   FinanceSummary,
   FinanceTransaction,
   PayoutBatch,
+  SettlementScheduleAutoDraftJobResponse,
+  SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
   SettlementScheduleDryRunVendor,
