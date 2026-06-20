@@ -238,14 +238,32 @@ function parseOperationalAmount(amount: string) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function formatMetricShare(value: number, total: number) {
-  if (!total) {
-    return '0% of queue';
+function isTodayOrder(order: OrderSummary) {
+  const timestamp = getSafeTimestamp(order.date, Number.NaN);
+  if (!Number.isFinite(timestamp)) {
+    return false;
   }
-  return `${Math.round((value / total) * 100)}% of queue`;
+
+  const orderDate = new Date(timestamp);
+  const today = new Date();
+  return (
+    orderDate.getFullYear() === today.getFullYear() &&
+    orderDate.getMonth() === today.getMonth() &&
+    orderDate.getDate() === today.getDate()
+  );
 }
 
 function MetricIcon({ tone }: { tone: string }) {
+  if (tone === 'today') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="5" width="16" height="15" rx="2" />
+        <path d="M8 3v4" />
+        <path d="M16 3v4" />
+        <path d="M4 10h16" />
+      </svg>
+    );
+  }
   if (tone === 'awaiting') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -254,7 +272,7 @@ function MetricIcon({ tone }: { tone: string }) {
       </svg>
     );
   }
-  if (tone === 'missing') {
+  if (tone === 'blocked') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M12 7v6" />
@@ -263,45 +281,11 @@ function MetricIcon({ tone }: { tone: string }) {
       </svg>
     );
   }
-  if (tone === 'fulfilled') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m7 12 3 3 7-7" />
-        <circle cx="12" cy="12" r="8" />
-      </svg>
-    );
-  }
-  if (tone === 'tracking') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 7h11v8H4z" />
-        <path d="M15 10h3l2 3v2h-5z" />
-        <circle cx="8" cy="17" r="1.5" />
-        <circle cx="17" cy="17" r="1.5" />
-      </svg>
-    );
-  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M6 7h12v10H6z" />
       <path d="M9 7V5h6v2" />
       <path d="M9 11h6" />
-    </svg>
-  );
-}
-
-function MetricSparkline({ tone }: { tone: string }) {
-  const pointsByTone: Record<string, string> = {
-    orders: '0,18 12,15 24,16 36,10 48,13 60,7 72,9 84,4',
-    awaiting: '0,16 12,17 24,14 36,15 48,10 60,12 72,8 84,9',
-    missing: '0,12 12,12 24,12 36,12 48,12 60,12 72,12 84,12',
-    fulfilled: '0,17 12,16 24,16 36,14 48,13 60,11 72,8 84,5',
-    tracking: '0,18 12,16 24,17 36,14 48,12 60,11 72,7 84,6',
-  };
-
-  return (
-    <svg className="orders-kpi-sparkline" viewBox="0 0 84 24" preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={pointsByTone[tone] ?? pointsByTone.orders} />
     </svg>
   );
 }
@@ -592,20 +576,17 @@ export function OrdersPage() {
     const source = safeArray(orders);
     return {
       total: source.length,
+      today: source.filter(isTodayOrder).length,
       awaitingShipment: source.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
-      trackingMissing: source.filter((order) => !order.trackingNumber && !order.carrier).length,
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
-      fulfilled: source.filter((order) => order.fulfillmentStatus === 'Fulfilled').length,
-      tracked: source.filter((order) => order.trackingNumber || order.carrier).length,
     };
   }, [orders]);
 
   const orderKpis = [
-    { label: 'Total orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders', trend: 'Live queue' },
-    { label: 'Awaiting shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting', trend: formatMetricShare(summary.awaitingShipment, summary.total) },
-    { label: 'Tracking missing', value: summary.trackingMissing, detail: 'No carrier evidence yet', tone: 'missing', trend: formatMetricShare(summary.trackingMissing, summary.total) },
-    { label: 'Fulfilled', value: summary.fulfilled, detail: 'Fulfillment complete', tone: 'fulfilled', trend: formatMetricShare(summary.fulfilled, summary.total) },
-    { label: 'Tracking visible', value: summary.tracked, detail: 'Carrier or tracking present', tone: 'tracking', trend: formatMetricShare(summary.tracked, summary.total) },
+    { label: 'Total Orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders' },
+    { label: 'Today Orders', value: summary.today, detail: 'Created today', tone: 'today' },
+    { label: 'Awaiting Shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting' },
+    { label: 'Blocked Orders', value: summary.blocked, detail: 'Needs operator review', tone: 'blocked' },
   ];
 
   const recentOrders = filteredOrders.slice(0, 3);
@@ -614,7 +595,7 @@ export function OrdersPage() {
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
     { key: 'blocked', label: 'Blocked', count: summary.blocked },
     { key: 'awaiting', label: 'Awaiting shipment', count: summary.awaitingShipment },
-    { key: 'tracking_missing', label: 'Tracking missing', count: summary.trackingMissing },
+    { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
     { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
   ];
@@ -740,10 +721,6 @@ export function OrdersPage() {
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
                     <small>{metric.detail}</small>
-                  </div>
-                  <div className="orders-kpi-signal">
-                    <small>{metric.trend}</small>
-                    <MetricSparkline tone={metric.tone} />
                   </div>
                 </article>
               ))}
@@ -1264,7 +1241,7 @@ export function OrdersPage() {
               </div>
               <div>
                 <span>Tracking visible</span>
-                <strong>{summary.tracked}</strong>
+                <strong>{safeArray(orders).filter((order) => order.trackingNumber || order.carrier).length}</strong>
               </div>
             </div>
           </OperationalSection>

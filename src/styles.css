@@ -4243,16 +4243,6 @@ h3 {
   background: #fee2e2;
 }
 
-.orders-kpi-fulfilled .orders-kpi-icon {
-  color: #166534;
-  background: #dcfce7;
-}
-
-.orders-kpi-tracking .orders-kpi-icon {
-  color: #334155;
-  background: #f1f5f9;
-}
-
 .orders-filter-card {
   display: grid;
   gap: 8px;
@@ -4649,11 +4639,11 @@ h3 {
 
 .orders-enterprise-kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0;
   align-items: stretch;
   overflow: hidden;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--orders-border);
   border-radius: 18px;
   background:
@@ -4662,15 +4652,13 @@ h3 {
 }
 
 .orders-enterprise-kpi {
-  grid-template-areas:
-    "icon copy"
-    "signal signal";
-  grid-template-columns: 34px minmax(0, 1fr);
-  grid-template-rows: minmax(38px, auto) 28px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
   min-width: 0;
-  min-height: 88px;
-  align-content: center;
-  padding: 10px 14px;
+  min-height: 50px;
+  padding: 8px 12px;
   border: 0;
   border-right: 1px solid rgba(203, 213, 225, 0.7);
   border-radius: 0;
@@ -4683,19 +4671,18 @@ h3 {
 }
 
 .orders-kpi-icon {
-  grid-area: icon;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: 1px solid rgba(37, 99, 235, 0.16);
-  border-radius: 12px;
+  border-radius: 10px;
   background: linear-gradient(145deg, #eff6ff, #dbeafe);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .orders-kpi-icon svg,
 .orders-smart-label-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -4704,9 +4691,8 @@ h3 {
 }
 
 .orders-kpi-copy {
-  grid-area: copy;
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -4722,7 +4708,7 @@ h3 {
 
 .orders-enterprise-kpi .orders-kpi-copy > strong {
   min-width: 0;
-  font-size: clamp(1.34rem, 1.6vw, 1.66rem);
+  font-size: clamp(1.12rem, 1.25vw, 1.34rem);
   letter-spacing: 0;
   line-height: 1;
 }
@@ -4733,65 +4719,9 @@ h3 {
   white-space: nowrap;
 }
 
-.orders-kpi-signal {
-  grid-area: signal;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px;
-  gap: 5px;
-  align-items: end;
-  justify-items: end;
-  min-width: 0;
-  padding-top: 4px;
-}
-
-.orders-kpi-signal small {
-  justify-self: start;
-  max-width: 100%;
-  overflow: hidden;
-  color: #2563eb;
-  font-size: 0.66rem;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.orders-kpi-sparkline {
-  display: block;
-  width: 76px;
-  max-width: 76px;
-  height: 22px;
-}
-
-.orders-kpi-sparkline polyline {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.orders-kpi-awaiting .orders-kpi-signal small,
-.orders-kpi-awaiting .orders-kpi-sparkline {
-  color: #d97706;
-}
-
-.orders-kpi-missing .orders-kpi-icon {
-  color: #dc2626;
-  background: linear-gradient(145deg, #fff1f2, #fee2e2);
-}
-
-.orders-kpi-missing .orders-kpi-signal small,
-.orders-kpi-missing .orders-kpi-sparkline {
-  color: #dc2626;
-}
-
-.orders-kpi-fulfilled .orders-kpi-signal small,
-.orders-kpi-fulfilled .orders-kpi-sparkline {
-  color: #16a34a;
-}
-
-.orders-kpi-tracking .orders-kpi-signal small,
-.orders-kpi-tracking .orders-kpi-sparkline {
-  color: #0284c7;
+.orders-kpi-today .orders-kpi-icon {
+  color: #4f46e5;
+  background: linear-gradient(145deg, #eef2ff, #e0e7ff);
 }
 
 .orders-filter-card {
@@ -9608,14 +9538,6 @@ summary.provider-response-heading::-webkit-details-marker {
 
   .orders-control-center .op-filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .orders-kpi-signal {
-    grid-template-columns: minmax(0, 1fr) 68px;
-  }
-
-  .orders-kpi-sparkline {
-    width: 68px;
   }
 
   .orders-detail-info-grid {
