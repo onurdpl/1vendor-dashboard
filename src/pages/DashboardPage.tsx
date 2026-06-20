@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   EmptyStatePanel,
   SectionErrorRetry,
@@ -245,6 +245,7 @@ function CalendarIcon() {
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const vendorId = currentVendor.vendorId;
@@ -331,17 +332,27 @@ export function DashboardPage() {
           <p>Here’s what’s happening with your store today.</p>
         </div>
         <div className="dashboard-vendor-topbar" aria-label="Dashboard shortcuts">
-          <button type="button" className="dashboard-vendor-bell" aria-label="Notifications">
+          <button
+            type="button"
+            className="dashboard-vendor-bell"
+            aria-label="Open inbox"
+            onClick={() => navigate('/support/inbox')}
+          >
             <BellIcon />
             <span aria-hidden="true">3</span>
           </button>
-          <div className="dashboard-vendor-pill" aria-label={`Current vendor ${vendorName}`}>
+          <button
+            type="button"
+            className="dashboard-vendor-pill"
+            aria-label="Open profile"
+            onClick={() => navigate('/vendor/profile')}
+          >
             <span className="dashboard-vendor-pill-avatar" aria-hidden="true">
               {getVendorInitial(vendorName)}
             </span>
             <strong>{vendorName}</strong>
             <span className="dashboard-vendor-pill-chevron" aria-hidden="true">⌄</span>
-          </div>
+          </button>
         </div>
       </header>
 
