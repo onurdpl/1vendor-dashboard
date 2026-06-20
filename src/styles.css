@@ -13347,7 +13347,7 @@ summary.provider-response-heading::-webkit-details-marker {
   flex-shrink: 0;
 }
 
-.dashboard-vendor-bell {
+.dashboard-vendor-icon-button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -13359,6 +13359,11 @@ summary.provider-response-heading::-webkit-details-marker {
   background: transparent;
   color: #1f2a44;
   cursor: pointer;
+}
+
+.dashboard-vendor-icon-button:hover {
+  background: #f6f3ff;
+  color: #4f20ff;
 }
 
 .dashboard-vendor-bell span {

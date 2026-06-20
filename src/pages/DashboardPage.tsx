@@ -5,13 +5,13 @@ import {
   SectionErrorRetry,
   SkeletonText,
 } from '../components/OperationalPrimitives';
-import { runtimeConfig } from '../config/runtime';
 import {
   createDashboardRequestId,
   getDashboardDeferredOverview,
   getDashboardOverview,
 } from '../lib/api/dashboard';
-import type { DashboardOverview, DashboardPriorityItem, DashboardStat } from '../lib/api/contracts';
+import { listOrders } from '../features/orders/api';
+import type { DashboardOverview, DashboardPriorityItem, DashboardStat, OrderSummary } from '../lib/api/contracts';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -31,15 +31,8 @@ type RecentOrderRow = {
   status: string;
   tone: 'blue' | 'green' | 'orange';
   date: string;
+  detailTo: string;
 };
-
-const demoRecentOrders: RecentOrderRow[] = [
-  { orderNumber: '#1088', status: 'Awaiting Shipment', tone: 'orange', date: 'Jun 11, 10:32 AM' },
-  { orderNumber: '#1087', status: 'Awaiting Shipment', tone: 'orange', date: 'Jun 11, 09:15 AM' },
-  { orderNumber: '#1086', status: 'Processing', tone: 'blue', date: 'Jun 11, 08:47 AM' },
-  { orderNumber: '#1085', status: 'Shipped', tone: 'green', date: 'Jun 10, 06:20 PM' },
-  { orderNumber: '#1084', status: 'Delivered', tone: 'green', date: 'Jun 10, 02:15 PM' },
-];
 
 function asDisplayValue(value: string | number | null | undefined, fallback = '0') {
   if (typeof value === 'number') {
@@ -134,6 +127,75 @@ function getVendorInitial(vendorName: string) {
   return vendorName.trim().charAt(0).toUpperCase() || 'V';
 }
 
+function formatOrderNumber(order: OrderSummary) {
+  const orderNumber = String(order.sourceShopifyOrderNumber || order.id).trim();
+  if (!orderNumber) {
+    return order.id;
+  }
+  return orderNumber.startsWith('#') ? orderNumber : `#${orderNumber}`;
+}
+
+function formatOrderDate(value: string | null | undefined) {
+  if (!value) {
+    return 'Not available';
+  }
+
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
+}
+
+function getOrderTimestamp(order: OrderSummary) {
+  const timestamp = Date.parse(order.date);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function humanizeOrderStatus(value: string) {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getOrderStatusTone(order: OrderSummary): RecentOrderRow['tone'] {
+  const statusText = `${order.status} ${order.fulfillmentStatus} ${order.shippingStatus}`.toLowerCase();
+  if (statusText.includes('deliver') || statusText.includes('ship')) {
+    return 'green';
+  }
+  if (statusText.includes('await') || statusText.includes('pending') || statusText.includes('review')) {
+    return 'orange';
+  }
+  return 'blue';
+}
+
+function buildRecentOrderRows(orders: OrderSummary[] | undefined): RecentOrderRow[] {
+  if (!orders?.length) {
+    return [];
+  }
+
+  const indexedOrders = orders.map((order, index) => ({ order, index, timestamp: getOrderTimestamp(order) }));
+  const hasReliableDates = indexedOrders.some((entry) => entry.timestamp !== null);
+  const sortedOrders = hasReliableDates
+    ? [...indexedOrders].sort((a, b) => (b.timestamp ?? -Infinity) - (a.timestamp ?? -Infinity) || a.index - b.index)
+    : indexedOrders;
+
+  return sortedOrders.slice(0, 5).map(({ order }) => ({
+    orderNumber: formatOrderNumber(order),
+    status: humanizeOrderStatus(order.shippingStatus || order.fulfillmentStatus || order.status),
+    tone: getOrderStatusTone(order),
+    date: formatOrderDate(order.date),
+    detailTo: `/orders/${encodeURIComponent(order.id)}`,
+  }));
+}
+
 function DashboardCardIcon({ name }: { name: string }) {
   const commonProps = {
     width: 30,
@@ -200,6 +262,27 @@ function BellIcon() {
     >
       <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
       <path d="M10 21h4" />
+    </svg>
+  );
+}
+
+function TicketIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a3 3 0 0 0 0 6v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a3 3 0 0 0 0-6V6Z" />
+      <path d="M13 5v14" />
+      <path d="M8 9h2" />
+      <path d="M8 15h2" />
     </svg>
   );
 }
@@ -293,6 +376,16 @@ export function DashboardPage() {
     { enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard) },
   );
 
+  const {
+    data: vendorOrders,
+    isLoading: isOrdersLoading,
+    isError: isOrdersError,
+  } = useQueryResource(
+    queryKeys.orders.list(vendorId),
+    ({ signal }) => listOrders({ vendorId, signal }),
+    { enabled: appReadiness.ready && Boolean(vendorId) },
+  );
+
   async function refetchDashboard() {
     const shellRefresh = refetchDashboardShell();
     if (shouldLoadDeferredDashboard) {
@@ -309,7 +402,7 @@ export function DashboardPage() {
   const upcomingPayment = asDisplayValue(dashboardView.financeSnapshot?.payoutEstimate, 'TRY 0');
   const lastPayment = 'TRY 0';
   const lastPaymentDate = 'Not available';
-  const recentOrders = runtimeConfig.apiMode === 'mock' ? demoRecentOrders : [];
+  const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
 
   if (isError && !initialDashboard) {
@@ -334,7 +427,15 @@ export function DashboardPage() {
         <div className="dashboard-vendor-topbar" aria-label="Dashboard shortcuts">
           <button
             type="button"
-            className="dashboard-vendor-bell"
+            className="dashboard-vendor-icon-button dashboard-vendor-support"
+            aria-label="Open support tickets"
+            onClick={() => navigate('/support')}
+          >
+            <TicketIcon />
+          </button>
+          <button
+            type="button"
+            className="dashboard-vendor-icon-button dashboard-vendor-bell"
             aria-label="Open inbox"
             onClick={() => navigate('/support/inbox')}
           >
@@ -344,7 +445,7 @@ export function DashboardPage() {
           <button
             type="button"
             className="dashboard-vendor-pill"
-            aria-label="Open profile"
+            aria-label="Open vendor profile"
             onClick={() => navigate('/vendor/profile')}
           >
             <span className="dashboard-vendor-pill-avatar" aria-hidden="true">
@@ -381,14 +482,40 @@ export function DashboardPage() {
         <div className="dashboard-vendor-panel-header">
           <div>
             <h2>Recent Orders</h2>
-            {runtimeConfig.apiMode === 'mock' ? <span className="dashboard-vendor-demo-badge">Demo preview</span> : null}
           </div>
           <Link className="dashboard-vendor-panel-link" to="/orders">
             View all orders
             <ArrowIcon />
           </Link>
         </div>
-        {recentOrders.length > 0 ? (
+        {isOrdersLoading ? (
+          <div className="dashboard-vendor-table-wrap">
+            <table className="dashboard-vendor-orders-table">
+              <thead>
+                <tr>
+                  <th>Order Number</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={4}>
+                    <SkeletonText width="14rem" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : isOrdersError ? (
+          <div className="dashboard-vendor-empty-orders">
+            <EmptyStatePanel
+              title="Recent orders could not be loaded."
+              description="Open Orders to review the vendor order list."
+            />
+          </div>
+        ) : recentOrders.length > 0 ? (
           <div className="dashboard-vendor-table-wrap">
             <table className="dashboard-vendor-orders-table">
               <thead>
@@ -412,7 +539,7 @@ export function DashboardPage() {
                     </td>
                     <td>{order.date}</td>
                     <td>
-                      <Link className="dashboard-vendor-open-link" to="/orders">
+                      <Link className="dashboard-vendor-open-link" to={order.detailTo}>
                         Open
                       </Link>
                     </td>
