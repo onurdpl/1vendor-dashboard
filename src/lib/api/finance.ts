@@ -1,5 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { VendorDebtHistory, VendorFinancialProfile } from './contracts';
+import type { SettlementScheduleCreateDraftsResponse, SettlementScheduleDryRunResponse, VendorDebtHistory, VendorFinancialProfile } from './contracts';
 
 export function getFinanceDashboard(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
@@ -46,6 +46,24 @@ export function updateVendorFinancialProfile(
   },
 ) {
   return runtimeServices.finance.updateProfile(vendorId, input);
+}
+
+export function getSettlementScheduleDryRun(options: {
+  runDate?: string | null;
+  vendorId?: string | null;
+  limit?: number | null;
+  signal?: AbortSignal;
+} = {}): Promise<SettlementScheduleDryRunResponse> {
+  return runtimeServices.finance.settlementScheduleDryRun(options, { signal: options.signal });
+}
+
+export function createSettlementScheduleDrafts(input: {
+  runDate?: string | null;
+  vendorId?: string | null;
+  limit?: number | null;
+  confirmAutoSettlementDrafts: true;
+}): Promise<SettlementScheduleCreateDraftsResponse> {
+  return runtimeServices.finance.createSettlementScheduleDrafts(input);
 }
 
 export function preparePayoutBatch(vendorId: string) {

@@ -1,8 +1,10 @@
 export {
   attachShippingCost,
+  createSettlementScheduleDrafts,
   getFinanceDashboard,
   getFinanceProfile,
   getReturnFinanceRecords,
+  getSettlementScheduleDryRun,
   getVendorDebtHistory,
   preparePayoutBatch,
   updateVendorFinancialProfile,
@@ -12,6 +14,9 @@ export type {
   FinanceSummary,
   FinanceTransaction,
   PayoutBatch,
+  SettlementScheduleCreateDraftsResponse,
+  SettlementScheduleDryRunResponse,
+  SettlementScheduleDryRunVendor,
   VendorDebtHistory,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';

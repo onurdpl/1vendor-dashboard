@@ -12058,6 +12058,187 @@ summary.provider-response-heading::-webkit-details-marker {
   max-width: 1480px;
 }
 
+.scheduled-settlements-page {
+  max-width: 1560px;
+}
+
+.scheduled-settlements-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.scheduled-settlements-controls label {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  color: var(--op-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.scheduled-settlements-controls input {
+  min-height: 38px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  background: var(--op-surface);
+  color: var(--op-text);
+}
+
+.scheduled-settlements-summary {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.scheduled-settlements-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.scheduled-settlements-main {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.scheduled-settlements-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.scheduled-settlements-card h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.scheduled-settlements-table .op-table-head,
+.scheduled-settlements-table .op-table-row {
+  grid-template-columns:
+    minmax(148px, 1.2fr)
+    minmax(58px, 0.5fr)
+    minmax(80px, 0.62fr)
+    minmax(86px, 0.68fr)
+    minmax(76px, 0.58fr)
+    minmax(150px, 1fr)
+    minmax(92px, 0.72fr)
+    minmax(48px, 0.36fr)
+    minmax(128px, 0.9fr)
+    minmax(96px, 0.72fr)
+    minmax(152px, 1.1fr)
+    minmax(100px, 0.72fr);
+}
+
+.scheduled-settlements-table .op-table-row > span,
+.scheduled-settlements-table .op-table-head > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scheduled-settlements-table small {
+  display: block;
+  color: var(--op-muted);
+  font-size: 0.72rem;
+}
+
+.scheduled-refund-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(146, 64, 14, 0.28);
+  padding: 3px 8px;
+  background: rgba(146, 64, 14, 0.08);
+  color: var(--op-warning);
+  font-weight: 800;
+  white-space: normal;
+}
+
+.scheduled-notes {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--op-text);
+  font-size: 0.86rem;
+}
+
+.scheduled-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: var(--space-2);
+}
+
+.scheduled-result-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scheduled-result-list li {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.scheduled-settlements-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.scheduled-settlements-modal-card {
+  display: grid;
+  gap: var(--space-3);
+  width: min(520px, 100%);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--op-border);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-lg);
+}
+
+.scheduled-settlements-modal-card h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.scheduled-settlements-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--op-text);
+  font-weight: 800;
+}
+
+.scheduled-settlements-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
 .settlement-workspace-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

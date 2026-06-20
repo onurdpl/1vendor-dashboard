@@ -6,6 +6,8 @@ import type {
   VendorDebtHistory,
   PayoutBatch,
   ReturnFinanceRecordsResponse,
+  SettlementScheduleCreateDraftsResponse,
+  SettlementScheduleDryRunResponse,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
@@ -337,6 +339,38 @@ export async function updateVendorFinancialProfile(
   },
 ): Promise<VendorFinancialProfile> {
   return apiClient.put<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, input);
+}
+
+export async function getSettlementScheduleDryRun(options: {
+  runDate?: string | null;
+  vendorId?: string | null;
+  limit?: number | null;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}): Promise<SettlementScheduleDryRunResponse> {
+  const params = new URLSearchParams();
+  if (options.runDate) params.set('runDate', options.runDate);
+  if (options.vendorId) params.set('vendorId', options.vendorId);
+  if (options.limit) params.set('limit', String(options.limit));
+  const path = `/admin/finance/settlement-schedules/dry-run${params.size ? `?${params.toString()}` : ''}`;
+  return apiClient.get<SettlementScheduleDryRunResponse>(path, {
+    skipVendorContext: true,
+    signal: options.signal,
+    headers: options.headers,
+  });
+}
+
+export function createSettlementScheduleDrafts(input: {
+  runDate?: string | null;
+  vendorId?: string | null;
+  limit?: number | null;
+  confirmAutoSettlementDrafts: true;
+}): Promise<SettlementScheduleCreateDraftsResponse> {
+  return apiClient.post<SettlementScheduleCreateDraftsResponse>(
+    '/admin/finance/settlement-schedules/create-drafts',
+    input,
+    { skipVendorContext: true },
+  );
 }
 
 export function preparePayoutBatch(vendorId: string): Promise<PayoutBatch> {

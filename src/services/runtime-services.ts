@@ -2208,6 +2208,104 @@ export const runtimeServices = {
             active: true,
             source: 'configured' as const,
           }),
+    settlementScheduleDryRun: (
+      input: { runDate?: string | null; vendorId?: string | null; limit?: number | null } = {},
+      options: ReadRequestOptions = {},
+    ) => {
+      const vendorId = input.vendorId ?? getCurrentVendorId();
+      const finance = getMockFinanceDashboard(vendorId);
+      const runDate = input.runDate ?? new Date().toISOString().slice(0, 10);
+      return runtimeConfig.apiMode === 'real'
+        ? realFinance.getSettlementScheduleDryRun({
+            ...input,
+            signal: options.signal,
+            headers: options.headers,
+          })
+        : Promise.resolve({
+            ok: true as const,
+            writesPerformed: false as const,
+            runDate,
+            periodEnd: `${runDate}T23:59:59.999Z`,
+            summary: {
+              vendorsChecked: 1,
+              dueVendors: 1,
+              autoDraftEligibleVendors: 1,
+              totalEligibleLineCount: finance.payoutBatchSummary?.eligibleRowCount ?? 0,
+              totalNetPayableMinor: 305910,
+            },
+            vendors: [
+              {
+                vendorId,
+                vendorName: finance.profile?.vendorId ?? vendorId,
+                due: true,
+                dueReason: `Weekly ${finance.profile?.weeklySettlementDay ?? 'WEDNESDAY'} run is due.`,
+                schedule: {
+                  settlementDelayDays: finance.profile?.settlementDelayDays ?? 21,
+                  settlementFrequencyType: finance.profile?.settlementFrequencyType ?? 'WEEKLY',
+                  weeklySettlementDay: finance.profile?.weeklySettlementDay ?? 'WEDNESDAY',
+                  autoSettlementDraftEnabled: true,
+                  autoSettlementApproveEnabled: false,
+                  autoSettlementInvoiceEnabled: false,
+                },
+                eligibleLineCount: finance.payoutBatchSummary?.eligibleRowCount ?? 1,
+                excludedActiveApprovalRowCount: 0,
+                netPayableMinor: 305910,
+                pendingRefundAdjustmentCount: 0,
+                pendingRefundAdjustmentTotalMinor: 0,
+                netAfterPendingRefundAdjustmentsMinor: 305910,
+                canCreateDraft: true,
+                blockedReason: null,
+                warnings: [],
+              },
+            ],
+            notes: [
+              'Dry run is read-only and reuses settlement approval preview eligibility.',
+              'Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.',
+            ],
+          });
+    },
+    createSettlementScheduleDrafts: (input: Parameters<typeof realFinance.createSettlementScheduleDrafts>[0]) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.createSettlementScheduleDrafts(input)
+        : Promise.resolve({
+            ok: true as const,
+            writesPerformed: true,
+            runDate: input.runDate ?? new Date().toISOString().slice(0, 10),
+            periodEnd: `${input.runDate ?? new Date().toISOString().slice(0, 10)}T23:59:59.999Z`,
+            summary: {
+              vendorsChecked: 1,
+              dueVendors: 1,
+              created: 1,
+              skipped: 0,
+              failed: 0,
+            },
+            createdDrafts: [
+              {
+                vendorId: input.vendorId ?? getCurrentVendorId(),
+                settlementApprovalId: `mock-scheduled-settlement-${input.vendorId ?? getCurrentVendorId()}`,
+                status: 'draft',
+                lineCount: 1,
+                netPayableMinor: 305910,
+              },
+            ],
+            skipped: [],
+            failed: [],
+            dryRun: {
+              ok: true as const,
+              writesPerformed: false as const,
+              runDate: input.runDate ?? new Date().toISOString().slice(0, 10),
+              periodEnd: `${input.runDate ?? new Date().toISOString().slice(0, 10)}T23:59:59.999Z`,
+              summary: {
+                vendorsChecked: 1,
+                dueVendors: 1,
+                autoDraftEligibleVendors: 1,
+                totalEligibleLineCount: 1,
+                totalNetPayableMinor: 305910,
+              },
+              vendors: [],
+              notes: ['Draft creation used the existing scheduled settlement endpoint.'],
+            },
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

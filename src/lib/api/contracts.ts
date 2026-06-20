@@ -1399,6 +1399,81 @@ export type VendorFinancialProfile = {
   source: 'configured' | 'default';
 };
 
+export type SettlementScheduleFrequencyType = 'WEEKLY' | 'BIWEEKLY';
+export type SettlementScheduleWeekday = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY';
+
+export type SettlementScheduleProfile = {
+  settlementDelayDays: number;
+  settlementFrequencyType: SettlementScheduleFrequencyType;
+  weeklySettlementDay: SettlementScheduleWeekday;
+  autoSettlementDraftEnabled: boolean;
+  autoSettlementApproveEnabled: boolean;
+  autoSettlementInvoiceEnabled: boolean;
+};
+
+export type SettlementScheduleDryRunVendor = {
+  vendorId: string;
+  vendorName: string | null;
+  due: boolean;
+  dueReason: string;
+  schedule: SettlementScheduleProfile;
+  eligibleLineCount: number;
+  excludedActiveApprovalRowCount: number;
+  netPayableMinor: number;
+  pendingRefundAdjustmentCount: number;
+  pendingRefundAdjustmentTotalMinor: number;
+  netAfterPendingRefundAdjustmentsMinor: number;
+  canCreateDraft: boolean;
+  blockedReason: string | null;
+  warnings: string[];
+};
+
+export type SettlementScheduleDryRunResponse = {
+  ok: true;
+  writesPerformed: false;
+  runDate: string;
+  periodEnd: string;
+  summary: {
+    vendorsChecked: number;
+    dueVendors: number;
+    autoDraftEligibleVendors: number;
+    totalEligibleLineCount: number;
+    totalNetPayableMinor: number;
+  };
+  vendors: SettlementScheduleDryRunVendor[];
+  notes: string[];
+};
+
+export type SettlementScheduleCreateDraftsResponse = {
+  ok: true;
+  writesPerformed: boolean;
+  runDate: string;
+  periodEnd: string;
+  summary: {
+    vendorsChecked: number;
+    dueVendors: number;
+    created: number;
+    skipped: number;
+    failed: number;
+  };
+  createdDrafts: Array<{
+    vendorId: string;
+    settlementApprovalId: string;
+    status: string;
+    lineCount: number;
+    netPayableMinor: number;
+  }>;
+  skipped: Array<{
+    vendorId: string;
+    reason: string;
+  }>;
+  failed: Array<{
+    vendorId: string;
+    reason: string;
+  }>;
+  dryRun: SettlementScheduleDryRunResponse;
+};
+
 export type VendorBillingProfile = {
   id: string;
   vendorId: string;

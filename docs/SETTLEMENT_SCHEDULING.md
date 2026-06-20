@@ -22,6 +22,28 @@ Scheduled runs create draft settlement approvals only when:
 
 Phase 4A does not auto approve settlements, create Logo invoices, create payouts, or call payment providers.
 
+## Phase 4B Scheduled Settlement Workspace
+
+Operators can review scheduled settlement candidates from:
+
+`/admin/finance/settlement-schedules`
+
+Workflow:
+
+Dry Run
+↓
+Review due vendors, blockers, existing drafts, and pending refund adjustments
+↓
+Create Drafts
+↓
+Open Settlement Workspace
+↓
+Approve
+↓
+Invoice
+
+The workspace is an operator UI on top of the existing dry-run and draft-creation endpoints. Dry run is read-only. Draft creation still creates draft settlement approvals only; it does not auto approve, create Logo invoices, create payouts, or call payment providers.
+
 ## Examples
 
 21 days delay with weekly Wednesday settlement:
