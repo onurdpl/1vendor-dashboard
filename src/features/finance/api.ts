@@ -21,6 +21,7 @@ export type {
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
   SettlementScheduleDryRunVendor,
+  SettlementScheduleState,
   VendorDebtHistory,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';

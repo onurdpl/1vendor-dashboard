@@ -4,6 +4,9 @@ const prismaMock = vi.hoisted(() => ({
   vendorFinancialProfile: {
     findMany: vi.fn(),
   },
+  settlementApproval: {
+    findFirst: vi.fn(),
+  },
 }));
 
 const previewApprovalMock = vi.hoisted(() => vi.fn());
@@ -105,6 +108,7 @@ describe('settlement schedule service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.vendorFinancialProfile.findMany.mockResolvedValue([profileRow()]);
+    prismaMock.settlementApproval.findFirst.mockResolvedValue(null);
     previewApprovalMock.mockResolvedValue(preview());
     createDraftApprovalMock.mockResolvedValue({
       ok: true,
@@ -157,6 +161,10 @@ describe('settlement schedule service', () => {
     expect(result.vendors[0]).toEqual(expect.objectContaining({
       vendorId: 'yalispor',
       due: true,
+      state: 'READY',
+      scheduledCycleKey: 'scheduled-settlement:yalispor:2026-01-21',
+      existingSettlementApprovalId: null,
+      existingSettlementApprovalStatus: null,
       canCreateDraft: true,
       eligibleLineCount: 2,
       netPayableMinor: 88000,
@@ -170,6 +178,57 @@ describe('settlement schedule service', () => {
         asOfDate: new Date('2026-01-21T23:59:59.999Z'),
       },
     );
+  });
+
+  it('dry-run detects existing DRAFT scheduled approval for the same vendor run date', async () => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue({
+      id: 'approval-existing-draft',
+      status: 'DRAFT',
+    });
+
+    const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21', vendorId: 'yalispor' });
+
+    expect(result.summary.autoDraftEligibleVendors).toBe(0);
+    expect(result.vendors[0]).toEqual(expect.objectContaining({
+      state: 'DRAFT_EXISTS',
+      canCreateDraft: false,
+      existingSettlementApprovalId: 'approval-existing-draft',
+      existingSettlementApprovalStatus: 'draft',
+      blockedReason: 'Scheduled settlement cycle already has an approval.',
+    }));
+  });
+
+  it('dry-run detects existing APPROVED scheduled approval and blocks late rows for the same run date', async () => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue({
+      id: 'approval-existing-approved',
+      status: 'APPROVED',
+    });
+
+    const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21', vendorId: 'yalispor' });
+
+    expect(result.summary.autoDraftEligibleVendors).toBe(0);
+    expect(result.vendors[0]).toEqual(expect.objectContaining({
+      state: 'SETTLEMENT_EXISTS',
+      canCreateDraft: false,
+      eligibleLineCount: 2,
+      existingSettlementApprovalId: 'approval-existing-approved',
+      existingSettlementApprovalStatus: 'approved',
+    }));
+  });
+
+  it('ignores cancelled scheduled approvals for cycle blocking', async () => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue(null);
+
+    const result = await getSettlementScheduleDryRun({ runDate: '2026-01-21', vendorId: 'yalispor' });
+
+    expect(prismaMock.settlementApproval.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: {
+          not: 'CANCELLED',
+        },
+      }),
+    }));
+    expect(result.vendors[0].state).toBe('READY');
   });
 
   it('does not preview vendors that are not due', async () => {
@@ -207,8 +266,31 @@ describe('settlement schedule service', () => {
       vendorId: 'yalispor',
       periodEnd: new Date('2026-01-21T23:59:59.999Z'),
       asOfDate: new Date('2026-01-21T23:59:59.999Z'),
+      scheduledRunDate: new Date('2026-01-21T00:00:00.000Z'),
+      scheduledPeriodEnd: new Date('2026-01-21T23:59:59.999Z'),
+      scheduledCycleKey: 'scheduled-settlement:yalispor:2026-01-21',
       candidateScope: 'date_range',
     }));
+  });
+
+  it('skips create-drafts when the scheduled cycle already has an approved settlement', async () => {
+    prismaMock.settlementApproval.findFirst.mockResolvedValue({
+      id: 'approval-existing-approved',
+      status: 'APPROVED',
+    });
+
+    const result = await createSettlementScheduleDrafts({
+      runDate: '2026-01-21',
+      confirmAutoSettlementDrafts: true,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary.created).toBe(0);
+    expect(result.skipped[0]).toEqual({
+      vendorId: 'yalispor',
+      reason: 'Scheduled settlement cycle already has an approval.',
+    });
+    expect(createDraftApprovalMock).not.toHaveBeenCalled();
   });
 
   it('skips adjustment-only previews and surfaces the existing settlement blocker', async () => {

@@ -2239,6 +2239,10 @@ export const runtimeServices = {
                 vendorName: finance.profile?.vendorId ?? vendorId,
                 due: true,
                 dueReason: `Weekly ${finance.profile?.weeklySettlementDay ?? 'WEDNESDAY'} run is due.`,
+                state: 'READY' as const,
+                scheduledCycleKey: `scheduled-settlement:${vendorId}:${runDate}`,
+                existingSettlementApprovalId: null,
+                existingSettlementApprovalStatus: null,
                 schedule: {
                   settlementDelayDays: finance.profile?.settlementDelayDays ?? 21,
                   settlementFrequencyType: finance.profile?.settlementFrequencyType ?? 'WEEKLY',

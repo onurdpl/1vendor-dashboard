@@ -1411,12 +1411,26 @@ export type SettlementScheduleProfile = {
   autoSettlementInvoiceEnabled: boolean;
 };
 
+export type SettlementScheduleState =
+  | 'READY'
+  | 'DRAFT_EXISTS'
+  | 'SETTLEMENT_EXISTS'
+  | 'NOT_DUE'
+  | 'AUTO_DRAFT_DISABLED'
+  | 'NO_ELIGIBLE_ROWS'
+  | 'BLOCKED'
+  | 'CONFIG_MISSING';
+
 export type SettlementScheduleDryRunVendor = {
   vendorId: string;
   vendorName: string | null;
   due: boolean;
   dueReason: string;
   schedule: SettlementScheduleProfile;
+  state: SettlementScheduleState;
+  scheduledCycleKey: string;
+  existingSettlementApprovalId: string | null;
+  existingSettlementApprovalStatus: 'draft' | 'approved' | 'cancelled' | null;
   eligibleLineCount: number;
   excludedActiveApprovalRowCount: number;
   netPayableMinor: number;

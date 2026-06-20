@@ -1,3 +1,4 @@
+import { SettlementApprovalStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   createDraftApproval,
@@ -18,12 +19,26 @@ export type SettlementScheduleProfileDto = {
   autoSettlementInvoiceEnabled: boolean;
 };
 
+export type SettlementScheduleStateDto =
+  | 'READY'
+  | 'DRAFT_EXISTS'
+  | 'SETTLEMENT_EXISTS'
+  | 'NOT_DUE'
+  | 'AUTO_DRAFT_DISABLED'
+  | 'NO_ELIGIBLE_ROWS'
+  | 'BLOCKED'
+  | 'CONFIG_MISSING';
+
 export type SettlementScheduleDryRunVendorDto = {
   vendorId: string;
   vendorName: string | null;
   due: boolean;
   dueReason: string;
   schedule: SettlementScheduleProfileDto;
+  state: SettlementScheduleStateDto;
+  scheduledCycleKey: string;
+  existingSettlementApprovalId: string | null;
+  existingSettlementApprovalStatus: 'draft' | 'approved' | 'cancelled' | null;
   preview: SettlementApprovalPreviewDto | null;
   eligibleLineCount: number;
   excludedActiveApprovalRowCount: number;
@@ -95,6 +110,11 @@ type SettlementScheduleProfileRow = {
   } | null;
 };
 
+type ExistingScheduledApproval = {
+  id: string;
+  status: SettlementApprovalStatus;
+} | null;
+
 type SettlementScheduleRequestInput = {
   runDate?: string | Date | null;
   vendorId?: string | null;
@@ -151,6 +171,10 @@ export function toSettlementRunDate(value?: string | Date | null) {
 
 export function toSettlementRunDateKey(date: Date) {
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+export function buildScheduledSettlementCycleKey(vendorId: string, runDate: Date) {
+  return `scheduled-settlement:${vendorId}:${toSettlementRunDateKey(runDate)}`;
 }
 
 function endOfUtcDay(date: Date) {
@@ -256,16 +280,75 @@ function buildAutomationWarnings(profile: SettlementScheduleProfileDto) {
   return warnings;
 }
 
+async function findExistingScheduledApproval(vendorId: string, scheduledCycleKey: string): Promise<ExistingScheduledApproval> {
+  return prisma.settlementApproval.findFirst({
+    where: {
+      vendorId,
+      scheduledCycleKey,
+      status: {
+        not: SettlementApprovalStatus.CANCELLED,
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+}
+
+function toApprovalStatusDto(status: SettlementApprovalStatus): 'draft' | 'approved' | 'cancelled' {
+  return status.toLowerCase() as 'draft' | 'approved' | 'cancelled';
+}
+
+function getScheduleState(input: {
+  due: boolean;
+  schedule: SettlementScheduleProfileDto;
+  eligibleLineCount: number;
+  blockedReason: string | null;
+  existingApproval: ExistingScheduledApproval;
+}): SettlementScheduleStateDto {
+  if (input.existingApproval?.status === SettlementApprovalStatus.DRAFT) {
+    return 'DRAFT_EXISTS';
+  }
+  if (input.existingApproval?.status === SettlementApprovalStatus.APPROVED) {
+    return 'SETTLEMENT_EXISTS';
+  }
+  if (!input.schedule.weeklySettlementDay || !input.schedule.settlementFrequencyType) {
+    return 'CONFIG_MISSING';
+  }
+  if (!input.due) {
+    return 'NOT_DUE';
+  }
+  if (!input.schedule.autoSettlementDraftEnabled) {
+    return 'AUTO_DRAFT_DISABLED';
+  }
+  if (input.eligibleLineCount > 0) {
+    return 'READY';
+  }
+  if (input.eligibleLineCount === 0 && /no eligible/i.test(input.blockedReason ?? '')) {
+    return 'NO_ELIGIBLE_ROWS';
+  }
+  return 'BLOCKED';
+}
+
 function summarizeDryRunVendor(input: {
   row: SettlementScheduleProfileRow;
   runDate: Date;
+  scheduledCycleKey: string;
+  existingApproval: ExistingScheduledApproval;
   preview: SettlementApprovalPreviewDto | null;
 }) {
   const schedule = normalizeProfile(input.row);
   const dueResult = evaluateSettlementScheduleDue(schedule, input.runDate);
   const eligibleLineCount = input.preview?.summary.eligibleRowCount ?? 0;
   const pendingRefundAdjustmentCount = input.preview?.summary.pendingRefundAdjustmentCount ?? 0;
-  const blockedReason = !dueResult.due
+  const cycleBlocker = input.existingApproval
+    ? 'Scheduled settlement cycle already has an approval.'
+    : null;
+  const blockedReason = cycleBlocker ?? (!dueResult.due
     ? dueResult.reason
     : !schedule.autoSettlementDraftEnabled
       ? 'Auto settlement draft is disabled for this vendor.'
@@ -273,7 +356,14 @@ function summarizeDryRunVendor(input: {
         ? 'Adjustment-only settlement drafts are not supported yet.'
         : eligibleLineCount === 0
           ? 'No eligible settlement rows are available for auto draft.'
-          : null;
+          : null);
+  const state = getScheduleState({
+    due: dueResult.due,
+    schedule,
+    eligibleLineCount,
+    blockedReason,
+    existingApproval: input.existingApproval,
+  });
 
   return {
     vendorId: input.row.vendorId,
@@ -281,6 +371,10 @@ function summarizeDryRunVendor(input: {
     due: dueResult.due,
     dueReason: dueResult.reason,
     schedule,
+    state,
+    scheduledCycleKey: input.scheduledCycleKey,
+    existingSettlementApprovalId: input.existingApproval?.id ?? null,
+    existingSettlementApprovalStatus: input.existingApproval ? toApprovalStatusDto(input.existingApproval.status) : null,
     preview: input.preview,
     eligibleLineCount,
     excludedActiveApprovalRowCount: input.preview?.summary.excludedActiveApprovalRowCount ?? 0,
@@ -288,7 +382,7 @@ function summarizeDryRunVendor(input: {
     pendingRefundAdjustmentCount,
     pendingRefundAdjustmentTotalMinor: input.preview?.summary.pendingRefundAdjustmentTotalMinor ?? 0,
     netAfterPendingRefundAdjustmentsMinor: input.preview?.summary.netAfterPendingRefundAdjustmentsMinor ?? 0,
-    canCreateDraft: dueResult.due && schedule.autoSettlementDraftEnabled && eligibleLineCount > 0,
+    canCreateDraft: state === 'READY',
     blockedReason,
     warnings: buildAutomationWarnings(schedule),
   };
@@ -305,13 +399,15 @@ export async function getSettlementScheduleDryRun(
   for (const row of rows) {
     const schedule = normalizeProfile(row);
     const dueResult = evaluateSettlementScheduleDue(schedule, runDate);
+    const scheduledCycleKey = buildScheduledSettlementCycleKey(row.vendorId, runDate);
+    const existingApproval = await findExistingScheduledApproval(row.vendorId, scheduledCycleKey);
     const preview = dueResult.due
       ? await previewApproval(row.vendorId, null, periodEnd, {
           candidateScope: 'date_range',
           asOfDate: periodEnd,
         })
       : null;
-    vendors.push(summarizeDryRunVendor({ row, runDate, preview }));
+    vendors.push(summarizeDryRunVendor({ row, runDate, scheduledCycleKey, existingApproval, preview }));
   }
 
   return {
@@ -330,6 +426,7 @@ export async function getSettlementScheduleDryRun(
     notes: [
       'Dry run is read-only and reuses settlement approval preview eligibility.',
       'Scheduled previews use periodEnd at the end of runDate and asOfDate equal to that periodEnd.',
+      'Scheduled cycle identity allows one non-cancelled settlement approval per vendor per run date.',
       'Biweekly schedules use ISO week parity for the every-second-week rule until a dedicated business cycle field is introduced.',
       'Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.',
     ],
@@ -352,7 +449,9 @@ export async function createSettlementScheduleDrafts(
     if (!vendor.canCreateDraft) {
       skipped.push({
         vendorId: vendor.vendorId,
-        reason: vendor.blockedReason ?? 'Vendor is not eligible for scheduled auto draft.',
+        reason: vendor.state === 'DRAFT_EXISTS' || vendor.state === 'SETTLEMENT_EXISTS'
+          ? 'Scheduled settlement cycle already has an approval.'
+          : vendor.blockedReason ?? 'Vendor is not eligible for scheduled auto draft.',
       });
       continue;
     }
@@ -362,6 +461,9 @@ export async function createSettlementScheduleDrafts(
         vendorId: vendor.vendorId,
         periodEnd: new Date(dryRun.periodEnd),
         asOfDate: new Date(dryRun.periodEnd),
+        scheduledRunDate: toSettlementRunDate(dryRun.runDate),
+        scheduledPeriodEnd: new Date(dryRun.periodEnd),
+        scheduledCycleKey: vendor.scheduledCycleKey,
         candidateScope: 'date_range',
         notes: `Auto settlement draft generated for ${dryRun.runDate}.`,
       });

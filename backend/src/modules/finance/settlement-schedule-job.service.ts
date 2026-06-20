@@ -102,6 +102,7 @@ function isExistingDraftReason(reason: string) {
 }
 
 function getVendorDryRunState(vendor: SettlementScheduleDryRunVendorDto) {
+  if (vendor.state) return vendor.state;
   if (!vendor.due) return 'NOT_DUE';
   if (!vendor.schedule.autoSettlementDraftEnabled) return 'AUTO_DRAFT_DISABLED';
   if (vendor.canCreateDraft) return 'READY';

@@ -9,13 +9,11 @@ import type {
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
 } from '../lib/api/contracts';
-import type { SettlementApprovalListResponse } from '../features/finance/settlementApprovalsApi';
 
 const getSettlementScheduleDryRunMock = vi.fn<() => Promise<SettlementScheduleDryRunResponse>>();
 const createSettlementScheduleDraftsMock = vi.fn<() => Promise<SettlementScheduleCreateDraftsResponse>>();
 const getSettlementScheduleAutoDraftJobStatusMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobStatusResponse>>();
 const runSettlementScheduleAutoDraftJobMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobResponse>>();
-const listSettlementApprovalsMock = vi.fn<(vendorId: string) => Promise<SettlementApprovalListResponse>>();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
@@ -25,16 +23,6 @@ vi.mock('../features/finance/api', async () => {
     createSettlementScheduleDrafts: (input: unknown) => createSettlementScheduleDraftsMock(input as never),
     getSettlementScheduleAutoDraftJobStatus: () => getSettlementScheduleAutoDraftJobStatusMock(),
     runSettlementScheduleAutoDraftJob: (input: unknown) => runSettlementScheduleAutoDraftJobMock(input as never),
-  };
-});
-
-vi.mock('../features/finance/settlementApprovalsApi', async () => {
-  const actual = await vi.importActual<typeof import('../features/finance/settlementApprovalsApi')>(
-    '../features/finance/settlementApprovalsApi',
-  );
-  return {
-    ...actual,
-    listSettlementApprovals: (vendorId: string) => listSettlementApprovalsMock(vendorId),
   };
 });
 
@@ -56,6 +44,10 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
       vendorName: 'Yalı Spor',
       due: true,
       dueReason: 'Weekly WEDNESDAY run is due.',
+      state: 'READY',
+      scheduledCycleKey: 'scheduled-settlement:yalispor:2026-06-24',
+      existingSettlementApprovalId: null,
+      existingSettlementApprovalStatus: null,
       schedule: {
         settlementDelayDays: 21,
         settlementFrequencyType: 'WEEKLY',
@@ -79,6 +71,10 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
       vendorName: 'Sporjinal',
       due: false,
       dueReason: 'Configured settlement weekday is FRIDAY; run date is WEDNESDAY.',
+      state: 'NOT_DUE',
+      scheduledCycleKey: 'scheduled-settlement:sporjinal:2026-06-24',
+      existingSettlementApprovalId: null,
+      existingSettlementApprovalStatus: null,
       schedule: {
         settlementDelayDays: 14,
         settlementFrequencyType: 'BIWEEKLY',
@@ -102,6 +98,10 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
       vendorName: 'Disabled Vendor',
       due: true,
       dueReason: 'Weekly WEDNESDAY run is due.',
+      state: 'AUTO_DRAFT_DISABLED',
+      scheduledCycleKey: 'scheduled-settlement:disabled-vendor:2026-06-24',
+      existingSettlementApprovalId: null,
+      existingSettlementApprovalStatus: null,
       schedule: {
         settlementDelayDays: 21,
         settlementFrequencyType: 'WEEKLY',
@@ -125,6 +125,10 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
       vendorName: 'Empty Vendor',
       due: true,
       dueReason: 'Weekly WEDNESDAY run is due.',
+      state: 'NO_ELIGIBLE_ROWS',
+      scheduledCycleKey: 'scheduled-settlement:empty-vendor:2026-06-24',
+      existingSettlementApprovalId: null,
+      existingSettlementApprovalStatus: null,
       schedule: {
         settlementDelayDays: 21,
         settlementFrequencyType: 'WEEKLY',
@@ -148,6 +152,10 @@ const dryRunResponse: SettlementScheduleDryRunResponse = {
       vendorName: 'Draft Vendor',
       due: true,
       dueReason: 'Weekly WEDNESDAY run is due.',
+      state: 'DRAFT_EXISTS',
+      scheduledCycleKey: 'scheduled-settlement:draft-vendor:2026-06-24',
+      existingSettlementApprovalId: 'approval-existing-draft',
+      existingSettlementApprovalStatus: 'draft',
       schedule: {
         settlementDelayDays: 21,
         settlementFrequencyType: 'WEEKLY',
@@ -230,29 +238,6 @@ const autoDraftJobResult: SettlementScheduleAutoDraftJobResponse = {
   jobRun: null,
 };
 
-function approvalsResponse(vendorId: string, draftId?: string): SettlementApprovalListResponse {
-  return {
-    ok: true,
-    writesPerformed: false,
-    vendorId,
-    approvals: draftId
-      ? [
-          {
-            id: draftId,
-            createdAt: '2026-06-20T08:00:00Z',
-            vendorId,
-            status: 'draft',
-            currency: 'TRY',
-            grossSalesMinor: 759800,
-            netPayableMinor: 623036,
-            approvedAt: null,
-            lineCount: 2,
-          },
-        ]
-      : [],
-  };
-}
-
 function renderPage() {
   render(
     <MemoryRouter>
@@ -277,7 +262,6 @@ describe('AdminScheduledSettlementsPage', () => {
     createSettlementScheduleDraftsMock.mockReset();
     getSettlementScheduleAutoDraftJobStatusMock.mockReset();
     runSettlementScheduleAutoDraftJobMock.mockReset();
-    listSettlementApprovalsMock.mockReset();
     getSettlementScheduleDryRunMock.mockResolvedValue(dryRunResponse);
     getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue(autoDraftJobStatus);
     runSettlementScheduleAutoDraftJobMock.mockResolvedValue(autoDraftJobResult);
@@ -306,9 +290,6 @@ describe('AdminScheduledSettlementsPage', () => {
       failed: [{ vendorId: 'blocked-vendor', reason: 'Requires review.' }],
       dryRun: dryRunResponse,
     });
-    listSettlementApprovalsMock.mockImplementation((vendorId) =>
-      Promise.resolve(approvalsResponse(vendorId, vendorId === 'draft-vendor' ? 'approval-existing-draft' : undefined)),
-    );
   });
 
   it('loads dry run data and renders summary cards, state labels, blockers, draft links, and refund badges', async () => {
@@ -320,9 +301,11 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(summary).getByText('Due vendors')).toBeInTheDocument();
     expect(within(summary).getByText('Ready for draft')).toBeInTheDocument();
     expect(within(summary).getByText('Draft exists')).toBeInTheDocument();
+    expect(within(summary).getByText('Already processed')).toBeInTheDocument();
     expect(within(summary).getByText('Estimated net payable')).toBeInTheDocument();
     expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('1');
     expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('1');
+    expect(getSummaryCard(summary, 'Already processed')).toHaveTextContent('0');
     expect(screen.getAllByText('Ready')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Not due')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Auto draft off')[0]).toBeInTheDocument();
@@ -341,26 +324,39 @@ describe('AdminScheduledSettlementsPage', () => {
     );
   });
 
-  it('keeps ready summary and header count aligned while excluding draft-exists vendors', async () => {
-    listSettlementApprovalsMock.mockImplementation((vendorId) =>
-      Promise.resolve(approvalsResponse(
-        vendorId,
-        vendorId === 'yalispor'
-          ? 'approval-yalispor-existing'
-          : vendorId === 'draft-vendor'
-            ? 'approval-existing-draft'
-            : undefined,
-      )),
-    );
+  it('keeps ready summary and header count aligned while excluding existing scheduled cycles', async () => {
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ...dryRunResponse,
+      summary: {
+        ...dryRunResponse.summary,
+        autoDraftEligibleVendors: 0,
+      },
+      vendors: dryRunResponse.vendors.map((vendor) =>
+        vendor.vendorId === 'yalispor'
+          ? {
+              ...vendor,
+              state: 'SETTLEMENT_EXISTS',
+              canCreateDraft: false,
+              existingSettlementApprovalId: 'approval-yalispor-approved',
+              existingSettlementApprovalStatus: 'approved',
+              blockedReason: 'Scheduled settlement cycle already has an approval.',
+            }
+          : vendor,
+      ),
+    });
 
     renderPage();
 
-    await waitFor(() => expect(screen.getAllByText('Draft exists').length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getAllByText('Settlement already processed').length).toBeGreaterThan(0));
     const summary = screen.getByLabelText('Scheduled settlement summary');
     expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('0');
-    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('2');
+    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('1');
+    expect(getSummaryCard(summary, 'Already processed')).toHaveTextContent('1');
     expect(screen.getByText('0 ready')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
+    expect(screen.getAllByRole('link', { name: 'Open Settlement' }).some((link) =>
+      link.getAttribute('href') === '/admin/finance/settlement-approvals?approvalId=approval-yalispor-approved',
+    )).toBe(true);
   });
 
   it('shows compact blocker chips in the vendor list and full blocker details in the drawer', async () => {
@@ -489,6 +485,7 @@ describe('AdminScheduledSettlementsPage', () => {
       },
       vendors: dryRunResponse.vendors.map((vendor) => ({
         ...vendor,
+        state: vendor.existingSettlementApprovalId ? vendor.state : 'NO_ELIGIBLE_ROWS',
         canCreateDraft: false,
         blockedReason: vendor.blockedReason ?? 'No eligible settlement rows are available for auto draft.',
       })),

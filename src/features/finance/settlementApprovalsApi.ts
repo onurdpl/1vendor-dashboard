@@ -150,6 +150,9 @@ export type SettlementApproval = {
   status: SettlementApprovalStatus;
   periodStart: string | null;
   periodEnd: string | null;
+  scheduledRunDate?: string | null;
+  scheduledPeriodEnd?: string | null;
+  scheduledCycleKey?: string | null;
   currency: string;
   grossSalesMinor: number;
   refundTotalMinor: number;
@@ -174,6 +177,9 @@ export type SettlementApprovalSummary = {
   grossSalesMinor: number;
   netPayableMinor: number;
   approvedAt: string | null;
+  scheduledRunDate?: string | null;
+  scheduledPeriodEnd?: string | null;
+  scheduledCycleKey?: string | null;
   lineCount: number;
 };
 

@@ -61,6 +61,9 @@ type SettlementApprovalInput = {
   periodEnd?: Date | null;
   asOfDate?: Date | null;
   notes?: string | null;
+  scheduledRunDate?: Date | null;
+  scheduledPeriodEnd?: Date | null;
+  scheduledCycleKey?: string | null;
   candidateScope?: CandidateScope | null;
   selectedOrderIds?: string[];
   selectedShopifyOrderIds?: string[];
@@ -255,6 +258,9 @@ export type SettlementApprovalDto = {
   status: 'draft' | 'approved' | 'cancelled';
   periodStart: string | null;
   periodEnd: string | null;
+  scheduledRunDate: string | null;
+  scheduledPeriodEnd: string | null;
+  scheduledCycleKey: string | null;
   currency: string;
   grossSalesMinor: number;
   refundTotalMinor: number;
@@ -279,6 +285,9 @@ export type SettlementApprovalSummaryDto = {
   grossSalesMinor: number;
   netPayableMinor: number;
   approvedAt: string | null;
+  scheduledRunDate: string | null;
+  scheduledPeriodEnd: string | null;
+  scheduledCycleKey: string | null;
   lineCount: number;
 };
 
@@ -1867,6 +1876,9 @@ function mapApproval(
     status: approval.status.toLowerCase() as SettlementApprovalDto['status'],
     periodStart: toIso(approval.periodStart),
     periodEnd: toIso(approval.periodEnd),
+    scheduledRunDate: toIso(approval.scheduledRunDate),
+    scheduledPeriodEnd: toIso(approval.scheduledPeriodEnd),
+    scheduledCycleKey: approval.scheduledCycleKey,
     currency: approval.currency,
     grossSalesMinor: approval.grossSalesMinor,
     refundTotalMinor: approval.refundTotalMinor,
@@ -1907,6 +1919,9 @@ function mapApprovalSummary(approval: SettlementApproval & { _count: { lines: nu
     grossSalesMinor: approval.grossSalesMinor,
     netPayableMinor: approval.netPayableMinor,
     approvedAt: toIso(approval.approvedAt),
+    scheduledRunDate: toIso(approval.scheduledRunDate),
+    scheduledPeriodEnd: toIso(approval.scheduledPeriodEnd),
+    scheduledCycleKey: approval.scheduledCycleKey,
     lineCount: approval._count.lines,
   };
 }
@@ -1970,6 +1985,24 @@ export async function createDraftApproval(
         }
         throw new Error('No eligible settlement rows are available for approval.');
       }
+      if (input.scheduledCycleKey) {
+        const existingScheduledApproval = await tx.settlementApproval.findFirst({
+          where: {
+            vendorId: input.vendorId,
+            scheduledCycleKey: input.scheduledCycleKey,
+            status: {
+              not: SettlementApprovalStatus.CANCELLED,
+            },
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+        });
+        if (existingScheduledApproval) {
+          throw new Error('Scheduled settlement cycle already has an approval.');
+        }
+      }
       let availablePayableMinor = Math.max(preview.summary.netPayableMinor, 0);
       const appliedAdjustmentPlans: Array<{
         record: PendingRefundAdjustmentApplicationPreview['records'][number];
@@ -2025,6 +2058,9 @@ export async function createDraftApproval(
           vendorId: input.vendorId,
           periodStart: input.periodStart ?? null,
           periodEnd: input.periodEnd ?? null,
+          scheduledRunDate: input.scheduledRunDate ?? null,
+          scheduledPeriodEnd: input.scheduledPeriodEnd ?? null,
+          scheduledCycleKey: input.scheduledCycleKey ?? null,
           status: SettlementApprovalStatus.DRAFT,
           currency: 'TRY',
           grossSalesMinor: settlementTotals.grossSalesMinor,
@@ -2038,6 +2074,9 @@ export async function createDraftApproval(
             periodStart: toIso(input.periodStart),
             periodEnd: toIso(input.periodEnd),
             asOfDate: toIso(input.asOfDate),
+            scheduledRunDate: toIso(input.scheduledRunDate),
+            scheduledPeriodEnd: toIso(input.scheduledPeriodEnd),
+            scheduledCycleKey: input.scheduledCycleKey ?? null,
             candidateScope: preview.candidateScope,
             candidateSelectionSummary: preview.candidateSelectionSummary,
             generatedAt: generatedAt.toISOString(),

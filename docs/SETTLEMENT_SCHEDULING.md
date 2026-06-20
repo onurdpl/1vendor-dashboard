@@ -73,6 +73,25 @@ Only when all of the following are true can the job create draft settlements:
 
 The job is idempotent by run date through `SettlementScheduleJobRun`. Re-running the same run date does not create duplicate drafts.
 
+## Phase 4C.1 Scheduled Cycle Identity
+
+Scheduled settlement drafts also carry a per-vendor cycle identity:
+
+`scheduled-settlement:{vendorId}:{YYYY-MM-DD}`
+
+Only scheduled-created approvals receive this identity. Manual settlement approvals can keep the scheduled fields empty.
+
+Rules:
+
+- one non-cancelled scheduled settlement approval is allowed per vendor per run date
+- an existing scheduled `DRAFT` approval returns `DRAFT_EXISTS`
+- an existing scheduled `APPROVED` approval returns `SETTLEMENT_EXISTS`
+- `CANCELLED` scheduled approvals do not block recreation for the same run date
+- late-arriving eligible rows after a scheduled cycle was approved are not merged into the old settlement
+- late-arriving eligible rows must wait for the next scheduled cycle
+
+The Scheduled Settlements workspace uses the backend dry-run state for these decisions. It should not infer cycle state from recent drafts alone.
+
 The job creates draft settlement approvals only. It does not approve settlements, create Logo invoices, create commission invoice records, create payment records, or execute payouts.
 
 Deployment scheduler note:

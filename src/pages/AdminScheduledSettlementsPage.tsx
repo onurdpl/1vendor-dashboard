@@ -19,20 +19,11 @@ import {
   type SettlementScheduleCreateDraftsResponse,
   type SettlementScheduleDryRunResponse,
   type SettlementScheduleDryRunVendor,
+  type SettlementScheduleState,
 } from '../features/finance/api';
-import { listSettlementApprovals, type SettlementApprovalSummary } from '../features/finance/settlementApprovalsApi';
 import { formatCurrency, formatDateTime, safeStatusLabel } from '../services/real/formatting';
 
-type ScheduleState =
-  | 'READY'
-  | 'NOT_DUE'
-  | 'AUTO_DRAFT_DISABLED'
-  | 'NO_ELIGIBLE_ROWS'
-  | 'CONFIG_MISSING'
-  | 'BLOCKED'
-  | 'DRAFT_EXISTS';
-
-const STATE_LABELS: Record<ScheduleState, string> = {
+const STATE_LABELS: Record<SettlementScheduleState, string> = {
   READY: 'Ready',
   NOT_DUE: 'Not due',
   AUTO_DRAFT_DISABLED: 'Auto draft off',
@@ -40,6 +31,7 @@ const STATE_LABELS: Record<ScheduleState, string> = {
   CONFIG_MISSING: 'Missing config',
   BLOCKED: 'Blocked',
   DRAFT_EXISTS: 'Draft exists',
+  SETTLEMENT_EXISTS: 'Settlement already processed',
 };
 
 const WEEKDAY_LABELS: Record<string, string> = {
@@ -62,44 +54,12 @@ function getVendorName(vendor: SettlementScheduleDryRunVendor) {
   return vendor.vendorName || vendor.vendorId;
 }
 
-function getScheduleState(vendor: SettlementScheduleDryRunVendor, existingDraft: SettlementApprovalSummary | null): ScheduleState {
-  if (existingDraft) {
-    return 'DRAFT_EXISTS';
-  }
-  if (!vendor.schedule?.weeklySettlementDay || !vendor.schedule?.settlementFrequencyType) {
-    return 'CONFIG_MISSING';
-  }
-  if (!vendor.due) {
-    return 'NOT_DUE';
-  }
-  if (!vendor.schedule.autoSettlementDraftEnabled) {
-    return 'AUTO_DRAFT_DISABLED';
-  }
-  if (vendor.canCreateDraft) {
-    return 'READY';
-  }
-  if (vendor.eligibleLineCount === 0 && !vendor.blockedReason) {
-    return 'NO_ELIGIBLE_ROWS';
-  }
-  if (vendor.eligibleLineCount === 0 && /no eligible/i.test(vendor.blockedReason ?? '')) {
-    return 'NO_ELIGIBLE_ROWS';
-  }
-  return 'BLOCKED';
-}
-
-function getStateTone(state: ScheduleState): 'success' | 'attention' | 'warning' | 'danger' | 'neutral' | 'info' {
+function getStateTone(state: SettlementScheduleState): 'success' | 'attention' | 'warning' | 'danger' | 'neutral' | 'info' {
   if (state === 'READY') return 'success';
-  if (state === 'DRAFT_EXISTS') return 'info';
+  if (state === 'DRAFT_EXISTS' || state === 'SETTLEMENT_EXISTS') return 'info';
   if (state === 'NOT_DUE' || state === 'AUTO_DRAFT_DISABLED' || state === 'NO_ELIGIBLE_ROWS') return 'attention';
   if (state === 'CONFIG_MISSING') return 'danger';
   return 'warning';
-}
-
-function getDraftForVendor(
-  approvalsByVendor: Record<string, SettlementApprovalSummary[]>,
-  vendorId: string,
-) {
-  return approvalsByVendor[vendorId]?.find((approval) => approval.status === 'draft') ?? null;
 }
 
 function getOpenSettlementHref(approvalId: string) {
@@ -217,7 +177,6 @@ export function AdminScheduledSettlementsPage() {
   const [runDate, setRunDate] = useState(todayKey);
   const [vendorFilter, setVendorFilter] = useState('');
   const [dryRun, setDryRun] = useState<SettlementScheduleDryRunResponse | null>(null);
-  const [approvalsByVendor, setApprovalsByVendor] = useState<Record<string, SettlementApprovalSummary[]>>({});
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -247,17 +206,6 @@ export function AdminScheduledSettlementsPage() {
         }
         return response.vendors[0]?.vendorId ?? null;
       });
-      const approvalEntries = await Promise.all(
-        response.vendors.map(async (vendor) => {
-          try {
-            const approvals = await listSettlementApprovals(vendor.vendorId);
-            return [vendor.vendorId, approvals.approvals] as const;
-          } catch {
-            return [vendor.vendorId, []] as const;
-          }
-        }),
-      );
-      setApprovalsByVendor(Object.fromEntries(approvalEntries));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Scheduled settlement dry run failed.');
     } finally {
@@ -285,8 +233,9 @@ export function AdminScheduledSettlementsPage() {
     () => dryRun?.vendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? null,
     [dryRun?.vendors, selectedVendorId],
   );
-  const readyCount = dryRun?.vendors.filter((vendor) => getScheduleState(vendor, getDraftForVendor(approvalsByVendor, vendor.vendorId)) === 'READY').length ?? 0;
-  const draftExistsCount = dryRun?.vendors.filter((vendor) => getScheduleState(vendor, getDraftForVendor(approvalsByVendor, vendor.vendorId)) === 'DRAFT_EXISTS').length ?? 0;
+  const readyCount = dryRun?.vendors.filter((vendor) => vendor.state === 'READY').length ?? 0;
+  const draftExistsCount = dryRun?.vendors.filter((vendor) => vendor.state === 'DRAFT_EXISTS').length ?? 0;
+  const settlementExistsCount = dryRun?.vendors.filter((vendor) => vendor.state === 'SETTLEMENT_EXISTS').length ?? 0;
 
   async function handleCreateDrafts() {
     setCreating(true);
@@ -338,8 +287,7 @@ export function AdminScheduledSettlementsPage() {
 
   const jobModeLabel = jobStatus?.mode === 'WRITE' ? 'Write mode' : 'Dry-run mode';
   const jobEnabled = jobStatus?.enabled === true;
-  const selectedDraft = selectedVendor ? getDraftForVendor(approvalsByVendor, selectedVendor.vendorId) : null;
-  const selectedState = selectedVendor ? getScheduleState(selectedVendor, selectedDraft) : null;
+  const selectedState = selectedVendor?.state ?? null;
   const selectedBlockers = selectedVendor ? getVendorBlockers(selectedVendor) : [];
 
   return (
@@ -419,6 +367,7 @@ export function AdminScheduledSettlementsPage() {
             <KPIStatCard label="Due vendors" value={dryRun.summary.dueVendors} detail="Run date matches schedule" tone="info" />
             <KPIStatCard label="Ready for draft" value={readyCount} detail="Can create draft now" tone="success" />
             <KPIStatCard label="Draft exists" value={draftExistsCount} detail="No duplicate draft" tone="info" />
+            <KPIStatCard label="Already processed" value={settlementExistsCount} detail="Approved scheduled cycles" tone="info" />
             <KPIStatCard label="Eligible rows" value={dryRun.summary.totalEligibleLineCount} detail="Preview eligible rows" />
             <KPIStatCard label="Estimated net payable" value={formatMinor(dryRun.summary.totalNetPayableMinor)} detail="Before scheduled draft creation" tone="attention" />
           </div>
@@ -442,8 +391,7 @@ export function AdminScheduledSettlementsPage() {
                 {dryRun.vendors.length ? (
                   <div className="scheduled-vendor-list" aria-label="Scheduled vendor list">
                     {dryRun.vendors.map((vendor) => {
-                      const existingDraft = getDraftForVendor(approvalsByVendor, vendor.vendorId);
-                      const state = getScheduleState(vendor, existingDraft);
+                      const state = vendor.state;
                       const schedule = getScheduleSummary(vendor);
                       const blockers = getVendorBlockers(vendor);
                       return (
@@ -485,8 +433,8 @@ export function AdminScheduledSettlementsPage() {
                             <span>{blockers.length ? `${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : 'No blockers'}</span>
                           </span>
                           <span className="scheduled-vendor-card-draft">
-                            {existingDraft ? (
-                              <Link to={getOpenSettlementHref(existingDraft.id)}>Open Settlement</Link>
+                            {vendor.existingSettlementApprovalId ? (
+                              <Link to={getOpenSettlementHref(vendor.existingSettlementApprovalId)}>Open Settlement</Link>
                             ) : (
                               <span>No draft</span>
                             )}
@@ -564,7 +512,7 @@ export function AdminScheduledSettlementsPage() {
                       {jobResult.vendors.map((vendor) => (
                         <li key={vendor.vendorId}>
                           <span>{vendor.vendorId}</span>
-                          <span>{STATE_LABELS[vendor.state as ScheduleState] ?? safeStatusLabel(vendor.state)}</span>
+                          <span>{STATE_LABELS[vendor.state as SettlementScheduleState] ?? safeStatusLabel(vendor.state)}</span>
                           {vendor.createdSettlementApprovalId ? (
                             <Link to={getOpenSettlementHref(vendor.createdSettlementApprovalId)}>Open Settlement</Link>
                           ) : (
@@ -614,15 +562,16 @@ export function AdminScheduledSettlementsPage() {
                       <MetadataRow label="Status" value="No blockers" />
                     )}
                   </MetadataGroup>
-                  <MetadataGroup title="Existing draft">
-                    {selectedDraft ? (
+                  <MetadataGroup title="Existing settlement">
+                    {selectedVendor.existingSettlementApprovalId ? (
                       <MetadataRow
                         label="Settlement"
-                        value={<Link to={getOpenSettlementHref(selectedDraft.id)}>Open Settlement</Link>}
+                        value={<Link to={getOpenSettlementHref(selectedVendor.existingSettlementApprovalId)}>Open Settlement</Link>}
                       />
                     ) : (
                       <MetadataRow label="Settlement" value="None" />
                     )}
+                    <MetadataRow label="Cycle key" value={selectedVendor.scheduledCycleKey} />
                   </MetadataGroup>
                 </>
               ) : (

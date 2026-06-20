@@ -955,6 +955,9 @@ model SettlementApproval {
   cancelledBy        String?
   cancelledAt        DateTime?
   notes              String?
+  scheduledRunDate   DateTime?
+  scheduledPeriodEnd DateTime?
+  scheduledCycleKey  String?                   @unique
   sourceSnapshotJson Json
   vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines              SettlementApprovalLine[]
@@ -965,6 +968,7 @@ model SettlementApproval {
   vendorBalanceEvents VendorBalanceEvent[]
 
   @@index([vendorId, status])
+  @@index([vendorId, scheduledCycleKey])
   @@index([periodStart, periodEnd])
   @@index([createdAt])
 }
