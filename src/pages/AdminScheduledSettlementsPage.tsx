@@ -5,8 +5,6 @@ import {
   KPIStatCard,
   MetadataGroup,
   MetadataRow,
-  OperationalTable,
-  OperationalTableRow,
   SectionErrorRetry,
   SideDetailPanel,
   StatusBadge,
@@ -440,79 +438,68 @@ export function AdminScheduledSettlementsPage() {
                   </div>
                 ) : null}
                 {dryRun.vendors.length ? (
-                  <OperationalTable
-                    columns={[
-                      'Vendor',
-                      'Schedule',
-                      'Auto draft',
-                      'State',
-                      'Rows',
-                      'Refund adjustments',
-                      'Net payable',
-                      'Blockers',
-                      'Draft',
-                    ]}
-                    className="scheduled-settlements-table"
-                  >
+                  <div className="scheduled-vendor-list" aria-label="Scheduled vendor list">
                     {dryRun.vendors.map((vendor) => {
                       const existingDraft = getDraftForVendor(approvalsByVendor, vendor.vendorId);
                       const state = getScheduleState(vendor, existingDraft);
                       const schedule = getScheduleSummary(vendor);
                       const blockers = getVendorBlockers(vendor);
                       return (
-                        <OperationalTableRow
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className={`scheduled-vendor-card${selectedVendorId === vendor.vendorId ? ' is-selected' : ''}`}
                           key={vendor.vendorId}
-                          selected={selectedVendorId === vendor.vendorId}
-                          onSelect={() => setSelectedVendorId(vendor.vendorId)}
+                          onClick={() => setSelectedVendorId(vendor.vendorId)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedVendorId(vendor.vendorId);
+                            }
+                          }}
                         >
-                          <span>
-                            <strong>{getVendorName(vendor)}</strong>
-                            <small>{vendor.vendorId}</small>
+                          <span className="scheduled-vendor-card-top">
+                            <span className="scheduled-vendor-identity">
+                              <strong>{getVendorName(vendor)}</strong>
+                              <small>{vendor.vendorId}</small>
+                            </span>
+                            <span className="scheduled-vendor-status">
+                              <StatusBadge tone={getStateTone(state)}>{STATE_LABELS[state]}</StatusBadge>
+                              {blockers.length ? (
+                                <span className="scheduled-blocker-chip">
+                                  {blockers.length} blocker{blockers.length === 1 ? '' : 's'}
+                                </span>
+                              ) : null}
+                              <strong className="scheduled-vendor-net">{formatMinor(vendor.netPayableMinor)}</strong>
+                            </span>
                           </span>
-                          <span className="scheduled-table-schedule">
-                            <strong>{schedule.primary}</strong>
-                            <small>{schedule.secondary}</small>
+                          <span className="scheduled-vendor-card-meta">
+                            <span>{schedule.primary} · {schedule.secondary}</span>
+                            <span>{vendor.schedule.autoSettlementDraftEnabled ? 'Auto draft on' : 'Auto draft off'}</span>
+                            <span>Rows {vendor.eligibleLineCount}</span>
+                            <span>
+                              Refund adjustments {vendor.pendingRefundAdjustmentCount > 0 ? `${vendor.pendingRefundAdjustmentCount} (${formatMinor(vendor.pendingRefundAdjustmentTotalMinor)})` : 'none'}
+                            </span>
+                            <span>{blockers.length ? `${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : 'No blockers'}</span>
                           </span>
-                          <span>{vendor.schedule.autoSettlementDraftEnabled ? 'Enabled' : 'Disabled'}</span>
-                          <span><StatusBadge tone={getStateTone(state)}>{STATE_LABELS[state]}</StatusBadge></span>
-                          <span>{vendor.eligibleLineCount}</span>
-                          <span>
-                            {vendor.pendingRefundAdjustmentCount > 0 ? (
-                              <span className="scheduled-refund-badge" title={`Pending deduction amount: ${formatMinor(vendor.pendingRefundAdjustmentTotalMinor)}`}>
-                                {vendor.pendingRefundAdjustmentCount} pending
-                              </span>
-                            ) : (
-                              'None'
-                            )}
-                          </span>
-                          <span>{formatMinor(vendor.netPayableMinor)}</span>
-                          <span>
-                            {blockers.length ? (
-                              <span className="scheduled-blocker-chip" title={blockers.join(' ')}>
-                                {blockers.length} blocker{blockers.length === 1 ? '' : 's'}
-                              </span>
-                            ) : (
-                              'Clear'
-                            )}
-                          </span>
-                          <span>
+                          <span className="scheduled-vendor-card-draft">
                             {existingDraft ? (
                               <Link to={getOpenSettlementHref(existingDraft.id)}>Open Settlement</Link>
                             ) : (
-                              'None'
+                              <span>No draft</span>
                             )}
                           </span>
-                        </OperationalTableRow>
+                        </div>
                       );
                     })}
-                  </OperationalTable>
+                  </div>
                 ) : (
                   <EmptyStatePanel title="No vendors returned" description="The dry run did not return any vendor schedule profiles for this filter." />
                 )}
               </div>
 
               <div className="scheduled-settlements-card">
-                    <h3>Run Notes</h3>
+                <h3>Run Notes</h3>
                 <ul className="scheduled-notes">
                   {dryRun.notes.map((note) => (
                     <li key={note}>{note}</li>

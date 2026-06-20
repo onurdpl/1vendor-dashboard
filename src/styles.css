@@ -12160,36 +12160,93 @@ summary.provider-response-heading::-webkit-details-marker {
   justify-content: flex-end;
 }
 
-.scheduled-settlements-table .op-table-head,
-.scheduled-settlements-table .op-table-row {
-  grid-template-columns:
-    minmax(150px, 1.2fr)
-    minmax(136px, 1fr)
-    minmax(82px, 0.62fr)
-    minmax(116px, 0.82fr)
-    minmax(64px, 0.44fr)
-    minmax(118px, 0.82fr)
-    minmax(100px, 0.72fr)
-    minmax(92px, 0.66fr)
-    minmax(86px, 0.58fr);
-  align-items: center;
+.scheduled-vendor-list {
+  display: grid;
+  gap: var(--space-2);
 }
 
-.scheduled-settlements-table .op-table-row > span,
-.scheduled-settlements-table .op-table-head > span {
+.scheduled-vendor-card {
+  display: grid;
+  gap: 10px;
+  width: 100%;
   min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+  color: var(--op-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scheduled-vendor-card:hover,
+.scheduled-vendor-card:focus-visible,
+.scheduled-vendor-card.is-selected {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: rgba(37, 99, 235, 0.045);
+  outline: none;
+}
+
+.scheduled-vendor-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.scheduled-vendor-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scheduled-vendor-identity strong {
+  overflow-wrap: anywhere;
+  font-size: 0.98rem;
+}
+
+.scheduled-vendor-identity small {
+  color: var(--op-muted);
+  font-size: 0.74rem;
+}
+
+.scheduled-vendor-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scheduled-vendor-net {
+  color: var(--op-text);
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.scheduled-vendor-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  color: var(--op-muted);
+  font-size: 0.8rem;
+}
+
+.scheduled-vendor-card-meta span {
+  max-width: 100%;
+  border-radius: 999px;
+  border: 1px solid var(--op-border);
+  padding: 4px 8px;
+  background: var(--op-surface);
   overflow-wrap: anywhere;
 }
 
-.scheduled-settlements-table small {
-  display: block;
+.scheduled-vendor-card-draft {
+  display: flex;
+  justify-content: flex-end;
   color: var(--op-muted);
-  font-size: 0.72rem;
-}
-
-.scheduled-table-schedule strong {
-  display: block;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 
 .scheduled-refund-badge {
