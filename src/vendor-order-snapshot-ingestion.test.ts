@@ -44,6 +44,23 @@ vi.mock('../backend/src/integrations/odoo/odooAllocationOrderSync.service.js', (
 
 const { ingestShopifyOrderWebhook, updateShopifyOrderContactAddressSnapshotFromWebhook } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
 
+function buildSimpleOrderPayload(orderId = 2001, sku = 'SKU-1') {
+  return {
+    id: orderId,
+    name: `#${orderId}`,
+    total_price: '100.00',
+    line_items: [
+      {
+        id: orderId + 1000,
+        sku,
+        title: 'Sports Shoe',
+        quantity: 1,
+        price: '100.00',
+      },
+    ],
+  };
+}
+
 function mockSuccessfulDbWrites() {
   prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal' }]);
   prismaMock.webhookEvent.update.mockResolvedValue({});
@@ -159,6 +176,63 @@ describe('vendor order snapshot ingestion', () => {
           lineTotalVatIncluded: '200.50',
           lineTaxAmount: null,
           vatRate: '10',
+        }),
+      }),
+    );
+  });
+
+  it('preserves existing allocation workflow state when Shopify order ingestion is replayed', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-replay-preserve-blocked-state' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: buildSimpleOrderPayload(),
+    });
+
+    expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.not.objectContaining({
+          allocationStatus: expect.anything(),
+          cancellationReason: expect.anything(),
+          reassignmentRequired: expect.anything(),
+          originalVendorId: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it('preserves existing pending reassignment state during Shopify order ingestion replay', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-replay-preserve-pending-reassignment' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: buildSimpleOrderPayload(2003),
+    });
+
+    const allocationUpsert = prismaMock.vendorAllocation.upsert.mock.calls[0]?.[0];
+    expect(allocationUpsert.update).not.toHaveProperty('allocationStatus');
+    expect(allocationUpsert.update).not.toHaveProperty('cancellationReason');
+    expect(allocationUpsert.update).not.toHaveProperty('reassignmentRequired');
+    expect(allocationUpsert.update).not.toHaveProperty('originalVendorId');
+  });
+
+  it('defaults new allocations to active workflow state during Shopify order ingestion', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-new-allocation-defaults' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: buildSimpleOrderPayload(2004),
+    });
+
+    expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          allocationStatus: 'ACTIVE',
+          cancellationReason: null,
+          reassignmentRequired: false,
         }),
       }),
     );
