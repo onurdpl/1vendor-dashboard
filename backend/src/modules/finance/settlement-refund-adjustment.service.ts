@@ -5,6 +5,7 @@ import {
   SettlementRefundAdjustmentStatus,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 import { calculateRefundOffsetAmounts } from './refund-offset.service.js';
 
 const ACTIVE_COMMISSION_INVOICE_STATUSES = ['PENDING', 'CREATED', 'FAILED', 'UNKNOWN'] as const;
@@ -120,6 +121,84 @@ export type SettlementRefundAdjustmentDto = {
 
 function normalize(value: unknown) {
   return String(value ?? '').trim().toUpperCase();
+}
+
+type SaleLedgerForAdjustment = {
+  id: string;
+  vendorId: string;
+  entryType: string;
+  voidedAt?: Date | string | null;
+  payoutStatus: string;
+  settlementStatus: string;
+  commissionPercentSnapshot: unknown;
+  commissionVatPercentSnapshot: unknown;
+  settlementApprovalLines: Array<{
+    id: string;
+    settlementApproval: {
+      id: string;
+      status: string;
+      approvedAt: Date | null;
+      commissionInvoices: Array<{
+        id: string;
+        status: string;
+        createdAt: Date;
+      }>;
+    };
+  }>;
+};
+
+type ActiveSaleLedgerSelection =
+  | {
+      status: 'resolved';
+      saleLedger: SaleLedgerForAdjustment;
+      voidedSaleLedgerIds: string[];
+    }
+  | {
+      status: 'no_active_sale_ledger' | 'multiple_active_sale_ledgers' | 'economic_owner_mismatch';
+      saleLedger: null;
+      voidedSaleLedgerIds: string[];
+    };
+
+function selectActiveSaleLedgerForRefundAdjustment(input: {
+  saleLedgers: SaleLedgerForAdjustment[];
+  refundLedgerVendorId: string;
+}): ActiveSaleLedgerSelection {
+  const saleLedgers = input.saleLedgers.filter((entry) => normalize(entry.entryType) === 'SALE');
+  const voidedSaleLedgerIds = saleLedgers
+    .filter((entry) => isLedgerVoided(entry))
+    .map((entry) => entry.id);
+  const activeSaleLedgers = saleLedgers.filter((entry) => !isLedgerVoided(entry));
+
+  if (activeSaleLedgers.length === 0) {
+    return {
+      status: 'no_active_sale_ledger',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  if (activeSaleLedgers.length > 1) {
+    return {
+      status: 'multiple_active_sale_ledgers',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  const saleLedger = activeSaleLedgers[0];
+  if (saleLedger.vendorId !== input.refundLedgerVendorId) {
+    return {
+      status: 'economic_owner_mismatch',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  return {
+    status: 'resolved',
+    saleLedger,
+    voidedSaleLedgerIds,
+  };
 }
 
 function statusToDto(status: SettlementRefundAdjustmentStatus): SettlementRefundAdjustmentDto['status'] {
@@ -368,7 +447,9 @@ export async function createSettlementRefundAdjustmentForRefundLedger(
             },
             select: {
               id: true,
+              vendorId: true,
               entryType: true,
+              voidedAt: true,
               payoutStatus: true,
               settlementStatus: true,
               commissionPercentSnapshot: true,
@@ -418,7 +499,11 @@ export async function createSettlementRefundAdjustmentForRefundLedger(
     return null;
   }
 
-  const relatedSaleLedgerEntry = refundLedgerEntry.vendorAllocation?.financeEntries[0] ?? null;
+  const saleLedgerSelection = selectActiveSaleLedgerForRefundAdjustment({
+    saleLedgers: refundLedgerEntry.vendorAllocation?.financeEntries ?? [],
+    refundLedgerVendorId: refundLedgerEntry.vendorId,
+  });
+  const relatedSaleLedgerEntry = saleLedgerSelection.status === 'resolved' ? saleLedgerSelection.saleLedger : null;
   if (
     !relatedSaleLedgerEntry ||
     normalize(relatedSaleLedgerEntry.payoutStatus) === 'PAID' ||

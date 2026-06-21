@@ -1,5 +1,6 @@
 import { Prisma, SettlementRefundAdjustmentStatus, VendorBalanceEventType } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 import { calculateRefundOffsetAmounts } from './refund-offset.service.js';
 import { createSettlementRefundAdjustmentForRefundLedger } from './settlement-refund-adjustment.service.js';
 
@@ -11,6 +12,9 @@ export type RefundAdjustmentRecommendedAction =
   | 'VENDOR_DEBT_REQUIRED'
   | 'NOT_AFTER_APPROVED_OR_INVOICED_SETTLEMENT'
   | 'MISSING_RELATED_SALE_LEDGER'
+  | 'NO_ACTIVE_SALE_LEDGER'
+  | 'MULTIPLE_ACTIVE_SALE_LEDGERS'
+  | 'ECONOMIC_OWNER_MISMATCH'
   | 'MISSING_APPROVED_SETTLEMENT_LINE'
   | 'MISSING_VENDOR_ALLOCATION'
   | 'ZERO_OR_INVALID_AMOUNT'
@@ -18,6 +22,13 @@ export type RefundAdjustmentRecommendedAction =
 
 export type RefundAdjustmentEligibilityEvidence = {
   relatedSaleFinanceLedgerEntryId: string | null;
+  activeSaleLedgerSelectionStatus:
+    | 'resolved'
+    | 'no_active_sale_ledger'
+    | 'multiple_active_sale_ledgers'
+    | 'economic_owner_mismatch';
+  voidedSaleLedgerIds: string[];
+  voidedSaleLedgerIgnored: boolean;
   salePayoutStatus: string | null;
   saleSettlementStatus: string | null;
   settlementApprovalLineId: string | null;
@@ -53,6 +64,10 @@ export type RefundAdjustmentEligibilityPreview = {
     vendorDebtRequired: number;
     missingApprovedSettlementLine: number;
     missingRelatedSaleLedger: number;
+    noActiveSaleLedger: number;
+    multipleActiveSaleLedgers: number;
+    economicOwnerMismatch: number;
+    voidedSaleLedgerIgnored: number;
     notAfterApprovedOrInvoicedSettlement: number;
     unknown: number;
   };
@@ -168,11 +183,57 @@ function chooseRefundRecord(row: RefundLedgerRow) {
   return row.vendorAllocation?.refundRecords[0] ?? null;
 }
 
-function chooseSaleLedger(row: RefundLedgerRow) {
-  return row.vendorAllocation?.financeEntries.find((entry) => normalize(entry.entryType) === 'SALE') ?? null;
+type SaleLedgerSelection = {
+  status:
+    | 'resolved'
+    | 'no_active_sale_ledger'
+    | 'multiple_active_sale_ledgers'
+    | 'economic_owner_mismatch';
+  saleLedger: NonNullable<RefundLedgerRow['vendorAllocation']>['financeEntries'][number] | null;
+  voidedSaleLedgerIds: string[];
+};
+
+function chooseActiveSaleLedger(row: RefundLedgerRow): SaleLedgerSelection {
+  const saleLedgers = row.vendorAllocation?.financeEntries
+    .filter((entry) => normalize(entry.entryType) === 'SALE') ?? [];
+  const voidedSaleLedgerIds = saleLedgers
+    .filter((entry) => isLedgerVoided(entry))
+    .map((entry) => entry.id);
+  const activeSaleLedgers = saleLedgers.filter((entry) => !isLedgerVoided(entry));
+
+  if (activeSaleLedgers.length === 0) {
+    return {
+      status: 'no_active_sale_ledger',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  if (activeSaleLedgers.length > 1) {
+    return {
+      status: 'multiple_active_sale_ledgers',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  const saleLedger = activeSaleLedgers[0];
+  if (saleLedger.vendorId !== row.vendorId) {
+    return {
+      status: 'economic_owner_mismatch',
+      saleLedger: null,
+      voidedSaleLedgerIds,
+    };
+  }
+
+  return {
+    status: 'resolved',
+    saleLedger,
+    voidedSaleLedgerIds,
+  };
 }
 
-function chooseApprovedSettlementLine(saleLedger: ReturnType<typeof chooseSaleLedger>) {
+function chooseApprovedSettlementLine(saleLedger: SaleLedgerSelection['saleLedger']) {
   return (saleLedger?.settlementApprovalLines ?? [])
     .filter((line) => normalize(line.settlementApproval.status) === 'APPROVED')
     .sort((left, right) => {
@@ -195,15 +256,19 @@ function chooseVendorDebtEvent(row: RefundLedgerRow) {
 }
 
 function buildEvidence(input: {
-  saleLedger: ReturnType<typeof chooseSaleLedger>;
+  saleLedgerSelection: SaleLedgerSelection;
   approvedLine: ReturnType<typeof chooseApprovedSettlementLine>;
   commissionInvoice: ReturnType<typeof chooseActiveCommissionInvoice>;
   vendorDebtEvent: ReturnType<typeof chooseVendorDebtEvent>;
 }): RefundAdjustmentEligibilityEvidence {
+  const saleLedger = input.saleLedgerSelection.saleLedger;
   return {
-    relatedSaleFinanceLedgerEntryId: input.saleLedger?.id ?? null,
-    salePayoutStatus: input.saleLedger?.payoutStatus ?? null,
-    saleSettlementStatus: input.saleLedger?.settlementStatus ?? null,
+    relatedSaleFinanceLedgerEntryId: saleLedger?.id ?? null,
+    activeSaleLedgerSelectionStatus: input.saleLedgerSelection.status,
+    voidedSaleLedgerIds: input.saleLedgerSelection.voidedSaleLedgerIds,
+    voidedSaleLedgerIgnored: input.saleLedgerSelection.voidedSaleLedgerIds.length > 0,
+    salePayoutStatus: saleLedger?.payoutStatus ?? null,
+    saleSettlementStatus: saleLedger?.settlementStatus ?? null,
     settlementApprovalLineId: input.approvedLine?.id ?? null,
     settlementApprovalId: input.approvedLine?.settlementApproval.id ?? null,
     settlementApprovalStatus: input.approvedLine?.settlementApproval.status ?? null,
@@ -216,12 +281,14 @@ function buildEvidence(input: {
 export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): RefundAdjustmentEligibilityRecord {
   const existingAdjustment = row.refundAdjustments[0] ?? null;
   const refundRecord = chooseRefundRecord(row);
-  const saleLedger = chooseSaleLedger(row);
+  const saleLedgerSelection = chooseActiveSaleLedger(row);
+  const saleLedger = saleLedgerSelection.saleLedger;
+  const activeSaleLedger = saleLedgerSelection.status === 'resolved' ? saleLedger : null;
   const approvedLine = chooseApprovedSettlementLine(saleLedger);
   const commissionInvoice = chooseActiveCommissionInvoice(approvedLine);
   const vendorDebtEvent = chooseVendorDebtEvent(row);
   const evidence = buildEvidence({
-    saleLedger,
+    saleLedgerSelection,
     approvedLine,
     commissionInvoice,
     vendorDebtEvent,
@@ -238,10 +305,21 @@ export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): Refun
   } else if (!row.vendorAllocation) {
     recommendedAction = 'MISSING_VENDOR_ALLOCATION';
     blockerReason = 'Refund ledger is not linked to a vendor allocation.';
-  } else if (!saleLedger) {
-    recommendedAction = 'MISSING_RELATED_SALE_LEDGER';
-    blockerReason = 'Refund ledger allocation has no related sale ledger row.';
-  } else if (normalize(saleLedger.payoutStatus) === 'PAID' || normalize(saleLedger.settlementStatus) === 'SETTLED') {
+  } else if (saleLedgerSelection.status === 'no_active_sale_ledger') {
+    recommendedAction = 'NO_ACTIVE_SALE_LEDGER';
+    blockerReason = saleLedgerSelection.voidedSaleLedgerIds.length > 0
+      ? 'Refund ledger allocation has no active sale ledger row; voided sale ledger rows were ignored.'
+      : 'Refund ledger allocation has no active sale ledger row.';
+  } else if (saleLedgerSelection.status === 'multiple_active_sale_ledgers') {
+    recommendedAction = 'MULTIPLE_ACTIVE_SALE_LEDGERS';
+    blockerReason = 'Refund ledger allocation has multiple active sale ledger rows.';
+  } else if (saleLedgerSelection.status === 'economic_owner_mismatch') {
+    recommendedAction = 'ECONOMIC_OWNER_MISMATCH';
+    blockerReason = 'Refund ledger vendor does not match the active sale ledger economic owner.';
+  } else if (!activeSaleLedger) {
+    recommendedAction = 'UNKNOWN';
+    blockerReason = 'Active sale ledger selection could not be resolved.';
+  } else if (normalize(activeSaleLedger.payoutStatus) === 'PAID' || normalize(activeSaleLedger.settlementStatus) === 'SETTLED') {
     recommendedAction = 'VENDOR_DEBT_REQUIRED';
     blockerReason = 'Related sale ledger is already paid or settled; vendor debt path applies.';
   } else if (!approvedLine) {
@@ -250,8 +328,8 @@ export function classifyRefundAdjustmentEligibility(row: RefundLedgerRow): Refun
   } else {
     const offset = calculateRefundOffsetAmounts({
       refundAmount: row.amount,
-      commissionPercentSnapshot: row.commissionPercentSnapshot ?? saleLedger.commissionPercentSnapshot,
-      commissionVatPercentSnapshot: row.commissionVatPercentSnapshot ?? saleLedger.commissionVatPercentSnapshot,
+      commissionPercentSnapshot: row.commissionPercentSnapshot ?? activeSaleLedger.commissionPercentSnapshot,
+      commissionVatPercentSnapshot: row.commissionVatPercentSnapshot ?? activeSaleLedger.commissionVatPercentSnapshot,
     });
     if (offset.vendorPayableReversalMinor <= 0 || amountMinor <= 0 || !orderId || !refundRecord?.id) {
       recommendedAction = 'ZERO_OR_INVALID_AMOUNT';
@@ -294,6 +372,12 @@ function summarize(records: RefundAdjustmentEligibilityRecord[]): RefundAdjustme
       summary.missingApprovedSettlementLine += 1;
     } else if (record.recommendedAction === 'MISSING_RELATED_SALE_LEDGER') {
       summary.missingRelatedSaleLedger += 1;
+    } else if (record.recommendedAction === 'NO_ACTIVE_SALE_LEDGER') {
+      summary.noActiveSaleLedger += 1;
+    } else if (record.recommendedAction === 'MULTIPLE_ACTIVE_SALE_LEDGERS') {
+      summary.multipleActiveSaleLedgers += 1;
+    } else if (record.recommendedAction === 'ECONOMIC_OWNER_MISMATCH') {
+      summary.economicOwnerMismatch += 1;
     } else if (record.recommendedAction === 'NOT_AFTER_APPROVED_OR_INVOICED_SETTLEMENT') {
       summary.notAfterApprovedOrInvoicedSettlement += 1;
     } else if (record.recommendedAction === 'UNKNOWN' || record.recommendedAction === 'MISSING_VENDOR_ALLOCATION' || record.recommendedAction === 'ZERO_OR_INVALID_AMOUNT') {
@@ -305,11 +389,15 @@ function summarize(records: RefundAdjustmentEligibilityRecord[]): RefundAdjustme
     createPendingAdjustment: 0,
     alreadyHasAdjustment: 0,
     vendorDebtRequired: 0,
-    missingApprovedSettlementLine: 0,
-    missingRelatedSaleLedger: 0,
-    notAfterApprovedOrInvoicedSettlement: 0,
-    unknown: 0,
-  });
+      missingApprovedSettlementLine: 0,
+      missingRelatedSaleLedger: 0,
+      noActiveSaleLedger: 0,
+      multipleActiveSaleLedgers: 0,
+      economicOwnerMismatch: 0,
+      voidedSaleLedgerIgnored: records.filter((record) => record.evidence.voidedSaleLedgerIgnored).length,
+      notAfterApprovedOrInvoicedSettlement: 0,
+      unknown: 0,
+    });
 }
 
 async function findRefundLedgerRows(
@@ -392,7 +480,9 @@ async function findRefundLedgerRows(
             },
             select: {
               id: true,
+              vendorId: true,
               entryType: true,
+              voidedAt: true,
               payoutStatus: true,
               settlementStatus: true,
               commissionPercentSnapshot: true,

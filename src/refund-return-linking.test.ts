@@ -799,7 +799,9 @@ describe('Shopify refund return linking', () => {
           financeEntries: [
             {
               id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+              vendorId: 'sporjinal',
               entryType: 'sale',
+              voidedAt: null,
               payoutStatus: 'PENDING',
               settlementStatus: 'PAYABLE',
               commissionPercentSnapshot: 10,
