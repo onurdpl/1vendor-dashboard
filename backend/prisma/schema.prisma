@@ -301,20 +301,21 @@ enum VendorProfileSnapshotImpact {
 }
 
 model User {
-  id                            String                        @id @default(cuid())
-  email                         String                        @unique
-  name                          String
-  role                          UserRole
-  status                        String                        @default("active")
-  passwordHash                  String
-  createdAt                     DateTime                      @default(now())
-  updatedAt                     DateTime                      @updatedAt
-  vendorLinks                   UserVendorAccess[]
-  assignments                   AllocationAssignmentHistory[] @relation("assignmentActor")
-  economicTransfersAdministered AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
-  supportTickets                SupportTicket[]
-  supportNotes                  SupportTicketNote[]
-  supportReplies                SupportTicketReply[]
+  id                             String                        @id @default(cuid())
+  email                          String                        @unique
+  name                           String
+  role                           UserRole
+  status                         String                        @default("active")
+  passwordHash                   String
+  createdAt                      DateTime                      @default(now())
+  updatedAt                      DateTime                      @updatedAt
+  vendorLinks                    UserVendorAccess[]
+  assignments                    AllocationAssignmentHistory[] @relation("assignmentActor")
+  economicTransfersAdministered  AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
+  financeIntegrityAlertsResolved FinanceIntegrityAlert[]       @relation("financeIntegrityAlertResolvedBy")
+  supportTickets                 SupportTicket[]
+  supportNotes                   SupportTicketNote[]
+  supportReplies                 SupportTicketReply[]
 }
 
 model Vendor {
@@ -662,6 +663,7 @@ model VendorAllocation {
   shippingCosts                          ShipmentShippingCost[]
   shipmentExecutions                     ShipmentExecution[]
   economicTransfers                      AllocationEconomicTransfer[]
+  financeIntegrityAlerts                 FinanceIntegrityAlert[]
   operationalSignals                     OperationalSignal[]
   automationActions                      AutomationAction[]
   vendorIntegrationStatusEvents          VendorIntegrationStatusEvent[]
@@ -764,7 +766,7 @@ model AllocationAssignmentHistory {
 }
 
 model AllocationEconomicTransfer {
-  id                       String              @id
+  id                       String                  @id
   vendorAllocationId       String
   fromVendorId             String
   toVendorId               String
@@ -774,23 +776,54 @@ model AllocationEconomicTransfer {
   reason                   String?
   adminActorUserId         String?
   pricingSnapshotJson      Json?
-  idempotencyKey           String              @unique
-  createdAt                DateTime            @default(now())
+  idempotencyKey           String                  @unique
+  createdAt                DateTime                @default(now())
   completedAt              DateTime?
   failedAt                 DateTime?
   failureReason            String?
-  vendorAllocation         VendorAllocation    @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  fromVendor               Vendor              @relation("economicTransferFromVendor", fields: [fromVendorId], references: [id])
-  toVendor                 Vendor              @relation("economicTransferToVendor", fields: [toVendorId], references: [id])
-  fromFinanceLedgerEntry   FinanceLedgerEntry? @relation("economicTransferFromLedger", fields: [fromFinanceLedgerEntryId], references: [id], onDelete: SetNull)
-  toFinanceLedgerEntry     FinanceLedgerEntry? @relation("economicTransferToLedger", fields: [toFinanceLedgerEntryId], references: [id], onDelete: SetNull)
-  adminActorUser           User?               @relation("economicTransferAdminActor", fields: [adminActorUserId], references: [id], onDelete: SetNull)
+  vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  fromVendor               Vendor                  @relation("economicTransferFromVendor", fields: [fromVendorId], references: [id])
+  toVendor                 Vendor                  @relation("economicTransferToVendor", fields: [toVendorId], references: [id])
+  fromFinanceLedgerEntry   FinanceLedgerEntry?     @relation("economicTransferFromLedger", fields: [fromFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  toFinanceLedgerEntry     FinanceLedgerEntry?     @relation("economicTransferToLedger", fields: [toFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  adminActorUser           User?                   @relation("economicTransferAdminActor", fields: [adminActorUserId], references: [id], onDelete: SetNull)
+  financeIntegrityAlerts   FinanceIntegrityAlert[]
 
   @@index([vendorAllocationId])
   @@index([fromVendorId])
   @@index([toVendorId])
   @@index([status])
   @@index([createdAt])
+}
+
+model FinanceIntegrityAlert {
+  id                           String                      @id @default(cuid())
+  dedupeKey                    String                      @unique
+  severity                     String
+  category                     String
+  vendorAllocationId           String?
+  allocationEconomicTransferId String?
+  affectedLedgerIds            Json?
+  affectedFinanceEventIds      Json?
+  reason                       String
+  status                       String
+  resolutionNote               String?
+  detectedAt                   DateTime                    @default(now())
+  resolvedAt                   DateTime?
+  resolvedByUserId             String?
+  metadataJson                 Json?
+  createdAt                    DateTime                    @default(now())
+  updatedAt                    DateTime                    @updatedAt
+  vendorAllocation             VendorAllocation?           @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  allocationEconomicTransfer   AllocationEconomicTransfer? @relation(fields: [allocationEconomicTransferId], references: [id], onDelete: SetNull)
+  resolvedByUser               User?                       @relation("financeIntegrityAlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([category])
+  @@index([severity])
+  @@index([detectedAt])
+  @@index([vendorAllocationId])
+  @@index([allocationEconomicTransferId])
 }
 
 model Fulfillment {
