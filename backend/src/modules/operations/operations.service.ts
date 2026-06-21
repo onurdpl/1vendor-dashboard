@@ -3,6 +3,7 @@ import {
   type AutomationAction,
   AutomationActionStatus,
   AutomationExecutionMode,
+  type FinanceIntegrityAlert,
   type OperationalSignal,
   OperationalSignalSeverity,
   OperationalSignalStatus,
@@ -34,6 +35,7 @@ const ACTIVE_AUTOMATION_ACTION_STATUSES = [
   AutomationActionStatus.SUGGESTED,
   AutomationActionStatus.FAILED,
 ];
+const OPERATIONS_FINANCE_ALERT_SEVERITIES = ['critical', 'warning'] as const;
 
 function hoursSince(value: Date, now = new Date()) {
   return Math.max(0, Math.round(((now.getTime() - value.getTime()) / ONE_HOUR_MS) * 10) / 10);
@@ -338,6 +340,8 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     vendorBlocked,
     awaitingShipment,
     refundAttention,
+    financeIntegrityAlerts,
+    financeIntegrityCriticalAlerts,
     signalSeverityGroups,
     automationActions,
     automationAutoSafe,
@@ -383,6 +387,24 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
         },
       }),
     ),
+    withDashboardTiming('operations.summary.finance_integrity_alert_count', () =>
+      prisma.financeIntegrityAlert.count({
+        where: {
+          status: 'open',
+          severity: {
+            in: [...OPERATIONS_FINANCE_ALERT_SEVERITIES],
+          },
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.finance_integrity_critical_alert_count', () =>
+      prisma.financeIntegrityAlert.count({
+        where: {
+          status: 'open',
+          severity: 'critical',
+        },
+      }),
+    ),
     withDashboardTiming('operations.summary.operational_signal_group_count', () =>
       prisma.operationalSignal.groupBy({
         by: ['severity'],
@@ -421,17 +443,19 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
   const infoSignals = readSignalSeverityCount(signalSeverityGroups, OperationalSignalSeverity.INFO);
   const operationalSignals = criticalSignals + highSignals + warningSignals + infoSignals;
   const manualAutomationActions = Math.max(0, automationActions - automationAutoSafe);
+  const financeIntegrityWarningAlerts = Math.max(0, financeIntegrityAlerts - financeIntegrityCriticalAlerts);
 
   return {
-    total: pendingReassignment + vendorBlocked + awaitingShipment + refundAttention + operationalSignals + automationActions,
-    critical: pendingReassignment + criticalSignals,
-    warning: vendorBlocked + highSignals,
+    total: pendingReassignment + vendorBlocked + awaitingShipment + refundAttention + financeIntegrityAlerts + operationalSignals + automationActions,
+    critical: pendingReassignment + financeIntegrityCriticalAlerts + criticalSignals,
+    warning: vendorBlocked + financeIntegrityWarningAlerts + highSignals,
     attention: awaitingShipment + refundAttention + warningSignals + automationAutoSafe,
     normal: infoSignals + manualAutomationActions,
     pendingReassignment,
     vendorBlocked,
     awaitingShipment,
     refundAttention,
+    financeIntegrityAlerts,
     operationalSignals,
     automationActions,
   };
@@ -525,6 +549,71 @@ function mapPersistedAutomationActionToQueueItem(action: AutomationAction): Oper
     createdAt: action.createdAt.toISOString(),
     actionLabel: action.executionMode === AutomationExecutionMode.AUTO_SAFE ? 'Review safe action' : 'Review suggestion',
     destinationPath: '/admin/operations',
+  };
+}
+
+function formatQueueDescriptionPart(label: string, value: string) {
+  return `${label}: ${value.trim().replace(/[.]+$/g, '')}.`;
+}
+
+function mapFinanceIntegrityAlertToQueueItem(
+  alert: Pick<
+    FinanceIntegrityAlert,
+    | 'id'
+    | 'dedupeKey'
+    | 'severity'
+    | 'category'
+    | 'reason'
+    | 'status'
+    | 'detectedAt'
+    | 'vendorAllocationId'
+    | 'allocationEconomicTransferId'
+  > & {
+    vendorAllocation: {
+      assignedVendorId: string;
+      assignedVendor: {
+        name: string;
+      };
+      order: {
+        sourceShopifyOrderId: string;
+      };
+    } | null;
+  },
+): OperationsQueueItemDto | null {
+  const severity = alert.severity.trim().toLowerCase();
+  const status = alert.status.trim().toLowerCase();
+  if (status !== 'open') {
+    return null;
+  }
+
+  if (severity !== 'critical' && severity !== 'warning') {
+    return null;
+  }
+
+  const relatedShopifyOrderId = alert.vendorAllocation?.order.sourceShopifyOrderId ?? null;
+  const descriptionParts = [
+    formatQueueDescriptionPart('Category', alert.category),
+    formatQueueDescriptionPart('Reason', alert.reason),
+    alert.vendorAllocationId ? formatQueueDescriptionPart('Vendor allocation', alert.vendorAllocationId) : null,
+    alert.allocationEconomicTransferId ? formatQueueDescriptionPart('Economic transfer', alert.allocationEconomicTransferId) : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return {
+    id: `op-finance-integrity-${alert.id}`,
+    type: 'finance_integrity_alert',
+    severity,
+    title: 'Finance integrity alert',
+    description: descriptionParts.join(' '),
+    vendorId: alert.vendorAllocation?.assignedVendorId ?? 'platform',
+    vendorName: alert.vendorAllocation?.assignedVendor.name ?? 'Platform',
+    relatedOrderId: alert.vendorAllocationId,
+    relatedShopifyOrderId,
+    relatedReturnId: null,
+    relatedRefundId: null,
+    status,
+    createdAt: alert.detectedAt.toISOString(),
+    actionLabel: 'Investigate finance alert',
+    destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
   };
 }
 
@@ -713,6 +802,55 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   }
   logDashboardTiming('operations.return_aggregation', returnAggregationStartedAt);
 
+  const financeIntegrityAlerts = await withDashboardTiming('operations.finance_integrity_alert_fetch', () => prisma.financeIntegrityAlert.findMany({
+    where: {
+      status: 'open',
+      severity: {
+        in: [...OPERATIONS_FINANCE_ALERT_SEVERITIES],
+      },
+    },
+    select: {
+      id: true,
+      dedupeKey: true,
+      severity: true,
+      category: true,
+      reason: true,
+      status: true,
+      detectedAt: true,
+      vendorAllocationId: true,
+      allocationEconomicTransferId: true,
+      vendorAllocation: {
+        select: {
+          assignedVendorId: true,
+          assignedVendor: {
+            select: {
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              sourceShopifyOrderId: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [
+      {
+        detectedAt: 'desc',
+      },
+    ],
+    take: 100,
+  }));
+  const financeIntegrityAggregationStartedAt = startDashboardTimer();
+  for (const alert of financeIntegrityAlerts) {
+    const item = mapFinanceIntegrityAlertToQueueItem(alert);
+    if (item) {
+      items.push(item);
+    }
+  }
+  logDashboardTiming('operations.finance_integrity_alert_aggregation', financeIntegrityAggregationStartedAt);
+
   const signals = await withDashboardTiming('operations.operational_signals_fetch', () => prisma.operationalSignal.findMany({
     where: {
       status: OperationalSignalStatus.ACTIVE,
@@ -803,11 +941,13 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
         ? 'shipment'
         : item.type === 'refund_attention'
           ? 'return'
-          : item.type === 'automation_action'
-            ? 'automation'
-            : item.type === 'operational_signal'
-              ? 'operational_signal'
-              : 'shipment',
+          : item.type === 'finance_integrity_alert'
+            ? 'finance'
+            : item.type === 'automation_action'
+              ? 'automation'
+              : item.type === 'operational_signal'
+                ? 'operational_signal'
+                : 'shipment',
     severity: mapAttentionSeverity(item.severity),
     vendorId: item.vendorId,
     vendorName: item.vendorName,

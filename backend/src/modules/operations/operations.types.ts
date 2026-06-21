@@ -3,6 +3,7 @@ export type OperationsQueueItemType =
   | 'vendor_blocked'
   | 'awaiting_shipment'
   | 'refund_attention'
+  | 'finance_integrity_alert'
   | 'operational_signal'
   | 'automation_action';
 
@@ -36,6 +37,7 @@ export type OperationsQueueSummaryDto = {
   vendorBlocked: number;
   awaitingShipment: number;
   refundAttention: number;
+  financeIntegrityAlerts: number;
   operationalSignals: number;
   automationActions: number;
 };

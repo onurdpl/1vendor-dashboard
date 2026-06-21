@@ -9,6 +9,10 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     count: vi.fn(),
   },
+  financeIntegrityAlert: {
+    findMany: vi.fn(),
+    count: vi.fn(),
+  },
   operationalSignal: {
     findMany: vi.fn(),
     groupBy: vi.fn(),
@@ -77,6 +81,8 @@ function mockQueueSummaryCounts({
   vendorBlocked = 0,
   awaitingShipment = 0,
   refundAttention = 0,
+  financeIntegrityAlerts = 0,
+  financeIntegrityCriticalAlerts = 0,
   signalGroups = [],
   automationActions = 0,
   automationAutoSafe = 0,
@@ -85,6 +91,8 @@ function mockQueueSummaryCounts({
   vendorBlocked?: number;
   awaitingShipment?: number;
   refundAttention?: number;
+  financeIntegrityAlerts?: number;
+  financeIntegrityCriticalAlerts?: number;
   signalGroups?: unknown[];
   automationActions?: number;
   automationAutoSafe?: number;
@@ -94,6 +102,9 @@ function mockQueueSummaryCounts({
     .mockResolvedValueOnce(vendorBlocked)
     .mockResolvedValueOnce(awaitingShipment);
   prismaMock.returnRecord.count.mockResolvedValueOnce(refundAttention);
+  prismaMock.financeIntegrityAlert.count
+    .mockResolvedValueOnce(financeIntegrityAlerts)
+    .mockResolvedValueOnce(financeIntegrityCriticalAlerts);
   prismaMock.operationalSignal.groupBy.mockResolvedValueOnce(signalGroups);
   prismaMock.automationAction.count
     .mockResolvedValueOnce(automationActions)
@@ -106,6 +117,8 @@ describe('admin operations summary counts', () => {
     prismaMock.vendorAllocation.count.mockReset();
     prismaMock.returnRecord.findMany.mockReset();
     prismaMock.returnRecord.count.mockReset();
+    prismaMock.financeIntegrityAlert.findMany.mockReset();
+    prismaMock.financeIntegrityAlert.count.mockReset();
     prismaMock.operationalSignal.findMany.mockReset();
     prismaMock.operationalSignal.groupBy.mockReset();
     prismaMock.automationAction.findMany.mockReset();
@@ -115,6 +128,8 @@ describe('admin operations summary counts', () => {
 
     prismaMock.vendorAllocation.findMany.mockResolvedValue([]);
     prismaMock.returnRecord.findMany.mockResolvedValue([]);
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    prismaMock.financeIntegrityAlert.count.mockResolvedValue(0);
     prismaMock.operationalSignal.findMany.mockResolvedValue([]);
     prismaMock.automationAction.findMany.mockResolvedValue([]);
     evaluateOperationalSignalsMock.mockResolvedValue([]);
@@ -127,6 +142,9 @@ describe('admin operations summary counts', () => {
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
     prismaMock.returnRecord.count.mockResolvedValueOnce(0);
+    prismaMock.financeIntegrityAlert.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
     prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([
       { severity: 'HIGH', _count: { _all: 1 } },
     ]);
@@ -314,12 +332,121 @@ describe('admin operations summary counts', () => {
     ]);
   });
 
+  it('includes open critical and warning finance integrity alerts in the operations queue', async () => {
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      {
+        id: 'alert-critical',
+        dedupeKey: 'finance:critical',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Two active sale ledgers exist.',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: 'transfer-1',
+        vendorAllocation: {
+          assignedVendorId: 'vendor-1',
+          assignedVendor: {
+            name: 'Vendor 1',
+          },
+          order: {
+            sourceShopifyOrderId: '7709129507153',
+          },
+        },
+      },
+      {
+        id: 'alert-warning',
+        dedupeKey: 'finance:warning',
+        severity: 'warning',
+        category: 'no_active_sale_ledger',
+        reason: 'No active sale ledger exists.',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T08:00:00.000Z'),
+        vendorAllocationId: 'alloc-2',
+        allocationEconomicTransferId: null,
+        vendorAllocation: null,
+      },
+    ]);
+    mockQueueSummaryCounts({ financeIntegrityAlerts: 2, financeIntegrityCriticalAlerts: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-finance-integrity-alert-critical',
+        type: 'finance_integrity_alert',
+        severity: 'critical',
+        description: 'Category: multiple_active_sale_ledgers. Reason: Two active sale ledgers exist. Vendor allocation: alloc-1. Economic transfer: transfer-1.',
+        actionLabel: 'Investigate finance alert',
+        destinationPath: '/admin/orders/7709129507153',
+      }),
+      expect.objectContaining({
+        id: 'op-finance-integrity-alert-warning',
+        type: 'finance_integrity_alert',
+        severity: 'warning',
+        description: 'Category: no_active_sale_ledger. Reason: No active sale ledger exists. Vendor allocation: alloc-2.',
+        destinationPath: '/admin/operations',
+      }),
+    ]);
+    expect(dashboard.summary).toMatchObject({
+      total: 2,
+      critical: 1,
+      warning: 1,
+      financeIntegrityAlerts: 2,
+    });
+  });
+
+  it('omits resolved and info finance integrity alerts from the operations queue', async () => {
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      {
+        id: 'alert-resolved',
+        dedupeKey: 'finance:resolved',
+        severity: 'critical',
+        category: 'transfer_failed',
+        reason: 'Resolved alert.',
+        status: 'resolved',
+        detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+        vendorAllocation: null,
+      },
+      {
+        id: 'alert-info',
+        dedupeKey: 'finance:info',
+        severity: 'info',
+        category: 'transfer_in_progress',
+        reason: 'Info alert.',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T08:00:00.000Z'),
+        vendorAllocationId: 'alloc-2',
+        allocationEconomicTransferId: null,
+        vendorAllocation: null,
+      },
+    ]);
+    mockQueueSummaryCounts();
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([]);
+    expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        status: 'open',
+        severity: {
+          in: ['critical', 'warning'],
+        },
+      },
+    }));
+  });
+
   it('computes operations summary counts before candidate slicing', async () => {
     prismaMock.vendorAllocation.count
       .mockResolvedValueOnce(25)
       .mockResolvedValueOnce(12)
       .mockResolvedValueOnce(31);
     prismaMock.returnRecord.count.mockResolvedValueOnce(22);
+    prismaMock.financeIntegrityAlert.count
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce(2);
     prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([
       { severity: 'CRITICAL', _count: { _all: 4 } },
       { severity: 'HIGH', _count: { _all: 5 } },
@@ -334,15 +461,16 @@ describe('admin operations summary counts', () => {
 
     expect(dashboard.items).toEqual([]);
     expect(dashboard.summary).toEqual({
-      total: 121,
-      critical: 29,
-      warning: 17,
+      total: 124,
+      critical: 31,
+      warning: 18,
       attention: 62,
       normal: 13,
       pendingReassignment: 25,
       vendorBlocked: 12,
       awaitingShipment: 31,
       refundAttention: 22,
+      financeIntegrityAlerts: 3,
       operationalSignals: 22,
       automationActions: 9,
     });
@@ -359,6 +487,9 @@ describe('admin operations summary counts', () => {
       .mockResolvedValueOnce(2)
       .mockResolvedValueOnce(3);
     prismaMock.returnRecord.count.mockResolvedValueOnce(4);
+    prismaMock.financeIntegrityAlert.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
     prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([]);
     prismaMock.automationAction.count
       .mockResolvedValueOnce(5)
@@ -376,6 +507,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 2,
       awaitingShipment: 3,
       refundAttention: 4,
+      financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 5,
     });

@@ -79,6 +79,7 @@ function createRuntimeServices() {
         vendorBlocked: 0,
         awaitingShipment: 0,
         refundAttention: 0,
+        financeIntegrityAlerts: 0,
         operationalSignals: 0,
         automationActions: 0,
       }),
@@ -93,6 +94,7 @@ function createRuntimeServices() {
           vendorBlocked: 0,
           awaitingShipment: 0,
           refundAttention: 0,
+          financeIntegrityAlerts: 0,
           operationalSignals: 0,
           automationActions: 0,
         },
@@ -396,6 +398,7 @@ describe('dashboard real-mode loading', () => {
         vendorBlocked: 0,
         awaitingShipment: 0,
         refundAttention: 0,
+        financeIntegrityAlerts: 0,
         operationalSignals: 0,
         automationActions: 0,
       });

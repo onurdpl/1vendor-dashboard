@@ -934,6 +934,19 @@ export type VendorAllocationSummary = {
   lineItems: OrderLineItem[];
   refundedItems: ReturnLineItem[];
   refundTotal: string;
+  financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
+};
+
+export type FinanceIntegrityAlertSummary = {
+  id: string;
+  severity: string;
+  category: string;
+  reason: string;
+  status: string;
+  detectedAt: string;
+  vendorAllocationId: string | null;
+  allocationEconomicTransferId: string | null;
+  affectedLedgerIds?: unknown;
 };
 
 export type ShopifyOrderBreakdown = {
@@ -2287,6 +2300,7 @@ export type OperationsQueueItemType =
   | 'vendor_blocked'
   | 'awaiting_shipment'
   | 'refund_attention'
+  | 'finance_integrity_alert'
   | 'operational_signal'
   | 'automation_action';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -2317,6 +2331,7 @@ export type OperationsQueueSummary = {
   vendorBlocked: number;
   awaitingShipment: number;
   refundAttention: number;
+  financeIntegrityAlerts: number;
   operationalSignals: number;
   automationActions: number;
 };

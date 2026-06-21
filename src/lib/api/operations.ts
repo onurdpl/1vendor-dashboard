@@ -113,7 +113,14 @@ export function listAdminOperationsQueue(): OperationsQueueItem[] {
 function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttentionItem {
   return {
     id: `attention-${item.id}`,
-    type: item.type === 'refund_attention' ? 'return' : item.type === 'automation_action' ? 'automation' : 'shipment',
+    type:
+      item.type === 'refund_attention'
+        ? 'return'
+        : item.type === 'finance_integrity_alert'
+          ? 'finance'
+          : item.type === 'automation_action'
+            ? 'automation'
+            : 'shipment',
     severity: item.severity === 'critical' ? 'critical' : item.severity === 'high' || item.severity === 'medium' ? 'warning' : 'info',
     vendorId: item.vendorId,
     vendorName: item.vendorName ?? item.vendorId,

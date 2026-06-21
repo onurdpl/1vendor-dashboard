@@ -537,6 +537,18 @@ export type AdminOrderBreakdownLineItemDto = {
   lineAmount: string;
 };
 
+export type AdminFinanceIntegrityAlertDto = {
+  id: string;
+  severity: string;
+  category: string;
+  reason: string;
+  status: string;
+  detectedAt: string;
+  vendorAllocationId: string | null;
+  allocationEconomicTransferId: string | null;
+  affectedLedgerIds: unknown;
+};
+
 export type AdminOrderBreakdownAllocationDto = {
   id: string;
   vendorId: string;
@@ -572,6 +584,7 @@ export type AdminOrderBreakdownAllocationDto = {
     createdAt: string;
     updatedAt: string;
   }>;
+  financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
 };
 
 export type AdminOrderBreakdownDto = {

@@ -2372,6 +2372,46 @@ h3 {
   background: rgba(251, 146, 60, 0.08);
 }
 
+.finance-integrity-alerts {
+  display: grid;
+  gap: 10px;
+}
+
+.finance-integrity-alert {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(251, 146, 60, 0.32);
+  border-radius: 14px;
+  background: #fff7ed;
+}
+
+.finance-integrity-alert-critical {
+  border-color: rgba(239, 68, 68, 0.36);
+  background: #fef2f2;
+}
+
+.finance-integrity-alert-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.finance-integrity-alert h4,
+.finance-integrity-alert p {
+  margin: 0;
+}
+
+.finance-integrity-alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .paratika-probe-card {
   display: grid;
   gap: 14px;

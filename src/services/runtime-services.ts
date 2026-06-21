@@ -77,6 +77,7 @@ function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQu
     vendorBlocked: items.filter((item) => item.type === 'vendor_blocked').length,
     awaitingShipment: items.filter((item) => item.type === 'awaiting_shipment').length,
     refundAttention: items.filter((item) => item.type === 'refund_attention').length,
+    financeIntegrityAlerts: items.filter((item) => item.type === 'finance_integrity_alert').length,
     operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
     automationActions: items.filter((item) => item.type === 'automation_action').length,
   };

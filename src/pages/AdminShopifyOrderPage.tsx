@@ -47,6 +47,14 @@ function getProbeErrorMessage(error: unknown) {
   return 'Paratika probe failed.';
 }
 
+function formatFinanceAlertCategory(value: string) {
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -327,6 +335,36 @@ export function AdminShopifyOrderPage() {
               </span>
             </div>
           </header>
+
+          {allocation.financeIntegrityAlerts?.length ? (
+            <section className="finance-integrity-alerts" aria-label="Finance integrity alerts">
+              {allocation.financeIntegrityAlerts.map((alert) => (
+                <article
+                  key={alert.id}
+                  className={`finance-integrity-alert finance-integrity-alert-${getClassToken(alert.severity)}`}
+                >
+                  <div className="finance-integrity-alert-header">
+                    <div>
+                      <p className="eyebrow">Finance integrity alert</p>
+                      <h4>{formatFinanceAlertCategory(alert.category)}</h4>
+                    </div>
+                    <div className="chip-row">
+                      <span className={`status-badge status-${getClassToken(alert.severity)}`}>{alert.severity}</span>
+                      <span className={`status-badge status-${getClassToken(alert.status)}`}>{alert.status}</span>
+                    </div>
+                  </div>
+                  <p>{alert.reason}</p>
+                  <div className="finance-integrity-alert-meta">
+                    <span>Detected {formatDate(alert.detectedAt)}</span>
+                    {alert.vendorAllocationId ? <span>Allocation {alert.vendorAllocationId}</span> : null}
+                    {alert.allocationEconomicTransferId ? (
+                      <span>Economic transfer {alert.allocationEconomicTransferId}</span>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </section>
+          ) : null}
 
           <div className="allocation-summary-grid">
             <div className="summary-row">

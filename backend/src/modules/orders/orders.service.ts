@@ -1833,6 +1833,28 @@ export async function getAdminShopifyOrderBreakdown(
               createdAt: 'desc',
             },
           },
+          financeIntegrityAlerts: {
+            where: {
+              status: 'open',
+              severity: {
+                in: ['critical', 'warning'],
+              },
+            },
+            select: {
+              id: true,
+              severity: true,
+              category: true,
+              reason: true,
+              status: true,
+              detectedAt: true,
+              vendorAllocationId: true,
+              allocationEconomicTransferId: true,
+              affectedLedgerIds: true,
+            },
+            orderBy: {
+              detectedAt: 'desc',
+            },
+          },
         },
         orderBy: {
           createdAt: 'asc',
@@ -1919,6 +1941,17 @@ export async function getAdminShopifyOrderBreakdown(
           status: refundRecord.status,
           createdAt: refundRecord.createdAt.toISOString(),
           updatedAt: refundRecord.updatedAt.toISOString(),
+        })),
+        financeIntegrityAlerts: allocation.financeIntegrityAlerts.map((alert) => ({
+          id: alert.id,
+          severity: alert.severity,
+          category: alert.category,
+          reason: alert.reason,
+          status: alert.status,
+          detectedAt: alert.detectedAt.toISOString(),
+          vendorAllocationId: alert.vendorAllocationId,
+          allocationEconomicTransferId: alert.allocationEconomicTransferId,
+          affectedLedgerIds: alert.affectedLedgerIds,
         })),
       };
     }),

@@ -23,6 +23,8 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const {
   addBlockedAllocationResolutionNote,
+  getAdminShopifyOrderBreakdown,
+  getVendorOrderById,
   rejectVendorOrderAllocation,
   returnBlockedAllocationToVendor,
   OrderRejectValidationError,
@@ -131,6 +133,7 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
         createdAt: new Date('2026-06-21T08:05:00.000Z'),
       },
     ],
+    financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
     ...overrides,
   };
 }
@@ -174,6 +177,7 @@ function buildAdminOrderBreakdownDb() {
         },
         returnRecords: [],
         refundRecords: [],
+        financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
       },
     ],
   };
@@ -383,6 +387,71 @@ describe('vendor order reject operational hold', () => {
         actorUserId: 'admin-1',
       },
     });
+  });
+
+  it('includes open finance integrity alerts in admin Shopify order breakdown', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.financeIntegrityAlerts = [
+      {
+        id: 'alert-1',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Two active sale ledgers exist for this allocation.',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        vendorAllocationId: 'alloc-1088',
+        allocationEconomicTransferId: 'transfer-1',
+        affectedLedgerIds: ['ledger-a', 'ledger-b'],
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.financeIntegrityAlerts).toEqual([
+      {
+        id: 'alert-1',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Two active sale ledgers exist for this allocation.',
+        status: 'open',
+        detectedAt: '2026-06-21T09:00:00.000Z',
+        vendorAllocationId: 'alloc-1088',
+        allocationEconomicTransferId: 'transfer-1',
+        affectedLedgerIds: ['ledger-a', 'ledger-b'],
+      },
+    ]);
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        allocations: expect.objectContaining({
+          include: expect.objectContaining({
+            financeIntegrityAlerts: expect.objectContaining({
+              where: {
+                status: 'open',
+                severity: {
+                  in: ['critical', 'warning'],
+                },
+              },
+            }),
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('does not expose finance integrity alerts through vendor order detail', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
+      financeIntegrityAlerts: [
+        {
+          id: 'alert-1',
+          severity: 'critical',
+        },
+      ],
+    }));
+
+    const detail = await getVendorOrderById('yalispor', 'alloc-1088');
+
+    expect(detail).not.toHaveProperty('financeIntegrityAlerts');
   });
 
   it('requires a note for admin resolution actions', async () => {

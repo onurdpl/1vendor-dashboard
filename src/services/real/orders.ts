@@ -202,6 +202,17 @@ type AdminOrderBreakdownDto = {
       status: string;
       createdAt: string;
     }>;
+    financeIntegrityAlerts?: Array<{
+      id: string;
+      severity: string;
+      category: string;
+      reason: string;
+      status: string;
+      detectedAt: string;
+      vendorAllocationId: string | null;
+      allocationEconomicTransferId: string | null;
+      affectedLedgerIds?: unknown;
+    }>;
   }>;
 };
 
@@ -497,6 +508,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         refundTotal: formatCurrency(
           allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
         ),
+        financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
       };
     }),
   };
