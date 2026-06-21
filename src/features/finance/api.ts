@@ -10,6 +10,7 @@ export {
   getVendorDebtHistory,
   preparePayoutBatch,
   rescanFinanceIntegrityAlert,
+  resolveFinanceIntegrityAlert,
   runSettlementScheduleAutoDraftJob,
   updateVendorFinancialProfile,
 } from '../../lib/api/finance';

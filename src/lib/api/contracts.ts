@@ -962,9 +962,13 @@ export type FinanceIntegrityAlertAcknowledgeResult = {
     resolvedAt: string | null;
     resolvedByUserId: string | null;
     resolutionNote: string | null;
+    resolutionValidationJson?: unknown;
+    resolutionType?: string | null;
     updatedAt: string;
   };
 };
+
+export type FinanceIntegrityAlertResolveResult = FinanceIntegrityAlertAcknowledgeResult;
 
 export type FinanceIntegrityAlertFinding = {
   category: string;

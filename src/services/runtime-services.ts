@@ -2455,6 +2455,38 @@ export const runtimeServices = {
               },
             ],
           }),
+    resolveFinanceIntegrityAlert: (
+      alertId: string,
+      input: Parameters<typeof realFinance.resolveFinanceIntegrityAlert>[1],
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.resolveFinanceIntegrityAlert(alertId, input)
+        : Promise.resolve({
+            ok: true as const,
+            alert: {
+              id: alertId,
+              dedupeKey: `mock-finance-integrity-alert:${alertId}`,
+              severity: 'warning',
+              category: 'mock_finance_integrity_alert',
+              reason: 'Mock finance integrity alert resolution.',
+              status: 'resolved',
+              detectedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              vendorAllocationId: null,
+              allocationEconomicTransferId: null,
+              acknowledgedAt: null,
+              acknowledgedByUserId: null,
+              acknowledgmentNote: null,
+              resolvedAt: new Date().toISOString(),
+              resolvedByUserId: null,
+              resolutionNote: input.note,
+              resolutionValidationJson: {
+                scannerValidated: true,
+                findingsReturned: [],
+              },
+              resolutionType: 'scanner_validated',
+            },
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

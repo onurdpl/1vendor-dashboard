@@ -68,6 +68,7 @@ import {
 import {
   FinanceIntegrityScannerValidationError,
   rescanFinanceIntegrityAlert,
+  resolveFinanceIntegrityAlertWithScannerValidation,
   runFinanceIntegrityScannerDiagnostics,
 } from './finance-integrity-scanner.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
@@ -156,6 +157,8 @@ function toFinanceIntegrityAlertActionDto(alert: FinanceIntegrityAlertActionResu
     resolvedAt: alert.resolvedAt?.toISOString() ?? null,
     resolvedByUserId: alert.resolvedByUserId,
     resolutionNote: alert.resolutionNote,
+    resolutionValidationJson: alert.resolutionValidationJson ?? null,
+    resolutionType: alert.resolutionType ?? null,
     detectedAt: alert.detectedAt.toISOString(),
     updatedAt: alert.updatedAt.toISOString(),
   };
@@ -458,6 +461,62 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           alertId,
           dryRun,
           writesPerformed: false,
+          message,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance-integrity/alerts/:alertId/resolve',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      if (!isRecord(request.body) || request.body.confirmResolve !== true) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'confirmResolve must be true to resolve finance integrity alerts.',
+        });
+      }
+
+      const { alertId } = request.params as { alertId: string };
+      const note = readOptionalBodyString(request.body, 'note');
+      if (!note) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Resolution note is required.',
+        });
+      }
+      if (note.length > 500) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Resolution note must be 500 characters or fewer.',
+        });
+      }
+
+      try {
+        const alert = await resolveFinanceIntegrityAlertWithScannerValidation({
+          alertId,
+          note,
+          resolvedByUserId: request.authUser?.id ?? null,
+        });
+        return {
+          ok: true,
+          alert: toFinanceIntegrityAlertActionDto(alert),
+        };
+      } catch (error) {
+        const statusCode = error instanceof FinanceIntegrityAlertLifecycleError ||
+          error instanceof FinanceIntegrityScannerValidationError
+          ? error.statusCode
+          : 400;
+        const message = error instanceof Error ? error.message : 'Finance integrity alert could not be resolved.';
+        return reply.code(statusCode).send({
+          ok: false,
           message,
         });
       }

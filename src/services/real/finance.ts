@@ -12,6 +12,7 @@ import type {
   SettlementScheduleDryRunResponse,
   FinanceIntegrityAlertAcknowledgeResult,
   FinanceIntegrityAlertRescanResult,
+  FinanceIntegrityAlertResolveResult,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
@@ -419,6 +420,17 @@ export function rescanFinanceIntegrityAlert(
 ): Promise<FinanceIntegrityAlertRescanResult> {
   return apiClient.post<FinanceIntegrityAlertRescanResult>(
     `/admin/finance-integrity/alerts/${encodeURIComponent(alertId)}/rescan`,
+    input,
+    { skipVendorContext: true },
+  );
+}
+
+export function resolveFinanceIntegrityAlert(
+  alertId: string,
+  input: { note: string; confirmResolve: true },
+): Promise<FinanceIntegrityAlertResolveResult> {
+  return apiClient.post<FinanceIntegrityAlertResolveResult>(
+    `/admin/finance-integrity/alerts/${encodeURIComponent(alertId)}/resolve`,
     input,
     { skipVendorContext: true },
   );

@@ -16,6 +16,7 @@ import {
   detectVoidedLedgerWithoutSuccessor,
   FinanceIntegrityScannerValidationError,
   rescanFinanceIntegrityAlert,
+  resolveFinanceIntegrityAlertWithScannerValidation,
   runFinanceIntegrityScannerDiagnostics,
 } from '../backend/src/modules/finance/finance-integrity-scanner.service.js';
 
@@ -768,6 +769,124 @@ describe('finance integrity alert foundation', () => {
       name: 'FinanceIntegrityScannerValidationError',
       statusCode: 400,
       message: 'Finance integrity alert has no allocation or transfer scope to rescan.',
+    });
+  });
+
+  it('resolves an alert only when scanner validation no longer detects the issue', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        financeEntries: [
+          { id: 'fin-a-sale', vendorId: 'vendor-a', entryType: 'sale', voidedAt: null },
+        ],
+      },
+    ]);
+    const alert = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Reviewed.',
+    }, db as never);
+
+    const resolved = await resolveFinanceIntegrityAlertWithScannerValidation({
+      alertId: alert.id,
+      note: 'Validated and resolved.',
+      resolvedByUserId: 'admin-2',
+      resolvedAt: new Date('2026-06-21T14:00:00.000Z'),
+      db: db as never,
+    });
+
+    expect(resolved).toMatchObject({
+      id: alert.id,
+      status: 'resolved',
+      resolvedByUserId: 'admin-2',
+      resolutionNote: 'Validated and resolved.',
+      resolutionType: 'scanner_validated',
+      resolutionValidationJson: {
+        validatedAt: '2026-06-21T14:00:00.000Z',
+        findingsReturned: [],
+        categoryResolved: 'multiple_active_sale_ledgers',
+        scannerValidated: true,
+      },
+    });
+    await expect(findBlockingFinanceIntegrityAlerts({ vendorAllocationId: 'alloc-1' }, db as never))
+      .resolves.toEqual([]);
+    await expect(assertNoOpenFinanceIntegrityAlertForMoneyMovement({ vendorAllocationId: 'alloc-1' }, db as never))
+      .resolves.toBeUndefined();
+    await expect(findAlertsForAllocation('alloc-1', db as never))
+      .resolves.toEqual([
+        expect.objectContaining({
+          id: alert.id,
+          status: 'resolved',
+        }),
+      ]);
+  });
+
+  it('blocks alert resolution when scanner still detects the same issue', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        financeEntries: [
+          { id: 'fin-a-sale', vendorId: 'vendor-a', entryType: 'sale', voidedAt: null },
+          { id: 'fin-b-sale', vendorId: 'vendor-b', entryType: 'sale', voidedAt: null },
+        ],
+      },
+    ]);
+    const alert = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+    }, db as never);
+
+    await expect(resolveFinanceIntegrityAlertWithScannerValidation({
+      alertId: alert.id,
+      note: 'Validated and resolved.',
+      resolvedByUserId: 'admin-1',
+      db: db as never,
+    })).rejects.toMatchObject({
+      name: 'FinanceIntegrityAlertLifecycleError',
+      statusCode: 409,
+      message: 'Cannot resolve alert because the issue is still detected.',
+    });
+    expect(db.__alerts[0]).toMatchObject({
+      id: alert.id,
+      status: 'open',
+      resolvedAt: null,
+      resolutionNote: null,
+    });
+  });
+
+  it('requires a resolution note for scanner-validated alert resolution', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        financeEntries: [
+          { id: 'fin-a-sale', vendorId: 'vendor-a', entryType: 'sale', voidedAt: null },
+        ],
+      },
+    ]);
+    const alert = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+    }, db as never);
+
+    await expect(resolveFinanceIntegrityAlertWithScannerValidation({
+      alertId: alert.id,
+      note: ' ',
+      db: db as never,
+    })).rejects.toMatchObject({
+      name: 'FinanceIntegrityAlertLifecycleError',
+      statusCode: 400,
+      message: 'Resolution note is required.',
     });
   });
 });

@@ -3,8 +3,10 @@ import { prisma } from '../../db/prisma.js';
 import { isLedgerVoided } from './active-ledger-policy.service.js';
 import {
   createOrUpdateAlert,
+  FinanceIntegrityAlertLifecycleError,
   financeIntegrityAlertDedupeKey,
   type FinanceIntegrityAlertCategory,
+  type FinanceIntegrityAlertActionResult,
   type FinanceIntegrityAlertSeverity,
 } from './finance-integrity-alert.service.js';
 
@@ -67,6 +69,14 @@ export type FinanceIntegrityAlertRescanResult = FinanceIntegrityScannerResult & 
   matchingAlertStillDetected: boolean;
 };
 
+export type ResolveFinanceIntegrityAlertWithScannerValidationInput = {
+  alertId: string;
+  note?: string | null;
+  resolvedByUserId?: string | null;
+  resolvedAt?: Date;
+  db?: FinanceIntegrityScannerDbClient;
+};
+
 export class FinanceIntegrityScannerValidationError extends Error {
   statusCode: number;
 
@@ -95,6 +105,17 @@ const FAILED_TRANSFER_STATUSES = new Set([
   'FAILURE',
   'ERROR',
 ]);
+const TRANSFER_INTEGRITY_ALERT_CATEGORIES = new Set([
+  'transfer_in_progress',
+  'transfer_failed',
+]);
+const ACTIVE_LEDGER_INTEGRITY_ALERT_CATEGORIES = new Set([
+  'no_active_sale_ledger',
+  'multiple_active_sale_ledgers',
+  'voided_sale_ledger_without_successor',
+  'superseded_ledger_missing_target',
+]);
+const MAX_RESOLUTION_NOTE_LENGTH = 500;
 
 function normalize(value: unknown) {
   return String(value ?? '').trim().toUpperCase();
@@ -126,6 +147,47 @@ function activeSupersededTargets(allocation: AllocationIntegritySnapshot) {
 
 function alertSeverityForCategory(category: FinanceIntegrityAlertCategory): FinanceIntegrityAlertSeverity {
   return category === 'transfer_in_progress' ? 'warning' : 'critical';
+}
+
+function readResolutionNote(note: string | null | undefined) {
+  const trimmed = note?.trim() ?? '';
+  if (!trimmed) {
+    throw new FinanceIntegrityAlertLifecycleError('Resolution note is required.', 400);
+  }
+  if (trimmed.length > MAX_RESOLUTION_NOTE_LENGTH) {
+    throw new FinanceIntegrityAlertLifecycleError('Resolution note must be 500 characters or fewer.', 400);
+  }
+  return trimmed;
+}
+
+function scannerFindingsIncludeAlertIssue(input: {
+  alert: {
+    dedupeKey: string;
+    category: string;
+  };
+  result: FinanceIntegrityScannerResult;
+}) {
+  return input.result.findings.some((finding) => {
+    const sameScope = finding.vendorAllocationId === input.result.scope.vendorAllocationId &&
+      finding.allocationEconomicTransferId === input.result.scope.allocationEconomicTransferId;
+    if (finding.dedupeKey === input.alert.dedupeKey) {
+      return true;
+    }
+    if (!sameScope) {
+      return false;
+    }
+    if (finding.category === input.alert.category) {
+      return true;
+    }
+    if (
+      TRANSFER_INTEGRITY_ALERT_CATEGORIES.has(input.alert.category) &&
+      TRANSFER_INTEGRITY_ALERT_CATEGORIES.has(finding.category)
+    ) {
+      return true;
+    }
+    return ACTIVE_LEDGER_INTEGRITY_ALERT_CATEGORIES.has(input.alert.category) &&
+      ACTIVE_LEDGER_INTEGRITY_ALERT_CATEGORIES.has(finding.category);
+  });
 }
 
 async function loadAllocationSnapshot(
@@ -555,20 +617,90 @@ export async function rescanFinanceIntegrityAlert(input: {
     dryRun,
     db,
   });
-  const matchingAlertStillDetected = result.findings.some((finding) =>
-    finding.dedupeKey === alert.dedupeKey ||
-    (
-      finding.category === alert.category &&
-      finding.vendorAllocationId === result.scope.vendorAllocationId &&
-      finding.allocationEconomicTransferId === result.scope.allocationEconomicTransferId
-    )
-  );
+  const matchingAlertStillDetected = scannerFindingsIncludeAlertIssue({ alert, result });
 
   return {
     ...result,
     alertId: alert.id,
     matchingAlertStillDetected,
   };
+}
+
+export async function resolveFinanceIntegrityAlertWithScannerValidation(
+  input: ResolveFinanceIntegrityAlertWithScannerValidationInput,
+): Promise<FinanceIntegrityAlertActionResult> {
+  const db = input.db ?? prisma;
+  const note = readResolutionNote(input.note);
+  const alert = await db.financeIntegrityAlert.findUnique({
+    where: {
+      id: input.alertId,
+    },
+    select: {
+      id: true,
+      dedupeKey: true,
+      severity: true,
+      category: true,
+      reason: true,
+      status: true,
+      vendorAllocationId: true,
+      allocationEconomicTransferId: true,
+      acknowledgedAt: true,
+      acknowledgedByUserId: true,
+      acknowledgmentNote: true,
+      resolvedAt: true,
+      resolvedByUserId: true,
+      resolutionNote: true,
+      detectedAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!alert) {
+    throw new FinanceIntegrityAlertLifecycleError('Finance integrity alert was not found.', 404);
+  }
+
+  if (alert.status === 'resolved') {
+    throw new FinanceIntegrityAlertLifecycleError('Resolved finance integrity alerts cannot be resolved again.', 409);
+  }
+
+  if (alert.status !== 'open' && alert.status !== 'acknowledged') {
+    throw new FinanceIntegrityAlertLifecycleError(`Finance integrity alert status ${alert.status} cannot be resolved.`, 409);
+  }
+
+  if (!alert.vendorAllocationId && !alert.allocationEconomicTransferId) {
+    throw new FinanceIntegrityAlertLifecycleError('Finance integrity alert has no allocation or transfer scope to validate.', 400);
+  }
+
+  const validation = await runFinanceIntegrityScannerDiagnostics({
+    vendorAllocationId: alert.vendorAllocationId,
+    allocationEconomicTransferId: alert.allocationEconomicTransferId,
+    dryRun: true,
+    db,
+  });
+
+  if (scannerFindingsIncludeAlertIssue({ alert, result: validation })) {
+    throw new FinanceIntegrityAlertLifecycleError('Cannot resolve alert because the issue is still detected.', 409);
+  }
+
+  const resolvedAt = input.resolvedAt ?? new Date();
+  return db.financeIntegrityAlert.update({
+    where: {
+      id: input.alertId,
+    },
+    data: {
+      status: 'resolved',
+      resolvedAt,
+      resolvedByUserId: input.resolvedByUserId ?? null,
+      resolutionNote: note,
+      resolutionValidationJson: {
+        validatedAt: resolvedAt.toISOString(),
+        findingsReturned: validation.findings,
+        categoryResolved: alert.category,
+        scannerValidated: true,
+      } satisfies Prisma.InputJsonValue,
+      resolutionType: 'scanner_validated',
+    },
+  });
 }
 
 export const __financeIntegrityScannerTesting = {

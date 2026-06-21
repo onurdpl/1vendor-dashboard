@@ -12,6 +12,7 @@ const getSettlementScheduleAutoDraftJobStatusMock = vi.hoisted(() => vi.fn());
 const runSettlementScheduleAutoDraftJobMock = vi.hoisted(() => vi.fn());
 const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
 const rescanFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
+const resolveFinanceIntegrityAlertWithScannerValidationMock = vi.hoisted(() => vi.fn());
 const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
@@ -73,6 +74,7 @@ vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () 
 vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', () => ({
   FinanceIntegrityScannerValidationError: FinanceIntegrityScannerValidationErrorMock,
   rescanFinanceIntegrityAlert: rescanFinanceIntegrityAlertMock,
+  resolveFinanceIntegrityAlertWithScannerValidation: resolveFinanceIntegrityAlertWithScannerValidationMock,
   runFinanceIntegrityScannerDiagnostics: runFinanceIntegrityScannerDiagnosticsMock,
 }));
 
@@ -209,6 +211,7 @@ describe('finance route validation', () => {
     vi.clearAllMocks();
     runFinanceIntegrityScannerDiagnosticsMock.mockReset();
     rescanFinanceIntegrityAlertMock.mockReset();
+    resolveFinanceIntegrityAlertWithScannerValidationMock.mockReset();
     acknowledgeFinanceIntegrityAlertMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
@@ -890,6 +893,164 @@ describe('finance route validation', () => {
         dryRun: true,
         writesPerformed: false,
         message: 'Finance integrity alert has no allocation or transfer scope to rescan.',
+      },
+    });
+  });
+
+  it('requires admin access for finance integrity alert resolve', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/resolve')?.(
+      {
+        authUser: { id: 'vendor-user', role: 'vendor' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Validated and resolved.',
+          confirmResolve: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(resolveFinanceIntegrityAlertWithScannerValidationMock).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation for finance integrity alert resolve', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/resolve')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Validated and resolved.',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        message: 'confirmResolve must be true to resolve finance integrity alerts.',
+      },
+    });
+    expect(resolveFinanceIntegrityAlertWithScannerValidationMock).not.toHaveBeenCalled();
+  });
+
+  it('requires a note for finance integrity alert resolve', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/resolve')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: ' ',
+          confirmResolve: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        message: 'Resolution note is required.',
+      },
+    });
+    expect(resolveFinanceIntegrityAlertWithScannerValidationMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves finance integrity alerts through scanner validation', async () => {
+    resolveFinanceIntegrityAlertWithScannerValidationMock.mockResolvedValueOnce({
+      id: 'alert-1',
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+      status: 'resolved',
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: null,
+      acknowledgedAt: null,
+      acknowledgedByUserId: null,
+      acknowledgmentNote: null,
+      resolvedAt: new Date('2026-06-21T14:00:00.000Z'),
+      resolvedByUserId: 'admin-1',
+      resolutionNote: 'Validated and resolved.',
+      resolutionValidationJson: {
+        scannerValidated: true,
+        findingsReturned: [],
+      },
+      resolutionType: 'scanner_validated',
+      detectedAt: new Date('2026-06-21T10:00:00.000Z'),
+      updatedAt: new Date('2026-06-21T14:00:00.000Z'),
+    });
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/resolve')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Validated and resolved.',
+          confirmResolve: true,
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      alert: expect.objectContaining({
+        id: 'alert-1',
+        status: 'resolved',
+        resolvedAt: '2026-06-21T14:00:00.000Z',
+        resolvedByUserId: 'admin-1',
+        resolutionNote: 'Validated and resolved.',
+        resolutionType: 'scanner_validated',
+      }),
+    });
+    expect(resolveFinanceIntegrityAlertWithScannerValidationMock).toHaveBeenCalledWith({
+      alertId: 'alert-1',
+      note: 'Validated and resolved.',
+      resolvedByUserId: 'admin-1',
+    });
+  });
+
+  it('returns lifecycle validation errors for finance integrity alert resolve', async () => {
+    resolveFinanceIntegrityAlertWithScannerValidationMock.mockRejectedValueOnce(
+      new FinanceIntegrityAlertLifecycleErrorMock('Cannot resolve alert because the issue is still detected.', 409),
+    );
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/resolve')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Validated and resolved.',
+          confirmResolve: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 409,
+      body: {
+        ok: false,
+        message: 'Cannot resolve alert because the issue is still detected.',
       },
     });
   });

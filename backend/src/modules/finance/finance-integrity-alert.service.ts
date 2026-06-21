@@ -81,6 +81,8 @@ export type FinanceIntegrityAlertActionResult = {
   resolvedAt: Date | null;
   resolvedByUserId: string | null;
   resolutionNote: string | null;
+  resolutionValidationJson?: Prisma.JsonValue | null;
+  resolutionType?: string | null;
   detectedAt: Date;
   updatedAt: Date;
 };

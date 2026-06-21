@@ -94,6 +94,10 @@ export function rescanFinanceIntegrityAlert(alertId: string, input: { dryRun?: b
   return runtimeServices.finance.rescanFinanceIntegrityAlert(alertId, input);
 }
 
+export function resolveFinanceIntegrityAlert(alertId: string, input: { note: string; confirmResolve: true }) {
+  return runtimeServices.finance.resolveFinanceIntegrityAlert(alertId, input);
+}
+
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }

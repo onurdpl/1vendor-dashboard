@@ -10,7 +10,11 @@ import {
   type ParatikaSessionTokenLiveProbeResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
-import { acknowledgeFinanceIntegrityAlert, rescanFinanceIntegrityAlert } from '../features/finance/api';
+import {
+  acknowledgeFinanceIntegrityAlert,
+  rescanFinanceIntegrityAlert,
+  resolveFinanceIntegrityAlert,
+} from '../features/finance/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -74,6 +78,8 @@ type FinanceIntegrityAlertAcknowledgeAction = {
   alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number];
 };
 
+type FinanceIntegrityAlertResolveAction = FinanceIntegrityAlertAcknowledgeAction;
+
 type FinanceIntegrityAlertRescanSummary = {
   tone: 'success' | 'info' | 'error';
   message: string;
@@ -88,6 +94,8 @@ export function AdminShopifyOrderPage() {
   const [resolutionNote, setResolutionNote] = useState('');
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
+  const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
+  const [alertResolutionNote, setAlertResolutionNote] = useState('');
   const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
   const paratikaLiveProbe = useMutationAction(
     async () => {
@@ -176,6 +184,18 @@ export function AdminShopifyOrderPage() {
       },
     },
   );
+  const resolveAlertMutation = useMutationAction(
+    async (payload: { alertId: string; note: string }) =>
+      resolveFinanceIntegrityAlert(payload.alertId, {
+        note: payload.note,
+        confirmResolve: true,
+      }),
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Finance integrity alert could not be resolved.'), 'error');
+      },
+    },
+  );
 
   async function handleResolutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -259,6 +279,32 @@ export function AdminShopifyOrderPage() {
         },
       }));
       showFeedback(message, tone);
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleResolveSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resolveAction) {
+      return;
+    }
+
+    const note = alertResolutionNote.trim();
+    if (!note) {
+      showFeedback('Resolution note is required.', 'error');
+      return;
+    }
+
+    try {
+      await resolveAlertMutation.mutateAsync({
+        alertId: resolveAction.alert.id,
+        note,
+      });
+      showFeedback('Finance integrity alert resolved after scanner validation.', 'success');
+      setResolveAction(null);
+      setAlertResolutionNote('');
+      await refetch();
     } catch {
       // The mutation onError handler owns user-facing feedback.
     }
@@ -426,6 +472,7 @@ export function AdminShopifyOrderPage() {
                 const rescanSummary = rescanSummaries[alert.id];
                 const canAcknowledge = normalizedAlertStatus === 'open';
                 const canRescan = normalizedAlertStatus === 'open' || normalizedAlertStatus === 'acknowledged';
+                const canResolve = normalizedAlertStatus === 'open' || normalizedAlertStatus === 'acknowledged';
 
                 return (
                   <article
@@ -450,7 +497,7 @@ export function AdminShopifyOrderPage() {
                         <span>Economic transfer {alert.allocationEconomicTransferId}</span>
                       ) : null}
                     </div>
-                    {canAcknowledge || canRescan ? (
+                    {canAcknowledge || canRescan || canResolve ? (
                       <div className="support-modal-actions finance-integrity-alert-actions">
                         {canAcknowledge ? (
                           <button
@@ -472,6 +519,19 @@ export function AdminShopifyOrderPage() {
                             onClick={() => void handleRescanAlert(alert)}
                           >
                             {rescanAlertMutation.isPending ? 'Rescanning...' : 'Rescan'}
+                          </button>
+                        ) : null}
+                        {canResolve ? (
+                          <button
+                            type="button"
+                            className="button button-primary button-compact"
+                            disabled={resolveAlertMutation.isPending}
+                            onClick={() => {
+                              setResolveAction({ allocation, alert });
+                              setAlertResolutionNote('');
+                            }}
+                          >
+                            Resolve
                           </button>
                         ) : null}
                       </div>
@@ -827,6 +887,71 @@ export function AdminShopifyOrderPage() {
                 </button>
                 <button type="submit" className="button button-primary" disabled={acknowledgeAlertMutation.isPending}>
                   {acknowledgeAlertMutation.isPending ? 'Acknowledging...' : 'Acknowledge'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {resolveAction ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section
+            className="support-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="finance-integrity-resolve-title"
+          >
+            <div className="support-modal-header">
+              <div>
+                <h2 id="finance-integrity-resolve-title">Resolve finance alert</h2>
+                <p>
+                  {resolveAction.allocation.vendorName} · {formatFinanceAlertCategory(resolveAction.alert.category)}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                onClick={() => {
+                  if (!resolveAlertMutation.isPending) {
+                    setResolveAction(null);
+                    setAlertResolutionNote('');
+                  }
+                }}
+                aria-label="Close finance alert resolution form"
+              >
+                ×
+              </button>
+            </div>
+            <form className="support-ticket-form" onSubmit={handleResolveSubmit}>
+              <p className="support-context-note">
+                This action will re-run finance integrity validation. The alert can only be resolved if the issue is no longer detected.
+              </p>
+              <label>
+                Resolution note
+                <textarea
+                  value={alertResolutionNote}
+                  onChange={(event) => setAlertResolutionNote(event.target.value)}
+                  maxLength={500}
+                  rows={5}
+                  required
+                  placeholder="Record the evidence reviewed before resolving this alert."
+                />
+              </label>
+              <div className="support-modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setResolveAction(null);
+                    setAlertResolutionNote('');
+                  }}
+                  disabled={resolveAlertMutation.isPending}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-primary" disabled={resolveAlertMutation.isPending}>
+                  {resolveAlertMutation.isPending ? 'Validating...' : 'Resolve alert'}
                 </button>
               </div>
             </form>
