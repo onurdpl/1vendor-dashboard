@@ -2399,6 +2399,33 @@ export const runtimeServices = {
             notes: ['SETTLEMENT_AUTO_DRAFT_JOB_ENABLED is false; no drafts were created.'],
             jobRun: null,
           }),
+    acknowledgeFinanceIntegrityAlert: (
+      alertId: string,
+      input: Parameters<typeof realFinance.acknowledgeFinanceIntegrityAlert>[1],
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.acknowledgeFinanceIntegrityAlert(alertId, input)
+        : Promise.resolve({
+            ok: true as const,
+            alert: {
+              id: alertId,
+              dedupeKey: `mock-finance-integrity-alert:${alertId}`,
+              severity: 'warning',
+              category: 'mock_finance_integrity_alert',
+              reason: 'Mock finance integrity alert acknowledgment.',
+              status: 'acknowledged',
+              detectedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              vendorAllocationId: null,
+              allocationEconomicTransferId: null,
+              acknowledgedAt: new Date().toISOString(),
+              acknowledgedByUserId: null,
+              acknowledgmentNote: input.note,
+              resolvedAt: null,
+              resolvedByUserId: null,
+              resolutionNote: null,
+            },
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

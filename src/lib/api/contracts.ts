@@ -947,6 +947,23 @@ export type FinanceIntegrityAlertSummary = {
   vendorAllocationId: string | null;
   allocationEconomicTransferId: string | null;
   affectedLedgerIds?: unknown;
+  acknowledgedAt?: string | null;
+  acknowledgedByUserId?: string | null;
+  acknowledgmentNote?: string | null;
+};
+
+export type FinanceIntegrityAlertAcknowledgeResult = {
+  ok: true;
+  alert: FinanceIntegrityAlertSummary & {
+    dedupeKey: string;
+    acknowledgedAt: string | null;
+    acknowledgedByUserId: string | null;
+    acknowledgmentNote: string | null;
+    resolvedAt: string | null;
+    resolvedByUserId: string | null;
+    resolutionNote: string | null;
+    updatedAt: string;
+  };
 };
 
 export type ShopifyOrderBreakdown = {

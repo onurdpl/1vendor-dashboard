@@ -10,6 +10,7 @@ import {
   type ParatikaSessionTokenLiveProbeResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
+import { acknowledgeFinanceIntegrityAlert } from '../features/finance/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -68,6 +69,11 @@ type AdminAllocationResolutionAction = {
   allocation: ShopifyOrderBreakdown['allocations'][number];
 };
 
+type FinanceIntegrityAlertAcknowledgeAction = {
+  allocation: ShopifyOrderBreakdown['allocations'][number];
+  alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number];
+};
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const appReadiness = useAppReadiness();
@@ -75,6 +81,8 @@ export function AdminShopifyOrderPage() {
   const [paratikaProbeResult, setParatikaProbeResult] = useState<ParatikaSessionTokenLiveProbeResult | null>(null);
   const [resolutionAction, setResolutionAction] = useState<AdminAllocationResolutionAction | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
+  const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
+  const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const paratikaLiveProbe = useMutationAction(
     async () => {
       if (!shopifyOrderId) {
@@ -146,6 +154,14 @@ export function AdminShopifyOrderPage() {
     },
   );
   const isResolutionPending = returnToVendorMutation.isPending || addResolutionNoteMutation.isPending;
+  const acknowledgeAlertMutation = useMutationAction(
+    async (payload: { alertId: string; note: string }) => acknowledgeFinanceIntegrityAlert(payload.alertId, { note: payload.note }),
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Finance integrity alert could not be acknowledged.'), 'error');
+      },
+    },
+  );
 
   async function handleResolutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -175,6 +191,32 @@ export function AdminShopifyOrderPage() {
       }
       setResolutionAction(null);
       setResolutionNote('');
+      await refetch();
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleAcknowledgeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!acknowledgeAction) {
+      return;
+    }
+
+    const note = acknowledgmentNote.trim();
+    if (!note) {
+      showFeedback('Acknowledgment note is required.', 'error');
+      return;
+    }
+
+    try {
+      await acknowledgeAlertMutation.mutateAsync({
+        alertId: acknowledgeAction.alert.id,
+        note,
+      });
+      showFeedback('Finance integrity alert acknowledged. Money movement remains blocked until the alert is resolved.', 'success');
+      setAcknowledgeAction(null);
+      setAcknowledgmentNote('');
       await refetch();
     } catch {
       // The mutation onError handler owns user-facing feedback.
@@ -361,6 +403,20 @@ export function AdminShopifyOrderPage() {
                       <span>Economic transfer {alert.allocationEconomicTransferId}</span>
                     ) : null}
                   </div>
+                  {alert.status.toLowerCase() === 'open' ? (
+                    <div className="support-modal-actions finance-integrity-alert-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        onClick={() => {
+                          setAcknowledgeAction({ allocation, alert });
+                          setAcknowledgmentNote('');
+                        }}
+                      >
+                        Acknowledge
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </section>
@@ -645,6 +701,71 @@ export function AdminShopifyOrderPage() {
                     : resolutionAction.type === 'return_to_vendor'
                       ? 'Return to vendor'
                       : 'Add note'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {acknowledgeAction ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section
+            className="support-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="finance-integrity-acknowledge-title"
+          >
+            <div className="support-modal-header">
+              <div>
+                <h2 id="finance-integrity-acknowledge-title">Acknowledge finance alert</h2>
+                <p>
+                  {acknowledgeAction.allocation.vendorName} · {formatFinanceAlertCategory(acknowledgeAction.alert.category)}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                onClick={() => {
+                  if (!acknowledgeAlertMutation.isPending) {
+                    setAcknowledgeAction(null);
+                    setAcknowledgmentNote('');
+                  }
+                }}
+                aria-label="Close finance alert acknowledgment form"
+              >
+                ×
+              </button>
+            </div>
+            <form className="support-ticket-form" onSubmit={handleAcknowledgeSubmit}>
+              <p className="support-context-note">
+                Acknowledging records that finance has reviewed this alert. It does not unblock settlement, payout, or refund movement.
+              </p>
+              <label>
+                Acknowledgment note
+                <textarea
+                  value={acknowledgmentNote}
+                  onChange={(event) => setAcknowledgmentNote(event.target.value)}
+                  maxLength={500}
+                  rows={5}
+                  required
+                  placeholder="Record who reviewed this alert and what follow-up is planned."
+                />
+              </label>
+              <div className="support-modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setAcknowledgeAction(null);
+                    setAcknowledgmentNote('');
+                  }}
+                  disabled={acknowledgeAlertMutation.isPending}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-primary" disabled={acknowledgeAlertMutation.isPending}>
+                  {acknowledgeAlertMutation.isPending ? 'Acknowledging...' : 'Acknowledge'}
                 </button>
               </div>
             </form>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  acknowledgeFinanceIntegrityAlert,
   createOrUpdateAlert,
   assertNoOpenFinanceIntegrityAlertForMoneyMovement,
   findBlockingFinanceIntegrityAlerts,
@@ -56,6 +57,7 @@ function buildDb(allocations: AllocationInput[] = []) {
   return {
     __alerts: alerts,
     financeIntegrityAlert: {
+      findUnique: async (args: { where: { id: string } }) => alerts.find((alert) => alert.id === args.where.id) ?? null,
       upsert: async (args: { where: { dedupeKey: string }; create: Record<string, unknown>; update: Record<string, unknown> }) => {
         const existing = alerts.find((alert) => alert.dedupeKey === args.where.dedupeKey);
         if (existing) {
@@ -312,6 +314,120 @@ describe('finance integrity alert foundation', () => {
           severity: 'warning',
         }),
       });
+  });
+
+  it('acknowledges an open alert with audit fields and keeps it blocking', async () => {
+    const db = buildDb();
+
+    const created = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:acknowledge:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+    }, db as never);
+
+    const acknowledged = await acknowledgeFinanceIntegrityAlert({
+      alertId: created.id,
+      note: ' Reviewed by finance ops. ',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgedAt: new Date('2026-06-21T13:00:00.000Z'),
+    }, db as never);
+
+    expect(acknowledged).toMatchObject({
+      id: created.id,
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Reviewed by finance ops.',
+      acknowledgedAt: new Date('2026-06-21T13:00:00.000Z'),
+      resolvedAt: null,
+      resolvedByUserId: null,
+      resolutionNote: null,
+    });
+    await expect(assertNoOpenFinanceIntegrityAlertForMoneyMovement({ vendorAllocationId: 'alloc-1' }, db as never))
+      .rejects.toMatchObject({
+        name: 'FinanceIntegrityMoneyMovementBlockedError',
+        alert: expect.objectContaining({
+          status: 'acknowledged',
+          severity: 'critical',
+        }),
+      });
+  });
+
+  it('requires an acknowledgment note', async () => {
+    const db = buildDb();
+    const created = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:acknowledge-note:alloc-1',
+      severity: 'warning',
+      category: 'transfer_in_progress',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Economic transfer is in progress for allocation.',
+    }, db as never);
+
+    await expect(acknowledgeFinanceIntegrityAlert({
+      alertId: created.id,
+      note: ' ',
+      acknowledgedByUserId: 'admin-1',
+    }, db as never)).rejects.toMatchObject({
+      name: 'FinanceIntegrityAlertLifecycleError',
+      statusCode: 400,
+      message: 'Acknowledgment note is required.',
+    });
+  });
+
+  it('does not acknowledge resolved alerts', async () => {
+    const db = buildDb();
+    const created = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:acknowledge-resolved:alloc-1',
+      severity: 'critical',
+      category: 'transfer_failed',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Economic transfer failed for allocation.',
+    }, db as never);
+    await resolveAlert({
+      id: created.id,
+      resolutionNote: 'Resolved by validated recovery.',
+      resolvedByUserId: 'admin-1',
+    }, db as never);
+
+    await expect(acknowledgeFinanceIntegrityAlert({
+      alertId: created.id,
+      note: 'Reviewed by finance ops.',
+      acknowledgedByUserId: 'admin-2',
+    }, db as never)).rejects.toMatchObject({
+      name: 'FinanceIntegrityAlertLifecycleError',
+      statusCode: 409,
+      message: 'Resolved finance integrity alerts cannot be acknowledged.',
+    });
+  });
+
+  it('returns an already acknowledged alert without changing the original acknowledgment audit note', async () => {
+    const db = buildDb();
+    const created = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:already-acknowledged:alloc-1',
+      severity: 'warning',
+      category: 'no_active_sale_ledger',
+      vendorAllocationId: 'alloc-1',
+      reason: 'No active sale ledger exists for allocation.',
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Original acknowledgment.',
+      acknowledgedAt: new Date('2026-06-21T13:00:00.000Z'),
+    }, db as never);
+
+    const repeated = await acknowledgeFinanceIntegrityAlert({
+      alertId: created.id,
+      note: 'Second acknowledgment should not overwrite.',
+      acknowledgedByUserId: 'admin-2',
+    }, db as never);
+
+    expect(repeated).toMatchObject({
+      id: created.id,
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Original acknowledgment.',
+      acknowledgedAt: new Date('2026-06-21T13:00:00.000Z'),
+    });
   });
 
   it('does not block money movement for info or resolved alerts by default', async () => {

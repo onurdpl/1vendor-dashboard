@@ -86,6 +86,10 @@ export function runSettlementScheduleAutoDraftJob(input: {
   return runtimeServices.finance.runSettlementScheduleAutoDraftJob(input);
 }
 
+export function acknowledgeFinanceIntegrityAlert(alertId: string, input: { note: string }) {
+  return runtimeServices.finance.acknowledgeFinanceIntegrityAlert(alertId, input);
+}
+
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }

@@ -10,6 +10,7 @@ import type {
   SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
+  FinanceIntegrityAlertAcknowledgeResult,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
@@ -395,6 +396,17 @@ export function runSettlementScheduleAutoDraftJob(input: {
 }): Promise<SettlementScheduleAutoDraftJobResponse> {
   return apiClient.post<SettlementScheduleAutoDraftJobResponse>(
     '/admin/finance/settlement-schedules/run-auto-draft-job',
+    input,
+    { skipVendorContext: true },
+  );
+}
+
+export function acknowledgeFinanceIntegrityAlert(
+  alertId: string,
+  input: { note: string },
+): Promise<FinanceIntegrityAlertAcknowledgeResult> {
+  return apiClient.post<FinanceIntegrityAlertAcknowledgeResult>(
+    `/admin/finance-integrity/alerts/${encodeURIComponent(alertId)}/acknowledge`,
     input,
     { skipVendorContext: true },
   );

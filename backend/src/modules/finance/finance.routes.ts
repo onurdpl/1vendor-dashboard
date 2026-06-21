@@ -61,6 +61,11 @@ import {
   runSettlementScheduleAutoDraftJob,
 } from './settlement-schedule-job.service.js';
 import {
+  acknowledgeFinanceIntegrityAlert,
+  FinanceIntegrityAlertLifecycleError,
+  type FinanceIntegrityAlertActionResult,
+} from './finance-integrity-alert.service.js';
+import {
   FinanceIntegrityScannerValidationError,
   runFinanceIntegrityScannerDiagnostics,
 } from './finance-integrity-scanner.service.js';
@@ -132,6 +137,27 @@ function readOptionalBodyString(body: unknown, key: string) {
 
   const value = body[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function toFinanceIntegrityAlertActionDto(alert: FinanceIntegrityAlertActionResult) {
+  return {
+    id: alert.id,
+    dedupeKey: alert.dedupeKey,
+    severity: alert.severity,
+    category: alert.category,
+    reason: alert.reason,
+    status: alert.status,
+    vendorAllocationId: alert.vendorAllocationId,
+    allocationEconomicTransferId: alert.allocationEconomicTransferId,
+    acknowledgedAt: alert.acknowledgedAt?.toISOString() ?? null,
+    acknowledgedByUserId: alert.acknowledgedByUserId,
+    acknowledgmentNote: alert.acknowledgmentNote,
+    resolvedAt: alert.resolvedAt?.toISOString() ?? null,
+    resolvedByUserId: alert.resolvedByUserId,
+    resolutionNote: alert.resolutionNote,
+    detectedAt: alert.detectedAt.toISOString(),
+    updatedAt: alert.updatedAt.toISOString(),
+  };
 }
 
 function readOptionalBodyBoolean(body: unknown, key: string) {
@@ -352,6 +378,52 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           ok: false,
           dryRun,
           writesPerformed: false,
+          message,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance-integrity/alerts/:alertId/acknowledge',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { alertId } = request.params as { alertId: string };
+      const note = readOptionalBodyString(request.body, 'note');
+      if (!note) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Acknowledgment note is required.',
+        });
+      }
+      if (note.length > 500) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Acknowledgment note must be 500 characters or fewer.',
+        });
+      }
+
+      try {
+        const alert = await acknowledgeFinanceIntegrityAlert({
+          alertId,
+          note,
+          acknowledgedByUserId: request.authUser?.id ?? null,
+        });
+        return {
+          ok: true,
+          alert: toFinanceIntegrityAlertActionDto(alert),
+        };
+      } catch (error) {
+        const statusCode = error instanceof FinanceIntegrityAlertLifecycleError ? error.statusCode : 400;
+        const message = error instanceof Error ? error.message : 'Finance integrity alert could not be acknowledged.';
+        return reply.code(statusCode).send({
+          ok: false,
           message,
         });
       }

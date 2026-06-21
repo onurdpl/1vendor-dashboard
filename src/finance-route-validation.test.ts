@@ -11,6 +11,17 @@ const createSettlementScheduleDraftsMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleAutoDraftJobStatusMock = vi.hoisted(() => vi.fn());
 const runSettlementScheduleAutoDraftJobMock = vi.hoisted(() => vi.fn());
 const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
+const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
+const FinanceIntegrityAlertLifecycleErrorMock = vi.hoisted(() =>
+  class FinanceIntegrityAlertLifecycleError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
+);
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -58,6 +69,11 @@ vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', (
     }
   },
   runFinanceIntegrityScannerDiagnostics: runFinanceIntegrityScannerDiagnosticsMock,
+}));
+
+vi.mock('../backend/src/modules/finance/finance-integrity-alert.service.js', () => ({
+  acknowledgeFinanceIntegrityAlert: acknowledgeFinanceIntegrityAlertMock,
+  FinanceIntegrityAlertLifecycleError: FinanceIntegrityAlertLifecycleErrorMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -187,6 +203,7 @@ describe('finance route validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     runFinanceIntegrityScannerDiagnosticsMock.mockReset();
+    acknowledgeFinanceIntegrityAlertMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
       commissionPercent: '10.00',
@@ -649,6 +666,130 @@ describe('finance route validation', () => {
       vendorAllocationId: null,
       allocationEconomicTransferId: 'transfer-1',
       dryRun: false,
+    });
+  });
+
+  it('requires admin access for finance integrity alert acknowledgment', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/acknowledge')?.(
+      {
+        authUser: { id: 'vendor-user', role: 'vendor' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Reviewed by finance ops.',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(acknowledgeFinanceIntegrityAlertMock).not.toHaveBeenCalled();
+  });
+
+  it('requires a note for finance integrity alert acknowledgment', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/acknowledge')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: ' ',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        message: 'Acknowledgment note is required.',
+      },
+    });
+    expect(acknowledgeFinanceIntegrityAlertMock).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges an open finance integrity alert for admins', async () => {
+    acknowledgeFinanceIntegrityAlertMock.mockResolvedValueOnce({
+      id: 'alert-1',
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      reason: 'Multiple active sale ledgers exist.',
+      status: 'acknowledged',
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: null,
+      acknowledgedAt: new Date('2026-06-21T13:00:00.000Z'),
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Reviewed by finance ops.',
+      resolvedAt: null,
+      resolvedByUserId: null,
+      resolutionNote: null,
+      detectedAt: new Date('2026-06-21T12:00:00.000Z'),
+      updatedAt: new Date('2026-06-21T13:00:00.000Z'),
+    });
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/acknowledge')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: ' Reviewed by finance ops. ',
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      alert: expect.objectContaining({
+        id: 'alert-1',
+        status: 'acknowledged',
+        acknowledgedAt: '2026-06-21T13:00:00.000Z',
+        acknowledgedByUserId: 'admin-1',
+        acknowledgmentNote: 'Reviewed by finance ops.',
+        resolvedAt: null,
+      }),
+    });
+    expect(acknowledgeFinanceIntegrityAlertMock).toHaveBeenCalledWith({
+      alertId: 'alert-1',
+      note: 'Reviewed by finance ops.',
+      acknowledgedByUserId: 'admin-1',
+    });
+  });
+
+  it('returns lifecycle validation errors for finance integrity alert acknowledgment', async () => {
+    acknowledgeFinanceIntegrityAlertMock.mockRejectedValueOnce(
+      new FinanceIntegrityAlertLifecycleErrorMock('Resolved finance integrity alerts cannot be acknowledged.', 409),
+    );
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/acknowledge')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          note: 'Reviewed by finance ops.',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 409,
+      body: {
+        ok: false,
+        message: 'Resolved finance integrity alerts cannot be acknowledged.',
+      },
     });
   });
 

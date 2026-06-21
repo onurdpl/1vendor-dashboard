@@ -23,6 +23,11 @@ export type FinanceIntegrityAlertStatus = typeof FINANCE_INTEGRITY_ALERT_STATUSE
 export type BlockingFinanceIntegrityAlertStatus = typeof FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES[number];
 
 type FinanceIntegrityAlertDbClient = Pick<Prisma.TransactionClient, 'financeIntegrityAlert'>;
+type FinanceIntegrityAlertRootDbClient = FinanceIntegrityAlertDbClient & {
+  $transaction?: <T>(callback: (tx: FinanceIntegrityAlertDbClient) => Promise<T>) => Promise<T>;
+};
+
+const MAX_ACKNOWLEDGMENT_NOTE_LENGTH = 500;
 
 export type CreateOrUpdateFinanceIntegrityAlertInput = {
   dedupeKey: string;
@@ -54,6 +59,32 @@ export type ResolveFinanceIntegrityAlertInput = {
   resolvedAt?: Date;
 };
 
+export type AcknowledgeFinanceIntegrityAlertInput = {
+  alertId: string;
+  note?: string | null;
+  acknowledgedByUserId?: string | null;
+  acknowledgedAt?: Date;
+};
+
+export type FinanceIntegrityAlertActionResult = {
+  id: string;
+  dedupeKey: string;
+  severity: string;
+  category: string;
+  reason: string;
+  status: string;
+  vendorAllocationId: string | null;
+  allocationEconomicTransferId: string | null;
+  acknowledgedAt: Date | null;
+  acknowledgedByUserId: string | null;
+  acknowledgmentNote: string | null;
+  resolvedAt: Date | null;
+  resolvedByUserId: string | null;
+  resolutionNote: string | null;
+  detectedAt: Date;
+  updatedAt: Date;
+};
+
 export type BlockingFinanceIntegrityAlert = {
   id: string;
   dedupeKey: string;
@@ -80,6 +111,17 @@ export class FinanceIntegrityMoneyMovementBlockedError extends Error {
     this.name = 'FinanceIntegrityMoneyMovementBlockedError';
     this.alert = alert;
     Object.setPrototypeOf(this, FinanceIntegrityMoneyMovementBlockedError.prototype);
+  }
+}
+
+export class FinanceIntegrityAlertLifecycleError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.name = 'FinanceIntegrityAlertLifecycleError';
+    this.statusCode = statusCode;
+    Object.setPrototypeOf(this, FinanceIntegrityAlertLifecycleError.prototype);
   }
 }
 
@@ -151,6 +193,71 @@ export async function resolveAlert(
       resolutionNote: input.resolutionNote ?? null,
     },
   });
+}
+
+function readAcknowledgmentNote(note: string | null | undefined) {
+  const trimmed = note?.trim() ?? '';
+  if (!trimmed) {
+    throw new FinanceIntegrityAlertLifecycleError('Acknowledgment note is required.', 400);
+  }
+  if (trimmed.length > MAX_ACKNOWLEDGMENT_NOTE_LENGTH) {
+    throw new FinanceIntegrityAlertLifecycleError('Acknowledgment note must be 500 characters or fewer.', 400);
+  }
+  return trimmed;
+}
+
+export async function acknowledgeFinanceIntegrityAlert(
+  input: AcknowledgeFinanceIntegrityAlertInput,
+  db: FinanceIntegrityAlertRootDbClient = prisma,
+): Promise<FinanceIntegrityAlertActionResult> {
+  const note = readAcknowledgmentNote(input.note);
+
+  const run = async (tx: FinanceIntegrityAlertDbClient) => {
+    const alert = await tx.financeIntegrityAlert.findUnique({
+      where: {
+        id: input.alertId,
+      },
+    });
+
+    if (!alert) {
+      throw new FinanceIntegrityAlertLifecycleError('Finance integrity alert was not found.', 404);
+    }
+
+    if (alert.status === 'acknowledged') {
+      return alert;
+    }
+
+    if (alert.status === 'resolved') {
+      throw new FinanceIntegrityAlertLifecycleError('Resolved finance integrity alerts cannot be acknowledged.', 409);
+    }
+
+    if (alert.status !== 'open') {
+      throw new FinanceIntegrityAlertLifecycleError(`Finance integrity alert status ${alert.status} cannot be acknowledged.`, 409);
+    }
+
+    return tx.financeIntegrityAlert.update({
+      where: {
+        id: input.alertId,
+      },
+      data: {
+        status: 'acknowledged',
+        acknowledgedAt: input.acknowledgedAt ?? new Date(),
+        acknowledgedByUserId: input.acknowledgedByUserId ?? null,
+        acknowledgmentNote: note,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        resolutionNote: null,
+        resolutionValidationJson: Prisma.JsonNull,
+        resolutionType: null,
+      },
+    });
+  };
+
+  if (typeof db.$transaction === 'function') {
+    return db.$transaction(run);
+  }
+
+  return run(db);
 }
 
 export async function findOpenAlerts(db: FinanceIntegrityAlertDbClient = prisma) {
