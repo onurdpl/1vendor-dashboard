@@ -301,84 +301,87 @@ enum VendorProfileSnapshotImpact {
 }
 
 model User {
-  id           String                        @id @default(cuid())
-  email        String                        @unique
-  name         String
-  role         UserRole
-  status       String                        @default("active")
-  passwordHash String
-  createdAt    DateTime                      @default(now())
-  updatedAt    DateTime                      @updatedAt
-  vendorLinks  UserVendorAccess[]
-  assignments  AllocationAssignmentHistory[] @relation("assignmentActor")
-  supportTickets SupportTicket[]
-  supportNotes   SupportTicketNote[]
-  supportReplies SupportTicketReply[]
+  id                            String                        @id @default(cuid())
+  email                         String                        @unique
+  name                          String
+  role                          UserRole
+  status                        String                        @default("active")
+  passwordHash                  String
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
+  vendorLinks                   UserVendorAccess[]
+  assignments                   AllocationAssignmentHistory[] @relation("assignmentActor")
+  economicTransfersAdministered AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
+  supportTickets                SupportTicket[]
+  supportNotes                  SupportTicketNote[]
+  supportReplies                SupportTicketReply[]
 }
 
 model Vendor {
-  id                    String                        @id
-  name                  String
-  status                String                        @default("active")
-  createdAt             DateTime                      @default(now())
-  updatedAt             DateTime                      @updatedAt
-  users                 UserVendorAccess[]
-  originalAllocations   VendorAllocation[]            @relation("originalVendor")
-  assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
-  financeEntries        FinanceLedgerEntry[]
-  shippingCosts         ShipmentShippingCost[]
-  shippingConfig        VendorShippingConfig?
-  shippingWarehouses    VendorShippingWarehouse[]
-  shipmentExecutions    ShipmentExecution[]
-  financialProfile      VendorFinancialProfile?
-  billingProfile        VendorBillingProfile?
-  paymentProviderSellers VendorPaymentProviderSeller[]
-  financeEvents         FinanceEvent[]
-  payoutBatches         PayoutBatch[]
-  settlementApprovals   SettlementApproval[]
+  id                           String                        @id
+  name                         String
+  status                       String                        @default("active")
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+  users                        UserVendorAccess[]
+  originalAllocations          VendorAllocation[]            @relation("originalVendor")
+  assignedAllocations          VendorAllocation[]            @relation("assignedVendor")
+  financeEntries               FinanceLedgerEntry[]
+  shippingCosts                ShipmentShippingCost[]
+  shippingConfig               VendorShippingConfig?
+  shippingWarehouses           VendorShippingWarehouse[]
+  shipmentExecutions           ShipmentExecution[]
+  financialProfile             VendorFinancialProfile?
+  billingProfile               VendorBillingProfile?
+  paymentProviderSellers       VendorPaymentProviderSeller[]
+  financeEvents                FinanceEvent[]
+  payoutBatches                PayoutBatch[]
+  settlementApprovals          SettlementApproval[]
   settlementCommissionInvoices SettlementCommissionInvoice[]
-  settlementRefundAdjustments SettlementRefundAdjustment[]
-  balanceEvents         VendorBalanceEvent[]
-  profileAuditLogs      VendorProfileAuditLog[]
-  operationalSignals    OperationalSignal[]
-  automationActions     AutomationAction[]
-  notifications         NotificationIntent[]
-  supportTickets        SupportTicket[]
-  assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
-  assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
+  settlementRefundAdjustments  SettlementRefundAdjustment[]
+  balanceEvents                VendorBalanceEvent[]
+  profileAuditLogs             VendorProfileAuditLog[]
+  operationalSignals           OperationalSignal[]
+  automationActions            AutomationAction[]
+  notifications                NotificationIntent[]
+  supportTickets               SupportTicket[]
+  assignmentHistoryFrom        AllocationAssignmentHistory[] @relation("assignmentFromVendor")
+  assignmentHistoryTo          AllocationAssignmentHistory[] @relation("assignmentToVendor")
+  economicTransfersFrom        AllocationEconomicTransfer[]  @relation("economicTransferFromVendor")
+  economicTransfersTo          AllocationEconomicTransfer[]  @relation("economicTransferToVendor")
 }
 
 model SupportTicket {
-  id              String   @id @default(cuid())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  createdByUserId String
-  createdByRole   String
-  vendorId        String
-  subject         String
-  message         String
-  priority        String   @default("normal")
-  status          String   @default("OPEN")
-  category        String   @default("OTHER")
-  assigneeUserId  String?
-  assigneeName    String?
-  vendorUnreadCount Int    @default(0)
-  adminUnreadCount  Int    @default(0)
-  lastReplyAt     DateTime?
-  lastReplyByRole String?
+  id                 String               @id @default(cuid())
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  createdByUserId    String
+  createdByRole      String
+  vendorId           String
+  subject            String
+  message            String
+  priority           String               @default("normal")
+  status             String               @default("OPEN")
+  category           String               @default("OTHER")
+  assigneeUserId     String?
+  assigneeName       String?
+  vendorUnreadCount  Int                  @default(0)
+  adminUnreadCount   Int                  @default(0)
+  lastReplyAt        DateTime?
+  lastReplyByRole    String?
   firstResponseDueAt DateTime?
   nextResponseDueAt  DateTime?
   escalatedAt        DateTime?
   escalationReason   String?
-  contextType     String
-  contextId       String?
-  contextSnapshot Json?
-  resolvedAt      DateTime?
-  closedAt        DateTime?
-  createdBy       User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
-  vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  notes           SupportTicketNote[]
-  replies         SupportTicketReply[]
+  contextType        String
+  contextId          String?
+  contextSnapshot    Json?
+  resolvedAt         DateTime?
+  closedAt           DateTime?
+  createdBy          User                 @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  vendor             Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  notes              SupportTicketNote[]
+  replies            SupportTicketReply[]
 
   @@index([vendorId, status, createdAt])
   @@index([category, status])
@@ -421,23 +424,23 @@ model SupportTicketReply {
 }
 
 model VendorFinancialProfile {
-  id                     String                @id @default(cuid())
-  vendorId               String                @unique
-  commissionPercent      Decimal               @default(10.00) @db.Decimal(5, 2)
-  commissionVatPercent   Decimal               @default(0.00) @db.Decimal(5, 2)
-  deductShippingEnabled  Boolean               @default(false)
-  shippingMode           ShippingDeductionMode @default(DISABLED)
-  fixedShippingFee       Decimal?              @db.Decimal(10, 2)
-  settlementDelayDays    Int                   @default(21)
-  settlementFrequencyType SettlementFrequencyType @default(WEEKLY)
-  weeklySettlementDay    SettlementWeekday     @default(WEDNESDAY)
-  autoSettlementDraftEnabled Boolean            @default(false)
-  autoSettlementApproveEnabled Boolean          @default(false)
-  autoSettlementInvoiceEnabled Boolean          @default(false)
-  active                 Boolean               @default(true)
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  vendor                 Vendor                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  id                           String                  @id @default(cuid())
+  vendorId                     String                  @unique
+  commissionPercent            Decimal                 @default(10.00) @db.Decimal(5, 2)
+  commissionVatPercent         Decimal                 @default(0.00) @db.Decimal(5, 2)
+  deductShippingEnabled        Boolean                 @default(false)
+  shippingMode                 ShippingDeductionMode   @default(DISABLED)
+  fixedShippingFee             Decimal?                @db.Decimal(10, 2)
+  settlementDelayDays          Int                     @default(21)
+  settlementFrequencyType      SettlementFrequencyType @default(WEEKLY)
+  weeklySettlementDay          SettlementWeekday       @default(WEDNESDAY)
+  autoSettlementDraftEnabled   Boolean                 @default(false)
+  autoSettlementApproveEnabled Boolean                 @default(false)
+  autoSettlementInvoiceEnabled Boolean                 @default(false)
+  active                       Boolean                 @default(true)
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+  vendor                       Vendor                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId, active])
 }
@@ -514,16 +517,16 @@ model UserVendorAccess {
 }
 
 model VendorIntegrationClient {
-  id               String                      @id @default(cuid())
+  id               String                           @id @default(cuid())
   vendorIdentifier String
   providerName     String
-  tokenHash        String                      @unique
-  enabled          Boolean                     @default(true)
+  tokenHash        String                           @unique
+  enabled          Boolean                          @default(true)
   scopes           String[]
   lastUsedAt       DateTime?
   revokedAt        DateTime?
-  createdAt        DateTime                    @default(now())
-  updatedAt        DateTime                    @updatedAt
+  createdAt        DateTime                         @default(now())
+  updatedAt        DateTime                         @updatedAt
   auditLogs        VendorIntegrationAuditLog[]
   statusEvents     VendorIntegrationStatusEvent[]
   shipmentEvents   VendorIntegrationShipmentEvent[]
@@ -549,120 +552,121 @@ model VendorIntegrationAuditLog {
 }
 
 model ShopifyOrder {
-  id                       String                 @id @default(cuid())
-  sourceShopifyOrderId     String                 @unique
-  sourceShopifyOrderNumber String
-  shopifyCreatedAt         DateTime?
-  currency                 String?
-  financialStatus          String?
-  paymentGatewayName       String?
-  taxesIncluded            Boolean?
-  orderTaxAmount           Decimal?               @db.Decimal(10, 2)
-  shippingAmount           Decimal?               @db.Decimal(10, 2)
-  discountAmount           Decimal?               @db.Decimal(10, 2)
-  orderNote                String?
-  orderTags                String[]               @default([])
-  customerName             String?
-  customerEmail            String?
-  customerPhone            String?
-  billingFullName          String?
-  billingCompany           String?
-  billingPhone             String?
-  billingCity              String?
-  billingDistrict          String?
-  billingAddress1          String?
-  billingAddress2          String?
-  billingPostcode          String?
-  shippingCountry          String?
-  shippingPostcode         String?
-  shippingCity             String?
-  shippingDistrict         String?
-  shippingAddress          String?
-  totalPrice               Decimal?               @db.Decimal(10, 2)
-  createdAt                DateTime               @default(now())
-  updatedAt                DateTime               @updatedAt
-  lineItems                ShopifyOrderLineItem[]
-  allocations              VendorAllocation[]
-  webhookEvents            WebhookEvent[]
-  refunds                  ShopifyRefund[]
-  financeEvents            FinanceEvent[]
+  id                          String                       @id @default(cuid())
+  sourceShopifyOrderId        String                       @unique
+  sourceShopifyOrderNumber    String
+  shopifyCreatedAt            DateTime?
+  currency                    String?
+  financialStatus             String?
+  paymentGatewayName          String?
+  taxesIncluded               Boolean?
+  orderTaxAmount              Decimal?                     @db.Decimal(10, 2)
+  shippingAmount              Decimal?                     @db.Decimal(10, 2)
+  discountAmount              Decimal?                     @db.Decimal(10, 2)
+  orderNote                   String?
+  orderTags                   String[]                     @default([])
+  customerName                String?
+  customerEmail               String?
+  customerPhone               String?
+  billingFullName             String?
+  billingCompany              String?
+  billingPhone                String?
+  billingCity                 String?
+  billingDistrict             String?
+  billingAddress1             String?
+  billingAddress2             String?
+  billingPostcode             String?
+  shippingCountry             String?
+  shippingPostcode            String?
+  shippingCity                String?
+  shippingDistrict            String?
+  shippingAddress             String?
+  totalPrice                  Decimal?                     @db.Decimal(10, 2)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  lineItems                   ShopifyOrderLineItem[]
+  allocations                 VendorAllocation[]
+  webhookEvents               WebhookEvent[]
+  refunds                     ShopifyRefund[]
+  financeEvents               FinanceEvent[]
   settlementRefundAdjustments SettlementRefundAdjustment[]
 }
 
 model ShopifyOrderLineItem {
-  id                  String                     @id @default(cuid())
-  shopifyOrderId      String
-  sourceLineItemId    String
-  shopifyProductId    String?
-  sourceVariantId     String?
-  sku                 String?
-  title               String?
-  imageUrl            String?
-  quantity            Int                        @default(1)
-  unitPrice           Decimal?                   @db.Decimal(10, 2)
-  unitPriceVatIncluded Decimal?                  @db.Decimal(10, 2)
-  lineTotalVatIncluded Decimal?                  @db.Decimal(10, 2)
-  lineTaxAmount       Decimal?                   @db.Decimal(10, 2)
-  vatRate             Decimal?                   @db.Decimal(5, 2)
-  originalVendorId    String?
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
-  order               ShopifyOrder               @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
-  allocationLineItems VendorAllocationLineItem[]
-  refundLineItems     ShopifyRefundLineItem[]
+  id                   String                     @id @default(cuid())
+  shopifyOrderId       String
+  sourceLineItemId     String
+  shopifyProductId     String?
+  sourceVariantId      String?
+  sku                  String?
+  title                String?
+  imageUrl             String?
+  quantity             Int                        @default(1)
+  unitPrice            Decimal?                   @db.Decimal(10, 2)
+  unitPriceVatIncluded Decimal?                   @db.Decimal(10, 2)
+  lineTotalVatIncluded Decimal?                   @db.Decimal(10, 2)
+  lineTaxAmount        Decimal?                   @db.Decimal(10, 2)
+  vatRate              Decimal?                   @db.Decimal(5, 2)
+  originalVendorId     String?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  order                ShopifyOrder               @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  allocationLineItems  VendorAllocationLineItem[]
+  refundLineItems      ShopifyRefundLineItem[]
 
   @@unique([shopifyOrderId, sourceLineItemId])
 }
 
 model VendorAllocation {
-  id                       String                        @id @default(cuid())
-  sourceShopifyOrderId     String
-  sourceShopifyOrderNumber String
-  originalVendorId         String
-  assignedVendorId         String
-  allocationStatus         AllocationStatus              @default(ACTIVE)
-  cancellationReason       CancellationReason?
-  reassignmentRequired     Boolean                       @default(false)
-  fulfillmentStatus        String                        @default("Pending")
-  shippingStatus           String                        @default("Awaiting Shipment")
-  trackingNumber           String?
-  carrier                  String?
-  vendorIntegrationTrackingUrl String?
-  vendorIntegrationShippedAt DateTime?
-  odooSaleOrderId          String?
-  odooSaleOrderName        String?
-  odooSaleOrderSyncedAt    DateTime?
-  vendorIntegrationStatus  String?
-  vendorIntegrationStatusMessage String?
-  vendorIntegrationStatusUpdatedAt DateTime?
-  vendorIntegrationProvider String?
-  lastVendorIntegrationRequestId String?
+  id                                     String                           @id @default(cuid())
+  sourceShopifyOrderId                   String
+  sourceShopifyOrderNumber               String
+  originalVendorId                       String
+  assignedVendorId                       String
+  allocationStatus                       AllocationStatus                 @default(ACTIVE)
+  cancellationReason                     CancellationReason?
+  reassignmentRequired                   Boolean                          @default(false)
+  fulfillmentStatus                      String                           @default("Pending")
+  shippingStatus                         String                           @default("Awaiting Shipment")
+  trackingNumber                         String?
+  carrier                                String?
+  vendorIntegrationTrackingUrl           String?
+  vendorIntegrationShippedAt             DateTime?
+  odooSaleOrderId                        String?
+  odooSaleOrderName                      String?
+  odooSaleOrderSyncedAt                  DateTime?
+  vendorIntegrationStatus                String?
+  vendorIntegrationStatusMessage         String?
+  vendorIntegrationStatusUpdatedAt       DateTime?
+  vendorIntegrationProvider              String?
+  lastVendorIntegrationRequestId         String?
   lastVendorIntegrationShipmentRequestId String?
-  vendorInvoiceNumber      String?
-  vendorInvoiceDate        DateTime?
-  vendorInvoiceUrl         String?
-  vendorInvoiceAmount      Decimal?                      @db.Decimal(10, 2)
-  vendorInvoiceReceivedAt  DateTime?
-  lastVendorIntegrationInvoiceRequestId String?
-  createdAt                DateTime                      @default(now())
-  updatedAt                DateTime                      @updatedAt
-  order                    ShopifyOrder                  @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
-  originalVendor           Vendor                        @relation("originalVendor", fields: [originalVendorId], references: [id])
-  assignedVendor           Vendor                        @relation("assignedVendor", fields: [assignedVendorId], references: [id])
-  lineItems                VendorAllocationLineItem[]
-  assignmentHistory        AllocationAssignmentHistory[]
-  fulfillment              Fulfillment?
-  returnRecords            ReturnRecord[]
-  refundRecords            RefundRecord[]
-  financeEntries           FinanceLedgerEntry[]
-  operationalJobs          OperationalJob[]
-  shippingCosts            ShipmentShippingCost[]
-  shipmentExecutions       ShipmentExecution[]
-  operationalSignals       OperationalSignal[]
-  automationActions        AutomationAction[]
-  vendorIntegrationStatusEvents VendorIntegrationStatusEvent[]
-  vendorIntegrationShipmentEvents VendorIntegrationShipmentEvent[]
-  vendorIntegrationInvoiceEvents VendorIntegrationInvoiceEvent[]
+  vendorInvoiceNumber                    String?
+  vendorInvoiceDate                      DateTime?
+  vendorInvoiceUrl                       String?
+  vendorInvoiceAmount                    Decimal?                         @db.Decimal(10, 2)
+  vendorInvoiceReceivedAt                DateTime?
+  lastVendorIntegrationInvoiceRequestId  String?
+  createdAt                              DateTime                         @default(now())
+  updatedAt                              DateTime                         @updatedAt
+  order                                  ShopifyOrder                     @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
+  originalVendor                         Vendor                           @relation("originalVendor", fields: [originalVendorId], references: [id])
+  assignedVendor                         Vendor                           @relation("assignedVendor", fields: [assignedVendorId], references: [id])
+  lineItems                              VendorAllocationLineItem[]
+  assignmentHistory                      AllocationAssignmentHistory[]
+  fulfillment                            Fulfillment?
+  returnRecords                          ReturnRecord[]
+  refundRecords                          RefundRecord[]
+  financeEntries                         FinanceLedgerEntry[]
+  operationalJobs                        OperationalJob[]
+  shippingCosts                          ShipmentShippingCost[]
+  shipmentExecutions                     ShipmentExecution[]
+  economicTransfers                      AllocationEconomicTransfer[]
+  operationalSignals                     OperationalSignal[]
+  automationActions                      AutomationAction[]
+  vendorIntegrationStatusEvents          VendorIntegrationStatusEvent[]
+  vendorIntegrationShipmentEvents        VendorIntegrationShipmentEvent[]
+  vendorIntegrationInvoiceEvents         VendorIntegrationInvoiceEvent[]
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -670,20 +674,20 @@ model VendorAllocation {
 }
 
 model VendorIntegrationInvoiceEvent {
-  id               String                  @id @default(cuid())
-  clientId         String
+  id                 String                  @id @default(cuid())
+  clientId           String
   vendorAllocationId String
-  vendorIdentifier String
-  providerName     String?
-  invoiceNumber    String
-  invoiceDate      DateTime
-  invoiceUrl       String?
-  invoiceAmount    Decimal                 @db.Decimal(10, 2)
-  idempotencyKey   String
-  requestId        String?
-  createdAt        DateTime                @default(now())
-  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  vendorAllocation VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  vendorIdentifier   String
+  providerName       String?
+  invoiceNumber      String
+  invoiceDate        DateTime
+  invoiceUrl         String?
+  invoiceAmount      Decimal                 @db.Decimal(10, 2)
+  idempotencyKey     String
+  requestId          String?
+  createdAt          DateTime                @default(now())
+  client             VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vendorAllocation   VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, vendorAllocationId, idempotencyKey])
   @@index([vendorAllocationId, createdAt])
@@ -691,20 +695,20 @@ model VendorIntegrationInvoiceEvent {
 }
 
 model VendorIntegrationShipmentEvent {
-  id               String                  @id @default(cuid())
-  clientId         String
+  id                 String                  @id @default(cuid())
+  clientId           String
   vendorAllocationId String
-  vendorIdentifier String
-  providerName     String?
-  carrier          String
-  trackingNumber   String
-  trackingUrl      String?
-  shippedAt        DateTime?
-  idempotencyKey   String
-  requestId        String?
-  createdAt        DateTime                @default(now())
-  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  vendorAllocation VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  vendorIdentifier   String
+  providerName       String?
+  carrier            String
+  trackingNumber     String
+  trackingUrl        String?
+  shippedAt          DateTime?
+  idempotencyKey     String
+  requestId          String?
+  createdAt          DateTime                @default(now())
+  client             VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vendorAllocation   VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, vendorAllocationId, idempotencyKey])
   @@index([vendorAllocationId, createdAt])
@@ -712,18 +716,18 @@ model VendorIntegrationShipmentEvent {
 }
 
 model VendorIntegrationStatusEvent {
-  id               String                  @id @default(cuid())
-  clientId         String
+  id                 String                  @id @default(cuid())
+  clientId           String
   vendorAllocationId String
-  vendorIdentifier String
-  providerName     String?
-  status           String
-  message          String?
-  idempotencyKey   String
-  requestId        String?
-  createdAt        DateTime                @default(now())
-  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  vendorAllocation VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  vendorIdentifier   String
+  providerName       String?
+  status             String
+  message            String?
+  idempotencyKey     String
+  requestId          String?
+  createdAt          DateTime                @default(now())
+  client             VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vendorAllocation   VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, vendorAllocationId, idempotencyKey])
   @@index([vendorAllocationId, createdAt])
@@ -757,6 +761,36 @@ model AllocationAssignmentHistory {
   fromVendor         Vendor?          @relation("assignmentFromVendor", fields: [fromVendorId], references: [id])
   toVendor           Vendor           @relation("assignmentToVendor", fields: [toVendorId], references: [id])
   actorUser          User?            @relation("assignmentActor", fields: [actorUserId], references: [id])
+}
+
+model AllocationEconomicTransfer {
+  id                       String              @id
+  vendorAllocationId       String
+  fromVendorId             String
+  toVendorId               String
+  fromFinanceLedgerEntryId String?
+  toFinanceLedgerEntryId   String?
+  status                   String
+  reason                   String?
+  adminActorUserId         String?
+  pricingSnapshotJson      Json?
+  idempotencyKey           String              @unique
+  createdAt                DateTime            @default(now())
+  completedAt              DateTime?
+  failedAt                 DateTime?
+  failureReason            String?
+  vendorAllocation         VendorAllocation    @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  fromVendor               Vendor              @relation("economicTransferFromVendor", fields: [fromVendorId], references: [id])
+  toVendor                 Vendor              @relation("economicTransferToVendor", fields: [toVendorId], references: [id])
+  fromFinanceLedgerEntry   FinanceLedgerEntry? @relation("economicTransferFromLedger", fields: [fromFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  toFinanceLedgerEntry     FinanceLedgerEntry? @relation("economicTransferToLedger", fields: [toFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  adminActorUser           User?               @relation("economicTransferAdminActor", fields: [adminActorUserId], references: [id], onDelete: SetNull)
+
+  @@index([vendorAllocationId])
+  @@index([fromVendorId])
+  @@index([toVendorId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Fulfillment {
@@ -819,20 +853,20 @@ model ReturnRecord {
 }
 
 model RefundRecord {
-  id                       String                  @id @default(cuid())
-  vendorAllocationId       String
-  sourceShopifyOrderId     String
-  sourceShopifyOrderNumber String
-  sourceShopifyRefundId    String
-  amount                   Decimal?                @db.Decimal(10, 2)
-  status                   String
-  createdAt                DateTime                @default(now())
-  updatedAt                DateTime                @updatedAt
-  vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  lineItems                ShopifyRefundLineItem[]
-  vendorBalanceEvents      VendorBalanceEvent[]
+  id                          String                       @id @default(cuid())
+  vendorAllocationId          String
+  sourceShopifyOrderId        String
+  sourceShopifyOrderNumber    String
+  sourceShopifyRefundId       String
+  amount                      Decimal?                     @db.Decimal(10, 2)
+  status                      String
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  vendorAllocation            VendorAllocation             @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  lineItems                   ShopifyRefundLineItem[]
+  vendorBalanceEvents         VendorBalanceEvent[]
   settlementRefundAdjustments SettlementRefundAdjustment[]
-  operationalJobs          OperationalJob[]
+  operationalJobs             OperationalJob[]
 
   @@index([vendorAllocationId, createdAt])
 }
@@ -870,35 +904,42 @@ model ShopifyRefundLineItem {
 }
 
 model FinanceLedgerEntry {
-  id                            String                 @id @default(cuid())
+  id                            String                       @id @default(cuid())
   vendorAllocationId            String?
   vendorId                      String
   entryType                     String
-  amount                        Decimal                @db.Decimal(10, 2)
-  payoutStatus                  PayoutStatus           @default(PENDING)
+  amount                        Decimal                      @db.Decimal(10, 2)
+  payoutStatus                  PayoutStatus                 @default(PENDING)
   description                   String?
-  commissionPercentSnapshot     Decimal?               @db.Decimal(5, 2)
-  commissionVatPercentSnapshot  Decimal?               @db.Decimal(5, 2)
+  commissionPercentSnapshot     Decimal?                     @db.Decimal(5, 2)
+  commissionVatPercentSnapshot  Decimal?                     @db.Decimal(5, 2)
   deductShippingEnabledSnapshot Boolean?
   shippingModeSnapshot          ShippingDeductionMode?
-  fixedShippingFeeSnapshot      Decimal?               @db.Decimal(10, 2)
-  shippingCostSnapshot          Decimal?               @db.Decimal(10, 2)
-  shippingVatAmountSnapshot     Decimal?               @db.Decimal(10, 2)
+  fixedShippingFeeSnapshot      Decimal?                     @db.Decimal(10, 2)
+  shippingCostSnapshot          Decimal?                     @db.Decimal(10, 2)
+  shippingVatAmountSnapshot     Decimal?                     @db.Decimal(10, 2)
   shippingCostSourceSnapshot    String?
   shippingCostProviderSnapshot  String?
   shippingCostIdSnapshot        String?
   financialProfileIdSnapshot    String?
-  settlementDelayDaysSnapshot   Int                    @default(21)
-  settlementStatus              SettlementStatus       @default(PENDING)
+  settlementDelayDaysSnapshot   Int                          @default(21)
+  settlementStatus              SettlementStatus             @default(PENDING)
   settlementEligibleAt          DateTime?
   accruedAt                     DateTime?
   payableAt                     DateTime?
   settledAt                     DateTime?
   settlementHoldReason          String?
-  createdAt                     DateTime               @default(now())
-  updatedAt                     DateTime               @updatedAt
-  vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
-  vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  voidedAt                      DateTime?
+  voidReason                    String?
+  supersededByLedgerId          String?
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
+  vendorAllocation              VendorAllocation?            @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  vendor                        Vendor                       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  supersededBy                  FinanceLedgerEntry?          @relation("FinanceLedgerSupersession", fields: [supersededByLedgerId], references: [id], onDelete: SetNull)
+  supersedes                    FinanceLedgerEntry[]         @relation("FinanceLedgerSupersession")
+  economicTransfersFrom         AllocationEconomicTransfer[] @relation("economicTransferFromLedger")
+  economicTransfersTo           AllocationEconomicTransfer[] @relation("economicTransferToLedger")
   payoutBatchLines              PayoutBatchLine[]
   financeEvents                 FinanceEvent[]
   settlementApprovalLines       SettlementApprovalLine[]
@@ -909,24 +950,25 @@ model FinanceLedgerEntry {
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
+  @@index([supersededByLedgerId])
 }
 
 model FinanceEvent {
-  id                   String           @id @default(cuid())
-  createdAt            DateTime         @default(now())
+  id                   String              @id @default(cuid())
+  createdAt            DateTime            @default(now())
   vendorId             String
   shopifyOrderId       String?
   financeLedgerEntryId String?
   eventType            FinanceEventType
   amountMinor          Int
-  currency             String           @default("TRY")
+  currency             String              @default("TRY")
   referenceType        String
   referenceId          String
   metadataJson         Json?
   createdBy            String
-  idempotencyKey       String           @unique
-  vendor               Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  shopifyOrder         ShopifyOrder?    @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+  idempotencyKey       String              @unique
+  vendor               Vendor              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  shopifyOrder         ShopifyOrder?       @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
   financeLedgerEntry   FinanceLedgerEntry? @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
 
   @@index([vendorId, createdAt])
@@ -937,35 +979,35 @@ model FinanceEvent {
 }
 
 model SettlementApproval {
-  id                 String                    @id @default(cuid())
-  createdAt          DateTime                  @default(now())
-  updatedAt          DateTime                  @updatedAt
-  vendorId           String
-  periodStart        DateTime?
-  periodEnd          DateTime?
-  status             SettlementApprovalStatus  @default(DRAFT)
-  currency           String                    @default("TRY")
-  grossSalesMinor    Int
-  refundTotalMinor   Int
-  commissionMinor    Int
-  commissionVatMinor Int
-  netPayableMinor    Int
-  approvedBy         String?
-  approvedAt         DateTime?
-  cancelledBy        String?
-  cancelledAt        DateTime?
-  notes              String?
-  scheduledRunDate   DateTime?
-  scheduledPeriodEnd DateTime?
-  scheduledCycleKey  String?                   @unique
-  sourceSnapshotJson Json
-  vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  lines              SettlementApprovalLine[]
+  id                           String                                  @id @default(cuid())
+  createdAt                    DateTime                                @default(now())
+  updatedAt                    DateTime                                @updatedAt
+  vendorId                     String
+  periodStart                  DateTime?
+  periodEnd                    DateTime?
+  status                       SettlementApprovalStatus                @default(DRAFT)
+  currency                     String                                  @default("TRY")
+  grossSalesMinor              Int
+  refundTotalMinor             Int
+  commissionMinor              Int
+  commissionVatMinor           Int
+  netPayableMinor              Int
+  approvedBy                   String?
+  approvedAt                   DateTime?
+  cancelledBy                  String?
+  cancelledAt                  DateTime?
+  notes                        String?
+  scheduledRunDate             DateTime?
+  scheduledPeriodEnd           DateTime?
+  scheduledCycleKey            String?                                 @unique
+  sourceSnapshotJson           Json
+  vendor                       Vendor                                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  lines                        SettlementApprovalLine[]
   refundAdjustmentApplications SettlementRefundAdjustmentApplication[]
-  commissionInvoices SettlementCommissionInvoice[]
-  originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalRefundAdjustments")
-  appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalRefundAdjustments")
-  vendorBalanceEvents VendorBalanceEvent[]
+  commissionInvoices           SettlementCommissionInvoice[]
+  originalRefundAdjustments    SettlementRefundAdjustment[]            @relation("OriginalSettlementApprovalRefundAdjustments")
+  appliedRefundAdjustments     SettlementRefundAdjustment[]            @relation("AppliedSettlementApprovalRefundAdjustments")
+  vendorBalanceEvents          VendorBalanceEvent[]
 
   @@index([vendorId, status])
   @@index([vendorId, scheduledCycleKey])
@@ -990,23 +1032,23 @@ model SettlementScheduleJobRun {
 }
 
 model SettlementApprovalLine {
-  id                   String                     @id @default(cuid())
-  settlementApprovalId String
-  financeLedgerEntryId String
-  settlementRefundAdjustmentId String?            @unique
-  settlementRefundAdjustmentApplicationId String? @unique
-  lineType             SettlementApprovalLineType
-  amountMinor          Int
-  commissionMinor      Int
-  commissionVatMinor   Int
-  payableImpactMinor   Int
-  sourceSnapshotJson   Json
-  settlementApproval   SettlementApproval         @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
-  financeLedgerEntry   FinanceLedgerEntry         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
-  originalRefundAdjustments SettlementRefundAdjustment[] @relation("OriginalSettlementApprovalLineRefundAdjustments")
-  appliedRefundAdjustments SettlementRefundAdjustment[] @relation("AppliedSettlementApprovalLineRefundAdjustments")
-  refundAdjustmentApplication SettlementRefundAdjustmentApplication? @relation("RefundAdjustmentApplicationLine")
-  refundAdjustmentApplicationLink SettlementRefundAdjustmentApplication? @relation("LineRefundAdjustmentApplicationLink", fields: [settlementRefundAdjustmentApplicationId], references: [id], onDelete: SetNull)
+  id                                      String                                 @id @default(cuid())
+  settlementApprovalId                    String
+  financeLedgerEntryId                    String
+  settlementRefundAdjustmentId            String?                                @unique
+  settlementRefundAdjustmentApplicationId String?                                @unique
+  lineType                                SettlementApprovalLineType
+  amountMinor                             Int
+  commissionMinor                         Int
+  commissionVatMinor                      Int
+  payableImpactMinor                      Int
+  sourceSnapshotJson                      Json
+  settlementApproval                      SettlementApproval                     @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
+  financeLedgerEntry                      FinanceLedgerEntry                     @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+  originalRefundAdjustments               SettlementRefundAdjustment[]           @relation("OriginalSettlementApprovalLineRefundAdjustments")
+  appliedRefundAdjustments                SettlementRefundAdjustment[]           @relation("AppliedSettlementApprovalLineRefundAdjustments")
+  refundAdjustmentApplication             SettlementRefundAdjustmentApplication? @relation("RefundAdjustmentApplicationLine")
+  refundAdjustmentApplicationLink         SettlementRefundAdjustmentApplication? @relation("LineRefundAdjustmentApplicationLink", fields: [settlementRefundAdjustmentApplicationId], references: [id], onDelete: SetNull)
 
   @@unique([settlementApprovalId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
@@ -1014,49 +1056,49 @@ model SettlementApprovalLine {
 }
 
 model SettlementCommissionInvoice {
-  id                   String                              @id @default(cuid())
-  createdAt            DateTime                            @default(now())
-  updatedAt            DateTime                            @updatedAt
-  settlementApprovalId String
-  vendorId             String
-  provider             SettlementCommissionInvoiceProvider
-  status               SettlementCommissionInvoiceStatus   @default(PENDING)
-  providerInvoiceId    String?
-  providerUuid         String?
-  providerEttn         String?
-  invoiceNo            String?
-  invoiceDate          DateTime?
-  invoiceTotalMinor    Int?
-  invoiceCurrency      String?
-  gibStatus            String?
-  gibStatusCode        String?
-  documentStatus       String?
-  documentStatusCode   String?
-  documentType         String?
-  documentContentType  String?
-  documentSize         Int?
-  documentFetchedAt    DateTime?
-  lastProviderSyncedAt DateTime?
-  documentSnapshotJson Json?
-  requestSnapshotJson  Json?
-  responseSnapshotJson Json?
-  failureCode          String?
-  failureMessage       String?
-  failedAt             DateTime?
-  unknownReason        String?
-  unknownAt            DateTime?
-  reconciliationStatus String?
+  id                         String                              @id @default(cuid())
+  createdAt                  DateTime                            @default(now())
+  updatedAt                  DateTime                            @updatedAt
+  settlementApprovalId       String
+  vendorId                   String
+  provider                   SettlementCommissionInvoiceProvider
+  status                     SettlementCommissionInvoiceStatus   @default(PENDING)
+  providerInvoiceId          String?
+  providerUuid               String?
+  providerEttn               String?
+  invoiceNo                  String?
+  invoiceDate                DateTime?
+  invoiceTotalMinor          Int?
+  invoiceCurrency            String?
+  gibStatus                  String?
+  gibStatusCode              String?
+  documentStatus             String?
+  documentStatusCode         String?
+  documentType               String?
+  documentContentType        String?
+  documentSize               Int?
+  documentFetchedAt          DateTime?
+  lastProviderSyncedAt       DateTime?
+  documentSnapshotJson       Json?
+  requestSnapshotJson        Json?
+  responseSnapshotJson       Json?
+  failureCode                String?
+  failureMessage             String?
+  failedAt                   DateTime?
+  unknownReason              String?
+  unknownAt                  DateTime?
+  reconciliationStatus       String?
   reconciliationEvidenceJson Json?
-  reconciledAt         DateTime?
-  reconciledBy         String?
-  retryCount           Int                                 @default(0)
-  lastRetriedAt        DateTime?
-  createdBy            String?
-  cancelledBy          String?
-  cancelledAt          DateTime?
-  settlementApproval   SettlementApproval                  @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
-  vendor               Vendor                              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  originalRefundAdjustments SettlementRefundAdjustment[]
+  reconciledAt               DateTime?
+  reconciledBy               String?
+  retryCount                 Int                                 @default(0)
+  lastRetriedAt              DateTime?
+  createdBy                  String?
+  cancelledBy                String?
+  cancelledAt                DateTime?
+  settlementApproval         SettlementApproval                  @relation(fields: [settlementApprovalId], references: [id], onDelete: Cascade)
+  vendor                     Vendor                              @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  originalRefundAdjustments  SettlementRefundAdjustment[]
 
   @@index([settlementApprovalId])
   @@index([vendorId])
@@ -1067,36 +1109,36 @@ model SettlementCommissionInvoice {
 }
 
 model SettlementRefundAdjustment {
-  id                                   String                         @id @default(cuid())
-  refundRecordId                       String
-  refundFinanceLedgerEntryId           String                         @unique
-  vendorId                             String
-  originalOrderId                      String
-  originalSettlementApprovalId         String?
-  originalSettlementApprovalLineId     String?
+  id                                    String                                  @id @default(cuid())
+  refundRecordId                        String
+  refundFinanceLedgerEntryId            String                                  @unique
+  vendorId                              String
+  originalOrderId                       String
+  originalSettlementApprovalId          String?
+  originalSettlementApprovalLineId      String?
   originalSettlementCommissionInvoiceId String?
-  status                               SettlementRefundAdjustmentStatus @default(PENDING)
-  amountMinor                          Int
-  currencyCode                         String                         @default("TRY")
-  reason                               String
-  createdAt                            DateTime                       @default(now())
-  updatedAt                            DateTime                       @updatedAt
-  originalAmountMinor                   Int                            @default(0)
-  appliedAmountMinor                    Int                            @default(0)
-  remainingAmountMinor                  Int                            @default(0)
-  appliedSettlementApprovalId          String?
-  appliedSettlementApprovalLineId      String?
-  blockedReason                        String?
-  createdBy                            String?
-  refundRecord                         RefundRecord                   @relation(fields: [refundRecordId], references: [id], onDelete: Cascade)
-  refundFinanceLedgerEntry             FinanceLedgerEntry             @relation(fields: [refundFinanceLedgerEntryId], references: [id], onDelete: Cascade)
-  vendor                               Vendor                         @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  originalOrder                        ShopifyOrder                   @relation(fields: [originalOrderId], references: [id], onDelete: Cascade)
-  originalSettlementApproval           SettlementApproval?            @relation("OriginalSettlementApprovalRefundAdjustments", fields: [originalSettlementApprovalId], references: [id], onDelete: SetNull)
-  originalSettlementApprovalLine       SettlementApprovalLine?        @relation("OriginalSettlementApprovalLineRefundAdjustments", fields: [originalSettlementApprovalLineId], references: [id], onDelete: SetNull)
-  originalSettlementCommissionInvoice  SettlementCommissionInvoice?   @relation(fields: [originalSettlementCommissionInvoiceId], references: [id], onDelete: SetNull)
-  appliedSettlementApproval            SettlementApproval?            @relation("AppliedSettlementApprovalRefundAdjustments", fields: [appliedSettlementApprovalId], references: [id], onDelete: SetNull)
-  appliedSettlementApprovalLine        SettlementApprovalLine?        @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
+  status                                SettlementRefundAdjustmentStatus        @default(PENDING)
+  amountMinor                           Int
+  currencyCode                          String                                  @default("TRY")
+  reason                                String
+  createdAt                             DateTime                                @default(now())
+  updatedAt                             DateTime                                @updatedAt
+  originalAmountMinor                   Int                                     @default(0)
+  appliedAmountMinor                    Int                                     @default(0)
+  remainingAmountMinor                  Int                                     @default(0)
+  appliedSettlementApprovalId           String?
+  appliedSettlementApprovalLineId       String?
+  blockedReason                         String?
+  createdBy                             String?
+  refundRecord                          RefundRecord                            @relation(fields: [refundRecordId], references: [id], onDelete: Cascade)
+  refundFinanceLedgerEntry              FinanceLedgerEntry                      @relation(fields: [refundFinanceLedgerEntryId], references: [id], onDelete: Cascade)
+  vendor                                Vendor                                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  originalOrder                         ShopifyOrder                            @relation(fields: [originalOrderId], references: [id], onDelete: Cascade)
+  originalSettlementApproval            SettlementApproval?                     @relation("OriginalSettlementApprovalRefundAdjustments", fields: [originalSettlementApprovalId], references: [id], onDelete: SetNull)
+  originalSettlementApprovalLine        SettlementApprovalLine?                 @relation("OriginalSettlementApprovalLineRefundAdjustments", fields: [originalSettlementApprovalLineId], references: [id], onDelete: SetNull)
+  originalSettlementCommissionInvoice   SettlementCommissionInvoice?            @relation(fields: [originalSettlementCommissionInvoiceId], references: [id], onDelete: SetNull)
+  appliedSettlementApproval             SettlementApproval?                     @relation("AppliedSettlementApprovalRefundAdjustments", fields: [appliedSettlementApprovalId], references: [id], onDelete: SetNull)
+  appliedSettlementApprovalLine         SettlementApprovalLine?                 @relation("AppliedSettlementApprovalLineRefundAdjustments", fields: [appliedSettlementApprovalLineId], references: [id], onDelete: SetNull)
   applications                          SettlementRefundAdjustmentApplication[]
   events                                SettlementRefundAdjustmentEvent[]
 
@@ -1110,12 +1152,12 @@ model SettlementRefundAdjustment {
 }
 
 model SettlementRefundAdjustmentEvent {
-  id                           String                            @id @default(cuid())
+  id                           String                              @id @default(cuid())
   settlementRefundAdjustmentId String
   eventType                    SettlementRefundAdjustmentEventType
-  createdAt                    DateTime                          @default(now())
+  createdAt                    DateTime                            @default(now())
   metadataJson                 Json?
-  settlementRefundAdjustment   SettlementRefundAdjustment        @relation(fields: [settlementRefundAdjustmentId], references: [id], onDelete: Cascade)
+  settlementRefundAdjustment   SettlementRefundAdjustment          @relation(fields: [settlementRefundAdjustmentId], references: [id], onDelete: Cascade)
 
   @@index([settlementRefundAdjustmentId, createdAt])
   @@index([eventType, createdAt])
@@ -1165,37 +1207,37 @@ model ShipmentShippingCost {
 }
 
 model VendorShippingConfig {
-  id                String           @id @default(cuid())
-  vendorId          String           @unique
-  preferredProvider ShippingProvider @default(HEPSIJET)
-  shippingEnabled   Boolean          @default(true)
-  defaultDesi       Decimal          @default(3.00) @db.Decimal(10, 2)
+  id                 String                    @id @default(cuid())
+  vendorId           String                    @unique
+  preferredProvider  ShippingProvider          @default(HEPSIJET)
+  shippingEnabled    Boolean                   @default(true)
+  defaultDesi        Decimal                   @default(3.00) @db.Decimal(10, 2)
   cargoIntegrationId String?
   defaultWarehouseId String?
-  shippingVatPercent Decimal          @default(18.00) @db.Decimal(5, 2)
-  providerMetadata  Json?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  vendor            Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  warehouses        VendorShippingWarehouse[]
+  shippingVatPercent Decimal                   @default(18.00) @db.Decimal(5, 2)
+  providerMetadata   Json?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  vendor             Vendor                    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  warehouses         VendorShippingWarehouse[]
 
   @@index([vendorId, shippingEnabled])
 }
 
 model VendorShippingWarehouse {
-  id                String               @id @default(cuid())
-  configId          String
-  vendorId          String
-  provider          ShippingProvider
-  warehouseId       String
-  name              String?
-  address           String?
-  isDefault         Boolean              @default(false)
-  metadata          Json?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  config            VendorShippingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-  vendor            Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  id          String               @id @default(cuid())
+  configId    String
+  vendorId    String
+  provider    ShippingProvider
+  warehouseId String
+  name        String?
+  address     String?
+  isDefault   Boolean              @default(false)
+  metadata    Json?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  config      VendorShippingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  vendor      Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@unique([vendorId, provider, warehouseId])
   @@index([configId, isDefault])
@@ -1236,20 +1278,20 @@ model ShipmentExecution {
 }
 
 model PayoutBatch {
-  id                      String            @id @default(cuid())
+  id                      String               @id @default(cuid())
   vendorId                String
-  status                  PayoutBatchStatus @default(DRAFT)
-  grossAmount             Decimal           @default(0.00) @db.Decimal(10, 2)
-  commissionAmount        Decimal           @default(0.00) @db.Decimal(10, 2)
-  commissionVatAmount     Decimal           @default(0.00) @db.Decimal(10, 2)
-  shippingDeductionAmount Decimal           @default(0.00) @db.Decimal(10, 2)
-  refundAmount            Decimal           @default(0.00) @db.Decimal(10, 2)
-  netAmount               Decimal           @default(0.00) @db.Decimal(10, 2)
-  currency                String            @default("TRY")
+  status                  PayoutBatchStatus    @default(DRAFT)
+  grossAmount             Decimal              @default(0.00) @db.Decimal(10, 2)
+  commissionAmount        Decimal              @default(0.00) @db.Decimal(10, 2)
+  commissionVatAmount     Decimal              @default(0.00) @db.Decimal(10, 2)
+  shippingDeductionAmount Decimal              @default(0.00) @db.Decimal(10, 2)
+  refundAmount            Decimal              @default(0.00) @db.Decimal(10, 2)
+  netAmount               Decimal              @default(0.00) @db.Decimal(10, 2)
+  currency                String               @default("TRY")
   createdByUserId         String?
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
-  vendor                  Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  vendor                  Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                   PayoutBatchLine[]
   vendorBalanceEvents     VendorBalanceEvent[]
   operationalSignals      OperationalSignal[]
