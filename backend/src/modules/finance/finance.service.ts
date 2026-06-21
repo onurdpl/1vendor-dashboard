@@ -50,6 +50,7 @@ import {
   assertLedgerActiveForMoneyMovement,
   isLedgerVoided,
 } from './active-ledger-policy.service.js';
+import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -60,7 +61,10 @@ const DEFAULT_WEEKLY_SETTLEMENT_DAY = 'WEDNESDAY' as const;
 const SUPPORTED_SETTLEMENT_FREQUENCY_TYPES = new Set(['WEEKLY', 'BIWEEKLY']);
 const SUPPORTED_SETTLEMENT_WEEKDAYS = new Set(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY']);
 
-type FinanceDbClient = Pick<Prisma.TransactionClient, 'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent'>;
+type FinanceDbClient = Pick<
+  Prisma.TransactionClient,
+  'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent' | 'financeIntegrityAlert'
+>;
 type SettlementCommissionInvoiceReviewSnapshot = {
   id?: string | null;
   status?: string | null;
@@ -81,6 +85,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'refund_offset_required_before_payout'
   | 'payout_amount_changed_since_batch_creation'
   | 'approved_return_hold_active'
+  | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
   | 'ledger_row_no_longer_eligible'
@@ -2470,6 +2475,27 @@ async function validatePayoutBatchBeforeTransitionWithClient(
     const ledgerEntryId = ledgerEntry.id;
     const type = normalizeType(transitionEntry.entryType);
     const payoutStatus = mapStatus(transitionEntry.payoutStatus ?? '');
+    const vendorAllocationId = ledgerEntry.vendorAllocation?.id ?? ledgerEntry.vendorAllocationId ?? null;
+
+    if (vendorAllocationId) {
+      const blockingAlerts = await findBlockingFinanceIntegrityAlerts({ vendorAllocationId }, db);
+      for (const alert of blockingAlerts) {
+        blockers.push(buildPayoutBatchTransitionBlocker({
+          code: 'finance_integrity_alert_open',
+          reason: `Money movement blocked by open finance integrity alert: ${alert.category}.`,
+          payoutBatchLineId: line.id,
+          financeLedgerEntryId: ledgerEntryId,
+          metadata: {
+            alertCategory: alert.category,
+            alertSeverity: alert.severity,
+            alertReason: alert.reason,
+            dedupeKey: alert.dedupeKey,
+            vendorAllocationId: alert.vendorAllocationId,
+            allocationEconomicTransferId: alert.allocationEconomicTransferId,
+          },
+        }));
+      }
+    }
 
     if (isLedgerVoided(ledgerEntry)) {
       blockers.push(buildPayoutBatchTransitionBlocker({

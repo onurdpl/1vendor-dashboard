@@ -17,6 +17,9 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
+  financeIntegrityAlert: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -89,6 +92,7 @@ function buildEntry(input: {
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
     vendorAllocation: {
+      id: `alloc-${input.id}`,
       allocationStatus: 'ACTIVE',
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
@@ -199,8 +203,10 @@ describe('payout batch preparation', () => {
     prismaMock.payoutBatch.update.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.upsert.mockReset();
+    prismaMock.financeIntegrityAlert.findMany.mockReset();
 
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
     prismaMock.vendorBalanceEvent.upsert.mockImplementation(async ({ create }) => ({
       id: 'vendor-balance-event-offset',
@@ -960,6 +966,40 @@ describe('payout batch preparation', () => {
         expect.objectContaining({
           code: 'ledger_row_voided',
           financeLedgerEntryId: 'sale-voided-after-batch',
+        }),
+      ],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when an open finance integrity alert exists for the allocation', async () => {
+    const sale = buildEntry({ id: 'sale-integrity-alert', entryType: 'sale', amount: 1000, batched: true });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      {
+        id: 'alert-1',
+        dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-sale-integrity-alert',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Multiple active sale ledgers exist for allocation.',
+        vendorAllocationId: 'alloc-sale-integrity-alert',
+        allocationEconomicTransferId: null,
+      },
+    ]);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [
+        expect.objectContaining({
+          code: 'finance_integrity_alert_open',
+          reason: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+          financeLedgerEntryId: 'sale-integrity-alert',
+          metadata: expect.objectContaining({
+            alertCategory: 'multiple_active_sale_ledgers',
+            alertSeverity: 'critical',
+            dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-sale-integrity-alert',
+          }),
         }),
       ],
     });

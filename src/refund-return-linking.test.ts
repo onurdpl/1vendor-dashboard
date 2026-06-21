@@ -38,6 +38,9 @@ const txMock = vi.hoisted(() => ({
   vendorBalanceEvent: {
     upsert: vi.fn(),
   },
+  financeIntegrityAlert: {
+    findMany: vi.fn(),
+  },
   settlementRefundAdjustment: {
     upsert: vi.fn(),
   },
@@ -130,6 +133,7 @@ function setupOrder() {
     vendorId: 'sporjinal',
     type: 'VENDOR_DEBT_CREATED',
   });
+  txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
 }
 
 function setupTransferredOrder() {
@@ -198,6 +202,7 @@ function setupTransferredOrder() {
     vendorId: 'sporjinal',
     type: 'VENDOR_DEBT_CREATED',
   });
+  txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
 }
 
 function refundPayload() {
@@ -234,6 +239,7 @@ describe('Shopify refund return linking', () => {
         }
       });
     });
+    txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {
@@ -580,6 +586,38 @@ describe('Shopify refund return linking', () => {
     expect(result.error).toBe('Economic transfer is in progress for allocation.');
     expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
     expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks refund finance writes when an open finance integrity alert exists for the allocation', async () => {
+    setupOrder();
+    txMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      {
+        id: 'alert-1',
+        dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1029-sporjinal',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Multiple active sale ledgers exist for allocation.',
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        allocationEconomicTransferId: null,
+      },
+    ]);
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      error: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+    });
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
   });
 
   it('blocks refund finance writes when an active refund ledger already exists for another vendor', async () => {

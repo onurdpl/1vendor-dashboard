@@ -34,6 +34,7 @@ import {
   type PendingRefundAdjustmentApplicationPreview,
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
 import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy.service.js';
+import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -753,6 +754,18 @@ function getSnapshotRefundCount(line: SettlementApprovalLine) {
   return readLineExplanation(line.sourceSnapshotJson).refundCount;
 }
 
+async function getBlockingIntegrityAlertsForRow(
+  tx: SettlementApprovalTransaction,
+  row: Pick<SettlementApprovalLedgerRow, 'vendorAllocation'> | null,
+) {
+  const vendorAllocationId = row?.vendorAllocation?.id ?? null;
+  if (!vendorAllocationId) {
+    return [];
+  }
+
+  return findBlockingFinanceIntegrityAlerts({ vendorAllocationId }, tx);
+}
+
 function lineAmountsChanged(line: SettlementApprovalLine, currentLine: SettlementApprovalLineDraft) {
   return (
     line.lineType !== currentLine.lineType ||
@@ -1204,6 +1217,23 @@ export async function validateSettlementApprovalBeforeApprove(
       reasons.push(...await validateRefundAdjustmentApprovalLine(tx, approval, line, row));
     } else {
       reasons.push(...validateApprovalLineAgainstCurrentLedger(approval, line, row));
+    }
+
+    const blockingAlerts = await getBlockingIntegrityAlertsForRow(tx, row);
+    for (const alert of blockingAlerts) {
+      reasons.push(buildRevalidationReason(
+        line,
+        'finance_integrity_alert_open',
+        `Money movement blocked by open finance integrity alert: ${alert.category}.`,
+        {
+          alertCategory: alert.category,
+          alertSeverity: alert.severity,
+          alertReason: alert.reason,
+          dedupeKey: alert.dedupeKey,
+          vendorAllocationId: alert.vendorAllocationId,
+          allocationEconomicTransferId: alert.allocationEconomicTransferId,
+        },
+      ));
     }
   }
 
@@ -1838,7 +1868,14 @@ async function buildApprovalPreview(
 
   const candidateSelection = filterRowsByCandidateSelection(rows as SettlementApprovalLedgerRow[], input);
   const eligibleRows = candidateSelection.rows.filter((row) => rowIsEligible(row, undefined, input.asOfDate));
-  const unapprovedRows = eligibleRows.filter((row) => !rowHasActiveApproval(row));
+  const integritySafeRows: SettlementApprovalLedgerRow[] = [];
+  for (const row of eligibleRows) {
+    const blockingAlerts = await getBlockingIntegrityAlertsForRow(tx, row);
+    if (blockingAlerts.length === 0) {
+      integritySafeRows.push(row);
+    }
+  }
+  const unapprovedRows = integritySafeRows.filter((row) => !rowHasActiveApproval(row));
   const lines = unapprovedRows.map((row) => buildLine(row, input.asOfDate));
   const totals = summarizeLines(lines);
   const candidateQualitySummary = buildCandidateQualitySummary(unapprovedRows, input);
@@ -1871,7 +1908,7 @@ async function buildApprovalPreview(
     summary: {
       ...totals,
       eligibleRowCount: lines.length,
-      excludedActiveApprovalRowCount: eligibleRows.length - unapprovedRows.length,
+      excludedActiveApprovalRowCount: integritySafeRows.length - unapprovedRows.length,
       ...candidateQualitySummary,
       outstandingVendorDebtMinor: vendorBalance.outstandingDebtMinor,
       debtOffsetPreviewMinor: debtPreview.debtOffsetMinor,

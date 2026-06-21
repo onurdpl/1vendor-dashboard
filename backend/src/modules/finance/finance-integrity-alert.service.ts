@@ -46,6 +46,34 @@ export type ResolveFinanceIntegrityAlertInput = {
   resolvedAt?: Date;
 };
 
+export type BlockingFinanceIntegrityAlert = {
+  id: string;
+  dedupeKey: string;
+  severity: string;
+  category: string;
+  reason: string;
+  vendorAllocationId: string | null;
+  allocationEconomicTransferId: string | null;
+};
+
+export type FindBlockingFinanceIntegrityAlertsInput = {
+  vendorAllocationId?: string | null;
+  allocationEconomicTransferId?: string | null;
+  categories?: readonly FinanceIntegrityAlertCategory[];
+  severities?: readonly FinanceIntegrityAlertSeverity[];
+};
+
+export class FinanceIntegrityMoneyMovementBlockedError extends Error {
+  alert: BlockingFinanceIntegrityAlert;
+
+  constructor(alert: BlockingFinanceIntegrityAlert) {
+    super(`Money movement blocked by open finance integrity alert: ${alert.category}.`);
+    this.name = 'FinanceIntegrityMoneyMovementBlockedError';
+    this.alert = alert;
+    Object.setPrototypeOf(this, FinanceIntegrityMoneyMovementBlockedError.prototype);
+  }
+}
+
 function nullableJson(value: Prisma.InputJsonValue | null | undefined) {
   return value ?? Prisma.JsonNull;
 }
@@ -134,6 +162,64 @@ export async function findAlertsForAllocation(
       detectedAt: 'desc',
     },
   });
+}
+
+export async function findBlockingFinanceIntegrityAlerts(
+  input: FindBlockingFinanceIntegrityAlertsInput,
+  db: FinanceIntegrityAlertDbClient = prisma,
+): Promise<BlockingFinanceIntegrityAlert[]> {
+  if (!input.vendorAllocationId && !input.allocationEconomicTransferId) {
+    throw new Error('vendorAllocationId or allocationEconomicTransferId is required.');
+  }
+
+  const relationFilters = [
+    input.vendorAllocationId ? { vendorAllocationId: input.vendorAllocationId } : null,
+    input.allocationEconomicTransferId ? { allocationEconomicTransferId: input.allocationEconomicTransferId } : null,
+  ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
+
+  return db.financeIntegrityAlert.findMany({
+    where: {
+      status: 'open',
+      severity: {
+        in: [...(input.severities ?? ['warning', 'critical'])],
+      },
+      ...(input.categories?.length
+        ? {
+            category: {
+              in: [...input.categories],
+            },
+          }
+        : {}),
+      OR: relationFilters,
+    },
+    select: {
+      id: true,
+      dedupeKey: true,
+      severity: true,
+      category: true,
+      reason: true,
+      vendorAllocationId: true,
+      allocationEconomicTransferId: true,
+    },
+    orderBy: [
+      {
+        detectedAt: 'asc',
+      },
+      {
+        createdAt: 'asc',
+      },
+    ],
+  });
+}
+
+export async function assertNoOpenFinanceIntegrityAlertForMoneyMovement(
+  input: FindBlockingFinanceIntegrityAlertsInput,
+  db: FinanceIntegrityAlertDbClient = prisma,
+) {
+  const alerts = await findBlockingFinanceIntegrityAlerts(input, db);
+  if (alerts.length > 0) {
+    throw new FinanceIntegrityMoneyMovementBlockedError(alerts[0]);
+  }
 }
 
 export function financeIntegrityAlertDedupeKey(input: {

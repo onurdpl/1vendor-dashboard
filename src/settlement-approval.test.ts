@@ -39,6 +39,9 @@ const prismaMock = vi.hoisted(() => ({
   vendorBalanceEvent: {
     findMany: vi.fn(),
   },
+  financeIntegrityAlert: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -301,6 +304,8 @@ describe('settlement approval foundation', () => {
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
+    prismaMock.financeIntegrityAlert.findMany.mockReset();
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
   });
 
   it('previews eligible settlement approval rows without writes', async () => {
@@ -1647,6 +1652,41 @@ describe('settlement approval foundation', () => {
           financeLedgerEntryId: 'sale-1',
           code: 'ledger_voided',
           reason: 'Ledger has been voided or superseded and cannot be approved.',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when an open finance integrity alert exists for the allocation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({ id: 'sale-1', entryType: 'sale', amount: 1000, activeApproval: true, activeApprovalId: 'approval-1' }),
+    );
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      {
+        id: 'alert-1',
+        dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-sale-1',
+        severity: 'critical',
+        category: 'multiple_active_sale_ledgers',
+        reason: 'Multiple active sale ledgers exist for allocation.',
+        vendorAllocationId: 'alloc-sale-1',
+        allocationEconomicTransferId: null,
+      },
+    ]);
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+      reasons: [
+        expect.objectContaining({
+          financeLedgerEntryId: 'sale-1',
+          code: 'finance_integrity_alert_open',
+          reason: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+          details: expect.objectContaining({
+            alertCategory: 'multiple_active_sale_ledgers',
+            alertSeverity: 'critical',
+            dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-sale-1',
+          }),
         }),
       ],
     });

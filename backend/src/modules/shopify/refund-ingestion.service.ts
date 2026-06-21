@@ -2,6 +2,7 @@ import { prisma } from '../../db/prisma.js';
 import { FinanceEventType } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
+import { assertNoOpenFinanceIntegrityAlertForMoneyMovement } from '../finance/finance-integrity-alert.service.js';
 import {
   calculateRefundOffsetAmounts,
   classifyPostApprovalRefundRisk,
@@ -218,6 +219,9 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           vendorAllocationId: vendorAllocation.id,
           db: tx,
         });
+        await assertNoOpenFinanceIntegrityAlertForMoneyMovement({
+          vendorAllocationId: vendorAllocation.id,
+        }, tx);
 
         resolvedLineItems.push({
           ...lineItem,
