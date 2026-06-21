@@ -23,9 +23,13 @@ const txMock = vi.hoisted(() => ({
   shopifyRefundLineItem: {
     upsert: vi.fn(),
   },
+  vendorAllocation: {
+    findUnique: vi.fn(),
+  },
   financeLedgerEntry: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     upsert: vi.fn(),
   },
   financeEvent: {
@@ -93,11 +97,32 @@ function setupOrder() {
     ],
   });
   txMock.vendor.findMany.mockResolvedValueOnce([{ id: 'sporjinal' }]);
+  txMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+    id: 'alloc-1029-sporjinal',
+    financeEntries: [
+      {
+        id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+        vendorId: 'sporjinal',
+        entryType: 'sale',
+        voidedAt: null,
+        supersededByLedgerId: null,
+        supersededBy: null,
+      },
+    ],
+    economicTransfers: [],
+  });
   txMock.shopifyRefund.upsert.mockResolvedValueOnce({ id: 'shopify-refund-db-1' });
+  txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([]);
   txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce(null);
   txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+    id: 'fin-sporjinal-sale-alloc-1029-sporjinal',
+    entryType: 'sale',
+    payoutStatus: 'PENDING',
+    settlementStatus: 'PAYABLE',
     commissionPercentSnapshot: 10,
     commissionVatPercentSnapshot: 18,
+    payoutBatchLines: [],
+    settlementApprovalLines: [],
   });
   txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 4 });
   txMock.vendorBalanceEvent.upsert.mockResolvedValueOnce({
@@ -105,6 +130,97 @@ function setupOrder() {
     vendorId: 'sporjinal',
     type: 'VENDOR_DEBT_CREATED',
   });
+}
+
+function setupTransferredOrder() {
+  txMock.shopifyOrder.findUnique.mockResolvedValueOnce({
+    id: 'shopify-order-db-1029',
+    sourceShopifyOrderId: '7621834670417',
+    sourceShopifyOrderNumber: '#1029',
+    currency: 'TRY',
+    lineItems: [
+      {
+        id: 'order-line-db-1',
+        sourceLineItemId: '20346971095377',
+        sku: 'DJ1196-002-42',
+        originalVendorId: 'yalispor',
+      },
+    ],
+    allocations: [
+      {
+        id: 'alloc-1029-yalispor',
+        originalVendorId: 'yalispor',
+        assignedVendorId: 'sporjinal',
+        sourceShopifyOrderNumber: '#1029',
+      },
+    ],
+  });
+  txMock.vendor.findMany.mockResolvedValueOnce([{ id: 'yalispor' }, { id: 'sporjinal' }]);
+  txMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+    id: 'alloc-1029-yalispor',
+    financeEntries: [
+      {
+        id: 'fin-yalispor-sale-7621834670417',
+        vendorId: 'yalispor',
+        entryType: 'sale',
+        voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+        supersededByLedgerId: 'fin-sporjinal-sale-7621834670417',
+        supersededBy: {
+          id: 'fin-sporjinal-sale-7621834670417',
+          vendorId: 'sporjinal',
+          entryType: 'sale',
+          voidedAt: null,
+        },
+      },
+    ],
+    economicTransfers: [{
+      id: 'economic-transfer-1',
+      status: 'completed',
+      createdAt: new Date('2026-06-21T10:00:00.000Z'),
+    }],
+  });
+  txMock.shopifyRefund.upsert.mockResolvedValueOnce({ id: 'shopify-refund-db-1' });
+  txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([]);
+  txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce(null);
+  txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+    id: 'fin-sporjinal-sale-7621834670417',
+    entryType: 'sale',
+    payoutStatus: 'PENDING',
+    settlementStatus: 'PAYABLE',
+    commissionPercentSnapshot: 10,
+    commissionVatPercentSnapshot: 18,
+    payoutBatchLines: [],
+    settlementApprovalLines: [],
+  });
+  txMock.financeEvent.createMany.mockResolvedValueOnce({ count: 4 });
+  txMock.vendorBalanceEvent.upsert.mockResolvedValueOnce({
+    id: 'vendor-debt-created',
+    vendorId: 'sporjinal',
+    type: 'VENDOR_DEBT_CREATED',
+  });
+}
+
+function refundPayload() {
+  return {
+    id: '1074533826897',
+    order_id: '7621834670417',
+    created_at: '2026-05-16T14:37:38Z',
+    note: null,
+    refund_line_items: [
+      {
+        id: 'refund-line-1',
+        line_item_id: '20346971095377',
+        quantity: 1,
+        subtotal: '3399.00',
+        line_item: {
+          id: '20346971095377',
+          sku: 'DJ1196-002-42',
+          title: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+          variant_title: 'Siyah / 42',
+        },
+      },
+    ],
+  };
 }
 
 describe('Shopify refund return linking', () => {
@@ -264,6 +380,232 @@ describe('Shopify refund return linking', () => {
       ],
     });
     expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('targets the original active sale ledger owner for a normal non-reassigned refund', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'refund-sporjinal-1074533826897',
+        },
+      }),
+    );
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'fin-sporjinal-refund-1074533826897',
+        },
+        create: expect.objectContaining({
+          vendorId: 'sporjinal',
+        }),
+      }),
+    );
+  });
+
+  it('targets the replacement owner when original sale ledger is voided and superseded by an active sale ledger', async () => {
+    setupTransferredOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'refund-sporjinal-1074533826897',
+        },
+        create: expect.objectContaining({
+          vendorAllocationId: 'alloc-1029-yalispor',
+        }),
+      }),
+    );
+    expect(txMock.returnRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'return-yalispor-1074533826897',
+        },
+      }),
+    );
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'fin-sporjinal-refund-1074533826897',
+        },
+        create: expect.objectContaining({
+          vendorId: 'sporjinal',
+          commissionPercentSnapshot: 10,
+          commissionVatPercentSnapshot: 18,
+        }),
+      }),
+    );
+    expect(txMock.financeEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            vendorId: 'sporjinal',
+            eventType: 'COMMISSION_VAT_REVERSED',
+            idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_VAT_REVERSED',
+            metadataJson: expect.objectContaining({
+              originalVendorIds: ['yalispor'],
+              activeSaleLedgerId: 'fin-sporjinal-sale-7621834670417',
+              supersededFromLedgerIds: ['fin-yalispor-sale-7621834670417'],
+            }),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('creates vendor debt for the resolved replacement owner when the active sale ledger is already paid', async () => {
+    setupTransferredOrder();
+    txMock.financeLedgerEntry.findFirst.mockReset();
+    txMock.financeLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: 'fin-sporjinal-sale-7621834670417',
+      entryType: 'sale',
+      payoutStatus: 'PAID',
+      settlementStatus: 'SETTLED',
+      commissionPercentSnapshot: 10,
+      commissionVatPercentSnapshot: 18,
+      payoutBatchLines: [],
+      settlementApprovalLines: [],
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.vendorBalanceEvent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          idempotencyKey: 'sporjinal:refund-sporjinal-1074533826897:VENDOR_DEBT_CREATED',
+        },
+        create: expect.objectContaining({
+          vendorId: 'sporjinal',
+          financeLedgerEntryId: 'fin-sporjinal-refund-1074533826897',
+          refundRecordId: 'refund-sporjinal-1074533826897',
+        }),
+      }),
+    );
+  });
+
+  it('blocks refund finance writes when no active sale ledger can resolve economic owner', async () => {
+    setupOrder();
+    txMock.vendorAllocation.findUnique.mockReset();
+    txMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-1029-sporjinal',
+      financeEntries: [],
+      economicTransfers: [],
+    });
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      error: 'No active sale ledger found for allocation.',
+    });
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('blocks refund finance writes when multiple active sale ledgers exist', async () => {
+    setupOrder();
+    txMock.vendorAllocation.findUnique.mockReset();
+    txMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-1029-sporjinal',
+      financeEntries: [
+        {
+          id: 'fin-sporjinal-sale-7621834670417',
+          vendorId: 'sporjinal',
+          entryType: 'sale',
+          voidedAt: null,
+        },
+        {
+          id: 'fin-yalispor-sale-7621834670417',
+          vendorId: 'yalispor',
+          entryType: 'sale',
+          voidedAt: null,
+        },
+      ],
+      economicTransfers: [],
+    });
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(result.error).toBe('Multiple active sale ledgers found for allocation.');
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks refund finance writes while economic transfer is in progress', async () => {
+    setupOrder();
+    txMock.vendorAllocation.findUnique.mockReset();
+    txMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-1029-sporjinal',
+      financeEntries: [],
+      economicTransfers: [{
+        id: 'economic-transfer-1',
+        status: 'in_progress',
+        createdAt: new Date('2026-06-21T10:00:00.000Z'),
+      }],
+    });
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(result.error).toBe('Economic transfer is in progress for allocation.');
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('blocks refund finance writes when an active refund ledger already exists for another vendor', async () => {
+    setupTransferredOrder();
+    txMock.financeLedgerEntry.findMany.mockReset();
+    txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([
+      {
+        id: 'fin-yalispor-refund-1074533826897',
+        vendorId: 'yalispor',
+      },
+    ]);
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      error: 'Active refund ledger fin-yalispor-refund-1074533826897 already exists for allocation alloc-1029-yalispor and Shopify refund 1074533826897.',
+    });
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
   });
 
   it('does not emit a noisy commission VAT reversal event when refund VAT reversal is zero', async () => {
