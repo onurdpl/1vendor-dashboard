@@ -1,4 +1,5 @@
 export {
+  addAdminAllocationResolutionNote,
   cancelShipmentExecution,
   createShipmentExecution,
   createParatikaHostedPaymentLink,
@@ -15,6 +16,7 @@ export {
   refreshShipmentProviderData,
   refreshShipmentExecutionStatus,
   rejectOrder,
+  returnAdminBlockedAllocationToVendor,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,

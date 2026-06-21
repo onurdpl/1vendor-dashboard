@@ -50,7 +50,13 @@ import type {
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
 } from '../lib/api/contracts';
-import type { RejectOrderPayload, SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
+import type {
+  AdminResolutionNotePayload,
+  AdminReturnToVendorPayload,
+  RejectOrderPayload,
+  SubmitFulfillmentTrackingPayload,
+  UpdateNavlungoShipmentPayload,
+} from './real/orders';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
@@ -808,6 +814,40 @@ export const runtimeServices = {
       if (!breakdown) {
         throw new ApiError('Shopify order not found.', 'server', { status: 404 });
       }
+      return breakdown;
+    },
+    async returnAdminBlockedAllocationToVendor(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminReturnToVendorPayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.returnAdminBlockedAllocationToVendor(shopifyOrderId, allocationId, payload);
+      }
+
+      const breakdown = getShopifyOrderBreakdown(shopifyOrderId);
+      if (!breakdown) {
+        throw new ApiError('Shopify order not found.', 'server', { status: 404 });
+      }
+      void allocationId;
+      void payload;
+      return breakdown;
+    },
+    async addAdminAllocationResolutionNote(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminResolutionNotePayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.addAdminAllocationResolutionNote(shopifyOrderId, allocationId, payload);
+      }
+
+      const breakdown = getShopifyOrderBreakdown(shopifyOrderId);
+      if (!breakdown) {
+        throw new ApiError('Shopify order not found.', 'server', { status: 404 });
+      }
+      void allocationId;
+      void payload;
       return breakdown;
     },
     async createParatikaHostedPaymentLink(shopifyOrderId: string) {

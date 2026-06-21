@@ -682,7 +682,13 @@ export type KargonomiWarehouseSyncResult = {
   warnings: string[];
 };
 
-export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';
+export type AssignmentHistoryAction =
+  | 'assigned'
+  | 'vendor_blocked'
+  | 'reassignment_requested'
+  | 'reassigned'
+  | 'admin_returned_to_vendor'
+  | 'admin_note';
 
 export type AssignmentHistoryEntry = {
   action: AssignmentHistoryAction;

@@ -1,6 +1,11 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
-import type { RejectOrderPayload, UpdateNavlungoShipmentPayload } from '../../services/real/orders';
+import type {
+  AdminResolutionNotePayload,
+  AdminReturnToVendorPayload,
+  RejectOrderPayload,
+  UpdateNavlungoShipmentPayload,
+} from '../../services/real/orders';
 
 export async function listOrders(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined, { signal: options.signal });
@@ -12,6 +17,22 @@ export async function getOrder(orderId: string, options: { vendorId?: string | n
 
 export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string, options: { signal?: AbortSignal } = {}) {
   return runtimeServices.orders.adminBreakdown(shopifyOrderId, { signal: options.signal });
+}
+
+export async function returnAdminBlockedAllocationToVendor(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminReturnToVendorPayload,
+) {
+  return runtimeServices.orders.returnAdminBlockedAllocationToVendor(shopifyOrderId, allocationId, payload);
+}
+
+export async function addAdminAllocationResolutionNote(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminResolutionNotePayload,
+) {
+  return runtimeServices.orders.addAdminAllocationResolutionNote(shopifyOrderId, allocationId, payload);
 }
 
 export async function createParatikaHostedPaymentLink(shopifyOrderId: string) {

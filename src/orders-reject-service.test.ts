@@ -6,6 +6,9 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     update: vi.fn(),
   },
+  shopifyOrder: {
+    findUnique: vi.fn(),
+  },
   allocationAssignmentHistory: {
     create: vi.fn(),
   },
@@ -18,7 +21,12 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { rejectVendorOrderAllocation, OrderRejectValidationError } = await import('../backend/src/modules/orders/orders.service.js');
+const {
+  addBlockedAllocationResolutionNote,
+  rejectVendorOrderAllocation,
+  returnBlockedAllocationToVendor,
+  OrderRejectValidationError,
+} = await import('../backend/src/modules/orders/orders.service.js');
 
 function buildRejectAllocation(overrides: Record<string, unknown> = {}) {
   return {
@@ -127,11 +135,56 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildReturnableBlockedAllocation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'alloc-1088',
+    assignedVendorId: 'yalispor',
+    allocationStatus: 'VENDOR_BLOCKED',
+    reassignmentRequired: true,
+    fulfillmentStatus: 'Pending',
+    shippingStatus: 'Awaiting Shipment',
+    trackingNumber: null,
+    carrier: null,
+    fulfillment: null,
+    shipmentExecutions: [],
+    returnRecords: [],
+    refundRecords: [],
+    ...overrides,
+  };
+}
+
+function buildAdminOrderBreakdownDb() {
+  return {
+    sourceShopifyOrderId: 'gid://shopify/Order/1088',
+    sourceShopifyOrderNumber: '#1088',
+    customerName: 'Customer',
+    customerEmail: 'customer@example.test',
+    totalPrice: '1000.00',
+    createdAt: new Date('2026-06-21T08:00:00.000Z'),
+    updatedAt: new Date('2026-06-21T08:05:00.000Z'),
+    allocations: [
+      {
+        ...buildDetailAllocation({
+          allocationStatus: 'ACTIVE',
+          reassignmentRequired: false,
+          cancellationReason: null,
+        }),
+        assignedVendor: {
+          name: 'Yalı Spor',
+        },
+        returnRecords: [],
+        refundRecords: [],
+      },
+    ],
+  };
+}
+
 describe('vendor order reject operational hold', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
   });
 
   it('lets a vendor reject their own active allocation and records assignment history', async () => {
@@ -231,6 +284,113 @@ describe('vendor order reject operational hold', () => {
         note: '   ',
       }),
     ).rejects.toMatchObject({ message: 'Reject note is required.' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('lets an admin return a blocked allocation to the assigned vendor', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation());
+
+    const result = await returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {
+      note: 'Vendor confirmed stock is available.',
+      actorUserId: 'admin-1',
+    });
+
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
+      where: { id: 'alloc-1088' },
+      data: {
+        allocationStatus: 'ACTIVE',
+        reassignmentRequired: false,
+        cancellationReason: null,
+      },
+    });
+    expect(prismaMock.allocationAssignmentHistory.create).toHaveBeenCalledWith({
+      data: {
+        vendorAllocationId: 'alloc-1088',
+        action: 'admin_returned_to_vendor',
+        fromVendorId: 'yalispor',
+        toVendorId: 'yalispor',
+        reason: 'Vendor confirmed stock is available.',
+        actorUserId: 'admin-1',
+      },
+    });
+    expect(result.allocations[0]?.allocationStatus).toBe('ACTIVE');
+  });
+
+  it('does not return non-blocked allocations to vendor', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation({
+      allocationStatus: 'ACTIVE',
+    }));
+
+    await expect(
+      returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {
+        note: 'Return to vendor.',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['fulfilled allocation', { fulfillmentStatus: 'Fulfilled' }],
+    ['shipped allocation', { shippingStatus: 'Shipped' }],
+    ['tracked allocation', { trackingNumber: 'TRK-1' }],
+    ['carrier allocation', { carrier: 'Yurtiçi Kargo' }],
+  ])('does not return %s to vendor', async (_label, overrides) => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation(overrides));
+
+    await expect(
+      returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {
+        note: 'Return to vendor.',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('does not return allocation when it belongs to a different Shopify order', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      returnBlockedAllocationToVendor('gid://shopify/Order/9999', 'alloc-1088', {
+        note: 'Return to vendor.',
+      }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('adds an admin resolution note without changing allocation state', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+      id: 'alloc-1088',
+      assignedVendorId: 'yalispor',
+    });
+
+    await addBlockedAllocationResolutionNote('gid://shopify/Order/1088', 'alloc-1088', {
+      note: 'Waiting for vendor confirmation.',
+      actorUserId: 'admin-1',
+    });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).toHaveBeenCalledWith({
+      data: {
+        vendorAllocationId: 'alloc-1088',
+        action: 'admin_note',
+        fromVendorId: 'yalispor',
+        toVendorId: 'yalispor',
+        reason: 'Waiting for vendor confirmation.',
+        actorUserId: 'admin-1',
+      },
+    });
+  });
+
+  it('requires a note for admin resolution actions', async () => {
+    await expect(
+      addBlockedAllocationResolutionNote('gid://shopify/Order/1088', 'alloc-1088', {
+        note: ' ',
+      }),
+    ).rejects.toMatchObject({ message: 'Admin resolution note is required.' });
 
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });

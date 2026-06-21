@@ -65,6 +65,11 @@ export type RejectVendorOrderInput = {
   actorUserId?: string | null;
 };
 
+export type AdminAllocationResolutionInput = {
+  note?: string | null;
+  actorUserId?: string | null;
+};
+
 const BLOCKED_ALLOCATION_STATUSES = new Set<AllocationStatus>([
   AllocationStatus.VENDOR_BLOCKED,
   AllocationStatus.PENDING_REASSIGNMENT,
@@ -94,8 +99,42 @@ function normalizeRejectNote(note: string | null | undefined) {
   return normalized;
 }
 
+function normalizeAdminResolutionNote(note: string | null | undefined) {
+  const normalized = note?.trim() ?? '';
+  if (!normalized) {
+    throw new OrderRejectValidationError('Admin resolution note is required.');
+  }
+  if (normalized.length > 500) {
+    throw new OrderRejectValidationError('Admin resolution note must be 500 characters or fewer.');
+  }
+  return normalized;
+}
+
 function normalizeStatus(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? '';
+}
+
+const TERMINAL_RETURN_STATUS_TOKENS = ['closed', 'cancelled', 'canceled', 'declined', 'rejected', 'deleted'];
+
+function hasActiveReturnState(allocation: {
+  returnRecords: Array<{
+    status: string;
+    returnLifecycleStatus: string | null;
+  }>;
+}) {
+  return allocation.returnRecords.some((record) => {
+    const normalized = `${record.status ?? ''} ${record.returnLifecycleStatus ?? ''}`.trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+    return !TERMINAL_RETURN_STATUS_TOKENS.some((token) => normalized.includes(token));
+  });
+}
+
+function hasRefundState(allocation: {
+  refundRecords: Array<unknown>;
+}) {
+  return allocation.refundRecords.length > 0;
 }
 
 function hasShipmentEvidence(allocation: {
@@ -1424,6 +1463,166 @@ export async function rejectVendorOrderAllocation(
   }
 
   return updatedOrder;
+}
+
+export async function returnBlockedAllocationToVendor(
+  shopifyOrderId: string,
+  allocationId: string,
+  input: AdminAllocationResolutionInput,
+): Promise<AdminOrderBreakdownDto> {
+  const note = normalizeAdminResolutionNote(input.note);
+
+  await prisma.$transaction(async (transaction) => {
+    const allocation = await transaction.vendorAllocation.findFirst({
+      where: {
+        id: allocationId,
+        order: {
+          sourceShopifyOrderId: shopifyOrderId,
+        },
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        allocationStatus: true,
+        reassignmentRequired: true,
+        fulfillmentStatus: true,
+        shippingStatus: true,
+        trackingNumber: true,
+        carrier: true,
+        fulfillment: {
+          select: {
+            fulfilledAt: true,
+            shipmentCreatedAt: true,
+            shipmentUpdatedAt: true,
+            shopifyFulfillmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+          },
+        },
+        shipmentExecutions: {
+          select: {
+            providerShipmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+            shipmentStatus: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+        returnRecords: {
+          select: {
+            status: true,
+            returnLifecycleStatus: true,
+          },
+        },
+        refundRecords: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!allocation) {
+      throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+    }
+
+    if (allocation.allocationStatus !== AllocationStatus.VENDOR_BLOCKED) {
+      throw new OrderRejectValidationError('Only vendor-blocked allocations can be returned to vendor.', 409);
+    }
+
+    if (!allocation.reassignmentRequired) {
+      throw new OrderRejectValidationError('Allocation is not marked for admin reassignment review.', 409);
+    }
+
+    if (hasShipmentEvidence(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot be returned to vendor after fulfillment, shipment, carrier, or tracking evidence exists.', 409);
+    }
+
+    if (hasActiveReturnState(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot be returned to vendor while an active return is linked.', 409);
+    }
+
+    if (hasRefundState(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot be returned to vendor after refund evidence exists.', 409);
+    }
+
+    await transaction.vendorAllocation.update({
+      where: {
+        id: allocation.id,
+      },
+      data: {
+        allocationStatus: AllocationStatus.ACTIVE,
+        reassignmentRequired: false,
+        cancellationReason: null,
+      },
+    });
+
+    await transaction.allocationAssignmentHistory.create({
+      data: {
+        vendorAllocationId: allocation.id,
+        action: 'admin_returned_to_vendor',
+        fromVendorId: allocation.assignedVendorId,
+        toVendorId: allocation.assignedVendorId,
+        reason: note,
+        actorUserId: input.actorUserId ?? null,
+      },
+    });
+  });
+
+  const updatedBreakdown = await getAdminShopifyOrderBreakdown(shopifyOrderId);
+  if (!updatedBreakdown) {
+    throw new OrderRejectValidationError('Shopify order not found after allocation resolution.', 404);
+  }
+
+  return updatedBreakdown;
+}
+
+export async function addBlockedAllocationResolutionNote(
+  shopifyOrderId: string,
+  allocationId: string,
+  input: AdminAllocationResolutionInput,
+): Promise<AdminOrderBreakdownDto> {
+  const note = normalizeAdminResolutionNote(input.note);
+
+  await prisma.$transaction(async (transaction) => {
+    const allocation = await transaction.vendorAllocation.findFirst({
+      where: {
+        id: allocationId,
+        order: {
+          sourceShopifyOrderId: shopifyOrderId,
+        },
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+      },
+    });
+
+    if (!allocation) {
+      throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+    }
+
+    await transaction.allocationAssignmentHistory.create({
+      data: {
+        vendorAllocationId: allocation.id,
+        action: 'admin_note',
+        fromVendorId: allocation.assignedVendorId,
+        toVendorId: allocation.assignedVendorId,
+        reason: note,
+        actorUserId: input.actorUserId ?? null,
+      },
+    });
+  });
+
+  const updatedBreakdown = await getAdminShopifyOrderBreakdown(shopifyOrderId);
+  if (!updatedBreakdown) {
+    throw new OrderRejectValidationError('Shopify order not found after allocation note.', 404);
+  }
+
+  return updatedBreakdown;
 }
 
 export async function getVendorOrderById(

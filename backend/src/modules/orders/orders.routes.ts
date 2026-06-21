@@ -4,11 +4,13 @@ import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
+  addBlockedAllocationResolutionNote,
   getAdminShopifyOrderBreakdown,
   getVendorOrderByIdForUser,
   listVendorOrders,
   OrderRejectValidationError,
   rejectVendorOrderAllocation,
+  returnBlockedAllocationToVendor,
 } from './orders.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
@@ -113,6 +115,68 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return breakdown;
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: { confirmReturnToVendor?: boolean | null; note?: string | null };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/return-to-vendor',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (request.body?.confirmReturnToVendor !== true) {
+        return reply.code(400).send({ message: 'Return-to-vendor confirmation is required.' });
+      }
+
+      try {
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/return-to-vendor', () =>
+          returnBlockedAllocationToVendor(request.params.shopifyOrderId, request.params.allocationId, {
+            note: request.body?.note,
+            actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: { note?: string | null };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/resolution-note',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/resolution-note', () =>
+          addBlockedAllocationResolutionNote(request.params.shopifyOrderId, request.params.allocationId, {
+            note: request.body?.note,
+            actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
     },
   );
 }

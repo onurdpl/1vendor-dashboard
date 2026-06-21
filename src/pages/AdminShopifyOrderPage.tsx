@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
 import {
+  addAdminAllocationResolutionNote,
   createParatikaHostedPaymentLink,
   getAdminShopifyOrderBreakdown,
+  returnAdminBlockedAllocationToVendor,
   type ParatikaSessionTokenLiveProbeResult,
+  type ShopifyOrderBreakdown,
 } from '../features/orders/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -44,25 +47,26 @@ function getProbeErrorMessage(error: unknown) {
   return 'Paratika probe failed.';
 }
 
+function getActionErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+type AdminAllocationResolutionAction = {
+  type: 'return_to_vendor' | 'add_note';
+  allocation: ShopifyOrderBreakdown['allocations'][number];
+};
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const appReadiness = useAppReadiness();
   const { message, tone, showFeedback } = useActionFeedback();
   const [paratikaProbeResult, setParatikaProbeResult] = useState<ParatikaSessionTokenLiveProbeResult | null>(null);
-  const reassignAllocation = useMutationAction(
-    async (payload: { allocationOrderId: string; nextVendorId: string }) => payload,
-    {
-      onSuccess: (result) => {
-        showFeedback(
-          `Reassignment request prepared for ${result.allocationOrderId} -> ${result.nextVendorId} (mock only).`,
-          'success',
-        );
-      },
-      onError: () => {
-        showFeedback('Unable to prepare reassignment request.', 'error');
-      },
-    },
-  );
+  const [resolutionAction, setResolutionAction] = useState<AdminAllocationResolutionAction | null>(null);
+  const [resolutionNote, setResolutionNote] = useState('');
   const paratikaLiveProbe = useMutationAction(
     async () => {
       if (!shopifyOrderId) {
@@ -100,6 +104,74 @@ export function AdminShopifyOrderPage() {
       enabled: appReadiness.ready && Boolean(shopifyOrderId),
     },
   );
+  const returnToVendorMutation = useMutationAction(
+    async (payload: { allocationId: string; note: string }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return returnAdminBlockedAllocationToVendor(shopifyOrderId, payload.allocationId, {
+        confirmReturnToVendor: true,
+        note: payload.note,
+      });
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Allocation could not be returned to vendor.'), 'error');
+      },
+    },
+  );
+  const addResolutionNoteMutation = useMutationAction(
+    async (payload: { allocationId: string; note: string }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return addAdminAllocationResolutionNote(shopifyOrderId, payload.allocationId, {
+        note: payload.note,
+      });
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Admin note could not be saved.'), 'error');
+      },
+    },
+  );
+  const isResolutionPending = returnToVendorMutation.isPending || addResolutionNoteMutation.isPending;
+
+  async function handleResolutionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resolutionAction) {
+      return;
+    }
+
+    const note = resolutionNote.trim();
+    if (!note) {
+      showFeedback('Admin note is required.', 'error');
+      return;
+    }
+
+    try {
+      if (resolutionAction.type === 'return_to_vendor') {
+        await returnToVendorMutation.mutateAsync({
+          allocationId: resolutionAction.allocation.allocationOrderId,
+          note,
+        });
+        showFeedback('Allocation returned to vendor. Fulfillment is available again.', 'success');
+      } else {
+        await addResolutionNoteMutation.mutateAsync({
+          allocationId: resolutionAction.allocation.allocationOrderId,
+          note,
+        });
+        showFeedback('Admin note added to allocation history.', 'success');
+      }
+      setResolutionAction(null);
+      setResolutionNote('');
+      await refetch();
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
 
   if (!appReadiness.ready || (isLoading && !breakdown)) {
     return (
@@ -342,27 +414,39 @@ export function AdminShopifyOrderPage() {
             </div>
           </section>
 
-          {allocation.reassignmentRequired ? (
+          {allocation.allocationStatus === 'vendor_blocked' ? (
             <section className="action-row">
-              <p className="page-description">{allocation.reassignmentNote ?? 'Reassignment review required.'}</p>
+              <p className="page-description">
+                Admin resolution is required. Return keeps the same vendor and does not reassign, refund, mutate Shopify, or change finance.
+              </p>
               <div className="detail-actions">
-                {allocation.reassignmentCandidateVendorIds.map((candidateVendorId) => (
-                  <button
-                    key={candidateVendorId}
-                    className="button button-primary"
-                    type="button"
-                    disabled={reassignAllocation.isPending}
-                    onClick={() => {
-                      reassignAllocation.mutate({
-                        allocationOrderId: allocation.allocationOrderId,
-                        nextVendorId: candidateVendorId,
-                      });
-                    }}
-                  >
-                    {reassignAllocation.isPending ? 'Preparing...' : `Reassign to ${candidateVendorId}`}
-                  </button>
-                ))}
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => {
+                    setResolutionAction({ type: 'return_to_vendor', allocation });
+                    setResolutionNote('');
+                  }}
+                >
+                  Return to vendor
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => {
+                    setResolutionAction({ type: 'add_note', allocation });
+                    setResolutionNote('');
+                  }}
+                >
+                  Add note
+                </button>
               </div>
+            </section>
+          ) : allocation.reassignmentRequired ? (
+            <section className="action-row">
+              <p className="page-description">
+                Manual reassignment is not implemented in this phase. Review the allocation state before taking external action.
+              </p>
             </section>
           ) : null}
 
@@ -448,6 +532,87 @@ export function AdminShopifyOrderPage() {
           Back to vendor orders
         </Link>
       </article>
+
+      {resolutionAction ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section
+            className="support-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-allocation-resolution-title"
+          >
+            <div className="support-modal-header">
+              <div>
+                <h2 id="admin-allocation-resolution-title">
+                  {resolutionAction.type === 'return_to_vendor' ? 'Return to vendor' : 'Add admin note'}
+                </h2>
+                <p>
+                  {resolutionAction.allocation.vendorName} · {resolutionAction.allocation.allocationOrderId}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                onClick={() => {
+                  if (!isResolutionPending) {
+                    setResolutionAction(null);
+                    setResolutionNote('');
+                  }
+                }}
+                aria-label="Close allocation resolution form"
+              >
+                ×
+              </button>
+            </div>
+            <form className="support-ticket-form" onSubmit={handleResolutionSubmit}>
+              <p className="support-context-note">
+                {resolutionAction.type === 'return_to_vendor'
+                  ? 'This restores the allocation to the same vendor and allows fulfillment again. It does not reassign, refund, or change finance.'
+                  : 'This only adds an admin note. The allocation remains blocked.'}
+              </p>
+              <label>
+                Admin note
+                <textarea
+                  value={resolutionNote}
+                  onChange={(event) => setResolutionNote(event.target.value)}
+                  maxLength={500}
+                  rows={5}
+                  required
+                  placeholder={
+                    resolutionAction.type === 'return_to_vendor'
+                      ? 'Explain why this allocation can return to the vendor.'
+                      : 'Add operational context for the blocked allocation.'
+                  }
+                />
+              </label>
+              <div className="support-modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setResolutionAction(null);
+                    setResolutionNote('');
+                  }}
+                  disabled={isResolutionPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={resolutionAction.type === 'return_to_vendor' ? 'button button-primary' : 'button button-secondary'}
+                  disabled={isResolutionPending}
+                >
+                  {isResolutionPending
+                    ? 'Saving...'
+                    : resolutionAction.type === 'return_to_vendor'
+                      ? 'Return to vendor'
+                      : 'Add note'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

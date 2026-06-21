@@ -69,6 +69,15 @@ export type RejectOrderPayload = {
   note: string;
 };
 
+export type AdminReturnToVendorPayload = {
+  confirmReturnToVendor: true;
+  note: string;
+};
+
+export type AdminResolutionNotePayload = {
+  note: string;
+};
+
 type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;
@@ -423,34 +432,7 @@ function readVendorRequestOptions(options: { vendorId?: string | null; signal?: 
   return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
-  const params = new URLSearchParams();
-  if (options.limit) params.set('limit', String(options.limit));
-  if (options.offset) params.set('offset', String(options.offset));
-  const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
-  const requestOptions = readVendorRequestOptions(options);
-  const response = await (requestOptions
-    ? apiClient.get<OrderSummaryDto[]>(path, requestOptions)
-    : apiClient.get<OrderSummaryDto[]>(path));
-  return response.map(mapOrderSummary);
-}
-
-export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
-  const requestOptions = readVendorRequestOptions(options);
-  const response = await (requestOptions
-    ? apiClient.get<OrderDetailDto>(`/orders/${orderId}`, requestOptions)
-    : apiClient.get<OrderDetailDto>(`/orders/${orderId}`));
-  return mapOrderDetail(response);
-}
-
-export async function getAdminShopifyOrderBreakdown(
-  shopifyOrderId: string,
-  options: { signal?: AbortSignal } = {},
-): Promise<ShopifyOrderBreakdown> {
-  const response = await apiClient.get<AdminOrderBreakdownDto>(`/admin/orders/${shopifyOrderId}`, {
-    signal: options.signal,
-  });
-
+function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderBreakdown {
   return {
     sourceShopifyOrderId: response.order.sourceShopifyOrderId,
     sourceShopifyOrderNumber: response.order.sourceShopifyOrderNumber,
@@ -520,6 +502,37 @@ export async function getAdminShopifyOrderBreakdown(
   };
 }
 
+export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+  const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options);
+  const response = await (requestOptions
+    ? apiClient.get<OrderSummaryDto[]>(path, requestOptions)
+    : apiClient.get<OrderSummaryDto[]>(path));
+  return response.map(mapOrderSummary);
+}
+
+export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  const requestOptions = readVendorRequestOptions(options);
+  const response = await (requestOptions
+    ? apiClient.get<OrderDetailDto>(`/orders/${orderId}`, requestOptions)
+    : apiClient.get<OrderDetailDto>(`/orders/${orderId}`));
+  return mapOrderDetail(response);
+}
+
+export async function getAdminShopifyOrderBreakdown(
+  shopifyOrderId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ShopifyOrderBreakdown> {
+  const response = await apiClient.get<AdminOrderBreakdownDto>(`/admin/orders/${shopifyOrderId}`, {
+    signal: options.signal,
+  });
+
+  return mapAdminOrderBreakdown(response);
+}
+
 export async function createParatikaHostedPaymentLink(
   shopifyOrderId: string,
 ): Promise<ParatikaSessionTokenLiveProbeResult> {
@@ -553,6 +566,32 @@ export async function rejectOrder(
     },
   );
   return mapOrderDetail(dto);
+}
+
+export async function returnAdminBlockedAllocationToVendor(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminReturnToVendorPayload,
+) {
+  const response = await apiClient.post<AdminOrderBreakdownDto>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/return-to-vendor`,
+    payload,
+    { skipVendorContext: true },
+  );
+  return mapAdminOrderBreakdown(response);
+}
+
+export async function addAdminAllocationResolutionNote(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminResolutionNotePayload,
+) {
+  const response = await apiClient.post<AdminOrderBreakdownDto>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/resolution-note`,
+    payload,
+    { skipVendorContext: true },
+  );
+  return mapAdminOrderBreakdown(response);
 }
 
 export async function createShipmentExecution(
