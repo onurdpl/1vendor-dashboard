@@ -67,6 +67,7 @@ import {
 } from './finance-integrity-alert.service.js';
 import {
   FinanceIntegrityScannerValidationError,
+  rescanFinanceIntegrityAlert,
   runFinanceIntegrityScannerDiagnostics,
 } from './finance-integrity-scanner.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
@@ -424,6 +425,39 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         const message = error instanceof Error ? error.message : 'Finance integrity alert could not be acknowledged.';
         return reply.code(statusCode).send({
           ok: false,
+          message,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance-integrity/alerts/:alertId/rescan',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { alertId } = request.params as { alertId: string };
+      // Alert lifecycle rescans are forced read-only so scanner dedupe cannot mutate alert status.
+      const dryRun = true;
+
+      try {
+        return await rescanFinanceIntegrityAlert({
+          alertId,
+          dryRun,
+        });
+      } catch (error) {
+        const statusCode = error instanceof FinanceIntegrityScannerValidationError ? error.statusCode : 400;
+        const message = error instanceof Error ? error.message : 'Finance integrity alert could not be rescanned.';
+        return reply.code(statusCode).send({
+          ok: false,
+          alertId,
+          dryRun,
+          writesPerformed: false,
           message,
         });
       }

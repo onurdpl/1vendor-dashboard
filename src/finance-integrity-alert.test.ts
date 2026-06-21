@@ -15,6 +15,7 @@ import {
   detectTransferFailureStates,
   detectVoidedLedgerWithoutSuccessor,
   FinanceIntegrityScannerValidationError,
+  rescanFinanceIntegrityAlert,
   runFinanceIntegrityScannerDiagnostics,
 } from '../backend/src/modules/finance/finance-integrity-scanner.service.js';
 
@@ -696,5 +697,77 @@ describe('finance integrity alert foundation', () => {
     await expect(runFinanceIntegrityScannerDiagnostics({ db: db as never })).rejects.toBeInstanceOf(
       FinanceIntegrityScannerValidationError,
     );
+  });
+
+  it('rescans a scoped alert without changing alert status', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        financeEntries: [
+          { id: 'fin-a-sale', vendorId: 'vendor-a', entryType: 'sale', voidedAt: null },
+          { id: 'fin-b-sale', vendorId: 'vendor-b', entryType: 'sale', voidedAt: null },
+        ],
+      },
+    ]);
+    const alert = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Reviewed by finance ops.',
+    }, db as never);
+
+    const result = await rescanFinanceIntegrityAlert({
+      alertId: alert.id,
+      dryRun: false,
+      db: db as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      alertId: alert.id,
+      dryRun: true,
+      writesPerformed: false,
+      matchingAlertStillDetected: true,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+      },
+      findings: [
+        expect.objectContaining({
+          category: 'multiple_active_sale_ledgers',
+          dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+          createdAlertId: null,
+        }),
+      ],
+    });
+    expect(db.__alerts).toHaveLength(1);
+    expect(db.__alerts[0]).toMatchObject({
+      id: alert.id,
+      status: 'acknowledged',
+      acknowledgmentNote: 'Reviewed by finance ops.',
+    });
+  });
+
+  it('rejects alert rescans without allocation or transfer scope', async () => {
+    const db = buildDb();
+    const alert = await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:unscoped',
+      severity: 'warning',
+      category: 'transfer_in_progress',
+      reason: 'Unscoped alert.',
+    }, db as never);
+
+    await expect(rescanFinanceIntegrityAlert({
+      alertId: alert.id,
+      db: db as never,
+    })).rejects.toMatchObject({
+      name: 'FinanceIntegrityScannerValidationError',
+      statusCode: 400,
+      message: 'Finance integrity alert has no allocation or transfer scope to rescan.',
+    });
   });
 });

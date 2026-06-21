@@ -11,7 +11,18 @@ const createSettlementScheduleDraftsMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleAutoDraftJobStatusMock = vi.hoisted(() => vi.fn());
 const runSettlementScheduleAutoDraftJobMock = vi.hoisted(() => vi.fn());
 const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
+const rescanFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
+const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
+  class FinanceIntegrityScannerValidationError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
+);
 const FinanceIntegrityAlertLifecycleErrorMock = vi.hoisted(() =>
   class FinanceIntegrityAlertLifecycleError extends Error {
     statusCode: number;
@@ -60,14 +71,8 @@ vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () 
 }));
 
 vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', () => ({
-  FinanceIntegrityScannerValidationError: class FinanceIntegrityScannerValidationError extends Error {
-    statusCode: number;
-
-    constructor(message: string, statusCode = 400) {
-      super(message);
-      this.statusCode = statusCode;
-    }
-  },
+  FinanceIntegrityScannerValidationError: FinanceIntegrityScannerValidationErrorMock,
+  rescanFinanceIntegrityAlert: rescanFinanceIntegrityAlertMock,
   runFinanceIntegrityScannerDiagnostics: runFinanceIntegrityScannerDiagnosticsMock,
 }));
 
@@ -203,6 +208,7 @@ describe('finance route validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     runFinanceIntegrityScannerDiagnosticsMock.mockReset();
+    rescanFinanceIntegrityAlertMock.mockReset();
     acknowledgeFinanceIntegrityAlertMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
@@ -789,6 +795,101 @@ describe('finance route validation', () => {
       body: {
         ok: false,
         message: 'Resolved finance integrity alerts cannot be acknowledged.',
+      },
+    });
+  });
+
+  it('requires admin access for finance integrity alert rescan', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/rescan')?.(
+      {
+        authUser: { id: 'vendor-user', role: 'vendor' },
+        params: { alertId: 'alert-1' },
+        body: {
+          dryRun: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(rescanFinanceIntegrityAlertMock).not.toHaveBeenCalled();
+  });
+
+  it('rescans finance integrity alerts in forced dry-run mode', async () => {
+    const response = {
+      ok: true,
+      alertId: 'alert-1',
+      dryRun: true,
+      writesPerformed: false,
+      matchingAlertStillDetected: true,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+      },
+      findings: [
+        {
+          category: 'multiple_active_sale_ledgers',
+          severity: 'critical',
+          reason: 'Multiple active sale ledgers exist for allocation.',
+          dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: null,
+          affectedLedgerIds: ['ledger-a', 'ledger-b'],
+          createdAlertId: null,
+        },
+      ],
+    };
+    rescanFinanceIntegrityAlertMock.mockResolvedValueOnce(response);
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/rescan')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {
+          dryRun: false,
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toBe(response);
+    expect(rescanFinanceIntegrityAlertMock).toHaveBeenCalledWith({
+      alertId: 'alert-1',
+      dryRun: true,
+    });
+  });
+
+  it('returns scanner validation errors for finance integrity alert rescans', async () => {
+    rescanFinanceIntegrityAlertMock.mockRejectedValueOnce(
+      new FinanceIntegrityScannerValidationErrorMock('Finance integrity alert has no allocation or transfer scope to rescan.', 400),
+    );
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/alerts/:alertId/rescan')?.(
+      {
+        authUser: { id: 'admin-1', role: 'admin' },
+        params: { alertId: 'alert-1' },
+        body: {},
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        alertId: 'alert-1',
+        dryRun: true,
+        writesPerformed: false,
+        message: 'Finance integrity alert has no allocation or transfer scope to rescan.',
       },
     });
   });

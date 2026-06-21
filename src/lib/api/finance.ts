@@ -90,6 +90,10 @@ export function acknowledgeFinanceIntegrityAlert(alertId: string, input: { note:
   return runtimeServices.finance.acknowledgeFinanceIntegrityAlert(alertId, input);
 }
 
+export function rescanFinanceIntegrityAlert(alertId: string, input: { dryRun?: boolean } = {}) {
+  return runtimeServices.finance.rescanFinanceIntegrityAlert(alertId, input);
+}
+
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }

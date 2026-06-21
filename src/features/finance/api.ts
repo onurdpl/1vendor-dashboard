@@ -9,6 +9,7 @@ export {
   getSettlementScheduleDryRun,
   getVendorDebtHistory,
   preparePayoutBatch,
+  rescanFinanceIntegrityAlert,
   runSettlementScheduleAutoDraftJob,
   updateVendorFinancialProfile,
 } from '../../lib/api/finance';

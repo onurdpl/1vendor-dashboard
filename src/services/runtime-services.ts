@@ -2426,6 +2426,35 @@ export const runtimeServices = {
               resolutionNote: null,
             },
           }),
+    rescanFinanceIntegrityAlert: (
+      alertId: string,
+      input: Parameters<typeof realFinance.rescanFinanceIntegrityAlert>[1] = {},
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.rescanFinanceIntegrityAlert(alertId, input)
+        : Promise.resolve({
+            ok: true as const,
+            alertId,
+            dryRun: true,
+            writesPerformed: false,
+            matchingAlertStillDetected: true,
+            scope: {
+              vendorAllocationId: null,
+              allocationEconomicTransferId: null,
+            },
+            findings: [
+              {
+                category: 'mock_finance_integrity_alert',
+                severity: 'warning',
+                reason: 'Mock finance integrity alert still detected.',
+                dedupeKey: `mock-finance-integrity-alert:${alertId}`,
+                vendorAllocationId: 'mock-allocation',
+                allocationEconomicTransferId: null,
+                affectedLedgerIds: [],
+                createdAlertId: null,
+              },
+            ],
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

@@ -10,7 +10,7 @@ import {
   type ParatikaSessionTokenLiveProbeResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
-import { acknowledgeFinanceIntegrityAlert } from '../features/finance/api';
+import { acknowledgeFinanceIntegrityAlert, rescanFinanceIntegrityAlert } from '../features/finance/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -74,6 +74,11 @@ type FinanceIntegrityAlertAcknowledgeAction = {
   alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number];
 };
 
+type FinanceIntegrityAlertRescanSummary = {
+  tone: 'success' | 'info' | 'error';
+  message: string;
+};
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const appReadiness = useAppReadiness();
@@ -83,6 +88,7 @@ export function AdminShopifyOrderPage() {
   const [resolutionNote, setResolutionNote] = useState('');
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
+  const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
   const paratikaLiveProbe = useMutationAction(
     async () => {
       if (!shopifyOrderId) {
@@ -162,6 +168,14 @@ export function AdminShopifyOrderPage() {
       },
     },
   );
+  const rescanAlertMutation = useMutationAction(
+    async (payload: { alertId: string }) => rescanFinanceIntegrityAlert(payload.alertId, { dryRun: true }),
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Finance integrity alert could not be rescanned.'), 'error');
+      },
+    },
+  );
 
   async function handleResolutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -218,6 +232,33 @@ export function AdminShopifyOrderPage() {
       setAcknowledgeAction(null);
       setAcknowledgmentNote('');
       await refetch();
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleRescanAlert(alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number]) {
+    setRescanSummaries((current) => {
+      const next = { ...current };
+      delete next[alert.id];
+      return next;
+    });
+
+    try {
+      const result = await rescanAlertMutation.mutateAsync({ alertId: alert.id });
+      const findingCount = result.findings.length;
+      const message = result.matchingAlertStillDetected
+        ? `Issue still detected. ${findingCount} finding${findingCount === 1 ? '' : 's'} returned.`
+        : `No matching issue detected. ${findingCount} finding${findingCount === 1 ? '' : 's'} returned.`;
+      const tone = result.matchingAlertStillDetected ? 'info' : 'success';
+      setRescanSummaries((current) => ({
+        ...current,
+        [alert.id]: {
+          tone,
+          message,
+        },
+      }));
+      showFeedback(message, tone);
     } catch {
       // The mutation onError handler owns user-facing feedback.
     }
@@ -380,45 +421,65 @@ export function AdminShopifyOrderPage() {
 
           {allocation.financeIntegrityAlerts?.length ? (
             <section className="finance-integrity-alerts" aria-label="Finance integrity alerts">
-              {allocation.financeIntegrityAlerts.map((alert) => (
-                <article
-                  key={alert.id}
-                  className={`finance-integrity-alert finance-integrity-alert-${getClassToken(alert.severity)}`}
-                >
-                  <div className="finance-integrity-alert-header">
-                    <div>
-                      <p className="eyebrow">Finance integrity alert</p>
-                      <h4>{formatFinanceAlertCategory(alert.category)}</h4>
+              {allocation.financeIntegrityAlerts.map((alert) => {
+                const normalizedAlertStatus = alert.status.toLowerCase();
+                const rescanSummary = rescanSummaries[alert.id];
+                const canAcknowledge = normalizedAlertStatus === 'open';
+                const canRescan = normalizedAlertStatus === 'open' || normalizedAlertStatus === 'acknowledged';
+
+                return (
+                  <article
+                    key={alert.id}
+                    className={`finance-integrity-alert finance-integrity-alert-${getClassToken(alert.severity)}`}
+                  >
+                    <div className="finance-integrity-alert-header">
+                      <div>
+                        <p className="eyebrow">Finance integrity alert</p>
+                        <h4>{formatFinanceAlertCategory(alert.category)}</h4>
+                      </div>
+                      <div className="chip-row">
+                        <span className={`status-badge status-${getClassToken(alert.severity)}`}>{alert.severity}</span>
+                        <span className={`status-badge status-${getClassToken(alert.status)}`}>{alert.status}</span>
+                      </div>
                     </div>
-                    <div className="chip-row">
-                      <span className={`status-badge status-${getClassToken(alert.severity)}`}>{alert.severity}</span>
-                      <span className={`status-badge status-${getClassToken(alert.status)}`}>{alert.status}</span>
+                    <p>{alert.reason}</p>
+                    <div className="finance-integrity-alert-meta">
+                      <span>Detected {formatDate(alert.detectedAt)}</span>
+                      {alert.vendorAllocationId ? <span>Allocation {alert.vendorAllocationId}</span> : null}
+                      {alert.allocationEconomicTransferId ? (
+                        <span>Economic transfer {alert.allocationEconomicTransferId}</span>
+                      ) : null}
                     </div>
-                  </div>
-                  <p>{alert.reason}</p>
-                  <div className="finance-integrity-alert-meta">
-                    <span>Detected {formatDate(alert.detectedAt)}</span>
-                    {alert.vendorAllocationId ? <span>Allocation {alert.vendorAllocationId}</span> : null}
-                    {alert.allocationEconomicTransferId ? (
-                      <span>Economic transfer {alert.allocationEconomicTransferId}</span>
+                    {canAcknowledge || canRescan ? (
+                      <div className="support-modal-actions finance-integrity-alert-actions">
+                        {canAcknowledge ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() => {
+                              setAcknowledgeAction({ allocation, alert });
+                              setAcknowledgmentNote('');
+                            }}
+                          >
+                            Acknowledge
+                          </button>
+                        ) : null}
+                        {canRescan ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={rescanAlertMutation.isPending}
+                            onClick={() => void handleRescanAlert(alert)}
+                          >
+                            {rescanAlertMutation.isPending ? 'Rescanning...' : 'Rescan'}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
-                  </div>
-                  {alert.status.toLowerCase() === 'open' ? (
-                    <div className="support-modal-actions finance-integrity-alert-actions">
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => {
-                          setAcknowledgeAction({ allocation, alert });
-                          setAcknowledgmentNote('');
-                        }}
-                      >
-                        Acknowledge
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))}
+                    {rescanSummary ? <ActionFeedback tone={rescanSummary.tone} message={rescanSummary.message} /> : null}
+                  </article>
+                );
+              })}
             </section>
           ) : null}
 

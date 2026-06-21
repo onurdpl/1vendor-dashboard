@@ -62,6 +62,11 @@ export type FinanceIntegrityScannerResult = {
   findings: FinanceIntegrityScannerFinding[];
 };
 
+export type FinanceIntegrityAlertRescanResult = FinanceIntegrityScannerResult & {
+  alertId: string;
+  matchingAlertStillDetected: boolean;
+};
+
 export class FinanceIntegrityScannerValidationError extends Error {
   statusCode: number;
 
@@ -513,6 +518,56 @@ export async function runFinanceIntegrityScannerDiagnostics(input: {
       allocationEconomicTransferId,
     },
     findings,
+  };
+}
+
+export async function rescanFinanceIntegrityAlert(input: {
+  alertId: string;
+  dryRun?: boolean;
+  db?: FinanceIntegrityScannerDbClient;
+}): Promise<FinanceIntegrityAlertRescanResult> {
+  const db = input.db ?? prisma;
+  const dryRun = true;
+  const alert = await db.financeIntegrityAlert.findUnique({
+    where: {
+      id: input.alertId,
+    },
+    select: {
+      id: true,
+      dedupeKey: true,
+      category: true,
+      vendorAllocationId: true,
+      allocationEconomicTransferId: true,
+    },
+  });
+
+  if (!alert) {
+    throw new FinanceIntegrityScannerValidationError('Finance integrity alert was not found.', 404);
+  }
+
+  if (!alert.vendorAllocationId && !alert.allocationEconomicTransferId) {
+    throw new FinanceIntegrityScannerValidationError('Finance integrity alert has no allocation or transfer scope to rescan.');
+  }
+
+  const result = await runFinanceIntegrityScannerDiagnostics({
+    vendorAllocationId: alert.vendorAllocationId,
+    allocationEconomicTransferId: alert.allocationEconomicTransferId,
+    dryRun,
+    db,
+  });
+  const matchingAlertStillDetected = result.findings.some((finding) =>
+    finding.dedupeKey === alert.dedupeKey ||
+    (
+      finding.category === alert.category &&
+      finding.vendorAllocationId === result.scope.vendorAllocationId &&
+      finding.allocationEconomicTransferId === result.scope.allocationEconomicTransferId
+    )
+  );
+
+  return {
+    ...result,
+    alertId: alert.id,
+    matchingAlertStillDetected,
   };
 }
 

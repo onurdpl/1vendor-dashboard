@@ -966,6 +966,30 @@ export type FinanceIntegrityAlertAcknowledgeResult = {
   };
 };
 
+export type FinanceIntegrityAlertFinding = {
+  category: string;
+  severity: string;
+  reason: string;
+  dedupeKey: string;
+  vendorAllocationId: string;
+  allocationEconomicTransferId: string | null;
+  affectedLedgerIds: string[];
+  createdAlertId: string | null;
+};
+
+export type FinanceIntegrityAlertRescanResult = {
+  ok: true;
+  alertId: string;
+  dryRun: boolean;
+  writesPerformed: boolean;
+  matchingAlertStillDetected: boolean;
+  scope: {
+    vendorAllocationId: string | null;
+    allocationEconomicTransferId: string | null;
+  };
+  findings: FinanceIntegrityAlertFinding[];
+};
+
 export type ShopifyOrderBreakdown = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
