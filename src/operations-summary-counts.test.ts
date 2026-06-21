@@ -55,6 +55,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     id: 'alloc-1',
     assignedVendorId: 'vendor-1',
     allocationStatus: 'ACTIVE',
+    cancellationReason: null,
     fulfillmentStatus: 'Fulfilled',
     shippingStatus: 'Delivered',
     reassignmentRequired: false,
@@ -208,6 +209,7 @@ describe('admin operations summary counts', () => {
       buildAllocation({
         id: 'alloc-blocked',
         allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
         reassignmentRequired: true,
       }),
     ]);
@@ -219,6 +221,7 @@ describe('admin operations summary counts', () => {
       expect.objectContaining({
         id: 'op-blocked-alloc-blocked',
         type: 'vendor_blocked',
+        description: 'Vendor Vendor 1 marked allocation alloc-blocked as blocked. Reason: OUT_OF_STOCK.',
       }),
     ]);
     expect(dashboard.items).not.toEqual(
@@ -229,6 +232,28 @@ describe('admin operations summary counts', () => {
         }),
       ]),
     );
+  });
+
+  it('keeps the vendor_blocked fallback description when cancellationReason is missing', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-blocked-no-reason',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: null,
+        reassignmentRequired: true,
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-blocked-no-reason',
+        type: 'vendor_blocked',
+        description: 'Vendor Vendor 1 marked allocation alloc-blocked-no-reason as blocked.',
+      }),
+    ]);
   });
 
   it('excludes vendor-blocked allocations from pendingReassignment summary count', async () => {

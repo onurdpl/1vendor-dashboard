@@ -537,6 +537,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       id: true,
       assignedVendorId: true,
       allocationStatus: true,
+      cancellationReason: true,
       fulfillmentStatus: true,
       shippingStatus: true,
       reassignmentRequired: true,
@@ -585,12 +586,16 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const shopifyOrderId = allocation.order.sourceShopifyOrderId;
 
     if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED) {
+      const description = allocation.cancellationReason
+        ? `Vendor ${vendorName} marked allocation ${allocation.id} as blocked. Reason: ${allocation.cancellationReason}.`
+        : `Vendor ${vendorName} marked allocation ${allocation.id} as blocked.`;
+
       items.push({
         id: `op-blocked-${allocation.id}`,
         type: 'vendor_blocked',
         severity: 'warning',
         title: 'Vendor blocked allocation',
-        description: `Vendor ${vendorName} marked allocation ${allocation.id} as blocked.`,
+        description,
         vendorId: allocation.assignedVendorId,
         vendorName,
         relatedOrderId: orderId,

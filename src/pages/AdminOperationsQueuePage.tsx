@@ -185,6 +185,7 @@ export function AdminOperationsQueuePage() {
                     <span>
                       <strong>{formatType(item.type)}</strong>
                       <small>{item.title}</small>
+                      <small>{item.description}</small>
                     </span>
                     <span>
                       <strong>{item.vendorName}</strong>
