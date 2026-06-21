@@ -60,6 +60,10 @@ import {
   getSettlementScheduleAutoDraftJobStatus,
   runSettlementScheduleAutoDraftJob,
 } from './settlement-schedule-job.service.js';
+import {
+  FinanceIntegrityScannerValidationError,
+  runFinanceIntegrityScannerDiagnostics,
+} from './finance-integrity-scanner.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -128,6 +132,15 @@ function readOptionalBodyString(body: unknown, key: string) {
 
   const value = body[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readOptionalBodyBoolean(body: unknown, key: string) {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const value = body[key];
+  return typeof value === 'boolean' ? value : null;
 }
 
 function readOptionalBodyNumber(body: unknown, key: string) {
@@ -309,6 +322,39 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return getFinanceEventRelinkPlan();
+    },
+  );
+
+  app.post(
+    '/admin/finance-integrity/scan',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendorAllocationId = readOptionalBodyString(request.body, 'vendorAllocationId');
+      const allocationEconomicTransferId = readOptionalBodyString(request.body, 'allocationEconomicTransferId');
+      const dryRun = readOptionalBodyBoolean(request.body, 'dryRun') ?? true;
+
+      try {
+        return await runFinanceIntegrityScannerDiagnostics({
+          vendorAllocationId,
+          allocationEconomicTransferId,
+          dryRun,
+        });
+      } catch (error) {
+        const statusCode = error instanceof FinanceIntegrityScannerValidationError ? error.statusCode : 400;
+        const message = error instanceof Error ? error.message : 'Finance integrity scan could not be completed.';
+        return reply.code(statusCode).send({
+          ok: false,
+          dryRun,
+          writesPerformed: false,
+          message,
+        });
+      }
     },
   );
 

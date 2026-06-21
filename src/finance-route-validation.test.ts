@@ -10,6 +10,7 @@ const getSettlementScheduleDryRunMock = vi.hoisted(() => vi.fn());
 const createSettlementScheduleDraftsMock = vi.hoisted(() => vi.fn());
 const getSettlementScheduleAutoDraftJobStatusMock = vi.hoisted(() => vi.fn());
 const runSettlementScheduleAutoDraftJobMock = vi.hoisted(() => vi.fn());
+const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -45,6 +46,18 @@ vi.mock('../backend/src/modules/finance/settlement-schedule.service.js', () => (
 vi.mock('../backend/src/modules/finance/settlement-schedule-job.service.js', () => ({
   getSettlementScheduleAutoDraftJobStatus: getSettlementScheduleAutoDraftJobStatusMock,
   runSettlementScheduleAutoDraftJob: runSettlementScheduleAutoDraftJobMock,
+}));
+
+vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', () => ({
+  FinanceIntegrityScannerValidationError: class FinanceIntegrityScannerValidationError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
+  runFinanceIntegrityScannerDiagnostics: runFinanceIntegrityScannerDiagnosticsMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -173,6 +186,7 @@ async function updateFinancialProfile(body: unknown) {
 describe('finance route validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runFinanceIntegrityScannerDiagnosticsMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
       commissionPercent: '10.00',
@@ -494,6 +508,148 @@ describe('finance route validation', () => {
       body: { message: 'Vendor context could not be resolved.' },
     });
     expect(getVendorDebtHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it('requires admin access for finance integrity scanner diagnostics', async () => {
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/scan')?.(
+      {
+        authUser: { role: 'vendor' },
+        body: {
+          vendorAllocationId: 'alloc-1',
+          dryRun: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(runFinanceIntegrityScannerDiagnosticsMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects unscoped finance integrity scanner diagnostics', async () => {
+    runFinanceIntegrityScannerDiagnosticsMock.mockRejectedValueOnce(
+      new Error('vendorAllocationId or allocationEconomicTransferId is required for scoped finance integrity scans.'),
+    );
+    const posts = createRegisteredPostRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/finance-integrity/scan')?.(
+      {
+        authUser: { role: 'admin' },
+        body: {
+          dryRun: true,
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        dryRun: true,
+        writesPerformed: false,
+        message: 'vendorAllocationId or allocationEconomicTransferId is required for scoped finance integrity scans.',
+      },
+    });
+    expect(runFinanceIntegrityScannerDiagnosticsMock).toHaveBeenCalledWith({
+      vendorAllocationId: null,
+      allocationEconomicTransferId: null,
+      dryRun: true,
+    });
+  });
+
+  it('runs scoped finance integrity scanner diagnostics in dry-run mode by default', async () => {
+    const response = {
+      ok: true,
+      dryRun: true,
+      writesPerformed: false,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+      },
+      findings: [
+        {
+          category: 'multiple_active_sale_ledgers',
+          severity: 'critical',
+          reason: 'Multiple active sale ledgers exist for allocation.',
+          dedupeKey: 'finance-integrity:multiple_active_sale_ledgers:allocation:alloc-1',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: null,
+          affectedLedgerIds: ['ledger-a', 'ledger-b'],
+          createdAlertId: null,
+        },
+      ],
+    };
+    runFinanceIntegrityScannerDiagnosticsMock.mockResolvedValueOnce(response);
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/scan')?.(
+      {
+        authUser: { role: 'admin' },
+        body: {
+          vendorAllocationId: ' alloc-1 ',
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toBe(response);
+    expect(runFinanceIntegrityScannerDiagnosticsMock).toHaveBeenCalledWith({
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: null,
+      dryRun: true,
+    });
+  });
+
+  it('passes non-dry-run scoped finance integrity scanner diagnostics', async () => {
+    const response = {
+      ok: true,
+      dryRun: false,
+      writesPerformed: true,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: 'transfer-1',
+      },
+      findings: [
+        {
+          category: 'transfer_failed',
+          severity: 'critical',
+          reason: 'Economic transfer failed for allocation.',
+          dedupeKey: 'finance-integrity:transfer_failed:transfer:transfer-1',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-1',
+          affectedLedgerIds: ['ledger-a'],
+          createdAlertId: 'alert-1',
+        },
+      ],
+    };
+    runFinanceIntegrityScannerDiagnosticsMock.mockResolvedValueOnce(response);
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/scan')?.(
+      {
+        authUser: { role: 'admin' },
+        body: {
+          allocationEconomicTransferId: 'transfer-1',
+          dryRun: false,
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toBe(response);
+    expect(runFinanceIntegrityScannerDiagnosticsMock).toHaveBeenCalledWith({
+      vendorAllocationId: null,
+      allocationEconomicTransferId: 'transfer-1',
+      dryRun: false,
+    });
   });
 
   it('runs settlement schedule dry-run through the admin route', async () => {

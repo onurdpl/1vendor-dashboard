@@ -13,6 +13,8 @@ import {
   detectNoActiveSaleLedger,
   detectTransferFailureStates,
   detectVoidedLedgerWithoutSuccessor,
+  FinanceIntegrityScannerValidationError,
+  runFinanceIntegrityScannerDiagnostics,
 } from '../backend/src/modules/finance/finance-integrity-scanner.service.js';
 
 type AlertRow = Record<string, unknown> & {
@@ -142,6 +144,19 @@ function buildDb(allocations: AllocationInput[] = []) {
           financeEntries: allocation.financeEntries ?? [],
           economicTransfers: allocation.economicTransfers ?? [],
         };
+      },
+    },
+    allocationEconomicTransfer: {
+      findUnique: async (args: { where: { id: string } }) => {
+        for (const allocation of allocations) {
+          const transfer = allocation.economicTransfers?.find((item) => item.id === args.where.id);
+          if (transfer) {
+            return {
+              vendorAllocationId: allocation.id,
+            };
+          }
+        }
+        return null;
       },
     },
   };
@@ -390,5 +405,130 @@ describe('finance integrity alert foundation', () => {
       severity: 'critical',
       affectedLedgerIds: ['fin-a-sale', 'fin-b-sale'],
     });
+  });
+
+  it('returns scanner dry-run findings without creating alerts', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        financeEntries: [
+          { id: 'fin-a-sale', vendorId: 'vendor-a', entryType: 'sale', voidedAt: null },
+          { id: 'fin-b-sale', vendorId: 'vendor-b', entryType: 'sale', voidedAt: null },
+        ],
+      },
+    ]);
+
+    const result = await runFinanceIntegrityScannerDiagnostics({
+      vendorAllocationId: 'alloc-1',
+      dryRun: true,
+      db: db as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      dryRun: true,
+      writesPerformed: false,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+      },
+      findings: [
+        expect.objectContaining({
+          category: 'multiple_active_sale_ledgers',
+          severity: 'critical',
+          reason: 'Multiple active sale ledgers exist for allocation.',
+          createdAlertId: null,
+          affectedLedgerIds: ['fin-a-sale', 'fin-b-sale'],
+        }),
+      ],
+    });
+    expect(db.__alerts).toHaveLength(0);
+  });
+
+  it('creates and dedupes scanner alerts in non-dry-run mode', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        economicTransfers: [
+          {
+            id: 'transfer-1',
+            status: 'FAILED',
+            failureReason: 'Target ledger create failed.',
+            fromFinanceLedgerEntryId: 'fin-a-sale',
+          },
+        ],
+      },
+    ]);
+
+    const first = await runFinanceIntegrityScannerDiagnostics({
+      vendorAllocationId: 'alloc-1',
+      dryRun: false,
+      db: db as never,
+    });
+    const second = await runFinanceIntegrityScannerDiagnostics({
+      vendorAllocationId: 'alloc-1',
+      dryRun: false,
+      db: db as never,
+    });
+
+    expect(first.findings).toEqual([
+      expect.objectContaining({
+        category: 'no_active_sale_ledger',
+        createdAlertId: 'alert-1',
+      }),
+      expect.objectContaining({
+        category: 'transfer_failed',
+        createdAlertId: 'alert-2',
+      }),
+    ]);
+    expect(second.findings.map((finding) => finding.createdAlertId)).toEqual(['alert-1', 'alert-2']);
+    expect(db.__alerts).toHaveLength(2);
+  });
+
+  it('resolves transfer-scoped scanner diagnostics to the owning allocation', async () => {
+    const db = buildDb([
+      {
+        id: 'alloc-1',
+        economicTransfers: [
+          {
+            id: 'transfer-1',
+            status: 'FAILED',
+            failureReason: 'Target ledger create failed.',
+            fromFinanceLedgerEntryId: 'fin-a-sale',
+          },
+          {
+            id: 'transfer-2',
+            status: 'FAILED',
+            failureReason: 'Second transfer failed.',
+            fromFinanceLedgerEntryId: 'fin-c-sale',
+          },
+        ],
+      },
+    ]);
+
+    const result = await runFinanceIntegrityScannerDiagnostics({
+      allocationEconomicTransferId: 'transfer-1',
+      dryRun: true,
+      db: db as never,
+    });
+
+    expect(result.scope).toEqual({
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: 'transfer-1',
+    });
+    expect(result.findings.filter((finding) => finding.category === 'transfer_failed')).toEqual([
+      expect.objectContaining({
+        allocationEconomicTransferId: 'transfer-1',
+        affectedLedgerIds: ['fin-a-sale'],
+      }),
+    ]);
+  });
+
+  it('rejects unscoped scanner diagnostics', async () => {
+    const db = buildDb();
+
+    await expect(runFinanceIntegrityScannerDiagnostics({ db: db as never })).rejects.toBeInstanceOf(
+      FinanceIntegrityScannerValidationError,
+    );
   });
 });
