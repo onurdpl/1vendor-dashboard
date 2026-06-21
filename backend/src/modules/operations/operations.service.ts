@@ -345,6 +345,9 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     withDashboardTiming('operations.summary.pending_reassignment_count', () =>
       prisma.vendorAllocation.count({
         where: {
+          allocationStatus: {
+            not: AllocationStatus.VENDOR_BLOCKED,
+          },
           OR: [
             { reassignmentRequired: true },
             { allocationStatus: AllocationStatus.PENDING_REASSIGNMENT },
@@ -581,27 +584,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const orderId = allocation.id;
     const shopifyOrderId = allocation.order.sourceShopifyOrderId;
 
-    if (allocation.reassignmentRequired || allocation.allocationStatus === 'PENDING_REASSIGNMENT') {
-      items.push({
-        id: `op-pending-${allocation.id}`,
-        type: 'pending_reassignment',
-        severity: 'critical',
-        title: 'Pending vendor reassignment',
-        description: `Allocation ${allocation.id} requires reassignment review.`,
-        vendorId: allocation.assignedVendorId,
-        vendorName,
-        relatedOrderId: orderId,
-        relatedShopifyOrderId: shopifyOrderId,
-        relatedReturnId: allocation.returnRecords[0]?.id ?? null,
-        relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
-        status: allocation.allocationStatus.toLowerCase(),
-        createdAt: allocation.updatedAt.toISOString(),
-        actionLabel: 'Review allocation',
-        destinationPath: `/admin/orders/${shopifyOrderId}`,
-      });
-    }
-
-    if (allocation.allocationStatus === 'VENDOR_BLOCKED') {
+    if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED) {
       items.push({
         id: `op-blocked-${allocation.id}`,
         type: 'vendor_blocked',
@@ -617,6 +600,24 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         status: allocation.allocationStatus.toLowerCase(),
         createdAt: allocation.updatedAt.toISOString(),
         actionLabel: 'Investigate blocker',
+        destinationPath: `/admin/orders/${shopifyOrderId}`,
+      });
+    } else if (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT) {
+      items.push({
+        id: `op-pending-${allocation.id}`,
+        type: 'pending_reassignment',
+        severity: 'critical',
+        title: 'Pending vendor reassignment',
+        description: `Allocation ${allocation.id} requires reassignment review.`,
+        vendorId: allocation.assignedVendorId,
+        vendorName,
+        relatedOrderId: orderId,
+        relatedShopifyOrderId: shopifyOrderId,
+        relatedReturnId: allocation.returnRecords[0]?.id ?? null,
+        relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
+        status: allocation.allocationStatus.toLowerCase(),
+        createdAt: allocation.updatedAt.toISOString(),
+        actionLabel: 'Review allocation',
         destinationPath: `/admin/orders/${shopifyOrderId}`,
       });
     }

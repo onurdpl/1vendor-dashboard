@@ -50,6 +50,55 @@ const {
   getAdminOperationsQueueSummary,
 } = await import('../backend/src/modules/operations/operations.service.js');
 
+function buildAllocation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'alloc-1',
+    assignedVendorId: 'vendor-1',
+    allocationStatus: 'ACTIVE',
+    fulfillmentStatus: 'Fulfilled',
+    shippingStatus: 'Delivered',
+    reassignmentRequired: false,
+    updatedAt: new Date('2026-05-13T10:00:00.000Z'),
+    assignedVendor: {
+      name: 'Vendor 1',
+    },
+    returnRecords: [],
+    refundRecords: [],
+    order: {
+      sourceShopifyOrderId: '7709129507153',
+    },
+    ...overrides,
+  };
+}
+
+function mockQueueSummaryCounts({
+  pendingReassignment = 0,
+  vendorBlocked = 0,
+  awaitingShipment = 0,
+  refundAttention = 0,
+  signalGroups = [],
+  automationActions = 0,
+  automationAutoSafe = 0,
+}: {
+  pendingReassignment?: number;
+  vendorBlocked?: number;
+  awaitingShipment?: number;
+  refundAttention?: number;
+  signalGroups?: unknown[];
+  automationActions?: number;
+  automationAutoSafe?: number;
+} = {}) {
+  prismaMock.vendorAllocation.count
+    .mockResolvedValueOnce(pendingReassignment)
+    .mockResolvedValueOnce(vendorBlocked)
+    .mockResolvedValueOnce(awaitingShipment);
+  prismaMock.returnRecord.count.mockResolvedValueOnce(refundAttention);
+  prismaMock.operationalSignal.groupBy.mockResolvedValueOnce(signalGroups);
+  prismaMock.automationAction.count
+    .mockResolvedValueOnce(automationActions)
+    .mockResolvedValueOnce(automationAutoSafe);
+}
+
 describe('admin operations summary counts', () => {
   beforeEach(() => {
     prismaMock.vendorAllocation.findMany.mockReset();
@@ -152,6 +201,92 @@ describe('admin operations summary counts', () => {
     });
     expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
     expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
+  });
+
+  it('emits one vendor_blocked item for a blocked allocation that still requires reassignment', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-blocked',
+        allocationStatus: 'VENDOR_BLOCKED',
+        reassignmentRequired: true,
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-blocked',
+        type: 'vendor_blocked',
+      }),
+    ]);
+    expect(dashboard.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'op-pending-alloc-blocked',
+          type: 'pending_reassignment',
+        }),
+      ]),
+    );
+  });
+
+  it('excludes vendor-blocked allocations from pendingReassignment summary count', async () => {
+    mockQueueSummaryCounts({ pendingReassignment: 0, vendorBlocked: 1 });
+
+    const summary = await getAdminOperationsQueueSummary();
+
+    expect(summary.pendingReassignment).toBe(0);
+    expect(summary.vendorBlocked).toBe(1);
+    expect(prismaMock.vendorAllocation.count).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          allocationStatus: {
+            not: 'VENDOR_BLOCKED',
+          },
+        }),
+      }),
+    );
+  });
+
+  it('emits one pending_reassignment item for a non-blocked pending reassignment allocation', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-pending',
+        allocationStatus: 'PENDING_REASSIGNMENT',
+      }),
+    ]);
+    mockQueueSummaryCounts({ pendingReassignment: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-pending-alloc-pending',
+        type: 'pending_reassignment',
+      }),
+    ]);
+  });
+
+  it('emits one pending_reassignment item for a non-blocked allocation with reassignmentRequired=true', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-required',
+        allocationStatus: 'ACTIVE',
+        reassignmentRequired: true,
+      }),
+    ]);
+    mockQueueSummaryCounts({ pendingReassignment: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-pending-alloc-required',
+        type: 'pending_reassignment',
+      }),
+    ]);
   });
 
   it('computes operations summary counts before candidate slicing', async () => {
