@@ -1,5 +1,6 @@
 import { SettlementApprovalStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 
 type SnapshotCompletenessItem = {
   present: boolean;
@@ -49,6 +50,9 @@ type GuardLine = {
     shippingCostSourceSnapshot: string | null;
     shippingCostProviderSnapshot: string | null;
     shippingCostIdSnapshot: string | null;
+    voidedAt?: Date | null;
+    voidReason?: string | null;
+    supersededByLedgerId?: string | null;
   } | null;
 };
 
@@ -245,6 +249,9 @@ export async function validateSettlementApprovalExecutionSnapshots(
               shippingCostSourceSnapshot: true,
               shippingCostProviderSnapshot: true,
               shippingCostIdSnapshot: true,
+              voidedAt: true,
+              voidReason: true,
+              supersededByLedgerId: true,
             },
           },
         },
@@ -289,6 +296,12 @@ export async function validateSettlementApprovalExecutionSnapshots(
   }
 
   for (const line of lines) {
+    if (isLedgerVoided(line.financeLedgerEntry)) {
+      blockers.push(
+        `SettlementApprovalLine ${line.id} references a voided or superseded ledger row and cannot be used for financial execution.`,
+      );
+    }
+
     const lineAmountsPresent = [
       line.amountMinor,
       line.commissionMinor,

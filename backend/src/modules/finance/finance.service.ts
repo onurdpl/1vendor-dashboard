@@ -45,6 +45,11 @@ import {
   getVendorBalanceSummary,
 } from './vendor-balance.service.js';
 import { mapLinkedSettlementRefundAdjustments } from './settlement-refund-adjustment.service.js';
+import {
+  activeFinanceLedgerWhere,
+  assertLedgerActiveForMoneyMovement,
+  isLedgerVoided,
+} from './active-ledger-policy.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -76,6 +81,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'refund_offset_required_before_payout'
   | 'payout_amount_changed_since_batch_creation'
   | 'approved_return_hold_active'
+  | 'ledger_row_voided'
   | 'ledger_row_paid'
   | 'ledger_row_no_longer_eligible'
   | 'ledger_row_missing';
@@ -1877,9 +1883,16 @@ export async function upsertShipmentShippingCost(input: ShippingCostInputDto): P
         select: {
           vendorAllocationId: true,
           vendorId: true,
+          voidedAt: true,
+          voidReason: true,
+          supersededByLedgerId: true,
         },
       })
     : null;
+  assertLedgerActiveForMoneyMovement(
+    ledgerEntry,
+    'Finance ledger row has been voided or superseded and cannot receive shipping cost.',
+  );
   if (ledgerEntry && ledgerEntry.vendorId !== input.vendorId) {
     throw new Error('Finance ledger row does not belong to the selected vendor.');
   }
@@ -1996,6 +2009,7 @@ export async function preparePayoutBatch(
       tx.financeLedgerEntry.findMany({
         where: {
           vendorId: input.vendorId,
+          ...activeFinanceLedgerWhere,
           entryType: {
             in: ['sale', 'refund'],
           },
@@ -2006,6 +2020,7 @@ export async function preparePayoutBatch(
               fulfillment: true,
               refundRecords: true,
               financeEntries: {
+                where: activeFinanceLedgerWhere,
                 select: {
                   id: true,
                   entryType: true,
@@ -2013,6 +2028,7 @@ export async function preparePayoutBatch(
                   settlementStatus: true,
                   commissionPercentSnapshot: true,
                   commissionVatPercentSnapshot: true,
+                  voidedAt: true,
                   payoutBatchLines: {
                     where: {
                       payoutBatch: {
@@ -2337,6 +2353,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
                     },
                   },
                   financeEntries: {
+                    where: activeFinanceLedgerWhere,
                     select: {
                       id: true,
                       entryType: true,
@@ -2453,6 +2470,20 @@ async function validatePayoutBatchBeforeTransitionWithClient(
     const ledgerEntryId = ledgerEntry.id;
     const type = normalizeType(transitionEntry.entryType);
     const payoutStatus = mapStatus(transitionEntry.payoutStatus ?? '');
+
+    if (isLedgerVoided(ledgerEntry)) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'ledger_row_voided',
+        reason: 'Ledger row has been voided or superseded and cannot move through payout.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          voidedAt: ledgerEntry.voidedAt?.toISOString?.() ?? String(ledgerEntry.voidedAt),
+          voidReason: ledgerEntry.voidReason,
+          supersededByLedgerId: ledgerEntry.supersededByLedgerId,
+        },
+      }));
+    }
 
     if (payoutStatus === 'paid') {
       blockers.push(buildPayoutBatchTransitionBlocker({

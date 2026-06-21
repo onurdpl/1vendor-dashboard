@@ -27,6 +27,9 @@ describe('shipping cost foundation', () => {
     prismaMock.financeLedgerEntry.findUnique.mockResolvedValue({
       vendorAllocationId: 'alloc-1',
       vendorId: 'sporjinal',
+      voidedAt: null,
+      voidReason: null,
+      supersededByLedgerId: null,
     });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue({
       id: 'alloc-1',
@@ -89,6 +92,9 @@ describe('shipping cost foundation', () => {
     prismaMock.financeLedgerEntry.findUnique.mockResolvedValueOnce({
       vendorAllocationId: 'alloc-1',
       vendorId: 'other-vendor',
+      voidedAt: null,
+      voidReason: null,
+      supersededByLedgerId: null,
     });
 
     await expect(
@@ -119,6 +125,26 @@ describe('shipping cost foundation', () => {
         shippingCost: 72,
       }),
     ).rejects.toThrow('Allocation could not be found for the selected vendor.');
+    expect(prismaMock.shipmentShippingCost.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects a shipping cost when the ledger row has been voided', async () => {
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValueOnce({
+      vendorAllocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+      voidReason: 'economic transfer superseded source ledger',
+      supersededByLedgerId: 'replacement-ledger-1',
+    });
+
+    await expect(
+      upsertShipmentShippingCost({
+        vendorId: 'sporjinal',
+        financeLedgerEntryId: 'fin-sporjinal-sale-voided',
+        providerName: 'Cargo Co',
+        shippingCost: 72,
+      }),
+    ).rejects.toThrow('Finance ledger row has been voided or superseded and cannot receive shipping cost.');
     expect(prismaMock.shipmentShippingCost.upsert).not.toHaveBeenCalled();
   });
 });

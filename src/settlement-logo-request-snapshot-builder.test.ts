@@ -59,6 +59,7 @@ function buildLine(input: {
   commissionVatMinor?: number;
   vatRate?: string | null;
   ledgerCreatedAt?: Date | null;
+  ledgerVoidedAt?: Date | null;
   sourceSnapshotOverrides?: Record<string, unknown>;
 }) {
   const lineType = input.lineType ?? 'SALE';
@@ -88,11 +89,17 @@ function buildLine(input: {
     commissionVatMinor: input.commissionVatMinor ?? (lineType === 'SALE' ? 2000 : 0),
     payableImpactMinor: lineType === 'SALE' ? 88000 : -10000,
     sourceSnapshotJson,
-    financeLedgerEntry: input.ledgerCreatedAt === undefined
+    financeLedgerEntry: (
+      (input.ledgerCreatedAt === undefined || input.ledgerCreatedAt === null) &&
+      input.ledgerVoidedAt === undefined
+    )
       ? null
-      : input.ledgerCreatedAt
-        ? { createdAt: input.ledgerCreatedAt }
-        : null,
+      : {
+          createdAt: input.ledgerCreatedAt ?? new Date('2026-06-01T10:00:00.000Z'),
+          voidedAt: input.ledgerVoidedAt ?? null,
+          voidReason: input.ledgerVoidedAt ? 'economic transfer superseded source ledger' : null,
+          supersededByLedgerId: input.ledgerVoidedAt ? `replacement-ledger-${input.id}` : null,
+        },
   };
 }
 
@@ -228,6 +235,9 @@ describe('immutable settlement Logo request snapshot builder', () => {
             financeLedgerEntry: {
               select: {
                 createdAt: true,
+                voidedAt: true,
+                voidReason: true,
+                supersededByLedgerId: true,
               },
             },
           },
@@ -241,6 +251,32 @@ describe('immutable settlement Logo request snapshot builder', () => {
     expect(prismaMock.settlementCommissionInvoice.create).not.toHaveBeenCalled();
     const logoPayload = result.requestSnapshotJson?.logoPayload as Record<string, unknown>;
     expect(String(logoPayload.description)).not.toContain('SettlementApproval approval-1');
+  });
+
+  it('blocks request snapshot creation when an approval line references a voided ledger', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({
+      lines: [
+        buildLine({
+          id: '1001',
+          ledgerCreatedAt: new Date('2026-06-01T10:00:00.000Z'),
+          ledgerVoidedAt: new Date('2026-06-21T10:00:00.000Z'),
+        }),
+      ],
+    }));
+
+    const result = await buildSettlementLogoCommissionInvoiceRequestSnapshot(
+      'approval-1',
+      '2026-06-15',
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'BLOCKED',
+      blockers: [
+        expect.stringContaining('references a voided or superseded ledger row'),
+      ],
+    });
+    expect(result.requestSnapshotJson).toBeNull();
   });
 
   it('omits the visible period line when no reliable period or line date exists', async () => {

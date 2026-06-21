@@ -33,6 +33,7 @@ import {
   previewPendingRefundAdjustmentApplication,
   type PendingRefundAdjustmentApplicationPreview,
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
+import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -120,6 +121,9 @@ type SettlementApprovalLedgerRow = {
   payableAt: Date | null;
   settledAt: Date | null;
   settlementHoldReason: string | null;
+  voidedAt?: Date | null;
+  voidReason?: string | null;
+  supersededByLedgerId?: string | null;
   createdAt: Date;
   vendorAllocation: {
     id: string;
@@ -896,6 +900,19 @@ function validateApprovalLineAgainstCurrentLedger(
     return reasons;
   }
 
+  if (isLedgerVoided(row)) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'ledger_voided',
+      'Ledger has been voided or superseded and cannot be approved.',
+      {
+        voidedAt: toIso(row.voidedAt ?? null),
+        voidReason: row.voidReason,
+        supersededByLedgerId: row.supersededByLedgerId,
+      },
+    ));
+  }
+
   if (row.vendorId !== approval.vendorId) {
     reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Ledger row vendor changed since draft creation'));
   }
@@ -1052,6 +1069,9 @@ async function loadCurrentLedgerRowForApprovalLine(
       payableAt: true,
       settledAt: true,
       settlementHoldReason: true,
+      voidedAt: true,
+      voidReason: true,
+      supersededByLedgerId: true,
       createdAt: true,
       vendorAllocation: {
         select: {
@@ -1084,6 +1104,7 @@ async function loadCurrentLedgerRowForApprovalLine(
           },
           financeEntries: {
             where: {
+              ...activeFinanceLedgerWhere,
               entryType: 'sale',
             },
             select: {
@@ -1522,6 +1543,7 @@ async function buildApprovalPreview(
   const rows = await tx.financeLedgerEntry.findMany({
     where: {
       vendorId: input.vendorId,
+      ...activeFinanceLedgerWhere,
       entryType: {
         in: ['sale', 'refund'],
       },
@@ -1583,6 +1605,7 @@ async function buildApprovalPreview(
           },
           financeEntries: {
             where: {
+              ...activeFinanceLedgerWhere,
               entryType: 'sale',
             },
             select: {
@@ -1669,6 +1692,7 @@ async function buildApprovalPreview(
         entryType: {
           in: ['sale', 'refund'],
         },
+        ...activeFinanceLedgerWhere,
         vendorAllocation: {
           OR: [
             {
@@ -1740,6 +1764,7 @@ async function buildApprovalPreview(
             },
             financeEntries: {
               where: {
+                ...activeFinanceLedgerWhere,
                 entryType: 'sale',
               },
               select: {

@@ -18,6 +18,7 @@ import {
   type SettlementBillingSnapshot,
 } from './settlement-billing-snapshot.service.js';
 import type { SettlementExecutionSnapshotGuardDto } from './settlement-execution-snapshot-guard.service.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 
 export const SETTLEMENT_LOGO_REQUEST_PAYLOAD_BUILDER_VERSION = 'settlement-logo-request-v1';
 
@@ -36,7 +37,7 @@ const SOURCE_ORDER_ID_SAMPLE_LIMIT = 20;
 
 type RequiredBillingSnapshotField = (typeof REQUIRED_BILLING_SNAPSHOT_FIELDS)[number];
 type SettlementApprovalLineForRequestSnapshot = SettlementApprovalLine & {
-  financeLedgerEntry?: Pick<FinanceLedgerEntry, 'createdAt'> | null;
+  financeLedgerEntry?: Pick<FinanceLedgerEntry, 'createdAt' | 'voidedAt' | 'voidReason' | 'supersededByLedgerId'> | null;
 };
 type SettlementApprovalForRequestSnapshot = SettlementApproval & {
   vendor?: Pick<Vendor, 'name'> | null;
@@ -336,6 +337,12 @@ function buildStrictExecutionSnapshotGuard(
   completeness.executionLineCount = executionLines.length;
 
   for (const line of approval.lines) {
+    if (isLedgerVoided(line.financeLedgerEntry)) {
+      blockers.push(
+        `SettlementApprovalLine ${line.id} references a voided or superseded ledger row and cannot be used for financial execution.`,
+      );
+    }
+
     const lineAmountsPresent = [
       line.amountMinor,
       line.commissionMinor,
@@ -537,6 +544,9 @@ export async function buildSettlementLogoCommissionInvoiceRequestSnapshot(
           financeLedgerEntry: {
             select: {
               createdAt: true,
+              voidedAt: true,
+              voidReason: true,
+              supersededByLedgerId: true,
             },
           },
         },

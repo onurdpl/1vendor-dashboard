@@ -48,6 +48,7 @@ function buildEntry(input: {
   relatedSaleActivePayoutBatch?: boolean;
   activeSettlementApproval?: boolean;
   approvedRefundOffsetRepresented?: boolean;
+  voidedAt?: Date | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
@@ -83,6 +84,9 @@ function buildEntry(input: {
     payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: input.settlementHoldReason ?? null,
+    voidedAt: input.voidedAt ?? null,
+    voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
+    supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
     vendorAllocation: {
       allocationStatus: 'ACTIVE',
@@ -271,6 +275,17 @@ describe('payout batch preparation', () => {
       netAmount: '810.00',
       lineCount: 2,
     });
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          vendorId: 'demo-vendor-a',
+          voidedAt: null,
+          entryType: {
+            in: ['sale', 'refund'],
+          },
+        }),
+      }),
+    );
   });
 
   it('prevents duplicate active batch inclusion', async () => {
@@ -924,6 +939,29 @@ describe('payout batch preparation', () => {
         code: 'ledger_row_missing',
         financeLedgerEntryId: 'missing-ledger',
       })],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when a ledger row has been voided', async () => {
+    const sale = buildEntry({
+      id: 'sale-voided-after-batch',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [
+        expect.objectContaining({
+          code: 'ledger_row_voided',
+          financeLedgerEntryId: 'sale-voided-after-batch',
+        }),
+      ],
     });
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });

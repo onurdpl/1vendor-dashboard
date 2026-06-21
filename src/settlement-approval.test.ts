@@ -88,6 +88,7 @@ function buildLedgerRow(input: {
   relatedSaleActivePayoutBatch?: boolean;
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
+  voidedAt?: Date | null;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -127,6 +128,9 @@ function buildLedgerRow(input: {
     payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
+    voidedAt: input.voidedAt ?? null,
+    voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
+    supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt,
     vendorAllocation: {
       id: `alloc-${input.id}`,
@@ -366,6 +370,26 @@ describe('settlement approval foundation', () => {
     ]);
     expect(prismaMock.settlementApproval.create).not.toHaveBeenCalled();
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('filters settlement preview candidates to active finance ledger rows', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({ id: 'sale-active', entryType: 'sale', amount: 1000 }),
+    ]);
+
+    await previewApproval('vendor-a');
+
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          vendorId: 'vendor-a',
+          voidedAt: null,
+          entryType: {
+            in: ['sale', 'refund'],
+          },
+        }),
+      }),
+    );
   });
 
   it('keeps payable sales eligible when no approved open return exists', async () => {
@@ -1601,6 +1625,32 @@ describe('settlement approval foundation', () => {
     );
     expect(approval.status).toBe('approved');
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when the ledger row has been voided', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      name: 'SettlementApprovalRevalidationError',
+      reasons: [
+        expect.objectContaining({
+          financeLedgerEntryId: 'sale-1',
+          code: 'ledger_voided',
+          reason: 'Ledger has been voided or superseded and cannot be approved.',
+        }),
+      ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
   });
 
   it('keeps draft status and returns structured reasons when a refund arrives after draft creation', async () => {
