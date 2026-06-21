@@ -5,7 +5,7 @@ import { ApiError } from '../lib/api/errors';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getMockFinanceDashboard, getMockVendorDebtHistory } from '../lib/api/mockFinance';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
-import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from '../lib/api/mockOrders';
+import { getMockOrder, getShopifyOrderBreakdown, listMockOrders, rejectMockOrder } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
 import {
   getMockAdminOperationsAttention,
@@ -50,7 +50,7 @@ import type {
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
 } from '../lib/api/contracts';
-import type { SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
+import type { RejectOrderPayload, SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
@@ -851,6 +851,13 @@ export const runtimeServices = {
         shipmentCreatedAt: submittedAt,
         shipmentUpdatedAt: submittedAt,
       };
+    },
+    async reject(orderId: string, payload: RejectOrderPayload, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.rejectOrder(orderId, payload, { vendorId });
+      }
+
+      return rejectMockOrder(orderId, vendorId, payload);
     },
     async createShipmentExecution(allocationId: string, vendorId = getCurrentVendorId(), customerOverrides?: ShipmentCustomerOverrides) {
       if (runtimeConfig.apiMode === 'real') {

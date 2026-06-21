@@ -1,4 +1,5 @@
 import { prisma } from '../../db/prisma.js';
+import { AllocationStatus, CancellationReason, ShipmentExecutionStatus } from '@prisma/client';
 import type {
   AdminOrderBreakdownDto,
   OrderDetailDto,
@@ -46,6 +47,103 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+export class OrderRejectValidationError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.name = 'OrderRejectValidationError';
+    this.statusCode = statusCode;
+  }
+}
+
+export type RejectVendorOrderInput = {
+  reason?: string | null;
+  note?: string | null;
+  actorUserId?: string | null;
+};
+
+const BLOCKED_ALLOCATION_STATUSES = new Set<AllocationStatus>([
+  AllocationStatus.VENDOR_BLOCKED,
+  AllocationStatus.PENDING_REASSIGNMENT,
+  AllocationStatus.REASSIGNED,
+  AllocationStatus.FULFILLED,
+]);
+
+const SHIPPED_STATUS_VALUES = new Set(['shipped', 'delivered', 'in transit', 'in_transit', 'label created', 'label_created', 'partially_shipped']);
+const FULFILLED_STATUS_VALUES = new Set(['fulfilled', 'partially fulfilled', 'partially_fulfilled']);
+
+function normalizeRejectReason(reason: string | null | undefined): CancellationReason {
+  const normalized = reason?.trim().toUpperCase();
+  if (!normalized || !Object.values(CancellationReason).includes(normalized as CancellationReason)) {
+    throw new OrderRejectValidationError('Reject reason is required.');
+  }
+  return normalized as CancellationReason;
+}
+
+function normalizeRejectNote(note: string | null | undefined) {
+  const normalized = note?.trim() ?? '';
+  if (!normalized) {
+    throw new OrderRejectValidationError('Reject note is required.');
+  }
+  if (normalized.length > 500) {
+    throw new OrderRejectValidationError('Reject note must be 500 characters or fewer.');
+  }
+  return normalized;
+}
+
+function normalizeStatus(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? '';
+}
+
+function hasShipmentEvidence(allocation: {
+  trackingNumber: string | null;
+  carrier: string | null;
+  fulfillmentStatus: string;
+  shippingStatus: string;
+  fulfillment: {
+    fulfilledAt: Date | null;
+    shipmentCreatedAt: Date | null;
+    shipmentUpdatedAt: Date | null;
+    shopifyFulfillmentId: string | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+  } | null;
+  shipmentExecutions: Array<{
+    providerShipmentId: string | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+    shipmentStatus: ShipmentExecutionStatus;
+  }>;
+}) {
+  if (FULFILLED_STATUS_VALUES.has(normalizeStatus(allocation.fulfillmentStatus))) {
+    return true;
+  }
+  if (SHIPPED_STATUS_VALUES.has(normalizeStatus(allocation.shippingStatus))) {
+    return true;
+  }
+  if (allocation.trackingNumber?.trim() || allocation.carrier?.trim()) {
+    return true;
+  }
+  if (
+    allocation.fulfillment?.fulfilledAt ||
+    allocation.fulfillment?.shipmentCreatedAt ||
+    allocation.fulfillment?.shipmentUpdatedAt ||
+    allocation.fulfillment?.shopifyFulfillmentId ||
+    allocation.fulfillment?.trackingNumber?.trim() ||
+    allocation.fulfillment?.trackingUrl?.trim()
+  ) {
+    return true;
+  }
+
+  return allocation.shipmentExecutions.some((execution) => {
+    if (execution.providerShipmentId?.trim() || execution.trackingNumber?.trim() || execution.trackingUrl?.trim()) {
+      return true;
+    }
+    return execution.shipmentStatus !== ShipmentExecutionStatus.FAILED && execution.shipmentStatus !== ShipmentExecutionStatus.CANCELLED;
+  });
 }
 
 export type ShopifyLineItemImageLookupService = {
@@ -1234,6 +1332,98 @@ export async function listVendorOrders(
       updatedAt: allocation.updatedAt.toISOString(),
     };
   }));
+}
+
+export async function rejectVendorOrderAllocation(
+  vendorId: string,
+  orderId: string,
+  input: RejectVendorOrderInput,
+): Promise<OrderDetailDto> {
+  const reason = normalizeRejectReason(input.reason);
+  const note = normalizeRejectNote(input.note);
+
+  await prisma.$transaction(async (transaction) => {
+    const allocation = await transaction.vendorAllocation.findFirst({
+      where: {
+        id: orderId,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        allocationStatus: true,
+        fulfillmentStatus: true,
+        shippingStatus: true,
+        trackingNumber: true,
+        carrier: true,
+        fulfillment: {
+          select: {
+            fulfilledAt: true,
+            shipmentCreatedAt: true,
+            shipmentUpdatedAt: true,
+            shopifyFulfillmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+          },
+        },
+        shipmentExecutions: {
+          select: {
+            providerShipmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+            shipmentStatus: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (!allocation || allocation.assignedVendorId !== vendorId) {
+      throw new OrderRejectValidationError('Order not found.', 404);
+    }
+
+    if (allocation.allocationStatus !== AllocationStatus.ACTIVE) {
+      const message = BLOCKED_ALLOCATION_STATUSES.has(allocation.allocationStatus)
+        ? 'Order allocation cannot be rejected in its current status.'
+        : 'Only active order allocations can be rejected.';
+      throw new OrderRejectValidationError(message, 409);
+    }
+
+    if (hasShipmentEvidence(allocation)) {
+      throw new OrderRejectValidationError('Order cannot be rejected after fulfillment, shipment, carrier, or tracking evidence exists.', 409);
+    }
+
+    await transaction.vendorAllocation.update({
+      where: {
+        id: allocation.id,
+      },
+      data: {
+        allocationStatus: AllocationStatus.VENDOR_BLOCKED,
+        reassignmentRequired: true,
+        cancellationReason: reason,
+      },
+    });
+
+    await transaction.allocationAssignmentHistory.create({
+      data: {
+        vendorAllocationId: allocation.id,
+        action: 'vendor_blocked',
+        fromVendorId: allocation.assignedVendorId,
+        toVendorId: allocation.assignedVendorId,
+        reason: `${reason}: ${note}`,
+        actorUserId: input.actorUserId ?? null,
+      },
+    });
+  });
+
+  const updatedOrder = await getVendorOrderById(vendorId, orderId);
+  if (!updatedOrder) {
+    throw new OrderRejectValidationError('Order not found after reject update.', 404);
+  }
+
+  return updatedOrder;
 }
 
 export async function getVendorOrderById(

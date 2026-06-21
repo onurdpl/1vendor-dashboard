@@ -9,6 +9,7 @@ import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib
 
 const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
+const rejectOrderMock = vi.fn<(orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 const createShipmentExecutionMock = vi.fn<(allocationId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 const retryFailedShipmentExecutionMock = vi.fn<(shipmentExecutionId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 
@@ -18,6 +19,8 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     listOrders: (options?: { vendorId?: string | null }) => listOrdersMock(options),
     getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
+    rejectOrder: (orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) =>
+      rejectOrderMock(orderId, payload, options),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) =>
       createShipmentExecutionMock(allocationId, options),
     retryFailedShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
@@ -252,6 +255,7 @@ describe('OrdersPage control center', () => {
     });
     listOrdersMock.mockReset();
     getOrderMock.mockReset();
+    rejectOrderMock.mockReset();
     createShipmentExecutionMock.mockReset();
     retryFailedShipmentExecutionMock.mockReset();
   });
@@ -269,11 +273,10 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByRole('searchbox')).toHaveLength(1);
     const metricsStrip = screen.getByLabelText('Orders operational metrics');
     expect(metricsStrip).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Total orders')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Awaiting shipment')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Tracking missing')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Fulfilled')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Tracking visible')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Total Orders')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Today Orders')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Awaiting Shipment')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Blocked Orders')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
@@ -745,6 +748,76 @@ describe('OrdersPage control center', () => {
     expect(await screen.findByText('Shipment label created and opened.')).toBeInTheDocument();
 
     openMock.mockRestore();
+  });
+
+  it('lets a vendor reject an eligible active order from the detail rail', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    const awaitingShipmentOrder: OrderDetail = {
+      ...orderDetail,
+      status: 'Pending',
+      allocationStatus: 'active',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      fulfillmentActionState: 'awaiting_shipment',
+      fulfillmentActionAvailable: true,
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+      shipmentExecution: undefined,
+      lineItems: orderDetail.lineItems.map((item) => ({
+        ...item,
+        allocationStatus: 'active',
+        reassignmentRequired: false,
+        fulfillmentStatus: 'Pending',
+        shippingStatus: 'Awaiting Shipment',
+        trackingNumber: undefined,
+        trackingUrl: undefined,
+        carrier: undefined,
+      })),
+    };
+    const blockedOrder: OrderDetail = {
+      ...awaitingShipmentOrder,
+      status: 'On Hold',
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'damaged_inventory',
+      fulfillmentActionAvailable: false,
+    };
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
+    getOrderMock.mockResolvedValueOnce(awaitingShipmentOrder).mockResolvedValue(blockedOrder);
+    rejectOrderMock.mockResolvedValue(blockedOrder);
+
+    renderOrdersPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Reject order' }));
+    const dialog = screen.getByRole('dialog', { name: 'Reject order' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('Reason'), 'DAMAGED_INVENTORY');
+    await userEvent.type(within(dialog).getByLabelText('Note'), 'Damaged box on shelf');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reject order' }));
+
+    await waitFor(() =>
+      expect(rejectOrderMock).toHaveBeenCalledWith(
+        'ORD-A-1002',
+        {
+          reason: 'DAMAGED_INVENTORY',
+          note: 'Damaged box on shelf',
+        },
+        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
+      ),
+    );
+    expect(await screen.findByText('Order rejected and sent to admin review.')).toBeInTheDocument();
   });
 
   it('clears shipment label success feedback when selecting another order', async () => {

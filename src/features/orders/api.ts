@@ -14,6 +14,7 @@ export {
   probeTryOtoReturnLink,
   refreshShipmentProviderData,
   refreshShipmentExecutionStatus,
+  rejectOrder,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,

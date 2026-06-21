@@ -62,6 +62,13 @@ export type UpdateNavlungoShipmentPayload = {
   barcodeFormat?: string | null;
 };
 
+export type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
+
+export type RejectOrderPayload = {
+  reason: RejectOrderReason;
+  note: string;
+};
+
 type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;
@@ -531,6 +538,21 @@ export async function submitFulfillmentTracking(
     `/fulfillments/${allocationId}/tracking`,
     payload,
   );
+}
+
+export async function rejectOrder(
+  orderId: string,
+  payload: RejectOrderPayload,
+  options: { vendorId?: string | null } = {},
+) {
+  const dto = await apiClient.post<OrderDetailDto>(
+    `/orders/${encodeURIComponent(orderId)}/reject`,
+    payload,
+    {
+      vendorId: options.vendorId,
+    },
+  );
+  return mapOrderDetail(dto);
 }
 
 export async function createShipmentExecution(

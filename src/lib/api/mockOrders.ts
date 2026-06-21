@@ -18,6 +18,7 @@ import type {
   AssignmentHistoryEntry,
   FulfillmentActionState,
 } from './contracts';
+import { ApiError } from './errors';
 import { getMockReturn, listMockReturns } from './mockReturns';
 
 type ShopifySourceOrder = ShopifyOrderInput & {
@@ -32,6 +33,11 @@ type ShopifySourceOrder = ShopifyOrderInput & {
 
 type VendorOrder = OrderDetail & {
   vendorId: VendorId;
+};
+
+type RejectMockOrderInput = {
+  reason: 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
+  note: string;
 };
 
 type AllocationFulfillmentState = {
@@ -483,6 +489,70 @@ export function getMockOrder(orderId: string, vendorId?: VendorId): OrderDetail 
   const currentVendorId = resolveVendorId(vendorId);
 
   return orders.find((order) => order.assignedVendorId === currentVendorId && order.id === orderId) ?? null;
+}
+
+function toMockCancellationReason(reason: RejectMockOrderInput['reason']): AllocationBlockReason {
+  return reason.toLowerCase() as AllocationBlockReason;
+}
+
+export function rejectMockOrder(orderId: string, vendorId: VendorId, input: RejectMockOrderInput): OrderDetail {
+  const order = getMockOrder(orderId, vendorId);
+  if (!order) {
+    throw new ApiError('Order not found.', 'server', { status: 404 });
+  }
+  if (order.allocationStatus !== 'active') {
+    throw new ApiError('Order allocation cannot be rejected in its current status.', 'server', { status: 409 });
+  }
+  if (
+    order.fulfillmentStatus === 'Fulfilled' ||
+    order.shippingStatus !== 'Awaiting Shipment' ||
+    Boolean(order.trackingNumber || order.carrier)
+  ) {
+    throw new ApiError('Order cannot be rejected after fulfillment, shipment, carrier, or tracking evidence exists.', 'server', { status: 409 });
+  }
+  const note = input.note.trim();
+  if (!note) {
+    throw new ApiError('Reject note is required.', 'server', { status: 400 });
+  }
+  if (note.length > 500) {
+    throw new ApiError('Reject note must be 500 characters or fewer.', 'server', { status: 400 });
+  }
+
+  const cancellationReason = toMockCancellationReason(input.reason);
+  order.status = 'On Hold';
+  order.allocationStatus = 'vendor_blocked';
+  order.reassignmentRequired = true;
+  order.cancellationReason = cancellationReason;
+  order.assignmentBlockedAt = new Date().toISOString();
+  order.fulfillmentActionAvailable = false;
+  order.lineItems?.forEach((item) => {
+    item.allocationStatus = 'vendor_blocked';
+    item.reassignmentRequired = true;
+    item.cancellationReason = cancellationReason;
+    item.assignmentBlockedAt = order.assignmentBlockedAt;
+    item.fulfillmentActionAvailable = false;
+  });
+  order.items?.forEach((item) => {
+    item.allocationStatus = 'vendor_blocked';
+    item.reassignmentRequired = true;
+    item.cancellationReason = cancellationReason;
+    item.assignmentBlockedAt = order.assignmentBlockedAt;
+    item.fulfillmentActionAvailable = false;
+  });
+  order.assignmentHistory = [
+    ...(order.assignmentHistory ?? []),
+    {
+      action: 'vendor_blocked',
+      fromVendorId: order.assignedVendorId,
+      toVendorId: order.assignedVendorId,
+      reason: `${input.reason}: ${note}`,
+      actorName: 'Vendor User',
+      actorRole: 'vendor',
+      createdAt: order.assignmentBlockedAt,
+    },
+  ];
+
+  return order;
 }
 
 export function canVendorReportFulfillmentIssue(orderId: string, vendorId: VendorId): boolean {

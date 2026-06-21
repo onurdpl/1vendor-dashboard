@@ -1,6 +1,6 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
-import type { UpdateNavlungoShipmentPayload } from '../../services/real/orders';
+import type { RejectOrderPayload, UpdateNavlungoShipmentPayload } from '../../services/real/orders';
 
 export async function listOrders(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined, { signal: options.signal });
@@ -28,6 +28,14 @@ export async function submitFulfillmentTracking(
   },
 ) {
   return runtimeServices.orders.submitFulfillmentTracking(allocationId, payload);
+}
+
+export async function rejectOrder(
+  orderId: string,
+  payload: RejectOrderPayload,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.reject(orderId, payload, options.vendorId ?? undefined);
 }
 
 export async function createShipmentExecution(
