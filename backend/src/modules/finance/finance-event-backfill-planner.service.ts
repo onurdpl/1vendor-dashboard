@@ -1,6 +1,7 @@
 import { FinanceEventType } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { resolveFinanceCurrency } from './finance-currency-policy.service.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 
 const SALE_EVENT_TYPES = [
   FinanceEventType.SALE_RECORDED,
@@ -21,6 +22,7 @@ type BackfillClassification =
   | 'safe_refund_backfill_with_matching_sale'
   | 'unsafe_refund_missing_matching_sale'
   | 'existing_event_needs_relink_by_idempotency'
+  | 'voided_ledger_diagnostics_only'
   | 'already_complete';
 
 type FinanceEventTypeValue = `${FinanceEventType}`;
@@ -45,6 +47,7 @@ export type FinanceEventBackfillPlan = {
     safeRefundBackfillRows: number;
     unsafeRefundRows: number;
     relinkCandidateEvents: number;
+    voidedLedgerRows: number;
     alreadyCompleteRows: number;
   };
   samples: {
@@ -52,6 +55,7 @@ export type FinanceEventBackfillPlan = {
     safeRefundBackfill: FinanceEventBackfillSample[];
     unsafeRefundMissingSale: FinanceEventBackfillSample[];
     existingEventNeedsRelink: FinanceEventBackfillSample[];
+    voidedLedgerDiagnostics: FinanceEventBackfillSample[];
   };
   warnings: string[];
 };
@@ -62,6 +66,9 @@ type PlannerLedgerRow = {
   entryType: string;
   amount: unknown;
   vendorAllocationId: string | null;
+  voidedAt?: Date | string | null;
+  voidReason?: string | null;
+  supersededByLedgerId?: string | null;
   commissionPercentSnapshot: unknown;
   commissionVatPercentSnapshot: unknown;
   vendorAllocation: {
@@ -162,6 +169,9 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
         entryType: true,
         amount: true,
         vendorAllocationId: true,
+        voidedAt: true,
+        voidReason: true,
+        supersededByLedgerId: true,
         commissionPercentSnapshot: true,
         commissionVatPercentSnapshot: true,
         vendorAllocation: {
@@ -202,6 +212,9 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
 
   const saleRowsByVendorAllocation = new Map<string, PlannerLedgerRow>();
   for (const row of ledgerRows as PlannerLedgerRow[]) {
+    if (isLedgerVoided(row)) {
+      continue;
+    }
     if (normalizeEntryType(row.entryType) === 'sale' && row.vendorAllocationId) {
       saleRowsByVendorAllocation.set(`${row.vendorId}:${row.vendorAllocationId}`, row);
     }
@@ -217,6 +230,7 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
   let safeRefundBackfillRows = 0;
   let unsafeRefundRows = 0;
   let alreadyCompleteRows = 0;
+  let voidedLedgerRows = 0;
   let rowsUsingPolicyApprovedTryFallback = 0;
   let unsupportedNonTryCurrencyRows = 0;
   const classifications = new Map<string, Set<BackfillClassification>>();
@@ -225,9 +239,28 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
     safeRefundBackfill: [],
     unsafeRefundMissingSale: [],
     existingEventNeedsRelink: [],
+    voidedLedgerDiagnostics: [],
   };
 
   for (const row of ledgerRows as PlannerLedgerRow[]) {
+    if (isLedgerVoided(row)) {
+      voidedLedgerRows += 1;
+      const rowClasses = new Set<BackfillClassification>();
+      classifications.set(row.id, rowClasses);
+      rowClasses.add('voided_ledger_diagnostics_only');
+      pushSample(
+        samples.voidedLedgerDiagnostics,
+        toSample({
+          row,
+          missingEventTypes: [],
+          reason: row.supersededByLedgerId
+            ? `Ledger row is voided and superseded by ${row.supersededByLedgerId}; operational FinanceEvent backfill is disabled for historical rows.`
+            : 'Ledger row is voided; operational FinanceEvent backfill is disabled for historical rows.',
+        }),
+      );
+      continue;
+    }
+
     const expectedTypes = expectedFinanceEventTypes(row.entryType);
     const linkedEventTypes = new Set(row.financeEvents.map((event) => event.eventType));
     const missingLinkedEventTypes = expectedTypes.filter((eventType) => !linkedEventTypes.has(eventType));
@@ -326,6 +359,9 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
   if (relinkCandidateEvents > 0) {
     warnings.push(`${relinkCandidateEvents} existing FinanceEvent rows match ledger rows by idempotency key but have null financeLedgerEntryId.`);
   }
+  if (voidedLedgerRows > 0) {
+    warnings.push(`${voidedLedgerRows} voided finance ledger row(s) were excluded from operational FinanceEvent backfill.`);
+  }
 
   return {
     ok: true,
@@ -337,6 +373,7 @@ export async function getFinanceEventBackfillPlan(): Promise<FinanceEventBackfil
       safeRefundBackfillRows,
       unsafeRefundRows,
       relinkCandidateEvents,
+      voidedLedgerRows,
       alreadyCompleteRows,
     },
     samples,

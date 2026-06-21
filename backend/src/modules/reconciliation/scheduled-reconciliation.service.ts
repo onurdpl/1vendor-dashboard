@@ -12,6 +12,8 @@ import {
 } from '../operational-jobs/operational-jobs.service.js';
 import { createReconciliationService } from './reconciliation.service.js';
 import type { OrderReconciliationResult } from './reconciliation.types.js';
+import { isLedgerVoided } from '../finance/active-ledger-policy.service.js';
+import { resolveActiveEconomicOwnerForRepair } from './reconciliation-transfer-policy.service.js';
 
 export type ScheduledReconciliationCandidateType =
   | 'stale_allocation'
@@ -249,6 +251,7 @@ export async function findScheduledReconciliationCandidates(options: {
               },
               select: {
                 id: true,
+                voidedAt: true,
               },
             },
           },
@@ -335,15 +338,29 @@ export async function findScheduledReconciliationCandidates(options: {
   }
 
   for (const refundRecord of refundRecords) {
-    const expectedLedgerId = `fin-${refundRecord.vendorAllocation.assignedVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
-    const hasExpectedLedger = refundRecord.vendorAllocation.financeEntries.some((entry) => entry.id === expectedLedgerId);
+    let expectedLedgerId: string | null = null;
+    let ownerResolutionReason: string | null = null;
+    try {
+      const economicOwner = await resolveActiveEconomicOwnerForRepair({
+        vendorAllocationId: refundRecord.vendorAllocationId,
+      });
+      expectedLedgerId = `fin-${economicOwner.economicOwnerVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
+    } catch (error) {
+      ownerResolutionReason = error instanceof Error ? error.message : 'Refund ledger owner resolution failed.';
+    }
+
+    const hasExpectedLedger = expectedLedgerId
+      ? refundRecord.vendorAllocation.financeEntries.some((entry) => entry.id === expectedLedgerId && !isLedgerVoided(entry))
+      : false;
     if (hasExpectedLedger) {
       continue;
     }
 
     candidates.push(buildScheduledReconciliationCandidate({
       type: 'missing_refund_ledger',
-      reason: `Refund ${refundRecord.sourceShopifyRefundId} has no matching operational finance ledger entry.`,
+      reason: ownerResolutionReason
+        ? `Refund ${refundRecord.sourceShopifyRefundId} cannot be repaired automatically: ${ownerResolutionReason}`
+        : `Refund ${refundRecord.sourceShopifyRefundId} has no matching active operational finance ledger entry.`,
       sourceShopifyOrderId: refundRecord.vendorAllocation.order.sourceShopifyOrderId,
       vendorAllocationId: refundRecord.vendorAllocationId,
       refundRecordId: refundRecord.id,

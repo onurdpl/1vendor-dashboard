@@ -26,11 +26,12 @@ const { getFinanceEventRelinkPlan, relinkExistingFinanceEvents } = await import(
   '../backend/src/modules/finance/finance-event-relink.service.js'
 );
 
-function ledgerRow(input: { id: string; vendorId?: string; entryType?: 'sale' | 'refund' }) {
+function ledgerRow(input: { id: string; vendorId?: string; entryType?: 'sale' | 'refund'; voidedAt?: Date | null }) {
   return {
     id: input.id,
     vendorId: input.vendorId ?? 'sporjinal',
     entryType: input.entryType ?? 'sale',
+    voidedAt: input.voidedAt ?? null,
   };
 }
 
@@ -192,5 +193,27 @@ describe('finance event relink service', () => {
       financeLedgerEntryId: 'ledger-1',
     });
     expect(Object.keys(updateCall.data)).toEqual(['financeLedgerEntryId']);
+  });
+
+  it('excludes voided ledger rows from relink candidates', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValueOnce([
+      ledgerRow({
+        id: 'ledger-voided',
+        voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+      }),
+    ]);
+    prismaMock.financeEvent.findMany.mockResolvedValueOnce([
+      financeEvent({
+        id: 'event-voided',
+        idempotencyKey: 'ledger-voided:SALE_RECORDED',
+      }),
+    ]);
+
+    const result = await relinkExistingFinanceEvents();
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.summary.relinkCandidateEvents).toBe(0);
+    expect(result.summary.relinkedEvents).toBe(0);
+    expect(prismaMock.financeEvent.updateMany).not.toHaveBeenCalled();
   });
 });

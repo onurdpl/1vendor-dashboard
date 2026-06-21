@@ -1,5 +1,6 @@
 import { FinanceEventType, SettlementStatus, ShippingDeductionMode, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from './finance-event.service.js';
+import { assertLedgerActiveForMoneyMovement } from './active-ledger-policy.service.js';
 import {
   evaluateSaleSettlementDelay,
   normalizeSettlementDelayDays,
@@ -68,8 +69,15 @@ export async function upsertSaleLedgerForAllocation(
     },
     select: {
       id: true,
+      voidedAt: true,
+      voidReason: true,
+      supersededByLedgerId: true,
     },
   });
+  assertLedgerActiveForMoneyMovement(
+    existingLedgerEntry,
+    `Sale ledger ${ledgerId} has been voided or superseded and cannot be repaired by order replay.`,
+  );
   const activeProfile = await tx.vendorFinancialProfile.findFirst({
     where: {
       vendorId: allocation.assignedVendorId,

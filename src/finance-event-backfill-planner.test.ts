@@ -52,6 +52,9 @@ function ledgerRow(input: {
   allocationId: string;
   financeEvents?: Array<{ eventType: string; idempotencyKey: string; financeLedgerEntryId: string | null }>;
   currency?: string | null;
+  voidedAt?: Date | null;
+  voidReason?: string | null;
+  supersededByLedgerId?: string | null;
 }) {
   return {
     id: input.id,
@@ -59,6 +62,9 @@ function ledgerRow(input: {
     entryType: input.entryType,
     amount: input.amount ?? 100,
     vendorAllocationId: input.allocationId,
+    voidedAt: input.voidedAt ?? null,
+    voidReason: input.voidReason ?? null,
+    supersededByLedgerId: input.supersededByLedgerId ?? null,
     commissionPercentSnapshot: input.entryType === 'sale' ? 10 : null,
     commissionVatPercentSnapshot: input.entryType === 'sale' ? 18 : null,
     vendorAllocation: allocation(
@@ -157,6 +163,7 @@ describe('finance event backfill planner', () => {
       safeRefundBackfillRows: 1,
       unsafeRefundRows: 1,
       relinkCandidateEvents: 1,
+      voidedLedgerRows: 0,
       alreadyCompleteRows: 1,
     });
     expect(plan.samples.safeSaleBackfill).toEqual(
@@ -271,5 +278,41 @@ describe('finance event backfill planner', () => {
     expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
     expect(prismaMock.financeEvent.update).not.toHaveBeenCalled();
     expect(prismaMock.financeEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('excludes voided ledger rows from operational backfill and reports diagnostics', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      ledgerRow({
+        id: 'fin-yalispor-sale-voided',
+        entryType: 'sale',
+        allocationId: 'alloc-voided',
+        voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+        supersededByLedgerId: 'fin-sporjinal-sale-active',
+      }),
+    ]);
+    prismaMock.financeEvent.findMany.mockResolvedValue([]);
+
+    const plan = await getFinanceEventBackfillPlan();
+
+    expect(plan.writesPerformed).toBe(false);
+    expect(plan.summary).toMatchObject({
+      financeLedgerRows: 1,
+      safeSaleBackfillRows: 0,
+      safeRefundBackfillRows: 0,
+      unsafeRefundRows: 0,
+      relinkCandidateEvents: 0,
+      voidedLedgerRows: 1,
+      alreadyCompleteRows: 0,
+    });
+    expect(plan.samples.safeSaleBackfill).toEqual([]);
+    expect(plan.samples.voidedLedgerDiagnostics).toEqual([
+      expect.objectContaining({
+        financeLedgerEntryId: 'fin-yalispor-sale-voided',
+        reason: expect.stringContaining('voided and superseded by fin-sporjinal-sale-active'),
+      }),
+    ]);
+    expect(plan.warnings).toContain('1 voided finance ledger row(s) were excluded from operational FinanceEvent backfill.');
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
   });
 });

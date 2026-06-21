@@ -4,6 +4,7 @@ import {
   expectedFinanceEventTypes,
   financeEventIdempotencyKeyFor,
 } from './finance-event-backfill-planner.service.js';
+import { isLedgerVoided } from './active-ledger-policy.service.js';
 
 type FinanceEventRelinkTransaction = Prisma.TransactionClient;
 
@@ -11,6 +12,7 @@ type RelinkLedgerRow = {
   id: string;
   vendorId: string;
   entryType: string;
+  voidedAt?: Date | string | null;
 };
 
 type RelinkEventRow = {
@@ -56,6 +58,9 @@ function buildExpectedEventKeyIndex(ledgerRows: RelinkLedgerRow[]) {
   const expectedRowsByKey = new Map<string, Array<{ ledgerRow: RelinkLedgerRow; eventType: FinanceEventType }>>();
 
   for (const ledgerRow of ledgerRows) {
+    if (isLedgerVoided(ledgerRow)) {
+      continue;
+    }
     for (const eventType of expectedFinanceEventTypes(ledgerRow.entryType)) {
       const idempotencyKey = financeEventIdempotencyKeyFor(ledgerRow.id, eventType);
       const matches = expectedRowsByKey.get(idempotencyKey) ?? [];
@@ -79,6 +84,7 @@ async function findRelinkCandidates(tx: FinanceEventRelinkTransaction = prisma) 
         id: true,
         vendorId: true,
         entryType: true,
+        voidedAt: true,
       },
     }),
     tx.financeEvent.findMany({

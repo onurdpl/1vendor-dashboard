@@ -174,4 +174,58 @@ describe('sale ledger foundation', () => {
 
     expect(createManyCalled).toBe(false);
   });
+
+  it('blocks order replay from repairing a voided sale ledger row', async () => {
+    let upsertCalled = false;
+    const tx = {
+      vendorAllocation: {
+        findUnique: async () => ({
+          id: 'alloc-1',
+          assignedVendorId: 'sporjinal',
+          createdAt: new Date('2026-05-13T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-13T10:30:00.000Z'),
+          fulfillmentStatus: 'Fulfilled',
+          shippingStatus: 'Delivered',
+          order: {
+            id: 'shopify-order-db-1023',
+            sourceShopifyOrderId: '7616676626769',
+            sourceShopifyOrderNumber: '#1023',
+            currency: 'TRY',
+          },
+          lineItems: [
+            {
+              lineAmount: 3399,
+            },
+          ],
+          fulfillment: null,
+        }),
+      },
+      vendorFinancialProfile: {
+        findFirst: async () => null,
+      },
+      shipmentShippingCost: {
+        findFirst: async () => null,
+      },
+      financeLedgerEntry: {
+        findUnique: async () => ({
+          id: 'fin-sporjinal-sale-7616676626769',
+          voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+          voidReason: 'superseded_by_reassignment',
+          supersededByLedgerId: 'fin-yalispor-sale-7616676626769',
+        }),
+        upsert: async () => {
+          upsertCalled = true;
+          return null;
+        },
+      },
+      financeEvent: {
+        createMany: async () => ({ count: 0 }),
+      },
+    };
+
+    await expect(upsertSaleLedgerForAllocation(tx as never, 'alloc-1')).rejects.toThrow(
+      'Sale ledger fin-sporjinal-sale-7616676626769 has been voided or superseded and cannot be repaired by order replay.',
+    );
+    expect(upsertCalled).toBe(false);
+  });
 });

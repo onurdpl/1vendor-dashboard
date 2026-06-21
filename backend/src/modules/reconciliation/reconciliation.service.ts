@@ -13,6 +13,13 @@ import {
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
+import { isLedgerVoided } from '../finance/active-ledger-policy.service.js';
+import {
+  classifySaleLedgerRepairReadiness,
+  isTransferRepairBlocked,
+  repairBlockerMessage,
+  resolveActiveEconomicOwnerForRepair,
+} from './reconciliation-transfer-policy.service.js';
 
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
@@ -101,6 +108,26 @@ function recordChange(input: {
   };
 }
 
+function recordSkippedRepair(input: {
+  scope: string;
+  field: string;
+  localValue?: unknown;
+  canonicalValue?: unknown;
+  reason: string;
+  skippedFields: ReconciliationFieldChange[];
+  allocationResult: ReconciliationAllocationResult;
+}) {
+  const change = {
+    scope: input.scope,
+    field: input.field,
+    localValue: input.localValue === undefined || input.localValue === null ? null : String(input.localValue),
+    canonicalValue: input.canonicalValue === undefined || input.canonicalValue === null ? null : String(input.canonicalValue),
+  };
+  input.skippedFields.push(change);
+  input.allocationResult.skippedFields.push(change);
+  input.allocationResult.warnings.push(input.reason);
+}
+
 function buildCanonicalLineItemMaps(fulfillmentState: ShopifyOrderFulfillmentState) {
   const fulfilledLineItemIds = new Set<string>();
   const cancelledLineItemIds = new Set<string>();
@@ -167,6 +194,16 @@ export function createReconciliationService(env: AppEnv) {
             },
             refundRecords: true,
             returnRecords: true,
+            economicTransfers: {
+              select: {
+                id: true,
+                status: true,
+                createdAt: true,
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            },
             financeEntries: {
               include: {
                 payoutBatchLines: {
@@ -220,6 +257,14 @@ export function createReconciliationService(env: AppEnv) {
         skippedFields: [],
         warnings: [],
       };
+      const transferRepairStatus = isTransferRepairBlocked(allocation.economicTransfers);
+      const transferRepairBlocked = transferRepairStatus !== 'allowed';
+      const transferRepairBlockerReason = transferRepairBlocked
+        ? repairBlockerMessage(transferRepairStatus)
+        : null;
+      if (transferRepairBlockerReason) {
+        allocationResult.warnings.push(transferRepairBlockerReason);
+      }
 
       const allocationLineItemIds = allocation.lineItems.map((lineItem) =>
         normalizeLineItemId(lineItem.shopifyOrderLineItem.sourceLineItemId),
@@ -339,7 +384,19 @@ export function createReconciliationService(env: AppEnv) {
       allocationResult.staleFields.push(...fieldComparisons);
       staleFields.push(...fieldComparisons);
 
-      if (fieldComparisons.length > 0) {
+      if (fieldComparisons.length > 0 && transferRepairBlockerReason) {
+        for (const change of fieldComparisons) {
+          recordSkippedRepair({
+            scope: change.scope,
+            field: change.field,
+            localValue: change.localValue,
+            canonicalValue: change.canonicalValue,
+            reason: transferRepairBlockerReason,
+            skippedFields,
+            allocationResult,
+          });
+        }
+      } else if (fieldComparisons.length > 0) {
         await prisma.$transaction(async (tx) => {
           await tx.vendorAllocation.update({
             where: { id: allocation.id },
@@ -393,22 +450,95 @@ export function createReconciliationService(env: AppEnv) {
             canonicalValue: 'processed',
           });
           if (change) {
-            await prisma.refundRecord.update({
-              where: { id: refundRecord.id },
-              data: { status: 'processed' },
-            });
             staleFields.push(change);
-            repairedFields.push(change);
             allocationResult.staleFields.push(change);
-            allocationResult.repairedFields.push(change);
-            affectedVendorIds.add(allocation.assignedVendorId);
+            if (transferRepairBlockerReason) {
+              recordSkippedRepair({
+                scope: change.scope,
+                field: change.field,
+                localValue: change.localValue,
+                canonicalValue: change.canonicalValue,
+                reason: transferRepairBlockerReason,
+                skippedFields,
+                allocationResult,
+              });
+            } else {
+              await prisma.refundRecord.update({
+                where: { id: refundRecord.id },
+                data: { status: 'processed' },
+              });
+              repairedFields.push(change);
+              allocationResult.repairedFields.push(change);
+              affectedVendorIds.add(allocation.assignedVendorId);
+            }
           }
         }
 
-        const expectedLedgerId = `fin-${allocation.assignedVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
-        const hasLedger = allocation.financeEntries.some((entry) => entry.id === expectedLedgerId);
+        let expectedLedgerId: string | null = null;
+        let economicOwnerVendorId: string | null = null;
+        let activeSaleLedgerId: string | null = null;
+        let refundLedgerRepairReason: string | null = transferRepairBlockerReason;
+        if (!refundLedgerRepairReason) {
+          try {
+            const economicOwner = await resolveActiveEconomicOwnerForRepair({
+              vendorAllocationId: allocation.id,
+              transfers: allocation.economicTransfers,
+            });
+            economicOwnerVendorId = economicOwner.economicOwnerVendorId;
+            activeSaleLedgerId = economicOwner.activeSaleLedgerId;
+            expectedLedgerId = `fin-${economicOwnerVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
+          } catch (error) {
+            refundLedgerRepairReason = error instanceof Error ? error.message : 'Refund ledger repair owner resolution failed.';
+          }
+        }
+
+        const hasActiveLedger = expectedLedgerId
+          ? allocation.financeEntries.some((entry) => entry.id === expectedLedgerId && !isLedgerVoided(entry))
+          : false;
+        const conflictingActiveLedger = expectedLedgerId
+          ? allocation.financeEntries.find((entry) =>
+              entry.entryType === 'refund' &&
+              entry.id.endsWith(`-refund-${refundRecord.sourceShopifyRefundId}`) &&
+              entry.id !== expectedLedgerId &&
+              !isLedgerVoided(entry)
+            )
+          : null;
+        if (conflictingActiveLedger) {
+          refundLedgerRepairReason =
+            `Active refund ledger ${conflictingActiveLedger.id} already exists for allocation ${allocation.id} under a different economic owner.`;
+        }
+        const hasLedger = hasActiveLedger;
         if (!hasLedger && refundRecord.amount) {
-          const saleLedgerEntry = allocation.financeEntries.find((entry) => entry.entryType === 'sale') ?? null;
+          if (refundLedgerRepairReason || !expectedLedgerId || !economicOwnerVendorId || !activeSaleLedgerId) {
+            recordSkippedRepair({
+              scope: refundRecord.id,
+              field: 'financeLedgerEntry',
+              localValue: null,
+              canonicalValue: expectedLedgerId,
+              reason: refundLedgerRepairReason ?? 'Refund ledger repair owner resolution failed.',
+              skippedFields,
+              allocationResult,
+            });
+            continue;
+          }
+
+          const saleLedgerEntry = allocation.financeEntries.find((entry) =>
+            entry.id === activeSaleLedgerId &&
+            entry.entryType === 'sale' &&
+            !isLedgerVoided(entry)
+          ) ?? null;
+          if (!saleLedgerEntry) {
+            recordSkippedRepair({
+              scope: refundRecord.id,
+              field: 'financeLedgerEntry',
+              localValue: null,
+              canonicalValue: expectedLedgerId,
+              reason: `Active sale ledger ${activeSaleLedgerId} could not be loaded for reconciliation repair.`,
+              skippedFields,
+              allocationResult,
+            });
+            continue;
+          }
           const refundOffsetEligibility = getUnsettledRefundOffsetEligibility({
             refundRecord,
             relatedSaleLedgerEntry: saleLedgerEntry,
@@ -427,7 +557,7 @@ export function createReconciliationService(env: AppEnv) {
             data: {
               id: expectedLedgerId,
               vendorAllocationId: allocation.id,
-              vendorId: allocation.assignedVendorId,
+              vendorId: economicOwnerVendorId,
               entryType: 'refund',
               amount: refundRecord.amount,
               payoutStatus: refundOffsetEligibility.eligible ? 'PENDING' : 'HOLD',
@@ -442,7 +572,7 @@ export function createReconciliationService(env: AppEnv) {
           });
           if (postApprovalRefundRisk.state === 'already_paid_requires_vendor_debt') {
             await createVendorDebtForPaidRefund(prisma, {
-              vendorId: allocation.assignedVendorId,
+              vendorId: economicOwnerVendorId,
               refundRecordId: refundRecord.id,
               sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
               financeLedgerEntryId: expectedLedgerId,
@@ -459,7 +589,7 @@ export function createReconciliationService(env: AppEnv) {
           repairedFields.push(change);
           allocationResult.staleFields.push(change);
           allocationResult.repairedFields.push(change);
-          affectedVendorIds.add(allocation.assignedVendorId);
+          affectedVendorIds.add(economicOwnerVendorId);
         }
       }
 
@@ -472,25 +602,40 @@ export function createReconciliationService(env: AppEnv) {
             canonicalValue: returnRecord.returnLifecycleStatus,
           });
           if (change) {
-            await prisma.returnRecord.update({
-              where: { id: returnRecord.id },
-              data: {
-                status: returnRecord.returnLifecycleStatus,
-                requestUpdatedAt: new Date(),
-              },
-            });
             staleFields.push(change);
-            repairedFields.push(change);
             allocationResult.staleFields.push(change);
-            allocationResult.repairedFields.push(change);
-            affectedVendorIds.add(allocation.assignedVendorId);
+            if (transferRepairBlockerReason) {
+              recordSkippedRepair({
+                scope: change.scope,
+                field: change.field,
+                localValue: change.localValue,
+                canonicalValue: change.canonicalValue,
+                reason: transferRepairBlockerReason,
+                skippedFields,
+                allocationResult,
+              });
+            } else {
+              await prisma.returnRecord.update({
+                where: { id: returnRecord.id },
+                data: {
+                  status: returnRecord.returnLifecycleStatus,
+                  requestUpdatedAt: new Date(),
+                },
+              });
+              repairedFields.push(change);
+              allocationResult.repairedFields.push(change);
+              affectedVendorIds.add(allocation.assignedVendorId);
+            }
           }
         }
       }
 
+      const saleLedgerRepairReadiness = classifySaleLedgerRepairReadiness({
+        financeEntries: allocation.financeEntries,
+        transfers: allocation.economicTransfers,
+      });
       const expectedSaleLedgerId = `fin-${allocation.assignedVendorId}-sale-${shopifyOrder.sourceShopifyOrderId}`;
-      const hasSaleLedger = allocation.financeEntries.some((entry) => entry.id === expectedSaleLedgerId);
-      if (!hasSaleLedger) {
+      if (saleLedgerRepairReadiness.status === 'missing_active_sale_ledger') {
         const change = {
           scope: allocation.id,
           field: 'saleFinanceLedgerEntry',
@@ -505,9 +650,27 @@ export function createReconciliationService(env: AppEnv) {
         allocationResult.staleFields.push(change);
         allocationResult.repairedFields.push(change);
         affectedVendorIds.add(allocation.assignedVendorId);
+      } else if (
+        saleLedgerRepairReadiness.status !== 'active_sale_ledger_exists'
+      ) {
+        recordSkippedRepair({
+          scope: allocation.id,
+          field: 'saleFinanceLedgerEntry',
+          localValue: saleLedgerRepairReadiness.voidedSaleLedgerIds.length > 0
+            ? saleLedgerRepairReadiness.voidedSaleLedgerIds.join(',')
+            : null,
+          canonicalValue: expectedSaleLedgerId,
+          reason: saleLedgerRepairReadiness.reason,
+          skippedFields,
+          allocationResult,
+        });
       }
 
-      if (allocationResult.staleFields.length > 0 || allocationResult.warnings.length > 0) {
+      if (
+        allocationResult.staleFields.length > 0 ||
+        allocationResult.skippedFields.length > 0 ||
+        allocationResult.warnings.length > 0
+      ) {
         affectedAllocations.push(allocationResult);
       }
 
