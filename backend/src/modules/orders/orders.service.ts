@@ -9,6 +9,7 @@ import type {
   ShopifyReturnSignalDiscoveryDto,
 } from './orders.types.js';
 import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
+import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 import {
   isShopifyReturnSignalTopic,
   mapWebhookEventToReturnSignalDiscovery,
@@ -1835,7 +1836,9 @@ export async function getAdminShopifyOrderBreakdown(
           },
           financeIntegrityAlerts: {
             where: {
-              status: 'open',
+              status: {
+                in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+              },
               severity: {
                 in: ['critical', 'warning'],
               },

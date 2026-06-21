@@ -14,10 +14,13 @@ export const FINANCE_INTEGRITY_ALERT_CATEGORIES = [
 export const FINANCE_INTEGRITY_ALERT_SEVERITIES = ['info', 'warning', 'critical'] as const;
 
 export const FINANCE_INTEGRITY_ALERT_STATUSES = ['open', 'acknowledged', 'resolved'] as const;
+export const FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES = ['open', 'acknowledged'] as const;
+export const FINANCE_INTEGRITY_ALERT_NON_BLOCKING_STATUSES = ['resolved'] as const;
 
 export type FinanceIntegrityAlertCategory = typeof FINANCE_INTEGRITY_ALERT_CATEGORIES[number];
 export type FinanceIntegrityAlertSeverity = typeof FINANCE_INTEGRITY_ALERT_SEVERITIES[number];
 export type FinanceIntegrityAlertStatus = typeof FINANCE_INTEGRITY_ALERT_STATUSES[number];
+export type BlockingFinanceIntegrityAlertStatus = typeof FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES[number];
 
 type FinanceIntegrityAlertDbClient = Pick<Prisma.TransactionClient, 'financeIntegrityAlert'>;
 
@@ -32,6 +35,11 @@ export type CreateOrUpdateFinanceIntegrityAlertInput = {
   reason: string;
   status?: FinanceIntegrityAlertStatus;
   resolutionNote?: string | null;
+  acknowledgedAt?: Date | null;
+  acknowledgedByUserId?: string | null;
+  acknowledgmentNote?: string | null;
+  resolutionValidationJson?: Prisma.InputJsonValue | null;
+  resolutionType?: string | null;
   detectedAt?: Date;
   resolvedAt?: Date | null;
   resolvedByUserId?: string | null;
@@ -54,6 +62,7 @@ export type BlockingFinanceIntegrityAlert = {
   reason: string;
   vendorAllocationId: string | null;
   allocationEconomicTransferId: string | null;
+  status: string;
 };
 
 export type FindBlockingFinanceIntegrityAlertsInput = {
@@ -67,7 +76,7 @@ export class FinanceIntegrityMoneyMovementBlockedError extends Error {
   alert: BlockingFinanceIntegrityAlert;
 
   constructor(alert: BlockingFinanceIntegrityAlert) {
-    super(`Money movement blocked by open finance integrity alert: ${alert.category}.`);
+    super(`Money movement blocked by blocking finance integrity alert: ${alert.category}.`);
     this.name = 'FinanceIntegrityMoneyMovementBlockedError';
     this.alert = alert;
     Object.setPrototypeOf(this, FinanceIntegrityMoneyMovementBlockedError.prototype);
@@ -93,7 +102,12 @@ function buildAlertData(input: CreateOrUpdateFinanceIntegrityAlertInput) {
     affectedFinanceEventIds: nullableJson(input.affectedFinanceEventIds),
     reason: input.reason,
     status,
+    acknowledgedAt: status === 'acknowledged' ? input.acknowledgedAt ?? new Date() : null,
+    acknowledgedByUserId: status === 'acknowledged' ? input.acknowledgedByUserId ?? null : null,
+    acknowledgmentNote: status === 'acknowledged' ? input.acknowledgmentNote ?? null : null,
     resolutionNote: input.resolutionNote ?? null,
+    resolutionValidationJson: nullableJson(input.resolutionValidationJson),
+    resolutionType: input.resolutionType ?? null,
     resolvedAt: status === 'resolved' ? input.resolvedAt ?? new Date() : null,
     resolvedByUserId: status === 'resolved' ? input.resolvedByUserId ?? null : null,
     metadataJson: nullableJson(input.metadataJson),
@@ -179,7 +193,9 @@ export async function findBlockingFinanceIntegrityAlerts(
 
   return db.financeIntegrityAlert.findMany({
     where: {
-      status: 'open',
+      status: {
+        in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+      },
       severity: {
         in: [...(input.severities ?? ['warning', 'critical'])],
       },
@@ -200,6 +216,7 @@ export async function findBlockingFinanceIntegrityAlerts(
       reason: true,
       vendorAllocationId: true,
       allocationEconomicTransferId: true,
+      status: true,
     },
     orderBy: [
       {

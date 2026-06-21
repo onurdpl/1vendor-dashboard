@@ -993,7 +993,7 @@ describe('payout batch preparation', () => {
       blockers: [
         expect.objectContaining({
           code: 'finance_integrity_alert_open',
-          reason: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+          reason: 'Money movement blocked by blocking finance integrity alert: multiple_active_sale_ledgers.',
           financeLedgerEntryId: 'sale-integrity-alert',
           metadata: expect.objectContaining({
             alertCategory: 'multiple_active_sale_ledgers',

@@ -332,7 +332,7 @@ describe('admin operations summary counts', () => {
     ]);
   });
 
-  it('includes open critical and warning finance integrity alerts in the operations queue', async () => {
+  it('includes open and acknowledged warning/critical finance integrity alerts in the operations queue', async () => {
     prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
       {
         id: 'alert-critical',
@@ -355,12 +355,12 @@ describe('admin operations summary counts', () => {
         },
       },
       {
-        id: 'alert-warning',
-        dedupeKey: 'finance:warning',
+        id: 'alert-acknowledged-warning',
+        dedupeKey: 'finance:acknowledged-warning',
         severity: 'warning',
         category: 'no_active_sale_ledger',
         reason: 'No active sale ledger exists.',
-        status: 'open',
+        status: 'acknowledged',
         detectedAt: new Date('2026-06-21T08:00:00.000Z'),
         vendorAllocationId: 'alloc-2',
         allocationEconomicTransferId: null,
@@ -381,7 +381,7 @@ describe('admin operations summary counts', () => {
         destinationPath: '/admin/orders/7709129507153',
       }),
       expect.objectContaining({
-        id: 'op-finance-integrity-alert-warning',
+        id: 'op-finance-integrity-alert-acknowledged-warning',
         type: 'finance_integrity_alert',
         severity: 'warning',
         description: 'Category: no_active_sale_ledger. Reason: No active sale ledger exists. Vendor allocation: alloc-2.',
@@ -430,7 +430,9 @@ describe('admin operations summary counts', () => {
     expect(dashboard.items).toEqual([]);
     expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        status: 'open',
+        status: {
+          in: ['open', 'acknowledged'],
+        },
         severity: {
           in: ['critical', 'warning'],
         },

@@ -86,7 +86,7 @@ function buildDb(allocations: AllocationInput[] = []) {
       },
       findMany: async (args: {
         where?: {
-          status?: string;
+          status?: string | { in?: string[] };
           vendorAllocationId?: string;
           allocationEconomicTransferId?: string;
           severity?: { in?: string[] };
@@ -97,8 +97,13 @@ function buildDb(allocations: AllocationInput[] = []) {
         orderBy?: unknown;
       }) => {
         return alerts.filter((alert) => {
-          if (args.where?.status && alert.status !== args.where.status) {
-            return false;
+          if (args.where?.status) {
+            if (typeof args.where.status === 'string' && alert.status !== args.where.status) {
+              return false;
+            }
+            if (typeof args.where.status !== 'string' && !args.where.status.in?.includes(alert.status)) {
+              return false;
+            }
           }
           if (args.where?.severity?.in && !args.where.severity.in.includes(String(alert.severity))) {
             return false;
@@ -264,6 +269,51 @@ describe('finance integrity alert foundation', () => {
     }, db as never)).resolves.toHaveLength(2);
   });
 
+  it('finds acknowledged warning and critical alerts as money movement blockers', async () => {
+    const db = buildDb();
+
+    await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:ack-warning:alloc-1',
+      severity: 'warning',
+      category: 'transfer_in_progress',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Economic transfer is in progress for allocation.',
+      status: 'acknowledged',
+      acknowledgedByUserId: 'admin-1',
+      acknowledgmentNote: 'Operator reviewed; still unsafe.',
+    }, db as never);
+    await createOrUpdateAlert({
+      dedupeKey: 'finance-integrity:ack-critical:alloc-1',
+      severity: 'critical',
+      category: 'multiple_active_sale_ledgers',
+      vendorAllocationId: 'alloc-1',
+      reason: 'Multiple active sale ledgers exist for allocation.',
+      status: 'acknowledged',
+    }, db as never);
+
+    await expect(findBlockingFinanceIntegrityAlerts({ vendorAllocationId: 'alloc-1' }, db as never))
+      .resolves.toEqual([
+        expect.objectContaining({
+          status: 'acknowledged',
+          severity: 'warning',
+          category: 'transfer_in_progress',
+        }),
+        expect.objectContaining({
+          status: 'acknowledged',
+          severity: 'critical',
+          category: 'multiple_active_sale_ledgers',
+        }),
+      ]);
+    await expect(assertNoOpenFinanceIntegrityAlertForMoneyMovement({ vendorAllocationId: 'alloc-1' }, db as never))
+      .rejects.toMatchObject({
+        name: 'FinanceIntegrityMoneyMovementBlockedError',
+        alert: expect.objectContaining({
+          status: 'acknowledged',
+          severity: 'warning',
+        }),
+      });
+  });
+
   it('does not block money movement for info or resolved alerts by default', async () => {
     const db = buildDb();
 
@@ -306,7 +356,7 @@ describe('finance integrity alert foundation', () => {
     await expect(assertNoOpenFinanceIntegrityAlertForMoneyMovement({ vendorAllocationId: 'alloc-1' }, db as never))
       .rejects.toMatchObject({
         name: 'FinanceIntegrityMoneyMovementBlockedError',
-        message: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+        message: 'Money movement blocked by blocking finance integrity alert: multiple_active_sale_ledgers.',
         alert: expect.objectContaining({
           category: 'multiple_active_sale_ledgers',
           severity: 'critical',

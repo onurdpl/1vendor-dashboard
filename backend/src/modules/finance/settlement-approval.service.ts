@@ -1224,7 +1224,7 @@ export async function validateSettlementApprovalBeforeApprove(
       reasons.push(buildRevalidationReason(
         line,
         'finance_integrity_alert_open',
-        `Money movement blocked by open finance integrity alert: ${alert.category}.`,
+        `Money movement blocked by blocking finance integrity alert: ${alert.category}.`,
         {
           alertCategory: alert.category,
           alertSeverity: alert.severity,

@@ -301,21 +301,22 @@ enum VendorProfileSnapshotImpact {
 }
 
 model User {
-  id                             String                        @id @default(cuid())
-  email                          String                        @unique
-  name                           String
-  role                           UserRole
-  status                         String                        @default("active")
-  passwordHash                   String
-  createdAt                      DateTime                      @default(now())
-  updatedAt                      DateTime                      @updatedAt
-  vendorLinks                    UserVendorAccess[]
-  assignments                    AllocationAssignmentHistory[] @relation("assignmentActor")
-  economicTransfersAdministered  AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
-  financeIntegrityAlertsResolved FinanceIntegrityAlert[]       @relation("financeIntegrityAlertResolvedBy")
-  supportTickets                 SupportTicket[]
-  supportNotes                   SupportTicketNote[]
-  supportReplies                 SupportTicketReply[]
+  id                                 String                        @id @default(cuid())
+  email                              String                        @unique
+  name                               String
+  role                               UserRole
+  status                             String                        @default("active")
+  passwordHash                       String
+  createdAt                          DateTime                      @default(now())
+  updatedAt                          DateTime                      @updatedAt
+  vendorLinks                        UserVendorAccess[]
+  assignments                        AllocationAssignmentHistory[] @relation("assignmentActor")
+  economicTransfersAdministered      AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
+  financeIntegrityAlertsAcknowledged FinanceIntegrityAlert[]       @relation("financeIntegrityAlertAcknowledgedBy")
+  financeIntegrityAlertsResolved     FinanceIntegrityAlert[]       @relation("financeIntegrityAlertResolvedBy")
+  supportTickets                     SupportTicket[]
+  supportNotes                       SupportTicketNote[]
+  supportReplies                     SupportTicketReply[]
 }
 
 model Vendor {
@@ -807,7 +808,12 @@ model FinanceIntegrityAlert {
   affectedFinanceEventIds      Json?
   reason                       String
   status                       String
+  acknowledgedAt               DateTime?
+  acknowledgedByUserId         String?
+  acknowledgmentNote           String?
   resolutionNote               String?
+  resolutionValidationJson     Json?
+  resolutionType               String?
   detectedAt                   DateTime                    @default(now())
   resolvedAt                   DateTime?
   resolvedByUserId             String?
@@ -816,6 +822,7 @@ model FinanceIntegrityAlert {
   updatedAt                    DateTime                    @updatedAt
   vendorAllocation             VendorAllocation?           @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   allocationEconomicTransfer   AllocationEconomicTransfer? @relation(fields: [allocationEconomicTransferId], references: [id], onDelete: SetNull)
+  acknowledgedByUser           User?                       @relation("financeIntegrityAlertAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
   resolvedByUser               User?                       @relation("financeIntegrityAlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
 
   @@index([status])

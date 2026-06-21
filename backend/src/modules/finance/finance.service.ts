@@ -2482,7 +2482,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       for (const alert of blockingAlerts) {
         blockers.push(buildPayoutBatchTransitionBlocker({
           code: 'finance_integrity_alert_open',
-          reason: `Money movement blocked by open finance integrity alert: ${alert.category}.`,
+          reason: `Money movement blocked by blocking finance integrity alert: ${alert.category}.`,
           payoutBatchLineId: line.id,
           financeLedgerEntryId: ledgerEntryId,
           metadata: {

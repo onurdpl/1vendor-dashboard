@@ -1681,7 +1681,7 @@ describe('settlement approval foundation', () => {
         expect.objectContaining({
           financeLedgerEntryId: 'sale-1',
           code: 'finance_integrity_alert_open',
-          reason: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+          reason: 'Money movement blocked by blocking finance integrity alert: multiple_active_sale_ledgers.',
           details: expect.objectContaining({
             alertCategory: 'multiple_active_sale_ledgers',
             alertSeverity: 'critical',

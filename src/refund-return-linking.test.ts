@@ -611,7 +611,7 @@ describe('Shopify refund return linking', () => {
       ok: false,
       action: 'received_needs_attention',
       processingStatus: 'needs_attention',
-      error: 'Money movement blocked by open finance integrity alert: multiple_active_sale_ledgers.',
+      error: 'Money movement blocked by blocking finance integrity alert: multiple_active_sale_ledgers.',
     });
     expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();

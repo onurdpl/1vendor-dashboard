@@ -389,7 +389,7 @@ describe('vendor order reject operational hold', () => {
     });
   });
 
-  it('includes open finance integrity alerts in admin Shopify order breakdown', async () => {
+  it('includes open and acknowledged finance integrity alerts in admin Shopify order breakdown', async () => {
     const orderDb = buildAdminOrderBreakdownDb();
     orderDb.allocations[0]!.financeIntegrityAlerts = [
       {
@@ -402,6 +402,17 @@ describe('vendor order reject operational hold', () => {
         vendorAllocationId: 'alloc-1088',
         allocationEconomicTransferId: 'transfer-1',
         affectedLedgerIds: ['ledger-a', 'ledger-b'],
+      },
+      {
+        id: 'alert-2',
+        severity: 'warning',
+        category: 'no_active_sale_ledger',
+        reason: 'No active sale ledger exists for this allocation.',
+        status: 'acknowledged',
+        detectedAt: new Date('2026-06-21T10:00:00.000Z'),
+        vendorAllocationId: 'alloc-1088',
+        allocationEconomicTransferId: null,
+        affectedLedgerIds: [],
       },
     ];
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
@@ -420,6 +431,17 @@ describe('vendor order reject operational hold', () => {
         allocationEconomicTransferId: 'transfer-1',
         affectedLedgerIds: ['ledger-a', 'ledger-b'],
       },
+      {
+        id: 'alert-2',
+        severity: 'warning',
+        category: 'no_active_sale_ledger',
+        reason: 'No active sale ledger exists for this allocation.',
+        status: 'acknowledged',
+        detectedAt: '2026-06-21T10:00:00.000Z',
+        vendorAllocationId: 'alloc-1088',
+        allocationEconomicTransferId: null,
+        affectedLedgerIds: [],
+      },
     ]);
     expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -427,7 +449,9 @@ describe('vendor order reject operational hold', () => {
           include: expect.objectContaining({
             financeIntegrityAlerts: expect.objectContaining({
               where: {
-                status: 'open',
+                status: {
+                  in: ['open', 'acknowledged'],
+                },
                 severity: {
                   in: ['critical', 'warning'],
                 },

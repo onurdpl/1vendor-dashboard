@@ -26,6 +26,7 @@ import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
 import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import { deriveSupportSlaState } from '../support/support.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
@@ -390,7 +391,9 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     withDashboardTiming('operations.summary.finance_integrity_alert_count', () =>
       prisma.financeIntegrityAlert.count({
         where: {
-          status: 'open',
+          status: {
+            in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+          },
           severity: {
             in: [...OPERATIONS_FINANCE_ALERT_SEVERITIES],
           },
@@ -400,7 +403,9 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     withDashboardTiming('operations.summary.finance_integrity_critical_alert_count', () =>
       prisma.financeIntegrityAlert.count({
         where: {
-          status: 'open',
+          status: {
+            in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+          },
           severity: 'critical',
         },
       }),
@@ -582,7 +587,7 @@ function mapFinanceIntegrityAlertToQueueItem(
 ): OperationsQueueItemDto | null {
   const severity = alert.severity.trim().toLowerCase();
   const status = alert.status.trim().toLowerCase();
-  if (status !== 'open') {
+  if (!FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES.some((blockingStatus) => blockingStatus === status)) {
     return null;
   }
 
@@ -804,7 +809,9 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
 
   const financeIntegrityAlerts = await withDashboardTiming('operations.finance_integrity_alert_fetch', () => prisma.financeIntegrityAlert.findMany({
     where: {
-      status: 'open',
+      status: {
+        in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+      },
       severity: {
         in: [...OPERATIONS_FINANCE_ALERT_SEVERITIES],
       },
