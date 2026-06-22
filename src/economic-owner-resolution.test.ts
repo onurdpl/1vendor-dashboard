@@ -127,6 +127,37 @@ describe('economic owner resolution', () => {
     });
   });
 
+  it('resolves a transferred allocation from an allocation-scoped active target ledger', async () => {
+    const result = await resolveEconomicOwnerForAllocation({
+      vendorAllocationId: 'alloc-1',
+      db: buildDb({
+        financeEntries: [
+          {
+            id: 'fin-vendor-a-sale-1001',
+            vendorId: 'vendor-a',
+            entryType: 'sale',
+            voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+            supersededByLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+          },
+          {
+            id: 'fin-vendor-b-sale-1001-alloc-1',
+            vendorId: 'vendor-b',
+            entryType: 'sale',
+            voidedAt: null,
+          },
+        ],
+      }) as never,
+    });
+
+    expect(result).toEqual({
+      vendorAllocationId: 'alloc-1',
+      economicOwnerVendorId: 'vendor-b',
+      activeSaleLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+      supersededFromLedgerIds: [],
+      resolutionStatus: 'resolved',
+    });
+  });
+
   it('returns no_active_sale_ledger when none exists', async () => {
     const result = await resolveEconomicOwnerForAllocation({
       vendorAllocationId: 'alloc-1',

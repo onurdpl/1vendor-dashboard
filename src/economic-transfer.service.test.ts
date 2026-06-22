@@ -162,12 +162,14 @@ function setupDb(input: {
   allocation?: AllocationRow;
   vendors?: string[];
   alerts?: Array<Record<string, unknown>>;
+  extraLedgerEntries?: LedgerRow[];
   failOnTargetLedgerCreate?: boolean;
 } = {}) {
   const allocation = input.allocation ?? buildAllocation();
   const vendors = new Set(input.vendors ?? ['vendor-a', 'vendor-b']);
   const transfers = allocation.economicTransfers;
   const alerts = input.alerts ?? [];
+  const ledgerEntries = [...allocation.financeEntries, ...(input.extraLedgerEntries ?? [])];
   const financeEvents: Array<Record<string, unknown>> = [];
   const histories: Array<Record<string, unknown>> = [];
 
@@ -213,7 +215,7 @@ function setupDb(input: {
     return transfer;
   });
   prismaMock.financeLedgerEntry.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
-    allocation.financeEntries.find((ledger) => ledger.id === where.id) ?? null,
+    ledgerEntries.find((ledger) => ledger.id === where.id) ?? null,
   );
   prismaMock.financeLedgerEntry.create.mockImplementation(async ({ data }: { data: LedgerRow }) => {
     if (input.failOnTargetLedgerCreate) {
@@ -227,10 +229,11 @@ function setupDb(input: {
       ...data,
     } as LedgerRow;
     allocation.financeEntries.push(row);
+    ledgerEntries.push(row);
     return row;
   });
   prismaMock.financeLedgerEntry.update.mockImplementation(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-    const ledger = allocation.financeEntries.find((row) => row.id === where.id);
+    const ledger = ledgerEntries.find((row) => row.id === where.id);
     if (!ledger) {
       throw new Error('Ledger not found');
     }
@@ -330,17 +333,21 @@ describe('economic transfer service', () => {
       fromVendorId: 'vendor-a',
       toVendorId: 'vendor-b',
       sourceLedgerId: 'fin-vendor-a-sale-1001',
-      targetLedgerId: 'fin-vendor-b-sale-1001',
+      targetLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
       allocationId: 'alloc-1',
       status: 'COMPLETED',
     });
     const sourceLedger = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-a-sale-1001');
-    const targetLedger = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-b-sale-1001');
+    const targetLedger = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-b-sale-1001-alloc-1');
     expect(sourceLedger).toMatchObject({
-      supersededByLedgerId: 'fin-vendor-b-sale-1001',
+      supersededByLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
       voidReason: expect.stringContaining('economic_transfer:'),
     });
     expect(sourceLedger?.voidedAt).toBeInstanceOf(Date);
+    const activeSaleLedgersForAllocation = db.allocation.financeEntries.filter((ledger) =>
+      ledger.entryType === 'sale' && !ledger.voidedAt
+    );
+    expect(activeSaleLedgersForAllocation).toHaveLength(1);
     expect(targetLedger).toMatchObject({
       vendorId: 'vendor-b',
       entryType: 'sale',
@@ -358,7 +365,7 @@ describe('economic transfer service', () => {
     expect(db.transfers[0]).toMatchObject({
       status: 'COMPLETED',
       fromFinanceLedgerEntryId: 'fin-vendor-a-sale-1001',
-      toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001',
+      toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
     });
     expect(db.histories).toContainEqual(expect.objectContaining({
       action: 'economic_transfer_completed',
@@ -371,14 +378,64 @@ describe('economic transfer service', () => {
       expect.objectContaining({
         eventType: 'SALE_RECORDED',
         vendorId: 'vendor-b',
-        financeLedgerEntryId: 'fin-vendor-b-sale-1001',
+        financeLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
       }),
       expect.objectContaining({
         eventType: 'VENDOR_PAYABLE_RESERVED',
         vendorId: 'vendor-b',
-        financeLedgerEntryId: 'fin-vendor-b-sale-1001',
+        financeLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
       }),
     ]));
+  });
+
+  it('creates a distinct target ledger when the target vendor already has another allocation in the same Shopify order', async () => {
+    const existingTargetVendorOrderLedger = buildSourceLedger({
+      id: 'fin-vendor-b-sale-1001',
+      vendorAllocationId: 'alloc-existing-vendor-b',
+      vendorId: 'vendor-b',
+      amount: '250.00',
+    });
+    const db = setupDb({
+      extraLedgerEntries: [existingTargetVendorOrderLedger],
+    });
+
+    const result = await runTransfer();
+
+    expect(result.targetLedgerId).toBe('fin-vendor-b-sale-1001-alloc-1');
+    expect(db.allocation.financeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'fin-vendor-b-sale-1001-alloc-1',
+        vendorAllocationId: 'alloc-1',
+        vendorId: 'vendor-b',
+        voidedAt: null,
+      }),
+    ]));
+    expect(existingTargetVendorOrderLedger).toMatchObject({
+      id: 'fin-vendor-b-sale-1001',
+      vendorAllocationId: 'alloc-existing-vendor-b',
+      vendorId: 'vendor-b',
+      amount: '250.00',
+    });
+    expect(prismaMock.financeLedgerEntry.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        id: 'fin-vendor-b-sale-1001-alloc-1',
+      }),
+    }));
+  });
+
+  it('still blocks when the allocation-scoped target ledger id already exists', async () => {
+    setupDb({
+      extraLedgerEntries: [
+        buildSourceLedger({
+          id: 'fin-vendor-b-sale-1001-alloc-1',
+          vendorAllocationId: 'alloc-1',
+          vendorId: 'vendor-b',
+        }),
+      ],
+    });
+
+    await expect(runTransfer()).rejects.toThrow('Target vendor sale ledger already exists for this allocation.');
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -561,10 +618,10 @@ describe('economic transfer service', () => {
   it('returns an idempotent completed transfer result without creating duplicate target ledgers', async () => {
     const source = buildSourceLedger({
       voidedAt: new Date('2026-06-21T10:00:00.000Z'),
-      supersededByLedgerId: 'fin-vendor-b-sale-1001',
+      supersededByLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
     });
     const target = buildSourceLedger({
-      id: 'fin-vendor-b-sale-1001',
+      id: 'fin-vendor-b-sale-1001-alloc-1',
       vendorId: 'vendor-b',
       voidedAt: null,
       supersededByLedgerId: null,
@@ -583,7 +640,7 @@ describe('economic transfer service', () => {
             fromVendorId: 'vendor-a',
             toVendorId: 'vendor-b',
             fromFinanceLedgerEntryId: 'fin-vendor-a-sale-1001',
-            toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001',
+            toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
             status: 'COMPLETED',
             reason: 'Already completed.',
             adminActorUserId: 'admin-1',
@@ -602,6 +659,61 @@ describe('economic transfer service', () => {
 
     expect(result).toEqual({
       transferId: 'transfer-completed',
+      fromVendorId: 'vendor-a',
+      toVendorId: 'vendor-b',
+      sourceLedgerId: 'fin-vendor-a-sale-1001',
+      targetLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+      allocationId: 'alloc-1',
+      status: 'COMPLETED',
+    });
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.allocationEconomicTransfer.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps previously completed transfers with legacy target ledger ids idempotent', async () => {
+    const source = buildSourceLedger({
+      voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+      supersededByLedgerId: 'fin-vendor-b-sale-1001',
+    });
+    const legacyTarget = buildSourceLedger({
+      id: 'fin-vendor-b-sale-1001',
+      vendorId: 'vendor-b',
+      voidedAt: null,
+      supersededByLedgerId: null,
+    });
+    setupDb({
+      allocation: buildAllocation({
+        assignedVendorId: 'vendor-b',
+        allocationStatus: 'ACTIVE',
+        reassignmentRequired: false,
+        cancellationReason: null,
+        financeEntries: [source, legacyTarget],
+        economicTransfers: [
+          {
+            id: 'transfer-completed-legacy',
+            vendorAllocationId: 'alloc-1',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-b',
+            fromFinanceLedgerEntryId: 'fin-vendor-a-sale-1001',
+            toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001',
+            status: 'COMPLETED',
+            reason: 'Already completed before allocation-scoped ids.',
+            adminActorUserId: 'admin-1',
+            pricingSnapshotJson: null,
+            idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+            createdAt: new Date('2026-06-21T10:00:00.000Z'),
+            completedAt: new Date('2026-06-21T10:01:00.000Z'),
+            failedAt: null,
+            failureReason: null,
+          },
+        ],
+      }),
+    });
+
+    const result = await runTransfer();
+
+    expect(result).toEqual({
+      transferId: 'transfer-completed-legacy',
       fromVendorId: 'vendor-a',
       toVendorId: 'vendor-b',
       sourceLedgerId: 'fin-vendor-a-sale-1001',

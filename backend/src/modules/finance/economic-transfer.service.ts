@@ -117,8 +117,8 @@ function toAmountString(value: unknown) {
   return toNumber(value).toFixed(2);
 }
 
-function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string) {
-  return `fin-${vendorId}-sale-${sourceShopifyOrderId}`;
+function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string, vendorAllocationId: string) {
+  return `fin-${vendorId}-sale-${sourceShopifyOrderId}-${vendorAllocationId}`;
 }
 
 function buildIdempotencyKey(input: {
@@ -356,7 +356,7 @@ async function createTargetSaleLedger(input: {
   reason: string;
 }) {
   const { tx, allocation, sourceLedger, toVendorId, transferId, reason } = input;
-  const targetLedgerId = buildSaleLedgerEntryId(toVendorId, allocation.order.sourceShopifyOrderId);
+  const targetLedgerId = buildSaleLedgerEntryId(toVendorId, allocation.order.sourceShopifyOrderId, allocation.id);
   const existingTarget = await tx.financeLedgerEntry.findUnique({
     where: {
       id: targetLedgerId,
