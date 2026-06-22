@@ -75,6 +75,10 @@ import {
   getTransferRecoveryDiagnostics,
   TransferRecoveryDiagnosticsError,
 } from './transfer-recovery-diagnostics.service.js';
+import {
+  retryFailedEconomicTransfer,
+  EconomicTransferValidationError,
+} from './economic-transfer.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -418,6 +422,67 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
       } catch (error) {
         const statusCode = error instanceof TransferRecoveryDiagnosticsError ? error.statusCode : 400;
         const message = error instanceof Error ? error.message : 'Transfer recovery diagnostics could not be loaded.';
+        return reply.code(statusCode).send({
+          ok: false,
+          message,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/finance-integrity/transfers/:transferId/retry',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { transferId } = request.params as { transferId?: string };
+      const normalizedTransferId = transferId?.trim();
+      if (!normalizedTransferId) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Economic transfer id is required.',
+        });
+      }
+      if (!isRecord(request.body) || request.body.confirmRetry !== true) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'confirmRetry must be true to retry economic transfers.',
+        });
+      }
+
+      const note = readOptionalBodyString(request.body, 'note');
+      if (!note) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Retry note is required.',
+        });
+      }
+      if (note.length > 1000) {
+        return reply.code(400).send({
+          ok: false,
+          message: 'Retry note must be 1000 characters or fewer.',
+        });
+      }
+
+      try {
+        const result = await retryFailedEconomicTransfer({
+          transferId: normalizedTransferId,
+          note,
+          confirmRetry: true,
+          adminUserId: request.authUser?.id ?? null,
+        });
+        return {
+          ok: true,
+          ...result,
+        };
+      } catch (error) {
+        const statusCode = error instanceof EconomicTransferValidationError ? error.statusCode : 400;
+        const message = error instanceof Error ? error.message : 'Economic transfer retry could not be completed.';
         return reply.code(statusCode).send({
           ok: false,
           message,

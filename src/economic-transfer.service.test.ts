@@ -34,15 +34,23 @@ const prismaMock = vi.hoisted(() => ({
   financeIntegrityAlert: {
     findMany: vi.fn(),
     upsert: vi.fn(),
+    update: vi.fn(),
   },
 }));
+
+const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
+vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', () => ({
+  runFinanceIntegrityScannerDiagnostics: runFinanceIntegrityScannerDiagnosticsMock,
+}));
+
 const {
   EconomicTransferValidationError,
+  retryFailedEconomicTransfer,
   transferAllocationEconomics,
 } = await import('../backend/src/modules/finance/economic-transfer.service.js');
 
@@ -299,6 +307,17 @@ function setupDb(input: {
     alerts.push(created);
     return created;
   });
+  prismaMock.financeIntegrityAlert.update.mockImplementation(async ({ where, data }: {
+    where: { id: string };
+    data: Record<string, unknown>;
+  }) => {
+    const alert = alerts.find((row) => row.id === where.id);
+    if (!alert) {
+      throw new Error('Alert not found');
+    }
+    Object.assign(alert, data);
+    return alert;
+  });
 
   return {
     allocation,
@@ -319,9 +338,28 @@ async function runTransfer() {
   });
 }
 
+async function runRetry(transferId = 'transfer-failed') {
+  return retryFailedEconomicTransfer({
+    transferId,
+    adminUserId: 'admin-1',
+    note: 'Retry after target ledger id fix.',
+    confirmRetry: true,
+  });
+}
+
 describe('economic transfer service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runFinanceIntegrityScannerDiagnosticsMock.mockResolvedValue({
+      ok: true,
+      dryRun: true,
+      writesPerformed: false,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: 'transfer-failed',
+      },
+      findings: [],
+    });
   });
 
   it('transfers a blocked allocation to the replacement vendor and supersedes the source ledger', async () => {
@@ -613,6 +651,303 @@ describe('economic transfer service', () => {
       allocationEconomicTransferId: db.transfers[0].id,
       status: 'open',
     }));
+  });
+
+  it('retries a failed transfer using the existing transfer row and resolves the linked transfer failed alert', async () => {
+    const failedTransfer: TransferRow = {
+      id: 'transfer-failed',
+      vendorAllocationId: 'alloc-1',
+      fromVendorId: 'vendor-a',
+      toVendorId: 'vendor-b',
+      fromFinanceLedgerEntryId: null,
+      toFinanceLedgerEntryId: null,
+      status: 'FAILED',
+      reason: 'Original transfer.',
+      adminActorUserId: 'admin-1',
+      pricingSnapshotJson: null,
+      idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+      createdAt: new Date('2026-06-21T10:00:00.000Z'),
+      completedAt: null,
+      failedAt: new Date('2026-06-21T10:01:00.000Z'),
+      failureReason: 'Target vendor sale ledger already exists for this allocation.',
+    };
+    const db = setupDb({
+      allocation: buildAllocation({
+        economicTransfers: [failedTransfer],
+      }),
+      alerts: [
+        {
+          id: 'alert-transfer-failed',
+          dedupeKey: 'finance-integrity:transfer_failed:transfer:transfer-failed',
+          status: 'open',
+          severity: 'critical',
+          category: 'transfer_failed',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-failed',
+          reason: 'Economic transfer failed: Target vendor sale ledger already exists for this allocation.',
+        },
+      ],
+    });
+
+    const result = await runRetry();
+
+    expect(result.transfer).toEqual({
+      transferId: 'transfer-failed',
+      fromVendorId: 'vendor-a',
+      toVendorId: 'vendor-b',
+      sourceLedgerId: 'fin-vendor-a-sale-1001',
+      targetLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+      allocationId: 'alloc-1',
+      status: 'COMPLETED',
+    });
+    expect(db.transfers).toHaveLength(1);
+    expect(prismaMock.allocationEconomicTransfer.create).not.toHaveBeenCalled();
+    expect(db.transfers[0]).toMatchObject({
+      id: 'transfer-failed',
+      status: 'COMPLETED',
+      fromFinanceLedgerEntryId: 'fin-vendor-a-sale-1001',
+      toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
+      failedAt: null,
+      failureReason: null,
+    });
+    expect(db.allocation).toMatchObject({
+      assignedVendorId: 'vendor-b',
+      allocationStatus: 'ACTIVE',
+      reassignmentRequired: false,
+      cancellationReason: null,
+    });
+    expect(db.allocation.financeEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'fin-vendor-b-sale-1001-alloc-1',
+        vendorAllocationId: 'alloc-1',
+        vendorId: 'vendor-b',
+        voidedAt: null,
+      }),
+    ]));
+    expect(db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-a-sale-1001')).toMatchObject({
+      supersededByLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+      voidReason: 'economic_transfer:transfer-failed',
+    });
+    expect(db.histories).toContainEqual(expect.objectContaining({
+      action: 'economic_transfer_retry_completed',
+      reason: 'Retry after target ledger id fix.',
+    }));
+    expect(db.alerts.find((alert) => alert.id === 'alert-transfer-failed')).toMatchObject({
+      status: 'resolved',
+      resolutionType: 'scanner_validated',
+      resolutionNote: 'Resolved after successful economic transfer retry.',
+    });
+    expect(result.alertResolution).toEqual({
+      scannerValidated: true,
+      resolvedAlertIds: ['alert-transfer-failed'],
+      remainingFindingCategories: [],
+    });
+  });
+
+  it('keeps the linked transfer failed alert open when scanner still detects the issue after retry', async () => {
+    runFinanceIntegrityScannerDiagnosticsMock.mockResolvedValueOnce({
+      ok: true,
+      dryRun: true,
+      writesPerformed: false,
+      scope: {
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: 'transfer-failed',
+      },
+      findings: [
+        {
+          category: 'transfer_failed',
+          severity: 'critical',
+          reason: 'Economic transfer failed for allocation.',
+          dedupeKey: 'finance-integrity:transfer_failed:transfer:transfer-failed',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-failed',
+          affectedLedgerIds: [],
+          createdAlertId: null,
+        },
+      ],
+    });
+    const db = setupDb({
+      allocation: buildAllocation({
+        economicTransfers: [
+          {
+            id: 'transfer-failed',
+            vendorAllocationId: 'alloc-1',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-b',
+            fromFinanceLedgerEntryId: null,
+            toFinanceLedgerEntryId: null,
+            status: 'FAILED',
+            reason: 'Original transfer.',
+            adminActorUserId: 'admin-1',
+            pricingSnapshotJson: null,
+            idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+            createdAt: new Date('2026-06-21T10:00:00.000Z'),
+            completedAt: null,
+            failedAt: new Date('2026-06-21T10:01:00.000Z'),
+            failureReason: 'Original failure.',
+          },
+        ],
+      }),
+      alerts: [
+        {
+          id: 'alert-transfer-failed',
+          dedupeKey: 'finance-integrity:transfer_failed:transfer:transfer-failed',
+          status: 'open',
+          severity: 'critical',
+          category: 'transfer_failed',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-failed',
+          reason: 'Economic transfer failed.',
+        },
+      ],
+    });
+
+    const result = await runRetry();
+
+    expect(db.alerts.find((alert) => alert.id === 'alert-transfer-failed')).toMatchObject({
+      status: 'open',
+    });
+    expect(result.alertResolution).toEqual({
+      scannerValidated: true,
+      resolvedAlertIds: [],
+      remainingFindingCategories: ['transfer_failed'],
+    });
+  });
+
+  it('blocks retry when an unrelated blocking finance integrity alert exists', async () => {
+    setupDb({
+      allocation: buildAllocation({
+        economicTransfers: [
+          {
+            id: 'transfer-failed',
+            vendorAllocationId: 'alloc-1',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-b',
+            fromFinanceLedgerEntryId: null,
+            toFinanceLedgerEntryId: null,
+            status: 'FAILED',
+            reason: null,
+            adminActorUserId: null,
+            pricingSnapshotJson: null,
+            idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+            createdAt: new Date('2026-06-21T10:00:00.000Z'),
+            completedAt: null,
+            failedAt: new Date('2026-06-21T10:01:00.000Z'),
+            failureReason: 'Original failure.',
+          },
+        ],
+      }),
+      alerts: [
+        {
+          id: 'alert-transfer-failed',
+          status: 'open',
+          severity: 'critical',
+          category: 'transfer_failed',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-failed',
+          reason: 'Economic transfer failed.',
+        },
+        {
+          id: 'alert-multiple-ledgers',
+          status: 'open',
+          severity: 'critical',
+          category: 'multiple_active_sale_ledgers',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: null,
+          reason: 'Multiple active ledgers.',
+        },
+      ],
+    });
+
+    await expect(runRetry()).rejects.toThrow('Economic transfer retry blocked by finance integrity alert: multiple_active_sale_ledgers.');
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['source ledger voided', { financeEntries: [buildSourceLedger({ voidedAt: new Date('2026-06-21T10:00:00.000Z') })] }, 'No active sale ledger found for allocation.'],
+    ['target ledger already exists', { extraLedgerEntries: [buildSourceLedger({ id: 'fin-vendor-b-sale-1001-alloc-1', vendorId: 'vendor-b' })] }, 'Target vendor sale ledger already exists for this allocation.'],
+    ['assignment already changed', { assignedVendorId: 'vendor-c' }, 'Economic transfer retry requires allocation to still be assigned to the source vendor.'],
+    ['return exists', { returnRecords: [{ id: 'return-1' }] }, 'Economic transfer cannot run after return evidence exists.'],
+    ['refund exists', { refundRecords: [{ id: 'refund-1' }] }, 'Economic transfer cannot run after refund evidence exists.'],
+    ['tracking exists', { trackingNumber: 'TRK-1' }, 'Economic transfer cannot run after fulfillment, shipment, carrier, or tracking evidence exists.'],
+    ['settlement approval exists', { financeEntries: [buildSourceLedger({ settlementApprovalLines: [{ settlementApproval: { commissionInvoices: [] } }] })] }, 'Economic transfer cannot run after settlement approval evidence exists.'],
+    ['payout batch exists', { financeEntries: [buildSourceLedger({ payoutBatchLines: [{ payoutBatch: { status: 'DRAFT' } }] })] }, 'Economic transfer cannot run after payout batch evidence exists.'],
+    ['commission invoice exists', { financeEntries: [buildSourceLedger({ settlementApprovalLines: [{ settlementApproval: { commissionInvoices: [{ status: 'CREATED' }] } }] })] }, 'Economic transfer cannot run after commission invoice evidence exists.'],
+    ['vendor payment exists', { financeEntries: [buildSourceLedger({ payoutStatus: 'PAID' })] }, 'Economic transfer cannot run after vendor payment evidence exists.'],
+  ])('blocks retry when %s', async (_name, overrides, message) => {
+    setupDb({
+      allocation: buildAllocation({
+        ...(overrides as Partial<AllocationRow>),
+        economicTransfers: [
+          {
+            id: 'transfer-failed',
+            vendorAllocationId: 'alloc-1',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-b',
+            fromFinanceLedgerEntryId: null,
+            toFinanceLedgerEntryId: null,
+            status: 'FAILED',
+            reason: null,
+            adminActorUserId: null,
+            pricingSnapshotJson: null,
+            idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+            createdAt: new Date('2026-06-21T10:00:00.000Z'),
+            completedAt: null,
+            failedAt: new Date('2026-06-21T10:01:00.000Z'),
+            failureReason: 'Original failure.',
+          },
+        ],
+      }),
+      extraLedgerEntries: (overrides as { extraLedgerEntries?: LedgerRow[] }).extraLedgerEntries,
+    });
+
+    await expect(runRetry()).rejects.toThrow(message);
+  });
+
+  it('returns completed transfer idempotently for duplicate retry after completion', async () => {
+    setupDb({
+      allocation: buildAllocation({
+        assignedVendorId: 'vendor-b',
+        allocationStatus: 'ACTIVE',
+        reassignmentRequired: false,
+        cancellationReason: null,
+        financeEntries: [
+          buildSourceLedger({
+            voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+            supersededByLedgerId: 'fin-vendor-b-sale-1001-alloc-1',
+          }),
+          buildSourceLedger({
+            id: 'fin-vendor-b-sale-1001-alloc-1',
+            vendorId: 'vendor-b',
+          }),
+        ],
+        economicTransfers: [
+          {
+            id: 'transfer-failed',
+            vendorAllocationId: 'alloc-1',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-b',
+            fromFinanceLedgerEntryId: 'fin-vendor-a-sale-1001',
+            toFinanceLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
+            status: 'COMPLETED',
+            reason: null,
+            adminActorUserId: null,
+            pricingSnapshotJson: null,
+            idempotencyKey: 'economic-transfer:alloc-1:vendor-a:vendor-b',
+            createdAt: new Date('2026-06-21T10:00:00.000Z'),
+            completedAt: new Date('2026-06-21T10:01:00.000Z'),
+            failedAt: null,
+            failureReason: null,
+          },
+        ],
+      }),
+    });
+
+    const result = await runRetry();
+
+    expect(result.transfer.status).toBe('COMPLETED');
+    expect(result.alertResolution.scannerValidated).toBe(false);
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
   });
 
   it('returns an idempotent completed transfer result without creating duplicate target ledgers', async () => {

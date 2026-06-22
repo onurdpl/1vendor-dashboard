@@ -339,6 +339,9 @@ export async function getTransferRecoveryDiagnostics(input: {
   const activeSaleLedgerIds = allocation.financeEntries
     .filter((ledger) => !isLedgerVoided(ledger))
     .map((ledger) => ledger.id);
+  const blockingAlertsForClassification = alerts.filter((alert) =>
+    !(alert.category === 'transfer_failed' && alert.allocationEconomicTransferId === transfer.id)
+  );
 
   const classification = classifyDiagnostics({
     transfer,
@@ -347,7 +350,7 @@ export async function getTransferRecoveryDiagnostics(input: {
     assignedVendorId: allocation.assignedVendorId,
     activeSaleLedgerIds,
     economicOwnerStatus: economicOwner.resolutionStatus,
-    blockingAlertCount: alerts.length,
+    blockingAlertCount: blockingAlertsForClassification.length,
   });
 
   return {

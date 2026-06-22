@@ -15,6 +15,7 @@ const rescanFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const resolveFinanceIntegrityAlertWithScannerValidationMock = vi.hoisted(() => vi.fn());
 const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const getTransferRecoveryDiagnosticsMock = vi.hoisted(() => vi.fn());
+const retryFailedEconomicTransferMock = vi.hoisted(() => vi.fn());
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
     statusCode: number;
@@ -87,6 +88,18 @@ vi.mock('../backend/src/modules/finance/finance-integrity-alert.service.js', () 
 vi.mock('../backend/src/modules/finance/transfer-recovery-diagnostics.service.js', () => ({
   getTransferRecoveryDiagnostics: getTransferRecoveryDiagnosticsMock,
   TransferRecoveryDiagnosticsError: class TransferRecoveryDiagnosticsError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
+}));
+
+vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
+  retryFailedEconomicTransfer: retryFailedEconomicTransferMock,
+  EconomicTransferValidationError: class EconomicTransferValidationError extends Error {
     statusCode: number;
 
     constructor(message: string, statusCode = 400) {
@@ -227,6 +240,7 @@ describe('finance route validation', () => {
     resolveFinanceIntegrityAlertWithScannerValidationMock.mockReset();
     acknowledgeFinanceIntegrityAlertMock.mockReset();
     getTransferRecoveryDiagnosticsMock.mockReset();
+    retryFailedEconomicTransferMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
       commissionPercent: '10.00',
@@ -758,6 +772,113 @@ describe('finance route validation', () => {
     expect(result).toBe(response);
     expect(getTransferRecoveryDiagnosticsMock).toHaveBeenCalledWith({
       allocationEconomicTransferId: 'transfer-1',
+    });
+  });
+
+  it('requires admin access for economic transfer retry', async () => {
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/transfers/:transferId/retry')?.(
+      {
+        authUser: { role: 'vendor' },
+        params: { transferId: 'transfer-1' },
+        body: {
+          note: 'Retry after fix.',
+          confirmRetry: true,
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(retryFailedEconomicTransferMock).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation and note for economic transfer retry', async () => {
+    const posts = createRegisteredPostRoutes();
+
+    const missingConfirm = await posts.get('/admin/finance-integrity/transfers/:transferId/retry')?.(
+      {
+        authUser: { role: 'admin' },
+        params: { transferId: 'transfer-1' },
+        body: {
+          note: 'Retry after fix.',
+        },
+      },
+      createReply(),
+    );
+    const missingNote = await posts.get('/admin/finance-integrity/transfers/:transferId/retry')?.(
+      {
+        authUser: { role: 'admin' },
+        params: { transferId: 'transfer-1' },
+        body: {
+          confirmRetry: true,
+        },
+      },
+      createReply(),
+    );
+
+    expect(missingConfirm).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        message: 'confirmRetry must be true to retry economic transfers.',
+      },
+    });
+    expect(missingNote).toEqual({
+      status: 400,
+      body: {
+        ok: false,
+        message: 'Retry note is required.',
+      },
+    });
+    expect(retryFailedEconomicTransferMock).not.toHaveBeenCalled();
+  });
+
+  it('retries failed economic transfers for admins', async () => {
+    const response = {
+      transfer: {
+        transferId: 'transfer-1',
+        fromVendorId: 'vendor-a',
+        toVendorId: 'vendor-b',
+        sourceLedgerId: 'fin-a-sale',
+        targetLedgerId: 'fin-b-sale-alloc-1',
+        allocationId: 'alloc-1',
+        status: 'COMPLETED',
+      },
+      alertResolution: {
+        scannerValidated: true,
+        resolvedAlertIds: ['alert-1'],
+        remainingFindingCategories: [],
+      },
+    };
+    retryFailedEconomicTransferMock.mockResolvedValueOnce(response);
+    const posts = createRegisteredPostRoutes();
+
+    const result = await posts.get('/admin/finance-integrity/transfers/:transferId/retry')?.(
+      {
+        authUser: { role: 'admin', id: 'admin-1' },
+        params: { transferId: ' transfer-1 ' },
+        body: {
+          note: ' Retry after target ledger fix. ',
+          confirmRetry: true,
+        },
+      },
+      createReply(),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      ...response,
+    });
+    expect(retryFailedEconomicTransferMock).toHaveBeenCalledWith({
+      transferId: 'transfer-1',
+      note: 'Retry after target ledger fix.',
+      confirmRetry: true,
+      adminUserId: 'admin-1',
     });
   });
 

@@ -198,6 +198,45 @@ describe('transfer recovery diagnostics', () => {
     expect(result.recommendedAction).toContain('Retry may be safe');
   });
 
+  it('does not let the same linked transfer failed alert hide retry candidacy', async () => {
+    const result = await getTransferRecoveryDiagnostics({
+      allocationEconomicTransferId: 'transfer-1',
+      db: buildDb({
+        assignedVendorId: 'vendor-a',
+        transfers: [
+          {
+            id: 'transfer-1',
+            status: 'FAILED',
+            fromFinanceLedgerEntryId: 'fin-a-sale',
+            toFinanceLedgerEntryId: 'fin-b-sale',
+          },
+        ],
+        financeEntries: [
+          {
+            id: 'fin-a-sale',
+            vendorId: 'vendor-a',
+            entryType: 'sale',
+            voidedAt: null,
+          },
+        ],
+        alerts: [
+          {
+            id: 'alert-transfer-failed',
+            severity: 'critical',
+            category: 'transfer_failed',
+            reason: 'Economic transfer failed.',
+            status: 'open',
+            vendorAllocationId: 'alloc-1',
+            allocationEconomicTransferId: 'transfer-1',
+          },
+        ],
+      }) as never,
+    });
+
+    expect(result.financeIntegrityAlerts).toHaveLength(1);
+    expect(result.recoveryClassification).toBe('retry_candidate');
+  });
+
   it('classifies transferred ledger and assignment state with incomplete transfer status as force complete candidate', async () => {
     const result = await getTransferRecoveryDiagnostics({
       allocationEconomicTransferId: 'transfer-1',
@@ -292,10 +331,10 @@ describe('transfer recovery diagnostics', () => {
           {
             id: 'alert-1',
             severity: 'critical',
-            category: 'transfer_failed',
-            reason: 'Economic transfer failed.',
+            category: 'multiple_active_sale_ledgers',
+            reason: 'Multiple active sale ledgers exist.',
             status: 'open',
-            allocationEconomicTransferId: 'transfer-1',
+            vendorAllocationId: 'alloc-1',
           },
         ],
       }) as never,

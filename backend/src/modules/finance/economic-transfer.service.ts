@@ -14,8 +14,10 @@ import { createEventsIdempotently } from './finance-event.service.js';
 import {
   assertNoOpenFinanceIntegrityAlertForMoneyMovement,
   createOrUpdateAlert,
+  FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES,
   financeIntegrityAlertDedupeKey,
 } from './finance-integrity-alert.service.js';
+import { runFinanceIntegrityScannerDiagnostics } from './finance-integrity-scanner.service.js';
 import {
   evaluateSaleSettlementDelay,
   normalizeSettlementDelayDays,
@@ -29,6 +31,13 @@ export type TransferAllocationEconomicsInput = {
   confirmTransfer: true;
 };
 
+export type RetryFailedEconomicTransferInput = {
+  transferId: string;
+  adminUserId?: string | null;
+  note: string;
+  confirmRetry: true;
+};
+
 export type EconomicTransferResult = {
   transferId: string;
   fromVendorId: string;
@@ -37,6 +46,15 @@ export type EconomicTransferResult = {
   targetLedgerId: string;
   allocationId: string;
   status: 'COMPLETED';
+};
+
+export type RetryFailedEconomicTransferResult = {
+  transfer: EconomicTransferResult;
+  alertResolution: {
+    scannerValidated: boolean;
+    resolvedAlertIds: string[];
+    remainingFindingCategories: string[];
+  };
 };
 
 export class EconomicTransferValidationError extends Error {
@@ -71,6 +89,7 @@ const COMPLETED_TRANSFER_STATUSES = new Set(['COMPLETED']);
 const SHIPPED_STATUS_VALUES = new Set(['shipped', 'delivered', 'in transit', 'in_transit', 'label created', 'label_created']);
 const FULFILLED_STATUS_VALUES = new Set(['fulfilled', 'partially fulfilled', 'partially_fulfilled']);
 const MAX_REASON_LENGTH = 500;
+const MAX_RETRY_NOTE_LENGTH = 1000;
 
 type LoadedAllocation = Awaited<ReturnType<typeof loadAllocationForTransfer>>;
 type LoadedSaleLedger = NonNullable<LoadedAllocation>['financeEntries'][number];
@@ -98,9 +117,26 @@ function normalizeReason(reason: string | null | undefined) {
   return trimmed;
 }
 
+function normalizeRetryNote(note: string | null | undefined) {
+  const trimmed = normalizeText(note);
+  if (!trimmed) {
+    throw new EconomicTransferValidationError('Retry note is required.');
+  }
+  if (trimmed.length > MAX_RETRY_NOTE_LENGTH) {
+    throw new EconomicTransferValidationError('Retry note must be 1000 characters or fewer.');
+  }
+  return trimmed;
+}
+
 function assertConfirmed(confirmTransfer: boolean | undefined) {
   if (confirmTransfer !== true) {
     throw new EconomicTransferValidationError('Economic transfer requires explicit confirmation.');
+  }
+}
+
+function assertRetryConfirmed(confirmRetry: boolean | undefined) {
+  if (confirmRetry !== true) {
+    throw new EconomicTransferValidationError('Economic transfer retry requires explicit confirmation.');
   }
 }
 
@@ -347,6 +383,50 @@ function buildTransferResult(transfer: {
   };
 }
 
+async function assertNoBlockingAlertsExceptCurrentTransferFailure(input: {
+  db: EconomicTransferDb;
+  vendorAllocationId: string;
+  transferId: string;
+}) {
+  const alerts = await input.db.financeIntegrityAlert.findMany({
+    where: {
+      status: {
+        in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+      },
+      severity: {
+        in: ['warning', 'critical'],
+      },
+      OR: [
+        { vendorAllocationId: input.vendorAllocationId },
+        { allocationEconomicTransferId: input.transferId },
+      ],
+    },
+    select: {
+      id: true,
+      category: true,
+      severity: true,
+      reason: true,
+      vendorAllocationId: true,
+      allocationEconomicTransferId: true,
+    },
+  });
+
+  const blockers = alerts.filter((alert) =>
+    !(alert.category === 'transfer_failed' && alert.allocationEconomicTransferId === input.transferId)
+  );
+  if (blockers.length > 0) {
+    const blocker = blockers[0];
+    throw new EconomicTransferValidationError(
+      `Economic transfer retry blocked by finance integrity alert: ${blocker.category}.`,
+      409,
+    );
+  }
+
+  return alerts.filter((alert) =>
+    alert.category === 'transfer_failed' && alert.allocationEconomicTransferId === input.transferId
+  );
+}
+
 async function createTargetSaleLedger(input: {
   tx: Prisma.TransactionClient;
   allocation: NonNullable<LoadedAllocation>;
@@ -567,6 +647,70 @@ async function createFailedTransferAlert(input: {
   }, input.db);
 }
 
+async function resolveCurrentTransferFailureAlertsAfterRetry(input: {
+  db: EconomicTransferDb;
+  vendorAllocationId: string;
+  transferId: string;
+  adminUserId?: string | null;
+}) {
+  const validation = await runFinanceIntegrityScannerDiagnostics({
+    vendorAllocationId: input.vendorAllocationId,
+    allocationEconomicTransferId: input.transferId,
+    dryRun: true,
+    db: input.db,
+  });
+  const stillDetected = validation.findings.some((finding) =>
+    finding.category === 'transfer_failed' && finding.allocationEconomicTransferId === input.transferId
+  );
+  if (stillDetected) {
+    return {
+      scannerValidated: true,
+      resolvedAlertIds: [],
+      remainingFindingCategories: validation.findings.map((finding) => finding.category),
+    };
+  }
+
+  const alerts = await input.db.financeIntegrityAlert.findMany({
+    where: {
+      category: 'transfer_failed',
+      allocationEconomicTransferId: input.transferId,
+      status: {
+        in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+  const resolvedAt = new Date();
+  await Promise.all(alerts.map((alert) =>
+    input.db.financeIntegrityAlert.update({
+      where: {
+        id: alert.id,
+      },
+      data: {
+        status: 'resolved',
+        resolvedAt,
+        resolvedByUserId: input.adminUserId ?? null,
+        resolutionNote: 'Resolved after successful economic transfer retry.',
+        resolutionValidationJson: {
+          validatedAt: resolvedAt.toISOString(),
+          findingsReturned: validation.findings,
+          categoryResolved: 'transfer_failed',
+          scannerValidated: true,
+        } satisfies Prisma.InputJsonValue,
+        resolutionType: 'scanner_validated',
+      },
+    })
+  ));
+
+  return {
+    scannerValidated: true,
+    resolvedAlertIds: alerts.map((alert) => alert.id),
+    remainingFindingCategories: validation.findings.map((finding) => finding.category),
+  };
+}
+
 export async function transferAllocationEconomics(
   input: TransferAllocationEconomicsInput,
   db: EconomicTransferDb = prisma,
@@ -744,6 +888,221 @@ export async function transferAllocationEconomics(
       vendorAllocationId,
       affectedLedgerIds,
       reason,
+      error,
+    }).catch(() => null);
+
+    throw error;
+  }
+}
+
+export async function retryFailedEconomicTransfer(
+  input: RetryFailedEconomicTransferInput,
+  db: EconomicTransferDb = prisma,
+): Promise<RetryFailedEconomicTransferResult> {
+  assertRetryConfirmed(input.confirmRetry);
+  const note = normalizeRetryNote(input.note);
+  const transferId = normalizeText(input.transferId);
+  if (!transferId) {
+    throw new EconomicTransferValidationError('Economic transfer id is required.');
+  }
+
+  const transfer = await db.allocationEconomicTransfer.findUnique({
+    where: {
+      id: transferId,
+    },
+  });
+  if (!transfer) {
+    throw new EconomicTransferValidationError('Economic transfer was not found.', 404);
+  }
+
+  const transferStatus = normalizeTransferStatus(transfer.status);
+  if (transferStatus === 'COMPLETED') {
+    return {
+      transfer: buildTransferResult(transfer),
+      alertResolution: {
+        scannerValidated: false,
+        resolvedAlertIds: [],
+        remainingFindingCategories: [],
+      },
+    };
+  }
+  if (ACTIVE_TRANSFER_STATUSES.has(transferStatus)) {
+    throw new EconomicTransferValidationError('Economic transfer is already in progress for this allocation.', 409);
+  }
+  if (!FAILED_TRANSFER_STATUSES.has(transferStatus)) {
+    throw new EconomicTransferValidationError(`Economic transfer status ${transfer.status} cannot be retried.`, 409);
+  }
+
+  const allocation = await loadAllocationForTransfer(db, transfer.vendorAllocationId);
+  if (!allocation) {
+    throw new EconomicTransferValidationError('Allocation not found.', 404);
+  }
+  if (allocation.assignedVendorId !== transfer.fromVendorId) {
+    throw new EconomicTransferValidationError('Economic transfer retry requires allocation to still be assigned to the source vendor.', 409);
+  }
+  const sourceLedger = assertAllocationTransferable({
+    allocation,
+    toVendorId: transfer.toVendorId,
+    currentTransferId: transfer.id,
+  });
+  if (transfer.fromFinanceLedgerEntryId && sourceLedger.id !== transfer.fromFinanceLedgerEntryId) {
+    throw new EconomicTransferValidationError('Active source sale ledger no longer matches the failed economic transfer.', 409);
+  }
+  assertLedgerBlockers(sourceLedger);
+  await assertNoBlockingAlertsExceptCurrentTransferFailure({
+    db,
+    vendorAllocationId: allocation.id,
+    transferId: transfer.id,
+  });
+
+  const affectedLedgerIds = [sourceLedger.id];
+  try {
+    const completed = await db.$transaction?.(async (tx) => {
+      const currentTransfer = await tx.allocationEconomicTransfer.findUnique({
+        where: {
+          id: transfer.id,
+        },
+      });
+      if (!currentTransfer) {
+        throw new EconomicTransferValidationError('Economic transfer was not found.', 404);
+      }
+      const currentStatus = normalizeTransferStatus(currentTransfer.status);
+      if (currentStatus === 'COMPLETED') {
+        return buildTransferResult(currentTransfer);
+      }
+      if (ACTIVE_TRANSFER_STATUSES.has(currentStatus)) {
+        throw new EconomicTransferValidationError('Economic transfer is already in progress for this allocation.', 409);
+      }
+      if (!FAILED_TRANSFER_STATUSES.has(currentStatus)) {
+        throw new EconomicTransferValidationError(`Economic transfer status ${currentTransfer.status} cannot be retried.`, 409);
+      }
+
+      const currentAllocation = await loadAllocationForTransfer(tx, currentTransfer.vendorAllocationId);
+      if (!currentAllocation) {
+        throw new EconomicTransferValidationError('Allocation not found.', 404);
+      }
+      if (currentAllocation.assignedVendorId !== currentTransfer.fromVendorId) {
+        throw new EconomicTransferValidationError('Economic transfer retry requires allocation to still be assigned to the source vendor.', 409);
+      }
+      const currentSourceLedger = assertAllocationTransferable({
+        allocation: currentAllocation,
+        toVendorId: currentTransfer.toVendorId,
+        currentTransferId: currentTransfer.id,
+      });
+      if (currentTransfer.fromFinanceLedgerEntryId && currentSourceLedger.id !== currentTransfer.fromFinanceLedgerEntryId) {
+        throw new EconomicTransferValidationError('Active source sale ledger no longer matches the failed economic transfer.', 409);
+      }
+      assertLedgerBlockers(currentSourceLedger);
+      await assertNoBlockingAlertsExceptCurrentTransferFailure({
+        db: tx,
+        vendorAllocationId: currentAllocation.id,
+        transferId: currentTransfer.id,
+      });
+
+      await tx.allocationEconomicTransfer.update({
+        where: {
+          id: currentTransfer.id,
+        },
+        data: {
+          status: 'IN_PROGRESS',
+          failureReason: null,
+        },
+      });
+
+      const targetLedger = await createTargetSaleLedger({
+        tx,
+        allocation: currentAllocation,
+        sourceLedger: currentSourceLedger,
+        toVendorId: currentTransfer.toVendorId,
+        transferId: currentTransfer.id,
+        reason: note,
+      });
+      affectedLedgerIds.push(targetLedger.id);
+
+      await tx.financeLedgerEntry.update({
+        where: {
+          id: currentSourceLedger.id,
+        },
+        data: {
+          voidedAt: new Date(),
+          voidReason: `economic_transfer:${currentTransfer.id}`,
+          supersededByLedgerId: targetLedger.id,
+        },
+      });
+
+      await tx.vendorAllocation.update({
+        where: {
+          id: currentAllocation.id,
+        },
+        data: {
+          assignedVendorId: currentTransfer.toVendorId,
+          allocationStatus: AllocationStatus.ACTIVE,
+          reassignmentRequired: false,
+          cancellationReason: null,
+        },
+      });
+
+      await tx.allocationAssignmentHistory.create({
+        data: {
+          vendorAllocationId: currentAllocation.id,
+          action: 'economic_transfer_retry_completed',
+          fromVendorId: currentTransfer.fromVendorId,
+          toVendorId: currentTransfer.toVendorId,
+          reason: note,
+          actorUserId: input.adminUserId ?? null,
+        },
+      });
+
+      const updatedTransfer = await tx.allocationEconomicTransfer.update({
+        where: {
+          id: currentTransfer.id,
+        },
+        data: {
+          status: 'COMPLETED',
+          fromFinanceLedgerEntryId: currentSourceLedger.id,
+          toFinanceLedgerEntryId: targetLedger.id,
+          completedAt: new Date(),
+          failedAt: null,
+          failureReason: null,
+        },
+      });
+
+      return buildTransferResult(updatedTransfer);
+    });
+
+    if (!completed) {
+      throw new Error('Database transaction support is required for economic transfer retry.');
+    }
+
+    const alertResolution = await resolveCurrentTransferFailureAlertsAfterRetry({
+      db,
+      vendorAllocationId: completed.allocationId,
+      transferId: completed.transferId,
+      adminUserId: input.adminUserId ?? null,
+    });
+
+    return {
+      transfer: completed,
+      alertResolution,
+    };
+  } catch (error) {
+    await db.allocationEconomicTransfer.update({
+      where: {
+        id: transfer.id,
+      },
+      data: {
+        status: 'FAILED',
+        failedAt: new Date(),
+        failureReason: error instanceof Error ? error.message : String(error),
+      },
+    }).catch(() => null);
+
+    await createFailedTransferAlert({
+      db,
+      transferId: transfer.id,
+      vendorAllocationId: transfer.vendorAllocationId,
+      affectedLedgerIds,
+      reason: note,
       error,
     }).catch(() => null);
 
