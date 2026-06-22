@@ -1,6 +1,7 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
 import type {
+  AdminCancelRefundReviewPayload,
   AdminResolutionNotePayload,
   AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
@@ -34,6 +35,14 @@ export async function addAdminAllocationResolutionNote(
   payload: AdminResolutionNotePayload,
 ) {
   return runtimeServices.orders.addAdminAllocationResolutionNote(shopifyOrderId, allocationId, payload);
+}
+
+export async function requestAdminCancelRefundReview(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminCancelRefundReviewPayload,
+) {
+  return runtimeServices.orders.requestAdminCancelRefundReview(shopifyOrderId, allocationId, payload);
 }
 
 export async function transferAdminAllocationEconomics(

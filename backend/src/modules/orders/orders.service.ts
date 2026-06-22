@@ -81,6 +81,12 @@ export type AdminEconomicTransferInput = {
   actorUserId?: string | null;
 };
 
+export type AdminCancelRefundReviewInput = {
+  reason?: string | null;
+  note?: string | null;
+  actorUserId?: string | null;
+};
+
 export type AdminEconomicTransferResponse = {
   ok: true;
   transfer: EconomicTransferResult;
@@ -123,6 +129,17 @@ function normalizeAdminResolutionNote(note: string | null | undefined) {
   }
   if (normalized.length > 500) {
     throw new OrderRejectValidationError('Admin resolution note must be 500 characters or fewer.');
+  }
+  return normalized;
+}
+
+function normalizeCancelRefundReviewNote(note: string | null | undefined) {
+  const normalized = note?.trim() ?? '';
+  if (!normalized) {
+    throw new OrderRejectValidationError('Cancel/refund review note is required.');
+  }
+  if (normalized.length > 1000) {
+    throw new OrderRejectValidationError('Cancel/refund review note must be 1000 characters or fewer.');
   }
   return normalized;
 }
@@ -1642,6 +1659,134 @@ export async function addBlockedAllocationResolutionNote(
   return updatedBreakdown;
 }
 
+export async function requestCancelRefundReviewForAdminOrder(
+  shopifyOrderId: string,
+  allocationId: string,
+  input: AdminCancelRefundReviewInput,
+): Promise<AdminOrderBreakdownDto> {
+  const reason = normalizeRejectReason(input.reason);
+  const note = normalizeCancelRefundReviewNote(input.note);
+  const requestedAt = new Date();
+
+  await prisma.$transaction(async (transaction) => {
+    const allocation = await transaction.vendorAllocation.findFirst({
+      where: {
+        id: allocationId,
+        order: {
+          sourceShopifyOrderId: shopifyOrderId,
+        },
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        allocationStatus: true,
+        reassignmentRequired: true,
+        fulfillmentStatus: true,
+        shippingStatus: true,
+        trackingNumber: true,
+        carrier: true,
+        fulfillment: {
+          select: {
+            fulfilledAt: true,
+            shipmentCreatedAt: true,
+            shipmentUpdatedAt: true,
+            shopifyFulfillmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+          },
+        },
+        shipmentExecutions: {
+          select: {
+            providerShipmentId: true,
+            trackingNumber: true,
+            trackingUrl: true,
+            shipmentStatus: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+        returnRecords: {
+          select: {
+            status: true,
+            returnLifecycleStatus: true,
+          },
+        },
+        refundRecords: {
+          select: {
+            id: true,
+          },
+        },
+        economicTransfers: {
+          select: {
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!allocation) {
+      throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+    }
+
+    if (allocation.allocationStatus !== AllocationStatus.VENDOR_BLOCKED) {
+      throw new OrderRejectValidationError('Only vendor-blocked allocations can enter cancel/refund review.', 409);
+    }
+
+    if (!allocation.reassignmentRequired) {
+      throw new OrderRejectValidationError('Allocation is not marked for admin reassignment review.', 409);
+    }
+
+    if (hasShipmentEvidence(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot enter cancel/refund review after fulfillment, shipment, carrier, or tracking evidence exists.', 409);
+    }
+
+    if (hasActiveReturnState(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot enter cancel/refund review while an active return is linked.', 409);
+    }
+
+    if (hasRefundState(allocation)) {
+      throw new OrderRejectValidationError('Allocation cannot enter cancel/refund review after refund evidence exists.', 409);
+    }
+
+    if (allocation.economicTransfers.some((transfer) => transfer.status.trim().toUpperCase() === 'COMPLETED')) {
+      throw new OrderRejectValidationError('Allocation cannot enter cancel/refund review after economic transfer completed.', 409);
+    }
+
+    await transaction.vendorAllocation.update({
+      where: {
+        id: allocation.id,
+      },
+      data: {
+        cancelRefundReviewStatus: 'PENDING_REVIEW',
+        cancelRefundReviewReason: reason,
+        cancelRefundReviewNote: note,
+        cancelRefundReviewRequestedAt: requestedAt,
+        cancelRefundReviewRequestedByUserId: input.actorUserId ?? null,
+      },
+    });
+
+    await transaction.allocationAssignmentHistory.create({
+      data: {
+        vendorAllocationId: allocation.id,
+        action: 'cancel_refund_review_requested',
+        fromVendorId: allocation.assignedVendorId,
+        toVendorId: allocation.assignedVendorId,
+        reason: `${reason}: ${note}`,
+        actorUserId: input.actorUserId ?? null,
+      },
+    });
+  });
+
+  const updatedBreakdown = await getAdminShopifyOrderBreakdown(shopifyOrderId);
+  if (!updatedBreakdown) {
+    throw new OrderRejectValidationError('Shopify order not found after cancel/refund review request.', 404);
+  }
+
+  return updatedBreakdown;
+}
+
 export async function transferAllocationEconomicsForAdminOrder(
   shopifyOrderId: string,
   allocationId: string,
@@ -1986,6 +2131,15 @@ export async function getAdminShopifyOrderBreakdown(
         allocationStatus: allocation.allocationStatus,
         cancellationReason: allocation.cancellationReason,
         reassignmentRequired: allocation.reassignmentRequired,
+        cancelRefundReview: allocation.cancelRefundReviewStatus
+          ? {
+              status: allocation.cancelRefundReviewStatus,
+              reason: allocation.cancelRefundReviewReason,
+              note: allocation.cancelRefundReviewNote,
+              requestedAt: toIsoString(allocation.cancelRefundReviewRequestedAt),
+              requestedByUserId: allocation.cancelRefundReviewRequestedByUserId,
+            }
+          : null,
         fulfillmentStatus: allocation.fulfillmentStatus,
         shippingStatus: allocation.shippingStatus,
         trackingNumber: allocation.trackingNumber,

@@ -92,6 +92,7 @@ function buildLedgerRow(input: {
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
   voidedAt?: Date | null;
+  cancelRefundReviewStatus?: string | null;
 }) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -138,6 +139,7 @@ function buildLedgerRow(input: {
     vendorAllocation: {
       id: `alloc-${input.id}`,
       allocationStatus: 'ACTIVE',
+      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       sourceShopifyOrderId: input.sourceShopifyOrderId ?? `order-${input.id}`,
@@ -469,6 +471,57 @@ describe('settlement approval foundation', () => {
       derivedSettlementStatus: 'held',
       eligibilityDecision: 'excluded',
       eligibilityReason: 'Refund after settlement requires vendor debt handling.',
+    });
+  });
+
+  it('excludes cancel/refund review rows from settlement preview', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-cancel-refund-review',
+        entryType: 'sale',
+        amount: 1000,
+        cancelRefundReviewStatus: 'PENDING_REVIEW',
+        sourceShopifyOrderNumber: '#2006',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2006'],
+    });
+
+    expect(preview.summary).toMatchObject({
+      eligibleRowCount: 0,
+      grossSalesMinor: 0,
+    });
+    expect(preview.lines).toEqual([]);
+    expect(preview.selectedOrderDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestedIdentifier: '#2006',
+          financeLedgerEntryId: 'sale-cancel-refund-review',
+          candidateIncluded: false,
+          derivedSettlementStatus: 'held',
+          excludedReason: 'Allocation is under cancel/refund review and cannot move through settlement or payout.',
+        }),
+      ]),
+    );
+  });
+
+  it('explains cancel/refund review holds as settlement-ineligible', () => {
+    const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-cancel-refund-review',
+        entryType: 'sale',
+        amount: 1000,
+        cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
+      }),
+    );
+
+    expect(explanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Allocation is under cancel/refund review and cannot move through settlement or payout.',
     });
   });
 

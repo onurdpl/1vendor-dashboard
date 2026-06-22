@@ -559,6 +559,14 @@ export type AdminEconomicTransferSummaryDto = {
   adminActorUserId: string | null;
 };
 
+export type AdminCancelRefundReviewDto = {
+  status: string;
+  reason: string | null;
+  note: string | null;
+  requestedAt: string | null;
+  requestedByUserId: string | null;
+};
+
 export type AdminOrderBreakdownAllocationDto = {
   id: string;
   vendorId: string;
@@ -596,6 +604,7 @@ export type AdminOrderBreakdownAllocationDto = {
   }>;
   financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
   transferSummary: AdminEconomicTransferSummaryDto | null;
+  cancelRefundReview: AdminCancelRefundReviewDto | null;
 };
 
 export type AdminOrderBreakdownDto = {

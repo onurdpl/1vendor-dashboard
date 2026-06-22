@@ -10,6 +10,7 @@ import {
   listVendorOrders,
   OrderRejectValidationError,
   rejectVendorOrderAllocation,
+  requestCancelRefundReviewForAdminOrder,
   returnBlockedAllocationToVendor,
   transferAllocationEconomicsForAdminOrder,
 } from './orders.service.js';
@@ -40,6 +41,14 @@ function readEconomicTransferReason(value: string | null | undefined) {
     throw new OrderRejectValidationError('Economic transfer reason must be 500 characters or fewer.', 400);
   }
   return reason;
+}
+
+function readCancelRefundReviewNote(value: string | null | undefined) {
+  const note = readRequiredBodyText(value, 'Cancel/refund review note is required.');
+  if (note.length > 1000) {
+    throw new OrderRejectValidationError('Cancel/refund review note must be 1000 characters or fewer.', 400);
+  }
+  return note;
 }
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
@@ -194,6 +203,44 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/resolution-note', () =>
           addBlockedAllocationResolutionNote(request.params.shopifyOrderId, request.params.allocationId, {
             note: request.body?.note,
+            actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: { reason?: string | null; note?: string | null; confirmReview?: boolean | null };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/cancel-refund-review',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+        if (request.body?.confirmReview !== true) {
+          throw new OrderRejectValidationError('Cancel/refund review confirmation is required.', 400);
+        }
+        const reason = readRequiredBodyText(request.body?.reason, 'Cancel/refund review reason is required.');
+        const note = readCancelRefundReviewNote(request.body?.note);
+
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/cancel-refund-review', () =>
+          requestCancelRefundReviewForAdminOrder(shopifyOrderId, allocationId, {
+            reason,
+            note,
             actorUserId: request.authUser?.id ?? null,
           }),
         );

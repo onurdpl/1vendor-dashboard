@@ -35,6 +35,10 @@ import {
 } from './settlement-refund-adjustment-eligibility-diagnostics.service.js';
 import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy.service.js';
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
+import {
+  CANCEL_REFUND_REVIEW_HOLD_REASON,
+  hasBlockingCancelRefundReviewStatus,
+} from './cancel-refund-review-hold.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -129,6 +133,7 @@ type SettlementApprovalLedgerRow = {
   vendorAllocation: {
     id: string;
     allocationStatus: string;
+    cancelRefundReviewStatus?: string | null;
     fulfillmentStatus: string | null;
     shippingStatus: string | null;
     sourceShopifyOrderId: string;
@@ -440,6 +445,9 @@ function resolveSettlementStatus(
   if (payoutStatus === 'hold') {
     return 'held';
   }
+  if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
+    return 'held';
+  }
 
   const storedStatus = normalizeStatus(row.settlementStatus);
   if (storedStatus === 'held' || storedStatus === 'settled' || storedStatus === 'disputed') {
@@ -468,6 +476,9 @@ function rowIsEligible(
     return false;
   }
   if (normalizeStatus(row.payoutStatus) === 'paid') {
+    return false;
+  }
+  if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
     return false;
   }
   if (type === 'refund' && !getRefundOffsetEligibility(row, currentSettlementApprovalId).eligible) {
@@ -517,6 +528,8 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = refundOffsetEligibility.reason;
   } else if (payoutStatus === 'hold') {
     eligibilityReason = 'Excluded because payout status is HOLD.';
+  } else if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
+    eligibilityReason = CANCEL_REFUND_REVIEW_HOLD_REASON;
   } else if (hasApprovedOpenReturnHold(row)) {
     eligibilityReason = APPROVED_OPEN_RETURN_HOLD_REASON;
   } else if (derivedSettlementStatus === 'partially_refunded') {
@@ -941,6 +954,17 @@ function validateApprovalLineAgainstCurrentLedger(
     reasons.push(buildRevalidationReason(line, 'ledger_paid', 'Ledger row already paid'));
   }
 
+  if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'cancel_refund_review_active',
+      CANCEL_REFUND_REVIEW_HOLD_REASON,
+      {
+        cancelRefundReviewStatus: row.vendorAllocation?.cancelRefundReviewStatus ?? null,
+      },
+    ));
+  }
+
   if (row.payoutBatchLines.length > 0) {
     reasons.push(buildRevalidationReason(
       line,
@@ -1005,6 +1029,7 @@ function validateApprovalLineAgainstCurrentLedger(
         'ledger_paid',
         'approved_return_hold_active',
         'settlement_delay_not_satisfied',
+        'cancel_refund_review_active',
       ].includes(reason.code),
     );
     if (!alreadyExplained) {
@@ -1090,6 +1115,7 @@ async function loadCurrentLedgerRowForApprovalLine(
         select: {
           id: true,
           allocationStatus: true,
+          cancelRefundReviewStatus: true,
           fulfillmentStatus: true,
           shippingStatus: true,
           sourceShopifyOrderId: true,
@@ -1608,6 +1634,7 @@ async function buildApprovalPreview(
         select: {
           id: true,
           allocationStatus: true,
+          cancelRefundReviewStatus: true,
           fulfillmentStatus: true,
           shippingStatus: true,
           sourceShopifyOrderId: true,
@@ -1767,6 +1794,7 @@ async function buildApprovalPreview(
           select: {
             id: true,
             allocationStatus: true,
+            cancelRefundReviewStatus: true,
             fulfillmentStatus: true,
             shippingStatus: true,
             sourceShopifyOrderId: true,

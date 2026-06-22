@@ -31,6 +31,7 @@ const {
   getAdminShopifyOrderBreakdown,
   getVendorOrderById,
   rejectVendorOrderAllocation,
+  requestCancelRefundReviewForAdminOrder,
   returnBlockedAllocationToVendor,
   transferAllocationEconomicsForAdminOrder,
   OrderRejectValidationError,
@@ -65,6 +66,11 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
     vendorIntegrationShippedAt: null,
     reassignmentRequired: true,
     cancellationReason: 'OUT_OF_STOCK',
+    cancelRefundReviewStatus: null,
+    cancelRefundReviewReason: null,
+    cancelRefundReviewNote: null,
+    cancelRefundReviewRequestedAt: null,
+    cancelRefundReviewRequestedByUserId: null,
     vendorIntegrationStatus: null,
     vendorIntegrationStatusMessage: null,
     vendorIntegrationStatusUpdatedAt: null,
@@ -159,6 +165,7 @@ function buildReturnableBlockedAllocation(overrides: Record<string, unknown> = {
     shipmentExecutions: [],
     returnRecords: [],
     refundRecords: [],
+    economicTransfers: [],
     ...overrides,
   };
 }
@@ -396,6 +403,104 @@ describe('vendor order reject operational hold', () => {
     });
   });
 
+  it('marks a vendor-blocked allocation for local cancel/refund review', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation());
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.allocationStatus = 'VENDOR_BLOCKED';
+    orderDb.allocations[0]!.reassignmentRequired = true;
+    orderDb.allocations[0]!.cancellationReason = 'OUT_OF_STOCK';
+    orderDb.allocations[0]!.cancelRefundReviewStatus = 'PENDING_REVIEW';
+    orderDb.allocations[0]!.cancelRefundReviewReason = 'OUT_OF_STOCK';
+    orderDb.allocations[0]!.cancelRefundReviewNote = 'No replacement vendor available. Customer will be contacted.';
+    orderDb.allocations[0]!.cancelRefundReviewRequestedAt = new Date('2026-06-21T10:00:00.000Z');
+    orderDb.allocations[0]!.cancelRefundReviewRequestedByUserId = 'admin-1';
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const result = await requestCancelRefundReviewForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      reason: 'OUT_OF_STOCK',
+      note: 'No replacement vendor available. Customer will be contacted.',
+      actorUserId: 'admin-1',
+    });
+
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
+      where: { id: 'alloc-1088' },
+      data: {
+        cancelRefundReviewStatus: 'PENDING_REVIEW',
+        cancelRefundReviewReason: 'OUT_OF_STOCK',
+        cancelRefundReviewNote: 'No replacement vendor available. Customer will be contacted.',
+        cancelRefundReviewRequestedAt: expect.any(Date),
+        cancelRefundReviewRequestedByUserId: 'admin-1',
+      },
+    });
+    expect(prismaMock.allocationAssignmentHistory.create).toHaveBeenCalledWith({
+      data: {
+        vendorAllocationId: 'alloc-1088',
+        action: 'cancel_refund_review_requested',
+        fromVendorId: 'yalispor',
+        toVendorId: 'yalispor',
+        reason: 'OUT_OF_STOCK: No replacement vendor available. Customer will be contacted.',
+        actorUserId: 'admin-1',
+      },
+    });
+    expect(result.allocations[0]?.allocationStatus).toBe('VENDOR_BLOCKED');
+    expect(result.allocations[0]?.cancelRefundReview).toEqual({
+      status: 'PENDING_REVIEW',
+      reason: 'OUT_OF_STOCK',
+      note: 'No replacement vendor available. Customer will be contacted.',
+      requestedAt: '2026-06-21T10:00:00.000Z',
+      requestedByUserId: 'admin-1',
+    });
+  });
+
+  it('does not mark non-blocked allocations for cancel/refund review', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation({
+      allocationStatus: 'ACTIVE',
+    }));
+
+    await expect(
+      requestCancelRefundReviewForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: 'Customer will be contacted.',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
+  it('requires a cancel/refund review note', async () => {
+    await expect(
+      requestCancelRefundReviewForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: ' ',
+      }),
+    ).rejects.toMatchObject({ message: 'Cancel/refund review note is required.' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['fulfilled allocation', { fulfillmentStatus: 'Fulfilled' }],
+    ['shipped allocation', { shippingStatus: 'Shipped' }],
+    ['tracked allocation', { trackingNumber: 'TRK-1' }],
+    ['carrier allocation', { carrier: 'Yurtiçi Kargo' }],
+    ['active return allocation', { returnRecords: [{ status: 'requested', returnLifecycleStatus: null }] }],
+    ['refunded allocation', { refundRecords: [{ id: 'refund-1' }] }],
+    ['completed transfer allocation', { economicTransfers: [{ status: 'COMPLETED' }] }],
+  ])('does not mark %s for cancel/refund review', async (_label, overrides) => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation(overrides));
+
+    await expect(
+      requestCancelRefundReviewForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: 'Customer will be contacted.',
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
   it('includes open and acknowledged finance integrity alerts in admin Shopify order breakdown', async () => {
     const orderDb = buildAdminOrderBreakdownDb();
     orderDb.allocations[0]!.financeIntegrityAlerts = [
@@ -581,6 +686,21 @@ describe('vendor order reject operational hold', () => {
 
     expect(detail).not.toHaveProperty('transferSummary');
     expect(detail).not.toHaveProperty('economicTransfers');
+  });
+
+  it('does not expose cancel/refund review details through vendor order detail', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
+      cancelRefundReviewStatus: 'PENDING_REVIEW',
+      cancelRefundReviewReason: 'OUT_OF_STOCK',
+      cancelRefundReviewNote: 'Customer will be contacted.',
+      cancelRefundReviewRequestedAt: new Date('2026-06-21T10:00:00.000Z'),
+      cancelRefundReviewRequestedByUserId: 'admin-1',
+    }));
+
+    const detail = await getVendorOrderById('yalispor', 'alloc-1088');
+
+    expect(detail).not.toHaveProperty('cancelRefundReview');
+    expect(detail).not.toHaveProperty('cancelRefundReviewStatus');
   });
 
   it('requires a note for admin resolution actions', async () => {

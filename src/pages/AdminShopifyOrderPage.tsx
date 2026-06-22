@@ -7,6 +7,7 @@ import {
   addAdminAllocationResolutionNote,
   createParatikaHostedPaymentLink,
   getAdminShopifyOrderBreakdown,
+  requestAdminCancelRefundReview,
   returnAdminBlockedAllocationToVendor,
   transferAdminAllocationEconomics,
   type ParatikaSessionTokenLiveProbeResult,
@@ -80,6 +81,10 @@ function formatTransferRecoveryClassification(value: string) {
   return formatTransferStatus(value);
 }
 
+function formatCancelRefundReviewStatus(value: string) {
+  return formatTransferStatus(value);
+}
+
 function formatLedgerDiagnosticState(ledger: {
   id: string | null;
   exists: boolean;
@@ -113,6 +118,10 @@ type AdminAllocationResolutionAction = {
 };
 
 type AdminEconomicTransferAction = {
+  allocation: ShopifyOrderBreakdown['allocations'][number];
+};
+
+type AdminCancelRefundReviewAction = {
   allocation: ShopifyOrderBreakdown['allocations'][number];
 };
 
@@ -243,6 +252,23 @@ function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['alloca
   );
 }
 
+function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return (
+    normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
+    allocation.reassignmentRequired &&
+    !allocation.transferSummary &&
+    !allocation.cancelRefundReview &&
+    !hasVisibleTransferBlockerEvidence(allocation)
+  );
+}
+
+const CANCEL_REFUND_REVIEW_REASONS = [
+  { value: 'OUT_OF_STOCK', label: 'Out of stock' },
+  { value: 'VENDOR_CANCELLED', label: 'Vendor cancelled' },
+  { value: 'DAMAGED_INVENTORY', label: 'Damaged inventory' },
+  { value: 'FULFILLMENT_ISSUE', label: 'Fulfillment issue' },
+] as const;
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const queryClient = useQueryClient();
@@ -256,6 +282,10 @@ export function AdminShopifyOrderPage() {
   const [economicTransferReason, setEconomicTransferReason] = useState('');
   const [replacementFulfillmentConfirmed, setReplacementFulfillmentConfirmed] = useState(false);
   const [originalPriceConfirmed, setOriginalPriceConfirmed] = useState(false);
+  const [cancelRefundReviewAction, setCancelRefundReviewAction] = useState<AdminCancelRefundReviewAction | null>(null);
+  const [cancelRefundReviewReason, setCancelRefundReviewReason] = useState('');
+  const [cancelRefundReviewNote, setCancelRefundReviewNote] = useState('');
+  const [cancelRefundReviewConfirmed, setCancelRefundReviewConfirmed] = useState(false);
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
@@ -347,6 +377,24 @@ export function AdminShopifyOrderPage() {
     {
       onError: (mutationError) => {
         showFeedback(getActionErrorMessage(mutationError, 'Economic transfer could not be completed.'), 'error');
+      },
+    },
+  );
+  const cancelRefundReviewMutation = useMutationAction(
+    async (payload: { allocationId: string; reason: typeof CANCEL_REFUND_REVIEW_REASONS[number]['value']; note: string }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return requestAdminCancelRefundReview(shopifyOrderId, payload.allocationId, {
+        reason: payload.reason,
+        note: payload.note,
+        confirmReview: true,
+      });
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Cancel/refund review could not be requested.'), 'error');
       },
     },
   );
@@ -450,6 +498,47 @@ export function AdminShopifyOrderPage() {
       setEconomicTransferReason('');
       setReplacementFulfillmentConfirmed(false);
       setOriginalPriceConfirmed(false);
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleCancelRefundReviewSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cancelRefundReviewAction) {
+      return;
+    }
+
+    const note = cancelRefundReviewNote.trim();
+    if (!cancelRefundReviewReason) {
+      showFeedback('Cancel/refund review reason is required.', 'error');
+      return;
+    }
+    if (!note) {
+      showFeedback('Cancel/refund review note is required.', 'error');
+      return;
+    }
+    if (!cancelRefundReviewConfirmed) {
+      showFeedback('Cancel/refund review confirmation is required.', 'error');
+      return;
+    }
+
+    try {
+      const result = await cancelRefundReviewMutation.mutateAsync({
+        allocationId: cancelRefundReviewAction.allocation.allocationOrderId,
+        reason: cancelRefundReviewReason as typeof CANCEL_REFUND_REVIEW_REASONS[number]['value'],
+        note,
+      });
+      if (shopifyOrderId) {
+        queryClient.setQueryData(queryKeys.admin.orders.breakdown(shopifyOrderId), result);
+      } else {
+        await refetch();
+      }
+      showFeedback('Allocation moved to cancel/refund review. Shopify and refund state were not changed.', 'success');
+      setCancelRefundReviewAction(null);
+      setCancelRefundReviewReason('');
+      setCancelRefundReviewNote('');
+      setCancelRefundReviewConfirmed(false);
     } catch {
       // The mutation onError handler owns user-facing feedback.
     }
@@ -674,6 +763,7 @@ export function AdminShopifyOrderPage() {
           (vendor) => vendor.vendorId !== allocation.assignedVendorId,
         );
         const showEconomicTransferAction = canShowEconomicTransferAction(allocation);
+        const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation);
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -899,6 +989,49 @@ export function AdminShopifyOrderPage() {
             </>
           ) : null}
 
+          {allocation.cancelRefundReview ? (
+            <section className="economic-transfer-summary-card" aria-label="Cancel refund review summary">
+              <div className="economic-transfer-summary-header">
+                <div>
+                  <p className="eyebrow">Cancel / refund review</p>
+                  <h3>
+                    {allocation.cancelRefundReview.status === 'PENDING_REVIEW'
+                      ? 'Cancel / Refund Review Pending'
+                      : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
+                  </h3>
+                </div>
+                <span className={`status-badge status-${getClassToken(allocation.cancelRefundReview.status)}`}>
+                  {formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
+                </span>
+              </div>
+              <p className="page-description">
+                This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.
+              </p>
+              <div className="compact-meta-grid">
+                <div className="meta-item">
+                  <span>Reason</span>
+                  <strong>{allocation.cancelRefundReview.reason ?? 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Note</span>
+                  <strong>{allocation.cancelRefundReview.note ?? 'No note recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Requested</span>
+                  <strong>
+                    {allocation.cancelRefundReview.requestedAt
+                      ? formatDate(allocation.cancelRefundReview.requestedAt)
+                      : 'Not recorded'}
+                  </strong>
+                </div>
+                <div className="meta-item">
+                  <span>Admin</span>
+                  <strong>{allocation.cancelRefundReview.requestedByUserId ?? 'Not recorded'}</strong>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           {allocation.allocationStatus === 'vendor_blocked' ? (
             <section className="action-row">
               <p className="page-description">
@@ -940,6 +1073,20 @@ export function AdminShopifyOrderPage() {
                     }}
                   >
                     Transfer economics
+                  </button>
+                ) : null}
+                {showCancelRefundReviewAction ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setCancelRefundReviewAction({ allocation });
+                      setCancelRefundReviewReason('OUT_OF_STOCK');
+                      setCancelRefundReviewNote('');
+                      setCancelRefundReviewConfirmed(false);
+                    }}
+                  >
+                    Cancel / Refund Review
                   </button>
                 ) : null}
               </div>
@@ -1238,6 +1385,111 @@ export function AdminShopifyOrderPage() {
                   </button>
                   <button type="submit" className="button button-primary" disabled={!transferReady}>
                     {transferEconomicsMutation.isPending ? 'Transferring...' : 'Transfer economics'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {cancelRefundReviewAction ? (() => {
+        const note = cancelRefundReviewNote.trim();
+        const reviewReady = Boolean(
+          cancelRefundReviewReason &&
+            note &&
+            note.length <= 1000 &&
+            cancelRefundReviewConfirmed &&
+            !cancelRefundReviewMutation.isPending,
+        );
+
+        return (
+          <div className="support-modal-backdrop" role="presentation">
+            <section
+              className="support-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-cancel-refund-review-title"
+            >
+              <div className="support-modal-header">
+                <div>
+                  <h2 id="admin-cancel-refund-review-title">Cancel / Refund Review</h2>
+                  <p>
+                    {cancelRefundReviewAction.allocation.vendorName} · {cancelRefundReviewAction.allocation.allocationOrderId}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="support-modal-close"
+                  onClick={() => {
+                    if (!cancelRefundReviewMutation.isPending) {
+                      setCancelRefundReviewAction(null);
+                      setCancelRefundReviewReason('');
+                      setCancelRefundReviewNote('');
+                      setCancelRefundReviewConfirmed(false);
+                    }
+                  }}
+                  aria-label="Close cancel refund review form"
+                >
+                  ×
+                </button>
+              </div>
+              <form className="support-ticket-form" onSubmit={handleCancelRefundReviewSubmit}>
+                <p className="support-context-note economic-transfer-warning">
+                  This only places the allocation under admin cancel/refund review and blocks finance movement. Shopify refund/cancel must be handled separately after confirmation.
+                </p>
+                <label>
+                  Reason
+                  <select
+                    value={cancelRefundReviewReason}
+                    onChange={(event) => setCancelRefundReviewReason(event.target.value)}
+                    required
+                    disabled={cancelRefundReviewMutation.isPending}
+                  >
+                    {CANCEL_REFUND_REVIEW_REASONS.map((reason) => (
+                      <option key={reason.value} value={reason.value}>
+                        {reason.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Review note
+                  <textarea
+                    value={cancelRefundReviewNote}
+                    onChange={(event) => setCancelRefundReviewNote(event.target.value)}
+                    maxLength={1000}
+                    rows={5}
+                    required
+                    placeholder="Explain why transfer is not being used and what customer follow-up is planned."
+                    disabled={cancelRefundReviewMutation.isPending}
+                  />
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={cancelRefundReviewConfirmed}
+                    onChange={(event) => setCancelRefundReviewConfirmed(event.target.checked)}
+                    disabled={cancelRefundReviewMutation.isPending}
+                  />
+                  <span>I understand this does not refund the customer or cancel the Shopify order.</span>
+                </label>
+                <div className="support-modal-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setCancelRefundReviewAction(null);
+                      setCancelRefundReviewReason('');
+                      setCancelRefundReviewNote('');
+                      setCancelRefundReviewConfirmed(false);
+                    }}
+                    disabled={cancelRefundReviewMutation.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="button button-primary" disabled={!reviewReady}>
+                    {cancelRefundReviewMutation.isPending ? 'Saving review...' : 'Start review'}
                   </button>
                 </div>
               </form>

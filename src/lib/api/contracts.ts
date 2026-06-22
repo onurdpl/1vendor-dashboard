@@ -688,7 +688,8 @@ export type AssignmentHistoryAction =
   | 'reassignment_requested'
   | 'reassigned'
   | 'admin_returned_to_vendor'
-  | 'admin_note';
+  | 'admin_note'
+  | 'cancel_refund_review_requested';
 
 export type AssignmentHistoryEntry = {
   action: AssignmentHistoryAction;
@@ -912,6 +913,14 @@ export type EconomicTransferSummary = {
   adminActorUserId: string | null;
 };
 
+export type CancelRefundReviewSummary = {
+  status: string;
+  reason: string | null;
+  note: string | null;
+  requestedAt: string | null;
+  requestedByUserId: string | null;
+};
+
 export type VendorAllocationSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
@@ -947,6 +956,7 @@ export type VendorAllocationSummary = {
   returnRecordCount?: number;
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
   transferSummary?: EconomicTransferSummary | null;
+  cancelRefundReview?: CancelRefundReviewSummary | null;
 };
 
 export type FinanceIntegrityAlertSummary = {

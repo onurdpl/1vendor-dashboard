@@ -51,6 +51,7 @@ import type {
   VendorIntegrationProviderRevokeResult,
 } from '../lib/api/contracts';
 import type {
+  AdminCancelRefundReviewPayload,
   AdminResolutionNotePayload,
   AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
@@ -842,6 +843,23 @@ export const runtimeServices = {
     ) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.addAdminAllocationResolutionNote(shopifyOrderId, allocationId, payload);
+      }
+
+      const breakdown = getShopifyOrderBreakdown(shopifyOrderId);
+      if (!breakdown) {
+        throw new ApiError('Shopify order not found.', 'server', { status: 404 });
+      }
+      void allocationId;
+      void payload;
+      return breakdown;
+    },
+    async requestAdminCancelRefundReview(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminCancelRefundReviewPayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.requestAdminCancelRefundReview(shopifyOrderId, allocationId, payload);
       }
 
       const breakdown = getShopifyOrderBreakdown(shopifyOrderId);

@@ -52,6 +52,7 @@ function buildEntry(input: {
   activeSettlementApproval?: boolean;
   approvedRefundOffsetRepresented?: boolean;
   voidedAt?: Date | null;
+  cancelRefundReviewStatus?: string | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
@@ -94,6 +95,7 @@ function buildEntry(input: {
     vendorAllocation: {
       id: `alloc-${input.id}`,
       allocationStatus: 'ACTIVE',
+      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       fulfillment: {
@@ -297,6 +299,22 @@ describe('payout batch preparation', () => {
   it('prevents duplicate active batch inclusion', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildEntry({ id: 'sale-already-batched', entryType: 'sale', amount: 1000, batched: true }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'No eligible payable ledger rows',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('excludes cancel/refund review allocations from payout preparation', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-cancel-refund-review',
+        entryType: 'sale',
+        amount: 1000,
+        cancelRefundReviewStatus: 'PENDING_REVIEW',
+      }),
     ]);
 
     await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
@@ -816,6 +834,31 @@ describe('payout batch preparation', () => {
       status: 'review',
       lineCount: 1,
     });
+  });
+
+  it('blocks review when allocation enters cancel/refund review', async () => {
+    const sale = buildEntry({
+      id: 'sale-cancel-refund-review-transition',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [
+        expect.objectContaining({
+          code: 'cancel_refund_review_active',
+          reason: 'Allocation is under cancel/refund review and cannot move through settlement or payout.',
+          financeLedgerEntryId: 'sale-cancel-refund-review-transition',
+        }),
+      ],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
 
   it('blocks review when a refund arrived after batch creation', async () => {

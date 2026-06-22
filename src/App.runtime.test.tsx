@@ -390,6 +390,135 @@ describe('App startup runtime safety', () => {
     expect(within(transferSummary).getByText('admin-1')).toBeInTheDocument();
   });
 
+  it('submits a cancel refund review request from the blocked allocation modal', async () => {
+    vi.doMock('./config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+        apiBaseUrl: 'https://vendor-dashboard-backend-398h.onrender.com',
+        apiBaseOrigin: 'https://vendor-dashboard-backend-398h.onrender.com',
+        appEnvironment: 'production',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
+        startupIssues: [],
+      },
+    }));
+    vi.doMock('./lib/RequireAuth', () => ({
+      RequireAuth: () => <Outlet />,
+    }));
+    vi.doMock('./components/RequirePermission', () => ({
+      RequirePermission: ({ children }: { children: ReactNode }) => <>{children}</>,
+    }));
+    vi.doMock('./components/AppShell', () => ({
+      AppShell: () => <Outlet />,
+    }));
+    vi.doMock('./lib/appReadiness', () => ({
+      useAppReadiness: () => ({
+        ready: true,
+        currentUser: {
+          role: 'admin',
+          vendorDetails: [
+            { vendorId: 'vendor-a', vendorName: 'Vendor A' },
+            { vendorId: 'vendor-b', vendorName: 'Vendor B' },
+          ],
+        },
+      }),
+    }));
+    const blockedBreakdown = {
+      sourceShopifyOrderId: '7693738639697',
+      sourceShopifyOrderNumber: '#1069',
+      customer: 'Shopify Customer',
+      createdAt: '2026-06-02T12:00:00.000Z',
+      allocations: [
+        {
+          originalVendorId: 'vendor-a',
+          assignedVendorId: 'vendor-a',
+          vendorId: 'vendor-a',
+          vendorName: 'Vendor A',
+          allocationOrderId: 'alloc-vendor-a-7693738639697',
+          status: 'On Hold',
+          allocationStatus: 'vendor_blocked',
+          cancellationReason: 'out_of_stock',
+          reassignmentRequired: true,
+          reassignmentCandidateVendorIds: [],
+          assignmentHistory: [],
+          fulfillmentActionState: 'awaiting_shipment',
+          fulfillmentActionAvailable: false,
+          fulfillmentStatus: 'Pending',
+          shippingStatus: 'Awaiting Shipment',
+          allocationTotal: 'TRY 1,000.00',
+          lineItems: [],
+          refundedItems: [],
+          refundTotal: 'TRY 0.00',
+          returnRecordCount: 0,
+          financeIntegrityAlerts: [],
+          transferSummary: null,
+          cancelRefundReview: null,
+        },
+      ],
+    };
+    const requestAdminCancelRefundReview = vi.fn().mockResolvedValue({
+      ...blockedBreakdown,
+      allocations: [
+        {
+          ...blockedBreakdown.allocations[0],
+          cancelRefundReview: {
+            status: 'PENDING_REVIEW',
+            reason: 'OUT_OF_STOCK',
+            note: 'No replacement vendor available. Customer will be contacted.',
+            requestedAt: '2026-06-02T12:30:00.000Z',
+            requestedByUserId: 'admin-1',
+          },
+        },
+      ],
+    });
+    vi.doMock('./features/orders/api', async () => {
+      const actual = await vi.importActual<typeof import('./features/orders/api')>('./features/orders/api');
+      return {
+        ...actual,
+        getAdminShopifyOrderBreakdown: vi.fn().mockResolvedValue(blockedBreakdown),
+        createParatikaHostedPaymentLink: vi.fn(),
+        transferAdminAllocationEconomics: vi.fn(),
+        requestAdminCancelRefundReview,
+      };
+    });
+    const { default: App } = await import('./App');
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/orders/7693738639697']}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel / Refund Review' }));
+    const dialog = screen.getByRole('dialog', { name: 'Cancel / Refund Review' });
+    const submit = within(dialog).getByRole('button', { name: 'Start review' });
+    expect(submit).toBeDisabled();
+
+    await userEvent.selectOptions(within(dialog).getByLabelText('Reason'), 'OUT_OF_STOCK');
+    await userEvent.type(within(dialog).getByLabelText('Review note'), 'No replacement vendor available. Customer will be contacted.');
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: /does not refund the customer or cancel the Shopify order/i }));
+    expect(submit).toBeEnabled();
+
+    await userEvent.click(submit);
+
+    await waitFor(() => expect(requestAdminCancelRefundReview).toHaveBeenCalledWith('7693738639697', 'alloc-vendor-a-7693738639697', {
+      reason: 'OUT_OF_STOCK',
+      note: 'No replacement vendor available. Customer will be contacted.',
+      confirmReview: true,
+    }));
+    expect(await screen.findByText('Allocation moved to cancel/refund review. Shopify and refund state were not changed.')).toBeInTheDocument();
+    const reviewSummary = await screen.findByLabelText('Cancel refund review summary');
+    expect(within(reviewSummary).getByText('Cancel / Refund Review Pending')).toBeInTheDocument();
+    expect(within(reviewSummary).getAllByText('OUT_OF_STOCK').length).toBeGreaterThan(0);
+    expect(within(reviewSummary).getByText('No replacement vendor available. Customer will be contacted.')).toBeInTheDocument();
+    expect(within(reviewSummary).getByText(/Jun 2, 2026/)).toBeInTheDocument();
+    expect(within(reviewSummary).getByText('admin-1')).toBeInTheDocument();
+  });
+
   it('does not show economic transfer action for non-blocked allocations', async () => {
     vi.doMock('./config/runtime', () => ({
       runtimeConfig: {

@@ -629,6 +629,11 @@ model VendorAllocation {
   allocationStatus                       AllocationStatus                 @default(ACTIVE)
   cancellationReason                     CancellationReason?
   reassignmentRequired                   Boolean                          @default(false)
+  cancelRefundReviewStatus               String?
+  cancelRefundReviewReason               String?
+  cancelRefundReviewNote                 String?
+  cancelRefundReviewRequestedAt          DateTime?
+  cancelRefundReviewRequestedByUserId    String?
   fulfillmentStatus                      String                           @default("Pending")
   shippingStatus                         String                           @default("Awaiting Shipment")
   trackingNumber                         String?
@@ -675,6 +680,7 @@ model VendorAllocation {
   @@index([createdAt])
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
+  @@index([cancelRefundReviewStatus])
 }
 
 model VendorIntegrationInvoiceEvent {

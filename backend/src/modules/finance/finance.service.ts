@@ -51,6 +51,10 @@ import {
   isLedgerVoided,
 } from './active-ledger-policy.service.js';
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
+import {
+  CANCEL_REFUND_REVIEW_HOLD_REASON,
+  hasBlockingCancelRefundReviewStatus,
+} from './cancel-refund-review-hold.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -85,6 +89,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'refund_offset_required_before_payout'
   | 'payout_amount_changed_since_batch_creation'
   | 'approved_return_hold_active'
+  | 'cancel_refund_review_active'
   | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
@@ -410,6 +415,7 @@ type FinanceSummaryCalculationEntry = {
   shippingCostProviderSnapshot?: string | null;
   vendorAllocation?: {
     allocationStatus?: string;
+    cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null } | null;
@@ -692,6 +698,7 @@ function getSettlementStatus(entry: {
   settlementDelayDaysSnapshot?: unknown;
   vendorAllocation?: {
     allocationStatus?: string;
+    cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
@@ -717,6 +724,9 @@ function getSettlementStatus(entry: {
     return 'partially_refunded';
   }
   if (payoutStatus === 'hold') {
+    return 'held';
+  }
+  if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
     return 'held';
   }
 
@@ -753,6 +763,7 @@ function buildSettlement(entry: {
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     allocationStatus?: string;
+    cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
@@ -768,6 +779,7 @@ function buildSettlement(entry: {
   const status = getSettlementStatus(entry);
   const review = getActiveSettlementReview(entry);
   const postApprovalRefundRisk = getPostApprovalRefundRisk(entry);
+  const cancelRefundReviewActive = hasBlockingCancelRefundReviewStatus(entry.vendorAllocation);
   const saleDelay = evaluateSaleSettlementDelay(entry);
   const payableAt =
     saleDelay.applies
@@ -784,6 +796,8 @@ function buildSettlement(entry: {
     held:
       postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : cancelRefundReviewActive
+          ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : entry.settlementHoldReason ?? 'Settlement is held for operator review.',
     settled: 'Marked settled in the operational ledger.',
     disputed: 'Settlement is disputed and requires operator review.',
@@ -800,6 +814,8 @@ function buildSettlement(entry: {
     holdReason:
       postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : cancelRefundReviewActive
+          ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : entry.settlementHoldReason ?? null,
     note: status === 'held' || status === 'disputed' ? noteByStatus[status] : reviewNote ?? noteByStatus[status],
     review,
@@ -822,6 +838,7 @@ function isEntryEligibleForPayoutBatch(entry: {
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   vendorAllocation?: {
     allocationStatus?: string;
+    cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
@@ -845,6 +862,9 @@ function isEntryEligibleForPayoutBatch(entry: {
     return false;
   }
   if (hasDraftSettlementReview(entry)) {
+    return false;
+  }
+  if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
     return false;
   }
   if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
@@ -1060,6 +1080,7 @@ export async function getVendorFinanceDashboard(
           select: {
             id: true,
             allocationStatus: true,
+            cancelRefundReviewStatus: true,
             fulfillmentStatus: true,
             shippingStatus: true,
             fulfillment: {
@@ -1217,6 +1238,7 @@ export async function getVendorFinanceDashboard(
             sourceShopifyOrderId: true,
             sourceShopifyOrderNumber: true,
             allocationStatus: true,
+            cancelRefundReviewStatus: true,
             fulfillmentStatus: true,
             shippingStatus: true,
             fulfillment: {
@@ -1662,6 +1684,7 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
       vendorAllocation: {
         select: {
           allocationStatus: true,
+          cancelRefundReviewStatus: true,
           fulfillmentStatus: true,
           shippingStatus: true,
           fulfillment: {
@@ -2555,11 +2578,24 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
+    const cancelRefundReviewActive = hasBlockingCancelRefundReviewStatus(transitionEntry.vendorAllocation);
+    if (cancelRefundReviewActive) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'cancel_refund_review_active',
+        reason: CANCEL_REFUND_REVIEW_HOLD_REASON,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          cancelRefundReviewStatus: transitionEntry.vendorAllocation?.cancelRefundReviewStatus ?? null,
+        },
+      }));
+    }
+
     if (
       (type !== 'sale' && type !== 'refund') ||
       allocationIsCancelled(transitionEntry) ||
       (payoutStatus === 'hold' && transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
-      !isEntryEligibleForPayoutBatch(transitionEntry)
+      (!cancelRefundReviewActive && !isEntryEligibleForPayoutBatch(transitionEntry))
     ) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_no_longer_eligible',

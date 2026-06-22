@@ -78,6 +78,12 @@ export type AdminResolutionNotePayload = {
   note: string;
 };
 
+export type AdminCancelRefundReviewPayload = {
+  reason: RejectOrderReason;
+  note: string;
+  confirmReview: true;
+};
+
 export type AdminEconomicTransferPayload = {
   toVendorId: string;
   reason: string;
@@ -183,6 +189,13 @@ type AdminOrderBreakdownDto = {
     allocationStatus: string;
     cancellationReason: string | null;
     reassignmentRequired: boolean;
+    cancelRefundReview?: {
+      status: string;
+      reason: string | null;
+      note: string | null;
+      requestedAt: string | null;
+      requestedByUserId: string | null;
+    } | null;
     fulfillmentStatus: string;
     shippingStatus: string;
     trackingNumber: string | null;
@@ -548,6 +561,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         returnRecordCount: allocation.returnRecords.length,
         financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
         transferSummary: allocation.transferSummary ?? null,
+        cancelRefundReview: allocation.cancelRefundReview ?? null,
       };
     }),
   };
@@ -639,6 +653,19 @@ export async function addAdminAllocationResolutionNote(
 ) {
   const response = await apiClient.post<AdminOrderBreakdownDto>(
     `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/resolution-note`,
+    payload,
+    { skipVendorContext: true },
+  );
+  return mapAdminOrderBreakdown(response);
+}
+
+export async function requestAdminCancelRefundReview(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminCancelRefundReviewPayload,
+) {
+  const response = await apiClient.post<AdminOrderBreakdownDto>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/cancel-refund-review`,
     payload,
     { skipVendorContext: true },
   );
