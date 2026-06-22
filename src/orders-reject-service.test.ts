@@ -1204,6 +1204,221 @@ describe('vendor order reject operational hold', () => {
     }));
   });
 
+  it('requires post-refund fulfillment check confirmation for open unsubmitted fulfillment order probe', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Post-refund Shopify fulfillment check confirmation is required');
+
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'FAILED',
+      }),
+    }));
+  });
+
+  it('executes open unsubmitted refund probe without fulfillmentOrderCancel and passes post-check when remainingQuantity becomes zero', async () => {
+    const fetchFulfillmentOrdersForCancellationClassification = vi.fn()
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 0,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      });
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification,
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Customer approved refund.',
+      confirmRefund: true,
+      confirmPostRefundFulfillmentCheck: true,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      refundLineItems: [
+        {
+          lineItemId: 'gid://shopify/LineItem/20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+    }));
+    expect(fetchFulfillmentOrdersForCancellationClassification).toHaveBeenCalledTimes(2);
+    expect(result.message).toBe('Shopify refund submitted. Fulfillment post-check passed. Waiting for refunds/create webhook.');
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'SHOPIFY_ACTION_PENDING',
+        mutationResponseJson: expect.objectContaining({
+          postRefundFulfillmentCheck: expect.objectContaining({
+            status: 'passed',
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('returns warning when open unsubmitted refund probe still shows fulfillable quantity after refundCreate', async () => {
+    const fetchFulfillmentOrdersForCancellationClassification = vi.fn()
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      });
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification,
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Customer approved refund.',
+      confirmRefund: true,
+      confirmPostRefundFulfillmentCheck: true,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(result.message).toBe('Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.');
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
+      where: { id: 'alloc-1088' },
+      data: { cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' },
+    });
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'SHOPIFY_ACTION_PENDING',
+        warningsJson: expect.arrayContaining([
+          'Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.',
+        ]),
+        mutationResponseJson: expect.objectContaining({
+          postRefundFulfillmentCheck: expect.objectContaining({
+            status: 'warning',
+            activeFulfillableLineItems: [
+              expect.objectContaining({
+                shopifyLineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+              }),
+            ],
+          }),
+        }),
+      }),
+    }));
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+  });
+
   it('does not call refundCreate when fulfillment order cancellation returns userErrors', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
       fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({

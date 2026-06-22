@@ -939,6 +939,7 @@ export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
 
 export type FulfillmentOrderCancellationClassification =
   | 'safe_to_cancel'
+  | 'open_unsubmitted_refund_requires_post_check'
   | 'unsafe_mixed_fulfillment_order'
   | 'already_closed_or_cancelled'
   | 'unsupported_request_status'
@@ -948,6 +949,7 @@ export type FulfillmentOrderCancellationClassification =
 export type FulfillmentOrderCancellationOverallClassification =
   | 'safe_to_cancel'
   | 'no_cancellation_needed'
+  | 'post_check_required'
   | 'blocked'
   | 'unknown';
 
@@ -1012,6 +1014,7 @@ export type ShopifyRefundExecutionPayload = {
   notifyCustomer: boolean;
   note: string;
   confirmRefund: true;
+  confirmPostRefundFulfillmentCheck?: boolean;
 };
 
 export type ShopifyRefundExecutionResult = {

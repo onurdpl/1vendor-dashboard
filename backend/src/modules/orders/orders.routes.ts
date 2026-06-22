@@ -301,6 +301,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
       notifyCustomer?: boolean | null;
       note?: string | null;
       confirmRefund?: boolean | null;
+      confirmPostRefundFulfillmentCheck?: boolean | null;
     };
   }>(
     '/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund',
@@ -323,6 +324,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             notifyCustomer: request.body?.notifyCustomer,
             note: request.body?.note,
             confirmRefund: request.body?.confirmRefund,
+            confirmPostRefundFulfillmentCheck: request.body?.confirmPostRefundFulfillmentCheck,
             actorUserId: request.authUser?.id ?? null,
             shopifyAdminService: createShopifyAdminService(env),
           }),

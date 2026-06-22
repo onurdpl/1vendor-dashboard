@@ -143,6 +143,7 @@ export type AdminShopifyRefundExecutionInput = {
   notifyCustomer?: boolean | null;
   note?: string | null;
   confirmRefund?: boolean | null;
+  confirmPostRefundFulfillmentCheck?: boolean | null;
   actorUserId?: string | null;
   shopifyAdminService: ShopifyRefundExecutionService;
 };
@@ -257,6 +258,72 @@ function sanitizeFulfillmentOrderClassifierError(error: unknown) {
     .trim();
 
   return sanitized.slice(0, 500) || fallback;
+}
+
+function normalizeShopifyIdentifier(value: string | null | undefined) {
+  const text = value?.trim() ?? '';
+  if (!text) {
+    return '';
+  }
+  return text.split('/').at(-1)?.trim().toLowerCase() || text.toLowerCase();
+}
+
+function isTerminalOrInactiveFulfillmentOrderStatus(status: string | null | undefined) {
+  return ['closed', 'cancelled', 'canceled', 'incomplete'].includes(normalizeStatus(status));
+}
+
+function buildPostRefundFulfillmentCheck(input: {
+  preCheck: FulfillmentOrderCancellationClassificationResult;
+  postCheck: ShopifyFulfillmentOrderCancellationClassificationResponse;
+  selectedLineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+  }>;
+}) {
+  const selectedLineItemIds = new Set(input.selectedLineItems.map((lineItem) => normalizeShopifyIdentifier(lineItem.lineItemId)).filter(Boolean));
+  const inspectedFulfillmentOrders = input.postCheck.fulfillmentOrders.map((fulfillmentOrder) => ({
+    fulfillmentOrderId: fulfillmentOrder.id,
+    status: fulfillmentOrder.status,
+    requestStatus: fulfillmentOrder.requestStatus,
+    supportedActions: fulfillmentOrder.supportedActions,
+    assignedLocationId: fulfillmentOrder.assignedLocationId,
+    lineItems: fulfillmentOrder.lineItems
+      .filter((lineItem) => selectedLineItemIds.has(normalizeShopifyIdentifier(lineItem.lineItemId)))
+      .map((lineItem) => ({
+        fulfillmentOrderLineItemId: lineItem.id,
+        shopifyLineItemId: lineItem.lineItemId,
+        remainingQuantity: lineItem.remainingQuantity,
+        totalQuantity: lineItem.totalQuantity,
+      })),
+  }));
+
+  const activeFulfillableLineItems = inspectedFulfillmentOrders.flatMap((fulfillmentOrder) => {
+    if (isTerminalOrInactiveFulfillmentOrderStatus(fulfillmentOrder.status)) {
+      return [];
+    }
+
+    return fulfillmentOrder.lineItems.filter((lineItem) => lineItem.remainingQuantity === null || lineItem.remainingQuantity > 0).map((lineItem) => ({
+      fulfillmentOrderId: fulfillmentOrder.fulfillmentOrderId,
+      status: fulfillmentOrder.status,
+      requestStatus: fulfillmentOrder.requestStatus,
+      shopifyLineItemId: lineItem.shopifyLineItemId,
+      remainingQuantity: lineItem.remainingQuantity,
+    }));
+  });
+
+  const passed = activeFulfillableLineItems.length === 0;
+  return {
+    status: passed ? 'passed' : 'warning',
+    message: passed
+      ? 'Refunded line items are no longer fulfillable in active Shopify fulfillment orders.'
+      : 'Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.',
+    preCheck: input.preCheck,
+    postCheck: {
+      source: input.postCheck.source,
+      fulfillmentOrders: inspectedFulfillmentOrders,
+    },
+    activeFulfillableLineItems,
+  };
 }
 
 function normalizeShopifyRefundExecutionNote(note: string | null | undefined) {
@@ -2492,6 +2559,14 @@ export async function executeShopifyRefundForAdminOrder(
       warnings,
     });
   }
+  const postRefundFulfillmentCheckRequired = fulfillmentOrderCancellation.overallClassification === 'post_check_required';
+  if (postRefundFulfillmentCheckRequired && input.confirmPostRefundFulfillmentCheck !== true) {
+    await failAttempt('Post-refund Shopify fulfillment check confirmation is required for open unsubmitted fulfillment orders.', {
+      fulfillmentOrderCancellation,
+      blockers: ['Post-refund Shopify fulfillment check confirmation is required for open unsubmitted fulfillment orders.'],
+      warnings,
+    });
+  }
 
   const safeFulfillmentOrders = fulfillmentOrderCancellation.affectedFulfillmentOrders.filter(
     (order) => order.classification === 'safe_to_cancel',
@@ -2614,13 +2689,55 @@ export async function executeShopifyRefundForAdminOrder(
     });
   }
 
+  let postRefundFulfillmentCheck: ReturnType<typeof buildPostRefundFulfillmentCheck> | {
+    status: 'warning';
+    message: string;
+    preCheck: FulfillmentOrderCancellationClassificationResult;
+    postCheck: null;
+    activeFulfillableLineItems: [];
+  } | null = null;
+  if (postRefundFulfillmentCheckRequired) {
+    try {
+      const postCheckFulfillmentOrders = await input.shopifyAdminService.fetchFulfillmentOrdersForCancellationClassification(
+        allocation.order.sourceShopifyOrderId,
+      );
+      postRefundFulfillmentCheck = buildPostRefundFulfillmentCheck({
+        preCheck: fulfillmentOrderCancellation,
+        postCheck: postCheckFulfillmentOrders,
+        selectedLineItems: refundLineItems.map((lineItem) => ({
+          lineItemId: lineItem.lineItemId,
+          quantity: lineItem.quantity,
+        })),
+      });
+    } catch (error) {
+      postRefundFulfillmentCheck = {
+        status: 'warning',
+        message: `Refund was submitted, but Shopify fulfillment post-check failed: ${sanitizeFulfillmentOrderClassifierError(error)}`,
+        preCheck: fulfillmentOrderCancellation,
+        postCheck: null,
+        activeFulfillableLineItems: [],
+      };
+    }
+    if (postRefundFulfillmentCheck.status !== 'passed') {
+      warnings.push(postRefundFulfillmentCheck.message);
+    }
+  }
+
+  const mutationResponse = postRefundFulfillmentCheck
+    ? {
+        refundCreate: refundCreateResult.rawResponse,
+        postRefundFulfillmentCheck,
+      }
+    : refundCreateResult.rawResponse;
+
   await markOutboundShopifyRefundAttemptSubmitted({
     attemptId: attempt.id,
     shopifyRefundId: refundCreateResult.refundId,
-    mutationResponse: refundCreateResult.rawResponse,
+    mutationResponse,
     fulfillmentOrderCancellation: {
       classification: fulfillmentOrderCancellation,
       cancellationResults: fulfillmentOrderCancellationResults,
+      postRefundFulfillmentCheck,
     },
     suggestedTransactions,
     blockers: [],
@@ -2641,7 +2758,11 @@ export async function executeShopifyRefundForAdminOrder(
     status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
     shopifyRefundId: refundCreateResult.refundId,
     attemptId: attempt.id,
-    message: 'Shopify refund submitted. Waiting for refunds/create webhook.',
+    message: postRefundFulfillmentCheck
+      ? postRefundFulfillmentCheck.status === 'passed'
+        ? 'Shopify refund submitted. Fulfillment post-check passed. Waiting for refunds/create webhook.'
+        : postRefundFulfillmentCheck.message
+      : 'Shopify refund submitted. Waiting for refunds/create webhook.',
   };
 }
 

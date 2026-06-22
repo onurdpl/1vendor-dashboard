@@ -223,4 +223,24 @@ describe('Shopify fulfillment order cancel classifier', () => {
     expect(result.affectedFulfillmentOrders[0]?.classification).toBe('unsupported_request_status');
     expect(result.blockers[0]).toContain('fulfillment_order_cancel_action_not_supported');
   });
+
+  it('marks open unsubmitted fulfillment orders as requiring post-refund verification when ownership and quantity are safe', () => {
+    const result = classifyFulfillmentOrderCancellationSafety({
+      allocationId: 'alloc-1',
+      selectedLineItems,
+      fulfillmentOrders: [
+        buildFulfillmentOrder({
+          status: 'OPEN',
+          requestStatus: 'UNSUBMITTED',
+          supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+        }),
+      ],
+      localLineItemOwners,
+    });
+
+    expect(result.overallClassification).toBe('post_check_required');
+    expect(result.blockers).toEqual([]);
+    expect(result.warnings[0]).toContain('Open unsubmitted fulfillment order');
+    expect(result.affectedFulfillmentOrders[0]?.classification).toBe('open_unsubmitted_refund_requires_post_check');
+  });
 });

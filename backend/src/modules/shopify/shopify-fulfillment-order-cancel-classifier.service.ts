@@ -6,6 +6,7 @@ import type {
 
 export type FulfillmentOrderCancellationClassification =
   | 'safe_to_cancel'
+  | 'open_unsubmitted_refund_requires_post_check'
   | 'unsafe_mixed_fulfillment_order'
   | 'already_closed_or_cancelled'
   | 'unsupported_request_status'
@@ -15,6 +16,7 @@ export type FulfillmentOrderCancellationClassification =
 export type FulfillmentOrderCancellationOverallClassification =
   | 'safe_to_cancel'
   | 'no_cancellation_needed'
+  | 'post_check_required'
   | 'blocked'
   | 'unknown';
 
@@ -107,6 +109,10 @@ function hasConfirmedCancellationCompatibleStatus(fulfillmentOrder: ShopifyFulfi
     CANCELLATION_COMPATIBLE_STATUSES.has(normalizeToken(fulfillmentOrder.status)) ||
     CANCELLATION_COMPATIBLE_STATUSES.has(normalizeToken(fulfillmentOrder.requestStatus))
   );
+}
+
+function isOpenUnsubmittedFulfillmentOrder(fulfillmentOrder: ShopifyFulfillmentOrderForCancellationClassification) {
+  return normalizeToken(fulfillmentOrder.status) === 'open' && normalizeToken(fulfillmentOrder.requestStatus) === 'unsubmitted';
 }
 
 function createUnrunClassification(reason: string, diagnostic?: {
@@ -245,6 +251,12 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
       }
     }
 
+    const isOpenUnsubmittedPostCheckCandidate =
+      classification === 'safe_to_cancel' &&
+      fulfillmentOrder.supportedActions !== null &&
+      !hasDirectCancelAction(fulfillmentOrder.supportedActions) &&
+      isOpenUnsubmittedFulfillmentOrder(fulfillmentOrder);
+
     if (fulfillmentOrder.supportedActions === null) {
       blockers.push(
         `fulfillment_order_supported_actions_missing: Fulfillment order ${fulfillmentOrder.id} is missing supportedActions from Shopify.`,
@@ -252,6 +264,11 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
       if (classification === 'safe_to_cancel') {
         classification = 'unknown';
       }
+    } else if (isOpenUnsubmittedPostCheckCandidate) {
+      classification = 'open_unsubmitted_refund_requires_post_check';
+      warnings.push(
+        `Open unsubmitted fulfillment order ${fulfillmentOrder.id}: refund requires post-check before operational closure.`,
+      );
     } else if (!hasDirectCancelAction(fulfillmentOrder.supportedActions)) {
       blockers.push(
         `fulfillment_order_cancel_action_not_supported: Fulfillment order ${fulfillmentOrder.id} does not advertise a direct cancel action.`,
@@ -268,7 +285,10 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
       if (classification === 'safe_to_cancel') {
         classification = 'unknown';
       }
-    } else if (!hasConfirmedCancellationCompatibleStatus(fulfillmentOrder)) {
+    } else if (
+      classification !== 'open_unsubmitted_refund_requires_post_check' &&
+      !hasConfirmedCancellationCompatibleStatus(fulfillmentOrder)
+    ) {
       blockers.push(
         `fulfillment_order_status_not_confirmed_cancelable: Fulfillment order ${fulfillmentOrder.id} status/requestStatus is not confirmed compatible with fulfillmentOrderCancel.`,
       );
@@ -308,6 +328,13 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
     )
   ) {
     overallClassification = 'blocked';
+  }
+  if (
+    overallClassification !== 'blocked' &&
+    overallClassification !== 'unknown' &&
+    activeAffectedOrders.some((order) => order.classification === 'open_unsubmitted_refund_requires_post_check')
+  ) {
+    overallClassification = 'post_check_required';
   }
   if (activeAffectedOrders.length > 0 && activeAffectedOrders.every((order) => order.classification === 'safe_to_cancel')) {
     overallClassification = 'safe_to_cancel';

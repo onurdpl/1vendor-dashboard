@@ -320,8 +320,16 @@ function hasExecutableShopifyRefundPreview(preview: ShopifyRefundPreviewResult |
 
   return (
     hasMappedTransactions &&
-    (fulfillmentOrderState === 'safe_to_cancel' || fulfillmentOrderState === 'no_cancellation_needed')
+    (
+      fulfillmentOrderState === 'safe_to_cancel' ||
+      fulfillmentOrderState === 'no_cancellation_needed' ||
+      fulfillmentOrderState === 'post_check_required'
+    )
   );
+}
+
+function requiresPostRefundFulfillmentCheck(preview: ShopifyRefundPreviewResult | undefined) {
+  return normalizeStateToken(preview?.fulfillmentOrderCancellation.overallClassification) === 'post_check_required';
 }
 
 function canShowShopifyRefundExecutionAction(
@@ -366,6 +374,7 @@ export function AdminShopifyOrderPage() {
   const [shopifyRefundNotifyCustomer, setShopifyRefundNotifyCustomer] = useState(false);
   const [shopifyRefundPaymentConfirmed, setShopifyRefundPaymentConfirmed] = useState(false);
   const [shopifyRefundWebhookConfirmed, setShopifyRefundWebhookConfirmed] = useState(false);
+  const [shopifyRefundPostCheckConfirmed, setShopifyRefundPostCheckConfirmed] = useState(false);
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
@@ -713,6 +722,10 @@ export function AdminShopifyOrderPage() {
       showFeedback('Both refund confirmations are required.', 'error');
       return;
     }
+    if (requiresPostRefundFulfillmentCheck(shopifyRefundAction.preview) && !shopifyRefundPostCheckConfirmed) {
+      showFeedback('Post-refund Shopify fulfillment check confirmation is required.', 'error');
+      return;
+    }
     if (!canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, shopifyRefundAction.preview)) {
       showFeedback('Shopify refund execution is blocked by the current preview or allocation state.', 'error');
       return;
@@ -729,6 +742,9 @@ export function AdminShopifyOrderPage() {
           notifyCustomer: shopifyRefundNotifyCustomer,
           note,
           confirmRefund: true,
+          confirmPostRefundFulfillmentCheck: requiresPostRefundFulfillmentCheck(shopifyRefundAction.preview)
+            ? shopifyRefundPostCheckConfirmed
+            : undefined,
         },
       });
 
@@ -742,6 +758,8 @@ export function AdminShopifyOrderPage() {
       setShopifyRefundNotifyCustomer(false);
       setShopifyRefundPaymentConfirmed(false);
       setShopifyRefundWebhookConfirmed(false);
+      setShopifyRefundPostCheckConfirmed(false);
+      setShopifyRefundPostCheckConfirmed(false);
       await refetch();
       showFeedback(result.message || 'Shopify refund submitted. Waiting for refunds/create webhook.', 'success');
     } catch {
@@ -1371,6 +1389,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundNotifyCustomer(false);
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
+                      setShopifyRefundPostCheckConfirmed(false);
                     }}
                   >
                     Refund in Shopify
@@ -1434,6 +1453,11 @@ export function AdminShopifyOrderPage() {
                   ) : null}
                   <div className="refund-preview-message">
                     <strong>Fulfillment order safety</strong>
+                    {requiresPostRefundFulfillmentCheck(shopifyRefundPreview) ? (
+                      <p className="page-description">
+                        Open unsubmitted fulfillment order: refund requires post-check.
+                      </p>
+                    ) : null}
                     <div className="compact-meta-grid">
                       <div className="meta-item">
                         <span>Classification</span>
@@ -2020,11 +2044,13 @@ export function AdminShopifyOrderPage() {
         const note = shopifyRefundNote.trim();
         const preview = shopifyRefundAction.preview;
         const transactions = preview.suggestedRefund?.suggestedTransactions ?? [];
+        const postCheckRequired = requiresPostRefundFulfillmentCheck(preview);
         const refundReady = Boolean(
           note &&
             note.length <= 1000 &&
             shopifyRefundPaymentConfirmed &&
             shopifyRefundWebhookConfirmed &&
+            (!postCheckRequired || shopifyRefundPostCheckConfirmed) &&
             canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, preview) &&
             !shopifyRefundExecutionMutation.isPending,
         );
@@ -2054,6 +2080,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundNotifyCustomer(false);
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
+                      setShopifyRefundPostCheckConfirmed(false);
                     }
                   }}
                   aria-label="Close Shopify refund form"
@@ -2065,6 +2092,11 @@ export function AdminShopifyOrderPage() {
                 <p className="support-context-note economic-transfer-warning">
                   This action will call Shopify refundCreate and may cancel affected Shopify fulfillment orders first. It triggers a real payment refund in Shopify. Sporgym finance records are not created immediately; finance updates only after the Shopify refunds/create webhook is received and processed. Do not proceed unless the customer has approved the refund or policy allows it.
                 </p>
+                {postCheckRequired ? (
+                  <p className="support-context-note economic-transfer-warning">
+                    This refund uses a controlled probe for an open unsubmitted Shopify fulfillment order. After Shopify refundCreate, Sporgym will verify that the refunded line is no longer fulfillable.
+                  </p>
+                ) : null}
 
                 <section className="shopify-refund-preview-card" aria-label="Shopify refund execution summary">
                   <div className="economic-transfer-summary-header">
@@ -2160,6 +2192,17 @@ export function AdminShopifyOrderPage() {
                   />
                   <span>I understand Sporgym finance updates only after the refunds/create webhook.</span>
                 </label>
+                {postCheckRequired ? (
+                  <label className="checkbox-field economic-transfer-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={shopifyRefundPostCheckConfirmed}
+                      onChange={(event) => setShopifyRefundPostCheckConfirmed(event.target.checked)}
+                      disabled={shopifyRefundExecutionMutation.isPending}
+                    />
+                    <span>I understand Sporgym will verify Shopify fulfillment state after refundCreate.</span>
+                  </label>
+                ) : null}
                 <div className="support-modal-actions">
                   <button
                     type="button"
@@ -2170,6 +2213,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundNotifyCustomer(false);
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
+                      setShopifyRefundPostCheckConfirmed(false);
                     }}
                     disabled={shopifyRefundExecutionMutation.isPending}
                   >
