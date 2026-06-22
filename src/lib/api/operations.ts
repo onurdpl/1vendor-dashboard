@@ -25,6 +25,7 @@ function buildOrderQueueItems(): OperationsQueueItem[] {
       vendorName: vendorNameMap.get(order.assignedVendorId),
       relatedOrderId: order.id,
       relatedShopifyOrderId: shopifyOrderId,
+      relatedShopifyOrderNumber: String(order.sourceShopifyOrderNumber),
       actionTo: `/admin/orders/${shopifyOrderId}`,
       createdAt,
     };
@@ -50,13 +51,13 @@ function buildOrderQueueItems(): OperationsQueueItem[] {
       items.push({
         id: `queue-blocked-${order.id}`,
         type: 'vendor_blocked',
-        severity: 'high',
-        title: `Vendor blocked fulfillment on ${order.id}`,
-        description: order.cancellationReason ?? 'Vendor reported a fulfillment blocker.',
-        status: order.allocationStatus,
-        actionLabel: 'Review blocked allocation',
-        ...base,
-      });
+      severity: 'high',
+      title: 'Vendor rejected allocation',
+      description: order.cancellationReason ? `Reason: ${order.cancellationReason}.` : 'Vendor reported a fulfillment blocker.',
+      status: order.allocationStatus,
+      actionLabel: 'Review allocation',
+      ...base,
+    });
     }
 
     if (order.fulfillmentActionState === 'awaiting_shipment' && order.allocationStatus === 'active') {
@@ -116,6 +117,8 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
     type:
       item.type === 'refund_attention'
         ? 'return'
+        : item.type === 'vendor_blocked'
+          ? 'vendor_blocked'
         : item.type === 'finance_integrity_alert'
           ? 'finance'
           : item.type === 'automation_action'
@@ -125,7 +128,9 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
     vendorId: item.vendorId,
     vendorName: item.vendorName ?? item.vendorId,
     objectType: item.type,
-    objectReference: item.relatedShopifyOrderId ? `Order ${item.relatedShopifyOrderId}` : item.relatedOrderId ?? item.id,
+    objectReference: item.relatedShopifyOrderNumber
+      ? `Order ${String(item.relatedShopifyOrderNumber).startsWith('#') ? item.relatedShopifyOrderNumber : `#${item.relatedShopifyOrderNumber}`}`
+      : item.relatedShopifyOrderId ? `Order ${item.relatedShopifyOrderId}` : item.relatedOrderId ?? item.id,
     objectId: item.relatedOrderId ?? null,
     status: item.status,
     ageHours: Math.max(1, Math.round((Date.now() - new Date(item.createdAt).getTime()) / (60 * 60 * 1000))),
@@ -140,13 +145,18 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
 function mapAttentionItemToRecommendation(item: OperationsAttentionItem): OperationsRecommendation {
   const isReturn = item.type === 'return';
   const isShipment = item.type === 'shipment';
+  const isVendorBlocked = item.type === 'vendor_blocked';
   return {
     id: `recommendation-${item.id}`,
-    type: isReturn ? 'return_review' : isShipment ? 'shipment_tracking' : 'automation_review',
+    type: isVendorBlocked ? 'vendor_blocked_review' : isReturn ? 'return_review' : isShipment ? 'shipment_tracking' : 'automation_review',
     severity: item.severity,
-    title: isReturn ? 'Review unresolved return' : isShipment ? 'Review shipment tracking' : 'Review operational suggestion',
-    description: `${item.objectReference} has an active operational signal.`,
-    recommendedAction: isReturn ? 'Open the return and review next action' : isShipment ? 'Open the order and verify shipment tracking' : 'Review suggestion',
+    title: isVendorBlocked ? 'Vendor rejected allocation' : isReturn ? 'Review unresolved return' : isShipment ? 'Review shipment tracking' : 'Review operational suggestion',
+    description: isVendorBlocked
+      ? `${item.vendorName} rejected ${item.objectReference}. ${item.description}`.trim()
+      : `${item.objectReference} has an active operational signal.`,
+    recommendedAction: isVendorBlocked
+      ? 'Review transfer, cancel/refund, or return to vendor.'
+      : isReturn ? 'Open the return and review next action' : isShipment ? 'Open the order and verify shipment tracking' : 'Review suggestion',
     relatedObjectType: item.objectType,
     relatedObjectId: item.objectId,
     vendor: {
@@ -225,10 +235,19 @@ export function getMockAdminOperationsAttention(): OperationsAttentionDashboard 
       shipmentIssues: queue.filter((item) => item.type === 'shipment').length,
       returnBacklog: queue.filter((item) => item.type === 'return').length,
       financeReview: queue.filter((item) => item.type === 'finance').length,
+      vendorBlocked: queue.filter((item) => item.type === 'vendor_blocked').length,
       vendorRisks: vendorRisks.length,
     },
     queue,
     sections: [
+      {
+        key: 'vendor_blocked',
+        title: 'Vendor blocked allocations',
+        count: queue.filter((item) => item.type === 'vendor_blocked').length,
+        critical: queue.filter((item) => item.type === 'vendor_blocked' && item.severity === 'critical').length,
+        warning: queue.filter((item) => item.type === 'vendor_blocked' && item.severity === 'warning').length,
+        items: queue.filter((item) => item.type === 'vendor_blocked').slice(0, 5),
+      },
       {
         key: 'support',
         title: 'Support attention',

@@ -21,6 +21,15 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     count: vi.fn(),
   },
+  supportTicket: {
+    findMany: vi.fn(),
+  },
+  shipmentExecution: {
+    findMany: vi.fn(),
+  },
+  financeLedgerEntry: {
+    findMany: vi.fn(),
+  },
 }));
 const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const generateAutomationActionsForSignalsMock = vi.hoisted(() => vi.fn());
@@ -51,6 +60,7 @@ const {
   generateAdminOperationsAutomationActions,
   generateAdminOperationsSignals,
   getAdminOperationsQueue,
+  getAdminOperationsAttentionCenter,
   getAdminOperationsQueueSummary,
 } = await import('../backend/src/modules/operations/operations.service.js');
 
@@ -71,6 +81,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     refundRecords: [],
     order: {
       sourceShopifyOrderId: '7709129507153',
+      sourceShopifyOrderNumber: '#1091',
     },
     ...overrides,
   };
@@ -123,6 +134,9 @@ describe('admin operations summary counts', () => {
     prismaMock.operationalSignal.groupBy.mockReset();
     prismaMock.automationAction.findMany.mockReset();
     prismaMock.automationAction.count.mockReset();
+    prismaMock.supportTicket.findMany.mockReset();
+    prismaMock.shipmentExecution.findMany.mockReset();
+    prismaMock.financeLedgerEntry.findMany.mockReset();
     evaluateOperationalSignalsMock.mockReset();
     generateAutomationActionsForSignalsMock.mockReset();
 
@@ -132,6 +146,9 @@ describe('admin operations summary counts', () => {
     prismaMock.financeIntegrityAlert.count.mockResolvedValue(0);
     prismaMock.operationalSignal.findMany.mockResolvedValue([]);
     prismaMock.automationAction.findMany.mockResolvedValue([]);
+    prismaMock.supportTicket.findMany.mockResolvedValue([]);
+    prismaMock.shipmentExecution.findMany.mockResolvedValue([]);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
     evaluateOperationalSignalsMock.mockResolvedValue([]);
     generateAutomationActionsForSignalsMock.mockResolvedValue([]);
   });
@@ -239,7 +256,11 @@ describe('admin operations summary counts', () => {
       expect.objectContaining({
         id: 'op-blocked-alloc-blocked',
         type: 'vendor_blocked',
-        description: 'Vendor Vendor 1 marked allocation alloc-blocked as blocked. Reason: OUT_OF_STOCK.',
+        title: 'Vendor rejected allocation',
+        description: 'Vendor 1 rejected Order #1091. Reason: OUT_OF_STOCK. Reassignment required: yes.',
+        actionLabel: 'Review allocation',
+        relatedShopifyOrderNumber: '#1091',
+        destinationPath: '/admin/orders/7709129507153',
       }),
     ]);
     expect(dashboard.items).not.toEqual(
@@ -269,9 +290,71 @@ describe('admin operations summary counts', () => {
       expect.objectContaining({
         id: 'op-blocked-alloc-blocked-no-reason',
         type: 'vendor_blocked',
-        description: 'Vendor Vendor 1 marked allocation alloc-blocked-no-reason as blocked.',
+        description: 'Vendor 1 rejected Order #1091. Reassignment required: yes.',
       }),
     ]);
+  });
+
+  it('preserves vendor-blocked allocations as first-class attention items and recommendations', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-1091',
+        assignedVendorId: 'sporjinal',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        assignedVendor: {
+          name: 'Sporjinal',
+        },
+        order: {
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+        },
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+
+    expect(dashboard.summary.vendorBlocked).toBe(1);
+    expect(dashboard.queue).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-1091',
+        type: 'vendor_blocked',
+        title: 'Vendor rejected allocation',
+        objectReference: 'Order #1091',
+        description: 'Sporjinal rejected Order #1091. Reason: OUT_OF_STOCK. Reassignment required: yes.',
+        recommendedAction: 'Review allocation',
+        destinationPath: '/admin/orders/7817723773265',
+        reassignmentRequired: true,
+      }),
+    ]);
+    expect(dashboard.sections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'vendor_blocked',
+          title: 'Vendor blocked allocations',
+          count: 1,
+          items: [
+            expect.objectContaining({
+              type: 'vendor_blocked',
+              objectReference: 'Order #1091',
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(dashboard.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'vendor_blocked_review',
+          title: 'Vendor rejected allocation',
+          description: 'Sporjinal rejected Order #1091. Reason: OUT_OF_STOCK.',
+          recommendedAction: 'Review transfer, cancel/refund, or return to vendor.',
+          deepLink: '/admin/orders/7817723773265',
+        }),
+      ]),
+    );
   });
 
   it('excludes vendor-blocked allocations from pendingReassignment summary count', async () => {

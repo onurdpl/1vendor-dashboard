@@ -13,12 +13,14 @@ type OperationsResponseDto = {
     vendorName: string;
     relatedOrderId: string | null;
     relatedShopifyOrderId: string | null;
+    relatedShopifyOrderNumber?: string | null;
     relatedReturnId: string | null;
     relatedRefundId: string | null;
     status: string;
     createdAt: string;
     actionLabel: string;
     destinationPath: string | null;
+    reassignmentRequired?: boolean;
   }>;
 };
 
@@ -80,10 +82,12 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
       vendorName: item.vendorName,
       relatedOrderId: item.relatedOrderId ?? undefined,
       relatedShopifyOrderId: item.relatedShopifyOrderId ?? undefined,
+      relatedShopifyOrderNumber: item.relatedShopifyOrderNumber ?? undefined,
       status: item.status,
       createdAt: item.createdAt,
       actionLabel: item.actionLabel,
       actionTo: item.destinationPath ?? undefined,
+      reassignmentRequired: item.reassignmentRequired,
     })),
   };
 }

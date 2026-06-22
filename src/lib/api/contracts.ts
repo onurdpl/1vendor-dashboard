@@ -2520,10 +2520,12 @@ export type OperationsQueueItem = {
   vendorName?: string;
   relatedOrderId?: string;
   relatedShopifyOrderId?: string;
+  relatedShopifyOrderNumber?: string;
   status: string;
   createdAt: string;
   actionLabel?: string;
   actionTo?: string;
+  reassignmentRequired?: boolean;
 };
 
 export type OperationsQueueSummary = {
@@ -2552,6 +2554,7 @@ export type OperationsAttentionType =
   | 'shipment'
   | 'return'
   | 'finance'
+  | 'vendor_blocked'
   | 'vendor_risk'
   | 'operational_signal'
   | 'automation';
@@ -2572,10 +2575,11 @@ export type OperationsAttentionItem = {
   recommendedAction: string;
   destinationPath: string | null;
   createdAt: string;
+  reassignmentRequired?: boolean;
 };
 
 export type OperationsAttentionSection = {
-  key: 'support' | 'shipment' | 'return' | 'finance';
+  key: 'vendor_blocked' | 'support' | 'shipment' | 'return' | 'finance';
   title: string;
   count: number;
   critical: number;
@@ -2584,6 +2588,7 @@ export type OperationsAttentionSection = {
 };
 
 export type OperationsRecommendationType =
+  | 'vendor_blocked_review'
   | 'support_escalation'
   | 'support_assignment'
   | 'shipment_tracking'
@@ -2651,6 +2656,7 @@ export type OperationsAttentionDashboard = {
     shipmentIssues: number;
     returnBacklog: number;
     financeReview: number;
+    vendorBlocked: number;
     vendorRisks: number;
   };
   queue: OperationsAttentionItem[];

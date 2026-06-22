@@ -95,6 +95,19 @@ function getAttentionSection(
   };
 }
 
+function formatOrderReference(orderNumber?: string | null, sourceOrderId?: string | null) {
+  const trimmedOrderNumber = orderNumber?.trim();
+  if (trimmedOrderNumber) {
+    return `Order ${trimmedOrderNumber.startsWith('#') ? trimmedOrderNumber : `#${trimmedOrderNumber}`}`;
+  }
+  return sourceOrderId ? `Order ${sourceOrderId}` : null;
+}
+
+function readVendorBlockedReason(description: string) {
+  const match = description.match(/Reason:\s*([A-Z0-9_ -]+)\.?/i);
+  return match?.[1]?.trim().replace(/\.$/, '') ?? null;
+}
+
 export function buildVendorRiskSummaries(items: OperationsAttentionItemDto[]): OperationsVendorRiskDto[] {
   const grouped = new Map<string, OperationsAttentionItemDto[]>();
   for (const item of items) {
@@ -171,6 +184,17 @@ function getRecommendationForAttentionItem(item: OperationsAttentionItemDto): Pi
       title: 'Assign support ownership',
       description: `${item.objectReference} is active and needs a clear owner.`,
       recommendedAction: 'Assign an operator and respond to the vendor',
+      vendorVisible: false,
+    };
+  }
+
+  if (item.type === 'vendor_blocked') {
+    const reason = readVendorBlockedReason(item.description);
+    return {
+      type: 'vendor_blocked_review',
+      title: 'Vendor rejected allocation',
+      description: `${item.vendorName} rejected ${item.objectReference}.${reason ? ` Reason: ${reason}.` : ''}`,
+      recommendedAction: 'Review transfer, cancel/refund, or return to vendor.',
       vendorVisible: false,
     };
   }
@@ -662,6 +686,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       order: {
         select: {
           sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
         },
       },
     },
@@ -678,28 +703,32 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const vendorName = allocation.assignedVendor.name;
     const orderId = allocation.id;
     const shopifyOrderId = allocation.order.sourceShopifyOrderId;
+    const shopifyOrderNumber = allocation.order.sourceShopifyOrderNumber;
+    const orderReference = formatOrderReference(shopifyOrderNumber, shopifyOrderId) ?? `allocation ${allocation.id}`;
 
     if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED) {
       const description = allocation.cancellationReason
-        ? `Vendor ${vendorName} marked allocation ${allocation.id} as blocked. Reason: ${allocation.cancellationReason}.`
-        : `Vendor ${vendorName} marked allocation ${allocation.id} as blocked.`;
+        ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
+        : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
 
       items.push({
         id: `op-blocked-${allocation.id}`,
         type: 'vendor_blocked',
         severity: 'warning',
-        title: 'Vendor blocked allocation',
+        title: 'Vendor rejected allocation',
         description,
         vendorId: allocation.assignedVendorId,
         vendorName,
         relatedOrderId: orderId,
         relatedShopifyOrderId: shopifyOrderId,
+        relatedShopifyOrderNumber: shopifyOrderNumber,
         relatedReturnId: allocation.returnRecords[0]?.id ?? null,
         relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
         status: allocation.allocationStatus.toLowerCase(),
         createdAt: allocation.updatedAt.toISOString(),
-        actionLabel: 'Investigate blocker',
+        actionLabel: 'Review allocation',
         destinationPath: `/admin/orders/${shopifyOrderId}`,
+        reassignmentRequired: allocation.reassignmentRequired,
       });
     } else if (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT) {
       items.push({
@@ -712,6 +741,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         vendorName,
         relatedOrderId: orderId,
         relatedShopifyOrderId: shopifyOrderId,
+        relatedShopifyOrderNumber: shopifyOrderNumber,
         relatedReturnId: allocation.returnRecords[0]?.id ?? null,
         relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
         status: allocation.allocationStatus.toLowerCase(),
@@ -732,6 +762,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         vendorName,
         relatedOrderId: orderId,
         relatedShopifyOrderId: shopifyOrderId,
+        relatedShopifyOrderNumber: shopifyOrderNumber,
         relatedReturnId: null,
         relatedRefundId: null,
         status: allocation.shippingStatus.toLowerCase(),
@@ -944,7 +975,9 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
   const attentionItems: OperationsAttentionItemDto[] = queueDashboard.items.map((item) => ({
     id: item.id,
     type:
-      item.type === 'awaiting_shipment'
+      item.type === 'vendor_blocked'
+        ? 'vendor_blocked'
+        : item.type === 'awaiting_shipment'
         ? 'shipment'
         : item.type === 'refund_attention'
           ? 'return'
@@ -959,7 +992,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     vendorId: item.vendorId,
     vendorName: item.vendorName,
     objectType: item.type,
-    objectReference: item.relatedShopifyOrderId ? `Order ${item.relatedShopifyOrderId}` : item.relatedOrderId ?? item.id,
+    objectReference: formatOrderReference(item.relatedShopifyOrderNumber, item.relatedShopifyOrderId) ?? item.relatedOrderId ?? item.id,
     objectId: item.relatedOrderId,
     status: item.status,
     ageHours: hoursSince(new Date(item.createdAt), now),
@@ -968,6 +1001,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     recommendedAction: item.actionLabel,
     destinationPath: item.destinationPath,
     createdAt: item.createdAt,
+    reassignmentRequired: item.reassignmentRequired,
   }));
 
   const supportTickets = await prisma.supportTicket.findMany({
@@ -1196,10 +1230,12 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       shipmentIssues: queue.filter((item) => item.type === 'shipment').length,
       returnBacklog: queue.filter((item) => item.type === 'return').length,
       financeReview: queue.filter((item) => item.type === 'finance').length,
+      vendorBlocked: queue.filter((item) => item.type === 'vendor_blocked').length,
       vendorRisks: vendorRisks.filter((vendor) => vendor.riskLevel !== 'info').length,
     },
     queue: queue.slice(0, 100),
     sections: [
+      getAttentionSection('vendor_blocked', 'Vendor blocked allocations', queue),
       getAttentionSection('support', 'Support attention', queue),
       getAttentionSection('shipment', 'Shipment attention', queue),
       getAttentionSection('return', 'Return backlog', queue),

@@ -47,6 +47,9 @@ function formatAge(hours: number) {
 }
 
 function formatType(value: OperationsAttentionType) {
+  if (value === 'vendor_blocked') {
+    return 'Vendor blocked';
+  }
   if (value === 'vendor_risk') {
     return 'Vendor risk';
   }
@@ -105,6 +108,7 @@ export function AdminOperationsQueuePage() {
       shipmentIssues: 0,
       returnBacklog: 0,
       financeReview: 0,
+      vendorBlocked: 0,
     },
     recommendations: [],
     queue: [],
@@ -140,6 +144,7 @@ export function AdminOperationsQueuePage() {
         <KPIStatCard label="Critical" value={dataView.summary.critical} detail="Highest priority" tone="danger" />
         <KPIStatCard label="Overdue support" value={dataView.summary.overdueSupport} detail="SLA breached" tone="warning" />
         <KPIStatCard label="Shipment issues" value={dataView.summary.shipmentIssues} detail="Tracking or carrier state" tone="attention" />
+        <KPIStatCard label="Vendor blocked" value={dataView.summary.vendorBlocked} detail="Rejected allocations" tone="warning" />
         <KPIStatCard label="Return backlog" value={dataView.summary.returnBacklog} detail="Waiting review" tone="info" />
         <KPIStatCard label="Finance review" value={dataView.summary.financeReview} detail="Payout or invoice attention" tone="warning" />
       </div>
