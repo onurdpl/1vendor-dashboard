@@ -274,6 +274,14 @@ export type ShopifyFulfillmentOrderCancellationClassificationResponse = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type CancelFulfillmentOrderResult = {
+  fulfillmentOrderId: string | null;
+  fulfillmentOrderStatus: string | null;
+  replacementFulfillmentOrderId: string | null;
+  replacementFulfillmentOrderStatus: string | null;
+  userErrors: ShopifyUserError[];
+};
+
 export type CreateFulfillmentTrackingInput = {
   allocationId: string;
   shopifyOrderId: string;

@@ -156,4 +156,146 @@ describe('Shopify fulfillment order lookup', () => {
       },
     ]);
   });
+
+  it('converts numeric fulfillment order ids before calling fulfillmentOrderCancel', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            fulfillmentOrderCancel: {
+              fulfillmentOrder: {
+                id: 'gid://shopify/FulfillmentOrder/998877',
+                status: 'CLOSED',
+              },
+              replacementFulfillmentOrder: {
+                id: 'gid://shopify/FulfillmentOrder/998878',
+                status: 'OPEN',
+              },
+              userErrors: [],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    const result = await service.cancelFulfillmentOrder({ fulfillmentOrderId: '998877' });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      query: string;
+      variables: {
+        id: string;
+      };
+    };
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://demo.myshopify.com/admin/api/2026-01/graphql.json',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(requestBody.variables.id).toBe('gid://shopify/FulfillmentOrder/998877');
+    expect(requestBody.query).toContain('fulfillmentOrderCancel');
+    expect(requestBody.query).not.toContain('refundCreate');
+    expect(requestBody.query).not.toContain('orderCancel');
+    expect(result).toEqual({
+      fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/998877',
+      fulfillmentOrderStatus: 'CLOSED',
+      replacementFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/998878',
+      replacementFulfillmentOrderStatus: 'OPEN',
+      userErrors: [],
+    });
+  });
+
+  it('uses fulfillment order GIDs as-is when calling fulfillmentOrderCancel', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            fulfillmentOrderCancel: {
+              fulfillmentOrder: null,
+              replacementFulfillmentOrder: null,
+              userErrors: [],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    await service.cancelFulfillmentOrder({ fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/998877' });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      variables: {
+        id: string;
+      };
+    };
+    expect(requestBody.variables.id).toBe('gid://shopify/FulfillmentOrder/998877');
+  });
+
+  it('returns Shopify fulfillment order cancel userErrors without throwing', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            fulfillmentOrderCancel: {
+              fulfillmentOrder: null,
+              replacementFulfillmentOrder: null,
+              userErrors: [
+                {
+                  field: ['id'],
+                  message: 'Fulfillment order cannot be cancelled.',
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    const result = await service.cancelFulfillmentOrder({ fulfillmentOrderId: '998877' });
+
+    expect(result).toEqual({
+      fulfillmentOrderId: null,
+      fulfillmentOrderStatus: null,
+      replacementFulfillmentOrderId: null,
+      replacementFulfillmentOrderStatus: null,
+      userErrors: [
+        {
+          field: ['id'],
+          message: 'Fulfillment order cannot be cancelled.',
+        },
+      ],
+    });
+  });
+
+  it('throws for Shopify fulfillment order cancel transport errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('Unauthorized', { status: 401 }));
+    const service = createShopifyAdminService(env);
+
+    await expect(service.cancelFulfillmentOrder({ fulfillmentOrderId: '998877' })).rejects.toThrow(
+      'Shopify fulfillment order cancel failed with status 401.',
+    );
+  });
+
+  it('throws for Shopify fulfillment order cancel GraphQL structural errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          errors: [
+            {
+              message: 'Field fulfillmentOrderCancel does not exist.',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    await expect(service.cancelFulfillmentOrder({ fulfillmentOrderId: '998877' })).rejects.toThrow(
+      'Shopify fulfillment order cancel returned GraphQL errors: Field fulfillmentOrderCancel does not exist.',
+    );
+  });
 });

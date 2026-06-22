@@ -1,6 +1,7 @@
 import type { AppEnv } from '../../config/env.js';
 import { Buffer } from 'node:buffer';
 import type {
+  CancelFulfillmentOrderResult,
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
@@ -308,6 +309,23 @@ type ShopifyReturnCancelMutationResponse = {
     return?: {
       id: string;
       status: string;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
+  } | null;
+};
+
+type FulfillmentOrderCancelMutationResponse = {
+  fulfillmentOrderCancel?: {
+    fulfillmentOrder?: {
+      id: string;
+      status: string | null;
+    } | null;
+    replacementFulfillmentOrder?: {
+      id: string;
+      status: string | null;
     } | null;
     userErrors?: Array<{
       field?: string[] | null;
@@ -1696,6 +1714,65 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function cancelFulfillmentOrder(input: { fulfillmentOrderId: string }): Promise<CancelFulfillmentOrderResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify fulfillment order cancel is not configured.');
+    }
+
+    const fulfillmentOrderGid = toShopifyGid('FulfillmentOrder', input.fulfillmentOrderId);
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation FulfillmentOrderCancel($id: ID!) {
+              fulfillmentOrderCancel(id: $id) {
+                fulfillmentOrder {
+                  id
+                  status
+                }
+                replacementFulfillmentOrder {
+                  id
+                  status
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
+          variables: { id: fulfillmentOrderGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify fulfillment order cancel failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<FulfillmentOrderCancelMutationResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify fulfillment order cancel returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const payload = json.data?.fulfillmentOrderCancel;
+    return {
+      fulfillmentOrderId: payload?.fulfillmentOrder?.id ?? null,
+      fulfillmentOrderStatus: payload?.fulfillmentOrder?.status ?? null,
+      replacementFulfillmentOrderId: payload?.replacementFulfillmentOrder?.id ?? null,
+      replacementFulfillmentOrderStatus: payload?.replacementFulfillmentOrder?.status ?? null,
+      userErrors: normalizeUserErrors(payload?.userErrors),
+    };
+  }
+
   function getShopifyIdentifierCandidates(value: string | null | undefined) {
     const text = value?.trim();
     if (!text) {
@@ -2639,6 +2716,7 @@ export function createShopifyAdminService(env: AppEnv) {
     syncReturnShipping,
     fetchFulfillmentOrders,
     fetchFulfillmentOrdersForCancellationClassification,
+    cancelFulfillmentOrder,
     fetchOrderFulfillmentState,
     createFulfillmentTracking,
   };
