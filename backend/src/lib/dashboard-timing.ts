@@ -69,7 +69,6 @@ function classifyExternalProvider(url: URL) {
   const path = url.pathname.toLowerCase();
 
   if (host.includes('myshopify.com') || path.includes('/admin/api/')) return 'shopify';
-  if (host.includes('paratika')) return 'paratika';
   if (host.includes('navlungo')) return 'navlungo';
   if (host.includes('kargonomi') || host.includes('kargoentegrator') || host.includes('kargo-entegrator')) return 'kargonomi';
   if (host.includes('lidio')) return 'lidio';

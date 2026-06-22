@@ -71,10 +71,6 @@ export async function transferAdminAllocationEconomics(
   return runtimeServices.orders.transferAdminAllocationEconomics(shopifyOrderId, allocationId, payload);
 }
 
-export async function createParatikaHostedPaymentLink(shopifyOrderId: string) {
-  return runtimeServices.orders.createParatikaHostedPaymentLink(shopifyOrderId);
-}
-
 export async function submitFulfillmentTracking(
   allocationId: string,
   payload: {

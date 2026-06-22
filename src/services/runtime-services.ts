@@ -911,13 +911,6 @@ export const runtimeServices = {
 
       throw new ApiError('Economic transfer is available in real API mode only.', 'server', { status: 400 });
     },
-    async createParatikaHostedPaymentLink(shopifyOrderId: string) {
-      if (runtimeConfig.apiMode === 'real') {
-        return realOrders.createParatikaHostedPaymentLink(shopifyOrderId);
-      }
-
-      throw new ApiError('Paratika live probe is available in real API mode only.', 'server', { status: 400 });
-    },
     async submitFulfillmentTracking(allocationId: string, payload: SubmitFulfillmentTrackingPayload) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.submitFulfillmentTracking(allocationId, payload);

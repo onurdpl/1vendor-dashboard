@@ -33,9 +33,7 @@ import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integratio
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
-import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.routes.js';
 import { registerLogoIsbasiRoutes } from './modules/logo-isbasi/logo-isbasi.routes.js';
-import { registerPaymentReturnRoutes } from './modules/payments/payment-return.routes.js';
 import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyzico-marketplace.routes.js';
 import {
   buildDatabaseSourceDiagnostics,
@@ -442,8 +440,6 @@ export function createApp() {
   registerVendorIntegrationRoutes(app, env);
   registerVendorBillingProfileRoutes(app, env);
   registerVendorProfileAuditLogRoutes(app, env);
-  registerPaymentReturnRoutes(app);
-  registerParatikaProbeRoutes(app, env);
   registerLogoIsbasiRoutes(app, env);
   registerIyzicoMarketplaceDiagnosticsRoutes(app, env);
   registerReconciliationRoutes(app, env);

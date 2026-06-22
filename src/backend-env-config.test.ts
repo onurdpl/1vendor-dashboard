@@ -54,64 +54,6 @@ describe('backend env shipping provider gates', () => {
     expect(env.KARGO_ENTEGRATOR_API_KEY).toBe('configured');
   });
 
-  it('reads Paratika SESSIONTOKEN probe env config', () => {
-    resetEnv({
-      PARATIKA_API_URL: 'https://test.paratika.example/api',
-      PARATIKA_MERCHANT: 'merchant-id',
-      PARATIKA_MERCHANTUSER: 'merchant-user',
-      PARATIKA_MERCHANTPASSWORD: 'merchant-password',
-      PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
-      PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/payment',
-      PARATIKA_TEST_MODE: 'true',
-      PARATIKA_PROBE_DRY_RUN: 'false',
-      PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
-      PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_RATE',
-    });
-
-    const env = loadEnv();
-
-    expect(env.PARATIKA_API_URL).toBe('https://test.paratika.example/api');
-    expect(env.PARATIKA_MERCHANT).toBe('merchant-id');
-    expect(env.PARATIKA_MERCHANTUSER).toBe('merchant-user');
-    expect(env.PARATIKA_MERCHANTPASSWORD).toBe('merchant-password');
-    expect(env.PARATIKA_RETURN_URL).toBe('https://onevendor-dashboard.onrender.com/payments/paratika/return');
-    expect(env.PARATIKA_HOSTED_PAYMENT_BASE_URL).toBe('https://entegrasyon.paratika.com.tr/payment');
-    expect(env.PARATIKA_TEST_MODE).toBe(true);
-    expect(env.PARATIKA_PROBE_DRY_RUN).toBe(false);
-    expect(env.PARATIKA_PROBE_CONFIRM).toBe('CREATE_SESSIONTOKEN_TEST');
-    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_RATE');
-  });
-
-  it('defaults Paratika marketplace model to seller commission rate', () => {
-    resetEnv({
-      PARATIKA_MARKETPLACE_MODEL: undefined,
-    });
-
-    const env = loadEnv();
-
-    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_RATE');
-  });
-
-  it('defaults Paratika hosted payment base URL to the hosted page path', () => {
-    resetEnv({
-      PARATIKA_HOSTED_PAYMENT_BASE_URL: undefined,
-    });
-
-    const env = loadEnv();
-
-    expect(env.PARATIKA_HOSTED_PAYMENT_BASE_URL).toBe('https://entegrasyon.paratika.com.tr/payment');
-  });
-
-  it('rejects unsupported Paratika marketplace models', () => {
-    resetEnv({
-      PARATIKA_MARKETPLACE_MODEL: 'UNKNOWN_MODEL',
-    });
-
-    expect(() => loadEnv()).toThrow(
-      'Invalid PARATIKA_MARKETPLACE_MODEL value. Expected SELLER_PAYMENT_AMOUNT or SELLER_COMMISSION_RATE.',
-    );
-  });
-
   it('enables live Kargo execution only when the global and provider gates are both true', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'kargo_entegrator',

@@ -2,7 +2,6 @@ export {
   addAdminAllocationResolutionNote,
   cancelShipmentExecution,
   createShipmentExecution,
-  createParatikaHostedPaymentLink,
   createReturnShipmentLabel,
   executeAdminShopifyRefund,
   getAdminShopifyOrderBreakdown,
@@ -43,5 +42,4 @@ export type {
   KargonomiWarehouseSyncResult,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
-  ParatikaSessionTokenLiveProbeResult,
 } from '../../lib/api/contracts';

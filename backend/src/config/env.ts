@@ -1,5 +1,3 @@
-import { parseParatikaMarketplaceModel, type ParatikaMarketplaceModel } from '../modules/paratika/paratika-marketplace-model.js';
-
 type NodeEnv = 'development' | 'test' | 'production';
 
 export type AppEnv = {
@@ -73,16 +71,6 @@ export type AppEnv = {
   IYZICO_SANDBOX_API_KEY?: string;
   IYZICO_SANDBOX_SECRET_KEY?: string;
   IYZICO_SANDBOX_BASE_URL?: string;
-  PARATIKA_API_URL?: string;
-  PARATIKA_MERCHANT?: string;
-  PARATIKA_MERCHANTUSER?: string;
-  PARATIKA_MERCHANTPASSWORD?: string;
-  PARATIKA_RETURN_URL?: string;
-  PARATIKA_HOSTED_PAYMENT_BASE_URL?: string;
-  PARATIKA_TEST_MODE?: boolean;
-  PARATIKA_PROBE_DRY_RUN?: boolean;
-  PARATIKA_PROBE_CONFIRM?: string;
-  PARATIKA_MARKETPLACE_MODEL: ParatikaMarketplaceModel;
   LOGO_ISBASI_BASE_URL?: string;
   LOGO_ISBASI_API_KEY?: string;
   LOGO_ISBASI_USERNAME?: string;
@@ -265,16 +253,6 @@ export function loadEnv(): AppEnv {
   const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
   const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
   const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
-  const paratikaApiUrl = process.env.PARATIKA_API_URL?.trim() || undefined;
-  const paratikaMerchant = process.env.PARATIKA_MERCHANT?.trim() || undefined;
-  const paratikaMerchantUser = process.env.PARATIKA_MERCHANTUSER?.trim() || undefined;
-  const paratikaMerchantPassword = process.env.PARATIKA_MERCHANTPASSWORD?.trim() || undefined;
-  const paratikaReturnUrl = process.env.PARATIKA_RETURN_URL?.trim() || undefined;
-  const paratikaHostedPaymentBaseUrl = process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL?.trim() || 'https://entegrasyon.paratika.com.tr/payment';
-  const paratikaTestMode = parseBoolean(process.env.PARATIKA_TEST_MODE, false);
-  const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
-  const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;
-  const paratikaMarketplaceModel = parseParatikaMarketplaceModel(process.env.PARATIKA_MARKETPLACE_MODEL);
   const logoIsbasiBaseUrl = process.env.LOGO_ISBASI_BASE_URL?.trim() || 'https://soho-isbasi-mwv2-test.logo-paas.com';
   const logoIsbasiApiKey = process.env.LOGO_ISBASI_API_KEY?.trim() || undefined;
   const logoIsbasiUsername = process.env.LOGO_ISBASI_USERNAME?.trim() || undefined;
@@ -433,16 +411,6 @@ export function loadEnv(): AppEnv {
     IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
     IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
     IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,
-    PARATIKA_API_URL: paratikaApiUrl,
-    PARATIKA_MERCHANT: paratikaMerchant,
-    PARATIKA_MERCHANTUSER: paratikaMerchantUser,
-    PARATIKA_MERCHANTPASSWORD: paratikaMerchantPassword,
-    PARATIKA_RETURN_URL: paratikaReturnUrl,
-    PARATIKA_HOSTED_PAYMENT_BASE_URL: paratikaHostedPaymentBaseUrl,
-    PARATIKA_TEST_MODE: paratikaTestMode,
-    PARATIKA_PROBE_DRY_RUN: paratikaProbeDryRun,
-    PARATIKA_PROBE_CONFIRM: paratikaProbeConfirm,
-    PARATIKA_MARKETPLACE_MODEL: paratikaMarketplaceModel,
     LOGO_ISBASI_BASE_URL: logoIsbasiBaseUrl,
     LOGO_ISBASI_API_KEY: logoIsbasiApiKey,
     LOGO_ISBASI_USERNAME: logoIsbasiUsername,

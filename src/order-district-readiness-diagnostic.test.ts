@@ -46,7 +46,6 @@ function buildEnv(): AppEnv {
     TRY_OTO_ENABLED: false,
     TRY_OTO_SANDBOX_MODE: false,
     TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
-    PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_RATE',
   };
 }
 

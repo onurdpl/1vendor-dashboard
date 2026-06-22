@@ -2554,20 +2554,6 @@ h3 {
   color: var(--text);
 }
 
-.paratika-probe-card {
-  display: grid;
-  gap: 14px;
-}
-
-.paratika-probe-result {
-  display: grid;
-  gap: 12px;
-}
-
-.paratika-probe-link {
-  justify-self: flex-start;
-}
-
 .timeline-block {
   display: grid;
   gap: 10px;
