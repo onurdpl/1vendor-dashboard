@@ -188,28 +188,30 @@ export function AdminOperationsQueuePage() {
                 columns={['Severity', 'Type', 'Vendor', 'Reference', 'Age', 'Recommended action', 'Action']}
                 className="attention-op-table"
               >
-                {queue.map((item) => (
-                  <OperationalTableRow key={item.id}>
-                    <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
-                    <span>
-                      <strong>{formatType(item.type)}</strong>
-                      <small>{item.title}</small>
-                      <small>{item.description}</small>
-                    </span>
-                    <span>
-                      <strong>{item.vendorName}</strong>
-                      <small>{item.vendorId}</small>
-                    </span>
-                    <span>
-                      <strong>{item.objectReference}</strong>
-                      <small>{item.status}</small>
-                    </span>
-                    <strong>{formatAge(item.ageHours)}</strong>
-                    <span>{item.recommendedAction}</span>
-                    <OperationalActionGroup>
-                      {attentionLink(item, getActionLabel(item))}
-                    </OperationalActionGroup>
-                  </OperationalTableRow>
+	                {queue.map((item) => (
+	                  <OperationalTableRow key={item.id}>
+	                    <span className="attention-queue-severity">
+	                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+	                    </span>
+	                    <span className="attention-queue-type" title={`${formatType(item.type)} · ${item.title}`}>
+	                      <strong>{formatType(item.type)}</strong>
+	                      <small>{item.title}</small>
+	                      <small>{item.description}</small>
+	                    </span>
+	                    <span className="attention-queue-vendor" title={`${item.vendorName} · ${item.vendorId}`}>
+	                      <strong>{item.vendorName}</strong>
+	                      <small>{item.vendorId}</small>
+	                    </span>
+	                    <span className="attention-queue-reference" title={`${item.objectReference} · ${item.status}`}>
+	                      <strong>{item.objectReference}</strong>
+	                      <small>{item.status}</small>
+	                    </span>
+	                    <strong className="attention-queue-age">{formatAge(item.ageHours)}</strong>
+	                    <span className="attention-queue-action-copy" title={item.recommendedAction}>{item.recommendedAction}</span>
+	                    <OperationalActionGroup>
+	                      {attentionLink(item, getActionLabel(item))}
+	                    </OperationalActionGroup>
+	                  </OperationalTableRow>
                 ))}
               </OperationalTable>
             ) : (
