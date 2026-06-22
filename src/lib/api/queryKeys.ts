@@ -26,6 +26,9 @@ export const queryKeys = {
     orders: {
       breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,
     },
+    financeIntegrity: {
+      transferDiagnostics: (transferId: string) => ['admin', 'finance-integrity', 'transfer-diagnostics', transferId] as const,
+    },
     shipments: {
       providerConfig: (provider: string, vendorId = 'global') => ['admin', 'shipments', 'provider-config', provider, vendorId] as const,
       vendorShippingConfig: (vendorId: string) => ['admin', 'vendors', vendorId, 'shipping-config'] as const,

@@ -14,6 +14,7 @@ import {
 } from '../features/orders/api';
 import {
   acknowledgeFinanceIntegrityAlert,
+  getTransferRecoveryDiagnostics,
   rescanFinanceIntegrityAlert,
   resolveFinanceIntegrityAlert,
 } from '../features/finance/api';
@@ -75,6 +76,29 @@ function formatTransferStatus(value: string) {
     .join(' ');
 }
 
+function formatTransferRecoveryClassification(value: string) {
+  return formatTransferStatus(value);
+}
+
+function formatLedgerDiagnosticState(ledger: {
+  id: string | null;
+  exists: boolean;
+  active: boolean;
+  voided: boolean;
+  supersededByLedgerId?: string | null;
+}) {
+  if (!ledger.exists) {
+    return `Missing${ledger.id ? ` (${ledger.id})` : ''}`;
+  }
+  if (ledger.active) {
+    return `Active · ${ledger.id}`;
+  }
+  if (ledger.voided) {
+    return `Voided · ${ledger.id}${ledger.supersededByLedgerId ? ` → ${ledger.supersededByLedgerId}` : ''}`;
+  }
+  return `Inactive · ${ledger.id}`;
+}
+
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -103,6 +127,81 @@ type FinanceIntegrityAlertRescanSummary = {
   tone: 'success' | 'info' | 'error';
   message: string;
 };
+
+function TransferDiagnosticsCard({ transferId }: { transferId: string }) {
+  const { data, isLoading, isError, error, refetch } = useQueryResource(
+    queryKeys.admin.financeIntegrity.transferDiagnostics(transferId),
+    ({ signal }) => getTransferRecoveryDiagnostics(transferId, { signal }),
+    {
+      enabled: Boolean(transferId),
+    },
+  );
+
+  if (isLoading && !data) {
+    return (
+      <section className="economic-transfer-summary-card" aria-label="Transfer diagnostics">
+        <SectionSkeleton title="Loading transfer diagnostics" description="Reading transfer, ledger, assignment, and alert state." />
+      </section>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <section className="economic-transfer-summary-card" aria-label="Transfer diagnostics">
+        <SectionErrorRetry
+          title="Transfer diagnostics unavailable"
+          description={error ?? 'Transfer recovery diagnostics could not be loaded.'}
+          onRetry={() => void refetch()}
+        />
+      </section>
+    );
+  }
+
+  return (
+    <section className="economic-transfer-summary-card" aria-label="Transfer diagnostics">
+      <div className="economic-transfer-summary-header">
+        <div>
+          <p className="eyebrow">Transfer diagnostics</p>
+          <h3>Recovery diagnostics</h3>
+        </div>
+        <span className={`status-badge status-${getClassToken(data.recoveryClassification)}`}>
+          {formatTransferRecoveryClassification(data.recoveryClassification)}
+        </span>
+      </div>
+      <div className="compact-meta-grid">
+        <div className="meta-item">
+          <span>Transfer status</span>
+          <strong>{formatTransferStatus(data.transferStatus)}</strong>
+        </div>
+        <div className="meta-item">
+          <span>Source ledger</span>
+          <strong>{formatLedgerDiagnosticState(data.sourceLedger)}</strong>
+        </div>
+        <div className="meta-item">
+          <span>Target ledger</span>
+          <strong>{formatLedgerDiagnosticState(data.targetLedger)}</strong>
+        </div>
+        <div className="meta-item">
+          <span>Assignment</span>
+          <strong>
+            {data.assignment.consistent ? 'Consistent' : 'Mismatch'} · {data.assignment.assignedVendorId ?? 'Unknown'} / expected {data.assignment.expectedVendorId}
+          </strong>
+        </div>
+        <div className="meta-item">
+          <span>Active economic owner</span>
+          <strong>
+            {data.economicOwner.ownerVendorId ?? 'Unresolved'} · {formatTransferStatus(data.economicOwner.resolutionStatus)}
+          </strong>
+        </div>
+        <div className="meta-item">
+          <span>Blocking alerts</span>
+          <strong>{data.financeIntegrityAlerts.length}</strong>
+        </div>
+      </div>
+      <p className="page-description">{data.recommendedAction}</p>
+    </section>
+  );
+}
 
 function normalizeStateToken(value: string | null | undefined) {
   return (value ?? '').trim().toLowerCase().replace(/\s+/g, '_');
@@ -761,40 +860,43 @@ export function AdminShopifyOrderPage() {
           </section>
 
           {allocation.transferSummary ? (
-            <section className="economic-transfer-summary-card" aria-label="Economic transfer summary">
-              <div className="economic-transfer-summary-header">
-                <div>
-                  <p className="eyebrow">Economic transfer</p>
-                  <h3>Economics transferred</h3>
+            <>
+              <section className="economic-transfer-summary-card" aria-label="Economic transfer summary">
+                <div className="economic-transfer-summary-header">
+                  <div>
+                    <p className="eyebrow">Economic transfer</p>
+                    <h3>Economics transferred</h3>
+                  </div>
+                  <span className={`status-badge status-${getClassToken(allocation.transferSummary.status)}`}>
+                    {formatTransferStatus(allocation.transferSummary.status)}
+                  </span>
                 </div>
-                <span className={`status-badge status-${getClassToken(allocation.transferSummary.status)}`}>
-                  {formatTransferStatus(allocation.transferSummary.status)}
-                </span>
-              </div>
-              <p className="economic-transfer-route">
-                <strong>{allocation.transferSummary.fromVendorId}</strong>
-                <span aria-hidden="true">→</span>
-                <strong>{allocation.transferSummary.toVendorId}</strong>
-              </p>
-              <div className="compact-meta-grid">
-                <div className="meta-item">
-                  <span>Reason</span>
-                  <strong>{allocation.transferSummary.reason ?? 'No reason recorded'}</strong>
+                <p className="economic-transfer-route">
+                  <strong>{allocation.transferSummary.fromVendorId}</strong>
+                  <span aria-hidden="true">→</span>
+                  <strong>{allocation.transferSummary.toVendorId}</strong>
+                </p>
+                <div className="compact-meta-grid">
+                  <div className="meta-item">
+                    <span>Reason</span>
+                    <strong>{allocation.transferSummary.reason ?? 'No reason recorded'}</strong>
+                  </div>
+                  <div className="meta-item">
+                    <span>Completed</span>
+                    <strong>
+                      {allocation.transferSummary.completedAt
+                        ? formatDate(allocation.transferSummary.completedAt)
+                        : 'Completion date unavailable'}
+                    </strong>
+                  </div>
+                  <div className="meta-item">
+                    <span>Admin</span>
+                    <strong>{allocation.transferSummary.adminActorUserId ?? 'Not recorded'}</strong>
+                  </div>
                 </div>
-                <div className="meta-item">
-                  <span>Completed</span>
-                  <strong>
-                    {allocation.transferSummary.completedAt
-                      ? formatDate(allocation.transferSummary.completedAt)
-                      : 'Completion date unavailable'}
-                  </strong>
-                </div>
-                <div className="meta-item">
-                  <span>Admin</span>
-                  <strong>{allocation.transferSummary.adminActorUserId ?? 'Not recorded'}</strong>
-                </div>
-              </div>
-            </section>
+              </section>
+              <TransferDiagnosticsCard transferId={allocation.transferSummary.id} />
+            </>
           ) : null}
 
           {allocation.allocationStatus === 'vendor_blocked' ? (

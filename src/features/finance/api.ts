@@ -6,6 +6,7 @@ export {
   getFinanceProfile,
   getReturnFinanceRecords,
   getSettlementScheduleAutoDraftJobStatus,
+  getTransferRecoveryDiagnostics,
   getSettlementScheduleDryRun,
   getVendorDebtHistory,
   preparePayoutBatch,

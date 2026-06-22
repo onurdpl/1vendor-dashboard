@@ -1006,6 +1006,42 @@ export type FinanceIntegrityAlertRescanResult = {
   findings: FinanceIntegrityAlertFinding[];
 };
 
+export type TransferRecoveryClassification =
+  | 'healthy'
+  | 'retry_candidate'
+  | 'force_complete_candidate'
+  | 'manual_investigation_required';
+
+export type TransferRecoveryLedgerState = {
+  id: string | null;
+  exists: boolean;
+  active: boolean;
+  voided: boolean;
+  supersededByLedgerId?: string | null;
+};
+
+export type TransferRecoveryDiagnostics = {
+  transferId: string;
+  transferStatus: string;
+  sourceVendorId: string;
+  targetVendorId: string;
+  sourceLedger: TransferRecoveryLedgerState;
+  targetLedger: TransferRecoveryLedgerState;
+  assignment: {
+    assignedVendorId: string | null;
+    expectedVendorId: string;
+    consistent: boolean;
+  };
+  economicOwner: {
+    ownerVendorId: string | null;
+    activeSaleLedgerId: string | null;
+    resolutionStatus: string;
+  };
+  financeIntegrityAlerts: FinanceIntegrityAlertSummary[];
+  recoveryClassification: TransferRecoveryClassification;
+  recommendedAction: string;
+};
+
 export type ShopifyOrderBreakdown = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;

@@ -98,6 +98,10 @@ export function resolveFinanceIntegrityAlert(alertId: string, input: { note: str
   return runtimeServices.finance.resolveFinanceIntegrityAlert(alertId, input);
 }
 
+export function getTransferRecoveryDiagnostics(transferId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.finance.getTransferRecoveryDiagnostics(transferId, options);
+}
+
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }

@@ -13,6 +13,7 @@ import type {
   FinanceIntegrityAlertAcknowledgeResult,
   FinanceIntegrityAlertRescanResult,
   FinanceIntegrityAlertResolveResult,
+  TransferRecoveryDiagnostics,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
@@ -433,6 +434,20 @@ export function resolveFinanceIntegrityAlert(
     `/admin/finance-integrity/alerts/${encodeURIComponent(alertId)}/resolve`,
     input,
     { skipVendorContext: true },
+  );
+}
+
+export function getTransferRecoveryDiagnostics(
+  transferId: string,
+  options: { signal?: AbortSignal; headers?: HeadersInit } = {},
+): Promise<TransferRecoveryDiagnostics> {
+  return apiClient.get<TransferRecoveryDiagnostics>(
+    `/admin/finance-integrity/transfers/${encodeURIComponent(transferId)}/diagnostics`,
+    {
+      skipVendorContext: true,
+      signal: options.signal,
+      headers: options.headers,
+    },
   );
 }
 

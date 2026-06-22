@@ -2499,6 +2499,47 @@ export const runtimeServices = {
               resolutionType: 'scanner_validated',
             },
           }),
+    getTransferRecoveryDiagnostics: (
+      transferId: string,
+      options: ReadRequestOptions = {},
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getTransferRecoveryDiagnostics(transferId, {
+            signal: options.signal,
+            headers: options.headers,
+          })
+        : Promise.resolve({
+            transferId,
+            transferStatus: 'COMPLETED',
+            sourceVendorId: 'vendor-a',
+            targetVendorId: 'vendor-b',
+            sourceLedger: {
+              id: 'mock-source-ledger',
+              exists: true,
+              active: false,
+              voided: true,
+              supersededByLedgerId: 'mock-target-ledger',
+            },
+            targetLedger: {
+              id: 'mock-target-ledger',
+              exists: true,
+              active: true,
+              voided: false,
+            },
+            assignment: {
+              assignedVendorId: 'vendor-b',
+              expectedVendorId: 'vendor-b',
+              consistent: true,
+            },
+            economicOwner: {
+              ownerVendorId: 'vendor-b',
+              activeSaleLedgerId: 'mock-target-ledger',
+              resolutionStatus: 'resolved',
+            },
+            financeIntegrityAlerts: [],
+            recoveryClassification: 'healthy' as const,
+            recommendedAction: 'No recovery action is required.',
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)

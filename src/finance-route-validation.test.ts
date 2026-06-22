@@ -14,6 +14,7 @@ const runFinanceIntegrityScannerDiagnosticsMock = vi.hoisted(() => vi.fn());
 const rescanFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
 const resolveFinanceIntegrityAlertWithScannerValidationMock = vi.hoisted(() => vi.fn());
 const acknowledgeFinanceIntegrityAlertMock = vi.hoisted(() => vi.fn());
+const getTransferRecoveryDiagnosticsMock = vi.hoisted(() => vi.fn());
 const FinanceIntegrityScannerValidationErrorMock = vi.hoisted(() =>
   class FinanceIntegrityScannerValidationError extends Error {
     statusCode: number;
@@ -81,6 +82,18 @@ vi.mock('../backend/src/modules/finance/finance-integrity-scanner.service.js', (
 vi.mock('../backend/src/modules/finance/finance-integrity-alert.service.js', () => ({
   acknowledgeFinanceIntegrityAlert: acknowledgeFinanceIntegrityAlertMock,
   FinanceIntegrityAlertLifecycleError: FinanceIntegrityAlertLifecycleErrorMock,
+}));
+
+vi.mock('../backend/src/modules/finance/transfer-recovery-diagnostics.service.js', () => ({
+  getTransferRecoveryDiagnostics: getTransferRecoveryDiagnosticsMock,
+  TransferRecoveryDiagnosticsError: class TransferRecoveryDiagnosticsError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -213,6 +226,7 @@ describe('finance route validation', () => {
     rescanFinanceIntegrityAlertMock.mockReset();
     resolveFinanceIntegrityAlertWithScannerValidationMock.mockReset();
     acknowledgeFinanceIntegrityAlertMock.mockReset();
+    getTransferRecoveryDiagnosticsMock.mockReset();
     upsertVendorFinancialProfileMock.mockResolvedValue({
       vendorId: 'sporjinal',
       commissionPercent: '10.00',
@@ -675,6 +689,75 @@ describe('finance route validation', () => {
       vendorAllocationId: null,
       allocationEconomicTransferId: 'transfer-1',
       dryRun: false,
+    });
+  });
+
+  it('requires admin access for transfer recovery diagnostics', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/admin/finance-integrity/transfers/:transferId/diagnostics')?.(
+      {
+        authUser: { role: 'vendor' },
+        params: { transferId: 'transfer-1' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 403,
+      body: { message: 'Admin access required.' },
+    });
+    expect(getTransferRecoveryDiagnosticsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns transfer recovery diagnostics for admins', async () => {
+    const response = {
+      transferId: 'transfer-1',
+      transferStatus: 'COMPLETED',
+      sourceVendorId: 'vendor-a',
+      targetVendorId: 'vendor-b',
+      sourceLedger: {
+        id: 'fin-a-sale',
+        exists: true,
+        active: false,
+        voided: true,
+        supersededByLedgerId: 'fin-b-sale',
+      },
+      targetLedger: {
+        id: 'fin-b-sale',
+        exists: true,
+        active: true,
+        voided: false,
+      },
+      assignment: {
+        assignedVendorId: 'vendor-b',
+        expectedVendorId: 'vendor-b',
+        consistent: true,
+      },
+      economicOwner: {
+        ownerVendorId: 'vendor-b',
+        activeSaleLedgerId: 'fin-b-sale',
+        resolutionStatus: 'resolved',
+      },
+      financeIntegrityAlerts: [],
+      recoveryClassification: 'healthy',
+      recommendedAction: 'No recovery action is required.',
+    };
+    getTransferRecoveryDiagnosticsMock.mockResolvedValueOnce(response);
+    const gets = createRegisteredGetRoutes();
+
+    const result = await gets.get('/admin/finance-integrity/transfers/:transferId/diagnostics')?.(
+      {
+        authUser: { role: 'admin' },
+        params: { transferId: ' transfer-1 ' },
+      },
+      createReply(),
+    );
+
+    expect(result).toBe(response);
+    expect(getTransferRecoveryDiagnosticsMock).toHaveBeenCalledWith({
+      allocationEconomicTransferId: 'transfer-1',
     });
   });
 
