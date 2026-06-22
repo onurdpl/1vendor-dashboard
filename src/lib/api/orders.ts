@@ -2,6 +2,7 @@ import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
 import type {
   AdminResolutionNotePayload,
+  AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
   RejectOrderPayload,
   UpdateNavlungoShipmentPayload,
@@ -33,6 +34,14 @@ export async function addAdminAllocationResolutionNote(
   payload: AdminResolutionNotePayload,
 ) {
   return runtimeServices.orders.addAdminAllocationResolutionNote(shopifyOrderId, allocationId, payload);
+}
+
+export async function transferAdminAllocationEconomics(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminEconomicTransferPayload,
+) {
+  return runtimeServices.orders.transferAdminAllocationEconomics(shopifyOrderId, allocationId, payload);
 }
 
 export async function createParatikaHostedPaymentLink(shopifyOrderId: string) {

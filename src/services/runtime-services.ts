@@ -52,6 +52,7 @@ import type {
 } from '../lib/api/contracts';
 import type {
   AdminResolutionNotePayload,
+  AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
   RejectOrderPayload,
   SubmitFulfillmentTrackingPayload,
@@ -850,6 +851,17 @@ export const runtimeServices = {
       void allocationId;
       void payload;
       return breakdown;
+    },
+    async transferAdminAllocationEconomics(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminEconomicTransferPayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.transferAdminAllocationEconomics(shopifyOrderId, allocationId, payload);
+      }
+
+      throw new ApiError('Economic transfer is available in real API mode only.', 'server', { status: 400 });
     },
     async createParatikaHostedPaymentLink(shopifyOrderId: string) {
       if (runtimeConfig.apiMode === 'real') {

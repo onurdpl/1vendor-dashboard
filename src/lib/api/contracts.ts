@@ -934,6 +934,7 @@ export type VendorAllocationSummary = {
   lineItems: OrderLineItem[];
   refundedItems: ReturnLineItem[];
   refundTotal: string;
+  returnRecordCount?: number;
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
 };
 

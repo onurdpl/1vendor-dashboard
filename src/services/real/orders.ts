@@ -78,6 +78,28 @@ export type AdminResolutionNotePayload = {
   note: string;
 };
 
+export type AdminEconomicTransferPayload = {
+  toVendorId: string;
+  reason: string;
+  confirmTransfer: true;
+};
+
+export type AdminEconomicTransferSummary = {
+  transferId: string;
+  fromVendorId: string;
+  toVendorId: string;
+  sourceLedgerId: string;
+  targetLedgerId: string;
+  allocationId: string;
+  status: string;
+};
+
+export type AdminEconomicTransferResult = {
+  ok: true;
+  transfer: AdminEconomicTransferSummary;
+  order?: ShopifyOrderBreakdown;
+};
+
 type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;
@@ -214,6 +236,12 @@ type AdminOrderBreakdownDto = {
       affectedLedgerIds?: unknown;
     }>;
   }>;
+};
+
+type AdminEconomicTransferResponseDto = {
+  ok: true;
+  transfer: AdminEconomicTransferSummary;
+  order?: AdminOrderBreakdownDto;
 };
 
 function toAllocationStatus(value: string): AllocationStatus {
@@ -508,6 +536,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         refundTotal: formatCurrency(
           allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
         ),
+        returnRecordCount: allocation.returnRecords.length,
         financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
       };
     }),
@@ -604,6 +633,24 @@ export async function addAdminAllocationResolutionNote(
     { skipVendorContext: true },
   );
   return mapAdminOrderBreakdown(response);
+}
+
+export async function transferAdminAllocationEconomics(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminEconomicTransferPayload,
+): Promise<AdminEconomicTransferResult> {
+  const response = await apiClient.post<AdminEconomicTransferResponseDto>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/economic-transfer`,
+    payload,
+    { skipVendorContext: true },
+  );
+
+  return {
+    ok: response.ok,
+    transfer: response.transfer,
+    order: response.order ? mapAdminOrderBreakdown(response.order) : undefined,
+  };
 }
 
 export async function createShipmentExecution(

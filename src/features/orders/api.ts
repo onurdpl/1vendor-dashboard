@@ -21,6 +21,7 @@ export {
   retryShipmentExecution,
   submitFulfillmentTracking,
   syncKargonomiWarehouseDetails,
+  transferAdminAllocationEconomics,
   updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
 } from '../../lib/api/orders';

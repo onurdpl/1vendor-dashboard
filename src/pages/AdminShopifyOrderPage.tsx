@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
@@ -7,6 +8,7 @@ import {
   createParatikaHostedPaymentLink,
   getAdminShopifyOrderBreakdown,
   returnAdminBlockedAllocationToVendor,
+  transferAdminAllocationEconomics,
   type ParatikaSessionTokenLiveProbeResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
@@ -73,6 +75,10 @@ type AdminAllocationResolutionAction = {
   allocation: ShopifyOrderBreakdown['allocations'][number];
 };
 
+type AdminEconomicTransferAction = {
+  allocation: ShopifyOrderBreakdown['allocations'][number];
+};
+
 type FinanceIntegrityAlertAcknowledgeAction = {
   allocation: ShopifyOrderBreakdown['allocations'][number];
   alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number];
@@ -85,13 +91,59 @@ type FinanceIntegrityAlertRescanSummary = {
   message: string;
 };
 
+function normalizeStateToken(value: string | null | undefined) {
+  return (value ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function hasBlockingFinanceAlert(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return allocation.financeIntegrityAlerts?.some((alert) => {
+    const status = normalizeStateToken(alert.status);
+    return status === 'open' || status === 'acknowledged';
+  }) ?? false;
+}
+
+function hasVisibleTransferBlockerEvidence(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  const fulfillmentStatus = normalizeStateToken(allocation.fulfillmentStatus);
+  const shippingStatus = normalizeStateToken(allocation.shippingStatus);
+
+  return Boolean(
+    allocation.trackingNumber ||
+      allocation.carrier ||
+      allocation.fulfilledAt ||
+      allocation.shipmentCreatedAt ||
+      allocation.shipmentUpdatedAt ||
+      allocation.refundedItems.length > 0 ||
+      (allocation.returnRecordCount ?? 0) > 0 ||
+      fulfillmentStatus === 'fulfilled' ||
+      fulfillmentStatus === 'partially_fulfilled' ||
+      shippingStatus === 'in_transit' ||
+      shippingStatus === 'delivered' ||
+      shippingStatus === 'label_created',
+  );
+}
+
+function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return (
+    normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
+    allocation.reassignmentRequired &&
+    !hasBlockingFinanceAlert(allocation) &&
+    !hasVisibleTransferBlockerEvidence(allocation)
+  );
+}
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
+  const queryClient = useQueryClient();
   const appReadiness = useAppReadiness();
   const { message, tone, showFeedback } = useActionFeedback();
   const [paratikaProbeResult, setParatikaProbeResult] = useState<ParatikaSessionTokenLiveProbeResult | null>(null);
   const [resolutionAction, setResolutionAction] = useState<AdminAllocationResolutionAction | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
+  const [transferAction, setTransferAction] = useState<AdminEconomicTransferAction | null>(null);
+  const [replacementVendorId, setReplacementVendorId] = useState('');
+  const [economicTransferReason, setEconomicTransferReason] = useState('');
+  const [replacementFulfillmentConfirmed, setReplacementFulfillmentConfirmed] = useState(false);
+  const [originalPriceConfirmed, setOriginalPriceConfirmed] = useState(false);
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
@@ -168,6 +220,24 @@ export function AdminShopifyOrderPage() {
     },
   );
   const isResolutionPending = returnToVendorMutation.isPending || addResolutionNoteMutation.isPending;
+  const transferEconomicsMutation = useMutationAction(
+    async (payload: { allocationId: string; toVendorId: string; reason: string }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return transferAdminAllocationEconomics(shopifyOrderId, payload.allocationId, {
+        toVendorId: payload.toVendorId,
+        reason: payload.reason,
+        confirmTransfer: true,
+      });
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Economic transfer could not be completed.'), 'error');
+      },
+    },
+  );
   const acknowledgeAlertMutation = useMutationAction(
     async (payload: { alertId: string; note: string }) => acknowledgeFinanceIntegrityAlert(payload.alertId, { note: payload.note }),
     {
@@ -226,6 +296,48 @@ export function AdminShopifyOrderPage() {
       setResolutionAction(null);
       setResolutionNote('');
       await refetch();
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleEconomicTransferSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!transferAction) {
+      return;
+    }
+
+    const reason = economicTransferReason.trim();
+    if (!replacementVendorId) {
+      showFeedback('Replacement vendor is required.', 'error');
+      return;
+    }
+    if (!reason) {
+      showFeedback('Economic transfer reason is required.', 'error');
+      return;
+    }
+    if (!replacementFulfillmentConfirmed || !originalPriceConfirmed) {
+      showFeedback('Both economic transfer confirmations are required.', 'error');
+      return;
+    }
+
+    try {
+      const result = await transferEconomicsMutation.mutateAsync({
+        allocationId: transferAction.allocation.allocationOrderId,
+        toVendorId: replacementVendorId,
+        reason,
+      });
+      if (result.order && shopifyOrderId) {
+        queryClient.setQueryData(queryKeys.admin.orders.breakdown(shopifyOrderId), result.order);
+      } else {
+        await refetch();
+      }
+      showFeedback('Allocation economics transferred to the replacement vendor.', 'success');
+      setTransferAction(null);
+      setReplacementVendorId('');
+      setEconomicTransferReason('');
+      setReplacementFulfillmentConfirmed(false);
+      setOriginalPriceConfirmed(false);
     } catch {
       // The mutation onError handler owns user-facing feedback.
     }
@@ -445,7 +557,13 @@ export function AdminShopifyOrderPage() {
         ) : null}
       </article>
 
-      {breakdown.allocations.map((allocation) => (
+      {breakdown.allocations.map((allocation) => {
+        const replacementVendorOptions = (appReadiness.currentUser?.vendorDetails ?? []).filter(
+          (vendor) => vendor.vendorId !== allocation.assignedVendorId,
+        );
+        const showEconomicTransferAction = canShowEconomicTransferAction(allocation);
+
+        return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
           <header className="allocation-header">
             <div>
@@ -655,6 +773,23 @@ export function AdminShopifyOrderPage() {
                 >
                   Add note
                 </button>
+                {showEconomicTransferAction ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    disabled={replacementVendorOptions.length === 0}
+                    title={replacementVendorOptions.length === 0 ? 'No replacement vendors are available from the admin vendor directory.' : undefined}
+                    onClick={() => {
+                      setTransferAction({ allocation });
+                      setReplacementVendorId(replacementVendorOptions[0]?.vendorId ?? '');
+                      setEconomicTransferReason('');
+                      setReplacementFulfillmentConfirmed(false);
+                      setOriginalPriceConfirmed(false);
+                    }}
+                  >
+                    Transfer economics
+                  </button>
+                ) : null}
               </div>
             </section>
           ) : allocation.reassignmentRequired ? (
@@ -739,7 +874,8 @@ export function AdminShopifyOrderPage() {
             ))}
           </div>
         </article>
-      ))}
+        );
+      })}
 
       <article className="panel">
         {message ? <ActionFeedback tone={tone} message={message} /> : null}
@@ -828,6 +964,135 @@ export function AdminShopifyOrderPage() {
           </section>
         </div>
       ) : null}
+
+      {transferAction ? (() => {
+        const replacementVendorOptions = (appReadiness.currentUser?.vendorDetails ?? []).filter(
+          (vendor) => vendor.vendorId !== transferAction.allocation.assignedVendorId,
+        );
+        const reason = economicTransferReason.trim();
+        const transferReady = Boolean(
+          replacementVendorId &&
+            reason &&
+            reason.length <= 500 &&
+            replacementFulfillmentConfirmed &&
+            originalPriceConfirmed &&
+            !transferEconomicsMutation.isPending,
+        );
+
+        return (
+          <div className="support-modal-backdrop" role="presentation">
+            <section
+              className="support-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-economic-transfer-title"
+            >
+              <div className="support-modal-header">
+                <div>
+                  <h2 id="admin-economic-transfer-title">Transfer economics</h2>
+                  <p>
+                    {transferAction.allocation.vendorName} · {transferAction.allocation.allocationOrderId}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="support-modal-close"
+                  onClick={() => {
+                    if (!transferEconomicsMutation.isPending) {
+                      setTransferAction(null);
+                      setReplacementVendorId('');
+                      setEconomicTransferReason('');
+                      setReplacementFulfillmentConfirmed(false);
+                      setOriginalPriceConfirmed(false);
+                    }
+                  }}
+                  aria-label="Close economic transfer form"
+                >
+                  ×
+                </button>
+              </div>
+              <form className="support-ticket-form" onSubmit={handleEconomicTransferSubmit}>
+                <p className="support-context-note">
+                  This transfers fulfillment and economics to a replacement vendor while keeping the original customer-paid price.
+                </p>
+                <p className="support-context-note economic-transfer-warning">
+                  If the replacement vendor requires a higher price or customer approval is needed, do not transfer. Cancel/refund or contact the customer first.
+                </p>
+                <label>
+                  Replacement vendor
+                  <select
+                    value={replacementVendorId}
+                    onChange={(event) => setReplacementVendorId(event.target.value)}
+                    required
+                    disabled={replacementVendorOptions.length === 0 || transferEconomicsMutation.isPending}
+                  >
+                    <option value="">Select replacement vendor</option>
+                    {replacementVendorOptions.map((vendor) => (
+                      <option key={vendor.vendorId} value={vendor.vendorId}>
+                        {vendor.vendorName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {replacementVendorOptions.length === 0 ? (
+                  <p className="support-context-note">
+                    No replacement vendors are available from the current admin vendor directory.
+                  </p>
+                ) : null}
+                <label>
+                  Reason
+                  <textarea
+                    value={economicTransferReason}
+                    onChange={(event) => setEconomicTransferReason(event.target.value)}
+                    maxLength={500}
+                    rows={5}
+                    required
+                    placeholder="Explain why economics are moving to the replacement vendor."
+                    disabled={transferEconomicsMutation.isPending}
+                  />
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={replacementFulfillmentConfirmed}
+                    onChange={(event) => setReplacementFulfillmentConfirmed(event.target.checked)}
+                    disabled={transferEconomicsMutation.isPending}
+                  />
+                  <span>Replacement vendor confirmed it can fulfill this order.</span>
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={originalPriceConfirmed}
+                    onChange={(event) => setOriginalPriceConfirmed(event.target.checked)}
+                    disabled={transferEconomicsMutation.isPending}
+                  />
+                  <span>I understand this transfer keeps the original customer-paid price and does not charge the customer more.</span>
+                </label>
+                <div className="support-modal-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setTransferAction(null);
+                      setReplacementVendorId('');
+                      setEconomicTransferReason('');
+                      setReplacementFulfillmentConfirmed(false);
+                      setOriginalPriceConfirmed(false);
+                    }}
+                    disabled={transferEconomicsMutation.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="button button-primary" disabled={!transferReady}>
+                    {transferEconomicsMutation.isPending ? 'Transferring...' : 'Transfer economics'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {acknowledgeAction ? (
         <div className="support-modal-backdrop" role="presentation">

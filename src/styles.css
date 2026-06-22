@@ -9750,6 +9750,29 @@ summary.provider-response-heading::-webkit-details-marker {
   resize: vertical;
 }
 
+.support-ticket-form .checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.support-ticket-form .checkbox-field input {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+.economic-transfer-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 12px;
+  background: #fffbeb;
+}
+
 .support-modal-actions {
   display: flex;
   justify-content: flex-end;
