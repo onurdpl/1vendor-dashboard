@@ -4,6 +4,7 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
   vendorAllocation: {
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
   },
   shopifyOrder: {
@@ -229,6 +230,10 @@ function buildShopifyRefundPreviewService(overrides: Record<string, unknown> = {
       fulfillmentOrders: [],
       source: 'mock',
     }),
+    fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+      fulfillmentOrders: [],
+      source: 'mock',
+    }),
     ...overrides,
   };
 }
@@ -266,6 +271,19 @@ describe('vendor order reject operational hold', () => {
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([
+      {
+        id: 'alloc-1088',
+        assignedVendorId: 'yalispor',
+        lineItems: [
+          {
+            shopifyOrderLineItem: {
+              sourceLineItemId: '20346971095377',
+            },
+          },
+        ],
+      },
+    ]);
   });
 
   it('lets a vendor reject their own active allocation and records assignment history', async () => {
@@ -755,19 +773,24 @@ describe('vendor order reject operational hold', () => {
     expect(result.blockers).toContain('Suggested refund has no refundable payment transaction. Future refundCreate must not run.');
   });
 
-  it('adds an open fulfillment order warning without blocking Shopify refund preview', async () => {
+  it('includes safe fulfillment order cancellation classifier output without mutating state', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
-      fetchFulfillmentOrders: vi.fn().mockResolvedValue({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
         source: 'shopify_admin',
         fulfillmentOrders: [
           {
-            id: 'fulfillment-order-1',
-            status: 'open',
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNREQUESTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
-                id: 'fo-line-1',
-                lineItemId: '20346971095377',
-                quantity: 1,
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
               },
             ],
           },
@@ -782,8 +805,19 @@ describe('vendor order reject operational hold', () => {
       shopifyAdminService,
     });
 
-    expect(result.warnings).toContain('Open fulfillment order exists for selected line items. Future refundCreate must cancel affected fulfillment orders first.');
+    expect(result.fulfillmentOrderCancellation).toMatchObject({
+      overallClassification: 'safe_to_cancel',
+      affectedFulfillmentOrders: [
+        {
+          fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/1',
+          classification: 'safe_to_cancel',
+        },
+      ],
+    });
+    expect(result.warnings).toContain('Affected fulfillment orders must be cancelled before refundCreate.');
     expect(result.blockers).toEqual([]);
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
   });
 
   it('rejects Shopify refund preview outside cancel/refund review state', async () => {

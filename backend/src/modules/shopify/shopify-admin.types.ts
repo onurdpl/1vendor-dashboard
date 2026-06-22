@@ -252,6 +252,28 @@ export type ShopifyFulfillmentOrdersResponse = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifyFulfillmentOrderCancellationLineItem = {
+  id: string;
+  lineItemId: string;
+  remainingQuantity: number | null;
+  totalQuantity: number | null;
+};
+
+export type ShopifyFulfillmentOrderForCancellationClassification = {
+  id: string;
+  status: string | null;
+  requestStatus: string | null;
+  supportedActions: string[] | null;
+  assignedLocationId: string | null;
+  assignedLocationName: string | null;
+  lineItems: ShopifyFulfillmentOrderCancellationLineItem[];
+};
+
+export type ShopifyFulfillmentOrderCancellationClassificationResponse = {
+  fulfillmentOrders: ShopifyFulfillmentOrderForCancellationClassification[];
+  source: 'mock' | 'shopify_admin';
+};
+
 export type CreateFulfillmentTrackingInput = {
   allocationId: string;
   shopifyOrderId: string;

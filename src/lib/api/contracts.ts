@@ -923,6 +923,46 @@ export type CancelRefundReviewSummary = {
 
 export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
 
+export type FulfillmentOrderCancellationClassification =
+  | 'safe_to_cancel'
+  | 'unsafe_mixed_fulfillment_order'
+  | 'already_closed_or_cancelled'
+  | 'unsupported_request_status'
+  | 'quantity_mismatch'
+  | 'unknown';
+
+export type FulfillmentOrderCancellationOverallClassification =
+  | 'safe_to_cancel'
+  | 'no_cancellation_needed'
+  | 'blocked'
+  | 'unknown';
+
+export type FulfillmentOrderCancellationPreview = {
+  affectedFulfillmentOrders: Array<{
+    fulfillmentOrderId: string;
+    status: string | null;
+    requestStatus: string | null;
+    supportedActions: string[] | null;
+    assignedLocationId: string | null;
+    assignedLocationName: string | null;
+    classification: FulfillmentOrderCancellationClassification;
+    blockers: string[];
+    warnings: string[];
+    lineItems: Array<{
+      fulfillmentOrderLineItemId: string;
+      shopifyLineItemId: string;
+      selected: boolean;
+      ownerAllocationId: string | null;
+      selectedQuantity: number | null;
+      remainingQuantity: number | null;
+      totalQuantity: number | null;
+    }>;
+  }>;
+  overallClassification: FulfillmentOrderCancellationOverallClassification;
+  blockers: string[];
+  warnings: string[];
+};
+
 export type ShopifyRefundPreviewResult = {
   ok: true;
   writesPerformed: false;
@@ -945,6 +985,7 @@ export type ShopifyRefundPreviewResult = {
       parentTransactionId: string | null;
     }>;
   } | null;
+  fulfillmentOrderCancellation: FulfillmentOrderCancellationPreview;
   warnings: string[];
   blockers: string[];
   missingData: string[];

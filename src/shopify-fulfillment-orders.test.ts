@@ -80,4 +80,80 @@ describe('Shopify fulfillment order lookup', () => {
       },
     ]);
   });
+
+  it('fetches canonical GraphQL fulfillment order fields for cancellation classification', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            order: {
+              id: 'gid://shopify/Order/7616544244049',
+              fulfillmentOrders: {
+                nodes: [
+                  {
+                    id: 'gid://shopify/FulfillmentOrder/998877',
+                    status: 'OPEN',
+                    requestStatus: 'UNREQUESTED',
+                    supportedActions: [{ action: 'CANCEL_FULFILLMENT_ORDER' }],
+                    assignedLocation: {
+                      name: 'Main Warehouse Snapshot',
+                      location: {
+                        id: 'gid://shopify/Location/44',
+                        name: 'Main Warehouse',
+                      },
+                    },
+                    lineItems: {
+                      nodes: [
+                        {
+                          id: 'gid://shopify/FulfillmentOrderLineItem/112233',
+                          remainingQuantity: 1,
+                          totalQuantity: 1,
+                          lineItem: {
+                            id: 'gid://shopify/LineItem/20346971095377',
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    const result = await service.fetchFulfillmentOrdersForCancellationClassification('gid://shopify/Order/7616544244049');
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      variables: {
+        id: string;
+      };
+    };
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://demo.myshopify.com/admin/api/2026-01/graphql.json',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(requestBody.variables.id).toBe('gid://shopify/Order/7616544244049');
+    expect(result.fulfillmentOrders).toEqual([
+      {
+        id: 'gid://shopify/FulfillmentOrder/998877',
+        status: 'OPEN',
+        requestStatus: 'UNREQUESTED',
+        supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+        assignedLocationId: 'gid://shopify/Location/44',
+        assignedLocationName: 'Main Warehouse',
+        lineItems: [
+          {
+            id: 'gid://shopify/FulfillmentOrderLineItem/112233',
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            remainingQuantity: 1,
+            totalQuantity: 1,
+          },
+        ],
+      },
+    ]);
+  });
 });

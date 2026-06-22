@@ -14,6 +14,7 @@ import type {
   PreviewSuggestedRefundInput,
   PreviewSuggestedRefundResult,
   SellerInfoMap,
+  ShopifyFulfillmentOrderCancellationClassificationResponse,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
@@ -137,6 +138,45 @@ type SuggestedRefundQueryResponse = {
         } | null;
       }>;
     } | null;
+  } | null;
+};
+
+type FulfillmentOrderCancellationClassificationQueryResponse = {
+  order: {
+    id: string;
+    fulfillmentOrders: {
+      pageInfo?: {
+        hasNextPage?: boolean | null;
+      } | null;
+      nodes: Array<{
+        id: string;
+        status: string | null;
+        requestStatus: string | null;
+        supportedActions: Array<{
+          action?: string | null;
+        }> | null;
+        assignedLocation: {
+          name?: string | null;
+          location?: {
+            id?: string | null;
+            name?: string | null;
+          } | null;
+        } | null;
+        lineItems: {
+          pageInfo?: {
+            hasNextPage?: boolean | null;
+          } | null;
+          nodes: Array<{
+            id: string;
+            remainingQuantity: number | null;
+            totalQuantity: number | null;
+            lineItem: {
+              id: string;
+            } | null;
+          }>;
+        };
+      }>;
+    };
   } | null;
 };
 
@@ -2245,6 +2285,145 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function fetchFulfillmentOrdersForCancellationClassification(
+    shopifyOrderId: string,
+  ): Promise<ShopifyFulfillmentOrderCancellationClassificationResponse> {
+    const normalizedShopifyOrderId = extractShopifyGidTail(shopifyOrderId) ?? shopifyOrderId;
+    const mockFulfillmentOrders =
+      mockFulfillmentOrdersByOrderId[shopifyOrderId] ?? mockFulfillmentOrdersByOrderId[normalizedShopifyOrderId];
+    if (mockFulfillmentOrders) {
+      return {
+        fulfillmentOrders: mockFulfillmentOrders.map((order) => ({
+          id: toShopifyGid('FulfillmentOrder', order.id),
+          status: order.status,
+          requestStatus: null,
+          supportedActions: null,
+          assignedLocationId: null,
+          assignedLocationName: null,
+          lineItems: order.lineItems.map((lineItem) => ({
+            id: toShopifyGid('FulfillmentOrderLineItem', lineItem.id),
+            lineItemId: toShopifyLineItemGid(lineItem.lineItemId),
+            remainingQuantity: lineItem.quantity,
+            totalQuantity: lineItem.quantity,
+          })),
+        })),
+        source: 'mock',
+      };
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify fulfillment order cancellation classification is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query FulfillmentOrderCancellationClassification($id: ID!) {
+              order(id: $id) {
+                id
+                fulfillmentOrders(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  nodes {
+                    id
+                    status
+                    requestStatus
+                    supportedActions {
+                      action
+                    }
+                    assignedLocation {
+                      name
+                      location {
+                        id
+                        name
+                      }
+                    }
+                    lineItems(first: 250) {
+                      pageInfo {
+                        hasNextPage
+                      }
+                      nodes {
+                        id
+                        remainingQuantity
+                        totalQuantity
+                        lineItem {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            id: toShopifyOrderGid(shopifyOrderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify fulfillment order cancellation classification fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<FulfillmentOrderCancellationClassificationQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify fulfillment order cancellation classification fetch returned GraphQL errors: ${json.errors
+          .map((error) => error.message)
+          .join('; ')}`,
+      );
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      throw new Error(`Shopify order fulfillment orders were not found for order ${shopifyOrderId}.`);
+    }
+    if (order.fulfillmentOrders.pageInfo?.hasNextPage) {
+      throw new Error(`Shopify order ${shopifyOrderId} has more fulfillment orders than the classifier can safely inspect.`);
+    }
+    const fulfillmentOrderWithTruncatedLineItems = (order.fulfillmentOrders.nodes || []).find(
+      (fulfillmentOrder) => fulfillmentOrder.lineItems.pageInfo?.hasNextPage,
+    );
+    if (fulfillmentOrderWithTruncatedLineItems) {
+      throw new Error(
+        `Shopify fulfillment order ${fulfillmentOrderWithTruncatedLineItems.id} has more line items than the classifier can safely inspect.`,
+      );
+    }
+
+    return {
+      fulfillmentOrders: (order.fulfillmentOrders.nodes || []).map((fulfillmentOrder) => ({
+        id: fulfillmentOrder.id,
+        status: fulfillmentOrder.status ?? null,
+        requestStatus: fulfillmentOrder.requestStatus ?? null,
+        supportedActions: Array.isArray(fulfillmentOrder.supportedActions)
+          ? fulfillmentOrder.supportedActions
+              .map((action) => action.action?.trim())
+              .filter((action): action is string => Boolean(action))
+          : null,
+        assignedLocationId: fulfillmentOrder.assignedLocation?.location?.id ?? null,
+        assignedLocationName:
+          fulfillmentOrder.assignedLocation?.location?.name ?? fulfillmentOrder.assignedLocation?.name ?? null,
+        lineItems: (fulfillmentOrder.lineItems.nodes || []).map((lineItem) => ({
+          id: lineItem.id,
+          lineItemId: lineItem.lineItem?.id ?? '',
+          remainingQuantity: typeof lineItem.remainingQuantity === 'number' ? lineItem.remainingQuantity : null,
+          totalQuantity: typeof lineItem.totalQuantity === 'number' ? lineItem.totalQuantity : null,
+        })),
+      })),
+      source: 'shopify_admin',
+    };
+  }
+
   async function fetchOrderFulfillmentState(shopifyOrderId: string): Promise<ShopifyOrderFulfillmentState> {
     if (mockOrderFulfillmentStateByOrderId[shopifyOrderId]) {
       return {
@@ -2459,6 +2638,7 @@ export function createShopifyAdminService(env: AppEnv) {
     probeReturnLabelUpload,
     syncReturnShipping,
     fetchFulfillmentOrders,
+    fetchFulfillmentOrdersForCancellationClassification,
     fetchOrderFulfillmentState,
     createFulfillmentTracking,
   };

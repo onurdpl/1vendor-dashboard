@@ -23,9 +23,14 @@ import type { FetchOrderLineItemImagesResult } from '../shopify/shopify-admin.ty
 import type {
   PreviewSuggestedRefundInput,
   PreviewSuggestedRefundResult,
-  ShopifyFulfillmentOrdersResponse,
+  ShopifyFulfillmentOrderCancellationClassificationResponse,
   ShopifyRefundRestockType,
 } from '../shopify/shopify-admin.types.js';
+import {
+  buildUnrunFulfillmentOrderCancellationClassification,
+  classifyFulfillmentOrdersForAllocationRefund,
+  type FulfillmentOrderCancellationClassificationResult,
+} from '../shopify/shopify-fulfillment-order-cancel-classifier.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
@@ -102,7 +107,9 @@ export type AdminEconomicTransferResponse = {
 
 export type ShopifySuggestedRefundPreviewService = {
   previewSuggestedRefund(input: PreviewSuggestedRefundInput): Promise<PreviewSuggestedRefundResult>;
-  fetchFulfillmentOrders?(shopifyOrderId: string): Promise<ShopifyFulfillmentOrdersResponse>;
+  fetchFulfillmentOrdersForCancellationClassification(
+    shopifyOrderId: string,
+  ): Promise<ShopifyFulfillmentOrderCancellationClassificationResponse>;
 };
 
 export type AdminShopifyRefundPreviewInput = {
@@ -133,6 +140,7 @@ export type AdminShopifyRefundPreviewResponse = {
       parentTransactionId: string | null;
     }>;
   } | null;
+  fulfillmentOrderCancellation: FulfillmentOrderCancellationClassificationResult;
   warnings: string[];
   blockers: string[];
   missingData: string[];
@@ -148,7 +156,6 @@ const BLOCKED_ALLOCATION_STATUSES = new Set<AllocationStatus>([
 const SHIPPED_STATUS_VALUES = new Set(['shipped', 'delivered', 'in transit', 'in_transit', 'label created', 'label_created', 'partially_shipped']);
 const FULFILLED_STATUS_VALUES = new Set(['fulfilled', 'partially fulfilled', 'partially_fulfilled']);
 const REFUND_PREVIEW_RESTOCK_TYPES = new Set<ShopifyRefundRestockType>(['CANCEL', 'NO_RESTOCK']);
-const TERMINAL_FULFILLMENT_ORDER_STATUSES = new Set(['closed', 'cancelled', 'canceled', 'incomplete']);
 
 function normalizeRejectReason(reason: string | null | undefined): CancellationReason {
   const normalized = reason?.trim().toUpperCase();
@@ -201,19 +208,6 @@ function normalizeShopifyRefundPreviewRestockType(value: string | null | undefin
     throw new OrderRejectValidationError('Refund preview restockType must be CANCEL or NO_RESTOCK.', 400);
   }
   return normalized as ShopifyRefundRestockType;
-}
-
-function normalizeShopifyIdTail(value: string | null | undefined) {
-  const text = value?.trim() ?? '';
-  if (!text) {
-    return '';
-  }
-  return text.split('/').at(-1)?.trim() || text;
-}
-
-function isOpenFulfillmentOrderStatus(status: string | null | undefined) {
-  const normalized = normalizeStatus(status);
-  return !normalized || !TERMINAL_FULFILLMENT_ORDER_STATUSES.has(normalized);
 }
 
 const TERMINAL_RETURN_STATUS_TOKENS = ['closed', 'cancelled', 'canceled', 'declined', 'rejected', 'deleted'];
@@ -2007,6 +2001,11 @@ export async function previewShopifyRefundForAdminOrder(
     blockers.push('Allocation has no line items to preview for refund.');
   }
 
+  let fulfillmentOrderCancellation: FulfillmentOrderCancellationClassificationResult =
+    buildUnrunFulfillmentOrderCancellationClassification(
+      'Fulfillment order cancellation classification was not run because refund preview input is blocked.',
+    );
+
   const blockedResponse = (): AdminShopifyRefundPreviewResponse => ({
     ok: true,
     writesPerformed: false,
@@ -2018,6 +2017,7 @@ export async function previewShopifyRefundForAdminOrder(
       restockType: lineItem.restockType,
     })),
     suggestedRefund: null,
+    fulfillmentOrderCancellation,
     warnings,
     blockers,
     missingData,
@@ -2027,22 +2027,25 @@ export async function previewShopifyRefundForAdminOrder(
     return blockedResponse();
   }
 
-  if (input.shopifyAdminService.fetchFulfillmentOrders) {
-    try {
-      const fulfillmentOrders = await input.shopifyAdminService.fetchFulfillmentOrders(allocation.order.sourceShopifyOrderId);
-      const selectedLineItemIds = new Set(refundLineItems.map((lineItem) => normalizeShopifyIdTail(lineItem.sourceLineItemId)));
-      const hasOpenFulfillmentOrder = fulfillmentOrders.fulfillmentOrders.some((fulfillmentOrder) => {
-        if (!isOpenFulfillmentOrderStatus(fulfillmentOrder.status)) {
-          return false;
-        }
-        return fulfillmentOrder.lineItems.some((lineItem) => selectedLineItemIds.has(normalizeShopifyIdTail(lineItem.lineItemId)));
-      });
-      if (hasOpenFulfillmentOrder) {
-        warnings.push('Open fulfillment order exists for selected line items. Future refundCreate must cancel affected fulfillment orders first.');
-      }
-    } catch {
-      warnings.push('Shopify fulfillment order lookup failed. Future refundCreate must verify affected fulfillment orders before running.');
+  try {
+    fulfillmentOrderCancellation = await classifyFulfillmentOrdersForAllocationRefund({
+      shopifyOrderId: allocation.order.sourceShopifyOrderId,
+      allocationId: allocation.id,
+      selectedLineItems: refundLineItems.map((lineItem) => ({
+        lineItemId: lineItem.sourceLineItemId,
+        quantity: lineItem.quantity,
+      })),
+      shopifyAdminService: input.shopifyAdminService,
+    });
+    warnings.push(...fulfillmentOrderCancellation.warnings);
+    if (fulfillmentOrderCancellation.overallClassification === 'blocked' || fulfillmentOrderCancellation.overallClassification === 'unknown') {
+      blockers.push(...fulfillmentOrderCancellation.blockers);
     }
+  } catch {
+    fulfillmentOrderCancellation = buildUnrunFulfillmentOrderCancellationClassification(
+      'Shopify fulfillment order cancellation classification failed. Future refundCreate must verify affected fulfillment orders before running.',
+    );
+    blockers.push(...fulfillmentOrderCancellation.blockers);
   }
 
   const preview = await input.shopifyAdminService.previewSuggestedRefund({
@@ -2080,6 +2083,7 @@ export async function previewShopifyRefundForAdminOrder(
           })),
         }
       : null,
+    fulfillmentOrderCancellation,
     warnings,
     blockers,
     missingData,
