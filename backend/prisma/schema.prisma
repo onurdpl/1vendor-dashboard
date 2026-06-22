@@ -282,10 +282,6 @@ enum AutomationActionType {
   AUTO_PRIORITIZE_STALE_QUEUE_ITEM
 }
 
-enum PaymentProvider {
-  PARATIKA
-}
-
 enum VendorProfileSnapshotImpact {
   FUTURE_LEDGER_ROWS_ONLY
   FUTURE_SETTLEMENT_APPROVALS_ONLY
@@ -336,7 +332,6 @@ model Vendor {
   shipmentExecutions           ShipmentExecution[]
   financialProfile             VendorFinancialProfile?
   billingProfile               VendorBillingProfile?
-  paymentProviderSellers       VendorPaymentProviderSeller[]
   financeEvents                FinanceEvent[]
   payoutBatches                PayoutBatch[]
   settlementApprovals          SettlementApproval[]
@@ -492,21 +487,6 @@ model VendorProfileAuditLog {
   @@index([vendorId, changedAt])
   @@index([vendorId, section])
   @@index([fieldName])
-}
-
-model VendorPaymentProviderSeller {
-  id               String          @id @default(cuid())
-  vendorId         String
-  provider         PaymentProvider
-  externalSellerId String
-  enabled          Boolean         @default(true)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  vendor           Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, vendorId])
-  @@unique([provider, externalSellerId])
-  @@index([vendorId, provider, enabled])
 }
 
 model UserVendorAccess {
