@@ -5,6 +5,7 @@ import {
   autoCreateKargonomiReturnShipmentForApprovedReturn,
   autoCreateNavlungoReturnPickupForApprovedReturn,
 } from '../returns/returns.service.js';
+import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
 import type {
   ReturnLifecycleIngestionInput,
   ReturnLifecycleIngestionResult,
@@ -239,6 +240,10 @@ export async function ingestReturnRequestWebhook(
 
       for (const mappedItem of mappedItems) {
         const id = `return-request-${identity.sourceShopifyReturnId}-${mappedItem.vendorId}-${mappedItem.sourceLineItemId}`;
+        const ownerResolution = await assertResolvedEconomicOwnerForMoneyMovement({
+          vendorAllocationId: mappedItem.allocation.id,
+          db: tx,
+        });
 
         await tx.returnRecord.upsert({
           where: {
@@ -264,6 +269,7 @@ export async function ingestReturnRequestWebhook(
           create: {
             id,
             vendorAllocationId: mappedItem.allocation.id,
+            ownerVendorId: ownerResolution.economicOwnerVendorId,
             sourceShopifyOrderId,
             sourceShopifyOrderNumber: mappedItem.allocation.sourceShopifyOrderNumber,
             sourceShopifyRefundId: null,

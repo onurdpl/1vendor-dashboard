@@ -404,6 +404,13 @@ describe('Shopify refund return linking', () => {
         },
       }),
     );
+    expect(txMock.returnRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          ownerVendorId: 'sporjinal',
+        }),
+      }),
+    );
     expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -440,6 +447,9 @@ describe('Shopify refund return linking', () => {
         where: {
           id: 'return-yalispor-1074533826897',
         },
+        create: expect.objectContaining({
+          ownerVendorId: 'sporjinal',
+        }),
       }),
     );
     expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(

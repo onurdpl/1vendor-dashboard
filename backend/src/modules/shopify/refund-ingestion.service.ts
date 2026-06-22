@@ -303,6 +303,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           create: {
             id: returnRecordId,
             vendorAllocationId,
+            ownerVendorId: vendorId,
             sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
             sourceShopifyOrderNumber: orderNumber,
             sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,

@@ -7,12 +7,23 @@ const prismaMock = vi.hoisted(() => ({
   returnRecord: {
     updateMany: vi.fn(),
     findMany: vi.fn(),
+    upsert: vi.fn(),
+  },
+  shopifyOrder: {
+    findUnique: vi.fn(),
+  },
+  vendor: {
+    findMany: vi.fn(),
+  },
+  vendorAllocation: {
+    findUnique: vi.fn(),
   },
   $transaction: vi.fn(),
 }));
 
 const shopifyAdminMock = vi.hoisted(() => ({
   fetchReturnDetails: vi.fn(),
+  fetchOrderSellerInfo: vi.fn(),
 }));
 
 const autoCreateKargonomiReturnShipmentForApprovedReturnMock = vi.hoisted(() => vi.fn());
@@ -31,7 +42,10 @@ vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   autoCreateNavlungoReturnPickupForApprovedReturn: autoCreateNavlungoReturnPickupForApprovedReturnMock,
 }));
 
-const { applyReturnLifecycleStatusWebhook } = await import('../backend/src/modules/shopify/return-lifecycle-ingestion.service.js');
+const {
+  applyReturnLifecycleStatusWebhook,
+  ingestReturnRequestWebhook,
+} = await import('../backend/src/modules/shopify/return-lifecycle-ingestion.service.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -77,8 +91,13 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     prismaMock.webhookEvent.update.mockReset();
     prismaMock.returnRecord.updateMany.mockReset();
     prismaMock.returnRecord.findMany.mockReset();
+    prismaMock.returnRecord.upsert.mockReset();
+    prismaMock.shopifyOrder.findUnique.mockReset();
+    prismaMock.vendor.findMany.mockReset();
+    prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.$transaction.mockReset();
     shopifyAdminMock.fetchReturnDetails.mockReset();
+    shopifyAdminMock.fetchOrderSellerInfo.mockReset();
     autoCreateKargonomiReturnShipmentForApprovedReturnMock.mockReset();
     autoCreateNavlungoReturnPickupForApprovedReturnMock.mockReset();
 
@@ -89,6 +108,7 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     prismaMock.returnRecord.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.returnRecord.findMany.mockResolvedValue([{ id: 'return-request-1' }]);
     shopifyAdminMock.fetchReturnDetails.mockResolvedValue({ returnTracking: null });
+    shopifyAdminMock.fetchOrderSellerInfo.mockResolvedValue({ sellerInfo: null, source: 'shopify_admin' });
     autoCreateKargonomiReturnShipmentForApprovedReturnMock.mockResolvedValue({
       attempted: false,
       skippedReason: 'provider_not_kargonomi',
@@ -161,5 +181,151 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     });
     expect(autoCreateKargonomiReturnShipmentForApprovedReturnMock).not.toHaveBeenCalled();
     expect(autoCreateNavlungoReturnPickupForApprovedReturnMock).not.toHaveBeenCalled();
+  });
+
+  it('snapshots return owner from the active economic owner after transfer', async () => {
+    shopifyAdminMock.fetchReturnDetails.mockResolvedValueOnce({
+      orderGid: 'gid://shopify/Order/7621834670417',
+      returnTracking: null,
+      lineItems: [
+        {
+          returnLineItemGid: 'gid://shopify/ReturnLineItem/1',
+          lineItemGid: 'gid://shopify/LineItem/20346971095377',
+          sku: 'DJ1196-002-42',
+          returnReason: 'SIZE_TOO_LARGE',
+          returnReasonNote: 'Beden büyük geldi.',
+          customerNote: null,
+        },
+      ],
+    });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({
+      id: 'shopify-order-db-1029',
+      sourceShopifyOrderId: '7621834670417',
+      lineItems: [
+        {
+          sourceLineItemId: '20346971095377',
+          sku: 'DJ1196-002-42',
+          originalVendorId: 'yalispor',
+        },
+      ],
+      allocations: [
+        {
+          id: 'alloc-1029-yalispor',
+          originalVendorId: 'yalispor',
+          assignedVendorId: 'sporjinal',
+          sourceShopifyOrderNumber: '#1029',
+        },
+      ],
+    });
+    prismaMock.vendor.findMany.mockResolvedValueOnce([{ id: 'yalispor' }, { id: 'sporjinal' }]);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-1029-yalispor',
+      financeEntries: [
+        {
+          id: 'fin-yalispor-sale-7621834670417',
+          vendorId: 'yalispor',
+          entryType: 'sale',
+          voidedAt: new Date('2026-06-21T10:00:00.000Z'),
+          supersededByLedgerId: 'fin-sporjinal-sale-7621834670417',
+          supersededBy: {
+            id: 'fin-sporjinal-sale-7621834670417',
+            vendorId: 'sporjinal',
+            entryType: 'sale',
+            voidedAt: null,
+          },
+        },
+      ],
+      economicTransfers: [{
+        id: 'economic-transfer-1',
+        status: 'completed',
+        createdAt: new Date('2026-06-21T10:00:00.000Z'),
+      }],
+    });
+    prismaMock.returnRecord.upsert.mockResolvedValueOnce({});
+
+    const result = await ingestReturnRequestWebhook(env, {
+      event: {
+        id: 'webhook-return-request-1',
+      } as never,
+      payload: {
+        id: 23229399377,
+        admin_graphql_api_id: 'gid://shopify/Return/23229399377',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      affectedRecordCount: 1,
+    });
+    expect(prismaMock.returnRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'return-request-23229399377-yalispor-20346971095377',
+        },
+        create: expect.objectContaining({
+          vendorAllocationId: 'alloc-1029-yalispor',
+          ownerVendorId: 'sporjinal',
+        }),
+      }),
+    );
+  });
+
+  it('fails return creation safely when economic owner cannot be resolved', async () => {
+    shopifyAdminMock.fetchReturnDetails.mockResolvedValueOnce({
+      orderGid: 'gid://shopify/Order/7621834670417',
+      returnTracking: null,
+      lineItems: [
+        {
+          returnLineItemGid: 'gid://shopify/ReturnLineItem/1',
+          lineItemGid: 'gid://shopify/LineItem/20346971095377',
+          sku: 'DJ1196-002-42',
+          returnReason: 'SIZE_TOO_LARGE',
+          returnReasonNote: null,
+          customerNote: null,
+        },
+      ],
+    });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({
+      id: 'shopify-order-db-1029',
+      sourceShopifyOrderId: '7621834670417',
+      lineItems: [
+        {
+          sourceLineItemId: '20346971095377',
+          sku: 'DJ1196-002-42',
+          originalVendorId: 'sporjinal',
+        },
+      ],
+      allocations: [
+        {
+          id: 'alloc-1029-sporjinal',
+          originalVendorId: 'sporjinal',
+          assignedVendorId: 'sporjinal',
+          sourceShopifyOrderNumber: '#1029',
+        },
+      ],
+    });
+    prismaMock.vendor.findMany.mockResolvedValueOnce([{ id: 'sporjinal' }]);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
+      id: 'alloc-1029-sporjinal',
+      financeEntries: [],
+      economicTransfers: [],
+    });
+
+    const result = await ingestReturnRequestWebhook(env, {
+      event: {
+        id: 'webhook-return-request-1',
+      } as never,
+      payload: {
+        id: 23229399377,
+        admin_graphql_api_id: 'gid://shopify/Return/23229399377',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: 'No active sale ledger found for allocation.',
+    });
+    expect(prismaMock.returnRecord.upsert).not.toHaveBeenCalled();
   });
 });
