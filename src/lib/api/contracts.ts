@@ -902,6 +902,16 @@ export type OrderDetail = OrderSummary & {
   financeLedgerPreview?: FinanceLedgerPreview | null;
 };
 
+export type EconomicTransferSummary = {
+  id: string;
+  status: string;
+  fromVendorId: VendorId;
+  toVendorId: VendorId;
+  reason: string | null;
+  completedAt: string | null;
+  adminActorUserId: string | null;
+};
+
 export type VendorAllocationSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
@@ -936,6 +946,7 @@ export type VendorAllocationSummary = {
   refundTotal: string;
   returnRecordCount?: number;
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
+  transferSummary?: EconomicTransferSummary | null;
 };
 
 export type FinanceIntegrityAlertSummary = {

@@ -235,6 +235,15 @@ type AdminOrderBreakdownDto = {
       allocationEconomicTransferId: string | null;
       affectedLedgerIds?: unknown;
     }>;
+    transferSummary?: {
+      id: string;
+      status: string;
+      fromVendorId: string;
+      toVendorId: string;
+      reason: string | null;
+      completedAt: string | null;
+      adminActorUserId: string | null;
+    } | null;
   }>;
 };
 
@@ -538,6 +547,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         ),
         returnRecordCount: allocation.returnRecords.length,
         financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
+        transferSummary: allocation.transferSummary ?? null,
       };
     }),
   };

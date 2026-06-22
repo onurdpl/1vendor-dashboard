@@ -139,6 +139,7 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
         createdAt: new Date('2026-06-21T08:05:00.000Z'),
       },
     ],
+    economicTransfers: [] as Array<Record<string, unknown>>,
     financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
     ...overrides,
   };
@@ -469,6 +470,83 @@ describe('vendor order reject operational hold', () => {
     }));
   });
 
+  it('includes null transfer summary when no completed economic transfer exists', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(buildAdminOrderBreakdownDb());
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.transferSummary).toBeNull();
+  });
+
+  it('includes the latest completed economic transfer summary in admin Shopify order breakdown', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.economicTransfers = [
+      {
+        id: 'transfer-pending',
+        status: 'IN_PROGRESS',
+        fromVendorId: 'yalispor',
+        toVendorId: 'vendor-c',
+        reason: 'Pending transfer should not render.',
+        completedAt: null,
+        createdAt: new Date('2026-06-21T12:00:00.000Z'),
+        adminActorUserId: 'admin-pending',
+      },
+      {
+        id: 'transfer-old',
+        status: 'COMPLETED',
+        fromVendorId: 'vendor-x',
+        toVendorId: 'yalispor',
+        reason: 'Older completed transfer.',
+        completedAt: new Date('2026-06-20T12:00:00.000Z'),
+        createdAt: new Date('2026-06-20T11:59:00.000Z'),
+        adminActorUserId: 'admin-old',
+      },
+      {
+        id: 'transfer-latest',
+        status: 'COMPLETED',
+        fromVendorId: 'yalispor',
+        toVendorId: 'sporjinal',
+        reason: 'Replacement accepted captured economics.',
+        completedAt: new Date('2026-06-21T12:30:00.000Z'),
+        createdAt: new Date('2026-06-21T12:29:00.000Z'),
+        adminActorUserId: 'admin-1',
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.transferSummary).toEqual({
+      id: 'transfer-latest',
+      status: 'COMPLETED',
+      fromVendorId: 'yalispor',
+      toVendorId: 'sporjinal',
+      reason: 'Replacement accepted captured economics.',
+      completedAt: '2026-06-21T12:30:00.000Z',
+      adminActorUserId: 'admin-1',
+    });
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        allocations: expect.objectContaining({
+          include: expect.objectContaining({
+            economicTransfers: expect.objectContaining({
+              select: {
+                id: true,
+                status: true,
+                fromVendorId: true,
+                toVendorId: true,
+                reason: true,
+                completedAt: true,
+                adminActorUserId: true,
+                createdAt: true,
+              },
+            }),
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('does not expose finance integrity alerts through vendor order detail', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
       financeIntegrityAlerts: [
@@ -482,6 +560,27 @@ describe('vendor order reject operational hold', () => {
     const detail = await getVendorOrderById('yalispor', 'alloc-1088');
 
     expect(detail).not.toHaveProperty('financeIntegrityAlerts');
+  });
+
+  it('does not expose economic transfer summary through vendor order detail', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
+      economicTransfers: [
+        {
+          id: 'transfer-1',
+          status: 'COMPLETED',
+          fromVendorId: 'yalispor',
+          toVendorId: 'sporjinal',
+          reason: 'Replacement accepted captured economics.',
+          completedAt: new Date('2026-06-21T12:30:00.000Z'),
+          adminActorUserId: 'admin-1',
+        },
+      ],
+    }));
+
+    const detail = await getVendorOrderById('yalispor', 'alloc-1088');
+
+    expect(detail).not.toHaveProperty('transferSummary');
+    expect(detail).not.toHaveProperty('economicTransfers');
   });
 
   it('requires a note for admin resolution actions', async () => {

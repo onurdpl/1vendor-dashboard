@@ -62,6 +62,19 @@ function formatFinanceAlertCategory(value: string) {
     .join(' ');
 }
 
+function formatTransferStatus(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/_/g, ' ');
+  if (!normalized) {
+    return 'Unknown';
+  }
+
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function getActionErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -746,6 +759,43 @@ export function AdminShopifyOrderPage() {
               </strong>
             </div>
           </section>
+
+          {allocation.transferSummary ? (
+            <section className="economic-transfer-summary-card" aria-label="Economic transfer summary">
+              <div className="economic-transfer-summary-header">
+                <div>
+                  <p className="eyebrow">Economic transfer</p>
+                  <h3>Economics transferred</h3>
+                </div>
+                <span className={`status-badge status-${getClassToken(allocation.transferSummary.status)}`}>
+                  {formatTransferStatus(allocation.transferSummary.status)}
+                </span>
+              </div>
+              <p className="economic-transfer-route">
+                <strong>{allocation.transferSummary.fromVendorId}</strong>
+                <span aria-hidden="true">→</span>
+                <strong>{allocation.transferSummary.toVendorId}</strong>
+              </p>
+              <div className="compact-meta-grid">
+                <div className="meta-item">
+                  <span>Reason</span>
+                  <strong>{allocation.transferSummary.reason ?? 'No reason recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Completed</span>
+                  <strong>
+                    {allocation.transferSummary.completedAt
+                      ? formatDate(allocation.transferSummary.completedAt)
+                      : 'Completion date unavailable'}
+                  </strong>
+                </div>
+                <div className="meta-item">
+                  <span>Admin</span>
+                  <strong>{allocation.transferSummary.adminActorUserId ?? 'Not recorded'}</strong>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {allocation.allocationStatus === 'vendor_blocked' ? (
             <section className="action-row">

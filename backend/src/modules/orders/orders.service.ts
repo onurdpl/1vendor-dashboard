@@ -1891,6 +1891,26 @@ export async function getAdminShopifyOrderBreakdown(
               createdAt: 'desc',
             },
           },
+          economicTransfers: {
+            select: {
+              id: true,
+              status: true,
+              fromVendorId: true,
+              toVendorId: true,
+              reason: true,
+              completedAt: true,
+              adminActorUserId: true,
+              createdAt: true,
+            },
+            orderBy: [
+              {
+                completedAt: 'desc',
+              },
+              {
+                createdAt: 'desc',
+              },
+            ],
+          },
           financeIntegrityAlerts: {
             where: {
               status: {
@@ -1949,6 +1969,13 @@ export async function getAdminShopifyOrderBreakdown(
         (sum, lineItem) => sum + toNumber(lineItem.lineAmount),
         0,
       );
+      const latestCompletedTransfer = [...allocation.economicTransfers]
+        .filter((transfer) => transfer.status.trim().toUpperCase() === 'COMPLETED')
+        .sort((left, right) => {
+          const rightTime = right.completedAt?.getTime() ?? right.createdAt.getTime();
+          const leftTime = left.completedAt?.getTime() ?? left.createdAt.getTime();
+          return rightTime - leftTime;
+        })[0] ?? null;
 
       return {
         id: allocation.id,
@@ -2013,6 +2040,17 @@ export async function getAdminShopifyOrderBreakdown(
           allocationEconomicTransferId: alert.allocationEconomicTransferId,
           affectedLedgerIds: alert.affectedLedgerIds,
         })),
+        transferSummary: latestCompletedTransfer
+          ? {
+              id: latestCompletedTransfer.id,
+              status: latestCompletedTransfer.status,
+              fromVendorId: latestCompletedTransfer.fromVendorId,
+              toVendorId: latestCompletedTransfer.toVendorId,
+              reason: latestCompletedTransfer.reason,
+              completedAt: toIsoString(latestCompletedTransfer.completedAt),
+              adminActorUserId: latestCompletedTransfer.adminActorUserId,
+            }
+          : null,
       };
     }),
   };

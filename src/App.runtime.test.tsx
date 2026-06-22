@@ -328,6 +328,15 @@ describe('App startup runtime safety', () => {
             allocationStatus: 'active',
             reassignmentRequired: false,
             cancellationReason: undefined,
+            transferSummary: {
+              id: 'transfer-1',
+              status: 'COMPLETED',
+              fromVendorId: 'vendor-a',
+              toVendorId: 'vendor-b',
+              reason: 'Vendor A is out of stock and Vendor B accepted captured economics.',
+              completedAt: '2026-06-02T12:30:00.000Z',
+              adminActorUserId: 'admin-1',
+            },
           },
         ],
       },
@@ -371,6 +380,14 @@ describe('App startup runtime safety', () => {
       confirmTransfer: true,
     }));
     expect(await screen.findByText('Allocation economics transferred to the replacement vendor.')).toBeInTheDocument();
+    const transferSummary = await screen.findByLabelText('Economic transfer summary');
+    expect(within(transferSummary).getByText('Economics transferred')).toBeInTheDocument();
+    expect(within(transferSummary).getByText('vendor-a')).toBeInTheDocument();
+    expect(within(transferSummary).getByText('vendor-b')).toBeInTheDocument();
+    expect(within(transferSummary).getAllByText('Completed').length).toBeGreaterThan(0);
+    expect(within(transferSummary).getByText('Vendor A is out of stock and Vendor B accepted captured economics.')).toBeInTheDocument();
+    expect(within(transferSummary).getByText(/Jun 2, 2026/)).toBeInTheDocument();
+    expect(within(transferSummary).getByText('admin-1')).toBeInTheDocument();
   });
 
   it('does not show economic transfer action for non-blocked allocations', async () => {

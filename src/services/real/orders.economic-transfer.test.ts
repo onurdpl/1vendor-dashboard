@@ -57,6 +57,15 @@ describe('real orders economic transfer service', () => {
             returnRecords: [{ id: 'return-1', status: 'REQUESTED', reason: null, createdAt: '2026-06-22T08:00:00.000Z' }],
             refundRecords: [],
             financeIntegrityAlerts: [],
+            transferSummary: {
+              id: 'transfer-1',
+              status: 'COMPLETED',
+              fromVendorId: 'vendor-a',
+              toVendorId: 'vendor-b',
+              reason: 'Vendor B accepted captured economics.',
+              completedAt: '2026-06-22T08:05:00.000Z',
+              adminActorUserId: 'admin-1',
+            },
           },
         ],
       },
@@ -90,6 +99,15 @@ describe('real orders economic transfer service', () => {
       allocationStatus: 'active',
       reassignmentRequired: false,
       returnRecordCount: 1,
+      transferSummary: {
+        id: 'transfer-1',
+        status: 'COMPLETED',
+        fromVendorId: 'vendor-a',
+        toVendorId: 'vendor-b',
+        reason: 'Vendor B accepted captured economics.',
+        completedAt: '2026-06-22T08:05:00.000Z',
+        adminActorUserId: 'admin-1',
+      },
     });
   });
 });

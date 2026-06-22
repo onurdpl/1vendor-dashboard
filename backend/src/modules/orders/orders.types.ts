@@ -549,6 +549,16 @@ export type AdminFinanceIntegrityAlertDto = {
   affectedLedgerIds: unknown;
 };
 
+export type AdminEconomicTransferSummaryDto = {
+  id: string;
+  status: string;
+  fromVendorId: string;
+  toVendorId: string;
+  reason: string | null;
+  completedAt: string | null;
+  adminActorUserId: string | null;
+};
+
 export type AdminOrderBreakdownAllocationDto = {
   id: string;
   vendorId: string;
@@ -585,6 +595,7 @@ export type AdminOrderBreakdownAllocationDto = {
     updatedAt: string;
   }>;
   financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
+  transferSummary: AdminEconomicTransferSummaryDto | null;
 };
 
 export type AdminOrderBreakdownDto = {

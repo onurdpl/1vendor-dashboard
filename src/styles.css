@@ -2412,6 +2412,35 @@ h3 {
   font-weight: 700;
 }
 
+.economic-transfer-summary-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.economic-transfer-summary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.economic-transfer-summary-header h3,
+.economic-transfer-route {
+  margin: 0;
+}
+
+.economic-transfer-route {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text);
+}
+
 .paratika-probe-card {
   display: grid;
   gap: 14px;
