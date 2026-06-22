@@ -102,6 +102,10 @@ export function getTransferRecoveryDiagnostics(transferId: string, options: { si
   return runtimeServices.finance.getTransferRecoveryDiagnostics(transferId, options);
 }
 
+export function retryEconomicTransfer(transferId: string, input: { note: string; confirmRetry: true }) {
+  return runtimeServices.finance.retryEconomicTransfer(transferId, input);
+}
+
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }

@@ -11,6 +11,7 @@ export {
   getVendorDebtHistory,
   preparePayoutBatch,
   rescanFinanceIntegrityAlert,
+  retryEconomicTransfer,
   resolveFinanceIntegrityAlert,
   runSettlementScheduleAutoDraftJob,
   updateVendorFinancialProfile,

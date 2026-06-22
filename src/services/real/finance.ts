@@ -11,6 +11,7 @@ import type {
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
   FinanceIntegrityAlertAcknowledgeResult,
+  EconomicTransferRetryResult,
   FinanceIntegrityAlertRescanResult,
   FinanceIntegrityAlertResolveResult,
   TransferRecoveryDiagnostics,
@@ -448,6 +449,17 @@ export function getTransferRecoveryDiagnostics(
       signal: options.signal,
       headers: options.headers,
     },
+  );
+}
+
+export function retryEconomicTransfer(
+  transferId: string,
+  input: { note: string; confirmRetry: true },
+): Promise<EconomicTransferRetryResult> {
+  return apiClient.post<EconomicTransferRetryResult>(
+    `/admin/finance-integrity/transfers/${encodeURIComponent(transferId)}/retry`,
+    input,
+    { skipVendorContext: true },
   );
 }
 

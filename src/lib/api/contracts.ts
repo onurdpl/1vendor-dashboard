@@ -1154,6 +1154,14 @@ export type TransferRecoveryDiagnostics = {
   recommendedAction: string;
 };
 
+export type EconomicTransferRetryResult = {
+  ok: boolean;
+  transfer?: unknown;
+  diagnostics?: unknown;
+  alertResolution?: unknown;
+  message?: string;
+};
+
 export type ShopifyOrderBreakdown = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;

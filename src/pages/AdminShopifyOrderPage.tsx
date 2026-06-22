@@ -21,6 +21,7 @@ import {
   acknowledgeFinanceIntegrityAlert,
   getTransferRecoveryDiagnostics,
   rescanFinanceIntegrityAlert,
+  retryEconomicTransfer,
   resolveFinanceIntegrityAlert,
 } from '../features/finance/api';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -141,6 +142,10 @@ type FinanceIntegrityAlertAcknowledgeAction = {
 
 type FinanceIntegrityAlertResolveAction = FinanceIntegrityAlertAcknowledgeAction;
 
+type FinanceIntegrityAlertRetryAction = FinanceIntegrityAlertAcknowledgeAction & {
+  transferId: string;
+};
+
 type FinanceIntegrityAlertRescanSummary = {
   tone: 'success' | 'info' | 'error';
   message: string;
@@ -237,6 +242,22 @@ function hasBlockingFinanceAlert(allocation: ShopifyOrderBreakdown['allocations'
     const status = normalizeStateToken(alert.status);
     return status === 'open' || status === 'acknowledged';
   }) ?? false;
+}
+
+function getFinanceAlertTransferId(alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number]) {
+  const alternateTransferId = (alert as { economicTransferId?: string | null }).economicTransferId;
+  return alert.allocationEconomicTransferId?.trim() || alternateTransferId?.trim() || null;
+}
+
+function canShowRetryTransferAction(alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number]) {
+  const status = normalizeStateToken(alert.status);
+  const severity = normalizeStateToken(alert.severity);
+  return (
+    normalizeStateToken(alert.category) === 'transfer_failed' &&
+    (status === 'open' || status === 'acknowledged') &&
+    (severity === 'warning' || severity === 'critical') &&
+    Boolean(getFinanceAlertTransferId(alert))
+  );
 }
 
 function hasVisibleTransferBlockerEvidence(allocation: ShopifyOrderBreakdown['allocations'][number]) {
@@ -349,6 +370,9 @@ export function AdminShopifyOrderPage() {
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
   const [alertResolutionNote, setAlertResolutionNote] = useState('');
+  const [retryTransferAction, setRetryTransferAction] = useState<FinanceIntegrityAlertRetryAction | null>(null);
+  const [retryTransferNote, setRetryTransferNote] = useState('');
+  const [retryTransferConfirmed, setRetryTransferConfirmed] = useState(false);
   const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
   const [shopifyRefundPreviews, setShopifyRefundPreviews] = useState<Record<string, ShopifyRefundPreviewResult>>({});
   const paratikaLiveProbe = useMutationAction(
@@ -514,6 +538,18 @@ export function AdminShopifyOrderPage() {
     {
       onError: (mutationError) => {
         showFeedback(getActionErrorMessage(mutationError, 'Finance integrity alert could not be resolved.'), 'error');
+      },
+    },
+  );
+  const retryTransferMutation = useMutationAction(
+    async (payload: { transferId: string; note: string }) =>
+      retryEconomicTransfer(payload.transferId, {
+        note: payload.note,
+        confirmRetry: true,
+      }),
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Economic transfer retry could not be completed.'), 'error');
       },
     },
   );
@@ -793,6 +829,42 @@ export function AdminShopifyOrderPage() {
     }
   }
 
+  async function handleRetryTransferSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!retryTransferAction) {
+      return;
+    }
+
+    const note = retryTransferNote.trim();
+    if (!note) {
+      showFeedback('Retry note is required.', 'error');
+      return;
+    }
+    if (note.length > 1000) {
+      showFeedback('Retry note must be 1000 characters or fewer.', 'error');
+      return;
+    }
+    if (!retryTransferConfirmed) {
+      showFeedback('Retry confirmation is required.', 'error');
+      return;
+    }
+
+    try {
+      await retryTransferMutation.mutateAsync({
+        transferId: retryTransferAction.transferId,
+        note,
+      });
+      showFeedback('Economic transfer retry submitted successfully.', 'success');
+      setRetryTransferAction(null);
+      setRetryTransferNote('');
+      setRetryTransferConfirmed(false);
+      await refetch();
+    } catch {
+      await refetch();
+      // The mutation onError handler owns user-facing feedback while the modal remains open.
+    }
+  }
+
   if (!appReadiness.ready || (isLoading && !breakdown)) {
     return (
       <section className="dashboard order-detail">
@@ -963,9 +1035,11 @@ export function AdminShopifyOrderPage() {
               {allocation.financeIntegrityAlerts.map((alert) => {
                 const normalizedAlertStatus = alert.status.toLowerCase();
                 const rescanSummary = rescanSummaries[alert.id];
+                const retryTransferId = getFinanceAlertTransferId(alert);
                 const canAcknowledge = normalizedAlertStatus === 'open';
                 const canRescan = normalizedAlertStatus === 'open' || normalizedAlertStatus === 'acknowledged';
                 const canResolve = normalizedAlertStatus === 'open' || normalizedAlertStatus === 'acknowledged';
+                const canRetryTransfer = canShowRetryTransferAction(alert) && Boolean(retryTransferId);
 
                 return (
                   <article
@@ -1012,6 +1086,20 @@ export function AdminShopifyOrderPage() {
                             onClick={() => void handleRescanAlert(alert)}
                           >
                             {rescanAlertMutation.isPending ? 'Rescanning...' : 'Rescan'}
+                          </button>
+                        ) : null}
+                        {canRetryTransfer && retryTransferId ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={retryTransferMutation.isPending}
+                            onClick={() => {
+                              setRetryTransferAction({ allocation, alert, transferId: retryTransferId });
+                              setRetryTransferNote('');
+                              setRetryTransferConfirmed(false);
+                            }}
+                          >
+                            {retryTransferMutation.isPending ? 'Retrying...' : 'Retry transfer'}
                           </button>
                         ) : null}
                         {canResolve ? (
@@ -2117,6 +2205,87 @@ export function AdminShopifyOrderPage() {
                 </button>
                 <button type="submit" className="button button-primary" disabled={resolveAlertMutation.isPending}>
                   {resolveAlertMutation.isPending ? 'Validating...' : 'Resolve alert'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {retryTransferAction ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section
+            className="support-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="finance-integrity-retry-transfer-title"
+          >
+            <div className="support-modal-header">
+              <div>
+                <h2 id="finance-integrity-retry-transfer-title">Retry failed transfer</h2>
+                <p>
+                  {retryTransferAction.allocation.vendorName} · {retryTransferAction.transferId}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                onClick={() => {
+                  if (!retryTransferMutation.isPending) {
+                    setRetryTransferAction(null);
+                    setRetryTransferNote('');
+                    setRetryTransferConfirmed(false);
+                  }
+                }}
+                aria-label="Close economic transfer retry form"
+              >
+                ×
+              </button>
+            </div>
+            <form className="support-ticket-form" onSubmit={handleRetryTransferSubmit}>
+              <p className="support-context-note">
+                This retries the failed economic transfer using the current transfer engine. It does not call Shopify and does not move money directly.
+              </p>
+              <label>
+                Retry note
+                <textarea
+                  value={retryTransferNote}
+                  onChange={(event) => setRetryTransferNote(event.target.value)}
+                  maxLength={1000}
+                  rows={5}
+                  required
+                  placeholder="Explain why this transfer is safe to retry now."
+                  disabled={retryTransferMutation.isPending}
+                />
+              </label>
+              <label className="checkbox-field economic-transfer-confirmation">
+                <input
+                  type="checkbox"
+                  checked={retryTransferConfirmed}
+                  onChange={(event) => setRetryTransferConfirmed(event.target.checked)}
+                  disabled={retryTransferMutation.isPending}
+                />
+                <span>I confirm this retry should re-run the failed economic transfer.</span>
+              </label>
+              <div className="support-modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setRetryTransferAction(null);
+                    setRetryTransferNote('');
+                    setRetryTransferConfirmed(false);
+                  }}
+                  disabled={retryTransferMutation.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={retryTransferMutation.isPending || !retryTransferNote.trim() || !retryTransferConfirmed}
+                >
+                  {retryTransferMutation.isPending ? 'Retrying...' : 'Retry transfer'}
                 </button>
               </div>
             </form>

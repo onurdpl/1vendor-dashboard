@@ -2588,6 +2588,25 @@ export const runtimeServices = {
             recoveryClassification: 'healthy' as const,
             recommendedAction: 'No recovery action is required.',
           }),
+    retryEconomicTransfer: (
+      transferId: string,
+      input: Parameters<typeof realFinance.retryEconomicTransfer>[1],
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.retryEconomicTransfer(transferId, input)
+        : Promise.resolve({
+            ok: true,
+            transfer: {
+              transferId,
+              status: 'COMPLETED',
+            },
+            alertResolution: {
+              scannerValidated: true,
+              resolvedAlertIds: [],
+              remainingFindingCategories: [],
+            },
+            message: 'Mock economic transfer retry completed.',
+          }),
     preparePayoutBatch: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.preparePayoutBatch(vendorId)
