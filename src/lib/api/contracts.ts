@@ -1005,6 +1005,23 @@ export type ShopifyRefundPreviewResult = {
   missingData: string[];
 };
 
+export type ShopifyRefundExecutionPayload = {
+  restockType: ShopifyRefundPreviewRestockType;
+  refundShipping: false;
+  notifyCustomer: boolean;
+  note: string;
+  confirmRefund: true;
+};
+
+export type ShopifyRefundExecutionResult = {
+  ok: true;
+  writesPerformed: true;
+  status: 'SHOPIFY_ACTION_PENDING';
+  shopifyRefundId: string | null;
+  attemptId: string;
+  message: string;
+};
+
 export type VendorAllocationSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;

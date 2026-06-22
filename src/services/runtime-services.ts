@@ -54,6 +54,7 @@ import type {
   AdminCancelRefundReviewPayload,
   AdminResolutionNotePayload,
   AdminEconomicTransferPayload,
+  AdminShopifyRefundExecutionPayload,
   AdminReturnToVendorPayload,
   AdminShopifyRefundPreviewPayload,
   RejectOrderPayload,
@@ -884,6 +885,20 @@ export const runtimeServices = {
       void allocationId;
       void payload;
       throw new ApiError('Shopify refund preview is available in real API mode only.', 'server', { status: 400 });
+    },
+    async executeAdminShopifyRefund(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminShopifyRefundExecutionPayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.executeAdminShopifyRefund(shopifyOrderId, allocationId, payload);
+      }
+
+      void shopifyOrderId;
+      void allocationId;
+      void payload;
+      throw new ApiError('Shopify refund execution is available in real API mode only.', 'server', { status: 400 });
     },
     async transferAdminAllocationEconomics(
       shopifyOrderId: string,

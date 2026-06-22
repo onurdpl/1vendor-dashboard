@@ -6,12 +6,14 @@ import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPri
 import {
   addAdminAllocationResolutionNote,
   createParatikaHostedPaymentLink,
+  executeAdminShopifyRefund,
   getAdminShopifyOrderBreakdown,
   previewAdminShopifyRefund,
   requestAdminCancelRefundReview,
   returnAdminBlockedAllocationToVendor,
   transferAdminAllocationEconomics,
   type ParatikaSessionTokenLiveProbeResult,
+  type ShopifyRefundExecutionPayload,
   type ShopifyRefundPreviewResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
@@ -125,6 +127,11 @@ type AdminEconomicTransferAction = {
 
 type AdminCancelRefundReviewAction = {
   allocation: ShopifyOrderBreakdown['allocations'][number];
+};
+
+type AdminShopifyRefundExecutionAction = {
+  allocation: ShopifyOrderBreakdown['allocations'][number];
+  preview: ShopifyRefundPreviewResult;
 };
 
 type FinanceIntegrityAlertAcknowledgeAction = {
@@ -271,6 +278,44 @@ function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allo
   );
 }
 
+function isRefundReviewEligibleForShopifyExecution(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  const reviewStatus = normalizeStateToken(allocation.cancelRefundReview?.status);
+  return reviewStatus === 'pending_review' || reviewStatus === 'customer_contacted';
+}
+
+function isOutboundRefundPending(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return normalizeStateToken(allocation.outboundRefundAttemptSummary?.status) === 'shopify_action_pending';
+}
+
+function hasExecutableShopifyRefundPreview(preview: ShopifyRefundPreviewResult | undefined) {
+  if (!preview || preview.blockers.length > 0 || !preview.suggestedRefund) {
+    return false;
+  }
+
+  const transactions = preview.suggestedRefund.suggestedTransactions;
+  const hasMappedTransactions =
+    transactions.length > 0 && transactions.every((transaction) => Boolean(transaction.parentTransactionId?.trim()));
+  const fulfillmentOrderState = normalizeStateToken(preview.fulfillmentOrderCancellation.overallClassification);
+
+  return (
+    hasMappedTransactions &&
+    (fulfillmentOrderState === 'safe_to_cancel' || fulfillmentOrderState === 'no_cancellation_needed')
+  );
+}
+
+function canShowShopifyRefundExecutionAction(
+  allocation: ShopifyOrderBreakdown['allocations'][number],
+  preview: ShopifyRefundPreviewResult | undefined,
+) {
+  return (
+    isRefundReviewEligibleForShopifyExecution(allocation) &&
+    hasExecutableShopifyRefundPreview(preview) &&
+    !isOutboundRefundPending(allocation) &&
+    !hasVisibleTransferBlockerEvidence(allocation) &&
+    !hasBlockingFinanceAlert(allocation)
+  );
+}
+
 const CANCEL_REFUND_REVIEW_REASONS = [
   { value: 'OUT_OF_STOCK', label: 'Out of stock' },
   { value: 'VENDOR_CANCELLED', label: 'Vendor cancelled' },
@@ -295,6 +340,11 @@ export function AdminShopifyOrderPage() {
   const [cancelRefundReviewReason, setCancelRefundReviewReason] = useState('');
   const [cancelRefundReviewNote, setCancelRefundReviewNote] = useState('');
   const [cancelRefundReviewConfirmed, setCancelRefundReviewConfirmed] = useState(false);
+  const [shopifyRefundAction, setShopifyRefundAction] = useState<AdminShopifyRefundExecutionAction | null>(null);
+  const [shopifyRefundNote, setShopifyRefundNote] = useState('');
+  const [shopifyRefundNotifyCustomer, setShopifyRefundNotifyCustomer] = useState(false);
+  const [shopifyRefundPaymentConfirmed, setShopifyRefundPaymentConfirmed] = useState(false);
+  const [shopifyRefundWebhookConfirmed, setShopifyRefundWebhookConfirmed] = useState(false);
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
@@ -422,6 +472,20 @@ export function AdminShopifyOrderPage() {
     {
       onError: (mutationError) => {
         showFeedback(getActionErrorMessage(mutationError, 'Shopify refund preview could not be loaded.'), 'error');
+      },
+    },
+  );
+  const shopifyRefundExecutionMutation = useMutationAction(
+    async (payload: { allocationId: string; refund: ShopifyRefundExecutionPayload }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return executeAdminShopifyRefund(shopifyOrderId, payload.allocationId, payload.refund);
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Shopify refund could not be submitted.'), 'error');
       },
     },
   );
@@ -590,6 +654,62 @@ export function AdminShopifyOrderPage() {
         showFeedback('Shopify refund preview loaded. No local state was changed.', 'success');
       }
     } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleShopifyRefundExecutionSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!shopifyRefundAction) {
+      return;
+    }
+
+    const note = shopifyRefundNote.trim();
+    if (!note) {
+      showFeedback('Refund note is required.', 'error');
+      return;
+    }
+    if (note.length > 1000) {
+      showFeedback('Refund note must be 1000 characters or fewer.', 'error');
+      return;
+    }
+    if (!shopifyRefundPaymentConfirmed || !shopifyRefundWebhookConfirmed) {
+      showFeedback('Both refund confirmations are required.', 'error');
+      return;
+    }
+    if (!canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, shopifyRefundAction.preview)) {
+      showFeedback('Shopify refund execution is blocked by the current preview or allocation state.', 'error');
+      return;
+    }
+
+    const restockType = shopifyRefundAction.preview.refundLineItemsPreview[0]?.restockType ?? 'CANCEL';
+
+    try {
+      const result = await shopifyRefundExecutionMutation.mutateAsync({
+        allocationId: shopifyRefundAction.allocation.allocationOrderId,
+        refund: {
+          restockType,
+          refundShipping: false,
+          notifyCustomer: shopifyRefundNotifyCustomer,
+          note,
+          confirmRefund: true,
+        },
+      });
+
+      setShopifyRefundPreviews((current) => {
+        const next = { ...current };
+        delete next[shopifyRefundAction.allocation.allocationOrderId];
+        return next;
+      });
+      setShopifyRefundAction(null);
+      setShopifyRefundNote('');
+      setShopifyRefundNotifyCustomer(false);
+      setShopifyRefundPaymentConfirmed(false);
+      setShopifyRefundWebhookConfirmed(false);
+      await refetch();
+      showFeedback(result.message || 'Shopify refund submitted. Waiting for refunds/create webhook.', 'success');
+    } catch {
+      await refetch();
       // The mutation onError handler owns user-facing feedback.
     }
   }
@@ -815,6 +935,8 @@ export function AdminShopifyOrderPage() {
         const showEconomicTransferAction = canShowEconomicTransferAction(allocation);
         const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation);
         const shopifyRefundPreview = shopifyRefundPreviews[allocation.allocationOrderId];
+        const showShopifyRefundExecutionAction = canShowShopifyRefundExecutionAction(allocation, shopifyRefundPreview);
+        const outboundRefundPending = isOutboundRefundPending(allocation);
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1080,15 +1202,92 @@ export function AdminShopifyOrderPage() {
                   <strong>{allocation.cancelRefundReview.requestedByUserId ?? 'Not recorded'}</strong>
                 </div>
               </div>
+              {allocation.outboundRefundAttemptSummary ? (
+                <section className="shopify-refund-preview-card" aria-label="Outbound Shopify refund attempt summary">
+                  <div className="economic-transfer-summary-header">
+                    <div>
+                      <p className="eyebrow">Outbound refund attempt</p>
+                      <h4>{formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}</h4>
+                    </div>
+                    <span className={`status-badge status-${getClassToken(allocation.outboundRefundAttemptSummary.status)}`}>
+                      {formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}
+                    </span>
+                  </div>
+                  <div className="compact-meta-grid">
+                    <div className="meta-item">
+                      <span>Previewed</span>
+                      <strong>
+                        {allocation.outboundRefundAttemptSummary.previewedAt
+                          ? formatDate(allocation.outboundRefundAttemptSummary.previewedAt)
+                          : 'Not recorded'}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Submitted</span>
+                      <strong>
+                        {allocation.outboundRefundAttemptSummary.submittedAt
+                          ? formatDate(allocation.outboundRefundAttemptSummary.submittedAt)
+                          : 'Not submitted'}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Resolved</span>
+                      <strong>
+                        {allocation.outboundRefundAttemptSummary.resolvedAt
+                          ? formatDate(allocation.outboundRefundAttemptSummary.resolvedAt)
+                          : 'Not resolved'}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Failed</span>
+                      <strong>
+                        {allocation.outboundRefundAttemptSummary.failedAt
+                          ? formatDate(allocation.outboundRefundAttemptSummary.failedAt)
+                          : 'No failure recorded'}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Failure reason</span>
+                      <strong>{allocation.outboundRefundAttemptSummary.failureReason ?? 'None'}</strong>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
               <div className="support-modal-actions refund-preview-actions">
                 <button
                   className="button button-secondary"
                   type="button"
-                  disabled={shopifyRefundPreviewMutation.isPending}
+                  disabled={shopifyRefundPreviewMutation.isPending || outboundRefundPending}
                   onClick={() => void handleShopifyRefundPreview(allocation)}
                 >
-                  {shopifyRefundPreviewMutation.isPending ? 'Previewing...' : 'Preview Shopify refund'}
+                  {outboundRefundPending
+                    ? 'Refund pending'
+                    : shopifyRefundPreviewMutation.isPending
+                      ? 'Previewing...'
+                      : 'Preview Shopify refund'}
                 </button>
+                {showShopifyRefundExecutionAction ? (
+                  <button
+                    className="button button-primary"
+                    type="button"
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                    onClick={() => {
+                      if (!shopifyRefundPreview) {
+                        return;
+                      }
+                      setShopifyRefundAction({
+                        allocation,
+                        preview: shopifyRefundPreview,
+                      });
+                      setShopifyRefundNote('');
+                      setShopifyRefundNotifyCustomer(false);
+                      setShopifyRefundPaymentConfirmed(false);
+                      setShopifyRefundWebhookConfirmed(false);
+                    }}
+                  >
+                    Refund in Shopify
+                  </button>
+                ) : null}
               </div>
               {shopifyRefundPreview ? (
                 <section className="shopify-refund-preview-card" aria-label="Shopify suggested refund preview">
@@ -1618,6 +1817,175 @@ export function AdminShopifyOrderPage() {
                   </button>
                   <button type="submit" className="button button-primary" disabled={!reviewReady}>
                     {cancelRefundReviewMutation.isPending ? 'Saving review...' : 'Start review'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {shopifyRefundAction ? (() => {
+        const note = shopifyRefundNote.trim();
+        const preview = shopifyRefundAction.preview;
+        const transactions = preview.suggestedRefund?.suggestedTransactions ?? [];
+        const refundReady = Boolean(
+          note &&
+            note.length <= 1000 &&
+            shopifyRefundPaymentConfirmed &&
+            shopifyRefundWebhookConfirmed &&
+            canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, preview) &&
+            !shopifyRefundExecutionMutation.isPending,
+        );
+
+        return (
+          <div className="support-modal-backdrop" role="presentation">
+            <section
+              className="support-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="admin-shopify-refund-execution-title"
+            >
+              <div className="support-modal-header">
+                <div>
+                  <h2 id="admin-shopify-refund-execution-title">Refund in Shopify</h2>
+                  <p>
+                    {shopifyRefundAction.allocation.vendorName} · {shopifyRefundAction.allocation.allocationOrderId}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="support-modal-close"
+                  onClick={() => {
+                    if (!shopifyRefundExecutionMutation.isPending) {
+                      setShopifyRefundAction(null);
+                      setShopifyRefundNote('');
+                      setShopifyRefundNotifyCustomer(false);
+                      setShopifyRefundPaymentConfirmed(false);
+                      setShopifyRefundWebhookConfirmed(false);
+                    }
+                  }}
+                  aria-label="Close Shopify refund form"
+                >
+                  ×
+                </button>
+              </div>
+              <form className="support-ticket-form" onSubmit={handleShopifyRefundExecutionSubmit}>
+                <p className="support-context-note economic-transfer-warning">
+                  This action will call Shopify refundCreate and may cancel affected Shopify fulfillment orders first. It triggers a real payment refund in Shopify. Sporgym finance records are not created immediately; finance updates only after the Shopify refunds/create webhook is received and processed. Do not proceed unless the customer has approved the refund or policy allows it.
+                </p>
+
+                <section className="shopify-refund-preview-card" aria-label="Shopify refund execution summary">
+                  <div className="economic-transfer-summary-header">
+                    <div>
+                      <p className="eyebrow">Execution summary</p>
+                      <h4>
+                        {formatPreviewMoney(
+                          preview.suggestedRefund?.totalRefundAmount,
+                          preview.suggestedRefund?.currencyCode,
+                        )}
+                      </h4>
+                    </div>
+                    <span className={`status-badge status-${getClassToken(preview.fulfillmentOrderCancellation.overallClassification)}`}>
+                      {formatTransferStatus(preview.fulfillmentOrderCancellation.overallClassification)}
+                    </span>
+                  </div>
+                  <div className="compact-meta-grid">
+                    <div className="meta-item">
+                      <span>Suggested transactions</span>
+                      <strong>{transactions.length}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Fulfillment orders</span>
+                      <strong>{preview.fulfillmentOrderCancellation.affectedFulfillmentOrders.length}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Shipping refund</span>
+                      <strong>No</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Restock type</span>
+                      <strong>{preview.refundLineItemsPreview[0]?.restockType ?? 'CANCEL'}</strong>
+                    </div>
+                  </div>
+                  <div className="refund-preview-message">
+                    <strong>Line items</strong>
+                    <ul>
+                      {preview.refundLineItemsPreview.map((lineItem) => (
+                        <li key={`${lineItem.lineItemId}-${lineItem.quantity}`}>
+                          {lineItem.lineItemId} · Quantity {lineItem.quantity}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {preview.warnings.length || preview.fulfillmentOrderCancellation.warnings.length ? (
+                    <div className="refund-preview-message refund-preview-message-warning">
+                      <strong>Warnings</strong>
+                      <ul>
+                        {[...preview.warnings, ...preview.fulfillmentOrderCancellation.warnings].map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+
+                <label>
+                  Refund note
+                  <textarea
+                    value={shopifyRefundNote}
+                    onChange={(event) => setShopifyRefundNote(event.target.value)}
+                    maxLength={1000}
+                    rows={5}
+                    required
+                    placeholder="Record the customer approval or policy reason for the Shopify refund."
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                  />
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={shopifyRefundNotifyCustomer}
+                    onChange={(event) => setShopifyRefundNotifyCustomer(event.target.checked)}
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                  />
+                  <span>Notify customer through Shopify.</span>
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={shopifyRefundPaymentConfirmed}
+                    onChange={(event) => setShopifyRefundPaymentConfirmed(event.target.checked)}
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                  />
+                  <span>I understand this will trigger a real Shopify payment refund.</span>
+                </label>
+                <label className="checkbox-field economic-transfer-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={shopifyRefundWebhookConfirmed}
+                    onChange={(event) => setShopifyRefundWebhookConfirmed(event.target.checked)}
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                  />
+                  <span>I understand Sporgym finance updates only after the refunds/create webhook.</span>
+                </label>
+                <div className="support-modal-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setShopifyRefundAction(null);
+                      setShopifyRefundNote('');
+                      setShopifyRefundNotifyCustomer(false);
+                      setShopifyRefundPaymentConfirmed(false);
+                      setShopifyRefundWebhookConfirmed(false);
+                    }}
+                    disabled={shopifyRefundExecutionMutation.isPending}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="button button-primary" disabled={!refundReady}>
+                    {shopifyRefundExecutionMutation.isPending ? 'Submitting refund...' : 'Refund in Shopify'}
                   </button>
                 </div>
               </form>

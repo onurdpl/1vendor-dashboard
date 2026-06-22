@@ -14,6 +14,8 @@ import type {
   OrderStatus,
   OrderSummary,
   ShippingStatus,
+  ShopifyRefundExecutionPayload,
+  ShopifyRefundExecutionResult,
   ShopifyRefundPreviewResult,
   ShopifyOrderBreakdown,
   VendorAllocationSummary,
@@ -95,6 +97,8 @@ export type AdminShopifyRefundPreviewPayload = {
   restockType: 'CANCEL' | 'NO_RESTOCK';
   refundShipping: false;
 };
+
+export type AdminShopifyRefundExecutionPayload = ShopifyRefundExecutionPayload;
 
 export type AdminEconomicTransferSummary = {
   transferId: string;
@@ -699,6 +703,18 @@ export async function previewAdminShopifyRefund(
 ): Promise<ShopifyRefundPreviewResult> {
   return apiClient.post<ShopifyRefundPreviewResult>(
     `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/shopify-refund-preview`,
+    payload,
+    { skipVendorContext: true },
+  );
+}
+
+export async function executeAdminShopifyRefund(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminShopifyRefundExecutionPayload,
+): Promise<ShopifyRefundExecutionResult> {
+  return apiClient.post<ShopifyRefundExecutionResult>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/shopify-refund`,
     payload,
     { skipVendorContext: true },
   );

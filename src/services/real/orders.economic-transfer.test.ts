@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { previewAdminShopifyRefund, requestAdminCancelRefundReview, transferAdminAllocationEconomics } from './orders';
+import {
+  executeAdminShopifyRefund,
+  previewAdminShopifyRefund,
+  requestAdminCancelRefundReview,
+  transferAdminAllocationEconomics,
+} from './orders';
 
 const apiClientPost = vi.hoisted(() => vi.fn());
 
@@ -240,6 +245,43 @@ describe('real orders economic transfer service', () => {
         totalRefundAmount: '1000.00',
         currencyCode: 'TRY',
       },
+    });
+  });
+
+  it('posts admin Shopify refund execution payload without vendor context', async () => {
+    apiClientPost.mockResolvedValueOnce({
+      ok: true,
+      writesPerformed: true,
+      status: 'SHOPIFY_ACTION_PENDING',
+      shopifyRefundId: 'gid://shopify/Refund/1',
+      attemptId: 'attempt-1',
+      message: 'Shopify refund submitted. Waiting for refunds/create webhook.',
+    });
+
+    const result = await executeAdminShopifyRefund('gid://shopify/Order/1001', 'alloc/1', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Customer approved refund.',
+      confirmRefund: true,
+    });
+
+    expect(apiClientPost).toHaveBeenCalledWith(
+      '/admin/orders/gid%3A%2F%2Fshopify%2FOrder%2F1001/allocations/alloc%2F1/shopify-refund',
+      {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+      },
+      { skipVendorContext: true },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: true,
+      status: 'SHOPIFY_ACTION_PENDING',
+      attemptId: 'attempt-1',
     });
   });
 });
