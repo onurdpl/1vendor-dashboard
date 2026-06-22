@@ -71,7 +71,7 @@ type LocalLineItemOwner = {
 };
 
 const TERMINAL_FULFILLMENT_ORDER_STATUSES = new Set(['closed', 'cancelled', 'canceled', 'incomplete']);
-const UNSUPPORTED_REQUEST_STATUSES = new Set(['accepted']);
+const CANCELLATION_COMPATIBLE_STATUSES = new Set(['submitted', 'cancellation_requested']);
 const DIRECT_CANCEL_ACTIONS = new Set(['cancel', 'cancel_fulfillment_order']);
 
 function normalizeShopifyIdentifier(value: string | null | undefined) {
@@ -99,6 +99,13 @@ function hasDirectCancelAction(supportedActions: string[] | null) {
     return false;
   }
   return supportedActions.some((action) => DIRECT_CANCEL_ACTIONS.has(normalizeAction(action)));
+}
+
+function hasConfirmedCancellationCompatibleStatus(fulfillmentOrder: ShopifyFulfillmentOrderForCancellationClassification) {
+  return (
+    CANCELLATION_COMPATIBLE_STATUSES.has(normalizeToken(fulfillmentOrder.status)) ||
+    CANCELLATION_COMPATIBLE_STATUSES.has(normalizeToken(fulfillmentOrder.requestStatus))
+  );
 }
 
 function createUnrunClassification(reason: string): FulfillmentOrderCancellationClassificationResult {
@@ -230,19 +237,32 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
     }
 
     if (fulfillmentOrder.supportedActions === null) {
-      blockers.push(`Fulfillment order ${fulfillmentOrder.id} is missing supportedActions from Shopify.`);
+      blockers.push(
+        `fulfillment_order_supported_actions_missing: Fulfillment order ${fulfillmentOrder.id} is missing supportedActions from Shopify.`,
+      );
       if (classification === 'safe_to_cancel') {
         classification = 'unknown';
       }
     } else if (!hasDirectCancelAction(fulfillmentOrder.supportedActions)) {
-      blockers.push(`Fulfillment order ${fulfillmentOrder.id} does not advertise a direct cancel action.`);
+      blockers.push(
+        `fulfillment_order_cancel_action_not_supported: Fulfillment order ${fulfillmentOrder.id} does not advertise a direct cancel action.`,
+      );
       if (classification === 'safe_to_cancel') {
         classification = 'unsupported_request_status';
       }
     }
 
-    if (UNSUPPORTED_REQUEST_STATUSES.has(normalizeToken(fulfillmentOrder.requestStatus))) {
-      blockers.push(`Fulfillment order ${fulfillmentOrder.id} has unsupported requestStatus ${fulfillmentOrder.requestStatus}.`);
+    if (!normalizeToken(fulfillmentOrder.requestStatus)) {
+      blockers.push(
+        `fulfillment_order_request_status_missing: Fulfillment order ${fulfillmentOrder.id} is missing requestStatus from Shopify.`,
+      );
+      if (classification === 'safe_to_cancel') {
+        classification = 'unknown';
+      }
+    } else if (!hasConfirmedCancellationCompatibleStatus(fulfillmentOrder)) {
+      blockers.push(
+        `fulfillment_order_status_not_confirmed_cancelable: Fulfillment order ${fulfillmentOrder.id} status/requestStatus is not confirmed compatible with fulfillmentOrderCancel.`,
+      );
       if (classification === 'safe_to_cancel') {
         classification = 'unsupported_request_status';
       }

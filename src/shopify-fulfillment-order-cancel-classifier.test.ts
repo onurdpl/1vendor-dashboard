@@ -7,7 +7,7 @@ function buildFulfillmentOrder(overrides: Record<string, unknown> = {}) {
   return {
     id: 'gid://shopify/FulfillmentOrder/fo-1',
     status: 'OPEN',
-    requestStatus: 'UNREQUESTED',
+    requestStatus: 'SUBMITTED',
     supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
     assignedLocationId: 'gid://shopify/Location/location-1',
     assignedLocationName: 'Main Warehouse',
@@ -39,7 +39,7 @@ const localLineItemOwners = [
 ];
 
 describe('Shopify fulfillment order cancel classifier', () => {
-  it('marks a single fulfillment order safe when every line belongs to the selected allocation', () => {
+  it('marks a single fulfillment order safe when ownership and Shopify cancellation status are compatible', () => {
     const result = classifyFulfillmentOrderCancellationSafety({
       allocationId: 'alloc-1',
       selectedLineItems,
@@ -50,6 +50,18 @@ describe('Shopify fulfillment order cancel classifier', () => {
     expect(result.overallClassification).toBe('safe_to_cancel');
     expect(result.blockers).toEqual([]);
     expect(result.warnings).toContain('Affected fulfillment orders must be cancelled before refundCreate.');
+    expect(result.affectedFulfillmentOrders[0]?.classification).toBe('safe_to_cancel');
+  });
+
+  it('allows cancellation when requestStatus is CANCELLATION_REQUESTED', () => {
+    const result = classifyFulfillmentOrderCancellationSafety({
+      allocationId: 'alloc-1',
+      selectedLineItems,
+      fulfillmentOrders: [buildFulfillmentOrder({ requestStatus: 'CANCELLATION_REQUESTED' })],
+      localLineItemOwners,
+    });
+
+    expect(result.overallClassification).toBe('safe_to_cancel');
     expect(result.affectedFulfillmentOrders[0]?.classification).toBe('safe_to_cancel');
   });
 
@@ -171,18 +183,45 @@ describe('Shopify fulfillment order cancel classifier', () => {
 
     expect(result.overallClassification).toBe('unknown');
     expect(result.affectedFulfillmentOrders[0]?.classification).toBe('unknown');
-    expect(result.blockers[0]).toContain('missing supportedActions');
+    expect(result.blockers[0]).toContain('fulfillment_order_supported_actions_missing');
   });
 
-  it('blocks unsupported request status even when quantities are safe', () => {
+  it('blocks unsupported request status even when cancel action and quantities are safe', () => {
     const result = classifyFulfillmentOrderCancellationSafety({
       allocationId: 'alloc-1',
       selectedLineItems,
-      fulfillmentOrders: [buildFulfillmentOrder({ requestStatus: 'ACCEPTED', supportedActions: [] })],
+      fulfillmentOrders: [buildFulfillmentOrder({ requestStatus: 'UNREQUESTED' })],
       localLineItemOwners,
     });
 
     expect(result.overallClassification).toBe('blocked');
     expect(result.affectedFulfillmentOrders[0]?.classification).toBe('unsupported_request_status');
+    expect(result.blockers[0]).toContain('fulfillment_order_status_not_confirmed_cancelable');
+  });
+
+  it('classifies missing requestStatus as unknown', () => {
+    const result = classifyFulfillmentOrderCancellationSafety({
+      allocationId: 'alloc-1',
+      selectedLineItems,
+      fulfillmentOrders: [buildFulfillmentOrder({ requestStatus: null })],
+      localLineItemOwners,
+    });
+
+    expect(result.overallClassification).toBe('unknown');
+    expect(result.affectedFulfillmentOrders[0]?.classification).toBe('unknown');
+    expect(result.blockers[0]).toContain('fulfillment_order_request_status_missing');
+  });
+
+  it('blocks when Shopify does not advertise a direct cancel action', () => {
+    const result = classifyFulfillmentOrderCancellationSafety({
+      allocationId: 'alloc-1',
+      selectedLineItems,
+      fulfillmentOrders: [buildFulfillmentOrder({ supportedActions: [] })],
+      localLineItemOwners,
+    });
+
+    expect(result.overallClassification).toBe('blocked');
+    expect(result.affectedFulfillmentOrders[0]?.classification).toBe('unsupported_request_status');
+    expect(result.blockers[0]).toContain('fulfillment_order_cancel_action_not_supported');
   });
 });

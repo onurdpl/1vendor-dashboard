@@ -919,7 +919,7 @@ describe('vendor order reject operational hold', () => {
           {
             id: 'gid://shopify/FulfillmentOrder/1',
             status: 'OPEN',
-            requestStatus: 'UNREQUESTED',
+            requestStatus: 'SUBMITTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
             assignedLocationName: 'Main Warehouse',
@@ -956,6 +956,53 @@ describe('vendor order reject operational hold', () => {
     expect(result.blockers).toEqual([]);
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
+  it('surfaces strict fulfillment order cancellation status blockers in Shopify refund preview', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNREQUESTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            assignedLocationName: 'Main Warehouse',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.fulfillmentOrderCancellation).toMatchObject({
+      overallClassification: 'blocked',
+      affectedFulfillmentOrders: [
+        {
+          fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/1',
+          classification: 'unsupported_request_status',
+        },
+      ],
+    });
+    expect(result.blockers).toContain(
+      'fulfillment_order_status_not_confirmed_cancelable: Fulfillment order gid://shopify/FulfillmentOrder/1 status/requestStatus is not confirmed compatible with fulfillmentOrderCancel.',
+    );
+    expect(result.writesPerformed).toBe(false);
   });
 
   it('rejects Shopify refund preview outside cancel/refund review state', async () => {
