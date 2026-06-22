@@ -43,6 +43,7 @@ vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
 
 const {
   addBlockedAllocationResolutionNote,
+  executeShopifyRefundForAdminOrder,
   getAdminShopifyOrderBreakdown,
   getVendorOrderById,
   previewShopifyRefundForAdminOrder,
@@ -205,6 +206,7 @@ function buildRefundPreviewAllocation(overrides: Record<string, unknown> = {}) {
     ],
     financeIntegrityAlerts: [],
     outboundShopifyRefundAttempts: [],
+    financeEntries: [],
     ...overrides,
   };
 }
@@ -249,6 +251,22 @@ function buildShopifyRefundPreviewService(overrides: Record<string, unknown> = {
     fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
       fulfillmentOrders: [],
       source: 'mock',
+    }),
+    cancelFulfillmentOrder: vi.fn().mockResolvedValue({
+      fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/1',
+      fulfillmentOrderStatus: 'CLOSED',
+      replacementFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/2',
+      replacementFulfillmentOrderStatus: 'OPEN',
+      userErrors: [],
+    }),
+    createShopifyRefund: vi.fn().mockResolvedValue({
+      refundId: 'gid://shopify/Refund/1',
+      userErrors: [],
+      rawResponse: {
+        refund: {
+          id: 'gid://shopify/Refund/1',
+        },
+      },
     }),
     ...overrides,
   };
@@ -1003,6 +1021,281 @@ describe('vendor order reject operational hold', () => {
       'fulfillment_order_status_not_confirmed_cancelable: Fulfillment order gid://shopify/FulfillmentOrder/1 status/requestStatus is not confirmed compatible with fulfillmentOrderCancel.',
     );
     expect(result.writesPerformed).toBe(false);
+  });
+
+  it('executes Shopify refund, cancels safe fulfillment orders first, and leaves finance to webhook ingestion', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'SUBMITTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            assignedLocationName: 'Main Warehouse',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Customer approved refund.',
+      confirmRefund: true,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).toHaveBeenCalledWith({
+      fulfillmentOrderId: 'gid://shopify/FulfillmentOrder/1',
+    });
+    expect(shopifyAdminService.createShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: 'gid://shopify/Order/1088',
+      note: 'Customer approved refund.',
+      notify: true,
+      idempotencyKey: 'shopify-refund:alloc-1088:attempt-1',
+      refundLineItems: [
+        {
+          lineItemId: 'gid://shopify/LineItem/20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+      transactions: [
+        {
+          parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          amount: '1000.00',
+          gateway: 'bogus',
+        },
+      ],
+    }));
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
+      where: { id: 'alloc-1088' },
+      data: { cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' },
+    });
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: 'attempt-1' },
+      data: expect.objectContaining({
+        status: 'SHOPIFY_ACTION_PENDING',
+        shopifyRefundId: 'gid://shopify/Refund/1',
+      }),
+    }));
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: true,
+      status: 'SHOPIFY_ACTION_PENDING',
+      shopifyRefundId: 'gid://shopify/Refund/1',
+      attemptId: 'attempt-1',
+    });
+  });
+
+  it('blocks duplicate Shopify refund execution while an attempt is pending', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+    prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValueOnce({
+      id: 'attempt-pending',
+      status: 'SHOPIFY_ACTION_PENDING',
+    });
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService: buildShopifyRefundPreviewService(),
+      }),
+    ).rejects.toThrow('A Shopify refund attempt is already pending for this allocation.');
+  });
+
+  it('marks attempt failed when strict fulfillment order classification blocks execution', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNREQUESTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            assignedLocationName: 'Main Warehouse',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('fulfillment_order_status_not_confirmed_cancelable');
+
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'FAILED',
+      }),
+    }));
+  });
+
+  it('does not call refundCreate when fulfillment order cancellation returns userErrors', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'SUBMITTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            assignedLocationName: 'Main Warehouse',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+      cancelFulfillmentOrder: vi.fn().mockResolvedValue({
+        fulfillmentOrderId: null,
+        fulfillmentOrderStatus: null,
+        replacementFulfillmentOrderId: null,
+        replacementFulfillmentOrderStatus: null,
+        userErrors: [{ field: ['id'], message: 'Cannot cancel fulfillment order.' }],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Shopify fulfillment order cancellation failed: Cannot cancel fulfillment order.');
+
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+  });
+
+  it('blocks refundCreate when suggested transactions are missing parentTransactionId', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      previewSuggestedRefund: vi.fn().mockResolvedValue({
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        refundLineItemsPreview: [
+          {
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            quantity: 1,
+            restockType: 'CANCEL',
+          },
+        ],
+        suggestedRefund: {
+          totalRefundAmount: '1000.00',
+          currencyCode: 'TRY',
+          subtotalAmount: '900.00',
+          totalTaxAmount: '100.00',
+          shippingAmount: null,
+          maximumRefundableAmount: '1000.00',
+          suggestedTransactions: [
+            {
+              gateway: 'bogus',
+              formattedGateway: '(For Testing) Bogus Gateway',
+              amount: '1000.00',
+              currencyCode: 'TRY',
+              parentTransactionId: null,
+            },
+          ],
+          refundLineItems: [],
+        },
+        graphqlErrors: [],
+        source: 'shopify_admin',
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Suggested refund transaction is missing parentTransactionId.');
+
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+  });
+
+  it('marks attempt failed and keeps review open when refundCreate returns userErrors', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      createShopifyRefund: vi.fn().mockResolvedValue({
+        refundId: null,
+        userErrors: [{ field: ['transactions'], message: 'Payment cannot be refunded.' }],
+        rawResponse: {
+          userErrors: [{ field: ['transactions'], message: 'Payment cannot be refunded.' }],
+        },
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Shopify refundCreate failed: Payment cannot be refunded.');
+
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'FAILED',
+      }),
+    }));
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: { cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' },
+    }));
   });
 
   it('rejects Shopify refund preview outside cancel/refund review state', async () => {

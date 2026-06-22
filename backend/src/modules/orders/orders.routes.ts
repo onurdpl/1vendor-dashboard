@@ -5,6 +5,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
   addBlockedAllocationResolutionNote,
+  executeShopifyRefundForAdminOrder,
   getAdminShopifyOrderBreakdown,
   getVendorOrderByIdForUser,
   listVendorOrders,
@@ -279,6 +280,49 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           previewShopifyRefundForAdminOrder(shopifyOrderId, allocationId, {
             restockType: request.body?.restockType,
             refundShipping: false,
+            actorUserId: request.authUser?.id ?? null,
+            shopifyAdminService: createShopifyAdminService(env),
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: {
+      restockType?: string | null;
+      refundShipping?: boolean | null;
+      notifyCustomer?: boolean | null;
+      note?: string | null;
+      confirmRefund?: boolean | null;
+    };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund', () =>
+          executeShopifyRefundForAdminOrder(shopifyOrderId, allocationId, {
+            restockType: request.body?.restockType,
+            refundShipping: request.body?.refundShipping,
+            notifyCustomer: request.body?.notifyCustomer,
+            note: request.body?.note,
+            confirmRefund: request.body?.confirmRefund,
             actorUserId: request.authUser?.id ?? null,
             shopifyAdminService: createShopifyAdminService(env),
           }),

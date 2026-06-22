@@ -21,6 +21,9 @@ import {
 } from '../shopify/return-signal-discovery.service.js';
 import type { FetchOrderLineItemImagesResult } from '../shopify/shopify-admin.types.js';
 import type {
+  CancelFulfillmentOrderResult,
+  CreateShopifyRefundInput,
+  CreateShopifyRefundResult,
   PreviewSuggestedRefundInput,
   PreviewSuggestedRefundResult,
   ShopifyFulfillmentOrderCancellationClassificationResponse,
@@ -32,9 +35,14 @@ import {
   type FulfillmentOrderCancellationClassificationResult,
 } from '../shopify/shopify-fulfillment-order-cancel-classifier.service.js';
 import {
+  createOrLockOutboundShopifyRefundExecutionAttempt,
   createPreviewOutboundShopifyRefundAttempt,
+  findActiveOutboundShopifyRefundAttemptForAllocation,
   findOpenOutboundShopifyRefundAttemptForAllocation,
+  markOutboundShopifyRefundAttemptFailed,
+  markOutboundShopifyRefundAttemptSubmitted,
   mapOutboundShopifyRefundAttemptSummary,
+  OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES,
 } from './outbound-shopify-refund-attempt.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
@@ -117,11 +125,35 @@ export type ShopifySuggestedRefundPreviewService = {
   ): Promise<ShopifyFulfillmentOrderCancellationClassificationResponse>;
 };
 
+export type ShopifyRefundExecutionService = ShopifySuggestedRefundPreviewService & {
+  cancelFulfillmentOrder(input: { fulfillmentOrderId: string }): Promise<CancelFulfillmentOrderResult>;
+  createShopifyRefund(input: CreateShopifyRefundInput): Promise<CreateShopifyRefundResult>;
+};
+
 export type AdminShopifyRefundPreviewInput = {
   restockType?: string | null;
   refundShipping?: boolean | null;
   actorUserId?: string | null;
   shopifyAdminService: ShopifySuggestedRefundPreviewService;
+};
+
+export type AdminShopifyRefundExecutionInput = {
+  restockType?: string | null;
+  refundShipping?: boolean | null;
+  notifyCustomer?: boolean | null;
+  note?: string | null;
+  confirmRefund?: boolean | null;
+  actorUserId?: string | null;
+  shopifyAdminService: ShopifyRefundExecutionService;
+};
+
+export type AdminShopifyRefundExecutionResponse = {
+  ok: true;
+  writesPerformed: true;
+  status: 'SHOPIFY_ACTION_PENDING';
+  shopifyRefundId: string | null;
+  attemptId: string;
+  message: string;
 };
 
 export type AdminShopifyRefundPreviewResponse = {
@@ -214,6 +246,49 @@ function normalizeShopifyRefundPreviewRestockType(value: string | null | undefin
     throw new OrderRejectValidationError('Refund preview restockType must be CANCEL or NO_RESTOCK.', 400);
   }
   return normalized as ShopifyRefundRestockType;
+}
+
+function normalizeShopifyRefundExecutionNote(note: string | null | undefined) {
+  const normalized = note?.trim() ?? '';
+  if (!normalized) {
+    throw new OrderRejectValidationError('Shopify refund note is required.', 400);
+  }
+  if (normalized.length > 1000) {
+    throw new OrderRejectValidationError('Shopify refund note must be 1000 characters or fewer.', 400);
+  }
+  return normalized;
+}
+
+function hasSettlementPayoutOrLogoEvidence(allocation: {
+  financeEntries?: Array<{
+    payoutStatus?: string | null;
+    payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
+    settlementApprovalLines?: Array<{
+      settlementApproval?: {
+        status?: string | null;
+        commissionInvoices?: Array<{ status?: string | null }>;
+      } | null;
+    }>;
+  }>;
+}) {
+  return (allocation.financeEntries ?? []).some((entry) => {
+    if (normalizeStatus(entry.payoutStatus) === 'paid') {
+      return true;
+    }
+
+    if ((entry.payoutBatchLines ?? []).some((line) => normalizeStatus(line.payoutBatch?.status) !== 'cancelled')) {
+      return true;
+    }
+
+    return (entry.settlementApprovalLines ?? []).some((line) => {
+      const settlementStatus = normalizeStatus(line.settlementApproval?.status);
+      if (settlementStatus && settlementStatus !== 'cancelled') {
+        return true;
+      }
+
+      return (line.settlementApproval?.commissionInvoices ?? []).some((invoice) => normalizeStatus(invoice.status) !== 'cancelled');
+    });
+  });
 }
 
 const TERMINAL_RETURN_STATUS_TOKENS = ['closed', 'cancelled', 'canceled', 'declined', 'rejected', 'deleted'];
@@ -2129,6 +2204,428 @@ export async function previewShopifyRefundForAdminOrder(
     warnings,
     blockers,
     missingData,
+  };
+}
+
+export async function executeShopifyRefundForAdminOrder(
+  shopifyOrderId: string,
+  allocationId: string,
+  input: AdminShopifyRefundExecutionInput,
+): Promise<AdminShopifyRefundExecutionResponse> {
+  if (input.confirmRefund !== true) {
+    throw new OrderRejectValidationError('Shopify refund confirmation is required.', 400);
+  }
+  const restockType = normalizeShopifyRefundPreviewRestockType(input.restockType);
+  const note = normalizeShopifyRefundExecutionNote(input.note);
+  const notifyCustomer = input.notifyCustomer === true;
+  if (input.refundShipping !== false) {
+    throw new OrderRejectValidationError('Refund shipping is not supported for allocation-scoped Shopify refund execution.', 400);
+  }
+
+  const allocation = await prisma.vendorAllocation.findFirst({
+    where: {
+      id: allocationId,
+      order: {
+        sourceShopifyOrderId: shopifyOrderId,
+      },
+    },
+    select: {
+      id: true,
+      allocationStatus: true,
+      reassignmentRequired: true,
+      cancelRefundReviewStatus: true,
+      fulfillmentStatus: true,
+      shippingStatus: true,
+      trackingNumber: true,
+      carrier: true,
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+        },
+      },
+      fulfillment: {
+        select: {
+          fulfilledAt: true,
+          shipmentCreatedAt: true,
+          shipmentUpdatedAt: true,
+          shopifyFulfillmentId: true,
+          trackingNumber: true,
+          trackingUrl: true,
+        },
+      },
+      shipmentExecutions: {
+        select: {
+          providerShipmentId: true,
+          trackingNumber: true,
+          trackingUrl: true,
+          shipmentStatus: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
+      },
+      returnRecords: {
+        select: {
+          status: true,
+          returnLifecycleStatus: true,
+        },
+      },
+      refundRecords: {
+        select: {
+          id: true,
+        },
+      },
+      economicTransfers: {
+        select: {
+          status: true,
+        },
+      },
+      financeIntegrityAlerts: {
+        where: {
+          status: {
+            in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+          },
+          severity: {
+            in: ['critical', 'warning'],
+          },
+        },
+        select: {
+          id: true,
+          category: true,
+        },
+      },
+      financeEntries: {
+        where: {
+          entryType: 'sale',
+          voidedAt: null,
+        },
+        select: {
+          payoutStatus: true,
+          payoutBatchLines: {
+            select: {
+              payoutBatch: {
+                select: {
+                  status: true,
+                },
+              },
+            },
+          },
+          settlementApprovalLines: {
+            select: {
+              settlementApproval: {
+                select: {
+                  status: true,
+                  commissionInvoices: {
+                    select: {
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      lineItems: {
+        select: {
+          id: true,
+          quantity: true,
+          shopifyOrderLineItem: {
+            select: {
+              sourceLineItemId: true,
+            },
+          },
+        },
+        orderBy: {
+          id: 'asc',
+        },
+      },
+    },
+  });
+
+  if (!allocation) {
+    throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+  }
+
+  const reviewStatus = allocation.cancelRefundReviewStatus?.trim().toUpperCase() ?? '';
+  if (reviewStatus === 'SHOPIFY_ACTION_PENDING') {
+    throw new OrderRejectValidationError('A Shopify refund action is already pending for this allocation.', 409);
+  }
+  if (reviewStatus !== 'PENDING_REVIEW' && reviewStatus !== 'CUSTOMER_CONTACTED') {
+    throw new OrderRejectValidationError('Allocation must be in cancel/refund review before Shopify refund execution.', 409);
+  }
+
+  if (allocation.economicTransfers.some((transfer) => transfer.status.trim().toUpperCase() === 'COMPLETED')) {
+    throw new OrderRejectValidationError('Allocation cannot be Shopify-refunded after economic transfer completed.', 409);
+  }
+
+  if (hasShipmentEvidence(allocation)) {
+    throw new OrderRejectValidationError('Allocation cannot be Shopify-refunded after fulfillment, shipment, carrier, or tracking evidence exists.', 409);
+  }
+
+  if (allocation.returnRecords.length > 0) {
+    throw new OrderRejectValidationError('Allocation cannot be Shopify-refunded after return evidence exists.', 409);
+  }
+
+  if (hasRefundState(allocation)) {
+    throw new OrderRejectValidationError('Allocation cannot be Shopify-refunded after refund evidence exists.', 409);
+  }
+
+  if (allocation.financeIntegrityAlerts.length > 0) {
+    throw new OrderRejectValidationError('Allocation has open or acknowledged finance integrity alerts and cannot be Shopify-refunded.', 409);
+  }
+
+  if (hasSettlementPayoutOrLogoEvidence(allocation)) {
+    throw new OrderRejectValidationError(
+      'Allocation cannot be Shopify-refunded through this flow after settlement, payout, vendor payment, or Logo invoice evidence exists.',
+      409,
+    );
+  }
+
+  const activeAttempt = await findActiveOutboundShopifyRefundAttemptForAllocation(allocation.id);
+  if (activeAttempt) {
+    throw new OrderRejectValidationError('A Shopify refund attempt is already pending for this allocation.', 409);
+  }
+
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const refundLineItems = allocation.lineItems.map((lineItem) => {
+    const sourceLineItemId = lineItem.shopifyOrderLineItem.sourceLineItemId?.trim() ?? '';
+    if (!sourceLineItemId) {
+      blockers.push(`Allocation line item ${lineItem.id} is missing sourceLineItemId.`);
+    }
+    if (!Number.isFinite(lineItem.quantity) || lineItem.quantity <= 0) {
+      blockers.push(`Allocation line item ${lineItem.id} has invalid refund quantity.`);
+    }
+    return {
+      lineItemId: sourceLineItemId,
+      quantity: lineItem.quantity,
+      restockType,
+    };
+  });
+
+  if (refundLineItems.length === 0) {
+    blockers.push('Allocation has no line items to execute for refund.');
+  }
+  if (blockers.length > 0) {
+    throw new OrderRejectValidationError(blockers.join(' '), 409);
+  }
+
+  let fulfillmentOrderCancellation: FulfillmentOrderCancellationClassificationResult =
+    buildUnrunFulfillmentOrderCancellationClassification('Fulfillment order cancellation classification has not run yet.');
+  const attempt = await createOrLockOutboundShopifyRefundExecutionAttempt({
+    vendorAllocationId: allocation.id,
+    shopifyOrderId: allocation.order.sourceShopifyOrderId,
+    restockType,
+    refundShipping: false,
+    notifyCustomer,
+    note,
+    requestedByUserId: input.actorUserId ?? null,
+    refundLineItems,
+    suggestedTransactions: [],
+    fulfillmentOrderCancellation,
+    blockers: [],
+    warnings: [],
+  });
+
+  const failAttempt = async (failureReason: string, options: {
+    shopifyUserErrors?: unknown;
+    mutationResponse?: unknown;
+    fulfillmentOrderCancellation?: unknown;
+    blockers?: unknown;
+    warnings?: unknown;
+  } = {}) => {
+    await markOutboundShopifyRefundAttemptFailed({
+      attemptId: attempt.id,
+      failureReason,
+      ...options,
+    });
+    throw new OrderRejectValidationError(failureReason, 409);
+  };
+
+  try {
+    fulfillmentOrderCancellation = await classifyFulfillmentOrdersForAllocationRefund({
+      shopifyOrderId: allocation.order.sourceShopifyOrderId,
+      allocationId: allocation.id,
+      selectedLineItems: refundLineItems.map((lineItem) => ({
+        lineItemId: lineItem.lineItemId,
+        quantity: lineItem.quantity,
+      })),
+      shopifyAdminService: input.shopifyAdminService,
+    });
+  } catch (error) {
+    const failureReason = error instanceof Error
+      ? `Shopify fulfillment order cancellation classification failed: ${error.message}`
+      : 'Shopify fulfillment order cancellation classification failed.';
+    await failAttempt(failureReason, {
+      fulfillmentOrderCancellation,
+      blockers: [failureReason],
+      warnings,
+    });
+  }
+
+  warnings.push(...fulfillmentOrderCancellation.warnings);
+  if (fulfillmentOrderCancellation.overallClassification === 'blocked' || fulfillmentOrderCancellation.overallClassification === 'unknown') {
+    const failureReason = fulfillmentOrderCancellation.blockers.length
+      ? fulfillmentOrderCancellation.blockers.join(' ')
+      : 'Shopify fulfillment order cancellation classification did not pass.';
+    await failAttempt(failureReason, {
+      fulfillmentOrderCancellation,
+      blockers: fulfillmentOrderCancellation.blockers,
+      warnings,
+    });
+  }
+
+  const safeFulfillmentOrders = fulfillmentOrderCancellation.affectedFulfillmentOrders.filter(
+    (order) => order.classification === 'safe_to_cancel',
+  );
+  const fulfillmentOrderCancellationResults: Array<{
+    fulfillmentOrderId: string;
+    result: CancelFulfillmentOrderResult;
+  }> = [];
+  for (const fulfillmentOrder of safeFulfillmentOrders) {
+    try {
+      const result = await input.shopifyAdminService.cancelFulfillmentOrder({
+        fulfillmentOrderId: fulfillmentOrder.fulfillmentOrderId,
+      });
+      fulfillmentOrderCancellationResults.push({
+        fulfillmentOrderId: fulfillmentOrder.fulfillmentOrderId,
+        result,
+      });
+      if (result.userErrors.length > 0) {
+        await failAttempt(
+          `Shopify fulfillment order cancellation failed: ${result.userErrors.map((error) => error.message).join('; ')}`,
+          {
+            shopifyUserErrors: result.userErrors,
+            mutationResponse: fulfillmentOrderCancellationResults,
+            fulfillmentOrderCancellation: {
+              classification: fulfillmentOrderCancellation,
+              cancellationResults: fulfillmentOrderCancellationResults,
+            },
+            blockers: result.userErrors.map((error) => error.message),
+            warnings,
+          },
+        );
+      }
+    } catch (error) {
+      const failureReason = error instanceof Error
+        ? `Shopify fulfillment order cancellation failed: ${error.message}`
+        : 'Shopify fulfillment order cancellation failed.';
+      await failAttempt(failureReason, {
+        mutationResponse: fulfillmentOrderCancellationResults,
+        fulfillmentOrderCancellation: {
+          classification: fulfillmentOrderCancellation,
+          cancellationResults: fulfillmentOrderCancellationResults,
+        },
+        blockers: [failureReason],
+        warnings,
+      });
+    }
+  }
+
+  const preview = await input.shopifyAdminService.previewSuggestedRefund({
+    shopifyOrderId: allocation.order.sourceShopifyOrderId,
+    refundLineItems: refundLineItems.map((lineItem) => ({
+      sourceLineItemId: lineItem.lineItemId,
+      quantity: lineItem.quantity,
+      restockType: lineItem.restockType,
+    })),
+    refundShipping: false,
+  });
+
+  const suggestedRefundBlockers = [...preview.graphqlErrors.map((error) => `Shopify suggested refund returned GraphQL error: ${error}`)];
+  const transactions = preview.suggestedRefund?.suggestedTransactions ?? [];
+  if (transactions.length === 0) {
+    suggestedRefundBlockers.push('Suggested refund has no refundable payment transaction. RefundCreate must not run.');
+  }
+  for (const transaction of transactions) {
+    if (!transaction.parentTransactionId?.trim()) {
+      suggestedRefundBlockers.push('Suggested refund transaction is missing parentTransactionId. RefundCreate must not run.');
+    }
+    if (!transaction.amount?.trim()) {
+      suggestedRefundBlockers.push('Suggested refund transaction is missing amount. RefundCreate must not run.');
+    }
+    if (!transaction.gateway?.trim()) {
+      suggestedRefundBlockers.push('Suggested refund transaction is missing gateway. RefundCreate must not run.');
+    }
+  }
+
+  if (suggestedRefundBlockers.length > 0) {
+    await failAttempt(suggestedRefundBlockers.join(' '), {
+      mutationResponse: {
+        suggestedRefund: preview.suggestedRefund,
+        graphqlErrors: preview.graphqlErrors,
+      },
+      fulfillmentOrderCancellation: {
+        classification: fulfillmentOrderCancellation,
+        cancellationResults: fulfillmentOrderCancellationResults,
+      },
+      blockers: suggestedRefundBlockers,
+      warnings,
+    });
+  }
+
+  const suggestedTransactions = transactions.map((transaction) => ({
+    gateway: transaction.gateway?.trim() ?? '',
+    amount: transaction.amount?.trim() ?? '',
+    currencyCode: transaction.currencyCode,
+    parentTransactionId: transaction.parentTransactionId?.trim() ?? '',
+  }));
+  const refundCreateResult = await input.shopifyAdminService.createShopifyRefund({
+    orderId: allocation.order.sourceShopifyOrderId,
+    refundLineItems: preview.refundLineItemsPreview,
+    transactions: suggestedTransactions.map((transaction) => ({
+      parentTransactionId: transaction.parentTransactionId,
+      amount: transaction.amount,
+      gateway: transaction.gateway,
+    })),
+    note,
+    notify: notifyCustomer,
+    idempotencyKey: `shopify-refund:${allocation.id}:${attempt.id}`,
+  });
+
+  if (refundCreateResult.userErrors.length > 0) {
+    await failAttempt(`Shopify refundCreate failed: ${refundCreateResult.userErrors.map((error) => error.message).join('; ')}`, {
+      shopifyUserErrors: refundCreateResult.userErrors,
+      mutationResponse: refundCreateResult.rawResponse,
+      fulfillmentOrderCancellation: {
+        classification: fulfillmentOrderCancellation,
+        cancellationResults: fulfillmentOrderCancellationResults,
+      },
+      blockers: refundCreateResult.userErrors.map((error) => error.message),
+      warnings,
+    });
+  }
+
+  await markOutboundShopifyRefundAttemptSubmitted({
+    attemptId: attempt.id,
+    shopifyRefundId: refundCreateResult.refundId,
+    mutationResponse: refundCreateResult.rawResponse,
+    fulfillmentOrderCancellation: {
+      classification: fulfillmentOrderCancellation,
+      cancellationResults: fulfillmentOrderCancellationResults,
+    },
+    suggestedTransactions,
+    blockers: [],
+    warnings,
+  });
+  await prisma.vendorAllocation.update({
+    where: {
+      id: allocation.id,
+    },
+    data: {
+      cancelRefundReviewStatus: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+    },
+  });
+
+  return {
+    ok: true,
+    writesPerformed: true,
+    status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+    shopifyRefundId: refundCreateResult.refundId,
+    attemptId: attempt.id,
+    message: 'Shopify refund submitted. Waiting for refunds/create webhook.',
   };
 }
 

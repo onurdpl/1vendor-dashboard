@@ -81,6 +81,29 @@ export type PreviewSuggestedRefundResult = {
   source: 'shopify_admin';
 };
 
+export type CreateShopifyRefundInput = {
+  orderId: string;
+  refundLineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+    restockType: ShopifyRefundRestockType;
+  }>;
+  transactions: Array<{
+    parentTransactionId: string;
+    amount: string;
+    gateway: string;
+  }>;
+  note?: string | null;
+  notify: boolean;
+  idempotencyKey: string;
+};
+
+export type CreateShopifyRefundResult = {
+  refundId: string | null;
+  userErrors: ShopifyUserError[];
+  rawResponse?: unknown;
+};
+
 export type ShopifyTaxLineSnapshot = {
   title: string | null;
   rate: number | null;

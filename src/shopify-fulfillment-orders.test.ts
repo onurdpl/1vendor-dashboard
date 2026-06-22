@@ -298,4 +298,161 @@ describe('Shopify fulfillment order lookup', () => {
       'Shopify fulfillment order cancel returned GraphQL errors: Field fulfillmentOrderCancel does not exist.',
     );
   });
+
+  it('creates Shopify refunds with mapped transactions and idempotency key', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            refundCreate: {
+              refund: {
+                id: 'gid://shopify/Refund/777',
+              },
+              order: {
+                id: 'gid://shopify/Order/7616544244049',
+              },
+              userErrors: [],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    const result = await service.createShopifyRefund({
+      orderId: '7616544244049',
+      refundLineItems: [
+        {
+          lineItemId: '20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+      transactions: [
+        {
+          parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          amount: '1000.00',
+          gateway: 'bogus',
+        },
+      ],
+      note: 'Customer approved refund.',
+      notify: true,
+      idempotencyKey: 'shopify-refund:alloc-1:attempt-1',
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      query: string;
+      variables: {
+        idempotencyKey: string;
+        input: {
+          orderId: string;
+          refundLineItems: Array<{ lineItemId: string; quantity: number; restockType: string }>;
+          transactions: Array<{ orderId: string; kind: string; gateway: string; amount: string; parentId: string }>;
+          note: string;
+          notify: boolean;
+        };
+      };
+    };
+
+    expect(requestBody.query).toContain('refundCreate');
+    expect(requestBody.query).toContain('@idempotent(key: $idempotencyKey)');
+    expect(requestBody.query).not.toContain('orderCancel');
+    expect(requestBody.variables).toEqual({
+      idempotencyKey: 'shopify-refund:alloc-1:attempt-1',
+      input: {
+        orderId: 'gid://shopify/Order/7616544244049',
+        refundLineItems: [
+          {
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            quantity: 1,
+            restockType: 'CANCEL',
+          },
+        ],
+        transactions: [
+          {
+            orderId: 'gid://shopify/Order/7616544244049',
+            kind: 'REFUND',
+            gateway: 'bogus',
+            amount: '1000.00',
+            parentId: 'gid://shopify/OrderTransaction/1',
+          },
+        ],
+        note: 'Customer approved refund.',
+        notify: true,
+      },
+    });
+    expect(result).toEqual({
+      refundId: 'gid://shopify/Refund/777',
+      userErrors: [],
+      rawResponse: {
+        refund: {
+          id: 'gid://shopify/Refund/777',
+        },
+        order: {
+          id: 'gid://shopify/Order/7616544244049',
+        },
+        userErrors: [],
+      },
+    });
+  });
+
+  it('returns Shopify refundCreate userErrors without throwing', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            refundCreate: {
+              refund: null,
+              order: null,
+              userErrors: [
+                {
+                  field: ['transactions'],
+                  message: 'Payment cannot be refunded.',
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    const result = await service.createShopifyRefund({
+      orderId: '7616544244049',
+      refundLineItems: [{ lineItemId: '20346971095377', quantity: 1, restockType: 'CANCEL' }],
+      transactions: [{ parentTransactionId: 'gid://shopify/OrderTransaction/1', amount: '1000.00', gateway: 'bogus' }],
+      notify: false,
+      idempotencyKey: 'shopify-refund:alloc-1:attempt-1',
+    });
+
+    expect(result.userErrors).toEqual([
+      {
+        field: ['transactions'],
+        message: 'Payment cannot be refunded.',
+      },
+    ]);
+    expect(result.refundId).toBeNull();
+  });
+
+  it('throws for Shopify refundCreate GraphQL structural errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          errors: [{ message: 'Field refundCreate does not exist.' }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const service = createShopifyAdminService(env);
+
+    await expect(service.createShopifyRefund({
+      orderId: '7616544244049',
+      refundLineItems: [{ lineItemId: '20346971095377', quantity: 1, restockType: 'CANCEL' }],
+      transactions: [{ parentTransactionId: 'gid://shopify/OrderTransaction/1', amount: '1000.00', gateway: 'bogus' }],
+      notify: false,
+      idempotencyKey: 'shopify-refund:alloc-1:attempt-1',
+    })).rejects.toThrow('Shopify refund create returned GraphQL errors: Field refundCreate does not exist.');
+  });
 });

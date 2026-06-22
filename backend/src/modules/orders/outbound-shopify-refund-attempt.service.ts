@@ -124,6 +124,23 @@ export async function findOpenOutboundShopifyRefundAttemptForAllocation(vendorAl
   });
 }
 
+export async function findActiveOutboundShopifyRefundAttemptForAllocation(vendorAllocationId: string) {
+  return prisma.outboundShopifyRefundAttempt.findFirst({
+    where: {
+      vendorAllocationId,
+      status: {
+        in: [
+          OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
+          OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+        ],
+      },
+    },
+    orderBy: {
+      requestedAt: 'desc',
+    },
+  });
+}
+
 export async function createPreviewOutboundShopifyRefundAttempt(input: CreatePreviewAttemptInput) {
   const now = new Date();
   const notifyCustomer = input.notifyCustomer ?? false;
@@ -180,6 +197,127 @@ export async function createPreviewOutboundShopifyRefundAttempt(input: CreatePre
     data: {
       vendorAllocationId: input.vendorAllocationId,
       ...data,
+    },
+  });
+}
+
+export async function createOrLockOutboundShopifyRefundExecutionAttempt(input: CreatePreviewAttemptInput) {
+  const now = new Date();
+  const notifyCustomer = input.notifyCustomer ?? false;
+  const previewHash = buildOutboundShopifyRefundPreviewHash({
+    vendorAllocationId: input.vendorAllocationId,
+    shopifyOrderId: input.shopifyOrderId,
+    restockType: input.restockType,
+    refundShipping: input.refundShipping,
+    notifyCustomer,
+    refundLineItems: input.refundLineItems,
+    suggestedTransactions: input.suggestedTransactions,
+    fulfillmentOrderCancellation: input.fulfillmentOrderCancellation,
+    blockers: input.blockers,
+    warnings: input.warnings,
+  });
+  const data = {
+    shopifyOrderId: input.shopifyOrderId,
+    status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
+    restockType: input.restockType,
+    refundShipping: input.refundShipping,
+    notifyCustomer,
+    note: input.note?.trim() || null,
+    requestedByUserId: input.requestedByUserId ?? null,
+    requestedAt: now,
+    refundLineItemsJson: toInputJson(input.refundLineItems),
+    suggestedTransactionsJson: toInputJson(input.suggestedTransactions),
+    fulfillmentOrderCancellationJson: toInputJson(input.fulfillmentOrderCancellation),
+    blockersJson: toInputJson(input.blockers),
+    warningsJson: toInputJson(input.warnings),
+    previewHash,
+    previewedAt: now,
+    submittedAt: null,
+    resolvedAt: null,
+    failedAt: null,
+    failureReason: null,
+    shopifyRefundId: null,
+    shopifyUserErrorsJson: undefined,
+    mutationResponseJson: undefined,
+  };
+
+  const existingPreview = await prisma.outboundShopifyRefundAttempt.findFirst({
+    where: {
+      vendorAllocationId: input.vendorAllocationId,
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.PREVIEWED,
+    },
+    orderBy: {
+      requestedAt: 'desc',
+    },
+  });
+
+  if (existingPreview) {
+    return prisma.outboundShopifyRefundAttempt.update({
+      where: {
+        id: existingPreview.id,
+      },
+      data,
+    });
+  }
+
+  return prisma.outboundShopifyRefundAttempt.create({
+    data: {
+      vendorAllocationId: input.vendorAllocationId,
+      ...data,
+    },
+  });
+}
+
+export async function markOutboundShopifyRefundAttemptFailed(input: {
+  attemptId: string;
+  failureReason: string;
+  shopifyUserErrors?: unknown;
+  mutationResponse?: unknown;
+  fulfillmentOrderCancellation?: unknown;
+  blockers?: unknown;
+  warnings?: unknown;
+}) {
+  return prisma.outboundShopifyRefundAttempt.update({
+    where: {
+      id: input.attemptId,
+    },
+    data: {
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.FAILED,
+      failedAt: new Date(),
+      failureReason: input.failureReason,
+      shopifyUserErrorsJson: input.shopifyUserErrors === undefined ? undefined : toInputJson(input.shopifyUserErrors),
+      mutationResponseJson: input.mutationResponse === undefined ? undefined : toInputJson(input.mutationResponse),
+      fulfillmentOrderCancellationJson:
+        input.fulfillmentOrderCancellation === undefined ? undefined : toInputJson(input.fulfillmentOrderCancellation),
+      blockersJson: input.blockers === undefined ? undefined : toInputJson(input.blockers),
+      warningsJson: input.warnings === undefined ? undefined : toInputJson(input.warnings),
+    },
+  });
+}
+
+export async function markOutboundShopifyRefundAttemptSubmitted(input: {
+  attemptId: string;
+  shopifyRefundId: string | null;
+  mutationResponse: unknown;
+  fulfillmentOrderCancellation?: unknown;
+  suggestedTransactions?: unknown;
+  blockers?: unknown;
+  warnings?: unknown;
+}) {
+  return prisma.outboundShopifyRefundAttempt.update({
+    where: {
+      id: input.attemptId,
+    },
+    data: {
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+      submittedAt: new Date(),
+      shopifyRefundId: input.shopifyRefundId,
+      mutationResponseJson: toInputJson(input.mutationResponse),
+      fulfillmentOrderCancellationJson:
+        input.fulfillmentOrderCancellation === undefined ? undefined : toInputJson(input.fulfillmentOrderCancellation),
+      suggestedTransactionsJson: input.suggestedTransactions === undefined ? undefined : toInputJson(input.suggestedTransactions),
+      blockersJson: input.blockers === undefined ? undefined : toInputJson(input.blockers),
+      warningsJson: input.warnings === undefined ? undefined : toInputJson(input.warnings),
     },
   });
 }

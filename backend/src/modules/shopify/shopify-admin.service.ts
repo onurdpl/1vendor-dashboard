@@ -5,6 +5,8 @@ import type {
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
+  CreateShopifyRefundInput,
+  CreateShopifyRefundResult,
   FetchOrderLineItemImagesResult,
   FetchOrderTaxSnapshotResult,
   FetchShopifyReturnDetailsResult,
@@ -326,6 +328,21 @@ type FulfillmentOrderCancelMutationResponse = {
     replacementFulfillmentOrder?: {
       id: string;
       status: string | null;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
+  } | null;
+};
+
+type RefundCreateMutationResponse = {
+  refundCreate?: {
+    refund?: {
+      id: string;
+    } | null;
+    order?: {
+      id: string;
     } | null;
     userErrors?: Array<{
       field?: string[] | null;
@@ -1773,6 +1790,78 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function createShopifyRefund(input: CreateShopifyRefundInput): Promise<CreateShopifyRefundResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify refund create is not configured.');
+    }
+
+    const orderGid = toShopifyOrderGid(input.orderId);
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {
+              refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
+                refund {
+                  id
+                }
+                order {
+                  id
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
+          variables: {
+            idempotencyKey: input.idempotencyKey,
+            input: {
+              orderId: orderGid,
+              refundLineItems: input.refundLineItems.map((lineItem) => ({
+                lineItemId: toShopifyLineItemGid(lineItem.lineItemId),
+                quantity: lineItem.quantity,
+                restockType: lineItem.restockType,
+              })),
+              transactions: input.transactions.map((transaction) => ({
+                orderId: orderGid,
+                kind: 'REFUND',
+                gateway: transaction.gateway,
+                amount: transaction.amount,
+                parentId: transaction.parentTransactionId,
+              })),
+              note: input.note?.trim() || undefined,
+              notify: input.notify,
+            },
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify refund create failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<RefundCreateMutationResponse>;
+    if (json.errors?.length) {
+      throw new Error(`Shopify refund create returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+
+    const payload = json.data?.refundCreate;
+    return {
+      refundId: payload?.refund?.id ?? null,
+      userErrors: normalizeUserErrors(payload?.userErrors),
+      rawResponse: payload ?? null,
+    };
+  }
+
   function getShopifyIdentifierCandidates(value: string | null | undefined) {
     const text = value?.trim();
     if (!text) {
@@ -2717,6 +2806,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchFulfillmentOrders,
     fetchFulfillmentOrdersForCancellationClassification,
     cancelFulfillmentOrder,
+    createShopifyRefund,
     fetchOrderFulfillmentState,
     createFulfillmentTracking,
   };
