@@ -1023,6 +1023,46 @@ describe('vendor order reject operational hold', () => {
     expect(result.writesPerformed).toBe(false);
   });
 
+  it('surfaces safe fulfillment order classifier exception diagnostics in Shopify refund preview', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockRejectedValue(
+        new Error('Shopify order fulfillment orders were not found for order gid://shopify/Order/1088.'),
+      ),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.suggestedRefund).toMatchObject({
+      totalRefundAmount: '1000.00',
+      currencyCode: 'TRY',
+    });
+    expect(result.fulfillmentOrderCancellation).toMatchObject({
+      overallClassification: 'unknown',
+      affectedFulfillmentOrders: [],
+      diagnosticCode: 'fulfillment_order_classifier_exception',
+      diagnosticMessage: 'Shopify order fulfillment orders were not found for order gid://shopify/Order/1088.',
+    });
+    expect(result.blockers).toContain(
+      'Shopify fulfillment order cancellation classification failed. Future refundCreate must verify affected fulfillment orders before running.',
+    );
+    expect(result.blockers).not.toContain('Shopify order fulfillment orders were not found for order gid://shopify/Order/1088.');
+    expect(prismaMock.outboundShopifyRefundAttempt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: 'PREVIEWED',
+        fulfillmentOrderCancellationJson: expect.objectContaining({
+          diagnosticCode: 'fulfillment_order_classifier_exception',
+          diagnosticMessage: 'Shopify order fulfillment orders were not found for order gid://shopify/Order/1088.',
+        }),
+      }),
+    });
+  });
+
   it('executes Shopify refund, cancels safe fulfillment orders first, and leaves finance to webhook ingestion', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
       fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({

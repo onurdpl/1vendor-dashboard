@@ -46,6 +46,8 @@ export type FulfillmentOrderCancellationClassificationResult = {
   overallClassification: FulfillmentOrderCancellationOverallClassification;
   blockers: string[];
   warnings: string[];
+  diagnosticCode?: string;
+  diagnosticMessage?: string;
 };
 
 export type FulfillmentOrderCancellationClassifierShopifyService = {
@@ -108,19 +110,28 @@ function hasConfirmedCancellationCompatibleStatus(fulfillmentOrder: ShopifyFulfi
   );
 }
 
-function createUnrunClassification(reason: string): FulfillmentOrderCancellationClassificationResult {
+function createUnrunClassification(reason: string, diagnostic?: {
+  code?: string;
+  message?: string;
+}): FulfillmentOrderCancellationClassificationResult {
   return {
     affectedFulfillmentOrders: [],
     overallClassification: 'unknown',
     blockers: [reason],
     warnings: [],
+    diagnosticCode: diagnostic?.code,
+    diagnosticMessage: diagnostic?.message,
   };
 }
 
 export function buildUnrunFulfillmentOrderCancellationClassification(
   reason = 'Fulfillment order cancellation classification was not run.',
+  diagnostic?: {
+    code?: string;
+    message?: string;
+  },
 ): FulfillmentOrderCancellationClassificationResult {
-  return createUnrunClassification(reason);
+  return createUnrunClassification(reason, diagnostic);
 }
 
 export function classifyFulfillmentOrderCancellationSafety(input: {

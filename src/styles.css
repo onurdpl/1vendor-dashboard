@@ -2475,6 +2475,77 @@ h3 {
   background: rgba(255, 251, 235, 0.9);
 }
 
+.refund-preview-diagnostic {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.refund-preview-diagnostic p,
+.refund-preview-fo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.refund-preview-diagnostic span,
+.refund-preview-line-item span {
+  color: var(--muted);
+}
+
+.refund-preview-diagnostic strong,
+.refund-preview-fo-header strong,
+.refund-preview-line-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refund-preview-fo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.refund-preview-fo {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.refund-preview-fo-notes {
+  margin: 0;
+  padding-left: 18px;
+  color: #991b1b;
+}
+
+.refund-preview-fo-warnings {
+  color: #92400e;
+}
+
+.refund-preview-line-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.refund-preview-line-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.9);
+  font-size: 0.82rem;
+}
+
 .economic-transfer-route {
   display: flex;
   align-items: center;

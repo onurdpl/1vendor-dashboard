@@ -1432,6 +1432,109 @@ export function AdminShopifyOrderPage() {
                       </ul>
                     </div>
                   ) : null}
+                  <div className="refund-preview-message">
+                    <strong>Fulfillment order safety</strong>
+                    <div className="compact-meta-grid">
+                      <div className="meta-item">
+                        <span>Classification</span>
+                        <strong>{formatTransferStatus(shopifyRefundPreview.fulfillmentOrderCancellation.overallClassification)}</strong>
+                      </div>
+                      <div className="meta-item">
+                        <span>Affected fulfillment orders</span>
+                        <strong>{shopifyRefundPreview.fulfillmentOrderCancellation.affectedFulfillmentOrders.length}</strong>
+                      </div>
+                    </div>
+                    {shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticCode ||
+                    shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticMessage ? (
+                      <div className="refund-preview-diagnostic">
+                        {shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticCode ? (
+                          <p>
+                            <span>Diagnostic code</span>
+                            <strong>{shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticCode}</strong>
+                          </p>
+                        ) : null}
+                        {shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticMessage ? (
+                          <p>
+                            <span>Diagnostic message</span>
+                            <strong>{shopifyRefundPreview.fulfillmentOrderCancellation.diagnosticMessage}</strong>
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {shopifyRefundPreview.fulfillmentOrderCancellation.blockers.length ? (
+                      <div className="refund-preview-message refund-preview-message-blocker">
+                        <strong>Classifier blockers</strong>
+                        <ul>
+                          {shopifyRefundPreview.fulfillmentOrderCancellation.blockers.map((blocker) => (
+                            <li key={blocker}>{blocker}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {shopifyRefundPreview.fulfillmentOrderCancellation.warnings.length ? (
+                      <div className="refund-preview-message refund-preview-message-warning">
+                        <strong>Classifier warnings</strong>
+                        <ul>
+                          {shopifyRefundPreview.fulfillmentOrderCancellation.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {shopifyRefundPreview.fulfillmentOrderCancellation.affectedFulfillmentOrders.length ? (
+                      <div className="refund-preview-fo-list">
+                        {shopifyRefundPreview.fulfillmentOrderCancellation.affectedFulfillmentOrders.map((fulfillmentOrder) => (
+                          <article className="refund-preview-fo" key={fulfillmentOrder.fulfillmentOrderId}>
+                            <div className="refund-preview-fo-header">
+                              <strong title={fulfillmentOrder.fulfillmentOrderId}>{fulfillmentOrder.fulfillmentOrderId}</strong>
+                              <span className={`status-badge status-${getClassToken(fulfillmentOrder.classification)}`}>
+                                {formatTransferStatus(fulfillmentOrder.classification)}
+                              </span>
+                            </div>
+                            <div className="compact-meta-grid">
+                              <div className="meta-item">
+                                <span>Status</span>
+                                <strong>{fulfillmentOrder.status ?? 'Unknown'}</strong>
+                              </div>
+                              <div className="meta-item">
+                                <span>Request status</span>
+                                <strong>{fulfillmentOrder.requestStatus ?? 'Unknown'}</strong>
+                              </div>
+                              <div className="meta-item">
+                                <span>Supported actions</span>
+                                <strong>{fulfillmentOrder.supportedActions?.join(', ') || 'Unknown'}</strong>
+                              </div>
+                            </div>
+                            {fulfillmentOrder.blockers.length ? (
+                              <ul className="refund-preview-fo-notes">
+                                {fulfillmentOrder.blockers.map((blocker) => (
+                                  <li key={blocker}>{blocker}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            {fulfillmentOrder.warnings.length ? (
+                              <ul className="refund-preview-fo-notes refund-preview-fo-warnings">
+                                {fulfillmentOrder.warnings.map((warning) => (
+                                  <li key={warning}>{warning}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            <div className="refund-preview-line-grid">
+                              {fulfillmentOrder.lineItems.map((lineItem) => (
+                                <div className="refund-preview-line-item" key={lineItem.fulfillmentOrderLineItemId}>
+                                  <span title={lineItem.shopifyLineItemId}>{lineItem.shopifyLineItemId}</span>
+                                  <strong>
+                                    {lineItem.selected ? 'Selected' : 'Other'} · {lineItem.selectedQuantity ?? 0}/
+                                    {lineItem.remainingQuantity ?? 'unknown'} remaining
+                                  </strong>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   {shopifyRefundPreview.warnings.length ? (
                     <div className="refund-preview-message refund-preview-message-warning">
                       <strong>Warnings</strong>

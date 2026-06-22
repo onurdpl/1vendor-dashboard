@@ -975,6 +975,8 @@ export type FulfillmentOrderCancellationPreview = {
   overallClassification: FulfillmentOrderCancellationOverallClassification;
   blockers: string[];
   warnings: string[];
+  diagnosticCode?: string;
+  diagnosticMessage?: string;
 };
 
 export type ShopifyRefundPreviewResult = {

@@ -248,6 +248,17 @@ function normalizeShopifyRefundPreviewRestockType(value: string | null | undefin
   return normalized as ShopifyRefundRestockType;
 }
 
+function sanitizeFulfillmentOrderClassifierError(error: unknown) {
+  const fallback = 'Fulfillment order cancellation classifier failed before returning details.';
+  const rawMessage = error instanceof Error ? error.message : fallback;
+  const sanitized = rawMessage
+    .replace(/(x-shopify-access-token|shopify_admin_access_token|access_token|token)\s*[:=]\s*[^,\s;]+/gi, '$1=[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return sanitized.slice(0, 500) || fallback;
+}
+
 function normalizeShopifyRefundExecutionNote(note: string | null | undefined) {
   const normalized = note?.trim() ?? '';
   if (!normalized) {
@@ -2143,9 +2154,14 @@ export async function previewShopifyRefundForAdminOrder(
     if (fulfillmentOrderCancellation.overallClassification === 'blocked' || fulfillmentOrderCancellation.overallClassification === 'unknown') {
       blockers.push(...fulfillmentOrderCancellation.blockers);
     }
-  } catch {
+  } catch (error) {
+    const diagnosticMessage = sanitizeFulfillmentOrderClassifierError(error);
     fulfillmentOrderCancellation = buildUnrunFulfillmentOrderCancellationClassification(
       'Shopify fulfillment order cancellation classification failed. Future refundCreate must verify affected fulfillment orders before running.',
+      {
+        code: 'fulfillment_order_classifier_exception',
+        message: diagnosticMessage,
+      },
     );
     blockers.push(...fulfillmentOrderCancellation.blockers);
   }
