@@ -8,6 +8,7 @@ const rejectVendorOrderAllocationMock = vi.hoisted(() => vi.fn());
 const returnBlockedAllocationToVendorMock = vi.hoisted(() => vi.fn());
 const addBlockedAllocationResolutionNoteMock = vi.hoisted(() => vi.fn());
 const requestCancelRefundReviewForAdminOrderMock = vi.hoisted(() => vi.fn());
+const previewShopifyRefundForAdminOrderMock = vi.hoisted(() => vi.fn());
 const transferAllocationEconomicsForAdminOrderMock = vi.hoisted(() => vi.fn());
 const MockOrderRejectValidationError = vi.hoisted(() => class MockOrderRejectValidationError extends Error {
   statusCode: number;
@@ -32,10 +33,18 @@ vi.mock('../backend/src/modules/orders/orders.service.js', () => ({
   getVendorOrderByIdForUser: getVendorOrderByIdForUserMock,
   listVendorOrders: listVendorOrdersMock,
   OrderRejectValidationError: MockOrderRejectValidationError,
+  previewShopifyRefundForAdminOrder: previewShopifyRefundForAdminOrderMock,
   rejectVendorOrderAllocation: rejectVendorOrderAllocationMock,
   requestCancelRefundReviewForAdminOrder: requestCancelRefundReviewForAdminOrderMock,
   returnBlockedAllocationToVendor: returnBlockedAllocationToVendorMock,
   transferAllocationEconomicsForAdminOrder: transferAllocationEconomicsForAdminOrderMock,
+}));
+
+vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
+  createShopifyAdminService: vi.fn(() => ({
+    previewSuggestedRefund: vi.fn(),
+    fetchFulfillmentOrders: vi.fn(),
+  })),
 }));
 
 vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
@@ -65,6 +74,7 @@ describe('orders route contract', () => {
     returnBlockedAllocationToVendorMock.mockReset();
     addBlockedAllocationResolutionNoteMock.mockReset();
     requestCancelRefundReviewForAdminOrderMock.mockReset();
+    previewShopifyRefundForAdminOrderMock.mockReset();
     transferAllocationEconomicsForAdminOrderMock.mockReset();
   });
 
@@ -346,6 +356,124 @@ describe('orders route contract', () => {
 
     expect(response).toEqual({ statusCode: 400, payload: { message } });
     expect(requestCancelRefundReviewForAdminOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('wires admin Shopify refund preview route to the read-only preview service', async () => {
+    const preview = {
+      ok: true,
+      writesPerformed: false,
+      allocationId: 'alloc-1',
+      shopifyOrderId: 'shopify-1',
+      refundLineItemsPreview: [],
+      suggestedRefund: null,
+      warnings: [],
+      blockers: [],
+      missingData: [],
+    };
+    previewShopifyRefundForAdminOrderMock.mockResolvedValueOnce(preview);
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { restockType?: string; refundShipping?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { restockType?: string; refundShipping?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: ' shopify-1 ', allocationId: ' alloc-1 ' },
+      body: { restockType: 'CANCEL', refundShipping: false },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual(preview);
+    expect(previewShopifyRefundForAdminOrderMock).toHaveBeenCalledWith('shopify-1', 'alloc-1', expect.objectContaining({
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService: expect.objectContaining({
+        previewSuggestedRefund: expect.any(Function),
+        fetchFulfillmentOrders: expect.any(Function),
+      }),
+    }));
+  });
+
+  it('blocks non-admin Shopify refund preview requests', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { restockType?: string; refundShipping?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { restockType?: string; refundShipping?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview')?.({
+      authUser: { id: 'vendor-1', role: 'vendor' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body: { restockType: 'CANCEL', refundShipping: false },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 403, payload: { message: 'Forbidden' } });
+    expect(previewShopifyRefundForAdminOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects Shopify refund preview when refundShipping is true', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { restockType?: string; refundShipping?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { restockType?: string; refundShipping?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body: { restockType: 'CANCEL', refundShipping: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 400,
+      payload: { message: 'Refund shipping preview is not supported for allocation-scoped cancel/refund review.' },
+    });
+    expect(previewShopifyRefundForAdminOrderMock).not.toHaveBeenCalled();
   });
 
   it('wires admin economic transfer route to the economic transfer wrapper', async () => {

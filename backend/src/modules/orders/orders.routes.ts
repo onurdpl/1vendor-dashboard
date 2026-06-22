@@ -9,12 +9,14 @@ import {
   getVendorOrderByIdForUser,
   listVendorOrders,
   OrderRejectValidationError,
+  previewShopifyRefundForAdminOrder,
   rejectVendorOrderAllocation,
   requestCancelRefundReviewForAdminOrder,
   returnBlockedAllocationToVendor,
   transferAllocationEconomicsForAdminOrder,
 } from './orders.service.js';
 import { EconomicTransferValidationError } from '../finance/economic-transfer.service.js';
+import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -242,6 +244,42 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             reason,
             note,
             actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: { restockType?: string | null; refundShipping?: boolean | null };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+        if (request.body?.refundShipping !== false) {
+          throw new OrderRejectValidationError('Refund shipping preview is not supported for allocation-scoped cancel/refund review.', 400);
+        }
+
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview', () =>
+          previewShopifyRefundForAdminOrder(shopifyOrderId, allocationId, {
+            restockType: request.body?.restockType,
+            refundShipping: false,
+            shopifyAdminService: createShopifyAdminService(env),
           }),
         );
       } catch (error) {

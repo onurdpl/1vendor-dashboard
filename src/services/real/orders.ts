@@ -14,6 +14,7 @@ import type {
   OrderStatus,
   OrderSummary,
   ShippingStatus,
+  ShopifyRefundPreviewResult,
   ShopifyOrderBreakdown,
   VendorAllocationSummary,
   KargonomiWarehouseSyncResult,
@@ -88,6 +89,11 @@ export type AdminEconomicTransferPayload = {
   toVendorId: string;
   reason: string;
   confirmTransfer: true;
+};
+
+export type AdminShopifyRefundPreviewPayload = {
+  restockType: 'CANCEL' | 'NO_RESTOCK';
+  refundShipping: false;
 };
 
 export type AdminEconomicTransferSummary = {
@@ -670,6 +676,18 @@ export async function requestAdminCancelRefundReview(
     { skipVendorContext: true },
   );
   return mapAdminOrderBreakdown(response);
+}
+
+export async function previewAdminShopifyRefund(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminShopifyRefundPreviewPayload,
+): Promise<ShopifyRefundPreviewResult> {
+  return apiClient.post<ShopifyRefundPreviewResult>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/shopify-refund-preview`,
+    payload,
+    { skipVendorContext: true },
+  );
 }
 
 export async function transferAdminAllocationEconomics(

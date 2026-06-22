@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { requestAdminCancelRefundReview, transferAdminAllocationEconomics } from './orders';
+import { previewAdminShopifyRefund, requestAdminCancelRefundReview, transferAdminAllocationEconomics } from './orders';
 
 const apiClientPost = vi.hoisted(() => vi.fn());
 
@@ -183,6 +183,62 @@ describe('real orders economic transfer service', () => {
         note: 'Customer will be contacted.',
         requestedAt: '2026-06-22T08:10:00.000Z',
         requestedByUserId: 'admin-1',
+      },
+    });
+  });
+
+  it('posts admin Shopify refund preview payload without vendor context', async () => {
+    apiClientPost.mockResolvedValueOnce({
+      ok: true,
+      writesPerformed: false,
+      allocationId: 'alloc/1',
+      shopifyOrderId: 'gid://shopify/Order/1001',
+      refundLineItemsPreview: [
+        {
+          lineItemId: 'gid://shopify/LineItem/1',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+      suggestedRefund: {
+        totalRefundAmount: '1000.00',
+        currencyCode: 'TRY',
+        totalTaxAmount: '100.00',
+        shippingAmount: null,
+        suggestedTransactions: [
+          {
+            gateway: 'bogus',
+            amount: '1000.00',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          },
+        ],
+      },
+      warnings: [],
+      blockers: [],
+      missingData: [],
+    });
+
+    const result = await previewAdminShopifyRefund('gid://shopify/Order/1001', 'alloc/1', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+    });
+
+    expect(apiClientPost).toHaveBeenCalledWith(
+      '/admin/orders/gid%3A%2F%2Fshopify%2FOrder%2F1001/allocations/alloc%2F1/shopify-refund-preview',
+      {
+        restockType: 'CANCEL',
+        refundShipping: false,
+      },
+      { skipVendorContext: true },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      allocationId: 'alloc/1',
+      suggestedRefund: {
+        totalRefundAmount: '1000.00',
+        currencyCode: 'TRY',
       },
     });
   });

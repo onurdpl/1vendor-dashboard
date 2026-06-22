@@ -30,6 +30,7 @@ const {
   addBlockedAllocationResolutionNote,
   getAdminShopifyOrderBreakdown,
   getVendorOrderById,
+  previewShopifyRefundForAdminOrder,
   rejectVendorOrderAllocation,
   requestCancelRefundReviewForAdminOrder,
   returnBlockedAllocationToVendor,
@@ -166,6 +167,68 @@ function buildReturnableBlockedAllocation(overrides: Record<string, unknown> = {
     returnRecords: [],
     refundRecords: [],
     economicTransfers: [],
+    ...overrides,
+  };
+}
+
+function buildRefundPreviewAllocation(overrides: Record<string, unknown> = {}) {
+  return {
+    ...buildReturnableBlockedAllocation(),
+    cancelRefundReviewStatus: 'PENDING_REVIEW',
+    order: {
+      sourceShopifyOrderId: 'gid://shopify/Order/1088',
+    },
+    lineItems: [
+      {
+        id: 'allocation-line-1',
+        quantity: 1,
+        shopifyOrderLineItem: {
+          sourceLineItemId: '20346971095377',
+        },
+      },
+    ],
+    financeIntegrityAlerts: [],
+    ...overrides,
+  };
+}
+
+function buildShopifyRefundPreviewService(overrides: Record<string, unknown> = {}) {
+  return {
+    previewSuggestedRefund: vi.fn().mockResolvedValue({
+      orderGid: 'gid://shopify/Order/1088',
+      sourceShopifyOrderId: '1088',
+      refundLineItemsPreview: [
+        {
+          lineItemId: 'gid://shopify/LineItem/20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+      suggestedRefund: {
+        totalRefundAmount: '1000.00',
+        currencyCode: 'TRY',
+        subtotalAmount: '900.00',
+        totalTaxAmount: '100.00',
+        shippingAmount: null,
+        maximumRefundableAmount: '1000.00',
+        suggestedTransactions: [
+          {
+            gateway: 'bogus',
+            formattedGateway: '(For Testing) Bogus Gateway',
+            amount: '1000.00',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          },
+        ],
+        refundLineItems: [],
+      },
+      graphqlErrors: [],
+      source: 'shopify_admin',
+    }),
+    fetchFulfillmentOrders: vi.fn().mockResolvedValue({
+      fulfillmentOrders: [],
+      source: 'mock',
+    }),
     ...overrides,
   };
 }
@@ -499,6 +562,245 @@ describe('vendor order reject operational hold', () => {
 
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
+  it('previews Shopify suggested refund for an allocation under cancel/refund review without local writes', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      writesPerformed: false,
+      allocationId: 'alloc-1088',
+      shopifyOrderId: 'gid://shopify/Order/1088',
+      blockers: [],
+      warnings: [],
+      suggestedRefund: {
+        totalRefundAmount: '1000.00',
+        currencyCode: 'TRY',
+        totalTaxAmount: '100.00',
+        shippingAmount: null,
+        suggestedTransactions: [
+          {
+            gateway: 'bogus',
+            amount: '1000.00',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          },
+        ],
+      },
+    });
+    expect(shopifyAdminService.previewSuggestedRefund).toHaveBeenCalledWith({
+      shopifyOrderId: 'gid://shopify/Order/1088',
+      refundLineItems: [
+        {
+          sourceLineItemId: '20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        },
+      ],
+      refundShipping: false,
+    });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks Shopify refund preview when source line item id is missing', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      lineItems: [
+        {
+          id: 'allocation-line-1',
+          quantity: 1,
+          shopifyOrderLineItem: {
+            sourceLineItemId: ' ',
+          },
+        },
+      ],
+    }));
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.suggestedRefund).toBeNull();
+    expect(result.blockers).toContain('Allocation line item allocation-line-1 is missing sourceLineItemId.');
+    expect(result.missingData).toContain('Allocation line item allocation-line-1 is missing sourceLineItemId.');
+    expect(shopifyAdminService.previewSuggestedRefund).not.toHaveBeenCalled();
+  });
+
+  it('includes multiple allocation lines in Shopify refund preview', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      lineItems: [
+        {
+          id: 'allocation-line-1',
+          quantity: 1,
+          shopifyOrderLineItem: {
+            sourceLineItemId: '20346971095377',
+          },
+        },
+        {
+          id: 'allocation-line-2',
+          quantity: 2,
+          shopifyOrderLineItem: {
+            sourceLineItemId: 'gid://shopify/LineItem/20346971095378',
+          },
+        },
+      ],
+    }));
+
+    await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'NO_RESTOCK',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.previewSuggestedRefund).toHaveBeenCalledWith({
+      shopifyOrderId: 'gid://shopify/Order/1088',
+      refundLineItems: [
+        {
+          sourceLineItemId: '20346971095377',
+          quantity: 1,
+          restockType: 'NO_RESTOCK',
+        },
+        {
+          sourceLineItemId: 'gid://shopify/LineItem/20346971095378',
+          quantity: 2,
+          restockType: 'NO_RESTOCK',
+        },
+      ],
+      refundShipping: false,
+    });
+  });
+
+  it('blocks Shopify refund preview when allocation quantity is not positive', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      lineItems: [
+        {
+          id: 'allocation-line-1',
+          quantity: 0,
+          shopifyOrderLineItem: {
+            sourceLineItemId: '20346971095377',
+          },
+        },
+      ],
+    }));
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.suggestedRefund).toBeNull();
+    expect(result.blockers).toContain('Allocation line item allocation-line-1 has invalid refund quantity.');
+    expect(shopifyAdminService.previewSuggestedRefund).not.toHaveBeenCalled();
+  });
+
+  it('blocks Shopify refund preview when suggested transactions are missing a parent transaction', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      previewSuggestedRefund: vi.fn().mockResolvedValue({
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        refundLineItemsPreview: [
+          {
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            quantity: 1,
+            restockType: 'CANCEL',
+          },
+        ],
+        suggestedRefund: {
+          totalRefundAmount: '1000.00',
+          currencyCode: 'TRY',
+          subtotalAmount: '900.00',
+          totalTaxAmount: '100.00',
+          shippingAmount: null,
+          maximumRefundableAmount: '1000.00',
+          suggestedTransactions: [
+            {
+              gateway: 'bogus',
+              formattedGateway: '(For Testing) Bogus Gateway',
+              amount: '1000.00',
+              currencyCode: 'TRY',
+              parentTransactionId: null,
+            },
+          ],
+          refundLineItems: [],
+        },
+        graphqlErrors: [],
+        source: 'shopify_admin',
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.writesPerformed).toBe(false);
+    expect(result.blockers).toContain('Suggested refund has no refundable payment transaction. Future refundCreate must not run.');
+  });
+
+  it('adds an open fulfillment order warning without blocking Shopify refund preview', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrders: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'fulfillment-order-1',
+            status: 'open',
+            lineItems: [
+              {
+                id: 'fo-line-1',
+                lineItemId: '20346971095377',
+                quantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.warnings).toContain('Open fulfillment order exists for selected line items. Future refundCreate must cancel affected fulfillment orders first.');
+    expect(result.blockers).toEqual([]);
+  });
+
+  it('rejects Shopify refund preview outside cancel/refund review state', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      cancelRefundReviewStatus: null,
+    }));
+
+    await expect(
+      previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        shopifyAdminService: buildShopifyRefundPreviewService(),
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Allocation must be in cancel/refund review before Shopify refund preview.',
+    });
   });
 
   it('includes open and acknowledged finance integrity alerts in admin Shopify order breakdown', async () => {

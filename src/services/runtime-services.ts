@@ -55,6 +55,7 @@ import type {
   AdminResolutionNotePayload,
   AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
+  AdminShopifyRefundPreviewPayload,
   RejectOrderPayload,
   SubmitFulfillmentTrackingPayload,
   UpdateNavlungoShipmentPayload,
@@ -869,6 +870,20 @@ export const runtimeServices = {
       void allocationId;
       void payload;
       return breakdown;
+    },
+    async previewAdminShopifyRefund(
+      shopifyOrderId: string,
+      allocationId: string,
+      payload: AdminShopifyRefundPreviewPayload,
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.previewAdminShopifyRefund(shopifyOrderId, allocationId, payload);
+      }
+
+      void shopifyOrderId;
+      void allocationId;
+      void payload;
+      throw new ApiError('Shopify refund preview is available in real API mode only.', 'server', { status: 400 });
     },
     async transferAdminAllocationEconomics(
       shopifyOrderId: string,

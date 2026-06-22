@@ -2433,6 +2433,48 @@ h3 {
   margin: 0;
 }
 
+.refund-preview-actions {
+  justify-content: flex-start;
+}
+
+.shopify-refund-preview-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.shopify-refund-preview-card h4 {
+  margin: 0;
+}
+
+.refund-preview-message {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+
+.refund-preview-message ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.refund-preview-message-blocker {
+  color: #991b1b;
+  border: 1px solid rgba(239, 68, 68, 0.24);
+  background: rgba(254, 242, 242, 0.88);
+}
+
+.refund-preview-message-warning {
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: rgba(255, 251, 235, 0.9);
+}
+
 .economic-transfer-route {
   display: flex;
   align-items: center;

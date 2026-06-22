@@ -7,10 +7,12 @@ import {
   addAdminAllocationResolutionNote,
   createParatikaHostedPaymentLink,
   getAdminShopifyOrderBreakdown,
+  previewAdminShopifyRefund,
   requestAdminCancelRefundReview,
   returnAdminBlockedAllocationToVendor,
   transferAdminAllocationEconomics,
   type ParatikaSessionTokenLiveProbeResult,
+  type ShopifyRefundPreviewResult,
   type ShopifyOrderBreakdown,
 } from '../features/orders/api';
 import {
@@ -136,6 +138,13 @@ type FinanceIntegrityAlertRescanSummary = {
   tone: 'success' | 'info' | 'error';
   message: string;
 };
+
+function formatPreviewMoney(amount: string | null | undefined, currencyCode: string | null | undefined) {
+  if (!amount) {
+    return currencyCode ? `0.00 ${currencyCode}` : 'Not returned';
+  }
+  return currencyCode ? `${amount} ${currencyCode}` : amount;
+}
 
 function TransferDiagnosticsCard({ transferId }: { transferId: string }) {
   const { data, isLoading, isError, error, refetch } = useQueryResource(
@@ -291,6 +300,7 @@ export function AdminShopifyOrderPage() {
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
   const [alertResolutionNote, setAlertResolutionNote] = useState('');
   const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
+  const [shopifyRefundPreviews, setShopifyRefundPreviews] = useState<Record<string, ShopifyRefundPreviewResult>>({});
   const paratikaLiveProbe = useMutationAction(
     async () => {
       if (!shopifyOrderId) {
@@ -395,6 +405,23 @@ export function AdminShopifyOrderPage() {
     {
       onError: (mutationError) => {
         showFeedback(getActionErrorMessage(mutationError, 'Cancel/refund review could not be requested.'), 'error');
+      },
+    },
+  );
+  const shopifyRefundPreviewMutation = useMutationAction(
+    async (payload: { allocationId: string }) => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return previewAdminShopifyRefund(shopifyOrderId, payload.allocationId, {
+        restockType: 'CANCEL',
+        refundShipping: false,
+      });
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(getActionErrorMessage(mutationError, 'Shopify refund preview could not be loaded.'), 'error');
       },
     },
   );
@@ -539,6 +566,29 @@ export function AdminShopifyOrderPage() {
       setCancelRefundReviewReason('');
       setCancelRefundReviewNote('');
       setCancelRefundReviewConfirmed(false);
+    } catch {
+      // The mutation onError handler owns user-facing feedback.
+    }
+  }
+
+  async function handleShopifyRefundPreview(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+    try {
+      const result = await shopifyRefundPreviewMutation.mutateAsync({
+        allocationId: allocation.allocationOrderId,
+      });
+      setShopifyRefundPreviews((current) => ({
+        ...current,
+        [allocation.allocationOrderId]: result,
+      }));
+      const blockerCount = result.blockers.length;
+      const warningCount = result.warnings.length;
+      if (blockerCount > 0) {
+        showFeedback(`Shopify refund preview loaded with ${blockerCount} blocker${blockerCount === 1 ? '' : 's'}.`, 'info');
+      } else if (warningCount > 0) {
+        showFeedback(`Shopify refund preview loaded with ${warningCount} warning${warningCount === 1 ? '' : 's'}.`, 'info');
+      } else {
+        showFeedback('Shopify refund preview loaded. No local state was changed.', 'success');
+      }
     } catch {
       // The mutation onError handler owns user-facing feedback.
     }
@@ -764,6 +814,7 @@ export function AdminShopifyOrderPage() {
         );
         const showEconomicTransferAction = canShowEconomicTransferAction(allocation);
         const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation);
+        const shopifyRefundPreview = shopifyRefundPreviews[allocation.allocationOrderId];
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1029,6 +1080,83 @@ export function AdminShopifyOrderPage() {
                   <strong>{allocation.cancelRefundReview.requestedByUserId ?? 'Not recorded'}</strong>
                 </div>
               </div>
+              <div className="support-modal-actions refund-preview-actions">
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={shopifyRefundPreviewMutation.isPending}
+                  onClick={() => void handleShopifyRefundPreview(allocation)}
+                >
+                  {shopifyRefundPreviewMutation.isPending ? 'Previewing...' : 'Preview Shopify refund'}
+                </button>
+              </div>
+              {shopifyRefundPreview ? (
+                <section className="shopify-refund-preview-card" aria-label="Shopify suggested refund preview">
+                  <div className="economic-transfer-summary-header">
+                    <div>
+                      <p className="eyebrow">Shopify suggested refund</p>
+                      <h4>Preview only</h4>
+                    </div>
+                    <span className="status-badge status-info">No writes</span>
+                  </div>
+                  <div className="compact-meta-grid">
+                    <div className="meta-item">
+                      <span>Total refund</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          shopifyRefundPreview.suggestedRefund?.totalRefundAmount,
+                          shopifyRefundPreview.suggestedRefund?.currencyCode,
+                        )}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Tax</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          shopifyRefundPreview.suggestedRefund?.totalTaxAmount,
+                          shopifyRefundPreview.suggestedRefund?.currencyCode,
+                        )}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Shipping refund</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          shopifyRefundPreview.suggestedRefund?.shippingAmount,
+                          shopifyRefundPreview.suggestedRefund?.currencyCode,
+                        )}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Suggested transactions</span>
+                      <strong>{shopifyRefundPreview.suggestedRefund?.suggestedTransactions.length ?? 0}</strong>
+                    </div>
+                  </div>
+                  <p className="page-description">
+                    Shopify remains canonical for actual refund creation. This preview did not create local refund, finance, or review-state records.
+                  </p>
+                  {shopifyRefundPreview.blockers.length ? (
+                    <div className="refund-preview-message refund-preview-message-blocker">
+                      <strong>Blockers</strong>
+                      <ul>
+                        {shopifyRefundPreview.blockers.map((blocker) => (
+                          <li key={blocker}>{blocker}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {shopifyRefundPreview.warnings.length ? (
+                    <div className="refund-preview-message refund-preview-message-warning">
+                      <strong>Warnings</strong>
+                      <ul>
+                        {shopifyRefundPreview.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
             </section>
           ) : null}
 

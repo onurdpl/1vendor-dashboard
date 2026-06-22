@@ -5,6 +5,7 @@ import type {
   AdminResolutionNotePayload,
   AdminEconomicTransferPayload,
   AdminReturnToVendorPayload,
+  AdminShopifyRefundPreviewPayload,
   RejectOrderPayload,
   UpdateNavlungoShipmentPayload,
 } from '../../services/real/orders';
@@ -43,6 +44,14 @@ export async function requestAdminCancelRefundReview(
   payload: AdminCancelRefundReviewPayload,
 ) {
   return runtimeServices.orders.requestAdminCancelRefundReview(shopifyOrderId, allocationId, payload);
+}
+
+export async function previewAdminShopifyRefund(
+  shopifyOrderId: string,
+  allocationId: string,
+  payload: AdminShopifyRefundPreviewPayload,
+) {
+  return runtimeServices.orders.previewAdminShopifyRefund(shopifyOrderId, allocationId, payload);
 }
 
 export async function transferAdminAllocationEconomics(

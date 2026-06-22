@@ -26,6 +26,61 @@ export type ShopifyMoneySnapshot = {
   currencyCode: string | null;
 };
 
+export type ShopifyRefundRestockType = 'CANCEL' | 'NO_RESTOCK';
+
+export type PreviewSuggestedRefundLineItemInput = {
+  sourceLineItemId: string;
+  quantity: number;
+  restockType: ShopifyRefundRestockType;
+};
+
+export type PreviewSuggestedRefundInput = {
+  shopifyOrderId: string;
+  refundLineItems: PreviewSuggestedRefundLineItemInput[];
+  refundShipping: boolean;
+};
+
+export type ShopifySuggestedRefundTransactionPreview = {
+  gateway: string | null;
+  formattedGateway: string | null;
+  amount: string | null;
+  currencyCode: string | null;
+  parentTransactionId: string | null;
+};
+
+export type ShopifySuggestedRefundLineItemPreview = {
+  lineItemId: string;
+  quantity: number;
+  restockType: ShopifyRefundRestockType | null;
+  subtotalAmount: string | null;
+  totalTaxAmount: string | null;
+  currencyCode: string | null;
+};
+
+export type ShopifySuggestedRefundPreview = {
+  totalRefundAmount: string | null;
+  currencyCode: string | null;
+  subtotalAmount: string | null;
+  totalTaxAmount: string | null;
+  shippingAmount: string | null;
+  maximumRefundableAmount: string | null;
+  suggestedTransactions: ShopifySuggestedRefundTransactionPreview[];
+  refundLineItems: ShopifySuggestedRefundLineItemPreview[];
+};
+
+export type PreviewSuggestedRefundResult = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  refundLineItemsPreview: Array<{
+    lineItemId: string;
+    quantity: number;
+    restockType: ShopifyRefundRestockType;
+  }>;
+  suggestedRefund: ShopifySuggestedRefundPreview | null;
+  graphqlErrors: string[];
+  source: 'shopify_admin';
+};
+
 export type ShopifyTaxLineSnapshot = {
   title: string | null;
   rate: number | null;

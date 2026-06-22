@@ -921,6 +921,35 @@ export type CancelRefundReviewSummary = {
   requestedByUserId: string | null;
 };
 
+export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
+
+export type ShopifyRefundPreviewResult = {
+  ok: true;
+  writesPerformed: false;
+  allocationId: string;
+  shopifyOrderId: string;
+  refundLineItemsPreview: Array<{
+    lineItemId: string;
+    quantity: number;
+    restockType: ShopifyRefundPreviewRestockType;
+  }>;
+  suggestedRefund: {
+    totalRefundAmount: string | null;
+    currencyCode: string | null;
+    totalTaxAmount: string | null;
+    shippingAmount: string | null;
+    suggestedTransactions: Array<{
+      gateway: string | null;
+      amount: string | null;
+      currencyCode: string | null;
+      parentTransactionId: string | null;
+    }>;
+  } | null;
+  warnings: string[];
+  blockers: string[];
+  missingData: string[];
+};
+
 export type VendorAllocationSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;

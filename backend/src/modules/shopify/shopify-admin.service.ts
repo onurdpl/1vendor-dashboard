@@ -11,11 +11,14 @@ import type {
   FetchOrderSellerInfoResult,
   ProbeShopifyReturnLabelUploadInput,
   ProbeShopifyReturnLabelUploadResult,
+  PreviewSuggestedRefundInput,
+  PreviewSuggestedRefundResult,
   SellerInfoMap,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
   ShopifyMoneySnapshot,
+  ShopifyRefundRestockType,
   ShopifyOrderFulfillmentState,
   ShopifyReturnCancellationState,
   ShopifyReverseDeliveryLineItem,
@@ -102,6 +105,38 @@ type OrderTaxSnapshotQueryResponse = {
         };
       }>;
     };
+  } | null;
+};
+
+type SuggestedRefundQueryResponse = {
+  order: {
+    id: string;
+    suggestedRefund: {
+      amountSet?: ShopifyMoneySetNode;
+      maximumRefundableSet?: ShopifyMoneySetNode;
+      subtotalSet?: ShopifyMoneySetNode;
+      totalTaxSet?: ShopifyMoneySetNode;
+      shipping?: {
+        amountSet?: ShopifyMoneySetNode;
+      } | null;
+      refundLineItems: Array<{
+        lineItem: {
+          id: string;
+        } | null;
+        quantity: number;
+        restockType?: ShopifyRefundRestockType | null;
+        subtotalSet?: ShopifyMoneySetNode;
+        totalTaxSet?: ShopifyMoneySetNode;
+      }>;
+      suggestedTransactions: Array<{
+        gateway?: string | null;
+        formattedGateway?: string | null;
+        amountSet?: ShopifyMoneySetNode;
+        parentTransaction?: {
+          id?: string | null;
+        } | null;
+      }>;
+    } | null;
   } | null;
 };
 
@@ -339,8 +374,20 @@ type ShopifyOrderFulfillmentStateQueryResponse = {
   } | null;
 };
 
+function toShopifyGid(resource: string, id: string) {
+  const trimmed = id.trim();
+  if (/^gid:\/\/shopify\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `gid://shopify/${resource}/${trimmed}`;
+}
+
 function toShopifyOrderGid(orderId: string) {
-  return `gid://shopify/Order/${orderId}`;
+  return toShopifyGid('Order', orderId);
+}
+
+function toShopifyLineItemGid(lineItemId: string) {
+  return toShopifyGid('LineItem', lineItemId);
 }
 
 function extractShopifyGidTail(gid: string) {
@@ -1008,6 +1055,171 @@ export function createShopifyAdminService(env: AppEnv) {
         taxLines: (edge.node.taxLines ?? []).map(mapShopifyTaxLine),
       })),
       source: 'shopify_admin',
+    };
+  }
+
+  async function previewSuggestedRefund(input: PreviewSuggestedRefundInput): Promise<PreviewSuggestedRefundResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify suggested refund preview is not configured.');
+    }
+
+    const orderGid = toShopifyOrderGid(input.shopifyOrderId);
+    const refundLineItemsPreview = input.refundLineItems.map((lineItem) => ({
+      lineItemId: toShopifyLineItemGid(lineItem.sourceLineItemId),
+      quantity: lineItem.quantity,
+      restockType: lineItem.restockType,
+    }));
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query SuggestedRefundPreview($id: ID!, $refundLineItems: [RefundLineItemInput!], $refundShipping: Boolean) {
+              order(id: $id) {
+                id
+                suggestedRefund(refundLineItems: $refundLineItems, refundShipping: $refundShipping) {
+                  amountSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  maximumRefundableSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  subtotalSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  totalTaxSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  shipping {
+                    amountSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                  refundLineItems {
+                    lineItem {
+                      id
+                    }
+                    quantity
+                    restockType
+                    subtotalSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    totalTaxSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                  suggestedTransactions {
+                    parentTransaction {
+                      id
+                    }
+                    gateway
+                    formattedGateway
+                    amountSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            id: orderGid,
+            refundLineItems: refundLineItemsPreview.map((lineItem) => ({
+              lineItemId: lineItem.lineItemId,
+              quantity: lineItem.quantity,
+              restockType: lineItem.restockType,
+            })),
+            refundShipping: input.refundShipping,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify suggested refund preview failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<SuggestedRefundQueryResponse>;
+    const graphqlErrors = (json.errors ?? [])
+      .map((error) => error.message?.trim())
+      .filter((message): message is string => Boolean(message));
+
+    const order = json.data?.order;
+    const suggestedRefund = order?.suggestedRefund ?? null;
+    const totalRefund = mapShopifyMoney(suggestedRefund?.amountSet ?? null);
+    const subtotal = mapShopifyMoney(suggestedRefund?.subtotalSet ?? null);
+    const totalTax = mapShopifyMoney(suggestedRefund?.totalTaxSet ?? null);
+    const shipping = mapShopifyMoney(suggestedRefund?.shipping?.amountSet ?? null);
+    const maximumRefundable = mapShopifyMoney(suggestedRefund?.maximumRefundableSet ?? null);
+
+    return {
+      orderGid: order?.id ?? orderGid,
+      sourceShopifyOrderId: extractShopifyGidTail(order?.id ?? orderGid) ?? input.shopifyOrderId,
+      refundLineItemsPreview,
+      graphqlErrors,
+      source: 'shopify_admin',
+      suggestedRefund: suggestedRefund
+        ? {
+            totalRefundAmount: totalRefund.amount,
+            currencyCode: totalRefund.currencyCode ?? subtotal.currencyCode ?? totalTax.currencyCode ?? shipping.currencyCode,
+            subtotalAmount: subtotal.amount,
+            totalTaxAmount: totalTax.amount,
+            shippingAmount: shipping.amount,
+            maximumRefundableAmount: maximumRefundable.amount,
+            suggestedTransactions: suggestedRefund.suggestedTransactions.map((transaction) => {
+              const transactionAmount = mapShopifyMoney(transaction.amountSet ?? null);
+              return {
+                gateway: transaction.gateway ?? null,
+                formattedGateway: transaction.formattedGateway ?? null,
+                amount: transactionAmount.amount,
+                currencyCode: transactionAmount.currencyCode,
+                parentTransactionId: transaction.parentTransaction?.id ?? null,
+              };
+            }),
+            refundLineItems: suggestedRefund.refundLineItems.map((lineItem) => {
+              const subtotalAmount = mapShopifyMoney(lineItem.subtotalSet ?? null);
+              const totalTaxAmount = mapShopifyMoney(lineItem.totalTaxSet ?? null);
+              return {
+                lineItemId: lineItem.lineItem?.id ?? '',
+                quantity: lineItem.quantity,
+                restockType: lineItem.restockType ?? null,
+                subtotalAmount: subtotalAmount.amount,
+                totalTaxAmount: totalTaxAmount.amount,
+                currencyCode: subtotalAmount.currencyCode ?? totalTaxAmount.currencyCode,
+              };
+            }),
+          }
+        : null,
     };
   }
 
@@ -2239,6 +2451,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderSellerInfo,
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,
+    previewSuggestedRefund,
     fetchReturnDetails,
     fetchReturnCancellationState,
     cancelReturn,
