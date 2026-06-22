@@ -351,6 +351,7 @@ model Vendor {
   assignmentHistoryTo          AllocationAssignmentHistory[] @relation("assignmentToVendor")
   economicTransfersFrom        AllocationEconomicTransfer[]  @relation("economicTransferFromVendor")
   economicTransfersTo          AllocationEconomicTransfer[]  @relation("economicTransferToVendor")
+  ownedReturnRecords           ReturnRecord[]                @relation("returnOwnerVendor")
 }
 
 model SupportTicket {
@@ -856,6 +857,7 @@ model Fulfillment {
 model ReturnRecord {
   id                       String           @id @default(cuid())
   vendorAllocationId       String
+  ownerVendorId            String?
   sourceShopifyOrderId     String
   sourceShopifyOrderNumber String
   sourceShopifyRefundId    String?
@@ -885,10 +887,12 @@ model ReturnRecord {
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
   vendorAllocation         VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  ownerVendor              Vendor?          @relation("returnOwnerVendor", fields: [ownerVendorId], references: [id], onDelete: SetNull)
   operationalJobs          OperationalJob[]
 
   @@index([sourceShopifyReturnGid])
   @@index([sourceShopifyReturnId])
+  @@index([ownerVendorId])
   @@index([vendorAllocationId, createdAt])
 }
 
