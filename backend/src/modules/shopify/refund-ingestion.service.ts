@@ -1,7 +1,8 @@
 import { prisma } from '../../db/prisma.js';
-import { FinanceEventType } from '@prisma/client';
+import { FinanceEventType, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
+import { CANCEL_REFUND_REVIEW_BLOCKING_STATUSES } from '../finance/cancel-refund-review-hold.service.js';
 import { assertNoOpenFinanceIntegrityAlertForMoneyMovement } from '../finance/finance-integrity-alert.service.js';
 import {
   calculateRefundOffsetAmounts,
@@ -10,6 +11,7 @@ import {
 } from '../finance/refund-offset.service.js';
 import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
+import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from '../orders/outbound-shopify-refund-attempt.service.js';
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
@@ -18,6 +20,8 @@ import type {
   ShopifyRefundLineItemPayload,
   ShopifyRefundsCreateWebhookPayload,
 } from './refund-ingestion.types.js';
+
+const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
 
 function toDate(value: string | null | undefined) {
   if (!value) {
@@ -103,6 +107,48 @@ function toMinorUnits(value: number) {
   return Math.round(value * 100);
 }
 
+async function resolveCancelRefundReviewAfterRefundIngestion(
+  tx: Prisma.TransactionClient,
+  input: {
+    vendorAllocationId: string;
+    cancelRefundReviewStatus: string | null;
+    sourceShopifyRefundId: string;
+    resolvedAt: Date;
+  },
+) {
+  const normalizedReviewStatus = input.cancelRefundReviewStatus?.trim().toUpperCase() ?? '';
+  if (CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET.has(normalizedReviewStatus)) {
+    await tx.vendorAllocation.updateMany({
+      where: {
+        id: input.vendorAllocationId,
+        cancelRefundReviewStatus: {
+          in: [...CANCEL_REFUND_REVIEW_BLOCKING_STATUSES],
+        },
+      },
+      data: {
+        cancelRefundReviewStatus: 'RESOLVED',
+      },
+    });
+  }
+
+  await tx.outboundShopifyRefundAttempt.updateMany({
+    where: {
+      vendorAllocationId: input.vendorAllocationId,
+      status: {
+        in: [
+          OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.PREVIEWED,
+          OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+        ],
+      },
+    },
+    data: {
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED,
+      shopifyRefundId: input.sourceShopifyRefundId,
+      resolvedAt: input.resolvedAt,
+    },
+  });
+}
+
 type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   vendorId: string;
   originalVendorId: string;
@@ -111,6 +157,7 @@ type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   supersededFromLedgerIds: string[];
   shopifyOrderLineItemId: string;
   sourceShopifyOrderNumber: string;
+  cancelRefundReviewStatus: string | null;
   refundAmount: string;
 };
 
@@ -232,6 +279,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           supersededFromLedgerIds: economicOwner.supersededFromLedgerIds,
           shopifyOrderLineItemId: matchedOrderLineItem.id,
           sourceShopifyOrderNumber: vendorAllocation.sourceShopifyOrderNumber,
+          cancelRefundReviewStatus: vendorAllocation.cancelRefundReviewStatus ?? null,
           refundAmount: toAmountString(lineItem.subtotal, lineItem.quantity),
         });
       }
@@ -600,6 +648,13 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
 
           await createEventsIdempotently(refundEvents, tx);
         }
+
+        await resolveCancelRefundReviewAfterRefundIngestion(tx, {
+          vendorAllocationId,
+          cancelRefundReviewStatus: vendorLineItems[0].cancelRefundReviewStatus,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          resolvedAt: new Date(),
+        });
       }
 
       await tx.webhookEvent.update({

@@ -25,6 +25,10 @@ const txMock = vi.hoisted(() => ({
   },
   vendorAllocation: {
     findUnique: vi.fn(),
+    updateMany: vi.fn(),
+  },
+  outboundShopifyRefundAttempt: {
+    updateMany: vi.fn(),
   },
   financeLedgerEntry: {
     findUnique: vi.fn(),
@@ -76,7 +80,7 @@ function webhookEvent() {
   };
 }
 
-function setupOrder() {
+function setupOrder(options: { cancelRefundReviewStatus?: string | null } = {}) {
   txMock.shopifyOrder.findUnique.mockResolvedValueOnce({
     id: 'shopify-order-db-1029',
     sourceShopifyOrderId: '7621834670417',
@@ -96,6 +100,7 @@ function setupOrder() {
         originalVendorId: 'sporjinal',
         assignedVendorId: 'sporjinal',
         sourceShopifyOrderNumber: '#1029',
+        cancelRefundReviewStatus: options.cancelRefundReviewStatus ?? null,
       },
     ],
   });
@@ -114,6 +119,8 @@ function setupOrder() {
     ],
     economicTransfers: [],
   });
+  txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 1 });
+  txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 1 });
   txMock.shopifyRefund.upsert.mockResolvedValueOnce({ id: 'shopify-refund-db-1' });
   txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([]);
   txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce(null);
@@ -156,6 +163,7 @@ function setupTransferredOrder() {
         originalVendorId: 'yalispor',
         assignedVendorId: 'sporjinal',
         sourceShopifyOrderNumber: '#1029',
+        cancelRefundReviewStatus: null,
       },
     ],
   });
@@ -183,6 +191,8 @@ function setupTransferredOrder() {
       createdAt: new Date('2026-06-21T10:00:00.000Z'),
     }],
   });
+  txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 1 });
+  txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 1 });
   txMock.shopifyRefund.upsert.mockResolvedValueOnce({ id: 'shopify-refund-db-1' });
   txMock.financeLedgerEntry.findMany.mockResolvedValueOnce([]);
   txMock.financeLedgerEntry.findUnique.mockResolvedValueOnce(null);
@@ -240,6 +250,8 @@ describe('Shopify refund return linking', () => {
       });
     });
     txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
+    txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {
@@ -386,6 +398,114 @@ describe('Shopify refund return linking', () => {
       ],
     });
     expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'PENDING_REVIEW',
+    'CUSTOMER_CONTACTED',
+    'SHOPIFY_ACTION_PENDING',
+  ])('resolves cancel/refund review status %s after successful refund ingestion', async (cancelRefundReviewStatus) => {
+    setupOrder({ cancelRefundReviewStatus });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.vendorAllocation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'alloc-1029-sporjinal',
+        cancelRefundReviewStatus: {
+          in: ['PENDING_REVIEW', 'CUSTOMER_CONTACTED', 'SHOPIFY_ACTION_PENDING'],
+        },
+      },
+      data: {
+        cancelRefundReviewStatus: 'RESOLVED',
+      },
+    });
+  });
+
+  it('leaves allocations without cancel/refund review state unchanged after refund ingestion', async () => {
+    setupOrder({ cancelRefundReviewStatus: null });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.vendorAllocation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('marks matching outbound refund attempt audit records resolved after refund ingestion', async () => {
+    setupOrder({ cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        status: {
+          in: ['PREVIEWED', 'SHOPIFY_ACTION_PENDING'],
+        },
+      },
+      data: {
+        status: 'RESOLVED',
+        shopifyRefundId: '1074533826897',
+        resolvedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('resolves cancel/refund review even when no outbound refund attempt exists', async () => {
+    setupOrder({ cancelRefundReviewStatus: 'PENDING_REVIEW' });
+    txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValueOnce({ count: 0 });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.vendorAllocation.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        cancelRefundReviewStatus: 'RESOLVED',
+      },
+    }));
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalled();
+  });
+
+  it('does not resolve cancel/refund review or outbound attempts when refund ingestion cannot match the allocation', async () => {
+    setupOrder({ cancelRefundReviewStatus: 'PENDING_REVIEW' });
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: {
+        ...refundPayload(),
+        refund_line_items: [
+          {
+            id: 'refund-line-1',
+            line_item_id: 'missing-line',
+            quantity: 1,
+            subtotal: '3399.00',
+            line_item: {
+              id: 'missing-line',
+              sku: 'UNKNOWN-SKU',
+            },
+          },
+        ],
+      } as never,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(txMock.vendorAllocation.updateMany).not.toHaveBeenCalled();
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
   });
 
   it('targets the original active sale ledger owner for a normal non-reassigned refund', async () => {
