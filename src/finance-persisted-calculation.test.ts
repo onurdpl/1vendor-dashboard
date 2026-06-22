@@ -88,10 +88,11 @@ function buildSaleFixture(input: {
   commissionPercentSnapshot: number;
   commissionVatPercentSnapshot: number;
   createdAt: string;
-  fulfilled?: boolean;
-  deliveredAt?: string | null;
-  settlementDelayDaysSnapshot?: number;
-}): LedgerFixture {
+	  fulfilled?: boolean;
+	  deliveredAt?: string | null;
+	  settlementDelayDaysSnapshot?: number;
+	  allocationStatus?: string;
+	}): LedgerFixture {
   const createdAt = new Date(input.createdAt);
   const fulfilled = input.fulfilled ?? true;
   const deliveredAt =
@@ -127,9 +128,9 @@ function buildSaleFixture(input: {
     payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
-    vendorAllocation: {
-      id: `alloc-${input.orderId}`,
-      allocationStatus: 'ACTIVE',
+	    vendorAllocation: {
+	      id: `alloc-${input.orderId}`,
+	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       fulfillment: {
@@ -333,7 +334,7 @@ describe('persisted vendor finance calculations', () => {
     });
   });
 
-  it('excludes approved and invoiced settlement rows from settlement review while preserving payout eligibility', async () => {
+	  it('excludes approved and invoiced settlement rows from settlement review while preserving payout eligibility', async () => {
     ledgerRows = [
       {
         ...buildSaleFixture({
@@ -387,6 +388,39 @@ describe('persisted vendor finance calculations', () => {
       eligibleRowCount: 1,
       eligibleNetAmount: '6686.24',
       blockedRowCount: 0,
+    });
+  });
+
+  it('holds vendor-blocked sale rows out of payout eligibility while preserving estimate visibility', async () => {
+    ledgerRows = [
+      buildSaleFixture({
+        id: 'fin-yalispor-sale-1095',
+        amount: 7598,
+        orderId: 'gid://shopify/Order/1095',
+        orderNumber: '#1095',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 20,
+        createdAt: '2026-06-18T10:30:00.000Z',
+        settlementDelayDaysSnapshot: 0,
+        deliveredAt: '2026-06-18T10:45:00.000Z',
+        allocationStatus: 'VENDOR_BLOCKED',
+      }),
+    ];
+
+    const dashboard = await getVendorFinanceDashboard('yalispor');
+    const record = dashboard.records[0];
+
+    expect(record.settlement).toMatchObject({
+      status: 'held',
+      payoutReady: false,
+      holdReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+    });
+    expect(dashboard.summary.payoutEstimate).toBe('6686.24');
+    expect(dashboard.summary.heldBalance).toBe('6686.24');
+    expect(dashboard.payoutBatchSummary).toMatchObject({
+      eligibleRowCount: 0,
+      eligibleNetAmount: '0.00',
+      blockedRowCount: 1,
     });
   });
 

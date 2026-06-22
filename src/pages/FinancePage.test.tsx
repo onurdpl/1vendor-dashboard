@@ -743,6 +743,47 @@ describe('FinancePage control center', () => {
     ).toBe(true);
   });
 
+  it('maps vendor-blocked finance rows to on-hold review copy', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          shopifyOrderNumber: '1095',
+          shopifyOrderId: '7819000001095',
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+          },
+        },
+      ],
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        eligibleRowCount: 0,
+        eligibleNetAmount: '$0.00',
+        blockedRowCount: 1,
+      },
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('#1095')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('On hold').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute(
+      'href',
+      '/orders?order=1095&shopifyOrderId=7819000001095',
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    expect(await screen.findByText('Reason')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
+  });
+
   it('selects a finance row by ledgerId deep link', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 

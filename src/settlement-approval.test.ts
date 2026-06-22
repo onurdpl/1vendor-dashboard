@@ -91,9 +91,10 @@ function buildLedgerRow(input: {
   relatedSaleActivePayoutBatch?: boolean;
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
-  voidedAt?: Date | null;
-  cancelRefundReviewStatus?: string | null;
-}) {
+	  voidedAt?: Date | null;
+	  cancelRefundReviewStatus?: string | null;
+	  allocationStatus?: string | null;
+	}) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
   const deliveredAt =
@@ -136,10 +137,10 @@ function buildLedgerRow(input: {
     voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt,
-    vendorAllocation: {
-      id: `alloc-${input.id}`,
-      allocationStatus: 'ACTIVE',
-      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
+	    vendorAllocation: {
+	      id: `alloc-${input.id}`,
+	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
+	      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       sourceShopifyOrderId: input.sourceShopifyOrderId ?? `order-${input.id}`,
@@ -506,6 +507,57 @@ describe('settlement approval foundation', () => {
         }),
       ]),
     );
+  });
+
+  it('excludes vendor-blocked rows from settlement preview', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-vendor-blocked',
+        entryType: 'sale',
+        amount: 1000,
+        allocationStatus: 'VENDOR_BLOCKED',
+        sourceShopifyOrderNumber: '#2007',
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a', null, null, {
+      candidateScope: 'selected_orders',
+      selectedOrderIds: ['#2007'],
+    });
+
+    expect(preview.summary).toMatchObject({
+      eligibleRowCount: 0,
+      grossSalesMinor: 0,
+    });
+    expect(preview.lines).toEqual([]);
+    expect(preview.selectedOrderDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestedIdentifier: '#2007',
+          financeLedgerEntryId: 'sale-vendor-blocked',
+          candidateIncluded: false,
+          derivedSettlementStatus: 'held',
+          excludedReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+        }),
+      ]),
+    );
+  });
+
+  it('explains vendor-blocked holds as settlement-ineligible', () => {
+    const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-vendor-blocked',
+        entryType: 'sale',
+        amount: 1000,
+        allocationStatus: 'VENDOR_BLOCKED',
+      }),
+    );
+
+    expect(explanation).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+    });
   });
 
   it('explains cancel/refund review holds as settlement-ineligible', () => {

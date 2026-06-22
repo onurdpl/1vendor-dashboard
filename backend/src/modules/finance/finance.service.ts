@@ -53,7 +53,9 @@ import {
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
+  VENDOR_BLOCKED_FINANCE_HOLD_REASON,
   hasBlockingCancelRefundReviewStatus,
+  hasVendorBlockedAllocationStatus,
 } from './cancel-refund-review-hold.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
@@ -90,6 +92,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'payout_amount_changed_since_batch_creation'
   | 'approved_return_hold_active'
   | 'cancel_refund_review_active'
+  | 'vendor_blocked_finance_hold_active'
   | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
@@ -726,6 +729,9 @@ function getSettlementStatus(entry: {
   if (payoutStatus === 'hold') {
     return 'held';
   }
+  if (hasVendorBlockedAllocationStatus(entry.vendorAllocation)) {
+    return 'held';
+  }
   if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
     return 'held';
   }
@@ -796,6 +802,8 @@ function buildSettlement(entry: {
     held:
       postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : hasVendorBlockedAllocationStatus(entry.vendorAllocation)
+          ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
         : cancelRefundReviewActive
           ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : entry.settlementHoldReason ?? 'Settlement is held for operator review.',
@@ -814,6 +822,8 @@ function buildSettlement(entry: {
     holdReason:
       postApprovalRefundRisk.state === 'approved_settlement_adjustment_required'
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
+        : hasVendorBlockedAllocationStatus(entry.vendorAllocation)
+          ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
         : cancelRefundReviewActive
           ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : entry.settlementHoldReason ?? null,
@@ -862,6 +872,9 @@ function isEntryEligibleForPayoutBatch(entry: {
     return false;
   }
   if (hasDraftSettlementReview(entry)) {
+    return false;
+  }
+  if (hasVendorBlockedAllocationStatus(entry.vendorAllocation)) {
     return false;
   }
   if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
@@ -2575,6 +2588,18 @@ async function validatePayoutBatchBeforeTransitionWithClient(
         reason: 'Approved return hold is active.',
         payoutBatchLineId: line.id,
         financeLedgerEntryId: ledgerEntryId,
+      }));
+    }
+
+    if (hasVendorBlockedAllocationStatus(transitionEntry.vendorAllocation)) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'vendor_blocked_finance_hold_active',
+        reason: VENDOR_BLOCKED_FINANCE_HOLD_REASON,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          allocationStatus: transitionEntry.vendorAllocation?.allocationStatus ?? null,
+        },
       }));
     }
 

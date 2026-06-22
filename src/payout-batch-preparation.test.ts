@@ -49,10 +49,11 @@ function buildEntry(input: {
   relatedSalePaid?: boolean;
   relatedSaleActiveApproval?: boolean;
   relatedSaleActivePayoutBatch?: boolean;
-  activeSettlementApproval?: boolean;
-  approvedRefundOffsetRepresented?: boolean;
-  voidedAt?: Date | null;
-  cancelRefundReviewStatus?: string | null;
+	  activeSettlementApproval?: boolean;
+	  approvedRefundOffsetRepresented?: boolean;
+	  voidedAt?: Date | null;
+	  allocationStatus?: string | null;
+	  cancelRefundReviewStatus?: string | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
@@ -92,9 +93,9 @@ function buildEntry(input: {
     voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
-    vendorAllocation: {
-      id: `alloc-${input.id}`,
-      allocationStatus: 'ACTIVE',
+	    vendorAllocation: {
+	      id: `alloc-${input.id}`,
+	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
       cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
@@ -307,7 +308,7 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
-  it('excludes cancel/refund review allocations from payout preparation', async () => {
+	  it('excludes cancel/refund review allocations from payout preparation', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildEntry({
         id: 'sale-cancel-refund-review',
@@ -321,7 +322,23 @@ describe('payout batch preparation', () => {
       'No eligible payable ledger rows',
     );
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
-  });
+	  });
+
+	  it('excludes vendor-blocked allocations from payout preparation', async () => {
+	    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+	      buildEntry({
+	        id: 'sale-vendor-blocked',
+	        entryType: 'sale',
+	        amount: 1000,
+	        allocationStatus: 'VENDOR_BLOCKED',
+	      }),
+	    ]);
+
+	    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+	      'No eligible payable ledger rows',
+	    );
+	    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+	  });
 
   it('does not offset refund rows when the related sale is already paid', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
@@ -857,6 +874,31 @@ describe('payout batch preparation', () => {
           financeLedgerEntryId: 'sale-cancel-refund-review-transition',
         }),
       ],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks review when allocation becomes vendor-blocked', async () => {
+    const sale = buildEntry({
+      id: 'sale-vendor-blocked-transition',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      allocationStatus: 'VENDOR_BLOCKED',
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'vendor_blocked_finance_hold_active',
+          reason: 'Vendor allocation is blocked and awaiting admin resolution.',
+          financeLedgerEntryId: 'sale-vendor-blocked-transition',
+        }),
+      ]),
     });
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });

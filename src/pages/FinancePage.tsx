@@ -59,6 +59,7 @@ const FINANCE_ESTIMATE_HELPER =
   'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
 const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement review is completed.';
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
+const VENDOR_BLOCKED_FINANCE_HOLD_REASON = 'Vendor allocation is blocked and awaiting admin resolution.';
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -274,6 +275,10 @@ function isRefundRecord(record: FinanceTransaction) {
   return record.category === 'Refund';
 }
 
+function isVendorBlockedFinanceHold(record: FinanceTransaction) {
+  return record.settlement?.holdReason === VENDOR_BLOCKED_FINANCE_HOLD_REASON;
+}
+
 function isPendingOrHoldRecord(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
   return status === 'Pending' || status === 'Recorded';
@@ -290,6 +295,9 @@ function getPayoutActivityType(record: FinanceTransaction) {
 }
 
 function getPayoutActivityDetail(record: FinanceTransaction) {
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'Vendor blocked';
+  }
   if (record.category === 'Invoice') {
     return 'Shopify order';
   }
@@ -347,6 +355,9 @@ function getSettlementReviewDisplay(record: FinanceTransaction) {
 
 function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const status = normalizeFinanceStatus(record.status);
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'On hold';
+  }
   if (status === 'Failed' || record.settlement?.status === 'held' || record.settlement?.status === 'disputed') {
     return 'Blocked';
   }
@@ -371,6 +382,9 @@ function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'adm
 
 function getPayoutActivityTone(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const label = getPayoutActivityStatusLabel(record, audience);
+  if (label === 'On hold') {
+    return 'warning' as const;
+  }
   if (label === 'Blocked') {
     return 'danger' as const;
   }
@@ -467,6 +481,9 @@ function getUpcomingPayoutDetail(finance: NonNullable<Awaited<ReturnType<typeof 
 }
 
 function getPayoutImpact(record: FinanceTransaction) {
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'Held';
+  }
   if (isRefundRecord(record)) {
     return formatDeductionValue(record.payoutCalculation?.refundImpact ?? record.amount);
   }
@@ -1369,7 +1386,8 @@ export function FinancePage() {
                 />
               </OperationalTableRow>
             ) : filteredRecords.map((record) => {
-              const orderSettlementHref = buildOrderSettlementHref(record);
+              const vendorBlockedHold = isVendorBlockedFinanceHold(record);
+              const orderSettlementHref = vendorBlockedHold ? buildOrdersHref(record) : buildOrderSettlementHref(record);
               return (
                 <OperationalTableRow
                   key={record.id}
@@ -1400,7 +1418,7 @@ export function FinancePage() {
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
                     {record.amount}
                   </strong>
-                  <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
+                  <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {getPayoutImpact(record)}
                   </strong>
                   <span>
@@ -1410,7 +1428,7 @@ export function FinancePage() {
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
                       <Link className="button button-secondary button-compact" to={orderSettlementHref}>
-                        View order settlement
+                        {vendorBlockedHold ? 'Review allocation' : 'View order settlement'}
                       </Link>
                     ) : null}
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
@@ -1565,10 +1583,13 @@ export function FinancePage() {
                     label="Refund impact"
                     value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
                   />
-                  <MetadataRow
-                    label="Settlement impact"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
-                  />
+	                  <MetadataRow
+	                    label="Settlement impact"
+	                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+	                  />
+	                  {isVendorBlockedFinanceHold(selectedRecord) ? (
+	                    <MetadataRow label="Reason" value="Vendor blocked" />
+	                  ) : null}
                   <MetadataRow
                     label={isVendorUser ? 'Settlement review' : 'Payout review'}
                     value={

@@ -37,7 +37,9 @@ import { activeFinanceLedgerWhere, isLedgerVoided } from './active-ledger-policy
 import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.service.js';
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
+  VENDOR_BLOCKED_FINANCE_HOLD_REASON,
   hasBlockingCancelRefundReviewStatus,
+  hasVendorBlockedAllocationStatus,
 } from './cancel-refund-review-hold.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
@@ -445,6 +447,9 @@ function resolveSettlementStatus(
   if (payoutStatus === 'hold') {
     return 'held';
   }
+  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+    return 'held';
+  }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
     return 'held';
   }
@@ -476,6 +481,9 @@ function rowIsEligible(
     return false;
   }
   if (normalizeStatus(row.payoutStatus) === 'paid') {
+    return false;
+  }
+  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
     return false;
   }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
@@ -528,6 +536,8 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = refundOffsetEligibility.reason;
   } else if (payoutStatus === 'hold') {
     eligibilityReason = 'Excluded because payout status is HOLD.';
+  } else if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+    eligibilityReason = VENDOR_BLOCKED_FINANCE_HOLD_REASON;
   } else if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
     eligibilityReason = CANCEL_REFUND_REVIEW_HOLD_REASON;
   } else if (hasApprovedOpenReturnHold(row)) {
@@ -961,6 +971,17 @@ function validateApprovalLineAgainstCurrentLedger(
       CANCEL_REFUND_REVIEW_HOLD_REASON,
       {
         cancelRefundReviewStatus: row.vendorAllocation?.cancelRefundReviewStatus ?? null,
+      },
+    ));
+  }
+
+  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'vendor_blocked_finance_hold_active',
+      VENDOR_BLOCKED_FINANCE_HOLD_REASON,
+      {
+        allocationStatus: row.vendorAllocation?.allocationStatus ?? null,
       },
     ));
   }
