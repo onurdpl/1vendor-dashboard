@@ -279,6 +279,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           previewShopifyRefundForAdminOrder(shopifyOrderId, allocationId, {
             restockType: request.body?.restockType,
             refundShipping: false,
+            actorUserId: request.authUser?.id ?? null,
             shopifyAdminService: createShopifyAdminService(env),
           }),
         );

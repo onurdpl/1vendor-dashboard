@@ -921,6 +921,20 @@ export type CancelRefundReviewSummary = {
   requestedByUserId: string | null;
 };
 
+export type OutboundRefundAttemptSummary = {
+  id: string;
+  status: string;
+  restockType: string;
+  refundShipping: boolean;
+  notifyCustomer: boolean;
+  previewedAt: string | null;
+  requestedAt: string;
+  submittedAt: string | null;
+  resolvedAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
+};
+
 export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
 
 export type FulfillmentOrderCancellationClassification =
@@ -1027,6 +1041,7 @@ export type VendorAllocationSummary = {
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
   transferSummary?: EconomicTransferSummary | null;
   cancelRefundReview?: CancelRefundReviewSummary | null;
+  outboundRefundAttemptSummary?: OutboundRefundAttemptSummary | null;
 };
 
 export type FinanceIntegrityAlertSummary = {

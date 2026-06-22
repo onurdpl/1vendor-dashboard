@@ -202,6 +202,19 @@ type AdminOrderBreakdownDto = {
       requestedAt: string | null;
       requestedByUserId: string | null;
     } | null;
+    outboundRefundAttemptSummary?: {
+      id: string;
+      status: string;
+      restockType: string;
+      refundShipping: boolean;
+      notifyCustomer: boolean;
+      previewedAt: string | null;
+      requestedAt: string;
+      submittedAt: string | null;
+      resolvedAt: string | null;
+      failedAt: string | null;
+      failureReason: string | null;
+    } | null;
     fulfillmentStatus: string;
     shippingStatus: string;
     trackingNumber: string | null;
@@ -568,6 +581,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
         transferSummary: allocation.transferSummary ?? null,
         cancelRefundReview: allocation.cancelRefundReview ?? null,
+        outboundRefundAttemptSummary: allocation.outboundRefundAttemptSummary ?? null,
       };
     }),
   };

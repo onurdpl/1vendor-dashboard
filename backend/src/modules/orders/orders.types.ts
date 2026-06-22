@@ -567,6 +567,20 @@ export type AdminCancelRefundReviewDto = {
   requestedByUserId: string | null;
 };
 
+export type AdminOutboundRefundAttemptSummaryDto = {
+  id: string;
+  status: string;
+  restockType: string;
+  refundShipping: boolean;
+  notifyCustomer: boolean;
+  previewedAt: string | null;
+  requestedAt: string;
+  submittedAt: string | null;
+  resolvedAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
+};
+
 export type AdminOrderBreakdownAllocationDto = {
   id: string;
   vendorId: string;
@@ -605,6 +619,7 @@ export type AdminOrderBreakdownAllocationDto = {
   financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
   transferSummary: AdminEconomicTransferSummaryDto | null;
   cancelRefundReview: AdminCancelRefundReviewDto | null;
+  outboundRefundAttemptSummary: AdminOutboundRefundAttemptSummaryDto | null;
 };
 
 export type AdminOrderBreakdownDto = {

@@ -13,8 +13,22 @@ const prismaMock = vi.hoisted(() => ({
   allocationAssignmentHistory: {
     create: vi.fn(),
   },
+  refundRecord: {
+    create: vi.fn(),
+  },
+  financeLedgerEntry: {
+    create: vi.fn(),
+  },
+  financeEvent: {
+    create: vi.fn(),
+  },
   webhookEvent: {
     findMany: vi.fn(),
+  },
+  outboundShopifyRefundAttempt: {
+    findFirst: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
   },
 }));
 const transferAllocationEconomicsMock = vi.hoisted(() => vi.fn());
@@ -149,6 +163,7 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
     ],
     economicTransfers: [] as Array<Record<string, unknown>>,
     financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
+    outboundShopifyRefundAttempts: [] as Array<Record<string, unknown>>,
     ...overrides,
   };
 }
@@ -189,6 +204,7 @@ function buildRefundPreviewAllocation(overrides: Record<string, unknown> = {}) {
       },
     ],
     financeIntegrityAlerts: [],
+    outboundShopifyRefundAttempts: [],
     ...overrides,
   };
 }
@@ -260,6 +276,7 @@ function buildAdminOrderBreakdownDb() {
         returnRecords: [],
         refundRecords: [],
         financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
+        outboundShopifyRefundAttempts: [] as Array<Record<string, unknown>>,
       },
     ],
   };
@@ -271,6 +288,28 @@ describe('vendor order reject operational hold', () => {
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
+    prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
+    prismaMock.outboundShopifyRefundAttempt.create.mockImplementation(async ({ data }) => ({
+      id: 'attempt-1',
+      createdAt: new Date('2026-06-21T08:10:00.000Z'),
+      updatedAt: new Date('2026-06-21T08:10:00.000Z'),
+      submittedAt: null,
+      resolvedAt: null,
+      failedAt: null,
+      failureReason: null,
+      ...data,
+    }));
+    prismaMock.outboundShopifyRefundAttempt.update.mockImplementation(async ({ data }) => ({
+      id: 'attempt-existing',
+      vendorAllocationId: 'alloc-1088',
+      createdAt: new Date('2026-06-21T08:00:00.000Z'),
+      updatedAt: new Date('2026-06-21T08:10:00.000Z'),
+      submittedAt: null,
+      resolvedAt: null,
+      failedAt: null,
+      failureReason: null,
+      ...data,
+    }));
     prismaMock.vendorAllocation.findMany.mockResolvedValue([
       {
         id: 'alloc-1088',
@@ -582,13 +621,14 @@ describe('vendor order reject operational hold', () => {
     expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
   });
 
-  it('previews Shopify suggested refund for an allocation under cancel/refund review without local writes', async () => {
+  it('previews Shopify suggested refund and stores outbound audit state without finance writes', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService();
     prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
 
     const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
       restockType: 'CANCEL',
       refundShipping: false,
+      actorUserId: 'admin-1',
       shopifyAdminService,
     });
 
@@ -627,6 +667,39 @@ describe('vendor order reject operational hold', () => {
     });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        vendorAllocationId: 'alloc-1088',
+        shopifyOrderId: 'gid://shopify/Order/1088',
+        status: 'PREVIEWED',
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: false,
+        requestedByUserId: 'admin-1',
+        refundLineItemsJson: [
+          {
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            quantity: 1,
+            restockType: 'CANCEL',
+          },
+        ],
+        suggestedTransactionsJson: [
+          {
+            gateway: 'bogus',
+            amount: '1000.00',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          },
+        ],
+        blockersJson: [],
+        warningsJson: [],
+        previewHash: expect.any(String),
+        previewedAt: expect.any(Date),
+      }),
+    });
   });
 
   it('blocks Shopify refund preview when source line item id is missing', async () => {
@@ -654,6 +727,71 @@ describe('vendor order reject operational hold', () => {
     expect(result.blockers).toContain('Allocation line item allocation-line-1 is missing sourceLineItemId.');
     expect(result.missingData).toContain('Allocation line item allocation-line-1 is missing sourceLineItemId.');
     expect(shopifyAdminService.previewSuggestedRefund).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: 'PREVIEWED',
+        vendorAllocationId: 'alloc-1088',
+        blockersJson: ['Allocation line item allocation-line-1 is missing sourceLineItemId.'],
+        suggestedTransactionsJson: [],
+      }),
+    });
+  });
+
+  it('updates the latest PREVIEWED outbound audit attempt on repeated preview', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+    prismaMock.outboundShopifyRefundAttempt.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'attempt-existing',
+        status: 'PREVIEWED',
+        vendorAllocationId: 'alloc-1088',
+      });
+
+    await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      actorUserId: 'admin-1',
+      shopifyAdminService,
+    });
+
+    expect(prismaMock.outboundShopifyRefundAttempt.create).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenCalledWith({
+      where: {
+        id: 'attempt-existing',
+      },
+      data: expect.objectContaining({
+        status: 'PREVIEWED',
+        restockType: 'CANCEL',
+        requestedByUserId: 'admin-1',
+        previewHash: expect.any(String),
+      }),
+    });
+  });
+
+  it('blocks Shopify refund preview when an outbound Shopify action is pending', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+    prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValueOnce({
+      id: 'attempt-pending',
+      status: 'SHOPIFY_ACTION_PENDING',
+      vendorAllocationId: 'alloc-1088',
+    });
+
+    await expect(
+      previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        shopifyAdminService,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'A Shopify refund attempt is already pending for this allocation.',
+    });
+
+    expect(shopifyAdminService.previewSuggestedRefund).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.create).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).not.toHaveBeenCalled();
   });
 
   it('includes multiple allocation lines in Shopify refund preview', async () => {
@@ -919,6 +1057,56 @@ describe('vendor order reject operational hold', () => {
     expect(breakdown?.allocations[0]?.transferSummary).toBeNull();
   });
 
+  it('includes latest outbound Shopify refund attempt summary in admin Shopify order breakdown', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.outboundShopifyRefundAttempts = [
+      {
+        id: 'attempt-latest',
+        status: 'PREVIEWED',
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: false,
+        previewedAt: new Date('2026-06-21T12:00:00.000Z'),
+        requestedAt: new Date('2026-06-21T12:00:00.000Z'),
+        submittedAt: null,
+        resolvedAt: null,
+        failedAt: null,
+        failureReason: null,
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.outboundRefundAttemptSummary).toEqual({
+      id: 'attempt-latest',
+      status: 'PREVIEWED',
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: false,
+      previewedAt: '2026-06-21T12:00:00.000Z',
+      requestedAt: '2026-06-21T12:00:00.000Z',
+      submittedAt: null,
+      resolvedAt: null,
+      failedAt: null,
+      failureReason: null,
+    });
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        allocations: expect.objectContaining({
+          include: expect.objectContaining({
+            outboundShopifyRefundAttempts: expect.objectContaining({
+              orderBy: {
+                requestedAt: 'desc',
+              },
+              take: 1,
+            }),
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('includes the latest completed economic transfer summary in admin Shopify order breakdown', async () => {
     const orderDb = buildAdminOrderBreakdownDb();
     orderDb.allocations[0]!.economicTransfers = [
@@ -1022,6 +1210,22 @@ describe('vendor order reject operational hold', () => {
 
     expect(detail).not.toHaveProperty('transferSummary');
     expect(detail).not.toHaveProperty('economicTransfers');
+  });
+
+  it('does not expose outbound Shopify refund attempt details through vendor order detail', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
+      outboundShopifyRefundAttempts: [
+        {
+          id: 'attempt-1',
+          status: 'PREVIEWED',
+        },
+      ],
+    }));
+
+    const detail = await getVendorOrderById('yalispor', 'alloc-1088');
+
+    expect(detail).not.toHaveProperty('outboundRefundAttemptSummary');
+    expect(detail).not.toHaveProperty('outboundShopifyRefundAttempts');
   });
 
   it('does not expose cancel/refund review details through vendor order detail', async () => {

@@ -31,6 +31,11 @@ import {
   classifyFulfillmentOrdersForAllocationRefund,
   type FulfillmentOrderCancellationClassificationResult,
 } from '../shopify/shopify-fulfillment-order-cancel-classifier.service.js';
+import {
+  createPreviewOutboundShopifyRefundAttempt,
+  findOpenOutboundShopifyRefundAttemptForAllocation,
+  mapOutboundShopifyRefundAttemptSummary,
+} from './outbound-shopify-refund-attempt.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
@@ -115,6 +120,7 @@ export type ShopifySuggestedRefundPreviewService = {
 export type AdminShopifyRefundPreviewInput = {
   restockType?: string | null;
   refundShipping?: boolean | null;
+  actorUserId?: string | null;
   shopifyAdminService: ShopifySuggestedRefundPreviewService;
 };
 
@@ -1977,6 +1983,11 @@ export async function previewShopifyRefundForAdminOrder(
     throw new OrderRejectValidationError('Allocation has open or acknowledged finance integrity alerts and cannot be previewed for Shopify refund.', 409);
   }
 
+  const pendingOutboundAttempt = await findOpenOutboundShopifyRefundAttemptForAllocation(allocation.id);
+  if (pendingOutboundAttempt) {
+    throw new OrderRejectValidationError('A Shopify refund attempt is already pending for this allocation.', 409);
+  }
+
   const blockers: string[] = [];
   const missingData: string[] = [];
   const warnings: string[] = [];
@@ -2024,6 +2035,22 @@ export async function previewShopifyRefundForAdminOrder(
   });
 
   if (blockers.length > 0) {
+    await createPreviewOutboundShopifyRefundAttempt({
+      vendorAllocationId: allocation.id,
+      shopifyOrderId: allocation.order.sourceShopifyOrderId,
+      restockType,
+      refundShipping: false,
+      requestedByUserId: input.actorUserId ?? null,
+      refundLineItems: refundLineItems.map((lineItem) => ({
+        lineItemId: lineItem.sourceLineItemId,
+        quantity: lineItem.quantity,
+        restockType: lineItem.restockType,
+      })),
+      suggestedTransactions: [],
+      fulfillmentOrderCancellation,
+      blockers,
+      warnings,
+    });
     return blockedResponse();
   }
 
@@ -2063,6 +2090,26 @@ export async function previewShopifyRefundForAdminOrder(
     blockers.push('Suggested refund has no refundable payment transaction. Future refundCreate must not run.');
   }
 
+  const suggestedTransactions = transactions.map((transaction) => ({
+    gateway: transaction.gateway,
+    amount: transaction.amount,
+    currencyCode: transaction.currencyCode,
+    parentTransactionId: transaction.parentTransactionId,
+  }));
+
+  await createPreviewOutboundShopifyRefundAttempt({
+    vendorAllocationId: allocation.id,
+    shopifyOrderId: allocation.order.sourceShopifyOrderId,
+    restockType,
+    refundShipping: false,
+    requestedByUserId: input.actorUserId ?? null,
+    refundLineItems: preview.refundLineItemsPreview,
+    suggestedTransactions,
+    fulfillmentOrderCancellation,
+    blockers,
+    warnings,
+  });
+
   return {
     ok: true,
     writesPerformed: false,
@@ -2075,12 +2122,7 @@ export async function previewShopifyRefundForAdminOrder(
           currencyCode: preview.suggestedRefund.currencyCode,
           totalTaxAmount: preview.suggestedRefund.totalTaxAmount,
           shippingAmount: preview.suggestedRefund.shippingAmount,
-          suggestedTransactions: transactions.map((transaction) => ({
-            gateway: transaction.gateway,
-            amount: transaction.amount,
-            currencyCode: transaction.currencyCode,
-            parentTransactionId: transaction.parentTransactionId,
-          })),
+          suggestedTransactions,
         }
       : null,
     fulfillmentOrderCancellation,
@@ -2383,6 +2425,25 @@ export async function getAdminShopifyOrderBreakdown(
               detectedAt: 'desc',
             },
           },
+          outboundShopifyRefundAttempts: {
+            select: {
+              id: true,
+              status: true,
+              restockType: true,
+              refundShipping: true,
+              notifyCustomer: true,
+              previewedAt: true,
+              requestedAt: true,
+              submittedAt: true,
+              resolvedAt: true,
+              failedAt: true,
+              failureReason: true,
+            },
+            orderBy: {
+              requestedAt: 'desc',
+            },
+            take: 1,
+          },
         },
         orderBy: {
           createdAt: 'asc',
@@ -2497,6 +2558,9 @@ export async function getAdminShopifyOrderBreakdown(
           allocationEconomicTransferId: alert.allocationEconomicTransferId,
           affectedLedgerIds: alert.affectedLedgerIds,
         })),
+        outboundRefundAttemptSummary: allocation.outboundShopifyRefundAttempts[0]
+          ? mapOutboundShopifyRefundAttemptSummary(allocation.outboundShopifyRefundAttempts[0])
+          : null,
         transferSummary: latestCompletedTransfer
           ? {
               id: latestCompletedTransfer.id,

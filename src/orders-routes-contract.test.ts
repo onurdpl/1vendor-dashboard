@@ -43,7 +43,7 @@ vi.mock('../backend/src/modules/orders/orders.service.js', () => ({
 vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
   createShopifyAdminService: vi.fn(() => ({
     previewSuggestedRefund: vi.fn(),
-    fetchFulfillmentOrders: vi.fn(),
+    fetchFulfillmentOrdersForCancellationClassification: vi.fn(),
   })),
 }));
 
@@ -402,9 +402,10 @@ describe('orders route contract', () => {
     expect(previewShopifyRefundForAdminOrderMock).toHaveBeenCalledWith('shopify-1', 'alloc-1', expect.objectContaining({
       restockType: 'CANCEL',
       refundShipping: false,
+      actorUserId: 'admin-1',
       shopifyAdminService: expect.objectContaining({
         previewSuggestedRefund: expect.any(Function),
-        fetchFulfillmentOrders: expect.any(Function),
+        fetchFulfillmentOrdersForCancellationClassification: expect.any(Function),
       }),
     }));
   });

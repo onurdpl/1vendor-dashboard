@@ -301,19 +301,20 @@ enum VendorProfileSnapshotImpact {
 }
 
 model User {
-  id                                 String                        @id @default(cuid())
-  email                              String                        @unique
+  id                                 String                         @id @default(cuid())
+  email                              String                         @unique
   name                               String
   role                               UserRole
-  status                             String                        @default("active")
+  status                             String                         @default("active")
   passwordHash                       String
-  createdAt                          DateTime                      @default(now())
-  updatedAt                          DateTime                      @updatedAt
+  createdAt                          DateTime                       @default(now())
+  updatedAt                          DateTime                       @updatedAt
   vendorLinks                        UserVendorAccess[]
-  assignments                        AllocationAssignmentHistory[] @relation("assignmentActor")
-  economicTransfersAdministered      AllocationEconomicTransfer[]  @relation("economicTransferAdminActor")
-  financeIntegrityAlertsAcknowledged FinanceIntegrityAlert[]       @relation("financeIntegrityAlertAcknowledgedBy")
-  financeIntegrityAlertsResolved     FinanceIntegrityAlert[]       @relation("financeIntegrityAlertResolvedBy")
+  assignments                        AllocationAssignmentHistory[]  @relation("assignmentActor")
+  economicTransfersAdministered      AllocationEconomicTransfer[]   @relation("economicTransferAdminActor")
+  financeIntegrityAlertsAcknowledged FinanceIntegrityAlert[]        @relation("financeIntegrityAlertAcknowledgedBy")
+  financeIntegrityAlertsResolved     FinanceIntegrityAlert[]        @relation("financeIntegrityAlertResolvedBy")
+  outboundRefundAttemptsRequested    OutboundShopifyRefundAttempt[] @relation("outboundShopifyRefundAttemptRequestedBy")
   supportTickets                     SupportTicket[]
   supportNotes                       SupportTicketNote[]
   supportReplies                     SupportTicketReply[]
@@ -676,11 +677,49 @@ model VendorAllocation {
   vendorIntegrationStatusEvents          VendorIntegrationStatusEvent[]
   vendorIntegrationShipmentEvents        VendorIntegrationShipmentEvent[]
   vendorIntegrationInvoiceEvents         VendorIntegrationInvoiceEvent[]
+  outboundShopifyRefundAttempts          OutboundShopifyRefundAttempt[]
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
   @@index([cancelRefundReviewStatus])
+}
+
+model OutboundShopifyRefundAttempt {
+  id                               String           @id @default(cuid())
+  vendorAllocationId               String
+  shopifyOrderId                   String
+  status                           String
+  restockType                      String
+  refundShipping                   Boolean          @default(false)
+  notifyCustomer                   Boolean          @default(false)
+  note                             String?
+  requestedByUserId                String?
+  requestedAt                      DateTime         @default(now())
+  refundLineItemsJson              Json?
+  suggestedTransactionsJson        Json?
+  fulfillmentOrderCancellationJson Json?
+  blockersJson                     Json?
+  warningsJson                     Json?
+  previewHash                      String?
+  previewedAt                      DateTime?
+  shopifyRefundId                  String?
+  shopifyUserErrorsJson            Json?
+  mutationResponseJson             Json?
+  submittedAt                      DateTime?
+  resolvedAt                       DateTime?
+  failedAt                         DateTime?
+  failureReason                    String?
+  createdAt                        DateTime         @default(now())
+  updatedAt                        DateTime         @updatedAt
+  vendorAllocation                 VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  requestedByUser                  User?            @relation("outboundShopifyRefundAttemptRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([vendorAllocationId])
+  @@index([shopifyOrderId])
+  @@index([status])
+  @@index([shopifyRefundId])
+  @@index([previewHash])
 }
 
 model VendorIntegrationInvoiceEvent {
