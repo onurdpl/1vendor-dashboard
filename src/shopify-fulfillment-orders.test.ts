@@ -330,6 +330,7 @@ describe('Shopify fulfillment order lookup', () => {
           lineItemId: '20346971095377',
           quantity: 1,
           restockType: 'CANCEL',
+          locationId: '44',
         },
       ],
       transactions: [
@@ -350,7 +351,7 @@ describe('Shopify fulfillment order lookup', () => {
         idempotencyKey: string;
         input: {
           orderId: string;
-          refundLineItems: Array<{ lineItemId: string; quantity: number; restockType: string }>;
+          refundLineItems: Array<{ lineItemId: string; quantity: number; restockType: string; locationId?: string }>;
           transactions: Array<{ orderId: string; kind: string; gateway: string; amount: string; parentId: string }>;
           note: string;
           notify: boolean;
@@ -370,6 +371,7 @@ describe('Shopify fulfillment order lookup', () => {
             lineItemId: 'gid://shopify/LineItem/20346971095377',
             quantity: 1,
             restockType: 'CANCEL',
+            locationId: 'gid://shopify/Location/44',
           },
         ],
         transactions: [

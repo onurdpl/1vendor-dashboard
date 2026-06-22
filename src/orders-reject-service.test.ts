@@ -1108,6 +1108,7 @@ describe('vendor order reject operational hold', () => {
           lineItemId: 'gid://shopify/LineItem/20346971095377',
           quantity: 1,
           restockType: 'CANCEL',
+          locationId: 'gid://shopify/Location/1',
         },
       ],
       transactions: [
@@ -1248,6 +1249,109 @@ describe('vendor order reject operational hold', () => {
     }));
   });
 
+  it('blocks refundCreate before Shopify when CANCEL restock locationId is missing', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: null,
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        confirmPostRefundFulfillmentCheck: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Missing Shopify locationId required for restockType CANCEL.');
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'FAILED',
+        failureReason: 'Missing Shopify locationId required for restockType CANCEL.',
+      }),
+    }));
+  });
+
+  it('blocks refundCreate when one CANCEL line item maps to conflicting fulfillment order locations', async () => {
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+          {
+            id: 'gid://shopify/FulfillmentOrder/2',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD'],
+            assignedLocationId: 'gid://shopify/Location/2',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/2',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Customer approved refund.',
+        confirmRefund: true,
+        confirmPostRefundFulfillmentCheck: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Conflicting Shopify locationIds found for restockType CANCEL.');
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+  });
+
   it('executes open unsubmitted refund probe without fulfillmentOrderCancel and passes post-check when remainingQuantity becomes zero', async () => {
     const fetchFulfillmentOrdersForCancellationClassification = vi.fn()
       .mockResolvedValueOnce({
@@ -1312,6 +1416,7 @@ describe('vendor order reject operational hold', () => {
           lineItemId: 'gid://shopify/LineItem/20346971095377',
           quantity: 1,
           restockType: 'CANCEL',
+          locationId: 'gid://shopify/Location/1',
         },
       ],
     }));
@@ -1467,6 +1572,26 @@ describe('vendor order reject operational hold', () => {
 
   it('blocks refundCreate when suggested transactions are missing parentTransactionId', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'SUBMITTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
       previewSuggestedRefund: vi.fn().mockResolvedValue({
         orderGid: 'gid://shopify/Order/1088',
         sourceShopifyOrderId: '1088',
@@ -1517,6 +1642,26 @@ describe('vendor order reject operational hold', () => {
 
   it('marks attempt failed and keeps review open when refundCreate returns userErrors', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'SUBMITTED',
+            supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
       createShopifyRefund: vi.fn().mockResolvedValue({
         refundId: null,
         userErrors: [{ field: ['transactions'], message: 'Payment cannot be refunded.' }],

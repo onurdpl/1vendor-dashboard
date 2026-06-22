@@ -268,6 +268,76 @@ function normalizeShopifyIdentifier(value: string | null | undefined) {
   return text.split('/').at(-1)?.trim().toLowerCase() || text.toLowerCase();
 }
 
+function refundRestockTypeRequiresLocation(restockType: ShopifyRefundRestockType) {
+  return restockType === 'CANCEL';
+}
+
+function resolveRefundLineItemLocationIds(input: {
+  refundLineItems: CreateShopifyRefundInput['refundLineItems'];
+  fulfillmentOrderCancellation: FulfillmentOrderCancellationClassificationResult;
+}) {
+  const locationIdsByLineItemId = new Map<string, string>();
+  for (const lineItem of input.refundLineItems) {
+    if (!refundRestockTypeRequiresLocation(lineItem.restockType)) {
+      continue;
+    }
+
+    const normalizedLineItemId = normalizeShopifyIdentifier(lineItem.lineItemId);
+    const matchingLocationIds = new Set<string>();
+    let missingLocation = false;
+
+    for (const fulfillmentOrder of input.fulfillmentOrderCancellation.affectedFulfillmentOrders) {
+      const hasSelectedLineItem = fulfillmentOrder.lineItems.some(
+        (fulfillmentOrderLineItem) =>
+          fulfillmentOrderLineItem.selected &&
+          normalizeShopifyIdentifier(fulfillmentOrderLineItem.shopifyLineItemId) === normalizedLineItemId,
+      );
+      if (!hasSelectedLineItem) {
+        continue;
+      }
+
+      const locationId = fulfillmentOrder.assignedLocationId?.trim();
+      if (!locationId) {
+        missingLocation = true;
+        continue;
+      }
+      matchingLocationIds.add(locationId);
+    }
+
+    if (missingLocation || matchingLocationIds.size === 0) {
+      throw new OrderRejectValidationError('Missing Shopify locationId required for restockType CANCEL.', 409);
+    }
+    if (matchingLocationIds.size > 1) {
+      throw new OrderRejectValidationError('Conflicting Shopify locationIds found for restockType CANCEL.', 409);
+    }
+
+    locationIdsByLineItemId.set(normalizedLineItemId, Array.from(matchingLocationIds)[0]);
+  }
+
+  return locationIdsByLineItemId;
+}
+
+function attachRefundLineItemLocationIds(input: {
+  refundLineItems: CreateShopifyRefundInput['refundLineItems'];
+  locationIdsByLineItemId: Map<string, string>;
+}) {
+  return input.refundLineItems.map((lineItem) => {
+    if (!refundRestockTypeRequiresLocation(lineItem.restockType)) {
+      return lineItem;
+    }
+
+    const locationId = input.locationIdsByLineItemId.get(normalizeShopifyIdentifier(lineItem.lineItemId));
+    if (!locationId) {
+      throw new OrderRejectValidationError('Missing Shopify locationId required for restockType CANCEL.', 409);
+    }
+
+    return {
+      ...lineItem,
+      locationId,
+    };
+  });
+}
+
 function isTerminalOrInactiveFulfillmentOrderStatus(status: string | null | undefined) {
   return ['closed', 'cancelled', 'canceled', 'incomplete'].includes(normalizeStatus(status));
 }
@@ -2568,6 +2638,22 @@ export async function executeShopifyRefundForAdminOrder(
     });
   }
 
+  let refundLineItemLocationIds: Map<string, string>;
+  try {
+    refundLineItemLocationIds = resolveRefundLineItemLocationIds({
+      refundLineItems,
+      fulfillmentOrderCancellation,
+    });
+  } catch (error) {
+    const failureReason = error instanceof Error ? error.message : 'Unable to resolve Shopify refund line item locationId.';
+    await failAttempt(failureReason, {
+      fulfillmentOrderCancellation,
+      blockers: [failureReason],
+      warnings,
+    });
+    throw error;
+  }
+
   const safeFulfillmentOrders = fulfillmentOrderCancellation.affectedFulfillmentOrders.filter(
     (order) => order.classification === 'safe_to_cancel',
   );
@@ -2663,9 +2749,14 @@ export async function executeShopifyRefundForAdminOrder(
     currencyCode: transaction.currencyCode,
     parentTransactionId: transaction.parentTransactionId?.trim() ?? '',
   }));
+  let refundLineItemsWithLocationIds: CreateShopifyRefundInput['refundLineItems'];
+  refundLineItemsWithLocationIds = attachRefundLineItemLocationIds({
+    refundLineItems: preview.refundLineItemsPreview,
+    locationIdsByLineItemId: refundLineItemLocationIds,
+  });
   const refundCreateResult = await input.shopifyAdminService.createShopifyRefund({
     orderId: allocation.order.sourceShopifyOrderId,
-    refundLineItems: preview.refundLineItemsPreview,
+    refundLineItems: refundLineItemsWithLocationIds,
     transactions: suggestedTransactions.map((transaction) => ({
       parentTransactionId: transaction.parentTransactionId,
       amount: transaction.amount,

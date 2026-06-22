@@ -87,6 +87,7 @@ export type CreateShopifyRefundInput = {
     lineItemId: string;
     quantity: number;
     restockType: ShopifyRefundRestockType;
+    locationId?: string | null;
   }>;
   transactions: Array<{
     parentTransactionId: string;

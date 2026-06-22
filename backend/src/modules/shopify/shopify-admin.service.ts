@@ -1827,6 +1827,7 @@ export function createShopifyAdminService(env: AppEnv) {
                 lineItemId: toShopifyLineItemGid(lineItem.lineItemId),
                 quantity: lineItem.quantity,
                 restockType: lineItem.restockType,
+                ...(lineItem.locationId ? { locationId: toShopifyGid('Location', lineItem.locationId) } : {}),
               })),
               transactions: input.transactions.map((transaction) => ({
                 orderId: orderGid,
