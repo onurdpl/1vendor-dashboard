@@ -230,28 +230,35 @@ function getErrorMessage(error: unknown, fallback = 'Action failed.') {
 }
 
 function canRejectOrder(order: OrderSummary | OrderDetail | null | undefined) {
+  return getRejectUnavailableReason(order) === null;
+}
+
+function getRejectUnavailableReason(order: OrderSummary | OrderDetail | null | undefined) {
   if (!order) {
-    return false;
+    return 'This order is not eligible for rejection.';
   }
   if (order.allocationStatus !== 'active') {
-    return false;
+    return 'This order is already blocked or no longer active.';
   }
   if (order.fulfillmentStatus === 'Fulfilled') {
-    return false;
+    return 'This order cannot be rejected after fulfillment.';
   }
   if (order.shippingStatus !== 'Awaiting Shipment') {
-    return false;
+    return 'This order cannot be rejected after shipping has started.';
   }
-  if (order.trackingNumber || order.carrier) {
-    return false;
+  if (order.trackingNumber) {
+    return 'This order cannot be rejected after tracking has been added.';
+  }
+  if (order.carrier) {
+    return 'This order cannot be rejected after a carrier has been assigned.';
   }
 
   const shipmentExecution = (order as OrderDetail).shipmentExecution;
-  if (!shipmentExecution) {
-    return true;
+  if (!shipmentExecution || shipmentExecution.shipmentStatus === 'failed' || shipmentExecution.shipmentStatus === 'cancelled') {
+    return null;
   }
 
-  return shipmentExecution.shipmentStatus === 'failed' || shipmentExecution.shipmentStatus === 'cancelled';
+  return 'This order cannot be rejected because a shipment is already being processed.';
 }
 
 function getItemInitials(name: string) {
@@ -1025,7 +1032,9 @@ export function OrdersPage() {
                 hasLabel: Boolean(labelUrl),
               });
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
+              const rejectUnavailableReason = getRejectUnavailableReason(selectedOrder);
               const rejectEligible = currentUser?.role === 'vendor' && canRejectOrder(selectedOrder);
+              const showRejectUnavailableReason = currentUser?.role === 'vendor' && rejectUnavailableReason !== null;
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
@@ -1119,6 +1128,14 @@ export function OrdersPage() {
                   >
                     Reject order
                   </button>
+                </section>
+              ) : showRejectUnavailableReason ? (
+                <section className="orders-detail-card" aria-label="Reject unavailable">
+                  <h4>Reject unavailable</h4>
+                  <p className="page-description">{rejectUnavailableReason}</p>
+                  {shipmentExecution && shipmentExecution.shipmentStatus !== 'failed' && shipmentExecution.shipmentStatus !== 'cancelled' ? (
+                    <small className="muted">Shipment status: {safeStatusLabel(shipmentExecution.shipmentStatus)}</small>
+                  ) : null}
                 </section>
               ) : null}
 

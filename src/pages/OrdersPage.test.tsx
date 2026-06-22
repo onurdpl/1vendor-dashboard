@@ -169,6 +169,49 @@ function buildSummary(overrides: Partial<OrderSummary> = {}): OrderSummary {
   };
 }
 
+function setVendorUser() {
+  setCurrentUser({
+    email: 'vendor@demo.com',
+    name: 'Demo Vendor',
+    role: 'vendor',
+    vendorAccess: ['demo-vendor-a'],
+    vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+    canSwitchVendors: false,
+    defaultVendorId: 'demo-vendor-a',
+  });
+}
+
+function buildAwaitingRejectableOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
+  return {
+    ...orderDetail,
+    status: 'Pending',
+    allocationStatus: 'active',
+    reassignmentRequired: false,
+    fulfillmentStatus: 'Pending',
+    shippingStatus: 'Awaiting Shipment',
+    fulfillmentActionState: 'awaiting_shipment',
+    fulfillmentActionAvailable: true,
+    fulfilledAt: undefined,
+    shipmentCreatedAt: undefined,
+    shipmentUpdatedAt: undefined,
+    trackingNumber: undefined,
+    trackingUrl: undefined,
+    carrier: undefined,
+    shipmentExecution: undefined,
+    lineItems: orderDetail.lineItems.map((item) => ({
+      ...item,
+      allocationStatus: 'active',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+    })),
+    ...overrides,
+  };
+}
+
 function renderOrdersPage(initialEntries = ['/orders']) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -751,42 +794,8 @@ describe('OrdersPage control center', () => {
   });
 
   it('lets a vendor reject an eligible active order from the detail rail', async () => {
-    setCurrentUser({
-      email: 'vendor@demo.com',
-      name: 'Demo Vendor',
-      role: 'vendor',
-      vendorAccess: ['demo-vendor-a'],
-      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
-      canSwitchVendors: false,
-      defaultVendorId: 'demo-vendor-a',
-    });
-    const awaitingShipmentOrder: OrderDetail = {
-      ...orderDetail,
-      status: 'Pending',
-      allocationStatus: 'active',
-      reassignmentRequired: false,
-      fulfillmentStatus: 'Pending',
-      shippingStatus: 'Awaiting Shipment',
-      fulfillmentActionState: 'awaiting_shipment',
-      fulfillmentActionAvailable: true,
-      fulfilledAt: undefined,
-      shipmentCreatedAt: undefined,
-      shipmentUpdatedAt: undefined,
-      trackingNumber: undefined,
-      trackingUrl: undefined,
-      carrier: undefined,
-      shipmentExecution: undefined,
-      lineItems: orderDetail.lineItems.map((item) => ({
-        ...item,
-        allocationStatus: 'active',
-        reassignmentRequired: false,
-        fulfillmentStatus: 'Pending',
-        shippingStatus: 'Awaiting Shipment',
-        trackingNumber: undefined,
-        trackingUrl: undefined,
-        carrier: undefined,
-      })),
-    };
+    setVendorUser();
+    const awaitingShipmentOrder = buildAwaitingRejectableOrder();
     const blockedOrder: OrderDetail = {
       ...awaitingShipmentOrder,
       status: 'On Hold',
@@ -818,6 +827,99 @@ describe('OrdersPage control center', () => {
       ),
     );
     expect(await screen.findByText('Order rejected and sent to admin review.')).toBeInTheDocument();
+  });
+
+  it('shows why reject is unavailable when shipment processing exists', async () => {
+    setVendorUser();
+    const awaitingShipmentOrder = buildAwaitingRejectableOrder({
+      shipmentExecution: {
+        ...shipmentExecution,
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'pending',
+      },
+    });
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
+    getOrderMock.mockResolvedValue(awaitingShipmentOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+      'This order cannot be rejected because a shipment is already being processed.',
+    );
+    expect(screen.getByText('Shipment status: Pending')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+  });
+
+  it('shows why reject is unavailable after fulfillment', async () => {
+    setVendorUser();
+    const fulfilledOrder = buildAwaitingRejectableOrder({
+      fulfillmentStatus: 'Fulfilled',
+    });
+    listOrdersMock.mockResolvedValue([toSummary(fulfilledOrder)]);
+    getOrderMock.mockResolvedValue(fulfilledOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+      'This order cannot be rejected after fulfillment.',
+    );
+    expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+  });
+
+  it('shows why reject is unavailable after tracking or carrier evidence exists', async () => {
+    setVendorUser();
+    const trackedOrder = buildAwaitingRejectableOrder({
+      trackingNumber: 'TRK-1092',
+    });
+    listOrdersMock.mockResolvedValue([toSummary(trackedOrder)]);
+    getOrderMock.mockResolvedValue(trackedOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+      'This order cannot be rejected after tracking has been added.',
+    );
+    expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+
+    cleanup();
+    listOrdersMock.mockReset();
+    getOrderMock.mockReset();
+
+    const carrierOrder = buildAwaitingRejectableOrder({
+      carrier: 'Yurtiçi Kargo',
+    });
+    listOrdersMock.mockResolvedValue([toSummary(carrierOrder)]);
+    getOrderMock.mockResolvedValue(carrierOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+      'This order cannot be rejected after a carrier has been assigned.',
+    );
+    expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+  });
+
+  it('shows why reject is unavailable for already blocked orders', async () => {
+    setVendorUser();
+    const blockedOrder = buildAwaitingRejectableOrder({
+      status: 'On Hold',
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'OUT_OF_STOCK',
+      fulfillmentActionAvailable: false,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(blockedOrder)]);
+    getOrderMock.mockResolvedValue(blockedOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+      'This order is already blocked or no longer active.',
+    );
+    expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
   });
 
   it('clears shipment label success feedback when selecting another order', async () => {
