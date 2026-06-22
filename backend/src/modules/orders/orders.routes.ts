@@ -11,10 +11,36 @@ import {
   OrderRejectValidationError,
   rejectVendorOrderAllocation,
   returnBlockedAllocationToVendor,
+  transferAllocationEconomicsForAdminOrder,
 } from './orders.service.js';
+import { EconomicTransferValidationError } from '../finance/economic-transfer.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+
+function readRequiredRouteParam(value: string | undefined, message: string) {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) {
+    throw new OrderRejectValidationError(message, 400);
+  }
+  return trimmed;
+}
+
+function readRequiredBodyText(value: string | null | undefined, message: string) {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) {
+    throw new OrderRejectValidationError(message, 400);
+  }
+  return trimmed;
+}
+
+function readEconomicTransferReason(value: string | null | undefined) {
+  const reason = readRequiredBodyText(value, 'Economic transfer reason is required.');
+  if (reason.length > 500) {
+    throw new OrderRejectValidationError('Economic transfer reason must be 500 characters or fewer.', 400);
+  }
+  return reason;
+}
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -173,6 +199,44 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         );
       } catch (error) {
         if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string; allocationId: string };
+    Body: { toVendorId?: string | null; reason?: string | null; confirmTransfer?: boolean | null };
+  }>(
+    '/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+        if (request.body?.confirmTransfer !== true) {
+          throw new OrderRejectValidationError('Economic transfer confirmation is required.', 400);
+        }
+        const toVendorId = readRequiredBodyText(request.body?.toVendorId, 'Replacement vendor id is required.');
+        const reason = readEconomicTransferReason(request.body?.reason);
+
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer', () =>
+          transferAllocationEconomicsForAdminOrder(shopifyOrderId, allocationId, {
+            toVendorId,
+            reason,
+            actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError || error instanceof EconomicTransferValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
         throw error;

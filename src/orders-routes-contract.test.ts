@@ -7,7 +7,16 @@ const getAdminShopifyOrderBreakdownMock = vi.hoisted(() => vi.fn());
 const rejectVendorOrderAllocationMock = vi.hoisted(() => vi.fn());
 const returnBlockedAllocationToVendorMock = vi.hoisted(() => vi.fn());
 const addBlockedAllocationResolutionNoteMock = vi.hoisted(() => vi.fn());
+const transferAllocationEconomicsForAdminOrderMock = vi.hoisted(() => vi.fn());
 const MockOrderRejectValidationError = vi.hoisted(() => class MockOrderRejectValidationError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+});
+const MockEconomicTransferValidationError = vi.hoisted(() => class MockEconomicTransferValidationError extends Error {
   statusCode: number;
 
   constructor(message: string, statusCode = 400) {
@@ -24,6 +33,11 @@ vi.mock('../backend/src/modules/orders/orders.service.js', () => ({
   OrderRejectValidationError: MockOrderRejectValidationError,
   rejectVendorOrderAllocation: rejectVendorOrderAllocationMock,
   returnBlockedAllocationToVendor: returnBlockedAllocationToVendorMock,
+  transferAllocationEconomicsForAdminOrder: transferAllocationEconomicsForAdminOrderMock,
+}));
+
+vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
+  EconomicTransferValidationError: MockEconomicTransferValidationError,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -48,6 +62,7 @@ describe('orders route contract', () => {
     rejectVendorOrderAllocationMock.mockReset();
     returnBlockedAllocationToVendorMock.mockReset();
     addBlockedAllocationResolutionNoteMock.mockReset();
+    transferAllocationEconomicsForAdminOrderMock.mockReset();
   });
 
   it('keeps vendor order detail as a DB read without Shopify image backfill service wiring', async () => {
@@ -216,6 +231,233 @@ describe('orders route contract', () => {
     expect(addBlockedAllocationResolutionNoteMock).toHaveBeenCalledWith('shopify-1', 'alloc-1', {
       note: 'Waiting for confirmation.',
       actorUserId: 'admin-1',
+    });
+  });
+
+  it('wires admin economic transfer route to the economic transfer wrapper', async () => {
+    const transfer = {
+      transferId: 'transfer-1',
+      fromVendorId: 'vendor-a',
+      toVendorId: 'vendor-b',
+      sourceLedgerId: 'fin-vendor-a-sale-1001',
+      targetLedgerId: 'fin-vendor-b-sale-1001',
+      allocationId: 'alloc-1',
+      status: 'COMPLETED',
+    };
+    const order = { order: { sourceShopifyOrderId: 'shopify-1' }, allocations: [] };
+    transferAllocationEconomicsForAdminOrderMock.mockResolvedValueOnce({ ok: true, transfer, order });
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body: {
+        toVendorId: ' vendor-b ',
+        reason: ' Replacement vendor accepted captured economics. ',
+        confirmTransfer: true,
+      },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ ok: true, transfer, order });
+    expect(transferAllocationEconomicsForAdminOrderMock).toHaveBeenCalledWith('shopify-1', 'alloc-1', {
+      toVendorId: 'vendor-b',
+      reason: 'Replacement vendor accepted captured economics.',
+      actorUserId: 'admin-1',
+    });
+  });
+
+  it('blocks non-admin economic transfer requests', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'vendor-1', role: 'vendor' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body: { toVendorId: 'vendor-b', reason: 'Replacement vendor accepted.', confirmTransfer: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 403, payload: { message: 'Forbidden' } });
+    expect(transferAllocationEconomicsForAdminOrderMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['confirmTransfer missing', { toVendorId: 'vendor-b', reason: 'Valid reason.' }, 'Economic transfer confirmation is required.'],
+    ['confirmTransfer false', { toVendorId: 'vendor-b', reason: 'Valid reason.', confirmTransfer: false }, 'Economic transfer confirmation is required.'],
+    ['toVendorId missing', { reason: 'Valid reason.', confirmTransfer: true }, 'Replacement vendor id is required.'],
+    ['reason missing', { toVendorId: 'vendor-b', confirmTransfer: true }, 'Economic transfer reason is required.'],
+    ['reason too long', { toVendorId: 'vendor-b', reason: 'x'.repeat(501), confirmTransfer: true }, 'Economic transfer reason must be 500 characters or fewer.'],
+  ])('rejects admin economic transfer when %s', async (_case, body, message) => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body,
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 400, payload: { message } });
+    expect(transferAllocationEconomicsForAdminOrderMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['shopifyOrderId missing', { shopifyOrderId: ' ', allocationId: 'alloc-1' }, 'Shopify order id is required.'],
+    ['allocationId missing', { shopifyOrderId: 'shopify-1', allocationId: ' ' }, 'Allocation id is required.'],
+  ])('rejects admin economic transfer when %s', async (_case, params, message) => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params,
+      body: { toVendorId: 'vendor-b', reason: 'Valid reason.', confirmTransfer: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 400, payload: { message } });
+    expect(transferAllocationEconomicsForAdminOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces allocation ownership validation for economic transfer safely', async () => {
+    transferAllocationEconomicsForAdminOrderMock.mockRejectedValueOnce(
+      new MockOrderRejectValidationError('Allocation not found for Shopify order.', 404),
+    );
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-other' },
+      body: { toVendorId: 'vendor-b', reason: 'Valid reason.', confirmTransfer: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 404, payload: { message: 'Allocation not found for Shopify order.' } });
+  });
+
+  it('surfaces economic transfer service blocker errors safely', async () => {
+    transferAllocationEconomicsForAdminOrderMock.mockRejectedValueOnce(
+      new MockEconomicTransferValidationError('Economic transfer cannot run after refund evidence exists.', 409),
+    );
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string; allocationId: string };
+      body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string; allocationId: string };
+        body?: { toVendorId?: string; reason?: string; confirmTransfer?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/allocations/:allocationId/economic-transfer')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'shopify-1', allocationId: 'alloc-1' },
+      body: { toVendorId: 'vendor-b', reason: 'Valid reason.', confirmTransfer: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 409,
+      payload: { message: 'Economic transfer cannot run after refund evidence exists.' },
     });
   });
 });

@@ -16,9 +16,14 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
 }));
+const transferAllocationEconomicsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
+}));
+
+vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
+  transferAllocationEconomics: transferAllocationEconomicsMock,
 }));
 
 const {
@@ -27,6 +32,7 @@ const {
   getVendorOrderById,
   rejectVendorOrderAllocation,
   returnBlockedAllocationToVendor,
+  transferAllocationEconomicsForAdminOrder,
   OrderRejectValidationError,
 } = await import('../backend/src/modules/orders/orders.service.js');
 
@@ -486,5 +492,69 @@ describe('vendor order reject operational hold', () => {
     ).rejects.toMatchObject({ message: 'Admin resolution note is required.' });
 
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('transfers allocation economics only after verifying allocation belongs to the Shopify order', async () => {
+    const transfer = {
+      transferId: 'transfer-1',
+      fromVendorId: 'yalispor',
+      toVendorId: 'sporjinal',
+      sourceLedgerId: 'fin-yalispor-sale-1088',
+      targetLedgerId: 'fin-sporjinal-sale-1088',
+      allocationId: 'alloc-1088',
+      status: 'COMPLETED',
+    };
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({ id: 'alloc-1088' });
+    transferAllocationEconomicsMock.mockResolvedValueOnce(transfer);
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(buildAdminOrderBreakdownDb());
+
+    const result = await transferAllocationEconomicsForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      toVendorId: 'sporjinal',
+      reason: 'Replacement accepted captured economics.',
+      actorUserId: 'admin-1',
+    });
+
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'alloc-1088',
+        order: {
+          sourceShopifyOrderId: 'gid://shopify/Order/1088',
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+    expect(transferAllocationEconomicsMock).toHaveBeenCalledWith({
+      vendorAllocationId: 'alloc-1088',
+      toVendorId: 'sporjinal',
+      adminUserId: 'admin-1',
+      reason: 'Replacement accepted captured economics.',
+      confirmTransfer: true,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      transfer,
+      order: {
+        order: {
+          sourceShopifyOrderId: 'gid://shopify/Order/1088',
+        },
+      },
+    });
+  });
+
+  it('rejects economic transfer when allocation does not belong to the Shopify order', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
+
+    await expect(transferAllocationEconomicsForAdminOrder('gid://shopify/Order/9999', 'alloc-1088', {
+      toVendorId: 'sporjinal',
+      reason: 'Replacement accepted captured economics.',
+      actorUserId: 'admin-1',
+    })).rejects.toMatchObject({
+      message: 'Allocation not found for Shopify order.',
+      statusCode: 404,
+    });
+
+    expect(transferAllocationEconomicsMock).not.toHaveBeenCalled();
   });
 });

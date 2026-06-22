@@ -11,6 +11,10 @@ import type {
 import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
 import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 import {
+  transferAllocationEconomics,
+  type EconomicTransferResult,
+} from '../finance/economic-transfer.service.js';
+import {
   isShopifyReturnSignalTopic,
   mapWebhookEventToReturnSignalDiscovery,
 } from '../shopify/return-signal-discovery.service.js';
@@ -69,6 +73,18 @@ export type RejectVendorOrderInput = {
 export type AdminAllocationResolutionInput = {
   note?: string | null;
   actorUserId?: string | null;
+};
+
+export type AdminEconomicTransferInput = {
+  toVendorId: string;
+  reason: string;
+  actorUserId?: string | null;
+};
+
+export type AdminEconomicTransferResponse = {
+  ok: true;
+  transfer: EconomicTransferResult;
+  order: AdminOrderBreakdownDto;
 };
 
 const BLOCKED_ALLOCATION_STATUSES = new Set<AllocationStatus>([
@@ -1624,6 +1640,47 @@ export async function addBlockedAllocationResolutionNote(
   }
 
   return updatedBreakdown;
+}
+
+export async function transferAllocationEconomicsForAdminOrder(
+  shopifyOrderId: string,
+  allocationId: string,
+  input: AdminEconomicTransferInput,
+): Promise<AdminEconomicTransferResponse> {
+  const allocation = await prisma.vendorAllocation.findFirst({
+    where: {
+      id: allocationId,
+      order: {
+        sourceShopifyOrderId: shopifyOrderId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!allocation) {
+    throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+  }
+
+  const transfer = await transferAllocationEconomics({
+    vendorAllocationId: allocation.id,
+    toVendorId: input.toVendorId,
+    adminUserId: input.actorUserId ?? null,
+    reason: input.reason,
+    confirmTransfer: true,
+  });
+
+  const updatedBreakdown = await getAdminShopifyOrderBreakdown(shopifyOrderId);
+  if (!updatedBreakdown) {
+    throw new OrderRejectValidationError('Shopify order not found after economic transfer.', 404);
+  }
+
+  return {
+    ok: true,
+    transfer,
+    order: updatedBreakdown,
+  };
 }
 
 export async function getVendorOrderById(
