@@ -70,6 +70,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     assignedVendorId: 'vendor-1',
     allocationStatus: 'ACTIVE',
     cancellationReason: null,
+    cancelRefundReviewStatus: null,
     fulfillmentStatus: 'Fulfilled',
     shippingStatus: 'Delivered',
     reassignmentRequired: false,
@@ -79,6 +80,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     },
     returnRecords: [],
     refundRecords: [],
+    outboundShopifyRefundAttempts: [],
     order: {
       sourceShopifyOrderId: '7709129507153',
       sourceShopifyOrderNumber: '#1091',
@@ -358,6 +360,146 @@ describe('admin operations summary counts', () => {
         }),
       ]),
     );
+  });
+
+  it('keeps a vendor-blocked allocation in the queue while Shopify refund webhook is pending', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-shopify-action-pending',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
+        outboundShopifyRefundAttempts: [
+          {
+            status: 'SHOPIFY_ACTION_PENDING',
+          },
+        ],
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-shopify-action-pending',
+        type: 'vendor_blocked',
+        actionLabel: 'Review allocation',
+      }),
+    ]);
+  });
+
+  it('keeps a vendor-blocked allocation in the queue when refund execution failed', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-refund-failed',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
+        outboundShopifyRefundAttempts: [
+          {
+            status: 'FAILED',
+          },
+        ],
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-refund-failed',
+        type: 'vendor_blocked',
+      }),
+    ]);
+  });
+
+  it('removes a vendor-blocked allocation from active queue after Shopify refund completion', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-refund-resolved',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        cancelRefundReviewStatus: 'RESOLVED',
+        fulfillmentStatus: 'Pending',
+        shippingStatus: 'Awaiting Shipment',
+        refundRecords: [
+          {
+            sourceShopifyRefundId: 'gid://shopify/Refund/1',
+          },
+        ],
+        outboundShopifyRefundAttempts: [
+          {
+            status: 'RESOLVED',
+          },
+        ],
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 0, awaitingShipment: 0 });
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([]);
+  });
+
+  it('keeps resolved vendor rejection refund in recent activity without active attention item', async () => {
+    const resolvedAllocation = buildAllocation({
+      id: 'alloc-refund-activity',
+      assignedVendorId: 'sporjinal',
+      allocationStatus: 'VENDOR_BLOCKED',
+      cancellationReason: 'OUT_OF_STOCK',
+      reassignmentRequired: true,
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecords: [
+        {
+          sourceShopifyRefundId: 'gid://shopify/Refund/1',
+        },
+      ],
+      outboundShopifyRefundAttempts: [
+        {
+          status: 'RESOLVED',
+        },
+      ],
+      assignedVendor: {
+        name: 'Sporjinal',
+      },
+      order: {
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+      },
+      updatedAt: new Date('2026-06-21T12:00:00.000Z'),
+    });
+    prismaMock.vendorAllocation.findMany
+      .mockResolvedValueOnce([resolvedAllocation])
+      .mockResolvedValueOnce([resolvedAllocation]);
+    mockQueueSummaryCounts({ vendorBlocked: 0, awaitingShipment: 0 });
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+
+    expect(dashboard.summary.vendorBlocked).toBe(0);
+    expect(dashboard.queue).toEqual([]);
+    expect(dashboard.sections.find((section) => section.key === 'vendor_blocked')?.count).toBe(0);
+    expect(dashboard.recommendations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'vendor_blocked_review',
+        }),
+      ]),
+    );
+    expect(dashboard.recentActivity).toEqual([
+      expect.objectContaining({
+        id: 'activity-resolved-vendor-block-alloc-refund-activity',
+        type: 'vendor_blocked',
+        severity: 'info',
+        title: 'Vendor rejection resolved by Shopify refund',
+        description: 'Order #1091',
+        destinationPath: '/admin/orders/7817723773265',
+      }),
+    ]);
   });
 
   it('excludes vendor-blocked allocations from pendingReassignment summary count', async () => {

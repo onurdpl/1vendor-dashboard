@@ -37,6 +37,14 @@ const ACTIVE_AUTOMATION_ACTION_STATUSES = [
   AutomationActionStatus.FAILED,
 ];
 const OPERATIONS_FINANCE_ALERT_SEVERITIES = ['critical', 'warning'] as const;
+const RESOLVED_CANCEL_REFUND_REVIEW_STATUSES = ['RESOLVED', 'COMPLETED', 'REFUND_COMPLETED'];
+const RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES = ['RESOLVED'];
+const NORMALIZED_RESOLVED_CANCEL_REFUND_REVIEW_STATUSES = new Set(
+  RESOLVED_CANCEL_REFUND_REVIEW_STATUSES.map((status) => status.toLowerCase()),
+);
+const NORMALIZED_RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES = new Set(
+  RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES.map((status) => status.toLowerCase()),
+);
 
 function hoursSince(value: Date, now = new Date()) {
   return Math.max(0, Math.round(((now.getTime() - value.getTime()) / ONE_HOUR_MS) * 10) / 10);
@@ -352,6 +360,80 @@ function insensitiveEquals(value: string) {
   };
 }
 
+function getRefundResolvedAllocationStateWhere() {
+  return {
+    cancelRefundReviewStatus: {
+      in: RESOLVED_CANCEL_REFUND_REVIEW_STATUSES,
+    },
+    OR: [
+      {
+        refundRecords: {
+          some: {},
+        },
+      },
+      {
+        outboundShopifyRefundAttempts: {
+          some: {
+            status: {
+              in: RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES,
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function getResolvedVendorBlockedRefundWhere() {
+  return {
+    allocationStatus: AllocationStatus.VENDOR_BLOCKED,
+    ...getRefundResolvedAllocationStateWhere(),
+  };
+}
+
+function getUnresolvedVendorBlockedWhere() {
+  return {
+    allocationStatus: AllocationStatus.VENDOR_BLOCKED,
+    NOT: getRefundResolvedAllocationStateWhere(),
+  };
+}
+
+function getNotResolvedVendorBlockedRefundWhere() {
+  return {
+    NOT: {
+      AND: [
+        {
+          allocationStatus: AllocationStatus.VENDOR_BLOCKED,
+        },
+        getRefundResolvedAllocationStateWhere(),
+      ],
+    },
+  };
+}
+
+function isVendorBlockedAllocationResolvedByRefund(allocation: {
+  allocationStatus: AllocationStatus | string;
+  cancelRefundReviewStatus?: string | null;
+  refundRecords: unknown[];
+  outboundShopifyRefundAttempts?: Array<{ status: string }>;
+}) {
+  if (allocation.allocationStatus !== AllocationStatus.VENDOR_BLOCKED) {
+    return false;
+  }
+
+  const reviewStatus = allocation.cancelRefundReviewStatus?.trim().toLowerCase();
+  if (!reviewStatus || !NORMALIZED_RESOLVED_CANCEL_REFUND_REVIEW_STATUSES.has(reviewStatus)) {
+    return false;
+  }
+
+  return (
+    allocation.refundRecords.length > 0 ||
+    (allocation.outboundShopifyRefundAttempts ?? []).some((attempt) =>
+      NORMALIZED_RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES.has(attempt.status.trim().toLowerCase()),
+    )
+  );
+}
+
 function readSignalSeverityCount(
   groups: Array<{ severity: OperationalSignalSeverity; _count: { _all: number } }>,
   severity: OperationalSignalSeverity,
@@ -386,19 +468,22 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     ),
     withDashboardTiming('operations.summary.vendor_blocked_count', () =>
       prisma.vendorAllocation.count({
-        where: {
-          allocationStatus: AllocationStatus.VENDOR_BLOCKED,
-        },
+        where: getUnresolvedVendorBlockedWhere(),
       }),
     ),
     withDashboardTiming('operations.summary.awaiting_shipment_count', () =>
       prisma.vendorAllocation.count({
         where: {
-          OR: [
-            { fulfillmentStatus: insensitiveEquals('processing') },
-            { fulfillmentStatus: insensitiveEquals('pending') },
-            { shippingStatus: insensitiveEquals('awaiting shipment') },
-            { shippingStatus: insensitiveEquals('awaiting_shipment') },
+          AND: [
+            {
+              OR: [
+                { fulfillmentStatus: insensitiveEquals('processing') },
+                { fulfillmentStatus: insensitiveEquals('pending') },
+                { shippingStatus: insensitiveEquals('awaiting shipment') },
+                { shippingStatus: insensitiveEquals('awaiting_shipment') },
+              ],
+            },
+            getNotResolvedVendorBlockedRefundWhere(),
           ],
         },
       }),
@@ -656,6 +741,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       assignedVendorId: true,
       allocationStatus: true,
       cancellationReason: true,
+      cancelRefundReviewStatus: true,
       fulfillmentStatus: true,
       shippingStatus: true,
       reassignmentRequired: true,
@@ -683,6 +769,15 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         },
         take: 1,
       },
+      outboundShopifyRefundAttempts: {
+        select: {
+          status: true,
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+        take: 1,
+      },
       order: {
         select: {
           sourceShopifyOrderId: true,
@@ -705,8 +800,9 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const shopifyOrderId = allocation.order.sourceShopifyOrderId;
     const shopifyOrderNumber = allocation.order.sourceShopifyOrderNumber;
     const orderReference = formatOrderReference(shopifyOrderNumber, shopifyOrderId) ?? `allocation ${allocation.id}`;
+    const resolvedByRefund = isVendorBlockedAllocationResolvedByRefund(allocation);
 
-    if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED) {
+    if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED && !resolvedByRefund) {
       const description = allocation.cancellationReason
         ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
         : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
@@ -730,7 +826,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         destinationPath: `/admin/orders/${shopifyOrderId}`,
         reassignmentRequired: allocation.reassignmentRequired,
       });
-    } else if (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT) {
+    } else if (!resolvedByRefund && (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT)) {
       items.push({
         id: `op-pending-${allocation.id}`,
         type: 'pending_reassignment',
@@ -751,7 +847,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       });
     }
 
-    if (isAwaitingShipment(allocation.fulfillmentStatus, allocation.shippingStatus)) {
+    if (!resolvedByRefund && isAwaitingShipment(allocation.fulfillmentStatus, allocation.shippingStatus)) {
       items.push({
         id: `op-shipment-${allocation.id}`,
         type: 'awaiting_shipment',
@@ -1206,10 +1302,44 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
   });
   const vendorRisks = buildVendorRiskSummaries(queue);
   const recommendations = buildOperationalRecommendations(queue, vendorRisks, now.toISOString());
-  const recentActivity: OperationsActivityDto[] = queue
+  const resolvedRefundedVendorBlocks = await prisma.vendorAllocation.findMany({
+    where: getResolvedVendorBlockedRefundWhere(),
+    select: {
+      id: true,
+      assignedVendorId: true,
+      updatedAt: true,
+      assignedVendor: {
+        select: {
+          name: true,
+        },
+      },
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 12,
+  });
+  const resolvedRefundActivities: OperationsActivityDto[] = resolvedRefundedVendorBlocks.map((allocation) => ({
+    id: `activity-resolved-vendor-block-${allocation.id}`,
+    type: 'vendor_blocked',
+    severity: 'info',
+    vendorId: allocation.assignedVendorId,
+    vendorName: allocation.assignedVendor.name,
+    title: 'Vendor rejection resolved by Shopify refund',
+    description: formatOrderReference(allocation.order.sourceShopifyOrderNumber, allocation.order.sourceShopifyOrderId) ?? allocation.id,
+    occurredAt: allocation.updatedAt.toISOString(),
+    destinationPath: `/admin/orders/${allocation.order.sourceShopifyOrderId}`,
+  }));
+  const recentActivity: OperationsActivityDto[] = [
+    ...queue
     .slice()
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .slice(0, 12)
     .map((item) => ({
       id: `activity-${item.id}`,
       type: item.type,
@@ -1220,7 +1350,11 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       description: item.objectReference,
       occurredAt: item.createdAt,
       destinationPath: item.destinationPath,
-    }));
+    })),
+    ...resolvedRefundActivities,
+  ]
+    .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    .slice(0, 12);
 
   return {
     generatedAt: now.toISOString(),
