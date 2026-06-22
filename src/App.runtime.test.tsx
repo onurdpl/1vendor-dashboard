@@ -605,4 +605,167 @@ describe('App startup runtime safety', () => {
     await screen.findByText('Vendor A');
     expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
   });
+
+  it('shows refunded allocations as operationally closed on the admin order page', async () => {
+    vi.doMock('./config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+        apiBaseUrl: 'https://vendor-dashboard-backend-398h.onrender.com',
+        apiBaseOrigin: 'https://vendor-dashboard-backend-398h.onrender.com',
+        appEnvironment: 'production',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
+        startupIssues: [],
+      },
+    }));
+    vi.doMock('./lib/RequireAuth', () => ({
+      RequireAuth: () => <Outlet />,
+    }));
+    vi.doMock('./components/RequirePermission', () => ({
+      RequirePermission: ({ children }: { children: ReactNode }) => <>{children}</>,
+    }));
+    vi.doMock('./components/AppShell', () => ({
+      AppShell: () => <Outlet />,
+    }));
+    vi.doMock('./lib/appReadiness', () => ({
+      useAppReadiness: () => ({
+        ready: true,
+        currentUser: {
+          role: 'admin',
+          vendorDetails: [
+            { vendorId: 'vendor-a', vendorName: 'Vendor A' },
+            { vendorId: 'vendor-b', vendorName: 'Vendor B' },
+          ],
+        },
+      }),
+    }));
+    vi.doMock('./features/orders/api', async () => {
+      const actual = await vi.importActual<typeof import('./features/orders/api')>('./features/orders/api');
+      return {
+        ...actual,
+        getAdminShopifyOrderBreakdown: vi.fn().mockResolvedValue({
+          sourceShopifyOrderId: '7693738639697',
+          sourceShopifyOrderNumber: '#1069',
+          customer: 'Shopify Customer',
+          createdAt: '2026-06-02T12:00:00.000Z',
+          allocations: [
+            {
+              originalVendorId: 'vendor-a',
+              assignedVendorId: 'vendor-a',
+              vendorId: 'vendor-a',
+              vendorName: 'Vendor A',
+              allocationOrderId: 'alloc-vendor-a-7693738639697',
+              status: 'On Hold',
+              allocationStatus: 'vendor_blocked',
+              cancellationReason: 'out_of_stock',
+              reassignmentRequired: true,
+              reassignmentCandidateVendorIds: [],
+              assignmentHistory: [
+                {
+                  action: 'vendor_blocked',
+                  fromVendorId: 'vendor-a',
+                  toVendorId: 'vendor-a',
+                  reason: 'OUT_OF_STOCK: No inventory',
+                  actorName: 'Vendor User',
+                  actorRole: 'vendor',
+                  createdAt: '2026-06-02T12:05:00.000Z',
+                },
+              ],
+              fulfillmentActionState: 'awaiting_shipment',
+              fulfillmentActionAvailable: false,
+              fulfillmentStatus: 'Pending',
+              shippingStatus: 'Awaiting Shipment',
+              allocationTotal: 'TRY 1,000.00',
+              lineItems: [
+                {
+                  id: 'line-1',
+                  sku: 'SKU-REFUNDED',
+                  variantTitle: '42',
+                  name: 'Refunded product',
+                  quantity: 1,
+                  price: 'TRY 1,000.00',
+                  fulfillmentStatus: 'Pending',
+                  shippingStatus: 'Awaiting Shipment',
+                },
+              ],
+              refundedItems: [
+                {
+                  id: 'refund-line-1',
+                  originalVendorId: 'vendor-a',
+                  assignedVendorId: 'vendor-a',
+                  vendorId: 'vendor-a',
+                  sku: 'SKU-REFUNDED',
+                  variantTitle: 'Refund gid://shopify/Refund/1',
+                  name: 'Refunded product',
+                  quantity: 1,
+                  condition: 'New',
+                  refundAmount: 'TRY 1,000.00',
+                },
+              ],
+              refundTotal: 'TRY 1,000.00',
+              returnRecordCount: 0,
+              financeIntegrityAlerts: [],
+              transferSummary: null,
+              cancelRefundReview: {
+                status: 'RESOLVED',
+                reason: 'OUT_OF_STOCK',
+                note: 'No replacement vendor available.',
+                requestedAt: '2026-06-02T12:10:00.000Z',
+                requestedByUserId: 'admin-1',
+              },
+              outboundRefundAttemptSummary: {
+                id: 'attempt-1',
+                status: 'RESOLVED',
+                restockType: 'CANCEL',
+                refundShipping: false,
+                notifyCustomer: true,
+                shopifyRefundId: 'gid://shopify/Refund/1',
+                previewedAt: '2026-06-02T12:12:00.000Z',
+                requestedAt: '2026-06-02T12:12:00.000Z',
+                submittedAt: '2026-06-02T12:13:00.000Z',
+                resolvedAt: '2026-06-02T12:14:00.000Z',
+                failedAt: null,
+                failureReason: null,
+                postRefundFulfillmentCheckStatus: 'passed',
+                postRefundFulfillmentCheckMessage:
+                  'Refunded line items are no longer fulfillable in active Shopify fulfillment orders.',
+              },
+            },
+          ],
+        }),
+        createParatikaHostedPaymentLink: vi.fn(),
+        transferAdminAllocationEconomics: vi.fn(),
+        returnAdminBlockedAllocationToVendor: vi.fn(),
+        requestAdminCancelRefundReview: vi.fn(),
+      };
+    });
+    const { default: App } = await import('./App');
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/orders/7693738639697']}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect((await screen.findAllByText('Refund completed')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getByText('Historical: Vendor blocked')).toBeInTheDocument();
+    expect(screen.getByText('Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.')).toBeInTheDocument();
+    expect(screen.getByText('Webhook received')).toBeInTheDocument();
+    expect(screen.getByText('gid://shopify/Refund/1')).toBeInTheDocument();
+    expect(screen.getAllByText('SKU-REFUNDED').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund submitted to Shopify')).toBeInTheDocument();
+    expect(screen.getByText('Refund webhook received')).toBeInTheDocument();
+    expect(screen.getByText('Post-check Passed')).toBeInTheDocument();
+    expect(screen.queryByText('No refunded items in this vendor allocation.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to vendor' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refund in Shopify' })).not.toBeInTheDocument();
+  });
 });

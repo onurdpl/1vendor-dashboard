@@ -244,6 +244,66 @@ function hasBlockingFinanceAlert(allocation: ShopifyOrderBreakdown['allocations'
   }) ?? false;
 }
 
+function isAllocationRefundCompleted(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return allocation.refundedItems.length > 0 || Number.parseFloat(allocation.refundTotal.replace(/[^0-9.-]/g, '')) > 0;
+}
+
+function getLatestRefundedAt(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  const resolvedAt = allocation.outboundRefundAttemptSummary?.resolvedAt;
+  if (resolvedAt) {
+    return resolvedAt;
+  }
+
+  return allocation.assignmentHistory
+    .filter((entry) => normalizeStateToken(entry.action).includes('refund'))
+    .map((entry) => entry.createdAt)
+    .sort()
+    .at(-1);
+}
+
+function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  const events = allocation.assignmentHistory.map((entry, index) => ({
+    key: `${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`,
+    title: `${entry.action.replace(/_/g, ' ')} · ${entry.toVendorId}`,
+    meta: `${entry.fromVendorId ? `From ${entry.fromVendorId} · ` : ''}${entry.reason ?? 'No reason provided'} · ${entry.actorName} (${entry.actorRole}) · ${formatDate(entry.createdAt)}`,
+    at: entry.createdAt,
+  }));
+
+  const attempt = allocation.outboundRefundAttemptSummary;
+  if (attempt?.submittedAt) {
+    events.push({
+      key: `${allocation.vendorId}-refund-submitted-${attempt.submittedAt}`,
+      title: 'Refund submitted to Shopify',
+      meta: `${attempt.shopifyRefundId ?? 'Shopify refund id pending'} · ${formatDate(attempt.submittedAt)}`,
+      at: attempt.submittedAt,
+    });
+  }
+  if (attempt?.resolvedAt) {
+    events.push({
+      key: `${allocation.vendorId}-refund-webhook-${attempt.resolvedAt}`,
+      title: 'Refund webhook received',
+      meta: `Webhook confirmed ${attempt.shopifyRefundId ?? 'Shopify refund'} · ${formatDate(attempt.resolvedAt)}`,
+      at: attempt.resolvedAt,
+    });
+    events.push({
+      key: `${allocation.vendorId}-refund-completed-${attempt.resolvedAt}`,
+      title: 'Refund completed',
+      meta: `Refund total ${allocation.refundTotal} · ${formatDate(attempt.resolvedAt)}`,
+      at: attempt.resolvedAt,
+    });
+  }
+  if (attempt?.postRefundFulfillmentCheckStatus) {
+    events.push({
+      key: `${allocation.vendorId}-refund-post-check-${attempt.resolvedAt ?? attempt.submittedAt ?? attempt.requestedAt}`,
+      title: `Post-check ${formatTransferStatus(attempt.postRefundFulfillmentCheckStatus)}`,
+      meta: attempt.postRefundFulfillmentCheckMessage ?? 'Shopify fulfillment post-check recorded.',
+      at: attempt.resolvedAt ?? attempt.submittedAt ?? attempt.requestedAt,
+    });
+  }
+
+  return events.sort((left, right) => left.at.localeCompare(right.at));
+}
+
 function getFinanceAlertTransferId(alert: NonNullable<ShopifyOrderBreakdown['allocations'][number]['financeIntegrityAlerts']>[number]) {
   const alternateTransferId = (alert as { economicTransferId?: string | null }).economicTransferId;
   return alert.allocationEconomicTransferId?.trim() || alternateTransferId?.trim() || null;
@@ -282,6 +342,7 @@ function hasVisibleTransferBlockerEvidence(allocation: ShopifyOrderBreakdown['al
 
 function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
   return (
+    !isAllocationRefundCompleted(allocation) &&
     normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
     allocation.reassignmentRequired &&
     !hasBlockingFinanceAlert(allocation) &&
@@ -291,6 +352,7 @@ function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['alloca
 
 function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
   return (
+    !isAllocationRefundCompleted(allocation) &&
     normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
     allocation.reassignmentRequired &&
     !allocation.transferSummary &&
@@ -300,6 +362,9 @@ function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allo
 }
 
 function isRefundReviewEligibleForShopifyExecution(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  if (isAllocationRefundCompleted(allocation)) {
+    return false;
+  }
   const reviewStatus = normalizeStateToken(allocation.cancelRefundReview?.status);
   return reviewStatus === 'pending_review' || reviewStatus === 'customer_contacted';
 }
@@ -1027,6 +1092,9 @@ export function AdminShopifyOrderPage() {
         const shopifyRefundPreview = shopifyRefundPreviews[allocation.allocationOrderId];
         const showShopifyRefundExecutionAction = canShowShopifyRefundExecutionAction(allocation, shopifyRefundPreview);
         const outboundRefundPending = isOutboundRefundPending(allocation);
+        const refundCompleted = isAllocationRefundCompleted(allocation);
+        const latestRefundedAt = getLatestRefundedAt(allocation);
+        const timelineEvents = buildAllocationTimelineEvents(allocation);
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1036,15 +1104,27 @@ export function AdminShopifyOrderPage() {
               <h3>{allocation.vendorName}</h3>
             </div>
             <div className="chip-row">
-              <span className={`status-badge status-${allocation.allocationStatus}`}>{allocation.allocationStatus}</span>
-              <span
-                className={`status-badge status-${getClassToken(allocation.fulfillmentActionState)}`}
-              >
-                {allocation.fulfillmentActionState}
-              </span>
-              <span className={`status-badge status-${getClassToken(allocation.shippingStatus)}`}>
-                {allocation.shippingStatus}
-              </span>
+              {refundCompleted ? (
+                <>
+                  <span className="status-badge status-refunded">Refunded</span>
+                  <span className="status-badge status-fulfillment-not-required">Fulfillment not required</span>
+                  {normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' ? (
+                    <span className="status-badge status-muted">Historical: Vendor blocked</span>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <span className={`status-badge status-${allocation.allocationStatus}`}>{allocation.allocationStatus}</span>
+                  <span
+                    className={`status-badge status-${getClassToken(allocation.fulfillmentActionState)}`}
+                  >
+                    {allocation.fulfillmentActionState}
+                  </span>
+                  <span className={`status-badge status-${getClassToken(allocation.shippingStatus)}`}>
+                    {allocation.shippingStatus}
+                  </span>
+                </>
+              )}
             </div>
           </header>
 
@@ -1165,7 +1245,7 @@ export function AdminShopifyOrderPage() {
             </div>
             <div className="summary-row">
               <span>Fulfillment</span>
-              <strong>{allocation.fulfillmentStatus}</strong>
+              <strong>{refundCompleted ? 'Fulfillment not required' : allocation.fulfillmentStatus}</strong>
             </div>
           </div>
 
@@ -1274,19 +1354,39 @@ export function AdminShopifyOrderPage() {
                 <div>
                   <p className="eyebrow">Cancel / refund review</p>
                   <h3>
-                    {allocation.cancelRefundReview.status === 'PENDING_REVIEW'
+                    {refundCompleted
+                      ? 'Refund completed'
+                      : allocation.cancelRefundReview.status === 'PENDING_REVIEW'
                       ? 'Cancel / Refund Review Pending'
                       : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
                   </h3>
                 </div>
                 <span className={`status-badge status-${getClassToken(allocation.cancelRefundReview.status)}`}>
-                  {formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
+                  {refundCompleted ? 'Resolved' : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
                 </span>
               </div>
               <p className="page-description">
-                This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.
+                {refundCompleted
+                  ? 'Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.'
+                  : 'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.'}
               </p>
               <div className="compact-meta-grid">
+                {refundCompleted ? (
+                  <>
+                    <div className="meta-item">
+                      <span>Refund amount</span>
+                      <strong>{allocation.refundTotal}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Refunded at</span>
+                      <strong>{latestRefundedAt ? formatDate(latestRefundedAt) : 'Webhook time unavailable'}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Webhook received</span>
+                      <strong>Yes</strong>
+                    </div>
+                  </>
+                ) : null}
                 <div className="meta-item">
                   <span>Reason</span>
                   <strong>{allocation.cancelRefundReview.reason ?? 'Not recorded'}</strong>
@@ -1313,13 +1413,21 @@ export function AdminShopifyOrderPage() {
                   <div className="economic-transfer-summary-header">
                     <div>
                       <p className="eyebrow">Outbound refund attempt</p>
-                      <h4>{formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}</h4>
+                      <h4>
+                        {normalizeStateToken(allocation.outboundRefundAttemptSummary.status) === 'resolved'
+                          ? 'Refund completed'
+                          : formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}
+                      </h4>
                     </div>
                     <span className={`status-badge status-${getClassToken(allocation.outboundRefundAttemptSummary.status)}`}>
                       {formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}
                     </span>
                   </div>
                   <div className="compact-meta-grid">
+                    <div className="meta-item">
+                      <span>Shopify refund</span>
+                      <strong>{allocation.outboundRefundAttemptSummary.shopifyRefundId ?? 'Not returned'}</strong>
+                    </div>
                     <div className="meta-item">
                       <span>Previewed</span>
                       <strong>
@@ -1356,9 +1464,21 @@ export function AdminShopifyOrderPage() {
                       <span>Failure reason</span>
                       <strong>{allocation.outboundRefundAttemptSummary.failureReason ?? 'None'}</strong>
                     </div>
+                    <div className="meta-item">
+                      <span>Post-check</span>
+                      <strong>
+                        {allocation.outboundRefundAttemptSummary.postRefundFulfillmentCheckStatus
+                          ? formatTransferStatus(allocation.outboundRefundAttemptSummary.postRefundFulfillmentCheckStatus)
+                          : 'Not required'}
+                      </strong>
+                    </div>
                   </div>
+                  {allocation.outboundRefundAttemptSummary.postRefundFulfillmentCheckMessage ? (
+                    <p className="page-description">{allocation.outboundRefundAttemptSummary.postRefundFulfillmentCheckMessage}</p>
+                  ) : null}
                 </section>
               ) : null}
+              {!refundCompleted ? (
               <div className="support-modal-actions refund-preview-actions">
                 <button
                   className="button button-secondary"
@@ -1396,6 +1516,7 @@ export function AdminShopifyOrderPage() {
                   </button>
                 ) : null}
               </div>
+              ) : null}
               {shopifyRefundPreview ? (
                 <section className="shopify-refund-preview-card" aria-label="Shopify suggested refund preview">
                   <div className="economic-transfer-summary-header">
@@ -1574,7 +1695,7 @@ export function AdminShopifyOrderPage() {
             </section>
           ) : null}
 
-          {allocation.allocationStatus === 'vendor_blocked' ? (
+          {normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' && !refundCompleted ? (
             <section className="action-row">
               <p className="page-description">
                 Admin resolution is required. Return keeps the same vendor and does not reassign, refund, mutate Shopify, or change finance.
@@ -1633,7 +1754,7 @@ export function AdminShopifyOrderPage() {
                 ) : null}
               </div>
             </section>
-          ) : allocation.reassignmentRequired ? (
+          ) : allocation.reassignmentRequired && !refundCompleted ? (
             <section className="action-row">
               <p className="page-description">
                 Manual reassignment is not implemented in this phase. Review the allocation state before taking external action.
@@ -1659,12 +1780,21 @@ export function AdminShopifyOrderPage() {
                 <span>{item.quantity}</span>
                 <span>{item.price}</span>
                 <span className="order-state-stack">
-                  <span className={`status-badge status-${getClassToken(item.fulfillmentStatus)}`}>
-                    {item.fulfillmentStatus}
-                  </span>
-                  <span className={`status-badge status-${getClassToken(item.shippingStatus)}`}>
-                    {item.shippingStatus}
-                  </span>
+                  {refundCompleted ? (
+                    <>
+                      <span className="status-badge status-refunded">Refunded</span>
+                      <span className="status-badge status-fulfillment-not-required">Fulfillment not required</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className={`status-badge status-${getClassToken(item.fulfillmentStatus)}`}>
+                        {item.fulfillmentStatus}
+                      </span>
+                      <span className={`status-badge status-${getClassToken(item.shippingStatus)}`}>
+                        {item.shippingStatus}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
             ))}
@@ -1698,18 +1828,12 @@ export function AdminShopifyOrderPage() {
 
           <h3 className="section-header">Assignment timeline</h3>
           <div className="timeline-block">
-            {allocation.assignmentHistory.map((entry, index) => (
-              <div key={`${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`} className="timeline-event">
+            {timelineEvents.map((entry) => (
+              <div key={entry.key} className="timeline-event">
                 <div className="timeline-dot" aria-hidden="true" />
                 <div>
-                  <p className="timeline-title">
-                    {entry.action.replace(/_/g, ' ')} · {entry.toVendorId}
-                  </p>
-                  <p className="timeline-meta">
-                    {entry.fromVendorId ? `From ${entry.fromVendorId} · ` : ''}
-                    {entry.reason ?? 'No reason provided'} · {entry.actorName} ({entry.actorRole}) ·{' '}
-                    {formatDate(entry.createdAt)}
-                  </p>
+                  <p className="timeline-title">{entry.title}</p>
+                  <p className="timeline-meta">{entry.meta}</p>
                 </div>
               </div>
             ))}

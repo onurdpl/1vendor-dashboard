@@ -573,12 +573,15 @@ export type AdminOutboundRefundAttemptSummaryDto = {
   restockType: string;
   refundShipping: boolean;
   notifyCustomer: boolean;
+  shopifyRefundId: string | null;
   previewedAt: string | null;
   requestedAt: string;
   submittedAt: string | null;
   resolvedAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
+  postRefundFulfillmentCheckStatus: string | null;
+  postRefundFulfillmentCheckMessage: string | null;
 };
 
 export type AdminOrderBreakdownAllocationDto = {
@@ -615,6 +618,14 @@ export type AdminOrderBreakdownAllocationDto = {
     status: string;
     createdAt: string;
     updatedAt: string;
+    lineItems: Array<{
+      id: string;
+      sku: string | null;
+      title: string | null;
+      sourceLineItemId: string;
+      quantity: number;
+      subtotal: string | null;
+    }>;
   }>;
   financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
   transferSummary: AdminEconomicTransferSummaryDto | null;

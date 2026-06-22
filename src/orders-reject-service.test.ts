@@ -1797,16 +1797,23 @@ describe('vendor order reject operational hold', () => {
     orderDb.allocations[0]!.outboundShopifyRefundAttempts = [
       {
         id: 'attempt-latest',
-        status: 'PREVIEWED',
+        status: 'RESOLVED',
         restockType: 'CANCEL',
         refundShipping: false,
         notifyCustomer: false,
         previewedAt: new Date('2026-06-21T12:00:00.000Z'),
         requestedAt: new Date('2026-06-21T12:00:00.000Z'),
-        submittedAt: null,
-        resolvedAt: null,
+        submittedAt: new Date('2026-06-21T12:01:00.000Z'),
+        resolvedAt: new Date('2026-06-21T12:02:00.000Z'),
         failedAt: null,
         failureReason: null,
+        shopifyRefundId: 'gid://shopify/Refund/1',
+        mutationResponseJson: {
+          postRefundFulfillmentCheck: {
+            status: 'passed',
+            message: 'Refunded line items are no longer fulfillable in active Shopify fulfillment orders.',
+          },
+        },
       },
     ];
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
@@ -1815,16 +1822,19 @@ describe('vendor order reject operational hold', () => {
 
     expect(breakdown?.allocations[0]?.outboundRefundAttemptSummary).toEqual({
       id: 'attempt-latest',
-      status: 'PREVIEWED',
+      status: 'RESOLVED',
       restockType: 'CANCEL',
       refundShipping: false,
       notifyCustomer: false,
+      shopifyRefundId: 'gid://shopify/Refund/1',
       previewedAt: '2026-06-21T12:00:00.000Z',
       requestedAt: '2026-06-21T12:00:00.000Z',
-      submittedAt: null,
-      resolvedAt: null,
+      submittedAt: '2026-06-21T12:01:00.000Z',
+      resolvedAt: '2026-06-21T12:02:00.000Z',
       failedAt: null,
       failureReason: null,
+      postRefundFulfillmentCheckStatus: 'passed',
+      postRefundFulfillmentCheckMessage: 'Refunded line items are no longer fulfillable in active Shopify fulfillment orders.',
     });
     expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -1835,6 +1845,70 @@ describe('vendor order reject operational hold', () => {
                 requestedAt: 'desc',
               },
               take: 1,
+            }),
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it('includes refunded line item details in admin Shopify order breakdown', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.refundRecords = [
+      {
+        id: 'refund-yalispor-1',
+        sourceShopifyRefundId: 'refund-1',
+        amount: '100.00',
+        status: 'processed',
+        createdAt: new Date('2026-06-21T12:02:00.000Z'),
+        updatedAt: new Date('2026-06-21T12:02:00.000Z'),
+        lineItems: [
+          {
+            id: 'refund-line-1',
+            sku: 'SKU-1',
+            title: 'Refunded item',
+            sourceLineItemId: 'gid://shopify/LineItem/1',
+            quantity: 1,
+            subtotal: '100.00',
+            createdAt: new Date('2026-06-21T12:02:00.000Z'),
+          },
+        ],
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.refundRecords).toEqual([
+      expect.objectContaining({
+        id: 'refund-yalispor-1',
+        sourceShopifyRefundId: 'refund-1',
+        amount: '100.00',
+        status: 'processed',
+        lineItems: [
+          {
+            id: 'refund-line-1',
+            sku: 'SKU-1',
+            title: 'Refunded item',
+            sourceLineItemId: 'gid://shopify/LineItem/1',
+            quantity: 1,
+            subtotal: '100.00',
+          },
+        ],
+      }),
+    ]);
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        allocations: expect.objectContaining({
+          include: expect.objectContaining({
+            refundRecords: expect.objectContaining({
+              include: {
+                lineItems: {
+                  orderBy: {
+                    createdAt: 'asc',
+                  },
+                },
+              },
             }),
           }),
         }),

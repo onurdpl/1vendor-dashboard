@@ -20,12 +20,15 @@ export type OutboundShopifyRefundAttemptSummary = {
   restockType: string;
   refundShipping: boolean;
   notifyCustomer: boolean;
+  shopifyRefundId: string | null;
   previewedAt: string | null;
   requestedAt: string;
   submittedAt: string | null;
   resolvedAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
+  postRefundFulfillmentCheckStatus: string | null;
+  postRefundFulfillmentCheckMessage: string | null;
 };
 
 export type CreatePreviewAttemptInput = {
@@ -90,25 +93,43 @@ export function mapOutboundShopifyRefundAttemptSummary(attempt: {
   restockType: string;
   refundShipping: boolean;
   notifyCustomer: boolean;
+  shopifyRefundId?: string | null;
   previewedAt: Date | null;
   requestedAt: Date;
   submittedAt: Date | null;
   resolvedAt: Date | null;
   failedAt: Date | null;
   failureReason: string | null;
+  mutationResponseJson?: unknown;
 }): OutboundShopifyRefundAttemptSummary {
+  const mutationResponse =
+    typeof attempt.mutationResponseJson === 'object' && attempt.mutationResponseJson !== null
+      ? (attempt.mutationResponseJson as Record<string, unknown>)
+      : null;
+  const postRefundFulfillmentCheck =
+    typeof mutationResponse?.postRefundFulfillmentCheck === 'object' && mutationResponse.postRefundFulfillmentCheck !== null
+      ? (mutationResponse.postRefundFulfillmentCheck as Record<string, unknown>)
+      : null;
+  const postRefundFulfillmentCheckStatus =
+    typeof postRefundFulfillmentCheck?.status === 'string' ? postRefundFulfillmentCheck.status : null;
+  const postRefundFulfillmentCheckMessage =
+    typeof postRefundFulfillmentCheck?.message === 'string' ? postRefundFulfillmentCheck.message : null;
+
   return {
     id: attempt.id,
     status: attempt.status,
     restockType: attempt.restockType,
     refundShipping: attempt.refundShipping,
     notifyCustomer: attempt.notifyCustomer,
+    shopifyRefundId: attempt.shopifyRefundId ?? null,
     previewedAt: attempt.previewedAt?.toISOString() ?? null,
     requestedAt: attempt.requestedAt.toISOString(),
     submittedAt: attempt.submittedAt?.toISOString() ?? null,
     resolvedAt: attempt.resolvedAt?.toISOString() ?? null,
     failedAt: attempt.failedAt?.toISOString() ?? null,
     failureReason: attempt.failureReason,
+    postRefundFulfillmentCheckStatus,
+    postRefundFulfillmentCheckMessage,
   };
 }
 

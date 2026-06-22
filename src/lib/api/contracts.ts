@@ -927,12 +927,15 @@ export type OutboundRefundAttemptSummary = {
   restockType: string;
   refundShipping: boolean;
   notifyCustomer: boolean;
+  shopifyRefundId: string | null;
   previewedAt: string | null;
   requestedAt: string;
   submittedAt: string | null;
   resolvedAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
+  postRefundFulfillmentCheckStatus: string | null;
+  postRefundFulfillmentCheckMessage: string | null;
 };
 
 export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';

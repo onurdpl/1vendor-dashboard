@@ -212,12 +212,15 @@ type AdminOrderBreakdownDto = {
       restockType: string;
       refundShipping: boolean;
       notifyCustomer: boolean;
+      shopifyRefundId: string | null;
       previewedAt: string | null;
       requestedAt: string;
       submittedAt: string | null;
       resolvedAt: string | null;
       failedAt: string | null;
       failureReason: string | null;
+      postRefundFulfillmentCheckStatus: string | null;
+      postRefundFulfillmentCheckMessage: string | null;
     } | null;
     fulfillmentStatus: string;
     shippingStatus: string;
@@ -259,6 +262,14 @@ type AdminOrderBreakdownDto = {
       amount: string;
       status: string;
       createdAt: string;
+      lineItems?: Array<{
+        id: string;
+        sku: string | null;
+        title: string | null;
+        sourceLineItemId: string;
+        quantity: number;
+        subtotal: string | null;
+      }>;
     }>;
     financeIntegrityAlerts?: Array<{
       id: string;
@@ -526,18 +537,38 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
       const allocationStatus = toAllocationStatus(allocation.allocationStatus);
       const shippingStatus = toShippingStatus(allocation.shippingStatus);
       const fulfillmentStatus = toFulfillmentStatus(allocation.fulfillmentStatus);
-      const refundedItems = allocation.refundRecords.map((refund) => ({
-        id: refund.id,
-        originalVendorId: allocation.originalVendorId,
-        assignedVendorId: allocation.assignedVendorId,
-        vendorId: allocation.assignedVendorId,
-        sku: refund.sourceShopifyRefundId,
-        variantTitle: 'Refund',
-        name: `Refund ${refund.sourceShopifyRefundId}`,
-        quantity: 1,
-        condition: 'Opened' as const,
-        refundAmount: formatCurrency(refund.amount),
-      }));
+      const refundedItems = allocation.refundRecords.flatMap((refund) => {
+        const lineItems = refund.lineItems ?? [];
+        if (lineItems.length > 0) {
+          return lineItems.map((lineItem) => ({
+            id: lineItem.id,
+            originalVendorId: allocation.originalVendorId,
+            assignedVendorId: allocation.assignedVendorId,
+            vendorId: allocation.assignedVendorId,
+            sku: lineItem.sku ?? lineItem.sourceLineItemId,
+            variantTitle: `Refund ${refund.sourceShopifyRefundId}`,
+            name: lineItem.title ?? `Refunded line ${lineItem.sourceLineItemId}`,
+            quantity: lineItem.quantity,
+            condition: 'New' as const,
+            refundAmount: formatCurrency(lineItem.subtotal ?? refund.amount),
+          }));
+        }
+
+        return [
+          {
+            id: refund.id,
+            originalVendorId: allocation.originalVendorId,
+            assignedVendorId: allocation.assignedVendorId,
+            vendorId: allocation.assignedVendorId,
+            sku: refund.sourceShopifyRefundId,
+            variantTitle: 'Refund',
+            name: `Refund ${refund.sourceShopifyRefundId}`,
+            quantity: 1,
+            condition: 'New' as const,
+            refundAmount: formatCurrency(refund.amount),
+          },
+        ];
+      });
 
       return {
         originalVendorId: allocation.originalVendorId,

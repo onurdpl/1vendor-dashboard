@@ -3105,6 +3105,13 @@ export async function getAdminShopifyOrderBreakdown(
             orderBy: {
               createdAt: 'desc',
             },
+            include: {
+              lineItems: {
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
+            },
           },
           economicTransfers: {
             select: {
@@ -3163,6 +3170,8 @@ export async function getAdminShopifyOrderBreakdown(
               resolvedAt: true,
               failedAt: true,
               failureReason: true,
+              shopifyRefundId: true,
+              mutationResponseJson: true,
             },
             orderBy: {
               requestedAt: 'desc',
@@ -3271,6 +3280,14 @@ export async function getAdminShopifyOrderBreakdown(
           status: refundRecord.status,
           createdAt: refundRecord.createdAt.toISOString(),
           updatedAt: refundRecord.updatedAt.toISOString(),
+          lineItems: refundRecord.lineItems.map((lineItem) => ({
+            id: lineItem.id,
+            sku: lineItem.sku,
+            title: lineItem.title,
+            sourceLineItemId: lineItem.sourceLineItemId,
+            quantity: lineItem.quantity,
+            subtotal: lineItem.subtotal === null ? null : toAmountString(toNumber(lineItem.subtotal)),
+          })),
         })),
         financeIntegrityAlerts: allocation.financeIntegrityAlerts.map((alert) => ({
           id: alert.id,
