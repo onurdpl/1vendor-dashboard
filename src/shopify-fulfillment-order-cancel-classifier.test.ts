@@ -10,7 +10,6 @@ function buildFulfillmentOrder(overrides: Record<string, unknown> = {}) {
     requestStatus: 'SUBMITTED',
     supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
     assignedLocationId: 'gid://shopify/Location/location-1',
-    assignedLocationName: 'Main Warehouse',
     lineItems: [
       {
         id: 'gid://shopify/FulfillmentOrderLineItem/fo-line-1',

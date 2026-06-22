@@ -159,10 +159,8 @@ type FulfillmentOrderCancellationClassificationQueryResponse = {
           action?: string | null;
         }> | null;
         assignedLocation: {
-          name?: string | null;
           location?: {
             id?: string | null;
-            name?: string | null;
           } | null;
         } | null;
         lineItems: {
@@ -2465,7 +2463,6 @@ export function createShopifyAdminService(env: AppEnv) {
           requestStatus: null,
           supportedActions: null,
           assignedLocationId: null,
-          assignedLocationName: null,
           lineItems: order.lineItems.map((lineItem) => ({
             id: toShopifyGid('FulfillmentOrderLineItem', lineItem.id),
             lineItemId: toShopifyLineItemGid(lineItem.lineItemId),
@@ -2506,10 +2503,8 @@ export function createShopifyAdminService(env: AppEnv) {
                       action
                     }
                     assignedLocation {
-                      name
                       location {
                         id
-                        name
                       }
                     }
                     lineItems(first: 250) {
@@ -2577,8 +2572,6 @@ export function createShopifyAdminService(env: AppEnv) {
               .filter((action): action is string => Boolean(action))
           : null,
         assignedLocationId: fulfillmentOrder.assignedLocation?.location?.id ?? null,
-        assignedLocationName:
-          fulfillmentOrder.assignedLocation?.location?.name ?? fulfillmentOrder.assignedLocation?.name ?? null,
         lineItems: (fulfillmentOrder.lineItems.nodes || []).map((lineItem) => ({
           id: lineItem.id,
           lineItemId: lineItem.lineItem?.id ?? '',

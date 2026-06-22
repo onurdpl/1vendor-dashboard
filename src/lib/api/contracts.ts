@@ -958,7 +958,6 @@ export type FulfillmentOrderCancellationPreview = {
     requestStatus: string | null;
     supportedActions: string[] | null;
     assignedLocationId: string | null;
-    assignedLocationName: string | null;
     classification: FulfillmentOrderCancellationClassification;
     blockers: string[];
     warnings: string[];

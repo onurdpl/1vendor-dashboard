@@ -288,7 +288,6 @@ export type ShopifyFulfillmentOrderForCancellationClassification = {
   requestStatus: string | null;
   supportedActions: string[] | null;
   assignedLocationId: string | null;
-  assignedLocationName: string | null;
   lineItems: ShopifyFulfillmentOrderCancellationLineItem[];
 };
 

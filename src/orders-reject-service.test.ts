@@ -940,7 +940,6 @@ describe('vendor order reject operational hold', () => {
             requestStatus: 'SUBMITTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
-            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
                 id: 'gid://shopify/FulfillmentOrderLineItem/1',
@@ -987,7 +986,6 @@ describe('vendor order reject operational hold', () => {
             requestStatus: 'UNREQUESTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
-            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
                 id: 'gid://shopify/FulfillmentOrderLineItem/1',
@@ -1074,7 +1072,6 @@ describe('vendor order reject operational hold', () => {
             requestStatus: 'SUBMITTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
-            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
                 id: 'gid://shopify/FulfillmentOrderLineItem/1',
@@ -1174,7 +1171,6 @@ describe('vendor order reject operational hold', () => {
             requestStatus: 'UNREQUESTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
-            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
                 id: 'gid://shopify/FulfillmentOrderLineItem/1',
@@ -1219,7 +1215,6 @@ describe('vendor order reject operational hold', () => {
             requestStatus: 'SUBMITTED',
             supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
             assignedLocationId: 'gid://shopify/Location/1',
-            assignedLocationName: 'Main Warehouse',
             lineItems: [
               {
                 id: 'gid://shopify/FulfillmentOrderLineItem/1',

@@ -96,10 +96,8 @@ describe('Shopify fulfillment order lookup', () => {
                     requestStatus: 'UNREQUESTED',
                     supportedActions: [{ action: 'CANCEL_FULFILLMENT_ORDER' }],
                     assignedLocation: {
-                      name: 'Main Warehouse Snapshot',
                       location: {
                         id: 'gid://shopify/Location/44',
-                        name: 'Main Warehouse',
                       },
                     },
                     lineItems: {
@@ -128,6 +126,7 @@ describe('Shopify fulfillment order lookup', () => {
     const result = await service.fetchFulfillmentOrdersForCancellationClassification('gid://shopify/Order/7616544244049');
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      query: string;
       variables: {
         id: string;
       };
@@ -137,6 +136,11 @@ describe('Shopify fulfillment order lookup', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     expect(requestBody.variables.id).toBe('gid://shopify/Order/7616544244049');
+    expect(requestBody.query).toContain('assignedLocation');
+    expect(requestBody.query).toContain('location');
+    expect(requestBody.query).toContain('id');
+    expect(requestBody.query).not.toContain('assignedLocation {\n                      name');
+    expect(requestBody.query).not.toContain('name\n                      }');
     expect(result.fulfillmentOrders).toEqual([
       {
         id: 'gid://shopify/FulfillmentOrder/998877',
@@ -144,7 +148,6 @@ describe('Shopify fulfillment order lookup', () => {
         requestStatus: 'UNREQUESTED',
         supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
         assignedLocationId: 'gid://shopify/Location/44',
-        assignedLocationName: 'Main Warehouse',
         lineItems: [
           {
             id: 'gid://shopify/FulfillmentOrderLineItem/112233',

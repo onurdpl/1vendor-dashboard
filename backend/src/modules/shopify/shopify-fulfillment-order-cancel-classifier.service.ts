@@ -34,7 +34,6 @@ export type FulfillmentOrderCancellationAffectedOrder = {
   requestStatus: string | null;
   supportedActions: string[] | null;
   assignedLocationId: string | null;
-  assignedLocationName: string | null;
   classification: FulfillmentOrderCancellationClassification;
   blockers: string[];
   warnings: string[];
@@ -199,7 +198,6 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
         requestStatus: fulfillmentOrder.requestStatus,
         supportedActions: fulfillmentOrder.supportedActions,
         assignedLocationId: fulfillmentOrder.assignedLocationId,
-        assignedLocationName: fulfillmentOrder.assignedLocationName,
         classification: 'already_closed_or_cancelled',
         blockers,
         warnings,
@@ -289,7 +287,6 @@ export function classifyFulfillmentOrderCancellationSafety(input: {
       requestStatus: fulfillmentOrder.requestStatus,
       supportedActions: fulfillmentOrder.supportedActions,
       assignedLocationId: fulfillmentOrder.assignedLocationId,
-      assignedLocationName: fulfillmentOrder.assignedLocationName,
       classification,
       blockers,
       warnings,
