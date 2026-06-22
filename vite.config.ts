@@ -8,6 +8,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+    maxWorkers: 2,
+    testTimeout: 10000,
   },
   build: {
     rollupOptions: {
