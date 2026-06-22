@@ -2576,6 +2576,9 @@ export type OperationsAttentionItem = {
   destinationPath: string | null;
   createdAt: string;
   reassignmentRequired?: boolean;
+  sourceShopifyOrderId?: string | null;
+  sourceShopifyOrderNumber?: string | null;
+  cancellationReason?: string | null;
 };
 
 export type OperationsAttentionSection = {

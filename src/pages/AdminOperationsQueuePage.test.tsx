@@ -65,6 +65,9 @@ const dashboard: OperationsAttentionDashboard = {
       destinationPath: '/admin/orders/7817723773265',
       createdAt: '2026-05-17T09:30:00.000Z',
       reassignmentRequired: true,
+      sourceShopifyOrderId: '7817723773265',
+      sourceShopifyOrderNumber: '#1091',
+      cancellationReason: 'OUT_OF_STOCK',
     },
     {
       id: 'shipment-1',
@@ -109,6 +112,9 @@ const dashboard: OperationsAttentionDashboard = {
           destinationPath: '/admin/orders/7817723773265',
           createdAt: '2026-05-17T09:30:00.000Z',
           reassignmentRequired: true,
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          cancellationReason: 'OUT_OF_STOCK',
         },
       ],
     },
@@ -259,7 +265,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Reason: OUT_OF_STOCK')).toBeInTheDocument();
     expect(screen.getAllByText('Review allocation').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getByText('Vendor blocked allocations')).toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
@@ -267,6 +275,6 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
-    expect(screen.getAllByRole('link', { name: 'Open' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByRole('link', { name: 'Review allocation' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
   });
 });

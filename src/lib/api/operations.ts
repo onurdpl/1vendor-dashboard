@@ -139,6 +139,9 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
     recommendedAction: item.actionLabel ?? 'Review',
     destinationPath: item.actionTo ?? null,
     createdAt: item.createdAt,
+    sourceShopifyOrderId: item.relatedShopifyOrderId ?? null,
+    sourceShopifyOrderNumber: item.relatedShopifyOrderNumber ?? null,
+    cancellationReason: item.type === 'vendor_blocked' ? item.description.replace(/^Reason:\s*/i, '').replace(/\.$/, '') : null,
   };
 }
 

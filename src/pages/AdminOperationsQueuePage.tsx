@@ -91,6 +91,10 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
   );
 }
 
+function getActionLabel(item: OperationsAttentionItem) {
+  return item.type === 'vendor_blocked' ? 'Review allocation' : 'Open';
+}
+
 export function AdminOperationsQueuePage() {
   const appReadiness = useAppReadiness();
   const { data, isLoading, isError, error, refetch } = useQueryResource(queryKeys.admin.operations.attention(), ({ signal }) =>
@@ -203,7 +207,7 @@ export function AdminOperationsQueuePage() {
                     <strong>{formatAge(item.ageHours)}</strong>
                     <span>{item.recommendedAction}</span>
                     <OperationalActionGroup>
-                      {attentionLink(item, 'Open')}
+                      {attentionLink(item, getActionLabel(item))}
                     </OperationalActionGroup>
                   </OperationalTableRow>
                 ))}
@@ -232,7 +236,16 @@ export function AdminOperationsQueuePage() {
                         <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                         <div>
                           <strong>{item.title}</strong>
-                          <small>{item.vendorName} · {formatAge(item.ageHours)}</small>
+                          {item.type === 'vendor_blocked' ? (
+                            <>
+                              <small>{item.vendorName} · {item.objectReference}</small>
+                              <span>{item.cancellationReason ? `Reason: ${item.cancellationReason}` : item.description}</span>
+                              <span>{item.recommendedAction}</span>
+                              {attentionLink(item, 'Review allocation')}
+                            </>
+                          ) : (
+                            <small>{item.vendorName} · {formatAge(item.ageHours)}</small>
+                          )}
                         </div>
                         <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
                       </div>
@@ -285,7 +298,7 @@ export function AdminOperationsQueuePage() {
                     <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                     <div>
                       {item.destinationPath ? <Link to={item.destinationPath}>{item.title}</Link> : <strong>{item.title}</strong>}
-                      <small>{item.vendorName} · {formatDate(item.occurredAt)}</small>
+                      <small>{item.vendorName} · {item.description} · {formatDate(item.occurredAt)}</small>
                       <span>{item.description}</span>
                     </div>
                     <StatusBadge tone={getActivityTone(item)}>{item.severity}</StatusBadge>

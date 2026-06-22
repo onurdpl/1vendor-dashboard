@@ -1002,6 +1002,9 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     destinationPath: item.destinationPath,
     createdAt: item.createdAt,
     reassignmentRequired: item.reassignmentRequired,
+    sourceShopifyOrderId: item.relatedShopifyOrderId,
+    sourceShopifyOrderNumber: item.relatedShopifyOrderNumber,
+    cancellationReason: item.type === 'vendor_blocked' ? readVendorBlockedReason(item.description) : null,
   }));
 
   const supportTickets = await prisma.supportTicket.findMany({
