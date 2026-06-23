@@ -2270,6 +2270,18 @@ export type PayoutCalculation = {
   commissionVatPercent?: string;
 };
 
+export type SplitFinanceSummary = {
+  splitEventId: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  sourceFinanceLedgerEntryId: string | null;
+  remainingFinanceLedgerEntryId: string | null;
+  childFinanceLedgerEntryId: string | null;
+  lineageRole: 'source' | 'child';
+  splitReason: string;
+  splitCreatedAt: string;
+};
+
 export type FinanceTransaction = {
   id: string;
   date: string;
@@ -2307,6 +2319,7 @@ export type FinanceTransaction = {
     createdAt: string;
   } | null;
   settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
+  splitFinanceSummary?: SplitFinanceSummary | null;
 };
 
 export type FinanceDashboard = {

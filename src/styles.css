@@ -3735,6 +3735,11 @@ h3 {
   font-weight: 900;
 }
 
+.finance-split-detail-card {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
 .finance-detail-rows {
   display: grid;
   gap: 5px;
@@ -3925,6 +3930,19 @@ h3 {
   min-width: 0;
   display: grid;
   gap: 2px;
+}
+
+.finance-split-badge {
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .finance-type-icon {

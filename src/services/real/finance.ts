@@ -56,6 +56,7 @@ type FinanceDashboardDto = {
     settlement?: FinanceTransaction['settlement'];
     payoutBatch?: FinanceTransaction['payoutBatch'];
     settlementRefundAdjustments?: FinanceTransaction['settlementRefundAdjustments'];
+    splitFinanceSummary?: FinanceTransaction['splitFinanceSummary'];
   }>;
 };
 
@@ -237,6 +238,7 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyRefundId: record.relatedRefundId ?? undefined,
       settlement: record.settlement,
       settlementRefundAdjustments: record.settlementRefundAdjustments ?? [],
+      splitFinanceSummary: record.splitFinanceSummary ?? null,
       payoutBatch: record.payoutBatch
         ? {
             ...record.payoutBatch,

@@ -20,6 +20,7 @@ import type {
   PayoutCalculationDto,
   PreparePayoutBatchDto,
   SettlementDto,
+  SplitFinanceSummaryDto,
   VendorFinancialProfileDto,
   VendorFinancialProfileUpdateDto,
   ShippingCostDto,
@@ -85,6 +86,23 @@ type SettlementApprovalReviewSnapshot = {
 type SettlementApprovalLineReviewSnapshot = {
   settlementApproval?: SettlementApprovalReviewSnapshot | null;
 };
+const splitFinanceEventSelect = {
+  id: true,
+  sourceAllocationId: true,
+  childAllocationId: true,
+  reason: true,
+  createdAt: true,
+  sourceFinanceLedgerEntryId: true,
+  remainingFinanceLedgerEntryId: true,
+  childFinanceLedgerEntryId: true,
+} satisfies Prisma.AllocationSplitEventSelect;
+type SplitFinanceEventSnapshot = Prisma.AllocationSplitEventGetPayload<{ select: typeof splitFinanceEventSelect }>;
+type SplitFinanceLedgerSnapshot = {
+  id: string;
+  sourceAllocationSplitEvents?: SplitFinanceEventSnapshot[];
+  remainingAllocationSplitEvents?: SplitFinanceEventSnapshot[];
+  childAllocationSplitEvents?: SplitFinanceEventSnapshot[];
+};
 
 export type PayoutBatchTransitionBlockerCode =
   | 'refund_arrived_after_batch_creation'
@@ -148,6 +166,28 @@ function toIso(value: Date | null | undefined) {
 
 function mapPayoutBatchStatus(status: string) {
   return status.trim().toLowerCase() as PayoutBatchDto['status'];
+}
+
+function mapSplitFinanceSummary(entry: SplitFinanceLedgerSnapshot): SplitFinanceSummaryDto | null {
+  const sourceEvent = entry.sourceAllocationSplitEvents?.[0] ?? null;
+  const remainingEvent = entry.remainingAllocationSplitEvents?.[0] ?? null;
+  const childEvent = entry.childAllocationSplitEvents?.[0] ?? null;
+  const event = childEvent ?? remainingEvent ?? sourceEvent;
+  if (!event) {
+    return null;
+  }
+
+  return {
+    splitEventId: event.id,
+    sourceAllocationId: event.sourceAllocationId,
+    childAllocationId: event.childAllocationId,
+    sourceFinanceLedgerEntryId: event.sourceFinanceLedgerEntryId ?? null,
+    remainingFinanceLedgerEntryId: event.remainingFinanceLedgerEntryId ?? null,
+    childFinanceLedgerEntryId: event.childFinanceLedgerEntryId ?? null,
+    lineageRole: childEvent ? 'child' : 'source',
+    splitReason: event.reason,
+    splitCreatedAt: event.createdAt.toISOString(),
+  };
 }
 
 function normalizeApprovalStatus(status: string | null | undefined) {
@@ -1454,6 +1494,27 @@ export async function getVendorFinanceDashboard(
             createdAt: 'desc',
           },
         },
+        sourceAllocationSplitEvents: {
+          select: splitFinanceEventSelect,
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+        remainingAllocationSplitEvents: {
+          select: splitFinanceEventSelect,
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+        childAllocationSplitEvents: {
+          select: splitFinanceEventSelect,
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -1628,6 +1689,7 @@ export async function getVendorFinanceDashboard(
       settlement,
       payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
       settlementRefundAdjustments: mapLinkedSettlementRefundAdjustments(entry.refundAdjustments),
+      splitFinanceSummary: mapSplitFinanceSummary(entry),
     };
   });
 

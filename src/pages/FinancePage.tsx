@@ -279,6 +279,57 @@ function isVendorBlockedFinanceHold(record: FinanceTransaction) {
   return record.settlement?.holdReason === VENDOR_BLOCKED_FINANCE_HOLD_REASON;
 }
 
+type SplitFinanceLedgerRole = 'original_source' | 'remaining_source' | 'child';
+
+function getSplitFinanceLedgerRole(record: FinanceTransaction): SplitFinanceLedgerRole | null {
+  const summary = record.splitFinanceSummary;
+  if (!summary) {
+    return null;
+  }
+  if (summary.childFinanceLedgerEntryId === record.id || summary.lineageRole === 'child') {
+    return 'child';
+  }
+  if (summary.remainingFinanceLedgerEntryId === record.id) {
+    return 'remaining_source';
+  }
+  if (summary.sourceFinanceLedgerEntryId === record.id) {
+    return 'original_source';
+  }
+  return summary.lineageRole === 'source' ? 'remaining_source' : null;
+}
+
+function getSplitFinanceLedgerLabel(record: FinanceTransaction) {
+  const role = getSplitFinanceLedgerRole(record);
+  if (role === 'child') {
+    return 'Blocked split allocation ledger';
+  }
+  if (role === 'original_source') {
+    return 'Original split source ledger';
+  }
+  if (role === 'remaining_source') {
+    return 'Remaining allocation ledger';
+  }
+  return null;
+}
+
+function getSplitFinanceExplanation(record: FinanceTransaction) {
+  const role = getSplitFinanceLedgerRole(record);
+  if (role === 'child') {
+    return 'Created from line-item reject split. Held until transfer, refund, or return resolution.';
+  }
+  if (role === 'original_source') {
+    return 'Original source ledger was replaced when selected items were moved into a blocked allocation.';
+  }
+  if (role === 'remaining_source') {
+    return 'Original allocation was split. Selected items moved into a blocked allocation.';
+  }
+  return null;
+}
+
+function isSplitChildFinanceHold(record: FinanceTransaction) {
+  return getSplitFinanceLedgerRole(record) === 'child' && isVendorBlockedFinanceHold(record);
+}
+
 function isPendingOrHoldRecord(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
   return status === 'Pending' || status === 'Recorded';
@@ -295,6 +346,13 @@ function getPayoutActivityType(record: FinanceTransaction) {
 }
 
 function getPayoutActivityDetail(record: FinanceTransaction) {
+  if (isSplitChildFinanceHold(record)) {
+    return 'Split allocation hold';
+  }
+  const splitLabel = getSplitFinanceLedgerLabel(record);
+  if (splitLabel) {
+    return splitLabel;
+  }
   if (isVendorBlockedFinanceHold(record)) {
     return 'Vendor blocked';
   }
@@ -512,12 +570,37 @@ function getTotalDeductions(record: FinanceTransaction) {
 
 function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineItem[] {
   const reviewDisplay = getSettlementReviewDisplay(record);
+  const splitRole = getSplitFinanceLedgerRole(record);
+  const splitItems: Array<FinanceTimelineItem | null> = record.splitFinanceSummary
+    ? [
+        {
+          label: 'Allocation split created',
+          at: record.splitFinanceSummary.splitCreatedAt,
+          status: 'Split',
+        },
+        splitRole === 'child'
+          ? {
+              label: 'Child held ledger created',
+              at: record.splitFinanceSummary.splitCreatedAt,
+              status: 'Held',
+            }
+          : null,
+        splitRole === 'remaining_source' || splitRole === 'original_source'
+          ? {
+              label: 'Source ledger replaced',
+              at: record.splitFinanceSummary.splitCreatedAt,
+              status: 'Ledger',
+            }
+          : null,
+      ]
+    : [];
   const items: Array<FinanceTimelineItem | null> = [
     {
       label: isRefundRecord(record) ? 'Refund impact captured' : 'Order captured',
       at: record.date,
       status: normalizeFinanceStatus(record.status),
     },
+    ...splitItems,
     {
       label: reviewDisplay?.timelineLabel ?? (record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
@@ -1028,6 +1111,8 @@ export function FinancePage() {
   const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
   const selectedOrderSettlementHref = selectedRecord ? buildOrderSettlementHref(selectedRecord) : null;
   const selectedReviewDisplay = selectedRecord ? getSettlementReviewDisplay(selectedRecord) : null;
+  const selectedSplitLedgerLabel = selectedRecord ? getSplitFinanceLedgerLabel(selectedRecord) : null;
+  const selectedSplitExplanation = selectedRecord ? getSplitFinanceExplanation(selectedRecord) : null;
   const selectedFinanceGuidance = selectedRecord
     ? selectedReviewDisplay?.guidance ?? getFinanceWorkflowAction({
         status: selectedRecord.status,
@@ -1407,6 +1492,9 @@ export function FinancePage() {
                     <span>
                       <strong>{getPayoutActivityType(record)}</strong>
                       <small>{getPayoutActivityDetail(record)}</small>
+                      {record.splitFinanceSummary ? (
+                        <span className="finance-split-badge">Split Allocation</span>
+                      ) : null}
                     </span>
                   </span>
                   <span>
@@ -1565,6 +1653,27 @@ export function FinancePage() {
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
               <AdminCollaborationNotes contextType="finance" contextId={selectedRecord.id} currentUser={currentUser} />
+              {selectedRecord.splitFinanceSummary ? (
+                <div className="finance-detail-card finance-split-detail-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Split finance context</h4>
+                    <StatusBadge tone={getSplitFinanceLedgerRole(selectedRecord) === 'child' ? 'warning' : 'info'}>
+                      Split Allocation
+                    </StatusBadge>
+                  </div>
+                  <p className="page-description">{selectedSplitExplanation ?? 'This ledger is linked to an allocation split event.'}</p>
+                  <div className="finance-detail-rows">
+                    <MetadataRow label="Ledger role" value={selectedSplitLedgerLabel ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Source allocation" value={selectedRecord.splitFinanceSummary.sourceAllocationId} />
+                    <MetadataRow label="Child allocation" value={selectedRecord.splitFinanceSummary.childAllocationId} />
+                    <MetadataRow label="Split reason" value={safeStatusLabel(selectedRecord.splitFinanceSummary.splitReason)} />
+                    <MetadataRow label="Split created" value={formatOptionalDate(selectedRecord.splitFinanceSummary.splitCreatedAt)} />
+                    <MetadataRow label="Original source ledger" value={selectedRecord.splitFinanceSummary.sourceFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Remaining source ledger" value={selectedRecord.splitFinanceSummary.remainingFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Child held ledger" value={selectedRecord.splitFinanceSummary.childFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                  </div>
+                </div>
+              ) : null}
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Settlement preview</h4>
@@ -1587,7 +1696,12 @@ export function FinancePage() {
 	                    label="Settlement impact"
 	                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
 	                  />
-	                  {isVendorBlockedFinanceHold(selectedRecord) ? (
+	                  {isSplitChildFinanceHold(selectedRecord) ? (
+	                    <>
+	                      <MetadataRow label="Reason" value="Split allocation hold" />
+	                      <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
+	                    </>
+	                  ) : isVendorBlockedFinanceHold(selectedRecord) ? (
 	                    <MetadataRow label="Reason" value="Vendor blocked" />
 	                  ) : null}
                   <MetadataRow

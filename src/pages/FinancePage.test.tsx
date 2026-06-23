@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
-import type { FinanceDashboard, SupportTicket } from '../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
@@ -172,6 +172,18 @@ const financeDashboardWithOrderSettlementRoute: FinanceDashboard = {
     },
     ...financeDashboard.transactions.slice(1),
   ],
+};
+
+const splitFinanceSummaryBase: NonNullable<FinanceTransaction['splitFinanceSummary']> = {
+  splitEventId: 'split-1097',
+  sourceAllocationId: 'alloc-source-1097',
+  childAllocationId: 'alloc-child-1097',
+  sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+  remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+  childFinanceLedgerEntryId: 'ledger-split-child',
+  lineageRole: 'source',
+  splitReason: 'OUT_OF_STOCK',
+  splitCreatedAt: '2026-06-20T08:55:00Z',
 };
 
 const emptyVendorDebtHistory = {
@@ -782,6 +794,81 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByText('Reason')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
+  });
+
+  it('shows split context for source replacement finance ledgers', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-split-source-remaining',
+          shopifyOrderNumber: '1097',
+          shopifyOrderId: '7819000001097',
+          splitFinanceSummary: splitFinanceSummaryBase,
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('Split Allocation')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Remaining allocation ledger').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    expect(await screen.findByText('Split finance context')).toBeInTheDocument();
+    expect(screen.getByText('Original allocation was split. Selected items moved into a blocked allocation.')).toBeInTheDocument();
+    expect(screen.getByText('alloc-source-1097')).toBeInTheDocument();
+    expect(screen.getByText('alloc-child-1097')).toBeInTheDocument();
+    expect(screen.getByText('ledger-split-source-remaining')).toBeInTheDocument();
+    expect(screen.getByText('Allocation split created')).toBeInTheDocument();
+    expect(screen.getByText('Source ledger replaced')).toBeInTheDocument();
+  });
+
+  it('shows split allocation hold context for child finance ledgers', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-split-child',
+          shopifyOrderNumber: '1097',
+          shopifyOrderId: '7819000001097',
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+          },
+          splitFinanceSummary: {
+            ...splitFinanceSummaryBase,
+            lineageRole: 'child',
+          },
+        },
+      ],
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        eligibleRowCount: 0,
+        eligibleNetAmount: '$0.00',
+        blockedRowCount: 1,
+      },
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('Split allocation hold')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('On hold').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    expect(await screen.findByText('Split finance context')).toBeInTheDocument();
+    expect(screen.getAllByText('Blocked split allocation ledger').length).toBeGreaterThan(0);
+    expect(screen.getByText('Created from line-item reject split. Held until transfer, refund, or return resolution.')).toBeInTheDocument();
+    expect(screen.getByText('Vendor rejected selected line items.')).toBeInTheDocument();
+    expect(screen.getByText('Child held ledger created')).toBeInTheDocument();
   });
 
   it('selects a finance row by ledgerId deep link', async () => {

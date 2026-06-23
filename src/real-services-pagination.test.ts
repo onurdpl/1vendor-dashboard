@@ -73,6 +73,61 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenCalledWith('/finance?limit=50');
   });
 
+  it('preserves finance split summaries on mapped dashboard records', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      summary: {
+        grossSales: '100.00',
+        refunds: '0',
+        netRevenue: '100.00',
+        platformFee: '10.00',
+        payoutEstimate: '90.00',
+      },
+      records: [
+        {
+          id: 'ledger-split-child',
+          type: 'sale',
+          amount: '100.00',
+          status: 'recorded',
+          description: 'Split child held ledger',
+          relatedOrderId: 'gid://shopify/Order/1097',
+          relatedOrderNumber: '1097',
+          relatedReturnId: null,
+          relatedRefundId: null,
+          createdAt: '2026-06-20T09:00:00Z',
+          payoutCalculation: null,
+          settlement: null,
+          payoutBatch: null,
+          settlementRefundAdjustments: [],
+          splitFinanceSummary: {
+            splitEventId: 'split-1097',
+            sourceAllocationId: 'alloc-source-1097',
+            childAllocationId: 'alloc-child-1097',
+            sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+            remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+            childFinanceLedgerEntryId: 'ledger-split-child',
+            lineageRole: 'child',
+            splitReason: 'OUT_OF_STOCK',
+            splitCreatedAt: '2026-06-20T08:55:00Z',
+          },
+        },
+      ],
+    });
+
+    const dashboard = await getFinanceDashboard();
+
+    expect(dashboard.transactions[0].splitFinanceSummary).toEqual({
+      splitEventId: 'split-1097',
+      sourceAllocationId: 'alloc-source-1097',
+      childAllocationId: 'alloc-child-1097',
+      sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+      remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+      childFinanceLedgerEntryId: 'ledger-split-child',
+      lineageRole: 'child',
+      splitReason: 'OUT_OF_STOCK',
+      splitCreatedAt: '2026-06-20T08:55:00Z',
+    });
+  });
+
   it('reads dashboard finance summary without calling the full finance dashboard endpoint', async () => {
     apiClientGet.mockResolvedValueOnce({
       summary: {

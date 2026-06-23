@@ -249,6 +249,19 @@ export type FinanceRecordDto = {
   settlement: SettlementDto;
   payoutBatch: PayoutBatchReferenceDto | null;
   settlementRefundAdjustments: SettlementRefundAdjustmentReferenceDto[];
+  splitFinanceSummary: SplitFinanceSummaryDto | null;
+};
+
+export type SplitFinanceSummaryDto = {
+  splitEventId: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  sourceFinanceLedgerEntryId: string | null;
+  remainingFinanceLedgerEntryId: string | null;
+  childFinanceLedgerEntryId: string | null;
+  lineageRole: 'source' | 'child';
+  splitReason: string;
+  splitCreatedAt: string;
 };
 
 export type ReturnFinanceRecordDto = {
