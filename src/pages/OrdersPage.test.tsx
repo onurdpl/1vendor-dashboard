@@ -982,7 +982,7 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    expect(await screen.findByText('Refunded')).toBeInTheDocument();
+    expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Reject unavailable')).toHaveTextContent(
       'Vendor rejection was resolved by Shopify refund. No further rejection action is required.',
