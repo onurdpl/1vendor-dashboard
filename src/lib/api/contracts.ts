@@ -873,6 +873,72 @@ export type FinanceLedgerPreview = {
   };
 };
 
+export type AllocationSplitSummary = {
+  splitEventId?: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  reason: string;
+  note?: string | null;
+  createdAt?: string;
+  actorUserId?: string | null;
+};
+
+export type AllocationSplitLineItem = {
+  id: string;
+  shopifyLineItemId: string;
+  sourceLineItemId?: string | null;
+  quantity: number;
+  lineAmount: number;
+  title?: string | null;
+  sku?: string | null;
+};
+
+export type AllocationSplitBlocker = {
+  code: string;
+  message: string;
+};
+
+export type AllocationSplitWarning = AllocationSplitBlocker;
+
+export type AllocationSplitPlannerResponse = {
+  ok: true;
+  writesPerformed: false;
+  canSplit: boolean;
+  decision: 'can_split' | 'use_full_allocation_reject' | 'blocked';
+  blockers: AllocationSplitBlocker[];
+  warnings: AllocationSplitWarning[];
+  sourceAllocation: {
+    id: string;
+    allocationStatus: string;
+    originalVendorId: string;
+    assignedVendorId: string;
+    sourceShopifyOrderId: string;
+    sourceShopifyOrderNumber?: string | null;
+  } | null;
+  selectedLines: AllocationSplitLineItem[];
+  remainingLines: AllocationSplitLineItem[];
+  amountPlan: {
+    originalAmount: number;
+    selectedAmount: number;
+    remainingAmount: number;
+  };
+  proposedChildAllocation: {
+    id: string | null;
+    deterministic: true;
+  };
+};
+
+export type AllocationSplitExecutionResponse = {
+  ok: true;
+  splitSummary: AllocationSplitSummary;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  sourceSaleLedgerId: string;
+  remainingSaleLedgerId: string;
+  childSaleLedgerId: string;
+  idempotent: boolean;
+};
+
 export type OrderDetail = OrderSummary & {
   shippingAddress: string;
   notes: string;
@@ -904,6 +970,7 @@ export type OrderDetail = OrderSummary & {
     matchedByField: string | null;
   } | null;
   financeLedgerPreview?: FinanceLedgerPreview | null;
+  splitSummary?: AllocationSplitSummary | null;
 };
 
 export type EconomicTransferSummary = {
@@ -1067,6 +1134,7 @@ export type VendorAllocationSummary = {
   returnRecordCount?: number;
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
   transferSummary?: EconomicTransferSummary | null;
+  splitSummary?: AllocationSplitSummary | null;
   cancelRefundReview?: CancelRefundReviewSummary | null;
   outboundRefundAttemptSummary?: OutboundRefundAttemptSummary | null;
 };

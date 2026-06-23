@@ -75,6 +75,8 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     },
     fulfillment: null,
     shipmentExecutions: [],
+    sourceAllocationSplitEvents: [],
+    childAllocationSplitEvents: [],
     lineItems: [
       {
         id: 'allocation-line-1',

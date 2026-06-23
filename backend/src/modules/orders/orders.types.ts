@@ -516,6 +516,72 @@ export type OrderShipmentExecutionDto = {
   };
 };
 
+export type AllocationSplitSummaryDto = {
+  splitEventId?: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  reason: string;
+  note?: string | null;
+  createdAt?: string;
+  actorUserId?: string | null;
+};
+
+export type AllocationSplitLineItemDto = {
+  id: string;
+  shopifyLineItemId: string;
+  sourceLineItemId?: string | null;
+  quantity: number;
+  lineAmount: number;
+  title?: string | null;
+  sku?: string | null;
+};
+
+export type AllocationSplitBlockerDto = {
+  code: string;
+  message: string;
+};
+
+export type AllocationSplitWarningDto = AllocationSplitBlockerDto;
+
+export type AllocationSplitPlannerResponseDto = {
+  ok: true;
+  writesPerformed: false;
+  canSplit: boolean;
+  decision: 'can_split' | 'use_full_allocation_reject' | 'blocked';
+  blockers: AllocationSplitBlockerDto[];
+  warnings: AllocationSplitWarningDto[];
+  sourceAllocation: {
+    id: string;
+    allocationStatus: string;
+    originalVendorId: string;
+    assignedVendorId: string;
+    sourceShopifyOrderId: string;
+    sourceShopifyOrderNumber?: string | null;
+  } | null;
+  selectedLines: AllocationSplitLineItemDto[];
+  remainingLines: AllocationSplitLineItemDto[];
+  amountPlan: {
+    originalAmount: number;
+    selectedAmount: number;
+    remainingAmount: number;
+  };
+  proposedChildAllocation: {
+    id: string | null;
+    deterministic: true;
+  };
+};
+
+export type AllocationSplitExecutionResponseDto = {
+  ok: true;
+  splitSummary: AllocationSplitSummaryDto;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  sourceSaleLedgerId: string;
+  remainingSaleLedgerId: string;
+  childSaleLedgerId: string;
+  idempotent: boolean;
+};
+
 export type OrderDetailDto = OrderSummaryDto & {
   customerName: string | null;
   reassignmentRequired: boolean;
@@ -527,6 +593,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
   shipmentExecution: OrderShipmentExecutionDto | null;
+  splitSummary?: AllocationSplitSummaryDto | null;
 };
 
 export type AdminOrderBreakdownLineItemDto = {
@@ -632,6 +699,7 @@ export type AdminOrderBreakdownAllocationDto = {
   }>;
   financeIntegrityAlerts: AdminFinanceIntegrityAlertDto[];
   transferSummary: AdminEconomicTransferSummaryDto | null;
+  splitSummary?: AllocationSplitSummaryDto | null;
   cancelRefundReview: AdminCancelRefundReviewDto | null;
   outboundRefundAttemptSummary: AdminOutboundRefundAttemptSummaryDto | null;
 };

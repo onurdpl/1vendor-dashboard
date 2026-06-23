@@ -7,6 +7,8 @@ import type {
   AdminShopifyRefundExecutionPayload,
   AdminReturnToVendorPayload,
   AdminShopifyRefundPreviewPayload,
+  AllocationSplitExecutePayload,
+  AllocationSplitPlanPayload,
   RejectOrderPayload,
   UpdateNavlungoShipmentPayload,
 } from '../../services/real/orders';
@@ -89,6 +91,22 @@ export async function rejectOrder(
   options: { vendorId?: string | null } = {},
 ) {
   return runtimeServices.orders.reject(orderId, payload, options.vendorId ?? undefined);
+}
+
+export async function planAllocationSplit(
+  allocationId: string,
+  payload: AllocationSplitPlanPayload,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.planAllocationSplit(allocationId, payload, options.vendorId ?? undefined);
+}
+
+export async function splitAllocation(
+  allocationId: string,
+  payload: AllocationSplitExecutePayload,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.splitAllocation(allocationId, payload, options.vendorId ?? undefined);
 }
 
 export async function createShipmentExecution(

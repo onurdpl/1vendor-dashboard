@@ -5,6 +5,8 @@ const listVendorOrdersMock = vi.hoisted(() => vi.fn());
 const getVendorOrderByIdForUserMock = vi.hoisted(() => vi.fn());
 const getAdminShopifyOrderBreakdownMock = vi.hoisted(() => vi.fn());
 const rejectVendorOrderAllocationMock = vi.hoisted(() => vi.fn());
+const planAllocationSplitForVendorOrderMock = vi.hoisted(() => vi.fn());
+const splitAllocationForVendorOrderMock = vi.hoisted(() => vi.fn());
 const returnBlockedAllocationToVendorMock = vi.hoisted(() => vi.fn());
 const addBlockedAllocationResolutionNoteMock = vi.hoisted(() => vi.fn());
 const requestCancelRefundReviewForAdminOrderMock = vi.hoisted(() => vi.fn());
@@ -33,10 +35,12 @@ vi.mock('../backend/src/modules/orders/orders.service.js', () => ({
   getVendorOrderByIdForUser: getVendorOrderByIdForUserMock,
   listVendorOrders: listVendorOrdersMock,
   OrderRejectValidationError: MockOrderRejectValidationError,
+  planAllocationSplitForVendorOrder: planAllocationSplitForVendorOrderMock,
   previewShopifyRefundForAdminOrder: previewShopifyRefundForAdminOrderMock,
   rejectVendorOrderAllocation: rejectVendorOrderAllocationMock,
   requestCancelRefundReviewForAdminOrder: requestCancelRefundReviewForAdminOrderMock,
   returnBlockedAllocationToVendor: returnBlockedAllocationToVendorMock,
+  splitAllocationForVendorOrder: splitAllocationForVendorOrderMock,
   transferAllocationEconomicsForAdminOrder: transferAllocationEconomicsForAdminOrderMock,
 }));
 
@@ -49,6 +53,10 @@ vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
 
 vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
   EconomicTransferValidationError: MockEconomicTransferValidationError,
+}));
+
+vi.mock('../backend/src/modules/orders/allocation-split.service.js', () => ({
+  AllocationSplitValidationError: MockOrderRejectValidationError,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -71,6 +79,8 @@ describe('orders route contract', () => {
     getVendorOrderByIdForUserMock.mockReset();
     getAdminShopifyOrderBreakdownMock.mockReset();
     rejectVendorOrderAllocationMock.mockReset();
+    planAllocationSplitForVendorOrderMock.mockReset();
+    splitAllocationForVendorOrderMock.mockReset();
     returnBlockedAllocationToVendorMock.mockReset();
     addBlockedAllocationResolutionNoteMock.mockReset();
     requestCancelRefundReviewForAdminOrderMock.mockReset();
@@ -141,6 +151,337 @@ describe('orders route contract', () => {
       note: 'Missing stock',
       actorUserId: 'user-1',
     });
+  });
+
+  it('wires vendor allocation split planner route to the read-only planner wrapper', async () => {
+    const plannerResponse = {
+      ok: true,
+      writesPerformed: false,
+      canSplit: true,
+      decision: 'can_split',
+      blockers: [],
+      warnings: [],
+      sourceAllocation: {
+        id: 'alloc-1',
+        allocationStatus: 'ACTIVE',
+        originalVendorId: 'vendor-a',
+        assignedVendorId: 'vendor-a',
+        sourceShopifyOrderId: 'shopify-1',
+        sourceShopifyOrderNumber: '#1097',
+      },
+      selectedLines: [{ id: 'line-2', shopifyLineItemId: 'shopify-line-2', quantity: 1, lineAmount: 200 }],
+      remainingLines: [{ id: 'line-1', shopifyLineItemId: 'shopify-line-1', quantity: 1, lineAmount: 100 }],
+      amountPlan: { originalAmount: 300, selectedAmount: 200, remainingAmount: 100 },
+      proposedChildAllocation: { id: 'alloc-split-alloc-1-hash', deterministic: true },
+    };
+    planAllocationSplitForVendorOrderMock.mockResolvedValueOnce(plannerResponse);
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; note?: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; note?: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split-plan')?.({
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: ' alloc-1 ' },
+      body: {
+        selectedVendorAllocationLineItemIds: [' line-2 ', ''],
+        reason: 'OUT_OF_STOCK',
+        note: 'One item unavailable.',
+      },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual(plannerResponse);
+    expect(planAllocationSplitForVendorOrderMock).toHaveBeenCalledWith('vendor-a', 'alloc-1', {
+      selectedVendorAllocationLineItemIds: ['line-2'],
+      reason: 'OUT_OF_STOCK',
+      note: 'One item unavailable.',
+    });
+  });
+
+  it.each([
+    ['blocked', { canSplit: false, decision: 'blocked', blockers: [{ code: 'tracking_exists', message: 'Allocation already has tracking evidence.' }], warnings: [] }],
+    ['use_full_allocation_reject', { canSplit: false, decision: 'use_full_allocation_reject', blockers: [], warnings: [{ code: 'all_lines_selected', message: 'All allocation lines were selected; use full allocation reject instead of split.' }] }],
+  ])('returns vendor allocation split planner %s responses without writing', async (_case, partialResponse) => {
+    const plannerResponse = {
+      ok: true,
+      writesPerformed: false,
+      sourceAllocation: null,
+      selectedLines: [],
+      remainingLines: [],
+      amountPlan: { originalAmount: 0, selectedAmount: 0, remainingAmount: 0 },
+      proposedChildAllocation: { id: null, deterministic: true },
+      ...partialResponse,
+    };
+    planAllocationSplitForVendorOrderMock.mockResolvedValueOnce(plannerResponse);
+    const posts = new Map<string, (request: {
+      authUser?: { role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[] };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[] };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split-plan')?.({
+      authUser: { role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: 'alloc-1' },
+      body: { selectedVendorAllocationLineItemIds: ['line-1'] },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual(plannerResponse);
+    expect(splitAllocationForVendorOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('wires vendor allocation split execution route to the split service wrapper', async () => {
+    const splitResponse = {
+      ok: true,
+      splitSummary: {
+        splitEventId: 'split-1',
+        sourceAllocationId: 'alloc-1',
+        childAllocationId: 'alloc-child',
+        reason: 'OUT_OF_STOCK',
+      },
+      sourceAllocationId: 'alloc-1',
+      childAllocationId: 'alloc-child',
+      sourceSaleLedgerId: 'fin-source',
+      remainingSaleLedgerId: 'fin-remaining',
+      childSaleLedgerId: 'fin-child',
+      idempotent: false,
+    };
+    splitAllocationForVendorOrderMock.mockResolvedValueOnce(splitResponse);
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; note?: string; confirmSplit?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; note?: string; confirmSplit?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split')?.({
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: 'alloc-1' },
+      body: {
+        selectedVendorAllocationLineItemIds: ['line-2'],
+        reason: ' OUT_OF_STOCK ',
+        note: 'One item unavailable.',
+        confirmSplit: true,
+      },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual(splitResponse);
+    expect(splitAllocationForVendorOrderMock).toHaveBeenCalledWith('vendor-a', 'alloc-1', {
+      selectedVendorAllocationLineItemIds: ['line-2'],
+      reason: 'OUT_OF_STOCK',
+      note: 'One item unavailable.',
+      actorUserId: 'vendor-user-1',
+    });
+  });
+
+  it('returns idempotent allocation split execution responses', async () => {
+    splitAllocationForVendorOrderMock.mockResolvedValueOnce({
+      ok: true,
+      splitSummary: {
+        splitEventId: 'split-1',
+        sourceAllocationId: 'alloc-1',
+        childAllocationId: 'alloc-child',
+        reason: 'OUT_OF_STOCK',
+      },
+      sourceAllocationId: 'alloc-1',
+      childAllocationId: 'alloc-child',
+      sourceSaleLedgerId: 'fin-source',
+      remainingSaleLedgerId: 'fin-remaining',
+      childSaleLedgerId: 'fin-child',
+      idempotent: true,
+    });
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split')?.({
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: 'alloc-1' },
+      body: { selectedVendorAllocationLineItemIds: ['line-2'], reason: 'OUT_OF_STOCK', confirmSplit: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toMatchObject({ ok: true, idempotent: true });
+  });
+
+  it('blocks allocation split execution without explicit confirmation', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split')?.({
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: 'alloc-1' },
+      body: { selectedVendorAllocationLineItemIds: ['line-2'], reason: 'OUT_OF_STOCK', confirmSplit: false },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 400, payload: { message: 'Allocation split confirmation is required.' } });
+    expect(splitAllocationForVendorOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces allocation split ownership validation safely', async () => {
+    splitAllocationForVendorOrderMock.mockRejectedValueOnce(
+      new MockOrderRejectValidationError('Actor vendor does not own this allocation.', 409),
+    );
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split')?.({
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-b' },
+      params: { allocationId: 'alloc-1' },
+      body: { selectedVendorAllocationLineItemIds: ['line-2'], reason: 'OUT_OF_STOCK', confirmSplit: true },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 409, payload: { message: 'Actor vendor does not own this allocation.' } });
+  });
+
+  it('blocks non-vendor allocation split routes', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { allocationId: string };
+      body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        vendorContext?: { vendorId?: string };
+        params: { allocationId: string };
+        body?: { selectedVendorAllocationLineItemIds?: string[]; reason?: string; confirmSplit?: boolean };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:allocationId/split-plan')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { allocationId: 'alloc-1' },
+      body: { selectedVendorAllocationLineItemIds: ['line-2'] },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 403, payload: { message: 'Forbidden' } });
+    expect(planAllocationSplitForVendorOrderMock).not.toHaveBeenCalled();
+    expect(splitAllocationForVendorOrderMock).not.toHaveBeenCalled();
   });
 
   it('wires admin return-to-vendor route to the allocation resolution service', async () => {

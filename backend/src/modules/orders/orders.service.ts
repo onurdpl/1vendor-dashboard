@@ -1,6 +1,9 @@
 import { prisma } from '../../db/prisma.js';
 import { AllocationStatus, CancellationReason, ShipmentExecutionStatus } from '@prisma/client';
 import type {
+  AllocationSplitExecutionResponseDto,
+  AllocationSplitPlannerResponseDto,
+  AllocationSplitSummaryDto,
   AdminOrderBreakdownDto,
   OrderDetailDto,
   OrderShipmentExecutionDto,
@@ -44,6 +47,14 @@ import {
   mapOutboundShopifyRefundAttemptSummary,
   OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES,
 } from './outbound-shopify-refund-attempt.service.js';
+import {
+  planAllocationSplitForLineItemReject,
+  type AllocationSplitPlannerResult,
+} from './allocation-split-planner.service.js';
+import {
+  splitAllocationForLineItemReject,
+  type AllocationSplitServiceResult,
+} from './allocation-split.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
@@ -77,6 +88,71 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function mapAllocationSplitSummary(event: {
+  id: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  reason: string;
+  note?: string | null;
+  actorUserId?: string | null;
+  createdAt: Date;
+} | null | undefined): AllocationSplitSummaryDto | null {
+  if (!event) {
+    return null;
+  }
+
+  return {
+    splitEventId: event.id,
+    sourceAllocationId: event.sourceAllocationId,
+    childAllocationId: event.childAllocationId,
+    reason: event.reason,
+    note: event.note ?? null,
+    createdAt: event.createdAt.toISOString(),
+    actorUserId: event.actorUserId ?? null,
+  };
+}
+
+function mapAllocationSplitPlannerResponse(result: AllocationSplitPlannerResult): AllocationSplitPlannerResponseDto {
+  return {
+    ok: true,
+    writesPerformed: false,
+    canSplit: result.canSplit,
+    decision: result.decision,
+    blockers: result.blockers,
+    warnings: result.warnings,
+    sourceAllocation: result.sourceAllocation,
+    selectedLines: result.selectedLines,
+    remainingLines: result.remainingLines,
+    amountPlan: result.amountPlan,
+    proposedChildAllocation: result.proposedChildAllocation,
+  };
+}
+
+function mapAllocationSplitExecutionResponse(
+  result: AllocationSplitServiceResult,
+  input: { reason: string; note?: string | null; actorUserId?: string | null },
+): AllocationSplitExecutionResponseDto {
+  const splitSummary: AllocationSplitSummaryDto = {
+    splitEventId: result.splitEventId,
+    sourceAllocationId: result.sourceAllocationId,
+    childAllocationId: result.childAllocationId,
+    reason: input.reason,
+    note: input.note ?? null,
+    actorUserId: input.actorUserId ?? null,
+  };
+
+  return {
+    ok: true,
+    splitSummary,
+    sourceAllocationId: result.sourceAllocationId,
+    childAllocationId: result.childAllocationId,
+    sourceSaleLedgerId: result.sourceSaleLedgerId,
+    remainingSaleLedgerId: result.remainingSaleLedgerId,
+    childSaleLedgerId: result.childSaleLedgerId,
+    idempotent: result.idempotent,
+  };
 }
 
 export class OrderRejectValidationError extends Error {
@@ -2924,6 +3000,53 @@ export async function transferAllocationEconomicsForAdminOrder(
   };
 }
 
+export async function planAllocationSplitForVendorOrder(
+  vendorId: string,
+  allocationId: string,
+  input: {
+    selectedVendorAllocationLineItemIds?: string[];
+    reason?: string | null;
+    note?: string | null;
+  },
+): Promise<AllocationSplitPlannerResponseDto> {
+  const result = await planAllocationSplitForLineItemReject({
+    vendorAllocationId: allocationId,
+    selectedVendorAllocationLineItemIds: input.selectedVendorAllocationLineItemIds,
+    actorVendorId: vendorId,
+    reason: input.reason ?? undefined,
+    note: input.note ?? undefined,
+  });
+
+  return mapAllocationSplitPlannerResponse(result);
+}
+
+export async function splitAllocationForVendorOrder(
+  vendorId: string,
+  allocationId: string,
+  input: {
+    selectedVendorAllocationLineItemIds?: string[];
+    reason: string;
+    note?: string | null;
+    actorUserId?: string | null;
+  },
+): Promise<AllocationSplitExecutionResponseDto> {
+  const result = await splitAllocationForLineItemReject({
+    vendorAllocationId: allocationId,
+    selectedVendorAllocationLineItemIds: input.selectedVendorAllocationLineItemIds,
+    actorVendorId: vendorId,
+    actorUserId: input.actorUserId ?? undefined,
+    reason: input.reason,
+    note: input.note ?? undefined,
+    confirmSplit: true,
+  });
+
+  return mapAllocationSplitExecutionResponse(result, {
+    reason: input.reason,
+    note: input.note ?? null,
+    actorUserId: input.actorUserId ?? null,
+  });
+}
+
 export async function getVendorOrderById(
   vendorId: string,
   orderId: string,
@@ -2951,6 +3074,18 @@ export async function getVendorOrderById(
         orderBy: {
           createdAt: 'asc',
         },
+      },
+      sourceAllocationSplitEvents: {
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
+      },
+      childAllocationSplitEvents: {
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
       },
       refundRecords: {
         select: {
@@ -3082,6 +3217,9 @@ export async function getVendorOrderById(
       actorUserId: entry.actorUserId,
       createdAt: entry.createdAt.toISOString(),
     })),
+    splitSummary: mapAllocationSplitSummary(
+      allocation.childAllocationSplitEvents[0] ?? allocation.sourceAllocationSplitEvents[0] ?? null,
+    ),
   };
 }
 
@@ -3146,6 +3284,18 @@ export async function getAdminShopifyOrderBreakdown(
             orderBy: {
               createdAt: 'asc',
             },
+          },
+          sourceAllocationSplitEvents: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 1,
+          },
+          childAllocationSplitEvents: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 1,
           },
           returnRecords: {
             orderBy: {
@@ -3365,6 +3515,9 @@ export async function getAdminShopifyOrderBreakdown(
               adminActorUserId: latestCompletedTransfer.adminActorUserId,
             }
           : null,
+        splitSummary: mapAllocationSplitSummary(
+          allocation.childAllocationSplitEvents[0] ?? allocation.sourceAllocationSplitEvents[0] ?? null,
+        ),
       };
     }),
   };

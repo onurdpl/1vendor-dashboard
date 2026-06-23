@@ -10,13 +10,16 @@ import {
   getVendorOrderByIdForUser,
   listVendorOrders,
   OrderRejectValidationError,
+  planAllocationSplitForVendorOrder,
   previewShopifyRefundForAdminOrder,
   rejectVendorOrderAllocation,
   requestCancelRefundReviewForAdminOrder,
   returnBlockedAllocationToVendor,
+  splitAllocationForVendorOrder,
   transferAllocationEconomicsForAdminOrder,
 } from './orders.service.js';
 import { EconomicTransferValidationError } from '../finance/economic-transfer.service.js';
+import { AllocationSplitValidationError } from './allocation-split.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
@@ -52,6 +55,12 @@ function readCancelRefundReviewNote(value: string | null | undefined) {
     throw new OrderRejectValidationError('Cancel/refund review note must be 1000 characters or fewer.', 400);
   }
   return note;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
 }
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
@@ -128,6 +137,89 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         );
       } catch (error) {
         if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { allocationId: string };
+    Body: { selectedVendorAllocationLineItemIds?: unknown; reason?: string | null; note?: string | null };
+  }>(
+    '/orders/:allocationId/split-plan',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'vendor') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+        return await withSlowEndpointTiming('POST /orders/:allocationId/split-plan', () =>
+          planAllocationSplitForVendorOrder(vendorId, allocationId, {
+            selectedVendorAllocationLineItemIds: readStringArray(request.body?.selectedVendorAllocationLineItemIds),
+            reason: request.body?.reason,
+            note: request.body?.note,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { allocationId: string };
+    Body: {
+      selectedVendorAllocationLineItemIds?: unknown;
+      reason?: string | null;
+      note?: string | null;
+      confirmSplit?: boolean | null;
+    };
+  }>(
+    '/orders/:allocationId/split',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'vendor') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
+        if (request.body?.confirmSplit !== true) {
+          throw new OrderRejectValidationError('Allocation split confirmation is required.', 400);
+        }
+        const reason = readRequiredBodyText(request.body?.reason, 'Allocation split reason is required.');
+
+        return await withSlowEndpointTiming('POST /orders/:allocationId/split', () =>
+          splitAllocationForVendorOrder(vendorId, allocationId, {
+            selectedVendorAllocationLineItemIds: readStringArray(request.body?.selectedVendorAllocationLineItemIds),
+            reason,
+            note: request.body?.note,
+            actorUserId: request.authUser?.id ?? null,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OrderRejectValidationError || error instanceof AllocationSplitValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
         throw error;

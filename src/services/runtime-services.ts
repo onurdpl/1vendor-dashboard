@@ -27,6 +27,8 @@ import * as realRuntime from './real/runtime';
 import * as realVendorIntegration from './real/vendorIntegration';
 import * as realVendors from './real/vendors';
 import type {
+  AllocationSplitExecutionResponse,
+  AllocationSplitPlannerResponse,
   CreateSupportTicketInput,
   DashboardNotificationsResponse,
   DashboardOperationalSignalsResponse,
@@ -57,6 +59,8 @@ import type {
   AdminShopifyRefundExecutionPayload,
   AdminReturnToVendorPayload,
   AdminShopifyRefundPreviewPayload,
+  AllocationSplitExecutePayload,
+  AllocationSplitPlanPayload,
   RejectOrderPayload,
   SubmitFulfillmentTrackingPayload,
   UpdateNavlungoShipmentPayload,
@@ -952,6 +956,59 @@ export const runtimeServices = {
       }
 
       return rejectMockOrder(orderId, vendorId, payload);
+    },
+    async planAllocationSplit(
+      allocationId: string,
+      payload: AllocationSplitPlanPayload,
+      vendorId = getCurrentVendorId(),
+    ): Promise<AllocationSplitPlannerResponse> {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.planAllocationSplit(allocationId, payload, { vendorId });
+      }
+
+      const order = getMockOrder(allocationId, vendorId);
+      return {
+        ok: true,
+        writesPerformed: false,
+        canSplit: false,
+        decision: 'blocked',
+        blockers: order
+          ? [{ code: 'mock_split_not_supported', message: 'Allocation split planning is only available in real API mode.' }]
+          : [{ code: 'allocation_missing', message: 'Vendor allocation could not be found.' }],
+        warnings: [],
+        sourceAllocation: order
+          ? {
+              id: order.id,
+              allocationStatus: order.allocationStatus,
+              originalVendorId: order.originalVendorId,
+              assignedVendorId: order.assignedVendorId,
+              sourceShopifyOrderId: order.sourceShopifyOrderId,
+              sourceShopifyOrderNumber: String(order.sourceShopifyOrderNumber),
+            }
+          : null,
+        selectedLines: [],
+        remainingLines: [],
+        amountPlan: {
+          originalAmount: 0,
+          selectedAmount: 0,
+          remainingAmount: 0,
+        },
+        proposedChildAllocation: {
+          id: null,
+          deterministic: true,
+        },
+      };
+    },
+    async splitAllocation(
+      allocationId: string,
+      payload: AllocationSplitExecutePayload,
+      vendorId = getCurrentVendorId(),
+    ): Promise<AllocationSplitExecutionResponse> {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.splitAllocation(allocationId, payload, { vendorId });
+      }
+
+      throw new ApiError('Allocation split execution is only available in real API mode.', 'server', { status: 409 });
     },
     async createShipmentExecution(allocationId: string, vendorId = getCurrentVendorId(), customerOverrides?: ShipmentCustomerOverrides) {
       if (runtimeConfig.apiMode === 'real') {

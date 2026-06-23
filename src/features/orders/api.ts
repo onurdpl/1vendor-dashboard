@@ -9,6 +9,7 @@ export {
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
   listOrders,
+  planAllocationSplit,
   probeShopifyReturnLabelUpload,
   probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
@@ -21,6 +22,7 @@ export {
   returnAdminBlockedAllocationToVendor,
   retryFailedShipmentExecution,
   retryShipmentExecution,
+  splitAllocation,
   submitFulfillmentTracking,
   syncKargonomiWarehouseDetails,
   transferAdminAllocationEconomics,
@@ -28,6 +30,9 @@ export {
   updateVendorShippingConfig,
 } from '../../lib/api/orders';
 export type {
+  AllocationSplitExecutionResponse,
+  AllocationSplitPlannerResponse,
+  AllocationSplitSummary,
   OrderDetail,
   OrderSummary,
   ShipmentCustomerField,

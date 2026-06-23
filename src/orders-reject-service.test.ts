@@ -162,6 +162,8 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
         createdAt: new Date('2026-06-21T08:05:00.000Z'),
       },
     ],
+    sourceAllocationSplitEvents: [] as Array<Record<string, unknown>>,
+    childAllocationSplitEvents: [] as Array<Record<string, unknown>>,
     economicTransfers: [] as Array<Record<string, unknown>>,
     financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
     outboundShopifyRefundAttempts: [] as Array<Record<string, unknown>>,
@@ -1985,6 +1987,48 @@ describe('vendor order reject operational hold', () => {
     }));
   });
 
+  it('includes split summary in admin Shopify order breakdown allocations', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.childAllocationSplitEvents = [
+      {
+        id: 'split-event-1',
+        sourceAllocationId: 'alloc-source',
+        childAllocationId: 'alloc-1088',
+        reason: 'OUT_OF_STOCK',
+        note: 'One selected line item was unavailable.',
+        actorUserId: 'vendor-user-1',
+        createdAt: new Date('2026-06-21T12:45:00.000Z'),
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.splitSummary).toEqual({
+      splitEventId: 'split-event-1',
+      sourceAllocationId: 'alloc-source',
+      childAllocationId: 'alloc-1088',
+      reason: 'OUT_OF_STOCK',
+      note: 'One selected line item was unavailable.',
+      createdAt: '2026-06-21T12:45:00.000Z',
+      actorUserId: 'vendor-user-1',
+    });
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        allocations: expect.objectContaining({
+          include: expect.objectContaining({
+            sourceAllocationSplitEvents: expect.objectContaining({
+              take: 1,
+            }),
+            childAllocationSplitEvents: expect.objectContaining({
+              take: 1,
+            }),
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('does not expose finance integrity alerts through vendor order detail', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
       financeIntegrityAlerts: [
@@ -2050,6 +2094,44 @@ describe('vendor order reject operational hold', () => {
 
     expect(detail).not.toHaveProperty('cancelRefundReview');
     expect(detail).not.toHaveProperty('cancelRefundReviewStatus');
+  });
+
+  it('includes split summary through vendor order detail', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildDetailAllocation({
+      childAllocationSplitEvents: [
+        {
+          id: 'split-event-1',
+          sourceAllocationId: 'alloc-source',
+          childAllocationId: 'alloc-1088',
+          reason: 'OUT_OF_STOCK',
+          note: 'One selected line item was unavailable.',
+          actorUserId: 'vendor-user-1',
+          createdAt: new Date('2026-06-21T12:45:00.000Z'),
+        },
+      ],
+    }));
+
+    const detail = await getVendorOrderById('yalispor', 'alloc-1088');
+
+    expect(detail?.splitSummary).toEqual({
+      splitEventId: 'split-event-1',
+      sourceAllocationId: 'alloc-source',
+      childAllocationId: 'alloc-1088',
+      reason: 'OUT_OF_STOCK',
+      note: 'One selected line item was unavailable.',
+      createdAt: '2026-06-21T12:45:00.000Z',
+      actorUserId: 'vendor-user-1',
+    });
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        sourceAllocationSplitEvents: expect.objectContaining({
+          take: 1,
+        }),
+        childAllocationSplitEvents: expect.objectContaining({
+          take: 1,
+        }),
+      }),
+    }));
   });
 
   it('requires a note for admin resolution actions', async () => {

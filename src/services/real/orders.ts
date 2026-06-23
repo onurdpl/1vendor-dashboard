@@ -1,5 +1,8 @@
 import { apiClient } from '../../lib/api-client';
 import type {
+  AllocationSplitExecutionResponse,
+  AllocationSplitPlannerResponse,
+  AllocationSplitSummary,
   AllocationStatus,
   AssignmentHistoryAction,
   AssignmentHistoryEntry,
@@ -69,6 +72,19 @@ export type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_I
 export type RejectOrderPayload = {
   reason: RejectOrderReason;
   note: string;
+};
+
+export type AllocationSplitPlanPayload = {
+  selectedVendorAllocationLineItemIds: string[];
+  reason?: RejectOrderReason;
+  note?: string;
+};
+
+export type AllocationSplitExecutePayload = {
+  selectedVendorAllocationLineItemIds: string[];
+  reason: RejectOrderReason;
+  note?: string;
+  confirmSplit: true;
 };
 
 export type AdminReturnToVendorPayload = {
@@ -180,6 +196,7 @@ type OrderDetailDto = OrderSummaryDto & {
     createdAt: string;
   }>;
   shipmentExecution: OrderDetail['shipmentExecution'];
+  splitSummary?: AllocationSplitSummary | null;
 };
 
 type AdminOrderBreakdownDto = {
@@ -293,6 +310,7 @@ type AdminOrderBreakdownDto = {
       completedAt: string | null;
       adminActorUserId: string | null;
     } | null;
+    splitSummary?: AllocationSplitSummary | null;
   }>;
 };
 
@@ -483,6 +501,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
     shopifyReturnSignal: dto.shopifyReturnSignal ?? null,
     orderSnapshot: dto.orderSnapshot ?? null,
+    splitSummary: dto.splitSummary ?? null,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
@@ -620,6 +639,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         returnRecordCount: allocation.returnRecords.length,
         financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
         transferSummary: allocation.transferSummary ?? null,
+        splitSummary: allocation.splitSummary ?? null,
         cancelRefundReview: allocation.cancelRefundReview ?? null,
         outboundRefundAttemptSummary: allocation.outboundRefundAttemptSummary ?? null,
       };
@@ -681,6 +701,34 @@ export async function rejectOrder(
     },
   );
   return mapOrderDetail(dto);
+}
+
+export async function planAllocationSplit(
+  allocationId: string,
+  payload: AllocationSplitPlanPayload,
+  options: { vendorId?: string | null } = {},
+): Promise<AllocationSplitPlannerResponse> {
+  return apiClient.post<AllocationSplitPlannerResponse>(
+    `/orders/${encodeURIComponent(allocationId)}/split-plan`,
+    payload,
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
+export async function splitAllocation(
+  allocationId: string,
+  payload: AllocationSplitExecutePayload,
+  options: { vendorId?: string | null } = {},
+): Promise<AllocationSplitExecutionResponse> {
+  return apiClient.post<AllocationSplitExecutionResponse>(
+    `/orders/${encodeURIComponent(allocationId)}/split`,
+    payload,
+    {
+      vendorId: options.vendorId,
+    },
+  );
 }
 
 export async function returnAdminBlockedAllocationToVendor(
