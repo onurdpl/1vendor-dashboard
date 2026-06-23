@@ -11,6 +11,7 @@ import type {
   ShopifyFulfillmentSyncDto,
   ShopifyReturnSignalDiscoveryDto,
 } from './orders.types.js';
+import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
 import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 import { hasBlockingCancelRefundReviewStatus } from '../finance/cancel-refund-review-hold.service.js';
@@ -88,6 +89,78 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function isActiveSaleLedger(entry: { entryType: string; voidedAt: Date | null }) {
+  return entry.entryType.trim().toLowerCase() === 'sale' && !entry.voidedAt;
+}
+
+function buildReturnOwnershipSummary(input: {
+  returnRecord: {
+    ownerVendorId?: string | null;
+    ownerVendor?: { id: string; name: string | null } | null;
+  };
+  allocation: {
+    originalVendorId: string;
+    assignedVendorId: string;
+    originalVendor?: { id: string; name: string | null } | null;
+    assignedVendor?: { id: string; name: string | null } | null;
+    financeEntries?: Array<{
+      vendorId: string;
+      entryType: string;
+      voidedAt: Date | null;
+      vendor?: { id: string; name: string | null } | null;
+    }>;
+    economicTransfers?: Array<{
+      status: string;
+      fromVendorId: string;
+      toVendorId: string;
+      completedAt: Date | null;
+      createdAt: Date;
+      fromVendor?: { name: string | null } | null;
+      toVendor?: { name: string | null } | null;
+    }>;
+  };
+}): ReturnOwnershipSummaryDto {
+  const activeSaleLedgers = (input.allocation.financeEntries ?? []).filter(isActiveSaleLedger);
+  const activeSaleLedger = activeSaleLedgers.length === 1 ? activeSaleLedgers[0] : null;
+  const latestTransfer = [...(input.allocation.economicTransfers ?? [])]
+    .filter((transfer) => transfer.status.trim().toUpperCase() === 'COMPLETED')
+    .sort((left, right) => {
+      const rightTime = right.completedAt?.getTime() ?? right.createdAt.getTime();
+      const leftTime = left.completedAt?.getTime() ?? left.createdAt.getTime();
+      return rightTime - leftTime;
+    })[0] ?? null;
+  const ownershipSource: ReturnOwnershipSummaryDto['ownershipSource'] = input.returnRecord.ownerVendorId
+    ? 'return_owner_snapshot'
+    : activeSaleLedger
+      ? 'active_sale_ledger'
+      : input.allocation.assignedVendorId
+        ? 'assigned_vendor'
+        : 'unknown';
+
+  return {
+    originalVendorId: input.allocation.originalVendorId ?? null,
+    originalVendorName: input.allocation.originalVendor?.name ?? null,
+    assignedVendorId: input.allocation.assignedVendorId ?? null,
+    assignedVendorName: input.allocation.assignedVendor?.name ?? null,
+    returnOwnerVendorId: input.returnRecord.ownerVendorId ?? null,
+    returnOwnerVendorName: input.returnRecord.ownerVendor?.name ?? null,
+    refundFinanceOwnerVendorId: activeSaleLedger?.vendorId ?? null,
+    refundFinanceOwnerVendorName: activeSaleLedger?.vendor?.name ?? null,
+    economicOwnerVendorId: activeSaleLedger?.vendorId ?? null,
+    economicOwnerVendorName: activeSaleLedger?.vendor?.name ?? null,
+    ownershipSource,
+    transferSummary: latestTransfer
+      ? {
+          fromVendorId: latestTransfer.fromVendorId,
+          fromVendorName: latestTransfer.fromVendor?.name ?? null,
+          toVendorId: latestTransfer.toVendorId,
+          toVendorName: latestTransfer.toVendor?.name ?? null,
+          transferCompletedAt: toIsoString(latestTransfer.completedAt),
+        }
+      : null,
+  };
 }
 
 function mapAllocationSplitSummary(event: {
@@ -3663,11 +3736,12 @@ export async function getAdminShopifyOrderBreakdown(
       sourceShopifyOrderId: shopifyOrderId,
     },
     include: {
-      allocations: {
-        include: {
-          assignedVendor: true,
-          fulfillment: true,
-          lineItems: {
+        allocations: {
+          include: {
+            assignedVendor: true,
+            originalVendor: true,
+            fulfillment: true,
+            lineItems: {
             include: {
               shopifyOrderLineItem: true,
             },
@@ -3727,11 +3801,14 @@ export async function getAdminShopifyOrderBreakdown(
             },
             take: 1,
           },
-          returnRecords: {
-            orderBy: {
-              createdAt: 'desc',
+            returnRecords: {
+              orderBy: {
+                createdAt: 'desc',
+              },
+              include: {
+                ownerVendor: true,
+              },
             },
-          },
           refundRecords: {
             orderBy: {
               createdAt: 'desc',
@@ -3754,6 +3831,16 @@ export async function getAdminShopifyOrderBreakdown(
               completedAt: true,
               adminActorUserId: true,
               createdAt: true,
+              fromVendor: {
+                select: {
+                  name: true,
+                },
+              },
+              toVendor: {
+                select: {
+                  name: true,
+                },
+              },
             },
             orderBy: [
               {
@@ -3763,6 +3850,19 @@ export async function getAdminShopifyOrderBreakdown(
                 createdAt: 'desc',
               },
             ],
+          },
+          financeEntries: {
+            select: {
+              vendorId: true,
+              entryType: true,
+              voidedAt: true,
+              vendor: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
           },
           financeIntegrityAlerts: {
             where: {
@@ -3897,13 +3997,14 @@ export async function getAdminShopifyOrderBreakdown(
           actorUserId: history.actorUserId,
           createdAt: history.createdAt.toISOString(),
         })),
-        returnRecords: allocation.returnRecords.map((returnRecord) => ({
-          id: returnRecord.id,
-          status: returnRecord.status,
-          reason: returnRecord.reason,
-          createdAt: returnRecord.createdAt.toISOString(),
-          updatedAt: returnRecord.updatedAt.toISOString(),
-        })),
+          returnRecords: allocation.returnRecords.map((returnRecord) => ({
+            id: returnRecord.id,
+            status: returnRecord.status,
+            reason: returnRecord.reason,
+            createdAt: returnRecord.createdAt.toISOString(),
+            updatedAt: returnRecord.updatedAt.toISOString(),
+            returnOwnershipSummary: buildReturnOwnershipSummary({ returnRecord, allocation }),
+          })),
         refundRecords: allocation.refundRecords.map((refundRecord) => ({
           id: refundRecord.id,
           sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,

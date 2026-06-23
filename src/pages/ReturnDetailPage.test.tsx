@@ -185,6 +185,9 @@ const returnDetail: ReturnDetail = {
 
 const closedRefundedReturnDetail: ReturnDetail = {
   ...returnDetail,
+  originalVendorId: 'yalispor',
+  assignedVendorId: 'sporjinal',
+  vendorId: 'sporjinal',
   status: 'Closed',
   sourceShopifyRefundId: 'gid://shopify/Refund/9001',
   vendorReceivedAt: '2026-06-20T10:00:00Z',
@@ -205,6 +208,26 @@ const closedRefundedReturnDetail: ReturnDetail = {
     { label: 'Return requested', at: '2026-06-19T10:00:00Z' },
     { label: 'Refund processed', at: '2026-06-20T10:10:00Z' },
   ],
+  returnOwnershipSummary: {
+    originalVendorId: 'yalispor',
+    originalVendorName: 'Yalı Spor',
+    assignedVendorId: 'sporjinal',
+    assignedVendorName: 'Sporjinal',
+    returnOwnerVendorId: 'sporjinal',
+    returnOwnerVendorName: 'Sporjinal',
+    refundFinanceOwnerVendorId: 'sporjinal',
+    refundFinanceOwnerVendorName: 'Sporjinal',
+    economicOwnerVendorId: 'sporjinal',
+    economicOwnerVendorName: 'Sporjinal',
+    ownershipSource: 'return_owner_snapshot',
+    transferSummary: {
+      fromVendorId: 'yalispor',
+      fromVendorName: 'Yalı Spor',
+      toVendorId: 'sporjinal',
+      toVendorName: 'Sporjinal',
+      transferCompletedAt: '2026-06-18T09:30:00Z',
+    },
+  },
 };
 
 function renderPage() {
@@ -1527,19 +1550,24 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Settlement review pending/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Payout accounting pending/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Provider sync diagnostics').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Settlement review pending/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Payout accounting pending/i).length).toBeGreaterThan(0);
+      const ownershipCard = screen.getByLabelText('Return ownership snapshot');
+      expect(within(ownershipCard).getByText('Yalı Spor (yalispor)')).toBeInTheDocument();
+      expect(within(ownershipCard).getAllByText('Sporjinal (sporjinal)').length).toBeGreaterThanOrEqual(4);
+      expect(within(ownershipCard).getByText('Return owner snapshot')).toBeInTheDocument();
+      expect(within(ownershipCard).getByText(/Transfer:/)).toHaveTextContent('Yalı Spor (yalispor) to Sporjinal (sporjinal)');
+      expect(screen.getAllByText('Provider sync diagnostics').length).toBeGreaterThan(0);
     expect(
       screen.getAllByText('Return is already closed/refunded; these fields are historical sync diagnostics.').length,
     ).toBeGreaterThan(0);
   });
 
-  it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
-    getReturnMock.mockResolvedValue({
-      ...returnDetail,
-      status: 'Approved',
-      vendorReceivedAt: '2026-06-20T10:00:00Z',
+    it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
+      getReturnMock.mockResolvedValue({
+        ...returnDetail,
+        status: 'Approved',
+        vendorReceivedAt: '2026-06-20T10:00:00Z',
       vendorReviewedAt: '2026-06-20T10:05:00Z',
       vendorDecision: 'approved',
     });
@@ -1547,11 +1575,36 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Vendor review' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor refund progress');
-    expect(screen.queryByText('Return completed')).not.toBeInTheDocument();
-  });
+      expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor refund progress');
+      expect(screen.queryByText('Return completed')).not.toBeInTheDocument();
+    });
 
-  it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
+    it('renders unknown ownership fields without guessing vendor ownership', async () => {
+      getReturnMock.mockResolvedValue({
+        ...closedRefundedReturnDetail,
+        returnOwnershipSummary: {
+          originalVendorId: null,
+          originalVendorName: null,
+          assignedVendorId: null,
+          assignedVendorName: null,
+          returnOwnerVendorId: null,
+          returnOwnerVendorName: null,
+          refundFinanceOwnerVendorId: null,
+          refundFinanceOwnerVendorName: null,
+          economicOwnerVendorId: null,
+          economicOwnerVendorName: null,
+          ownershipSource: 'unknown',
+          transferSummary: null,
+        },
+      });
+
+      renderPage();
+
+      const ownershipCard = await screen.findByLabelText('Return ownership snapshot');
+      expect(within(ownershipCard).getAllByText('Unknown').length).toBeGreaterThanOrEqual(6);
+    });
+
+    it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
     const user = userEvent.setup();
     getReturnMock
       .mockResolvedValueOnce(returnDetail)

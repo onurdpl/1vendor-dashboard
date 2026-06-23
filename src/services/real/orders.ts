@@ -21,6 +21,7 @@ import type {
   ShopifyRefundExecutionResult,
   ShopifyRefundPreviewResult,
   ShopifyOrderBreakdown,
+  ReturnOwnershipSummary,
   VendorAllocationSummary,
   KargonomiWarehouseSyncResult,
   VendorShippingConfig,
@@ -269,12 +270,14 @@ type AdminOrderBreakdownDto = {
       actorUserId: string | null;
       createdAt: string;
     }>;
-    returnRecords: Array<{
-      id: string;
-      status: string;
-      reason: string | null;
-      createdAt: string;
-    }>;
+      returnRecords: Array<{
+        id: string;
+        status: string;
+        reason: string | null;
+        createdAt: string;
+        updatedAt?: string;
+        returnOwnershipSummary?: ReturnOwnershipSummary | null;
+      }>;
     refundRecords: Array<{
       id: string;
       sourceShopifyRefundId: string;
@@ -633,11 +636,19 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
           allocation.shipmentUpdatedAt,
         ),
         refundedItems,
-        refundTotal: formatCurrency(
-          allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
-        ),
-        returnRecordCount: allocation.returnRecords.length,
-        financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
+          refundTotal: formatCurrency(
+            allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
+          ),
+          returnRecordCount: allocation.returnRecords.length,
+          returnRecords: allocation.returnRecords.map((returnRecord) => ({
+            id: returnRecord.id,
+            status: returnRecord.status,
+            reason: returnRecord.reason,
+            createdAt: returnRecord.createdAt,
+            updatedAt: returnRecord.updatedAt,
+            returnOwnershipSummary: returnRecord.returnOwnershipSummary ?? null,
+          })),
+          financeIntegrityAlerts: allocation.financeIntegrityAlerts ?? [],
         transferSummary: allocation.transferSummary ?? null,
         splitSummary: allocation.splitSummary ?? null,
         cancelRefundReview: allocation.cancelRefundReview ?? null,

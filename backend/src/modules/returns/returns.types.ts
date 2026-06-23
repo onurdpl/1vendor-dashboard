@@ -99,6 +99,27 @@ export type ReturnSettlementAdjustmentDto = {
   };
 };
 
+export type ReturnOwnershipSummaryDto = {
+  originalVendorId: string | null;
+  originalVendorName: string | null;
+  assignedVendorId: string | null;
+  assignedVendorName: string | null;
+  returnOwnerVendorId: string | null;
+  returnOwnerVendorName: string | null;
+  refundFinanceOwnerVendorId: string | null;
+  refundFinanceOwnerVendorName: string | null;
+  economicOwnerVendorId: string | null;
+  economicOwnerVendorName: string | null;
+  ownershipSource: 'assigned_vendor' | 'return_owner_snapshot' | 'active_sale_ledger' | 'unknown';
+  transferSummary?: {
+    fromVendorId: string | null;
+    fromVendorName: string | null;
+    toVendorId: string | null;
+    toVendorName: string | null;
+    transferCompletedAt: string | null;
+  } | null;
+};
+
 export type ReturnDetailDto = ReturnSummaryDto & {
   sourceShopifyInternalOrderId: string;
   originalVendorId: string;
@@ -107,6 +128,7 @@ export type ReturnDetailDto = ReturnSummaryDto & {
   returnProviderSnapshot: Record<string, unknown> | null;
   refundedItems: RefundedItemDto[];
   settlementRefundAdjustments: ReturnSettlementAdjustmentDto[];
+  returnOwnershipSummary: ReturnOwnershipSummaryDto | null;
 };
 
 export type KargonomiReturnPreviewDto = {

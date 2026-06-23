@@ -2226,7 +2226,7 @@ describe('vendor order reject operational hold', () => {
         allocations: expect.objectContaining({
           include: expect.objectContaining({
             economicTransfers: expect.objectContaining({
-              select: {
+              select: expect.objectContaining({
                 id: true,
                 status: true,
                 fromVendorId: true,
@@ -2235,7 +2235,17 @@ describe('vendor order reject operational hold', () => {
                 completedAt: true,
                 adminActorUserId: true,
                 createdAt: true,
-              },
+                fromVendor: {
+                  select: {
+                    name: true,
+                  },
+                },
+                toVendor: {
+                  select: {
+                    name: true,
+                  },
+                },
+              }),
             }),
           }),
         }),

@@ -147,7 +147,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
     getAdminShopifyOrderBreakdownMock.mockReset();
   });
 
-  it('renders child split summary card, moved items, and split timeline events', async () => {
+    it('renders child split summary card, moved items, and split timeline events', async () => {
     getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
       sourceShopifyOrderId: '7817723773265',
       sourceShopifyOrderNumber: '#1091',
@@ -171,6 +171,63 @@ describe('AdminShopifyOrderPage split visibility', () => {
 
     expect(screen.getByText('Allocation split created')).toBeInTheDocument();
     expect(screen.getByText('Selected items moved to blocked allocation')).toBeInTheDocument();
-    expect(screen.getByText('Child allocation awaiting admin resolution')).toBeInTheDocument();
+      expect(screen.getByText('Child allocation awaiting admin resolution')).toBeInTheDocument();
+    });
+
+    it('renders return ownership context for allocations with return records', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1098',
+        customer: 'Customer',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            originalVendorId: 'yalispor',
+            assignedVendorId: 'sporjinal',
+            vendorId: 'sporjinal',
+            vendorName: 'Sporjinal',
+            returnRecordCount: 1,
+            returnRecords: [
+              {
+                id: 'return-1098',
+                status: 'closed',
+                reason: 'Customer return closed after refund.',
+                createdAt: '2026-06-20T10:00:00.000Z',
+                updatedAt: '2026-06-20T10:15:00.000Z',
+                returnOwnershipSummary: {
+                  originalVendorId: 'yalispor',
+                  originalVendorName: 'Yalı Spor',
+                  assignedVendorId: 'sporjinal',
+                  assignedVendorName: 'Sporjinal',
+                  returnOwnerVendorId: 'sporjinal',
+                  returnOwnerVendorName: 'Sporjinal',
+                  refundFinanceOwnerVendorId: 'sporjinal',
+                  refundFinanceOwnerVendorName: 'Sporjinal',
+                  economicOwnerVendorId: 'sporjinal',
+                  economicOwnerVendorName: 'Sporjinal',
+                  ownershipSource: 'return_owner_snapshot',
+                  transferSummary: {
+                    fromVendorId: 'yalispor',
+                    fromVendorName: 'Yalı Spor',
+                    toVendorId: 'sporjinal',
+                    toVendorName: 'Sporjinal',
+                    transferCompletedAt: '2026-06-18T09:30:00.000Z',
+                  },
+                },
+              },
+            ],
+          }),
+        ],
+      });
+
+      renderPage();
+
+      const ownershipContext = await screen.findByLabelText('Return ownership context');
+      expect(within(ownershipContext).getByText('Return owner')).toBeInTheDocument();
+      expect(within(ownershipContext).getByText('Current assigned vendor')).toBeInTheDocument();
+      expect(within(ownershipContext).getByText('Original vendor')).toBeInTheDocument();
+      expect(within(ownershipContext).getByText('Yalı Spor (yalispor)')).toBeInTheDocument();
+      expect(within(ownershipContext).getAllByText('Sporjinal (sporjinal)').length).toBeGreaterThanOrEqual(2);
+      expect(within(ownershipContext).getByText(/Transfer:/)).toHaveTextContent('Yalı Spor (yalispor) to Sporjinal (sporjinal)');
+    });
   });
-});

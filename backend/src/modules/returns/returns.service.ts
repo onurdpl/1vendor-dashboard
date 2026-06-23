@@ -22,7 +22,13 @@ import {
 } from '../shipping/kargonomi-provider.adapter.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
-import type { DashboardReturnSummaryDto, KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
+import type {
+  DashboardReturnSummaryDto,
+  KargonomiReturnPreviewDto,
+  ReturnDetailDto,
+  ReturnOwnershipSummaryDto,
+  ReturnSummaryDto,
+} from './returns.types.js';
 import { mapLinkedSettlementRefundAdjustments } from '../finance/settlement-refund-adjustment.service.js';
 import {
   backfillMissingLineItemImages,
@@ -954,6 +960,90 @@ function getMatchingRefundRecords(record: {
   return isReturnRequestRecord(record) ? [] : record.vendorAllocation.refundRecords;
 }
 
+function isActiveSaleLedger(entry: { entryType: string; voidedAt: Date | null }) {
+  return entry.entryType.trim().toLowerCase() === 'sale' && !entry.voidedAt;
+}
+
+function latestCompletedTransfer(
+  transfers: Array<{
+    status: string;
+    completedAt: Date | null;
+    createdAt: Date;
+    fromVendorId: string;
+    toVendorId: string;
+    fromVendor?: { name: string | null } | null;
+    toVendor?: { name: string | null } | null;
+  }> = [],
+) {
+  return transfers
+    .filter((transfer) => transfer.status.trim().toUpperCase() === 'COMPLETED')
+    .sort((left, right) => {
+      const rightTime = right.completedAt?.getTime() ?? right.createdAt.getTime();
+      const leftTime = left.completedAt?.getTime() ?? left.createdAt.getTime();
+      return rightTime - leftTime;
+    })[0] ?? null;
+}
+
+function buildReturnOwnershipSummary(record: {
+  ownerVendorId?: string | null;
+  ownerVendor?: { id: string; name: string | null } | null;
+  vendorAllocation: {
+    originalVendorId: string;
+    assignedVendorId: string;
+    originalVendor?: { id: string; name: string | null } | null;
+    assignedVendor?: { id: string; name: string | null } | null;
+    financeEntries?: Array<{
+      vendorId: string;
+      entryType: string;
+      voidedAt: Date | null;
+      vendor?: { id: string; name: string | null } | null;
+    }>;
+    economicTransfers?: Array<{
+      status: string;
+      completedAt: Date | null;
+      createdAt: Date;
+      fromVendorId: string;
+      toVendorId: string;
+      fromVendor?: { name: string | null } | null;
+      toVendor?: { name: string | null } | null;
+    }>;
+  };
+}): ReturnOwnershipSummaryDto {
+  const activeSaleLedgers = (record.vendorAllocation.financeEntries ?? []).filter(isActiveSaleLedger);
+  const activeSaleLedger = activeSaleLedgers.length === 1 ? activeSaleLedgers[0] : null;
+  const transfer = latestCompletedTransfer(record.vendorAllocation.economicTransfers);
+  const ownershipSource: ReturnOwnershipSummaryDto['ownershipSource'] = record.ownerVendorId
+    ? 'return_owner_snapshot'
+    : activeSaleLedger
+      ? 'active_sale_ledger'
+      : record.vendorAllocation.assignedVendorId
+        ? 'assigned_vendor'
+        : 'unknown';
+
+  return {
+    originalVendorId: record.vendorAllocation.originalVendorId ?? null,
+    originalVendorName: record.vendorAllocation.originalVendor?.name ?? null,
+    assignedVendorId: record.vendorAllocation.assignedVendorId ?? null,
+    assignedVendorName: record.vendorAllocation.assignedVendor?.name ?? null,
+    returnOwnerVendorId: record.ownerVendorId ?? null,
+    returnOwnerVendorName: record.ownerVendor?.name ?? null,
+    refundFinanceOwnerVendorId: activeSaleLedger?.vendorId ?? null,
+    refundFinanceOwnerVendorName: activeSaleLedger?.vendor?.name ?? null,
+    economicOwnerVendorId: activeSaleLedger?.vendorId ?? null,
+    economicOwnerVendorName: activeSaleLedger?.vendor?.name ?? null,
+    ownershipSource,
+    transferSummary: transfer
+      ? {
+          fromVendorId: transfer.fromVendorId,
+          fromVendorName: transfer.fromVendor?.name ?? null,
+          toVendorId: transfer.toVendorId,
+          toVendorName: transfer.toVendor?.name ?? null,
+          transferCompletedAt: transfer.completedAt ? transfer.completedAt.toISOString() : null,
+        }
+      : null,
+  };
+}
+
 export async function listVendorReturns(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -1143,25 +1233,68 @@ export async function getVendorReturnById(
   options: { shopifyAdminService?: ShopifyLineItemImageLookupService; deferImageBackfill?: boolean } = {},
 ): Promise<ReturnDetailDto | null> {
   const startedAt = Date.now();
-  const record = await prisma.returnRecord.findFirst({
-    where: {
-      id: returnId,
-      vendorAllocation: {
-        assignedVendorId: vendorId,
+    const record = await prisma.returnRecord.findFirst({
+      where: {
+        id: returnId,
+        vendorAllocation: {
+          assignedVendorId: vendorId,
+        },
       },
-    },
-    include: {
-      vendorAllocation: {
-        include: {
-          order: {
-            select: {
-              sourceShopifyOrderId: true,
+      include: {
+        ownerVendor: true,
+        vendorAllocation: {
+          include: {
+            originalVendor: true,
+            assignedVendor: true,
+            order: {
+              select: {
+                sourceShopifyOrderId: true,
+              },
             },
-          },
-          lineItems: {
-            include: {
-              shopifyOrderLineItem: true,
+            financeEntries: {
+              select: {
+                vendorId: true,
+                entryType: true,
+                voidedAt: true,
+                vendor: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
             },
+            economicTransfers: {
+              select: {
+                status: true,
+                fromVendorId: true,
+                toVendorId: true,
+                completedAt: true,
+                createdAt: true,
+                fromVendor: {
+                  select: {
+                    name: true,
+                  },
+                },
+                toVendor: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+              orderBy: [
+                {
+                  completedAt: 'desc',
+                },
+                {
+                  createdAt: 'desc',
+                },
+              ],
+            },
+            lineItems: {
+              include: {
+                shopifyOrderLineItem: true,
+              },
           },
           refundRecords: {
             include: {
@@ -1371,11 +1504,12 @@ export async function getVendorReturnById(
     sourceShopifyInternalOrderId: record.vendorAllocation.sourceShopifyOrderId,
     originalVendorId: record.vendorAllocation.originalVendorId,
     requestCreatedAt: record.requestCreatedAt ? record.requestCreatedAt.toISOString() : null,
-    requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
-    refundedItems: detailRefundedItems,
-    settlementRefundAdjustments,
-  };
-}
+      requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
+      refundedItems: detailRefundedItems,
+      settlementRefundAdjustments,
+      returnOwnershipSummary: buildReturnOwnershipSummary(record),
+    };
+  }
 
 export async function getReturnByIdForActor(returnId: string, actor: ReturnActorScope): Promise<ReturnDetailDto | null> {
   if (actor.role !== 'admin' && !actor.vendorId) {

@@ -1161,6 +1161,14 @@ export type VendorAllocationSummary = {
   refundedItems: ReturnLineItem[];
   refundTotal: string;
   returnRecordCount?: number;
+  returnRecords?: Array<{
+    id: string;
+    status: string;
+    reason: string | null;
+    createdAt: string;
+    updatedAt?: string;
+    returnOwnershipSummary?: ReturnOwnershipSummary | null;
+  }>;
   financeIntegrityAlerts?: FinanceIntegrityAlertSummary[];
   transferSummary?: EconomicTransferSummary | null;
   splitSummary?: AllocationSplitSummary | null;
@@ -1289,6 +1297,27 @@ export type ReturnStatus =
   | 'Pending'
   | 'In Review';
 
+export type ReturnOwnershipSummary = {
+  originalVendorId: VendorId | null;
+  originalVendorName: string | null;
+  assignedVendorId: VendorId | null;
+  assignedVendorName: string | null;
+  returnOwnerVendorId: VendorId | null;
+  returnOwnerVendorName: string | null;
+  refundFinanceOwnerVendorId: VendorId | null;
+  refundFinanceOwnerVendorName: string | null;
+  economicOwnerVendorId: VendorId | null;
+  economicOwnerVendorName: string | null;
+  ownershipSource: 'assigned_vendor' | 'return_owner_snapshot' | 'active_sale_ledger' | 'unknown';
+  transferSummary?: {
+    fromVendorId: VendorId | null;
+    fromVendorName: string | null;
+    toVendorId: VendorId | null;
+    toVendorName: string | null;
+    transferCompletedAt: string | null;
+  } | null;
+};
+
 export type ReturnSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
@@ -1326,6 +1355,7 @@ export type ReturnSummary = {
   variantTitle?: string | null;
   refundedSkus?: string[];
   refundedItems?: ReturnLineItem[];
+  returnOwnershipSummary?: ReturnOwnershipSummary | null;
 };
 
 export type DashboardReturnSummary = {
@@ -1358,6 +1388,7 @@ export type ReturnDetail = ReturnSummary & {
   items: ReturnLineItem[];
   timeline: Array<{ label: string; at: string }>;
   settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
+  returnOwnershipSummary?: ReturnOwnershipSummary | null;
 };
 
 export type KargonomiReturnPreview = {

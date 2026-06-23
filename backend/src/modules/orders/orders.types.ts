@@ -1,4 +1,5 @@
 import type { FinanceLedgerPreviewDto } from '../finance/finance-ledger-preview.types.js';
+import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import type { NavlungoCreatePostRequestSummaryDto } from '../shipping/shipping-execution.types.js';
 
 export type OrderSummaryDto = {
@@ -684,13 +685,14 @@ export type AdminOrderBreakdownAllocationDto = {
   totalAmount: string;
   lineItems: AdminOrderBreakdownLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
-  returnRecords: Array<{
-    id: string;
-    status: string;
-    reason: string | null;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+    returnRecords: Array<{
+      id: string;
+      status: string;
+      reason: string | null;
+      createdAt: string;
+      updatedAt: string;
+      returnOwnershipSummary: ReturnOwnershipSummaryDto | null;
+    }>;
   refundRecords: Array<{
     id: string;
     sourceShopifyRefundId: string;

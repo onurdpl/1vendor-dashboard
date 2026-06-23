@@ -28,6 +28,7 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { formatOwnerLabel } from '../lib/returnOwnershipSummary';
 import { formatDateTime } from '../services/real/formatting';
 
 function formatDate(value: string) {
@@ -1348,9 +1349,9 @@ export function AdminShopifyOrderPage() {
             </div>
           </section>
 
-          {allocation.transferSummary ? (
-            <>
-              <section className="economic-transfer-summary-card" aria-label="Economic transfer summary">
+            {allocation.transferSummary ? (
+              <>
+                <section className="economic-transfer-summary-card" aria-label="Economic transfer summary">
                 <div className="economic-transfer-summary-header">
                   <div>
                     <p className="eyebrow">Economic transfer</p>
@@ -1384,12 +1385,70 @@ export function AdminShopifyOrderPage() {
                   </div>
                 </div>
               </section>
-              <TransferDiagnosticsCard transferId={allocation.transferSummary.id} />
-            </>
-          ) : null}
+                <TransferDiagnosticsCard transferId={allocation.transferSummary.id} />
+              </>
+            ) : null}
 
-          {allocation.cancelRefundReview ? (
-            <section className="economic-transfer-summary-card" aria-label="Cancel refund review summary">
+            {allocation.returnRecords?.some((returnRecord) => returnRecord.returnOwnershipSummary) ? (
+              <section className="economic-transfer-summary-card" aria-label="Return ownership context">
+                <div className="economic-transfer-summary-header">
+                  <div>
+                    <p className="eyebrow">Return ownership</p>
+                    <h3>Ownership context</h3>
+                  </div>
+                </div>
+                <p className="page-description">
+                  Return owner and finance owner are shown for audit context only. They do not change allocation actions.
+                </p>
+                {allocation.returnRecords
+                  .filter((returnRecord) => returnRecord.returnOwnershipSummary)
+                  .map((returnRecord) => {
+                    const ownership = returnRecord.returnOwnershipSummary;
+                    if (!ownership) {
+                      return null;
+                    }
+
+                    return (
+                      <div key={returnRecord.id}>
+                        <div className="economic-transfer-summary-header">
+                          <div>
+                            <p className="eyebrow">Return {returnRecord.id}</p>
+                            <h4>{returnRecord.status}</h4>
+                          </div>
+                        </div>
+                        <div className="compact-meta-grid">
+                          <div className="meta-item">
+                            <span>Return owner</span>
+                            <strong>{formatOwnerLabel(ownership.returnOwnerVendorId, ownership.returnOwnerVendorName)}</strong>
+                          </div>
+                          <div className="meta-item">
+                            <span>Current assigned vendor</span>
+                            <strong>{formatOwnerLabel(ownership.assignedVendorId, ownership.assignedVendorName)}</strong>
+                          </div>
+                          <div className="meta-item">
+                            <span>Original vendor</span>
+                            <strong>{formatOwnerLabel(ownership.originalVendorId, ownership.originalVendorName)}</strong>
+                          </div>
+                          <div className="meta-item">
+                            <span>Refund / finance owner</span>
+                            <strong>{formatOwnerLabel(ownership.refundFinanceOwnerVendorId, ownership.refundFinanceOwnerVendorName)}</strong>
+                          </div>
+                        </div>
+                        {ownership.transferSummary ? (
+                          <p className="page-description">
+                            Transfer:{' '}
+                            {formatOwnerLabel(ownership.transferSummary.fromVendorId, ownership.transferSummary.fromVendorName)} to{' '}
+                            {formatOwnerLabel(ownership.transferSummary.toVendorId, ownership.transferSummary.toVendorName)}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+              </section>
+            ) : null}
+
+            {allocation.cancelRefundReview ? (
+              <section className="economic-transfer-summary-card" aria-label="Cancel refund review summary">
               <div className="economic-transfer-summary-header">
                 <div>
                   <p className="eyebrow">Cancel / refund review</p>

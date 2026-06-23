@@ -3,6 +3,7 @@ import type {
   DashboardReturnSummary,
   KargonomiReturnPreview,
   ReturnDetail,
+  ReturnOwnershipSummary,
   ReturnSummary,
   SettlementRefundAdjustmentReference,
 } from '../../lib/api/contracts';
@@ -86,6 +87,7 @@ type ReturnSummaryDto = {
     refundAmount: string;
   }>;
   settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
+  returnOwnershipSummary?: ReturnOwnershipSummary | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -96,6 +98,7 @@ type ReturnDetailDto = ReturnSummaryDto & {
   requestCreatedAt: string | null;
   requestUpdatedAt: string | null;
   refundedItems: NonNullable<ReturnSummaryDto['refundedItems']>;
+  returnOwnershipSummary?: ReturnOwnershipSummary | null;
 };
 
 type DashboardReturnSummaryDto = {
@@ -320,6 +323,7 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     variantTitle: summaryVariantTitle || null,
     refundedSkus: dto.refundedSkus,
     refundedItems,
+    returnOwnershipSummary: dto.returnOwnershipSummary ?? null,
   };
 }
 
@@ -385,6 +389,7 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     refundedItems,
     items: refundedItems,
     settlementRefundAdjustments: response.settlementRefundAdjustments ?? [],
+    returnOwnershipSummary: response.returnOwnershipSummary ?? null,
     timeline: [
       {
         label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',

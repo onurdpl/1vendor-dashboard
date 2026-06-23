@@ -169,6 +169,77 @@ describe('returns list payload optimization', () => {
     );
   });
 
+  it('exposes return owner snapshot and active economic owner on detail responses', async () => {
+    const record = {
+      ...buildReturnRecord(),
+      ownerVendorId: 'sporjinal',
+      ownerVendor: {
+        id: 'sporjinal',
+        name: 'Sporjinal',
+      },
+    };
+    record.vendorAllocation.originalVendorId = 'yalispor';
+    record.vendorAllocation.assignedVendorId = 'sporjinal';
+    Object.assign(record.vendorAllocation, {
+      originalVendor: {
+        id: 'yalispor',
+        name: 'Yalı Spor',
+      },
+      assignedVendor: {
+        id: 'sporjinal',
+        name: 'Sporjinal',
+      },
+      financeEntries: [
+        {
+          vendorId: 'sporjinal',
+          entryType: 'sale',
+          voidedAt: null,
+          vendor: {
+            id: 'sporjinal',
+            name: 'Sporjinal',
+          },
+        },
+      ],
+      economicTransfers: [
+        {
+          status: 'COMPLETED',
+          fromVendorId: 'yalispor',
+          toVendorId: 'sporjinal',
+          completedAt: new Date('2026-06-18T09:30:00.000Z'),
+          createdAt: new Date('2026-06-18T09:00:00.000Z'),
+          fromVendor: {
+            name: 'Yalı Spor',
+          },
+          toVendor: {
+            name: 'Sporjinal',
+          },
+        },
+      ],
+    });
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(record);
+
+    const result = await getVendorReturnById('sporjinal', 'return-1');
+
+    expect(result?.returnOwnershipSummary).toEqual(
+      expect.objectContaining({
+        originalVendorId: 'yalispor',
+        originalVendorName: 'Yalı Spor',
+        assignedVendorId: 'sporjinal',
+        assignedVendorName: 'Sporjinal',
+        returnOwnerVendorId: 'sporjinal',
+        returnOwnerVendorName: 'Sporjinal',
+        refundFinanceOwnerVendorId: 'sporjinal',
+        economicOwnerVendorId: 'sporjinal',
+        ownershipSource: 'return_owner_snapshot',
+        transferSummary: expect.objectContaining({
+          fromVendorId: 'yalispor',
+          toVendorId: 'sporjinal',
+          transferCompletedAt: '2026-06-18T09:30:00.000Z',
+        }),
+      }),
+    );
+  });
+
   it('threads stored Shopify line item images into return list summaries', async () => {
     prismaMock.returnRecord.findMany.mockResolvedValueOnce([buildReturnRecord()]);
 

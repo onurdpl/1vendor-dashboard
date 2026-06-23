@@ -37,6 +37,7 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { isTerminalRefundedReturn } from '../lib/returnOperationalState';
+import { formatOwnerLabel, formatOwnershipSource, hasOwnerLineageChange } from '../lib/returnOwnershipSummary';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
@@ -936,11 +937,11 @@ export function ReturnDetailPage() {
           </article>
         </main>
         <aside className="return-review-side" aria-label="Return operational sidebar">
-          <article className="return-review-card return-review-summary-card">
-            <div className="return-review-card-header">
-              <div>
-                <p className="eyebrow">Summary</p>
-                <h3>Return details</h3>
+            <article className="return-review-card return-review-summary-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Summary</p>
+                  <h3>Return details</h3>
               </div>
             </div>
             <div className="return-review-summary-list" aria-label="Return summary skeleton">
@@ -1589,13 +1590,110 @@ export function ReturnDetailPage() {
               <div>
                 <span>Vendor</span>
                 <strong>{currentVendor.vendorName}</strong>
+                </div>
               </div>
-            </div>
-          </article>
+            </article>
 
-          <OperationalTimeline
-            title="Timeline"
-            events={unifiedTimelineEvents}
+            {returnRequest.returnOwnershipSummary ? (
+              <article className="return-review-card return-review-summary-card" aria-label="Return ownership snapshot">
+                <div className="return-review-card-header">
+                  <div>
+                    <p className="eyebrow">Ownership snapshot</p>
+                    <h3>Return ownership</h3>
+                  </div>
+                </div>
+                <p className="page-description">
+                  Return and refund ownership are resolved from the allocation and active economic owner at the time records are created.
+                </p>
+                {hasOwnerLineageChange(returnRequest.returnOwnershipSummary) ? (
+                  <p className="page-description">
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.originalVendorId,
+                        returnRequest.returnOwnershipSummary.originalVendorName,
+                      )}{' '}
+                      to{' '}
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.assignedVendorId,
+                        returnRequest.returnOwnershipSummary.assignedVendorName,
+                      )}
+                    </strong>
+                  </p>
+                ) : null}
+                <div className="return-review-summary-list">
+                  <div>
+                    <span>Original vendor</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.originalVendorId,
+                        returnRequest.returnOwnershipSummary.originalVendorName,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Current assigned vendor</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.assignedVendorId,
+                        returnRequest.returnOwnershipSummary.assignedVendorName,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Return owner</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.returnOwnerVendorId,
+                        returnRequest.returnOwnershipSummary.returnOwnerVendorName,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Refund / finance owner</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.refundFinanceOwnerVendorId,
+                        returnRequest.returnOwnershipSummary.refundFinanceOwnerVendorName,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Economic owner</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.economicOwnerVendorId,
+                        returnRequest.returnOwnershipSummary.economicOwnerVendorName,
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Ownership source</span>
+                    <strong>{formatOwnershipSource(returnRequest.returnOwnershipSummary.ownershipSource)}</strong>
+                  </div>
+                </div>
+                {returnRequest.returnOwnershipSummary.transferSummary ? (
+                  <p className="page-description">
+                    Transfer:{' '}
+                    {formatOwnerLabel(
+                      returnRequest.returnOwnershipSummary.transferSummary.fromVendorId,
+                      returnRequest.returnOwnershipSummary.transferSummary.fromVendorName,
+                    )}{' '}
+                    to{' '}
+                    {formatOwnerLabel(
+                      returnRequest.returnOwnershipSummary.transferSummary.toVendorId,
+                      returnRequest.returnOwnershipSummary.transferSummary.toVendorName,
+                    )}
+                    {returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt
+                      ? ` · ${formatDate(returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt)}`
+                      : ''}
+                  </p>
+                ) : null}
+              </article>
+            ) : null}
+
+            <OperationalTimeline
+              title="Timeline"
+              events={unifiedTimelineEvents}
             audience={audience}
           />
 
