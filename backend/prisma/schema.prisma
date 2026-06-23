@@ -311,6 +311,7 @@ model User {
   financeIntegrityAlertsAcknowledged FinanceIntegrityAlert[]        @relation("financeIntegrityAlertAcknowledgedBy")
   financeIntegrityAlertsResolved     FinanceIntegrityAlert[]        @relation("financeIntegrityAlertResolvedBy")
   outboundRefundAttemptsRequested    OutboundShopifyRefundAttempt[] @relation("outboundShopifyRefundAttemptRequestedBy")
+  allocationSplitEventsCreated       AllocationSplitEvent[]         @relation("allocationSplitActor")
   supportTickets                     SupportTicket[]
   supportNotes                       SupportTicketNote[]
   supportReplies                     SupportTicketReply[]
@@ -658,6 +659,8 @@ model VendorAllocation {
   vendorIntegrationShipmentEvents        VendorIntegrationShipmentEvent[]
   vendorIntegrationInvoiceEvents         VendorIntegrationInvoiceEvent[]
   outboundShopifyRefundAttempts          OutboundShopifyRefundAttempt[]
+  sourceAllocationSplitEvents            AllocationSplitEvent[]           @relation("allocationSplitSourceAllocation")
+  childAllocationSplitEvents             AllocationSplitEvent[]           @relation("allocationSplitChildAllocation")
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -790,6 +793,33 @@ model AllocationAssignmentHistory {
   fromVendor         Vendor?          @relation("assignmentFromVendor", fields: [fromVendorId], references: [id])
   toVendor           Vendor           @relation("assignmentToVendor", fields: [toVendorId], references: [id])
   actorUser          User?            @relation("assignmentActor", fields: [actorUserId], references: [id])
+}
+
+model AllocationSplitEvent {
+  id                                   String              @id @default(cuid())
+  sourceAllocationId                   String
+  childAllocationId                    String
+  reason                               String
+  note                                 String?
+  actorUserId                          String?
+  createdAt                            DateTime            @default(now())
+  movedVendorAllocationLineItemIdsJson Json?
+  movedShopifyLineItemIdsJson          Json?
+  sourceFinanceLedgerEntryId           String?
+  remainingFinanceLedgerEntryId        String?
+  childFinanceLedgerEntryId            String?
+  metadataJson                         Json?
+  sourceAllocation                     VendorAllocation    @relation("allocationSplitSourceAllocation", fields: [sourceAllocationId], references: [id], onDelete: Restrict)
+  childAllocation                      VendorAllocation    @relation("allocationSplitChildAllocation", fields: [childAllocationId], references: [id], onDelete: Restrict)
+  actorUser                            User?               @relation("allocationSplitActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  sourceFinanceLedgerEntry             FinanceLedgerEntry? @relation("allocationSplitSourceLedger", fields: [sourceFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  remainingFinanceLedgerEntry          FinanceLedgerEntry? @relation("allocationSplitRemainingLedger", fields: [remainingFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+  childFinanceLedgerEntry              FinanceLedgerEntry? @relation("allocationSplitChildLedger", fields: [childFinanceLedgerEntryId], references: [id], onDelete: SetNull)
+
+  @@index([sourceAllocationId])
+  @@index([childAllocationId])
+  @@index([actorUserId])
+  @@index([createdAt])
 }
 
 model AllocationEconomicTransfer {
@@ -973,49 +1003,52 @@ model ShopifyRefundLineItem {
 }
 
 model FinanceLedgerEntry {
-  id                            String                       @id @default(cuid())
-  vendorAllocationId            String?
-  vendorId                      String
-  entryType                     String
-  amount                        Decimal                      @db.Decimal(10, 2)
-  payoutStatus                  PayoutStatus                 @default(PENDING)
-  description                   String?
-  commissionPercentSnapshot     Decimal?                     @db.Decimal(5, 2)
-  commissionVatPercentSnapshot  Decimal?                     @db.Decimal(5, 2)
-  deductShippingEnabledSnapshot Boolean?
-  shippingModeSnapshot          ShippingDeductionMode?
-  fixedShippingFeeSnapshot      Decimal?                     @db.Decimal(10, 2)
-  shippingCostSnapshot          Decimal?                     @db.Decimal(10, 2)
-  shippingVatAmountSnapshot     Decimal?                     @db.Decimal(10, 2)
-  shippingCostSourceSnapshot    String?
-  shippingCostProviderSnapshot  String?
-  shippingCostIdSnapshot        String?
-  financialProfileIdSnapshot    String?
-  settlementDelayDaysSnapshot   Int                          @default(21)
-  settlementStatus              SettlementStatus             @default(PENDING)
-  settlementEligibleAt          DateTime?
-  accruedAt                     DateTime?
-  payableAt                     DateTime?
-  settledAt                     DateTime?
-  settlementHoldReason          String?
-  voidedAt                      DateTime?
-  voidReason                    String?
-  supersededByLedgerId          String?
-  createdAt                     DateTime                     @default(now())
-  updatedAt                     DateTime                     @updatedAt
-  vendorAllocation              VendorAllocation?            @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
-  vendor                        Vendor                       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  supersededBy                  FinanceLedgerEntry?          @relation("FinanceLedgerSupersession", fields: [supersededByLedgerId], references: [id], onDelete: SetNull)
-  supersedes                    FinanceLedgerEntry[]         @relation("FinanceLedgerSupersession")
-  economicTransfersFrom         AllocationEconomicTransfer[] @relation("economicTransferFromLedger")
-  economicTransfersTo           AllocationEconomicTransfer[] @relation("economicTransferToLedger")
-  payoutBatchLines              PayoutBatchLine[]
-  financeEvents                 FinanceEvent[]
-  settlementApprovalLines       SettlementApprovalLine[]
-  refundAdjustments             SettlementRefundAdjustment[]
-  vendorBalanceEvents           VendorBalanceEvent[]
-  operationalSignals            OperationalSignal[]
-  automationActions             AutomationAction[]
+  id                             String                       @id @default(cuid())
+  vendorAllocationId             String?
+  vendorId                       String
+  entryType                      String
+  amount                         Decimal                      @db.Decimal(10, 2)
+  payoutStatus                   PayoutStatus                 @default(PENDING)
+  description                    String?
+  commissionPercentSnapshot      Decimal?                     @db.Decimal(5, 2)
+  commissionVatPercentSnapshot   Decimal?                     @db.Decimal(5, 2)
+  deductShippingEnabledSnapshot  Boolean?
+  shippingModeSnapshot           ShippingDeductionMode?
+  fixedShippingFeeSnapshot       Decimal?                     @db.Decimal(10, 2)
+  shippingCostSnapshot           Decimal?                     @db.Decimal(10, 2)
+  shippingVatAmountSnapshot      Decimal?                     @db.Decimal(10, 2)
+  shippingCostSourceSnapshot     String?
+  shippingCostProviderSnapshot   String?
+  shippingCostIdSnapshot         String?
+  financialProfileIdSnapshot     String?
+  settlementDelayDaysSnapshot    Int                          @default(21)
+  settlementStatus               SettlementStatus             @default(PENDING)
+  settlementEligibleAt           DateTime?
+  accruedAt                      DateTime?
+  payableAt                      DateTime?
+  settledAt                      DateTime?
+  settlementHoldReason           String?
+  voidedAt                       DateTime?
+  voidReason                     String?
+  supersededByLedgerId           String?
+  createdAt                      DateTime                     @default(now())
+  updatedAt                      DateTime                     @updatedAt
+  vendorAllocation               VendorAllocation?            @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  vendor                         Vendor                       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  supersededBy                   FinanceLedgerEntry?          @relation("FinanceLedgerSupersession", fields: [supersededByLedgerId], references: [id], onDelete: SetNull)
+  supersedes                     FinanceLedgerEntry[]         @relation("FinanceLedgerSupersession")
+  economicTransfersFrom          AllocationEconomicTransfer[] @relation("economicTransferFromLedger")
+  economicTransfersTo            AllocationEconomicTransfer[] @relation("economicTransferToLedger")
+  payoutBatchLines               PayoutBatchLine[]
+  financeEvents                  FinanceEvent[]
+  settlementApprovalLines        SettlementApprovalLine[]
+  refundAdjustments              SettlementRefundAdjustment[]
+  vendorBalanceEvents            VendorBalanceEvent[]
+  operationalSignals             OperationalSignal[]
+  automationActions              AutomationAction[]
+  sourceAllocationSplitEvents    AllocationSplitEvent[]       @relation("allocationSplitSourceLedger")
+  remainingAllocationSplitEvents AllocationSplitEvent[]       @relation("allocationSplitRemainingLedger")
+  childAllocationSplitEvents     AllocationSplitEvent[]       @relation("allocationSplitChildLedger")
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
