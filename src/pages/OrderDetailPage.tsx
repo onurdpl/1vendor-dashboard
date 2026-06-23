@@ -401,6 +401,10 @@ function formatCancellationReason(value: string | null | undefined) {
   return value?.trim() || null;
 }
 
+function normalizeTimelineTitle(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? '';
+}
+
 function getTrackingTitle(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
   return order.trackingNumber || order.carrier || order.trackingUrl ? 'Tracking Synced' : 'Missing Tracking';
 }
@@ -4863,6 +4867,52 @@ export function OrderDetailPage() {
     at: order.date,
     tone: 'info',
   });
+  if (isVendorBlockedOrder) {
+    const vendorBlockedHistory = safeArray(order.assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
+    const vendorBlockedAt = order.assignmentBlockedAt ?? vendorBlockedHistory?.createdAt ?? order.date;
+    const rejectionReason = vendorBlockedHistory?.reason ?? vendorBlockedReason;
+    const existingTimelineTitles = new Set(
+      safeArray(order.timeline).map((entry) => normalizeTimelineTitle(getVendorTimelineLabel(entry.label))),
+    );
+    const pushVendorBlockedEvent = (event: OperationalEventInput) => {
+      if (!existingTimelineTitles.has(normalizeTimelineTitle(event.title))) {
+        orderTimelineEvents.push(event);
+      }
+    };
+
+    pushVendorBlockedEvent({
+      id: 'vendor-rejected-allocation',
+      title: 'Vendor rejected allocation',
+      description: rejectionReason ? `Reason: ${rejectionReason}.` : 'Vendor rejected this allocation.',
+      at: vendorBlockedAt,
+      status: 'Rejected',
+      tone: 'warning',
+    });
+    pushVendorBlockedEvent({
+      id: 'vendor-blocked',
+      title: 'Vendor blocked',
+      description: 'Fulfillment is blocked for this allocation.',
+      at: vendorBlockedAt,
+      status: 'Blocked',
+      tone: 'warning',
+    });
+    pushVendorBlockedEvent({
+      id: 'vendor-blocked-finance-hold',
+      title: 'Finance hold activated',
+      description: 'Settlement and payout movement are held until admin resolution.',
+      at: vendorBlockedAt,
+      status: 'Held',
+      tone: 'attention',
+    });
+    pushVendorBlockedEvent({
+      id: 'vendor-blocked-admin-resolution',
+      title: 'Awaiting admin resolution',
+      description: 'Transfer allocation, refund review, or return to vendor.',
+      at: vendorBlockedAt,
+      status: 'Action required',
+      tone: 'attention',
+    });
+  }
   if (order.shipmentCreatedAt) {
     orderTimelineEvents.push({
       id: 'shipment-created',

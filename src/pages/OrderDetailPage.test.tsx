@@ -2192,6 +2192,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       fulfillmentStatus: 'Pending',
       shippingStatus: 'Awaiting Shipment',
       shipmentExecution: null,
+      assignmentHistory: [
+        {
+          action: 'vendor_blocked',
+          fromVendorId: 'sporjinal',
+          toVendorId: 'sporjinal',
+          reason: 'OUT_OF_STOCK',
+          actorName: 'Vendor User',
+          actorRole: 'vendor',
+          createdAt: '2026-05-15T12:12:00.000Z',
+        },
+      ],
     });
 
     renderOrderDetail();
@@ -2212,7 +2223,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.getByText('Current state')).toBeInTheDocument();
     expect(screen.getByText('Fulfillment')).toBeInTheDocument();
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
     expect(screen.getByText('Finance')).toBeInTheDocument();
     expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Next action').length).toBeGreaterThan(0);
@@ -2227,6 +2238,21 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(settlementPreview).getByText('Held settlement estimate')).toBeInTheDocument();
     expect(within(settlementPreview).getAllByText('Held estimate').length).toBeGreaterThan(0);
     expect(within(settlementPreview).queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
+
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    expect(timeline).not.toBeNull();
+    const timelineScope = within(timeline as HTMLElement);
+    const rejectedEvent = timelineScope.getByText('Vendor rejected allocation');
+    const blockedEvent = timelineScope.getByText('Vendor blocked');
+    const financeHoldEvent = timelineScope.getByText('Finance hold activated');
+    const adminResolutionEvent = timelineScope.getByText('Awaiting admin resolution');
+    expect(timelineScope.getByText('Reason: OUT_OF_STOCK.')).toBeInTheDocument();
+    expect(timelineScope.getByText('Fulfillment is blocked for this allocation.')).toBeInTheDocument();
+    expect(timelineScope.getByText('Settlement and payout movement are held until admin resolution.')).toBeInTheDocument();
+    expect(timelineScope.getByText('Transfer allocation, refund review, or return to vendor.')).toBeInTheDocument();
+    expect(Boolean(rejectedEvent.compareDocumentPosition(blockedEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(blockedEvent.compareDocumentPosition(financeHoldEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('keeps support directly below timeline in the right sidebar flow', async () => {
