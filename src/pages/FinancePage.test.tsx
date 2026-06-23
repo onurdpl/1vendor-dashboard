@@ -915,7 +915,11 @@ describe('FinancePage control center', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'View' }));
 
-    expect(await screen.findByText('Refund completed. Settlement offset pending review.')).toBeInTheDocument();
+    expect(await screen.findByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
+    expect(screen.getByText('Operational status')).toBeInTheDocument();
+    expect(screen.getAllByText('Resolved').length).toBeGreaterThan(0);
+    expect(screen.getByText('Settlement status')).toBeInTheDocument();
+    expect(screen.getByText('Review pending')).toBeInTheDocument();
     expect(screen.getByText('Sale basis')).toBeInTheDocument();
     expect(screen.getByText('Refund offset')).toBeInTheDocument();
     expect(screen.getByText('Net child effect')).toBeInTheDocument();
@@ -923,7 +927,52 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('-$4,213.50').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
     expect(screen.getByText('Child allocation operationally resolved')).toBeInTheDocument();
-    expect(screen.getByText('Refund offset awaiting settlement review')).toBeInTheDocument();
+    expect(screen.getByText('Settlement offset awaiting review')).toBeInTheDocument();
+    expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
+  });
+
+  it('labels refund deduction settlement review separately from operational work', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[1],
+          id: 'ledger-split-child-refund',
+          shopifyOrderNumber: '1097',
+          shopifyOrderId: '7819000001097',
+          amount: '$4,213.50',
+          status: 'Pending',
+          payoutCalculation: {
+            ...financeDashboard.transactions[1].payoutCalculation!,
+            refundImpact: '$4,213.50',
+            estimatedPayout: '-$4,213.50',
+          },
+          settlement: {
+            status: 'partially_refunded',
+            payoutReady: true,
+            eligibleAt: '2026-06-21T09:15:00Z',
+            accruedAt: '2026-06-21T09:15:00Z',
+            payableAt: '2026-06-21T09:15:00Z',
+            settledAt: null,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Refund deduction')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund recorded. Awaiting settlement offset review.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement review pending').length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    expect((await screen.findAllByText('Settlement offset review pending')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
+    expect(screen.getByText('Settlement offset awaiting review')).toBeInTheDocument();
+    expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
   });
 
   it('selects a finance row by ledgerId deep link', async () => {

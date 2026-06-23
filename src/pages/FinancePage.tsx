@@ -52,6 +52,7 @@ type FinanceTimelineItem = {
   label: string;
   at: string | null;
   status: string;
+  detail?: string;
   visibility?: 'admin';
 };
 
@@ -344,6 +345,14 @@ function isRefundedSplitChildSaleBasis(record: FinanceTransaction) {
   );
 }
 
+function isSettlementReviewPendingRecord(record: FinanceTransaction) {
+  return Boolean(record.settlement?.payoutReady || record.settlement?.status === 'partially_refunded');
+}
+
+function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
+  return isRefundRecord(record) && isSettlementReviewPendingRecord(record);
+}
+
 function isPendingOrHoldRecord(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
   return status === 'Pending' || status === 'Recorded';
@@ -365,6 +374,9 @@ function getPayoutActivityType(record: FinanceTransaction) {
 function getPayoutActivityDetail(record: FinanceTransaction) {
   if (isRefundedSplitChildSaleBasis(record)) {
     return 'Offset by Shopify refund';
+  }
+  if (isRefundDeductionSettlementReviewPending(record)) {
+    return 'Refund recorded. Awaiting settlement offset review.';
   }
   if (isSplitChildFinanceHold(record)) {
     return 'Split allocation hold';
@@ -434,6 +446,9 @@ function getSettlementReviewDisplay(record: FinanceTransaction) {
 function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const status = normalizeFinanceStatus(record.status);
   if (isRefundedSplitChildSaleBasis(record) && record.splitFinanceSummary?.refundOffsetStatus === 'settlement_review_pending') {
+    return 'Settlement review pending';
+  }
+  if (isRefundDeductionSettlementReviewPending(record)) {
     return 'Settlement review pending';
   }
   if (isVendorBlockedFinanceHold(record)) {
@@ -600,6 +615,7 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
   const reviewDisplay = getSettlementReviewDisplay(record);
   const splitRole = getSplitFinanceLedgerRole(record);
   const refundedSplitChildSaleBasis = isRefundedSplitChildSaleBasis(record);
+  const settlementOffsetReviewPending = refundedSplitChildSaleBasis || isRefundDeductionSettlementReviewPending(record);
   const splitItems: Array<FinanceTimelineItem | null> = record.splitFinanceSummary
     ? [
         {
@@ -612,13 +628,6 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
               label: refundedSplitChildSaleBasis ? 'Child allocation operationally resolved' : 'Child held ledger created',
               at: record.splitFinanceSummary.splitCreatedAt,
               status: refundedSplitChildSaleBasis ? 'Resolved' : 'Held',
-            }
-          : null,
-        refundedSplitChildSaleBasis
-          ? {
-              label: 'Refund offset awaiting settlement review',
-              at: record.date,
-              status: 'Review',
             }
           : null,
         splitRole === 'remaining_source' || splitRole === 'original_source'
@@ -638,9 +647,10 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
     },
     ...splitItems,
     {
-      label: reviewDisplay?.timelineLabel ?? (record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
+      label: reviewDisplay?.timelineLabel ?? (settlementOffsetReviewPending ? 'Settlement offset awaiting review' : record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
       status: reviewDisplay?.timelineStatus ?? (record.settlement?.payoutReady ? 'Review' : 'Preview'),
+      detail: settlementOffsetReviewPending ? 'Operational resolution completed. Only settlement accounting review remains.' : undefined,
     },
     record.payoutBatch
       ? {
@@ -1150,6 +1160,10 @@ export function FinancePage() {
   const selectedSplitLedgerLabel = selectedRecord ? getSplitFinanceLedgerLabel(selectedRecord) : null;
   const selectedSplitExplanation = selectedRecord ? getSplitFinanceExplanation(selectedRecord) : null;
   const selectedRefundedSplitChildSaleBasis = selectedRecord ? isRefundedSplitChildSaleBasis(selectedRecord) : false;
+  const selectedSettlementOffsetReviewPending =
+    selectedRecord ? selectedRefundedSplitChildSaleBasis || isRefundDeductionSettlementReviewPending(selectedRecord) : false;
+  const selectedSettlementReviewStatusLabel =
+    selectedSettlementOffsetReviewPending ? 'Settlement offset review pending' : selectedRecord ? getPayoutActivityStatusLabel(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
   const selectedRefundOffsetValue = selectedRecord?.payoutCalculation?.refundImpact ?? null;
   const selectedRefundedSplitChildNetEffect =
     selectedRecord && selectedRefundedSplitChildSaleBasis
@@ -1213,7 +1227,7 @@ export function FinancePage() {
       ...getFinanceTimelineItems(selectedRecord).map((item) => ({
         id: `finance-${selectedRecord.id}-${item.label}`,
         title: item.label,
-        description: selectedRecord.category,
+        description: item.detail ?? selectedRecord.category,
         at: item.at,
         status: item.status,
         tone: selectedRecord.category === 'Refund' ? ('warning' as const) : ('success' as const),
@@ -1723,17 +1737,19 @@ export function FinancePage() {
                 <div className="finance-detail-card-heading">
                   <h4>Settlement preview</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {getPayoutActivityStatusLabel(selectedRecord, financeAudience)}
+                    {selectedSettlementReviewStatusLabel}
                   </StatusBadge>
                 </div>
-                {selectedRefundedSplitChildSaleBasis ? (
-                  <p className="page-description">Refund completed. Settlement offset pending review.</p>
+                {selectedSettlementOffsetReviewPending ? (
+                  <p className="page-description">Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.</p>
                 ) : null}
                 <div className="finance-detail-rows">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Review status" value={getPayoutActivityStatusLabel(selectedRecord, financeAudience)} />
+                  <MetadataRow label="Review status" value={selectedSettlementReviewStatusLabel} />
                   {selectedRefundedSplitChildSaleBasis ? (
                     <>
+                      <MetadataRow label="Operational status" value="Resolved" />
+                      <MetadataRow label="Settlement status" value="Review pending" />
                       <MetadataRow label="Sale basis" value={<span className="finance-payout-value">{selectedRecord.amount}</span>} />
                       <MetadataRow label="Refund offset" value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRefundOffsetValue)}</span>} />
                       <MetadataRow label="Net child effect" value={<span>{selectedRefundedSplitChildNetEffect ?? UNKNOWN_FINANCE_VALUE}</span>} />
