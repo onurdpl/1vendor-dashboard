@@ -4595,6 +4595,8 @@ export function OrderDetailPage() {
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
+  const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
+  const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
@@ -4653,7 +4655,7 @@ export function OrderDetailPage() {
       state: 'Estimated',
     },
     {
-      label: 'Estimated settlement',
+      label: isVendorBlockedOrder ? 'Held settlement estimate' : 'Estimated settlement',
       value: financePreview
         ? formatFinancePreviewValue(financePreview.balance.netVendorPosition, financePreview.currency, {
             unknown: financePreview.unknowns.includes('vendor_payable'),
@@ -4663,13 +4665,19 @@ export function OrderDetailPage() {
     },
   ].map((row) => ({
     ...row,
-    state: row.value === ORDER_FINANCE_UNKNOWN_VALUE ? ORDER_FINANCE_UNKNOWN_VALUE : row.state,
+    state: row.value === ORDER_FINANCE_UNKNOWN_VALUE
+      ? ORDER_FINANCE_UNKNOWN_VALUE
+      : isVendorBlockedOrder
+        ? 'Held estimate'
+        : row.state,
   }));
   const financePreviewEntryTime = (eventType: string) =>
     financePreview?.entries.find((entry) => entry.eventType === eventType)?.occurredAt ?? null;
   const commissionEstimateValue = financePreviewRows.find((row) => row.label === 'Commission estimate')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const shippingDeductionValue = financePreviewRows.find((row) => row.label === 'Shipping deduction')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
-  const estimatedSettlementValue = financePreviewRows.find((row) => row.label === 'Estimated settlement')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
+  const estimatedSettlementValue =
+    financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate')?.value ??
+    ORDER_FINANCE_UNKNOWN_VALUE;
   const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
   const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
@@ -4782,8 +4790,6 @@ export function OrderDetailPage() {
         !financePreview ? 'ledger_preview_unavailable' : null,
       ].filter(Boolean) as string[]
     : [];
-  const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
-  const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const summaryCards = isVendorBlockedOrder
     ? [
         {
@@ -6094,23 +6100,39 @@ export function OrderDetailPage() {
           <article
             id="settlement-preview"
             ref={settlementPreviewRef}
-            className="order-detail-card-v2 order-financial-summary-card order-workspace-panel"
+            className={`order-detail-card-v2 order-financial-summary-card order-workspace-panel${isVendorBlockedOrder ? ' order-financial-summary-held' : ''}`}
             aria-label="Order finance preview"
             tabIndex={-1}
           >
             <div className="order-card-heading">
               <div>
-                <h2>Settlement preview</h2>
-                <p>{ORDER_FINANCE_HELPER_COPY}</p>
+                <h2>{isVendorBlockedOrder ? 'Settlement on hold' : 'Settlement preview'}</h2>
+                <p>
+                  {isVendorBlockedOrder
+                    ? 'Vendor rejected allocation. Settlement is excluded until resolution.'
+                    : ORDER_FINANCE_HELPER_COPY}
+                </p>
               </div>
-              <span className="order-preview-badge">Preview</span>
+              <span className="order-preview-badge">{isVendorBlockedOrder ? 'Held' : 'Preview'}</span>
             </div>
-            <WorkflowActionGuidance
-              actionLabel={orderSettlementGuidance.actionLabel}
-              description={orderSettlementGuidance.description}
-              tone={orderSettlementGuidance.tone}
-            />
-            <div className="order-financial-impact-grid order-finance-preview-grid">
+            {isVendorBlockedOrder ? (
+              <div className="finance-hold-notice" aria-label="Finance hold reason">
+                <div>
+                  <span>Finance hold reason</span>
+                  <strong>Vendor blocked allocation.</strong>
+                </div>
+                <p>
+                  Settlement eligibility returns only after transfer completed or refund resolved.
+                </p>
+              </div>
+            ) : (
+              <WorkflowActionGuidance
+                actionLabel={orderSettlementGuidance.actionLabel}
+                description={orderSettlementGuidance.description}
+                tone={orderSettlementGuidance.tone}
+              />
+            )}
+            <div className={`order-financial-impact-grid order-finance-preview-grid${isVendorBlockedOrder ? ' order-finance-preview-held' : ''}`}>
               {financePreviewRows.map((row) => (
                 <div key={row.label}>
                   <span>{row.label}</span>

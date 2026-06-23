@@ -6802,6 +6802,57 @@ h3 {
   line-height: 1.25;
 }
 
+.order-financial-summary-held .order-card-heading p {
+  color: #475569;
+}
+
+.finance-hold-notice {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.finance-hold-notice div {
+  display: grid;
+  gap: 2px;
+}
+
+.finance-hold-notice span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.finance-hold-notice strong {
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.finance-hold-notice p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.order-finance-preview-held {
+  background: #f1f5f9;
+}
+
+.order-finance-preview-held strong {
+  color: #64748b;
+}
+
+.order-finance-preview-held em {
+  color: #475569;
+}
+
 .order-financial-impact-grid em {
   color: #64748b;
   font-size: 0.66rem;

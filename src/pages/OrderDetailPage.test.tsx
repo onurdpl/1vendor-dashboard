@@ -2214,8 +2214,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Fulfillment')).toBeInTheDocument();
     expect(screen.getByText('Blocked')).toBeInTheDocument();
     expect(screen.getByText('Finance')).toBeInTheDocument();
-    expect(screen.getByText('Held')).toBeInTheDocument();
+    expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Next action').length).toBeGreaterThan(0);
+
+    const settlementPreview = screen.getByLabelText('Order finance preview');
+    expect(within(settlementPreview).getByRole('heading', { name: 'Settlement on hold' })).toBeInTheDocument();
+    expect(settlementPreview).toHaveTextContent('Vendor rejected allocation. Settlement is excluded until resolution.');
+    expect(within(settlementPreview).getByLabelText('Finance hold reason')).toHaveTextContent('Vendor blocked allocation.');
+    expect(within(settlementPreview).getByLabelText('Finance hold reason')).toHaveTextContent(
+      'Settlement eligibility returns only after transfer completed or refund resolved.',
+    );
+    expect(within(settlementPreview).getByText('Held settlement estimate')).toBeInTheDocument();
+    expect(within(settlementPreview).getAllByText('Held estimate').length).toBeGreaterThan(0);
+    expect(within(settlementPreview).queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
   });
 
   it('keeps support directly below timeline in the right sidebar flow', async () => {
