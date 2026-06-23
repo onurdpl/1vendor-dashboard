@@ -1064,6 +1064,22 @@ export type FulfillmentOrderCancellationPreview = {
   diagnosticMessage?: string;
 };
 
+export type MixedFulfillmentOrderDirectRefundProbe = {
+  eligible: boolean;
+  code: 'mixed_fulfillment_order_direct_refund_probe';
+  message: string;
+  blockers: string[];
+  warnings: string[];
+  selectedLineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+  }>;
+  sourceLineItems: Array<{
+    lineItemId: string;
+    preRefundRemainingQuantity: number;
+  }>;
+};
+
 export type ShopifyRefundPreviewResult = {
   ok: true;
   writesPerformed: false;
@@ -1090,6 +1106,7 @@ export type ShopifyRefundPreviewResult = {
   warnings: string[];
   blockers: string[];
   missingData: string[];
+  mixedFulfillmentOrderDirectRefundProbe?: MixedFulfillmentOrderDirectRefundProbe;
 };
 
 export type ShopifyRefundExecutionPayload = {
@@ -1099,6 +1116,7 @@ export type ShopifyRefundExecutionPayload = {
   note: string;
   confirmRefund: true;
   confirmPostRefundFulfillmentCheck?: boolean;
+  confirmMixedFulfillmentOrderDirectRefundProbe?: boolean;
 };
 
 export type ShopifyRefundExecutionResult = {

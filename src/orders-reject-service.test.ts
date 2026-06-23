@@ -1526,6 +1526,262 @@ describe('vendor order reject operational hold', () => {
     expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
   });
 
+  it('exposes a controlled direct refundCreate probe for eligible split-child mixed fulfillment orders while keeping preview blocked', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      {
+        id: 'alloc-1088',
+        assignedVendorId: 'yalispor',
+        lineItems: [
+          {
+            shopifyOrderLineItem: {
+              sourceLineItemId: '20346971095377',
+            },
+          },
+        ],
+      },
+      {
+        id: 'alloc-source',
+        assignedVendorId: 'yalispor',
+        lineItems: [
+          {
+            shopifyOrderLineItem: {
+              sourceLineItemId: '20346971095378',
+            },
+          },
+        ],
+      },
+    ]);
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD', 'SPLIT'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/2',
+                lineItemId: 'gid://shopify/LineItem/20346971095378',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      childAllocationSplitEvents: [{ id: 'split-1' }],
+    }));
+
+    const result = await previewShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      shopifyAdminService,
+    });
+
+    expect(result.fulfillmentOrderCancellation.overallClassification).toBe('blocked');
+    expect(result.blockers.some((blocker) => blocker.includes('outside the selected allocation refund'))).toBe(true);
+    expect(result.mixedFulfillmentOrderDirectRefundProbe).toMatchObject({
+      eligible: true,
+      code: 'mixed_fulfillment_order_direct_refund_probe',
+      sourceLineItems: [
+        {
+          lineItemId: 'gid://shopify/LineItem/20346971095378',
+          preRefundRemainingQuantity: 1,
+        },
+      ],
+    });
+  });
+
+  it('requires explicit confirmation before running the split-child mixed fulfillment order direct refundCreate probe', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      {
+        id: 'alloc-1088',
+        assignedVendorId: 'yalispor',
+        lineItems: [{ shopifyOrderLineItem: { sourceLineItemId: '20346971095377' } }],
+      },
+      {
+        id: 'alloc-source',
+        assignedVendorId: 'yalispor',
+        lineItems: [{ shopifyOrderLineItem: { sourceLineItemId: '20346971095378' } }],
+      },
+    ]);
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD', 'SPLIT'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/2',
+                lineItemId: 'gid://shopify/LineItem/20346971095378',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      childAllocationSplitEvents: [{ id: 'split-1' }],
+    }));
+
+    await expect(
+      executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+        restockType: 'CANCEL',
+        refundShipping: false,
+        notifyCustomer: true,
+        note: 'Controlled probe.',
+        confirmRefund: true,
+        confirmPostRefundFulfillmentCheck: true,
+        shopifyAdminService,
+      }),
+    ).rejects.toThrow('Mixed fulfillment order direct refundCreate probe confirmation is required.');
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).not.toHaveBeenCalled();
+  });
+
+  it('executes split-child mixed fulfillment order direct refundCreate probe and verifies child and source remaining quantities', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      {
+        id: 'alloc-1088',
+        assignedVendorId: 'yalispor',
+        lineItems: [{ shopifyOrderLineItem: { sourceLineItemId: '20346971095377' } }],
+      },
+      {
+        id: 'alloc-source',
+        assignedVendorId: 'yalispor',
+        lineItems: [{ shopifyOrderLineItem: { sourceLineItemId: '20346971095378' } }],
+      },
+    ]);
+    const fetchFulfillmentOrdersForCancellationClassification = vi.fn()
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD', 'SPLIT'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/2',
+                lineItemId: 'gid://shopify/LineItem/20346971095378',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        source: 'shopify_admin',
+        fulfillmentOrders: [
+          {
+            id: 'gid://shopify/FulfillmentOrder/1',
+            status: 'OPEN',
+            requestStatus: 'UNSUBMITTED',
+            supportedActions: ['CREATE_FULFILLMENT', 'MOVE', 'HOLD', 'SPLIT'],
+            assignedLocationId: 'gid://shopify/Location/1',
+            lineItems: [
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                lineItemId: 'gid://shopify/LineItem/20346971095377',
+                remainingQuantity: 0,
+                totalQuantity: 1,
+              },
+              {
+                id: 'gid://shopify/FulfillmentOrderLineItem/2',
+                lineItemId: 'gid://shopify/LineItem/20346971095378',
+                remainingQuantity: 1,
+                totalQuantity: 1,
+              },
+            ],
+          },
+        ],
+      });
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      fetchFulfillmentOrdersForCancellationClassification,
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      childAllocationSplitEvents: [{ id: 'split-1' }],
+    }));
+
+    const result = await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Controlled probe.',
+      confirmRefund: true,
+      confirmPostRefundFulfillmentCheck: true,
+      confirmMixedFulfillmentOrderDirectRefundProbe: true,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      refundLineItems: [
+        {
+          lineItemId: 'gid://shopify/LineItem/20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+          locationId: 'gid://shopify/Location/1',
+        },
+      ],
+    }));
+    expect(fetchFulfillmentOrdersForCancellationClassification).toHaveBeenCalledTimes(2);
+    expect(result.message).toBe('Shopify refund submitted. Fulfillment post-check passed. Waiting for refunds/create webhook.');
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.outboundShopifyRefundAttempt.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'SHOPIFY_ACTION_PENDING',
+        mutationResponseJson: expect.objectContaining({
+          postRefundFulfillmentCheck: expect.objectContaining({
+            status: 'passed',
+            mode: 'mixed_fulfillment_order_direct_refund_probe',
+          }),
+        }),
+        fulfillmentOrderCancellationJson: expect.objectContaining({
+          mixedFulfillmentOrderDirectRefundProbe: expect.objectContaining({
+            eligible: true,
+          }),
+        }),
+      }),
+    }));
+  });
+
   it('does not call refundCreate when fulfillment order cancellation returns userErrors', async () => {
     const shopifyAdminService = buildShopifyRefundPreviewService({
       fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({

@@ -387,15 +387,16 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
 
   app.post<{
     Params: { shopifyOrderId: string; allocationId: string };
-    Body: {
-      restockType?: string | null;
-      refundShipping?: boolean | null;
-      notifyCustomer?: boolean | null;
-      note?: string | null;
-      confirmRefund?: boolean | null;
-      confirmPostRefundFulfillmentCheck?: boolean | null;
-    };
-  }>(
+      Body: {
+        restockType?: string | null;
+        refundShipping?: boolean | null;
+        notifyCustomer?: boolean | null;
+        note?: string | null;
+        confirmRefund?: boolean | null;
+        confirmPostRefundFulfillmentCheck?: boolean | null;
+        confirmMixedFulfillmentOrderDirectRefundProbe?: boolean | null;
+      };
+    }>(
     '/admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund',
     {
       preHandler: [authMiddleware.authenticateRequest],
@@ -417,6 +418,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             note: request.body?.note,
             confirmRefund: request.body?.confirmRefund,
             confirmPostRefundFulfillmentCheck: request.body?.confirmPostRefundFulfillmentCheck,
+            confirmMixedFulfillmentOrderDirectRefundProbe: request.body?.confirmMixedFulfillmentOrderDirectRefundProbe,
             actorUserId: request.authUser?.id ?? null,
             shopifyAdminService: createShopifyAdminService(env),
           }),

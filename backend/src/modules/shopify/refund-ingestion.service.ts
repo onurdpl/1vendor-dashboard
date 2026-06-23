@@ -52,6 +52,26 @@ function toRefundLineItemTitle(lineItem: ShopifyRefundLineItemPayload['line_item
   return baseTitle;
 }
 
+function readPostRefundFulfillmentCheckStatus(value: unknown) {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const mutationResponse = value as Record<string, unknown>;
+  const postRefundFulfillmentCheck = mutationResponse.postRefundFulfillmentCheck;
+  if (typeof postRefundFulfillmentCheck !== 'object' || postRefundFulfillmentCheck === null) {
+    return null;
+  }
+
+  const status = (postRefundFulfillmentCheck as Record<string, unknown>).status;
+  return typeof status === 'string' ? status.trim().toLowerCase() : null;
+}
+
+function hasBlockingPostRefundFulfillmentCheck(value: unknown) {
+  const status = readPostRefundFulfillmentCheckStatus(value);
+  return Boolean(status && status !== 'passed');
+}
+
 function parseRefundPayload(payload: ShopifyRefundsCreateWebhookPayload): ParsedShopifyRefundPayload {
   const refundLineItems = Array.isArray(payload.refund_line_items) ? payload.refund_line_items : [];
 
@@ -142,7 +162,21 @@ async function resolveCancelRefundReviewAfterRefundIngestion(
   },
 ) {
   const normalizedReviewStatus = input.cancelRefundReviewStatus?.trim().toUpperCase() ?? '';
-  if (CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET.has(normalizedReviewStatus)) {
+  const blockingPostCheckAttempt = await tx.outboundShopifyRefundAttempt.findFirst({
+    where: {
+      vendorAllocationId: input.vendorAllocationId,
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+    },
+    select: {
+      mutationResponseJson: true,
+    },
+    orderBy: {
+      requestedAt: 'desc',
+    },
+  });
+  const shouldKeepReviewOpen = hasBlockingPostRefundFulfillmentCheck(blockingPostCheckAttempt?.mutationResponseJson);
+
+  if (CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET.has(normalizedReviewStatus) && !shouldKeepReviewOpen) {
     await tx.vendorAllocation.updateMany({
       where: {
         id: input.vendorAllocationId,
@@ -154,6 +188,19 @@ async function resolveCancelRefundReviewAfterRefundIngestion(
         cancelRefundReviewStatus: 'RESOLVED',
       },
     });
+  }
+
+  if (shouldKeepReviewOpen) {
+    await tx.outboundShopifyRefundAttempt.updateMany({
+      where: {
+        vendorAllocationId: input.vendorAllocationId,
+        status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+      },
+      data: {
+        shopifyRefundId: input.sourceShopifyRefundId,
+      },
+    });
+    return;
   }
 
   await tx.outboundShopifyRefundAttempt.updateMany({

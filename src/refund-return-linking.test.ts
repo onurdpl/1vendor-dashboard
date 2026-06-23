@@ -35,6 +35,7 @@ const txMock = vi.hoisted(() => ({
     updateMany: vi.fn(),
   },
   outboundShopifyRefundAttempt: {
+    findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
   financeLedgerEntry: {
@@ -441,6 +442,7 @@ describe('Shopify refund return linking', () => {
     });
     txMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
     txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
+    txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
   });
 
@@ -648,6 +650,39 @@ describe('Shopify refund return linking', () => {
         status: 'RESOLVED',
         shopifyRefundId: '1074533826897',
         resolvedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('keeps cancel/refund review open when the matching outbound attempt has a blocking post-check warning', async () => {
+    setupOrder({ cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' });
+    txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValueOnce({
+      mutationResponseJson: {
+        postRefundFulfillmentCheck: {
+          status: 'warning',
+          message: 'Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.',
+        },
+      },
+    });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+    });
+
+    expect(txMock.vendorAllocation.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        cancelRefundReviewStatus: 'RESOLVED',
+      },
+    }));
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        vendorAllocationId: 'alloc-1029-sporjinal',
+        status: 'SHOPIFY_ACTION_PENDING',
+      },
+      data: {
+        shopifyRefundId: '1074533826897',
       },
     });
   });

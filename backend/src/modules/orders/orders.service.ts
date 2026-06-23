@@ -251,6 +251,7 @@ export type AdminShopifyRefundExecutionInput = {
   note?: string | null;
   confirmRefund?: boolean | null;
   confirmPostRefundFulfillmentCheck?: boolean | null;
+  confirmMixedFulfillmentOrderDirectRefundProbe?: boolean | null;
   actorUserId?: string | null;
   shopifyAdminService: ShopifyRefundExecutionService;
 };
@@ -290,6 +291,23 @@ export type AdminShopifyRefundPreviewResponse = {
   warnings: string[];
   blockers: string[];
   missingData: string[];
+  mixedFulfillmentOrderDirectRefundProbe: MixedFulfillmentOrderDirectRefundProbeEvaluation;
+};
+
+type MixedFulfillmentOrderDirectRefundProbeEvaluation = {
+  eligible: boolean;
+  code: 'mixed_fulfillment_order_direct_refund_probe';
+  message: string;
+  blockers: string[];
+  warnings: string[];
+  selectedLineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+  }>;
+  sourceLineItems: Array<{
+    lineItemId: string;
+    preRefundRemainingQuantity: number;
+  }>;
 };
 
 const BLOCKED_ALLOCATION_STATUSES = new Set<AllocationStatus>([
@@ -375,6 +393,162 @@ function normalizeShopifyIdentifier(value: string | null | undefined) {
   return text.split('/').at(-1)?.trim().toLowerCase() || text.toLowerCase();
 }
 
+function normalizeShopifyAction(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? '';
+}
+
+function hasDirectFulfillmentOrderCancelAction(actions: string[] | null | undefined) {
+  return (actions ?? []).some((action) => {
+    const normalized = normalizeShopifyAction(action);
+    return normalized === 'cancel' || normalized === 'cancel_fulfillment_order';
+  });
+}
+
+function hasFulfillmentOrderSplitAction(actions: string[] | null | undefined) {
+  return (actions ?? []).some((action) => normalizeShopifyAction(action) === 'split');
+}
+
+function buildMixedFulfillmentOrderDirectRefundProbeEvaluation(
+  overrides: Partial<MixedFulfillmentOrderDirectRefundProbeEvaluation> = {},
+): MixedFulfillmentOrderDirectRefundProbeEvaluation {
+  return {
+    eligible: false,
+    code: 'mixed_fulfillment_order_direct_refund_probe',
+    message:
+      'Mixed fulfillment order direct refundCreate probe is not available for this allocation.',
+    blockers: [],
+    warnings: [],
+    selectedLineItems: [],
+    sourceLineItems: [],
+    ...overrides,
+  };
+}
+
+function evaluateMixedFulfillmentOrderDirectRefundProbe(input: {
+  allocation: {
+    id: string;
+    allocationStatus?: string | null;
+    childAllocationSplitEvents?: Array<{ id: string }>;
+  };
+  selectedLineItems: Array<{
+    lineItemId: string;
+    quantity: number;
+  }>;
+  fulfillmentOrderCancellation: FulfillmentOrderCancellationClassificationResult;
+}) {
+  const blockers: string[] = [];
+  const selectedLineItems = input.selectedLineItems
+    .map((lineItem) => ({
+      lineItemId: lineItem.lineItemId,
+      quantity: lineItem.quantity,
+    }))
+    .filter((lineItem) => normalizeShopifyIdentifier(lineItem.lineItemId));
+  const selectedLineItemIds = new Set(selectedLineItems.map((lineItem) => normalizeShopifyIdentifier(lineItem.lineItemId)));
+
+  if ((input.allocation.childAllocationSplitEvents ?? []).length === 0) {
+    blockers.push('Controlled mixed fulfillment order refund probe is only available for split child allocations.');
+  }
+  if (input.allocation.allocationStatus?.trim().toUpperCase() !== AllocationStatus.VENDOR_BLOCKED) {
+    blockers.push('Controlled mixed fulfillment order refund probe requires a vendor-blocked allocation.');
+  }
+  if (input.fulfillmentOrderCancellation.overallClassification !== 'blocked') {
+    blockers.push('Controlled mixed fulfillment order refund probe requires a blocked mixed fulfillment order classification.');
+  }
+
+  const mixedAffectedOrders = input.fulfillmentOrderCancellation.affectedFulfillmentOrders.filter(
+    (order) => order.classification === 'unsafe_mixed_fulfillment_order',
+  );
+  if (mixedAffectedOrders.length !== 1) {
+    blockers.push('Controlled mixed fulfillment order refund probe requires exactly one affected mixed fulfillment order.');
+  }
+
+  const affectedOrder = mixedAffectedOrders[0];
+  const sourceLineItems: MixedFulfillmentOrderDirectRefundProbeEvaluation['sourceLineItems'] = [];
+
+  if (affectedOrder) {
+    if (normalizeShopifyAction(affectedOrder.status) !== 'open') {
+      blockers.push('Controlled mixed fulfillment order refund probe requires Shopify fulfillment order status OPEN.');
+    }
+    if (normalizeShopifyAction(affectedOrder.requestStatus) !== 'unsubmitted') {
+      blockers.push('Controlled mixed fulfillment order refund probe requires Shopify fulfillment order requestStatus UNSUBMITTED.');
+    }
+    if (!hasFulfillmentOrderSplitAction(affectedOrder.supportedActions)) {
+      blockers.push('Controlled mixed fulfillment order refund probe requires Shopify fulfillment order SPLIT support.');
+    }
+    if (hasDirectFulfillmentOrderCancelAction(affectedOrder.supportedActions)) {
+      blockers.push('Controlled mixed fulfillment order refund probe is not used when Shopify advertises a direct cancel action.');
+    }
+    if (!affectedOrder.assignedLocationId?.trim()) {
+      blockers.push('Missing Shopify locationId required for restockType CANCEL.');
+    }
+
+    const selectedLinesInFulfillmentOrder = affectedOrder.lineItems.filter((lineItem) => lineItem.selected);
+    const selectedLinesInFulfillmentOrderIds = new Set(
+      selectedLinesInFulfillmentOrder.map((lineItem) => normalizeShopifyIdentifier(lineItem.shopifyLineItemId)),
+    );
+    for (const selectedLineItem of selectedLineItems) {
+      if (!selectedLinesInFulfillmentOrderIds.has(normalizeShopifyIdentifier(selectedLineItem.lineItemId))) {
+        blockers.push(`Selected Shopify line item ${selectedLineItem.lineItemId} was not found in the affected fulfillment order.`);
+      }
+    }
+
+    for (const lineItem of affectedOrder.lineItems) {
+      if (lineItem.selected) {
+        if (lineItem.ownerAllocationId !== input.allocation.id) {
+          blockers.push(`Selected Shopify line item ${lineItem.shopifyLineItemId} is not owned by the split child allocation.`);
+        }
+        if (lineItem.remainingQuantity === null || !Number.isFinite(lineItem.remainingQuantity)) {
+          blockers.push(`Fulfillment order line item ${lineItem.fulfillmentOrderLineItemId} is missing remainingQuantity.`);
+        } else if (lineItem.selectedQuantity !== lineItem.remainingQuantity) {
+          blockers.push(`Selected Shopify line item ${lineItem.shopifyLineItemId} quantity does not match remainingQuantity.`);
+        }
+        if (!selectedLineItemIds.has(normalizeShopifyIdentifier(lineItem.shopifyLineItemId))) {
+          blockers.push(`Fulfillment order selected line item ${lineItem.shopifyLineItemId} is not part of the refundCreate input.`);
+        }
+        continue;
+      }
+
+      if (!lineItem.ownerAllocationId) {
+        blockers.push(`Mixed fulfillment order line item ${lineItem.shopifyLineItemId} has no local allocation owner.`);
+        continue;
+      }
+      if (lineItem.ownerAllocationId === input.allocation.id) {
+        blockers.push(`Split child line item ${lineItem.shopifyLineItemId} is present in the fulfillment order but not selected for refund.`);
+        continue;
+      }
+      if (lineItem.remainingQuantity === null || !Number.isFinite(lineItem.remainingQuantity) || lineItem.remainingQuantity <= 0) {
+        blockers.push(`Source allocation line item ${lineItem.shopifyLineItemId} is not currently fulfillable in Shopify.`);
+        continue;
+      }
+
+      sourceLineItems.push({
+        lineItemId: lineItem.shopifyLineItemId,
+        preRefundRemainingQuantity: lineItem.remainingQuantity,
+      });
+    }
+  }
+
+  if (sourceLineItems.length === 0) {
+    blockers.push('Controlled mixed fulfillment order refund probe requires at least one source allocation line to remain fulfillable.');
+  }
+
+  const eligible = blockers.length === 0;
+  return buildMixedFulfillmentOrderDirectRefundProbeEvaluation({
+    eligible,
+    message: eligible
+      ? 'Controlled mixed fulfillment order direct refundCreate probe is available. It bypasses fulfillmentOrderCancel and requires post-refund Shopify fulfillment verification.'
+      : 'Mixed fulfillment order direct refundCreate probe is blocked by safety gates.',
+    blockers,
+    warnings: eligible
+      ? [
+          'Controlled probe only: refundCreate will run without fulfillmentOrderCancel, then Shopify fulfillment remainingQuantity will be rechecked.',
+        ]
+      : [],
+    selectedLineItems,
+    sourceLineItems,
+  });
+}
+
 function refundRestockTypeRequiresLocation(restockType: ShopifyRefundRestockType) {
   return restockType === 'CANCEL';
 }
@@ -456,8 +630,14 @@ function buildPostRefundFulfillmentCheck(input: {
     lineItemId: string;
     quantity: number;
   }>;
+  sourceLineItems?: Array<{
+    lineItemId: string;
+    preRefundRemainingQuantity: number;
+  }>;
+  mode?: 'standard_open_unsubmitted' | 'mixed_fulfillment_order_direct_refund_probe';
 }) {
   const selectedLineItemIds = new Set(input.selectedLineItems.map((lineItem) => normalizeShopifyIdentifier(lineItem.lineItemId)).filter(Boolean));
+  const sourceLineItemIds = new Set((input.sourceLineItems ?? []).map((lineItem) => normalizeShopifyIdentifier(lineItem.lineItemId)).filter(Boolean));
   const inspectedFulfillmentOrders = input.postCheck.fulfillmentOrders.map((fulfillmentOrder) => ({
     fulfillmentOrderId: fulfillmentOrder.id,
     status: fulfillmentOrder.status,
@@ -465,10 +645,14 @@ function buildPostRefundFulfillmentCheck(input: {
     supportedActions: fulfillmentOrder.supportedActions,
     assignedLocationId: fulfillmentOrder.assignedLocationId,
     lineItems: fulfillmentOrder.lineItems
-      .filter((lineItem) => selectedLineItemIds.has(normalizeShopifyIdentifier(lineItem.lineItemId)))
+      .filter((lineItem) => {
+        const normalizedLineItemId = normalizeShopifyIdentifier(lineItem.lineItemId);
+        return selectedLineItemIds.has(normalizedLineItemId) || sourceLineItemIds.has(normalizedLineItemId);
+      })
       .map((lineItem) => ({
         fulfillmentOrderLineItemId: lineItem.id,
         shopifyLineItemId: lineItem.lineItemId,
+        role: selectedLineItemIds.has(normalizeShopifyIdentifier(lineItem.lineItemId)) ? 'selected_refund_line' : 'source_line',
         remainingQuantity: lineItem.remainingQuantity,
         totalQuantity: lineItem.totalQuantity,
       })),
@@ -479,27 +663,75 @@ function buildPostRefundFulfillmentCheck(input: {
       return [];
     }
 
-    return fulfillmentOrder.lineItems.filter((lineItem) => lineItem.remainingQuantity === null || lineItem.remainingQuantity > 0).map((lineItem) => ({
-      fulfillmentOrderId: fulfillmentOrder.fulfillmentOrderId,
-      status: fulfillmentOrder.status,
-      requestStatus: fulfillmentOrder.requestStatus,
-      shopifyLineItemId: lineItem.shopifyLineItemId,
-      remainingQuantity: lineItem.remainingQuantity,
-    }));
+    return fulfillmentOrder.lineItems
+      .filter(
+        (lineItem) =>
+          lineItem.role === 'selected_refund_line' &&
+          (lineItem.remainingQuantity === null || lineItem.remainingQuantity > 0),
+      )
+      .map((lineItem) => ({
+        fulfillmentOrderId: fulfillmentOrder.fulfillmentOrderId,
+        status: fulfillmentOrder.status,
+        requestStatus: fulfillmentOrder.requestStatus,
+        shopifyLineItemId: lineItem.shopifyLineItemId,
+        remainingQuantity: lineItem.remainingQuantity,
+      }));
   });
 
-  const passed = activeFulfillableLineItems.length === 0;
+  const sourceLineItemsWithoutFulfillableQuantity = (input.sourceLineItems ?? []).filter((sourceLineItem) => {
+    const normalizedSourceLineItemId = normalizeShopifyIdentifier(sourceLineItem.lineItemId);
+    return !inspectedFulfillmentOrders.some((fulfillmentOrder) => {
+      if (isTerminalOrInactiveFulfillmentOrderStatus(fulfillmentOrder.status)) {
+        return false;
+      }
+      return fulfillmentOrder.lineItems.some(
+        (lineItem) =>
+          lineItem.role === 'source_line' &&
+          normalizeShopifyIdentifier(lineItem.shopifyLineItemId) === normalizedSourceLineItemId &&
+          lineItem.remainingQuantity !== null &&
+          lineItem.remainingQuantity > 0,
+      );
+    });
+  });
+
+  const selectedLineItemsWithoutZeroRemainingQuantity =
+    input.mode === 'mixed_fulfillment_order_direct_refund_probe'
+      ? input.selectedLineItems.filter((selectedLineItem) => {
+          const normalizedSelectedLineItemId = normalizeShopifyIdentifier(selectedLineItem.lineItemId);
+          return !inspectedFulfillmentOrders.some((fulfillmentOrder) =>
+            fulfillmentOrder.lineItems.some(
+              (lineItem) =>
+                lineItem.role === 'selected_refund_line' &&
+                normalizeShopifyIdentifier(lineItem.shopifyLineItemId) === normalizedSelectedLineItemId &&
+                lineItem.remainingQuantity === 0,
+            ),
+          );
+        })
+      : [];
+
+  const passed =
+    activeFulfillableLineItems.length === 0 &&
+    sourceLineItemsWithoutFulfillableQuantity.length === 0 &&
+    selectedLineItemsWithoutZeroRemainingQuantity.length === 0;
+  const failedBecauseSelectedLinesStillFulfillable = activeFulfillableLineItems.length > 0;
   return {
     status: passed ? 'passed' : 'warning',
     message: passed
       ? 'Refunded line items are no longer fulfillable in active Shopify fulfillment orders.'
-      : 'Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.',
+      : failedBecauseSelectedLinesStillFulfillable
+        ? 'Refund was submitted, but Shopify still shows fulfillable quantity. Manual attention required.'
+        : selectedLineItemsWithoutZeroRemainingQuantity.length > 0
+          ? 'Refund was submitted, but Shopify did not confirm selected child lines at remainingQuantity 0. Manual attention required.'
+          : 'Refund was submitted, but Shopify no longer shows source allocation lines as fulfillable. Manual attention required.',
+    mode: input.mode ?? 'standard_open_unsubmitted',
     preCheck: input.preCheck,
     postCheck: {
       source: input.postCheck.source,
       fulfillmentOrders: inspectedFulfillmentOrders,
     },
     activeFulfillableLineItems,
+    sourceLineItemsWithoutFulfillableQuantity,
+    selectedLineItemsWithoutZeroRemainingQuantity,
   };
 }
 
@@ -2308,6 +2540,12 @@ export async function previewShopifyRefundForAdminOrder(
           id: 'asc',
         },
       },
+      childAllocationSplitEvents: {
+        select: {
+          id: true,
+        },
+        take: 1,
+      },
     },
   });
 
@@ -2372,6 +2610,7 @@ export async function previewShopifyRefundForAdminOrder(
     buildUnrunFulfillmentOrderCancellationClassification(
       'Fulfillment order cancellation classification was not run because refund preview input is blocked.',
     );
+  let mixedFulfillmentOrderDirectRefundProbe = buildMixedFulfillmentOrderDirectRefundProbeEvaluation();
 
   const blockedResponse = (): AdminShopifyRefundPreviewResponse => ({
     ok: true,
@@ -2388,6 +2627,7 @@ export async function previewShopifyRefundForAdminOrder(
     warnings,
     blockers,
     missingData,
+    mixedFulfillmentOrderDirectRefundProbe,
   });
 
   if (blockers.length > 0) {
@@ -2434,6 +2674,18 @@ export async function previewShopifyRefundForAdminOrder(
       },
     );
     blockers.push(...fulfillmentOrderCancellation.blockers);
+  }
+
+  mixedFulfillmentOrderDirectRefundProbe = evaluateMixedFulfillmentOrderDirectRefundProbe({
+    allocation,
+    selectedLineItems: refundLineItems.map((lineItem) => ({
+      lineItemId: lineItem.sourceLineItemId,
+      quantity: lineItem.quantity,
+    })),
+    fulfillmentOrderCancellation,
+  });
+  if (mixedFulfillmentOrderDirectRefundProbe.eligible) {
+    warnings.push(...mixedFulfillmentOrderDirectRefundProbe.warnings);
   }
 
   const preview = await input.shopifyAdminService.previewSuggestedRefund({
@@ -2490,6 +2742,7 @@ export async function previewShopifyRefundForAdminOrder(
     warnings,
     blockers,
     missingData,
+    mixedFulfillmentOrderDirectRefundProbe,
   };
 }
 
@@ -2627,6 +2880,12 @@ export async function executeShopifyRefundForAdminOrder(
           id: 'asc',
         },
       },
+      childAllocationSplitEvents: {
+        select: {
+          id: true,
+        },
+        take: 1,
+      },
     },
   });
 
@@ -2752,21 +3011,57 @@ export async function executeShopifyRefundForAdminOrder(
   }
 
   warnings.push(...fulfillmentOrderCancellation.warnings);
+  const mixedFulfillmentOrderDirectRefundProbe = evaluateMixedFulfillmentOrderDirectRefundProbe({
+    allocation,
+    selectedLineItems: refundLineItems.map((lineItem) => ({
+      lineItemId: lineItem.lineItemId,
+      quantity: lineItem.quantity,
+    })),
+    fulfillmentOrderCancellation,
+  });
+  const mixedFulfillmentOrderDirectRefundProbeRequested =
+    input.confirmMixedFulfillmentOrderDirectRefundProbe === true;
+  const mixedFulfillmentOrderDirectRefundProbeAllowed =
+    mixedFulfillmentOrderDirectRefundProbeRequested && mixedFulfillmentOrderDirectRefundProbe.eligible;
+
   if (fulfillmentOrderCancellation.overallClassification === 'blocked' || fulfillmentOrderCancellation.overallClassification === 'unknown') {
-    const failureReason = fulfillmentOrderCancellation.blockers.length
-      ? fulfillmentOrderCancellation.blockers.join(' ')
-      : 'Shopify fulfillment order cancellation classification did not pass.';
-    await failAttempt(failureReason, {
-      fulfillmentOrderCancellation,
-      blockers: fulfillmentOrderCancellation.blockers,
-      warnings,
-    });
+    if (mixedFulfillmentOrderDirectRefundProbe.eligible && !mixedFulfillmentOrderDirectRefundProbeRequested) {
+      await failAttempt('Mixed fulfillment order direct refundCreate probe confirmation is required.', {
+        fulfillmentOrderCancellation: {
+          classification: fulfillmentOrderCancellation,
+          mixedFulfillmentOrderDirectRefundProbe,
+        },
+        blockers: ['Mixed fulfillment order direct refundCreate probe confirmation is required.'],
+        warnings,
+      });
+    }
+    if (!mixedFulfillmentOrderDirectRefundProbeAllowed) {
+      const probeBlockers = mixedFulfillmentOrderDirectRefundProbeRequested
+        ? mixedFulfillmentOrderDirectRefundProbe.blockers
+        : [];
+      const failureReason = [...fulfillmentOrderCancellation.blockers, ...probeBlockers].length
+        ? [...fulfillmentOrderCancellation.blockers, ...probeBlockers].join(' ')
+        : 'Shopify fulfillment order cancellation classification did not pass.';
+      await failAttempt(failureReason, {
+        fulfillmentOrderCancellation: {
+          classification: fulfillmentOrderCancellation,
+          mixedFulfillmentOrderDirectRefundProbe,
+        },
+        blockers: [...fulfillmentOrderCancellation.blockers, ...probeBlockers],
+        warnings,
+      });
+    }
+    warnings.push(...mixedFulfillmentOrderDirectRefundProbe.warnings);
   }
-  const postRefundFulfillmentCheckRequired = fulfillmentOrderCancellation.overallClassification === 'post_check_required';
+  const postRefundFulfillmentCheckRequired =
+    fulfillmentOrderCancellation.overallClassification === 'post_check_required' || mixedFulfillmentOrderDirectRefundProbeAllowed;
   if (postRefundFulfillmentCheckRequired && input.confirmPostRefundFulfillmentCheck !== true) {
-    await failAttempt('Post-refund Shopify fulfillment check confirmation is required for open unsubmitted fulfillment orders.', {
-      fulfillmentOrderCancellation,
-      blockers: ['Post-refund Shopify fulfillment check confirmation is required for open unsubmitted fulfillment orders.'],
+    await failAttempt('Post-refund Shopify fulfillment check confirmation is required for this refund probe.', {
+      fulfillmentOrderCancellation: {
+        classification: fulfillmentOrderCancellation,
+        mixedFulfillmentOrderDirectRefundProbe,
+      },
+      blockers: ['Post-refund Shopify fulfillment check confirmation is required for this refund probe.'],
       warnings,
     });
   }
@@ -2780,16 +3075,19 @@ export async function executeShopifyRefundForAdminOrder(
   } catch (error) {
     const failureReason = error instanceof Error ? error.message : 'Unable to resolve Shopify refund line item locationId.';
     await failAttempt(failureReason, {
-      fulfillmentOrderCancellation,
+      fulfillmentOrderCancellation: {
+        classification: fulfillmentOrderCancellation,
+        mixedFulfillmentOrderDirectRefundProbe,
+      },
       blockers: [failureReason],
       warnings,
     });
     throw error;
   }
 
-  const safeFulfillmentOrders = fulfillmentOrderCancellation.affectedFulfillmentOrders.filter(
-    (order) => order.classification === 'safe_to_cancel',
-  );
+  const safeFulfillmentOrders = mixedFulfillmentOrderDirectRefundProbeAllowed
+    ? []
+    : fulfillmentOrderCancellation.affectedFulfillmentOrders.filter((order) => order.classification === 'safe_to_cancel');
   const fulfillmentOrderCancellationResults: Array<{
     fulfillmentOrderId: string;
     result: CancelFulfillmentOrderResult;
@@ -2870,6 +3168,7 @@ export async function executeShopifyRefundForAdminOrder(
       fulfillmentOrderCancellation: {
         classification: fulfillmentOrderCancellation,
         cancellationResults: fulfillmentOrderCancellationResults,
+        mixedFulfillmentOrderDirectRefundProbe,
       },
       blockers: suggestedRefundBlockers,
       warnings,
@@ -2907,6 +3206,7 @@ export async function executeShopifyRefundForAdminOrder(
       fulfillmentOrderCancellation: {
         classification: fulfillmentOrderCancellation,
         cancellationResults: fulfillmentOrderCancellationResults,
+        mixedFulfillmentOrderDirectRefundProbe,
       },
       blockers: refundCreateResult.userErrors.map((error) => error.message),
       warnings,
@@ -2916,9 +3216,15 @@ export async function executeShopifyRefundForAdminOrder(
   let postRefundFulfillmentCheck: ReturnType<typeof buildPostRefundFulfillmentCheck> | {
     status: 'warning';
     message: string;
+    mode: 'standard_open_unsubmitted' | 'mixed_fulfillment_order_direct_refund_probe';
     preCheck: FulfillmentOrderCancellationClassificationResult;
     postCheck: null;
     activeFulfillableLineItems: [];
+    sourceLineItemsWithoutFulfillableQuantity: MixedFulfillmentOrderDirectRefundProbeEvaluation['sourceLineItems'];
+    selectedLineItemsWithoutZeroRemainingQuantity: Array<{
+      lineItemId: string;
+      quantity: number;
+    }>;
   } | null = null;
   if (postRefundFulfillmentCheckRequired) {
     try {
@@ -2932,14 +3238,29 @@ export async function executeShopifyRefundForAdminOrder(
           lineItemId: lineItem.lineItemId,
           quantity: lineItem.quantity,
         })),
+        sourceLineItems: mixedFulfillmentOrderDirectRefundProbeAllowed
+          ? mixedFulfillmentOrderDirectRefundProbe.sourceLineItems
+          : undefined,
+        mode: mixedFulfillmentOrderDirectRefundProbeAllowed
+          ? 'mixed_fulfillment_order_direct_refund_probe'
+          : 'standard_open_unsubmitted',
       });
     } catch (error) {
       postRefundFulfillmentCheck = {
         status: 'warning',
         message: `Refund was submitted, but Shopify fulfillment post-check failed: ${sanitizeFulfillmentOrderClassifierError(error)}`,
+        mode: mixedFulfillmentOrderDirectRefundProbeAllowed
+          ? 'mixed_fulfillment_order_direct_refund_probe'
+          : 'standard_open_unsubmitted',
         preCheck: fulfillmentOrderCancellation,
         postCheck: null,
         activeFulfillableLineItems: [],
+        sourceLineItemsWithoutFulfillableQuantity: mixedFulfillmentOrderDirectRefundProbeAllowed
+          ? mixedFulfillmentOrderDirectRefundProbe.sourceLineItems
+          : [],
+        selectedLineItemsWithoutZeroRemainingQuantity: mixedFulfillmentOrderDirectRefundProbeAllowed
+          ? mixedFulfillmentOrderDirectRefundProbe.selectedLineItems
+          : [],
       };
     }
     if (postRefundFulfillmentCheck.status !== 'passed') {
@@ -2962,6 +3283,7 @@ export async function executeShopifyRefundForAdminOrder(
       classification: fulfillmentOrderCancellation,
       cancellationResults: fulfillmentOrderCancellationResults,
       postRefundFulfillmentCheck,
+      mixedFulfillmentOrderDirectRefundProbe,
     },
     suggestedTransactions,
     blockers: [],

@@ -418,8 +418,28 @@ function hasExecutableShopifyRefundPreview(preview: ShopifyRefundPreviewResult |
   );
 }
 
+function hasMappedSuggestedRefundTransactions(preview: ShopifyRefundPreviewResult | undefined) {
+  const transactions = preview?.suggestedRefund?.suggestedTransactions ?? [];
+  return transactions.length > 0 && transactions.every((transaction) => Boolean(transaction.parentTransactionId?.trim()));
+}
+
+function hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview: ShopifyRefundPreviewResult | undefined) {
+  return Boolean(
+    preview?.suggestedRefund &&
+      preview.mixedFulfillmentOrderDirectRefundProbe?.eligible &&
+      hasMappedSuggestedRefundTransactions(preview),
+  );
+}
+
 function requiresPostRefundFulfillmentCheck(preview: ShopifyRefundPreviewResult | undefined) {
-  return normalizeStateToken(preview?.fulfillmentOrderCancellation.overallClassification) === 'post_check_required';
+  return (
+    normalizeStateToken(preview?.fulfillmentOrderCancellation.overallClassification) === 'post_check_required' ||
+    hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview)
+  );
+}
+
+function requiresMixedFulfillmentOrderDirectRefundProbeConfirmation(preview: ShopifyRefundPreviewResult | undefined) {
+  return hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview);
 }
 
 function canShowShopifyRefundExecutionAction(
@@ -428,7 +448,7 @@ function canShowShopifyRefundExecutionAction(
 ) {
   return (
     isRefundReviewEligibleForShopifyExecution(allocation) &&
-    hasExecutableShopifyRefundPreview(preview) &&
+    (hasExecutableShopifyRefundPreview(preview) || hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview)) &&
     !isOutboundRefundPending(allocation) &&
     !hasVisibleTransferBlockerEvidence(allocation) &&
     !hasBlockingFinanceAlert(allocation)
@@ -464,6 +484,7 @@ export function AdminShopifyOrderPage() {
   const [shopifyRefundPaymentConfirmed, setShopifyRefundPaymentConfirmed] = useState(false);
   const [shopifyRefundWebhookConfirmed, setShopifyRefundWebhookConfirmed] = useState(false);
   const [shopifyRefundPostCheckConfirmed, setShopifyRefundPostCheckConfirmed] = useState(false);
+  const [shopifyRefundMixedProbeConfirmed, setShopifyRefundMixedProbeConfirmed] = useState(false);
   const [acknowledgeAction, setAcknowledgeAction] = useState<FinanceIntegrityAlertAcknowledgeAction | null>(null);
   const [acknowledgmentNote, setAcknowledgmentNote] = useState('');
   const [resolveAction, setResolveAction] = useState<FinanceIntegrityAlertResolveAction | null>(null);
@@ -791,6 +812,13 @@ export function AdminShopifyOrderPage() {
       showFeedback('Post-refund Shopify fulfillment check confirmation is required.', 'error');
       return;
     }
+    if (
+      requiresMixedFulfillmentOrderDirectRefundProbeConfirmation(shopifyRefundAction.preview) &&
+      !shopifyRefundMixedProbeConfirmed
+    ) {
+      showFeedback('Mixed fulfillment order direct refundCreate probe confirmation is required.', 'error');
+      return;
+    }
     if (!canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, shopifyRefundAction.preview)) {
       showFeedback('Shopify refund execution is blocked by the current preview or allocation state.', 'error');
       return;
@@ -810,6 +838,11 @@ export function AdminShopifyOrderPage() {
           confirmPostRefundFulfillmentCheck: requiresPostRefundFulfillmentCheck(shopifyRefundAction.preview)
             ? shopifyRefundPostCheckConfirmed
             : undefined,
+          confirmMixedFulfillmentOrderDirectRefundProbe: requiresMixedFulfillmentOrderDirectRefundProbeConfirmation(
+            shopifyRefundAction.preview,
+          )
+            ? shopifyRefundMixedProbeConfirmed
+            : undefined,
         },
       });
 
@@ -824,7 +857,7 @@ export function AdminShopifyOrderPage() {
       setShopifyRefundPaymentConfirmed(false);
       setShopifyRefundWebhookConfirmed(false);
       setShopifyRefundPostCheckConfirmed(false);
-      setShopifyRefundPostCheckConfirmed(false);
+      setShopifyRefundMixedProbeConfirmed(false);
       await refetch();
       showFeedback(result.message || 'Shopify refund submitted. Waiting for refunds/create webhook.', 'success');
     } catch {
@@ -1517,6 +1550,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
                       setShopifyRefundPostCheckConfirmed(false);
+                      setShopifyRefundMixedProbeConfirmed(false);
                     }}
                   >
                     Refund in Shopify
@@ -1577,6 +1611,24 @@ export function AdminShopifyOrderPage() {
                           <li key={blocker}>{blocker}</li>
                         ))}
                       </ul>
+                    </div>
+                  ) : null}
+                  {shopifyRefundPreview.mixedFulfillmentOrderDirectRefundProbe?.eligible ? (
+                    <div className="refund-preview-message refund-preview-message-warning">
+                      <strong>Controlled direct refundCreate probe available</strong>
+                      <p className="page-description">
+                        {shopifyRefundPreview.mixedFulfillmentOrderDirectRefundProbe.message}
+                      </p>
+                      <div className="compact-meta-grid">
+                        <div className="meta-item">
+                          <span>Selected child lines</span>
+                          <strong>{shopifyRefundPreview.mixedFulfillmentOrderDirectRefundProbe.selectedLineItems.length}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Source lines to verify</span>
+                          <strong>{shopifyRefundPreview.mixedFulfillmentOrderDirectRefundProbe.sourceLineItems.length}</strong>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                   <div className="refund-preview-message">
@@ -2176,12 +2228,14 @@ export function AdminShopifyOrderPage() {
         const preview = shopifyRefundAction.preview;
         const transactions = preview.suggestedRefund?.suggestedTransactions ?? [];
         const postCheckRequired = requiresPostRefundFulfillmentCheck(preview);
+        const mixedProbeRequired = requiresMixedFulfillmentOrderDirectRefundProbeConfirmation(preview);
         const refundReady = Boolean(
           note &&
             note.length <= 1000 &&
             shopifyRefundPaymentConfirmed &&
             shopifyRefundWebhookConfirmed &&
             (!postCheckRequired || shopifyRefundPostCheckConfirmed) &&
+            (!mixedProbeRequired || shopifyRefundMixedProbeConfirmed) &&
             canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, preview) &&
             !shopifyRefundExecutionMutation.isPending,
         );
@@ -2212,6 +2266,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
                       setShopifyRefundPostCheckConfirmed(false);
+                      setShopifyRefundMixedProbeConfirmed(false);
                     }
                   }}
                   aria-label="Close Shopify refund form"
@@ -2226,6 +2281,11 @@ export function AdminShopifyOrderPage() {
                 {postCheckRequired ? (
                   <p className="support-context-note economic-transfer-warning">
                     This refund uses a controlled probe for an open unsubmitted Shopify fulfillment order. After Shopify refundCreate, Sporgym will verify that the refunded line is no longer fulfillable.
+                  </p>
+                ) : null}
+                {mixedProbeRequired ? (
+                  <p className="support-context-note economic-transfer-warning">
+                    Controlled mixed fulfillment order probe: this bypasses fulfillmentOrderCancel, calls refundCreate for the split child line items only, and then verifies refunded child lines are no longer fulfillable while source allocation lines remain fulfillable.
                   </p>
                 ) : null}
 
@@ -2334,6 +2394,17 @@ export function AdminShopifyOrderPage() {
                     <span>I understand Sporgym will verify Shopify fulfillment state after refundCreate.</span>
                   </label>
                 ) : null}
+                {mixedProbeRequired ? (
+                  <label className="checkbox-field economic-transfer-confirmation">
+                    <input
+                      type="checkbox"
+                      checked={shopifyRefundMixedProbeConfirmed}
+                      onChange={(event) => setShopifyRefundMixedProbeConfirmed(event.target.checked)}
+                      disabled={shopifyRefundExecutionMutation.isPending}
+                    />
+                    <span>I understand this bypasses fulfillmentOrderCancel and is a controlled mixed-fulfillment-order refundCreate probe.</span>
+                  </label>
+                ) : null}
                 <div className="support-modal-actions">
                   <button
                     type="button"
@@ -2345,6 +2416,7 @@ export function AdminShopifyOrderPage() {
                       setShopifyRefundPaymentConfirmed(false);
                       setShopifyRefundWebhookConfirmed(false);
                       setShopifyRefundPostCheckConfirmed(false);
+                      setShopifyRefundMixedProbeConfirmed(false);
                     }}
                     disabled={shopifyRefundExecutionMutation.isPending}
                   >
