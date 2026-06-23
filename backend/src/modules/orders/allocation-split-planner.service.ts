@@ -94,9 +94,13 @@ function hasDuplicateValues(values: string[]) {
   return new Set(values).size !== values.length;
 }
 
-function buildDeterministicChildAllocationId(sourceAllocationId: string, selectedLineIds: string[]) {
+export function buildAllocationSplitSelectedLineHash(selectedLineIds: string[]) {
   const sorted = [...selectedLineIds].sort();
-  const digest = createHash('sha256').update(sorted.join('|')).digest('hex').slice(0, 16);
+  return createHash('sha256').update(sorted.join('|')).digest('hex').slice(0, 16);
+}
+
+export function buildDeterministicChildAllocationId(sourceAllocationId: string, selectedLineIds: string[]) {
+  const digest = buildAllocationSplitSelectedLineHash(selectedLineIds);
   const base = `alloc-split-${sourceAllocationId}-${digest}`;
   return base.length <= 120 ? base : `alloc-split-${digest}`;
 }
@@ -371,5 +375,6 @@ export async function planAllocationSplitForLineItemReject(
 }
 
 export const __allocationSplitPlannerTesting = {
+  buildAllocationSplitSelectedLineHash,
   buildDeterministicChildAllocationId,
 };
