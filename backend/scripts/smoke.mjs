@@ -609,10 +609,12 @@ async function runSmoke() {
       );
     }
     if (prisma) {
+      const expectedYalisporSaleLedgerId = `fin-yalispor-sale-${smokeOrderId}-alloc-yalispor-${smokeOrderId}`;
+      const expectedSporjinalSaleLedgerId = `fin-sporjinal-sale-${smokeOrderId}-alloc-sporjinal-${smokeOrderId}`;
       const saleLedgerRows = await prisma.financeLedgerEntry.findMany({
         where: {
           id: {
-            in: [`fin-yalispor-sale-${smokeOrderId}`, `fin-sporjinal-sale-${smokeOrderId}`],
+            in: [expectedYalisporSaleLedgerId, expectedSporjinalSaleLedgerId],
           },
           entryType: 'sale',
         },
@@ -1634,7 +1636,7 @@ async function runSmoke() {
         where: { id: `fin-yalispor-refund-rf-${runId}` },
       });
       await prisma.financeLedgerEntry.deleteMany({
-        where: { id: `fin-yalispor-sale-${smokeOrderId}` },
+        where: { id: `fin-yalispor-sale-${smokeOrderId}-alloc-yalispor-${smokeOrderId}` },
       });
     }
 
@@ -2058,7 +2060,7 @@ async function runSmoke() {
     if (!adminFinanceYali?.summary || !Array.isArray(adminFinanceYali?.records)) {
       throw new Error('/finance admin yalispor returned invalid shape.');
     }
-    if (!adminFinanceYali.records.some((record) => record.id === `fin-yalispor-sale-${smokeOrderId}` && record.type === 'sale')) {
+    if (!adminFinanceYali.records.some((record) => record.id === `fin-yalispor-sale-${smokeOrderId}-alloc-yalispor-${smokeOrderId}` && record.type === 'sale')) {
       throw new Error('/finance admin yalispor missing ingested order sale ledger row.');
     }
 

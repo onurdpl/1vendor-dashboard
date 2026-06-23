@@ -6,6 +6,7 @@ import {
   isTransferRepairBlocked,
   resolveActiveEconomicOwnerForRepair,
 } from '../backend/src/modules/reconciliation/reconciliation-transfer-policy.service.js';
+import { __reconciliationTesting } from '../backend/src/modules/reconciliation/reconciliation.service.js';
 
 function buildDb(input: {
   allocationId?: string;
@@ -95,6 +96,20 @@ describe('reconciliation transfer-aware repair policy', () => {
       activeSaleLedgerIds: ['fin-sporjinal-sale-1001'],
       voidedSaleLedgerIds: [],
     });
+  });
+
+  it('uses allocation-scoped sale ledger ids for reconciliation repair expectations', () => {
+    expect(__reconciliationTesting.buildExpectedSaleLedgerIdForReconciliation({
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderId: '7616676626769',
+      vendorAllocationId: 'alloc-sporjinal-7616676626769-a',
+    })).toBe('fin-sporjinal-sale-7616676626769-alloc-sporjinal-7616676626769-a');
+
+    expect(__reconciliationTesting.buildExpectedSaleLedgerIdForReconciliation({
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderId: '7616676626769',
+      vendorAllocationId: 'alloc-sporjinal-7616676626769-b',
+    })).toBe('fin-sporjinal-sale-7616676626769-alloc-sporjinal-7616676626769-b');
   });
 
   it('resolves repair owner from active economic sale ledger', async () => {

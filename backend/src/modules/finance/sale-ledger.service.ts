@@ -21,8 +21,8 @@ function toMinorUnits(value: number) {
   return Math.round(value * 100);
 }
 
-function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string) {
-  return `fin-${vendorId}-sale-${sourceShopifyOrderId}`;
+export function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string, vendorAllocationId: string) {
+  return `fin-${vendorId}-sale-${sourceShopifyOrderId}-${vendorAllocationId}`;
 }
 
 function mapShippingModeSnapshot(mode: string | null | undefined) {
@@ -62,7 +62,7 @@ export async function upsertSaleLedgerForAllocation(
   }
 
   const amount = allocation.lineItems.reduce((sum, lineItem) => sum + toNumber(lineItem.lineAmount), 0);
-  const ledgerId = buildSaleLedgerEntryId(allocation.assignedVendorId, allocation.order.sourceShopifyOrderId);
+  const ledgerId = buildSaleLedgerEntryId(allocation.assignedVendorId, allocation.order.sourceShopifyOrderId, allocation.id);
   const existingLedgerEntry = await tx.financeLedgerEntry.findUnique({
     where: {
       id: ledgerId,

@@ -1,6 +1,6 @@
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
-import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
+import { buildSaleLedgerEntryId, upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import type { ShopifyOrderFulfillment, ShopifyOrderFulfillmentState } from '../shopify/shopify-admin.types.js';
 import type {
@@ -28,6 +28,14 @@ function extractShopifyGidTail(gid: string) {
 
 function normalizeLineItemId(value: string) {
   return extractShopifyGidTail(value) ?? value;
+}
+
+function buildExpectedSaleLedgerIdForReconciliation(input: {
+  assignedVendorId: string;
+  sourceShopifyOrderId: string;
+  vendorAllocationId: string;
+}) {
+  return buildSaleLedgerEntryId(input.assignedVendorId, input.sourceShopifyOrderId, input.vendorAllocationId);
 }
 
 function isCancelledStatus(value: string | null | undefined) {
@@ -634,7 +642,11 @@ export function createReconciliationService(env: AppEnv) {
         financeEntries: allocation.financeEntries,
         transfers: allocation.economicTransfers,
       });
-      const expectedSaleLedgerId = `fin-${allocation.assignedVendorId}-sale-${shopifyOrder.sourceShopifyOrderId}`;
+      const expectedSaleLedgerId = buildExpectedSaleLedgerIdForReconciliation({
+        assignedVendorId: allocation.assignedVendorId,
+        sourceShopifyOrderId: shopifyOrder.sourceShopifyOrderId,
+        vendorAllocationId: allocation.id,
+      });
       if (saleLedgerRepairReadiness.status === 'missing_active_sale_ledger') {
         const change = {
           scope: allocation.id,
@@ -735,3 +747,7 @@ export function createReconciliationService(env: AppEnv) {
     reconcileShopifyOrder,
   };
 }
+
+export const __reconciliationTesting = {
+  buildExpectedSaleLedgerIdForReconciliation,
+};
