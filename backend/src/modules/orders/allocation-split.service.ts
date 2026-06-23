@@ -644,17 +644,6 @@ export async function splitAllocationForLineItemReject(
       throw new AllocationSplitValidationError('source_remaining_lines_invalid', 'Source allocation must retain remaining line items after split.');
     }
 
-    await tx.financeLedgerEntry.update({
-      where: {
-        id: sourceLedger.id,
-      },
-      data: {
-        voidedAt: new Date(),
-        voidReason: `allocation_split:${splitEventId}`,
-        supersededByLedgerId: remainingLedgerId,
-      },
-    });
-
     const remainingLedger = await createSplitSaleLedger({
       tx,
       ledgerId: remainingLedgerId,
@@ -688,6 +677,17 @@ export async function splitAllocationForLineItemReject(
       sourceAllocationId: freshSource.id,
       ledgerRole: 'child_blocked',
       movedLineIds: selectedLineIds,
+    });
+
+    await tx.financeLedgerEntry.update({
+      where: {
+        id: sourceLedger.id,
+      },
+      data: {
+        voidedAt: new Date(),
+        voidReason: `allocation_split:${splitEventId}`,
+        supersededByLedgerId: remainingLedger.id,
+      },
     });
 
     await tx.allocationSplitEvent.create({

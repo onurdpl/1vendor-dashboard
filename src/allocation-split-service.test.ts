@@ -146,6 +146,7 @@ function createSplitDb(sourceOverrides: Record<string, unknown> = {}) {
     splitEvents: new Map<string, any>(),
     history: [] as any[],
     financeEvents: [] as any[],
+    ledgerOperations: [] as string[],
   };
   const source = buildSourceAllocation(sourceOverrides);
   state.allocations.set(source.id, source);
@@ -210,6 +211,7 @@ function createSplitDb(sourceOverrides: Record<string, unknown> = {}) {
         if (state.ledgers.has(data.id)) {
           throw new Error(`duplicate ledger ${data.id}`);
         }
+        state.ledgerOperations.push(`create:${data.id}`);
         const created = {
           ...data,
           voidedAt: null,
@@ -226,6 +228,10 @@ function createSplitDb(sourceOverrides: Record<string, unknown> = {}) {
       update: async ({ where, data }: any) => {
         const existing = state.ledgers.get(where.id);
         if (!existing) throw new Error(`missing ledger ${where.id}`);
+        if (data.supersededByLedgerId && !state.ledgers.has(data.supersededByLedgerId)) {
+          throw new Error(`foreign key violation for supersededByLedgerId ${data.supersededByLedgerId}`);
+        }
+        state.ledgerOperations.push(`update:${where.id}:supersededBy:${data.supersededByLedgerId ?? 'none'}`);
         Object.assign(existing, data);
         return clone(existing);
       },
@@ -403,6 +409,34 @@ describe('allocation split service', () => {
       ]),
     );
     expect(Number(remainingLedger.amount) + Number(childLedger.amount)).toBe(Number(sourceLedger.amount));
+  });
+
+  it('creates replacement ledgers before superseding the source ledger', async () => {
+    const { db, state } = createSplitDb();
+
+    const result = await splitAllocationForLineItemReject({
+      vendorAllocationId: 'alloc-source',
+      selectedVendorAllocationLineItemIds: ['line-2'],
+      actorVendorId: 'vendor-a',
+      actorUserId: 'admin-1',
+      reason: 'OUT_OF_STOCK',
+      note: 'one line unavailable',
+      confirmSplit: true,
+    }, db as never);
+
+    const remainingCreateIndex = state.ledgerOperations.indexOf(`create:${result.remainingSaleLedgerId}`);
+    const childCreateIndex = state.ledgerOperations.indexOf(`create:${result.childSaleLedgerId}`);
+    const supersedeUpdateIndex = state.ledgerOperations.indexOf(
+      `update:${result.sourceSaleLedgerId}:supersededBy:${result.remainingSaleLedgerId}`,
+    );
+
+    expect(remainingCreateIndex).toBeGreaterThanOrEqual(0);
+    expect(childCreateIndex).toBeGreaterThanOrEqual(0);
+    expect(supersedeUpdateIndex).toBeGreaterThanOrEqual(0);
+    expect(remainingCreateIndex).toBeLessThan(supersedeUpdateIndex);
+    expect(childCreateIndex).toBeLessThan(supersedeUpdateIndex);
+    expect(state.ledgers.has(result.remainingSaleLedgerId)).toBe(true);
+    expect(state.ledgers.get(result.sourceSaleLedgerId).supersededByLedgerId).toBe(result.remainingSaleLedgerId);
   });
 
   it('rejects all-selected splits in favor of full allocation reject', async () => {
