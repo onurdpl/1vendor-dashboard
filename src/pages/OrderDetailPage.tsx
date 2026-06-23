@@ -400,6 +400,23 @@ function getStatusClass(value: string | null | undefined) {
   return (value ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
+function getPaymentStatusClass(value: string | null | undefined) {
+  const normalized = getStatusClass(value);
+  if (normalized.includes('refund-completed')) {
+    return 'refund-completed';
+  }
+  if (normalized.includes('refunded')) {
+    return 'refunded';
+  }
+  if (normalized === 'paid') {
+    return 'paid';
+  }
+  if (normalized.includes('pending') || normalized.includes('authorized')) {
+    return 'pending';
+  }
+  return normalized || 'unknown';
+}
+
 function isVendorBlockedStatus(value: string | null | undefined) {
   return getStatusClass(value) === 'vendor-blocked';
 }
@@ -4635,6 +4652,13 @@ export function OrderDetailPage() {
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
   const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  const operationalStatusLabel = operationalStory.resolvedByRefund
+    ? operationalStory.primaryLabel
+    : toTitleCaseLabel(order.allocationStatus);
+  const operationalStatusClass = operationalStory.resolvedByRefund ? 'refunded' : getStatusClass(order.allocationStatus);
+  const paymentStatusLabel = operationalStory.resolvedByRefund
+    ? operationalStory.financeLabel
+    : formatSnapshotValue(order.orderSnapshot?.financialStatus);
   const isRefundResolvedVendorBlockedOrder = operationalStory.state === 'vendor_blocked_resolved_by_refund';
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
@@ -5972,42 +5996,27 @@ export function OrderDetailPage() {
             </div>
           </div>
         </div>
-        <div className="order-detail-status-pills">
-          {operationalStory.resolvedByRefund ? (
-            <>
-              <span className="status-badge status-refunded">
-                {operationalStory.primaryLabel}
-              </span>
-              <span className="status-badge status-fulfillment-not-required">
-                {operationalStory.secondaryLabel}
-              </span>
-              {isVendorBlockedOrder ? (
-                <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
-                  Historical: {toTitleCaseLabel(order.allocationStatus)}
-                </span>
-              ) : null}
-            </>
-          ) : (
-            <>
+        <div className="order-detail-status-pills" aria-label="Order status axes">
+          <div className="order-status-axis">
+            <span>Operational Status</span>
+            <span className={`status-badge status-${operationalStatusClass}`}>
+              {operationalStatusLabel}
+            </span>
+          </div>
+          <div className="order-status-axis">
+            <span>Payment Status</span>
+            <span className={`status-badge status-${getPaymentStatusClass(paymentStatusLabel)}`}>
+              {paymentStatusLabel}
+            </span>
+          </div>
+          {operationalStory.resolvedByRefund && isVendorBlockedOrder ? (
+            <div className="order-status-axis order-status-axis-muted">
+              <span>Historical Context</span>
               <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
                 {toTitleCaseLabel(order.allocationStatus)}
               </span>
-              {isVendorBlockedOrder ? (
-                <span className="status-badge status-awaiting-admin-resolution">
-                  Awaiting Admin Resolution
-                </span>
-              ) : (
-                <>
-                  <span className={`status-badge status-${getStatusClass(order.fulfillmentStatus)}`}>
-                    {order.fulfillmentStatus}
-                  </span>
-                  <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
-                    {order.shippingStatus}
-                  </span>
-                </>
-              )}
-            </>
-          )}
+            </div>
+          ) : null}
         </div>
         {!hasOperationalReturn ? (
           <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">

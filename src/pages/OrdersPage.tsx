@@ -117,6 +117,20 @@ function getStatusTone(status: string | null | undefined) {
   return 'neutral' as const;
 }
 
+function getPaymentStatusTone(status: string | null | undefined) {
+  const normalized = status?.toLowerCase() ?? '';
+  if (normalized.includes('refund completed') || normalized.includes('refunded') || normalized === 'paid') {
+    return 'success' as const;
+  }
+  if (normalized.includes('pending') || normalized.includes('authorized')) {
+    return 'attention' as const;
+  }
+  if (normalized.includes('void') || normalized.includes('failed') || normalized.includes('expired')) {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
+}
+
 function getLineItemCount(order: OrderSummary | OrderDetail) {
   return (
     (order as OrderDetail).lineItems?.length ??
@@ -1071,6 +1085,13 @@ export function OrdersPage() {
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
               const snapshotCurrency = getSnapshotCurrency(selectedOrder);
+              const operationalStatusLabel = hasCanonicalTerminalStory ? operationalStory.primaryLabel : safeStatusLabel(selectedOrder.allocationStatus);
+              const operationalStatusTone = hasCanonicalTerminalStory
+                ? (operationalStory.resolvedByRefund ? 'success' : 'warning')
+                : getStatusTone(selectedOrder.allocationStatus);
+              const paymentStatusLabel = hasCanonicalTerminalStory
+                ? operationalStory.financeLabel
+                : formatSnapshotValue(orderSnapshot?.financialStatus);
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
@@ -1100,15 +1121,15 @@ export function OrdersPage() {
               return (
             <>
               <div className="orders-detail-rail-header">
-                <div className="orders-detail-rail-badges">
-                  <StatusBadge tone={hasCanonicalTerminalStory ? (operationalStory.resolvedByRefund ? 'success' : 'warning') : getStatusTone(selectedOrder.allocationStatus)}>
-                    {hasCanonicalTerminalStory ? operationalStory.primaryLabel : safeStatusLabel(selectedOrder.allocationStatus)}
-                  </StatusBadge>
-                  {hasCanonicalTerminalStory ? (
-                    <StatusBadge tone={operationalStory.resolvedByRefund ? 'success' : 'warning'}>{operationalStory.secondaryLabel}</StatusBadge>
-                  ) : (
-                    <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
-                  )}
+                <div className="orders-status-axis-grid" aria-label="Order status axes">
+                  <div className="orders-status-axis">
+                    <span>Operational Status</span>
+                    <StatusBadge tone={operationalStatusTone}>{operationalStatusLabel}</StatusBadge>
+                  </div>
+                  <div className="orders-status-axis">
+                    <span>Payment Status</span>
+                    <StatusBadge tone={getPaymentStatusTone(paymentStatusLabel)}>{paymentStatusLabel}</StatusBadge>
+                  </div>
                 </div>
               </div>
 

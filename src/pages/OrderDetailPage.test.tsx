@@ -1174,6 +1174,62 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
   });
 
+  it('separates active operational and paid payment status in the header', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'active',
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        financialStatus: 'paid',
+      },
+    });
+
+    renderOrderDetail();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).getByText('paid')).toBeInTheDocument();
+  });
+
+  it('separates active operational and pending payment status in the header', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'active',
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        financialStatus: 'pending',
+      },
+    });
+
+    renderOrderDetail();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).getByText('pending')).toBeInTheDocument();
+  });
+
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1252,7 +1308,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
-    expect(screen.getByText('paid')).toBeInTheDocument();
+    expect(screen.getAllByText('paid').length).toBeGreaterThan(0);
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('TRY')).toBeInTheDocument();
     expect(screen.getByText(/TRY\s*49\.90/)).toBeInTheDocument();
@@ -2320,7 +2376,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByText('Vendor Blocked')).toBeInTheDocument();
-    expect(screen.getByText('Awaiting Admin Resolution')).toBeInTheDocument();
+    const axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     const primaryStatus = screen.getByLabelText('Primary operational status');
     expect(within(primaryStatus).getByText('Vendor rejected allocation')).toBeInTheDocument();
     expect(within(primaryStatus).getByText('Admin action required. Reason: OUT_OF_STOCK.')).toBeInTheDocument();
@@ -2404,6 +2463,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
+    const axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Refunded')).toBeInTheDocument();
+    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.queryByText('Awaiting Admin Resolution')).not.toBeInTheDocument();
 

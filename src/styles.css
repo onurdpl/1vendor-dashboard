@@ -2236,6 +2236,13 @@ h3 {
   border-color: rgba(20, 184, 166, 0.18);
 }
 
+.status-paid,
+.status-refund-completed {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
 .status-in-review {
   color: #1d4ed8;
   background: rgba(59, 130, 246, 0.12);
@@ -4786,6 +4793,29 @@ h3 {
   gap: 5px;
 }
 
+.orders-status-axis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.orders-status-axis,
+.order-status-axis {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  align-content: start;
+}
+
+.orders-status-axis > span:first-child,
+.order-status-axis > span:first-child {
+  color: #64748b;
+  font-size: 0.65rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .orders-detail-status-strip {
   display: flex;
   flex-wrap: wrap;
@@ -6007,10 +6037,18 @@ h3 {
 .order-detail-status-pills {
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  gap: 5px;
+  align-items: flex-start;
+  gap: 10px;
   flex-wrap: wrap;
   padding-top: 0;
+}
+
+.order-status-axis {
+  justify-items: end;
+}
+
+.order-status-axis-muted {
+  opacity: 0.82;
 }
 
 .order-detail-status-pills .status-badge,

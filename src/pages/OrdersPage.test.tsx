@@ -365,6 +365,44 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
   });
 
+  it('separates active operational and paid payment status in the right rail', async () => {
+    const activePaidOrder = buildAwaitingRejectableOrder({
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus: 'paid',
+      },
+    });
+    listOrdersMock.mockResolvedValue([toSummary(activePaidOrder)]);
+    getOrderMock.mockResolvedValue(activePaidOrder);
+
+    renderOrdersPage();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).getByText('paid')).toBeInTheDocument();
+  });
+
+  it('separates active operational and pending payment status in the right rail', async () => {
+    const activePendingOrder = buildAwaitingRejectableOrder({
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus: 'pending',
+      },
+    });
+    listOrdersMock.mockResolvedValue([toSummary(activePendingOrder)]);
+    getOrderMock.mockResolvedValue(activePendingOrder);
+
+    renderOrdersPage();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Active')).toBeInTheDocument();
+    expect(within(axes).getByText('pending')).toBeInTheDocument();
+  });
+
   it('renders the inspector line item initials fallback when imageUrl is missing', async () => {
     listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
     getOrderMock.mockResolvedValue({
@@ -1182,6 +1220,11 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
+    const axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Refunded')).toBeInTheDocument();
+    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Reject unavailable')).toHaveTextContent(
       'Vendor rejection was resolved by Shopify refund. No further rejection action is required.',
