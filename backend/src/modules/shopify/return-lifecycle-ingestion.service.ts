@@ -6,6 +6,7 @@ import {
   autoCreateNavlungoReturnPickupForApprovedReturn,
 } from '../returns/returns.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
+import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-ownership-resolution.service.js';
 import type {
   ReturnLifecycleIngestionInput,
   ReturnLifecycleIngestionResult,
@@ -173,11 +174,6 @@ export async function ingestReturnRequestWebhook(
         throw new Error('Shopify return detail did not include a usable order id.');
       }
 
-      const sellerInfoResult = await shopifyAdminService.fetchOrderSellerInfo(sourceShopifyOrderId).catch(() => ({
-        sellerInfo: null,
-        source: 'shopify_admin' as const,
-      }));
-
       const shopifyOrder = await tx.shopifyOrder.findUnique({
         where: {
           sourceShopifyOrderId,
@@ -191,9 +187,8 @@ export async function ingestReturnRequestWebhook(
         throw new Error(`No ingested Shopify order found for return request order id ${sourceShopifyOrderId}.`);
       }
 
-      const vendorIds = new Set((await tx.vendor.findMany({ select: { id: true } })).map((vendor) => vendor.id));
-
-      const mappedItems = returnDetails.lineItems.map((lineItem) => {
+      const mappedItems = [];
+      for (const lineItem of returnDetails.lineItems) {
         if (!lineItem.sku) {
           throw new Error(`Return line item ${lineItem.returnLineItemGid} is missing SKU.`);
         }
@@ -207,32 +202,28 @@ export async function ingestReturnRequestWebhook(
           : matchingOrderLineItems.length === 1
             ? matchingOrderLineItems[0]
             : null;
-        const vendorSlug =
-          matchedOrderLineItem?.originalVendorId?.trim().toLowerCase() ??
-          sellerInfoResult.sellerInfo?.[lineItem.sku]?.trim().toLowerCase() ??
-          null;
-        if (!vendorSlug) {
-          throw new Error(`No local or seller_info vendor mapping found for return SKU ${lineItem.sku}.`);
+
+        if (!matchedOrderLineItem) {
+          if (matchingOrderLineItems.length > 1) {
+            throw new Error(`Return SKU ${lineItem.sku} matched multiple original order line items and could not be resolved safely.`);
+          }
+
+          throw new Error(`No original order mapping found for return SKU ${lineItem.sku}.`);
         }
 
-        if (!vendorIds.has(vendorSlug)) {
-          throw new Error(`seller_info mapped return SKU ${lineItem.sku} to unknown vendor ${vendorSlug}.`);
-        }
+        const ownership = await resolveAllocationForShopifyOrderLineItem({
+          shopifyOrderId: shopifyOrder.id,
+          shopifyOrderLineItemId: matchedOrderLineItem.id,
+          sourceLineItemId: matchedOrderLineItem.sourceLineItemId ?? sourceLineItemId,
+        }, tx);
 
-        const allocation = shopifyOrder.allocations.find(
-          (record) => record.originalVendorId === vendorSlug || record.assignedVendorId === vendorSlug,
-        );
-        if (!allocation) {
-          throw new Error(`No allocation found for return SKU ${lineItem.sku} and vendor ${vendorSlug}.`);
-        }
-
-        return {
+        mappedItems.push({
           lineItem,
-          allocation,
-          vendorId: vendorSlug,
+          allocation: ownership.allocation,
+          vendorId: ownership.allocation.originalVendorId,
           sourceLineItemId,
-        };
-      });
+        });
+      }
 
       let affectedRecordCount = 0;
       const affectedReturnRecordIds: string[] = [];

@@ -12,6 +12,7 @@ import {
 import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from '../orders/outbound-shopify-refund-attempt.service.js';
+import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-ownership-resolution.service.js';
 import type {
   ParsedShopifyRefundLineItem,
   ParsedShopifyRefundPayload,
@@ -105,6 +106,30 @@ function toNumber(value: unknown) {
 
 function toMinorUnits(value: number) {
   return Math.round(value * 100);
+}
+
+function buildRefundRecordId(input: {
+  vendorId: string;
+  sourceShopifyRefundId: string;
+  vendorAllocationId: string;
+}) {
+  return `refund-${input.vendorId}-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
+}
+
+function buildRefundReturnRecordId(input: {
+  originalVendorId: string;
+  sourceShopifyRefundId: string;
+  vendorAllocationId: string;
+}) {
+  return `return-${input.originalVendorId}-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
+}
+
+function buildRefundLedgerId(input: {
+  vendorId: string;
+  sourceShopifyRefundId: string;
+  vendorAllocationId: string;
+}) {
+  return `fin-${input.vendorId}-refund-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
 }
 
 async function resolveCancelRefundReviewAfterRefundIngestion(
@@ -222,8 +247,6 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
         throw new Error(`No ingested Shopify order found for refund order id ${parsedRefund.sourceShopifyOrderId}.`);
       }
 
-      const vendorIds = new Set((await tx.vendor.findMany({ select: { id: true } })).map((vendor) => vendor.id));
-
       const resolvedLineItems: ResolvedRefundLineItem[] = [];
       for (const lineItem of parsedRefund.refundLineItems) {
         if (!lineItem.sku) {
@@ -245,22 +268,13 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           throw new Error(`No original order mapping found for refund SKU ${lineItem.sku}.`);
         }
 
-        const originalVendorId = matchedOrderLineItem.originalVendorId?.trim().toLowerCase() ?? null;
-        if (!originalVendorId) {
-          throw new Error(`Original seller_info mapping is missing for refund SKU ${lineItem.sku}.`);
-        }
-
-        if (!vendorIds.has(originalVendorId)) {
-          throw new Error(`Original seller_info mapping resolved refund SKU ${lineItem.sku} to unknown vendor ${originalVendorId}.`);
-        }
-
-        const vendorAllocation = shopifyOrder.allocations.find(
-          (allocation) => allocation.originalVendorId === originalVendorId,
-        );
-
-        if (!vendorAllocation) {
-          throw new Error(`No vendor allocation found for refund SKU ${lineItem.sku} and vendor ${originalVendorId}.`);
-        }
+        const ownership = await resolveAllocationForShopifyOrderLineItem({
+          shopifyOrderId: shopifyOrder.id,
+          shopifyOrderLineItemId: matchedOrderLineItem.id,
+          sourceLineItemId: matchedOrderLineItem.sourceLineItemId ?? lineItem.sourceLineItemId ?? null,
+        }, tx);
+        const vendorAllocation = ownership.allocation;
+        const originalVendorId = vendorAllocation.originalVendorId;
 
         const economicOwner = await assertResolvedEconomicOwnerForMoneyMovement({
           vendorAllocationId: vendorAllocation.id,
@@ -277,7 +291,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           vendorAllocationId: vendorAllocation.id,
           activeSaleLedgerId: economicOwner.activeSaleLedgerId,
           supersededFromLedgerIds: economicOwner.supersededFromLedgerIds,
-          shopifyOrderLineItemId: matchedOrderLineItem.id,
+          shopifyOrderLineItemId: ownership.shopifyOrderLineItem.id,
           sourceShopifyOrderNumber: vendorAllocation.sourceShopifyOrderNumber,
           cancelRefundReviewStatus: vendorAllocation.cancelRefundReviewStatus ?? null,
           refundAmount: toAmountString(lineItem.subtotal, lineItem.quantity),
@@ -303,16 +317,34 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
         },
       });
 
-      const groupedByVendor = new Map<string, typeof resolvedLineItems>();
+      const groupedByAllocationAndVendor = new Map<string, typeof resolvedLineItems>();
       for (const lineItem of resolvedLineItems) {
-        const group = groupedByVendor.get(lineItem.vendorId) ?? [];
+        const groupKey = `${lineItem.vendorAllocationId}:${lineItem.vendorId}`;
+        const group = groupedByAllocationAndVendor.get(groupKey) ?? [];
         group.push(lineItem);
-        groupedByVendor.set(lineItem.vendorId, group);
+        groupedByAllocationAndVendor.set(groupKey, group);
       }
 
-      for (const [vendorId, vendorLineItems] of groupedByVendor.entries()) {
+      for (const [, vendorLineItems] of groupedByAllocationAndVendor.entries()) {
+        const vendorId = vendorLineItems[0].vendorId;
         const vendorAllocationId = vendorLineItems[0].vendorAllocationId;
-        const refundRecordId = `refund-${vendorId}-${parsedRefund.sourceShopifyRefundId}`;
+        const existingRefundRecord = await tx.refundRecord.findFirst({
+          where: {
+            vendorAllocationId,
+            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          },
+          select: {
+            id: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        });
+        const refundRecordId = existingRefundRecord?.id ?? buildRefundRecordId({
+          vendorId,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          vendorAllocationId,
+        });
         const totalRefundAmount = sumAmounts(vendorLineItems.map((lineItem) => lineItem.refundAmount));
         const orderNumber = vendorLineItems[0].sourceShopifyOrderNumber;
         const sourceLineItemIds = vendorLineItems
@@ -334,7 +366,26 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             })
           : null;
         const returnRecordOwnerId = vendorLineItems[0].originalVendorId;
-        const returnRecordId = linkedReturnRequest?.id ?? `return-${returnRecordOwnerId}-${parsedRefund.sourceShopifyRefundId}`;
+        const existingRefundReturnRecord = linkedReturnRequest
+          ? null
+          : await tx.returnRecord.findFirst({
+              where: {
+                vendorAllocationId,
+                sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+                sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+              },
+              select: {
+                id: true,
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            });
+        const returnRecordId = linkedReturnRequest?.id ?? existingRefundReturnRecord?.id ?? buildRefundReturnRecordId({
+          originalVendorId: returnRecordOwnerId,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          vendorAllocationId,
+        });
 
         await tx.returnRecord.upsert({
           where: {
@@ -414,41 +465,52 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           });
         }
 
-        const refundLedgerId = `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`;
-        const conflictingRefundLedgerEntries = await tx.financeLedgerEntry.findMany({
+        const expectedRefundLedgerId = buildRefundLedgerId({
+          vendorId,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          vendorAllocationId,
+        });
+        const refundLedgerEntries = await tx.financeLedgerEntry.findMany({
           where: {
             vendorAllocationId,
             entryType: 'refund',
-            id: {
-              endsWith: `-refund-${parsedRefund.sourceShopifyRefundId}`,
-            },
-            NOT: {
-              id: refundLedgerId,
-            },
             voidedAt: null,
+            OR: [
+              {
+                id: `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`,
+              },
+              {
+                id: expectedRefundLedgerId,
+              },
+              {
+                id: {
+                  contains: `-refund-${parsedRefund.sourceShopifyRefundId}-`,
+                },
+              },
+            ],
           },
           select: {
             id: true,
             vendorId: true,
-          },
-          take: 1,
-        });
-        const conflictingRefundLedgerEntry = conflictingRefundLedgerEntries[0] ?? null;
-        if (conflictingRefundLedgerEntry) {
-          throw new Error(
-            `Active refund ledger ${conflictingRefundLedgerEntry.id} already exists for allocation ${vendorAllocationId} and Shopify refund ${parsedRefund.sourceShopifyRefundId}.`,
-          );
-        }
-
-        const existingRefundLedgerEntry = await tx.financeLedgerEntry.findUnique({
-          where: {
-            id: refundLedgerId,
-          },
-          select: {
-            id: true,
             payoutStatus: true,
           },
+          orderBy: {
+            createdAt: 'asc',
+          },
+          take: 2,
         });
+        if (refundLedgerEntries.length > 1) {
+          throw new Error(
+            `Multiple active refund ledgers already exist for allocation ${vendorAllocationId} and Shopify refund ${parsedRefund.sourceShopifyRefundId}.`,
+          );
+        }
+        const existingRefundLedgerEntry = refundLedgerEntries[0] ?? null;
+        if (existingRefundLedgerEntry && existingRefundLedgerEntry.vendorId !== vendorId) {
+          throw new Error(
+            `Active refund ledger ${existingRefundLedgerEntry.id} already exists for allocation ${vendorAllocationId} and Shopify refund ${parsedRefund.sourceShopifyRefundId}.`,
+          );
+        }
+        const refundLedgerId = existingRefundLedgerEntry?.id ?? expectedRefundLedgerId;
         const saleLedgerEntry = await tx.financeLedgerEntry.findFirst({
           where: {
             id: vendorLineItems[0].activeSaleLedgerId,
@@ -669,7 +731,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
 
       return {
         shopifyOrderId: parsedRefund.sourceShopifyOrderId,
-        refundAllocationCount: groupedByVendor.size,
+        refundAllocationCount: groupedByAllocationAndVendor.size,
       };
     });
 

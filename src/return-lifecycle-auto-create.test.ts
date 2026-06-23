@@ -15,6 +15,12 @@ const prismaMock = vi.hoisted(() => ({
   vendor: {
     findMany: vi.fn(),
   },
+  shopifyOrderLineItem: {
+    findMany: vi.fn(),
+  },
+  vendorAllocationLineItem: {
+    findMany: vi.fn(),
+  },
   vendorAllocation: {
     findUnique: vi.fn(),
   },
@@ -94,6 +100,8 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     prismaMock.returnRecord.upsert.mockReset();
     prismaMock.shopifyOrder.findUnique.mockReset();
     prismaMock.vendor.findMany.mockReset();
+    prismaMock.shopifyOrderLineItem.findMany.mockReset();
+    prismaMock.vendorAllocationLineItem.findMany.mockReset();
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.$transaction.mockReset();
     shopifyAdminMock.fetchReturnDetails.mockReset();
@@ -115,6 +123,35 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     });
     autoCreateNavlungoReturnPickupForApprovedReturnMock.mockResolvedValue({ attempted: true, skippedReason: null });
   });
+
+  function queueOwnershipResolution(input: {
+    lineItem: {
+      id: string;
+      sourceLineItemId: string;
+      sku?: string | null;
+      originalVendorId?: string | null;
+    };
+    allocation: {
+      id: string;
+      originalVendorId: string;
+      assignedVendorId: string;
+      sourceShopifyOrderNumber: string;
+    };
+    allocationLineItemId?: string;
+  }) {
+    prismaMock.shopifyOrderLineItem.findMany.mockResolvedValueOnce([input.lineItem]);
+    prismaMock.vendorAllocationLineItem.findMany.mockResolvedValueOnce([
+      {
+        id: input.allocationLineItemId ?? `allocation-line-${input.lineItem.sourceLineItemId}`,
+        vendorAllocationId: input.allocation.id,
+        shopifyLineItemId: input.lineItem.id,
+        quantity: 1,
+        lineAmount: '0.00',
+        vendorAllocation: input.allocation,
+        shopifyOrderLineItem: input.lineItem,
+      },
+    ]);
+  }
 
   it('runs Navlungo return pickup auto-create after Shopify return approval updates ReturnRecord status', async () => {
     const result = await applyReturnLifecycleStatusWebhook(env, 'returns/approve', {
@@ -198,24 +235,27 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
         },
       ],
     });
+    const lineItem = {
+      id: 'order-line-db-1',
+      sourceLineItemId: '20346971095377',
+      sku: 'DJ1196-002-42',
+      originalVendorId: 'yalispor',
+    };
+    const allocation = {
+      id: 'alloc-1029-yalispor',
+      originalVendorId: 'yalispor',
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderNumber: '#1029',
+    };
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({
       id: 'shopify-order-db-1029',
       sourceShopifyOrderId: '7621834670417',
-      lineItems: [
-        {
-          sourceLineItemId: '20346971095377',
-          sku: 'DJ1196-002-42',
-          originalVendorId: 'yalispor',
-        },
-      ],
-      allocations: [
-        {
-          id: 'alloc-1029-yalispor',
-          originalVendorId: 'yalispor',
-          assignedVendorId: 'sporjinal',
-          sourceShopifyOrderNumber: '#1029',
-        },
-      ],
+      lineItems: [lineItem],
+      allocations: [allocation],
+    });
+    queueOwnershipResolution({
+      lineItem,
+      allocation,
     });
     prismaMock.vendor.findMany.mockResolvedValueOnce([{ id: 'yalispor' }, { id: 'sporjinal' }]);
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
@@ -270,6 +310,137 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
     );
   });
 
+  it('attaches mixed split return lines to their owning source and child allocations', async () => {
+    const sourceLineItem = {
+      id: 'order-line-db-source',
+      sourceLineItemId: 'line-source',
+      sku: 'SKU-SOURCE',
+      originalVendorId: 'sporjinal',
+    };
+    const childLineItem = {
+      id: 'order-line-db-child',
+      sourceLineItemId: 'line-child',
+      sku: 'SKU-CHILD',
+      originalVendorId: 'sporjinal',
+    };
+    const sourceAllocation = {
+      id: 'alloc-source',
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderNumber: '#1096',
+    };
+    const childAllocation = {
+      id: 'alloc-child',
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderNumber: '#1096',
+    };
+
+    shopifyAdminMock.fetchReturnDetails.mockResolvedValueOnce({
+      orderGid: 'gid://shopify/Order/split-order',
+      returnTracking: null,
+      lineItems: [
+        {
+          returnLineItemGid: 'gid://shopify/ReturnLineItem/source',
+          lineItemGid: 'gid://shopify/LineItem/line-source',
+          sku: 'SKU-SOURCE',
+          returnReason: 'OTHER',
+          returnReasonNote: 'source item',
+          customerNote: null,
+        },
+        {
+          returnLineItemGid: 'gid://shopify/ReturnLineItem/child',
+          lineItemGid: 'gid://shopify/LineItem/line-child',
+          sku: 'SKU-CHILD',
+          returnReason: 'OTHER',
+          returnReasonNote: 'child item',
+          customerNote: null,
+        },
+      ],
+    });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({
+      id: 'shopify-order-db-split',
+      sourceShopifyOrderId: 'split-order',
+      lineItems: [sourceLineItem, childLineItem],
+      allocations: [sourceAllocation, childAllocation],
+    });
+    queueOwnershipResolution({
+      lineItem: sourceLineItem,
+      allocation: sourceAllocation,
+      allocationLineItemId: 'allocation-line-source',
+    });
+    queueOwnershipResolution({
+      lineItem: childLineItem,
+      allocation: childAllocation,
+      allocationLineItemId: 'allocation-line-child',
+    });
+    prismaMock.vendorAllocation.findUnique
+      .mockResolvedValueOnce({
+        id: 'alloc-source',
+        financeEntries: [
+          {
+            id: 'fin-sporjinal-sale-split-order-alloc-source',
+            vendorId: 'sporjinal',
+            entryType: 'sale',
+            voidedAt: null,
+          },
+        ],
+        economicTransfers: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'alloc-child',
+        financeEntries: [
+          {
+            id: 'fin-sporjinal-sale-split-order-alloc-child',
+            vendorId: 'sporjinal',
+            entryType: 'sale',
+            voidedAt: null,
+          },
+        ],
+        economicTransfers: [],
+      });
+    prismaMock.returnRecord.upsert.mockResolvedValue({});
+
+    const result = await ingestReturnRequestWebhook(env, {
+      event: {
+        id: 'webhook-return-request-1',
+      } as never,
+      payload: {
+        id: 23229399377,
+        admin_graphql_api_id: 'gid://shopify/Return/23229399377',
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      affectedRecordCount: 2,
+    });
+    expect(prismaMock.returnRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'return-request-23229399377-sporjinal-line-source',
+        },
+        create: expect.objectContaining({
+          vendorAllocationId: 'alloc-source',
+          ownerVendorId: 'sporjinal',
+          sourceShopifyLineItemId: 'line-source',
+        }),
+      }),
+    );
+    expect(prismaMock.returnRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'return-request-23229399377-sporjinal-line-child',
+        },
+        create: expect.objectContaining({
+          vendorAllocationId: 'alloc-child',
+          ownerVendorId: 'sporjinal',
+          sourceShopifyLineItemId: 'line-child',
+        }),
+      }),
+    );
+  });
+
   it('fails return creation safely when economic owner cannot be resolved', async () => {
     shopifyAdminMock.fetchReturnDetails.mockResolvedValueOnce({
       orderGid: 'gid://shopify/Order/7621834670417',
@@ -285,24 +456,27 @@ describe('return lifecycle Navlungo auto-create trigger', () => {
         },
       ],
     });
+    const lineItem = {
+      id: 'order-line-db-1',
+      sourceLineItemId: '20346971095377',
+      sku: 'DJ1196-002-42',
+      originalVendorId: 'sporjinal',
+    };
+    const allocation = {
+      id: 'alloc-1029-sporjinal',
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      sourceShopifyOrderNumber: '#1029',
+    };
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({
       id: 'shopify-order-db-1029',
       sourceShopifyOrderId: '7621834670417',
-      lineItems: [
-        {
-          sourceLineItemId: '20346971095377',
-          sku: 'DJ1196-002-42',
-          originalVendorId: 'sporjinal',
-        },
-      ],
-      allocations: [
-        {
-          id: 'alloc-1029-sporjinal',
-          originalVendorId: 'sporjinal',
-          assignedVendorId: 'sporjinal',
-          sourceShopifyOrderNumber: '#1029',
-        },
-      ],
+      lineItems: [lineItem],
+      allocations: [allocation],
+    });
+    queueOwnershipResolution({
+      lineItem,
+      allocation,
     });
     prismaMock.vendor.findMany.mockResolvedValueOnce([{ id: 'sporjinal' }]);
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce({
