@@ -26,6 +26,7 @@ import { ProductImagePreview } from '../components/ProductImagePreview';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { safeArray } from '../services/real/formatting';
 import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
+import { isActiveReturnReviewStatus, isTerminalRefundedReturn } from '../lib/returnOperationalState';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -151,7 +152,23 @@ function getStatusTone(item: ReturnSummary) {
 }
 
 function isPendingReturn(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request';
+  return item.sourceType === 'shopify_return_request' && isActiveReturnReviewStatus(item);
+}
+
+function isRefundedReturn(item: ReturnSummary) {
+  return (
+    item.sourceType !== 'shopify_return_request' ||
+    isTerminalRefundedReturn({
+      status: item.status,
+      sourceType: item.sourceType,
+      refundStatus: getRefundStatusLabel(item),
+      sourceShopifyRefundId: item.sourceShopifyRefundId,
+      vendorReceivedAt: item.vendorReceivedAt,
+      vendorReviewedAt: item.vendorReviewedAt,
+      vendorDecision: item.vendorDecision,
+      refundedItems: item.refundedItems,
+    })
+  );
 }
 
 function needsAttention(item: ReturnSummary) {
@@ -597,8 +614,8 @@ export function ReturnsPage() {
       const matchesVendor = vendorFilter === 'all' || item.assignedVendorId === vendorFilter;
       const matchesSource =
         effectiveSourceFilter === 'all' ||
-        (effectiveSourceFilter === 'pending' && item.sourceType === 'shopify_return_request') ||
-        (effectiveSourceFilter === 'refunded' && item.sourceType !== 'shopify_return_request');
+        (effectiveSourceFilter === 'pending' && isPendingReturn(item)) ||
+        (effectiveSourceFilter === 'refunded' && isRefundedReturn(item));
       return matchesQuery && matchesStatus && matchesVendor && matchesSource;
     });
   }, [effectiveSourceFilter, returns, searchTerm, statusFilter, vendorFilter]);
@@ -634,9 +651,9 @@ export function ReturnsPage() {
   const selectedDetail = detailQuery.data;
 
   const returnRows = safeArray(returns);
-  const pendingCount = returnRows.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
+  const pendingCount = returnRows.filter(isPendingReturn).length;
   const approvedCount = returnRows.filter((item) => item.status === 'Approved').length;
-  const processedCount = returnRows.filter((item) => item.sourceType !== 'shopify_return_request').length;
+  const processedCount = returnRows.filter(isRefundedReturn).length;
   const attentionCount = returnRows.filter(needsAttention).length;
   const statuses = Array.from(new Set(returnRows.map((item) => item.status)));
   const vendors = Array.from(new Set(returnRows.map((item) => item.assignedVendorId)));

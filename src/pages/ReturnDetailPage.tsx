@@ -36,6 +36,7 @@ import {
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
+import { isTerminalRefundedReturn } from '../lib/returnOperationalState';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
@@ -86,6 +87,19 @@ function getRefundAdjustmentStatusCopy(status: string | null | undefined) {
     return 'Cancelled';
   }
   return formatAdjustmentStatus(normalized || 'unknown');
+}
+
+function getLinkedFinanceStatusLabel(record: { category: string; status: string }) {
+  const normalizedStatus = record.status.toLowerCase();
+  if (normalizedStatus !== 'pending') {
+    return safeStatusLabel(record.status);
+  }
+
+  return isRefundFinanceRecord(record) ? 'Settlement review pending' : 'Payout accounting pending';
+}
+
+function isRefundFinanceRecord(record: { category: string }) {
+  return record.category.toLowerCase() === 'refund';
 }
 
 function getStatusLabel(returnRequest: ReturnDetail) {
@@ -1180,12 +1194,26 @@ export function ReturnDetailPage() {
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
   const hasReceivedReturn = Boolean(returnRequest.vendorReceivedAt);
   const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
+  const terminalRefundedReturn = isTerminalRefundedReturn({
+    status: returnRequest.status,
+    sourceType: returnRequest.sourceType,
+    vendorReceivedAt: returnRequest.vendorReceivedAt,
+    vendorReviewedAt: returnRequest.vendorReviewedAt,
+    vendorDecision: returnRequest.vendorDecision,
+    refundStatus: getRefundStatus(returnRequest),
+    sourceShopifyRefundId: returnRequest.sourceShopifyRefundId,
+    refundedItems: returnRequest.refundedItems,
+  });
+  const canMutateReturnReview = canReviewReturn && !terminalRefundedReturn;
   const returnWorkflowGuidance = getReturnWorkflowAction({
     status: returnRequest.status,
     sourceType: returnRequest.sourceType,
     vendorReceivedAt: returnRequest.vendorReceivedAt,
+    vendorReviewedAt: returnRequest.vendorReviewedAt,
     vendorDecision: returnRequest.vendorDecision,
     refundStatus: getRefundStatus(returnRequest),
+    sourceShopifyRefundId: returnRequest.sourceShopifyRefundId,
+    refundedItems: returnRequest.refundedItems,
   });
   const supportSnapshot = {
     route: location.pathname,
@@ -1219,11 +1247,11 @@ export function ReturnDetailPage() {
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
       eyebrow: 'Finance',
-      title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
-      description: `${record.amount} · ${record.status}`,
+      title: isRefundFinanceRecord(record) ? 'Refund impact' : 'Payout activity',
+      description: `${record.amount} · ${getLinkedFinanceStatusLabel(record)}`,
       href: buildFinanceHref(record),
       status: record.category,
-      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      tone: isRefundFinanceRecord(record) ? ('warning' as const) : ('success' as const),
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
@@ -1245,11 +1273,11 @@ export function ReturnDetailPage() {
     })),
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
-      title: record.category === 'Refund' ? 'Refund processed' : 'Finance entry created',
+      title: isRefundFinanceRecord(record) ? 'Refund processed' : 'Finance entry created',
       description: `${record.category} · ${record.amount}`,
       at: record.date,
-      status: record.status,
-      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      status: getLinkedFinanceStatusLabel(record),
+      tone: isRefundFinanceRecord(record) ? ('warning' as const) : ('success' as const),
       href: buildFinanceHref(record),
     })),
     ...relatedSupportTickets.map((ticket) => ({
@@ -1304,7 +1332,7 @@ export function ReturnDetailPage() {
     })),
   ];
   const returnRecommendations: OperationsRecommendation[] = [];
-  if (!hasReceivedReturn) {
+  if (!terminalRefundedReturn && !hasReceivedReturn) {
     returnRecommendations.push({
       id: `return-rec-receipt-${returnRequest.id}`,
       type: 'return_review',
@@ -1325,7 +1353,7 @@ export function ReturnDetailPage() {
       vendorVisible: true,
       createdAt: returnRequest.updatedAt ?? returnRequest.date,
     });
-  } else if (!hasReviewedReturn) {
+  } else if (!terminalRefundedReturn && !hasReviewedReturn) {
     returnRecommendations.push({
       id: `return-rec-review-${returnRequest.id}`,
       type: 'return_review',
@@ -1345,7 +1373,7 @@ export function ReturnDetailPage() {
       createdAt: returnRequest.vendorReceivedAt ?? returnRequest.updatedAt ?? returnRequest.date,
     });
   }
-  if (getRefundStatus(returnRequest).toLowerCase().includes('pending')) {
+  if (!terminalRefundedReturn && getRefundStatus(returnRequest).toLowerCase().includes('pending')) {
     returnRecommendations.push({
       id: `return-rec-refund-${returnRequest.id}`,
       type: 'return_refund',
@@ -1581,8 +1609,12 @@ export function ReturnDetailPage() {
 
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
-            <h3>Vendor review</h3>
-            <p>Vendor review only. Shopify refund is not issued here.</p>
+            <h3>{terminalRefundedReturn ? 'Return completed' : 'Vendor review'}</h3>
+            <p>
+              {terminalRefundedReturn
+                ? 'Return is closed and refund is complete. No vendor action is required.'
+                : 'Vendor review only. Shopify refund is not issued here.'}
+            </p>
             <WorkflowActionGuidance
               actionLabel={returnWorkflowGuidance.actionLabel}
               description={returnWorkflowGuidance.description}
@@ -1610,7 +1642,7 @@ export function ReturnDetailPage() {
             </div>
             {message ? <p className={`action-feedback action-${tone}`}>{message}</p> : null}
             <div className="return-review-actions">
-              {canReviewReturn ? (
+              {canMutateReturnReview ? (
                 <button
                   type="button"
                   className="button button-secondary"
@@ -1620,7 +1652,7 @@ export function ReturnDetailPage() {
                   {markReceivedMutation.isPending ? 'Marking...' : hasReceivedReturn ? 'Received' : 'Mark received'}
                 </button>
               ) : null}
-              {canReviewReturn ? (
+              {canMutateReturnReview ? (
                 <button
                   type="button"
                   className="button button-primary"
@@ -1634,7 +1666,7 @@ export function ReturnDetailPage() {
                 Contact support
               </button>
             </div>
-            {canReviewReturn && hasReceivedReturn && !hasReviewedReturn ? (
+            {canMutateReturnReview && hasReceivedReturn && !hasReviewedReturn ? (
               <div className="return-review-reject-box">
                 <label htmlFor="return-reject-reason">Reject reason</label>
                 <textarea
@@ -1661,9 +1693,14 @@ export function ReturnDetailPage() {
               <div className="return-review-card-header">
                 <div>
                   <p className="eyebrow">Return shipment</p>
-                  <h3>Customer shipment</h3>
+                  <h3>{terminalRefundedReturn ? 'Provider sync diagnostics' : 'Customer shipment'}</h3>
                 </div>
               </div>
+              {terminalRefundedReturn ? (
+                <p className="page-description">
+                  Return is already closed/refunded; these fields are historical sync diagnostics.
+                </p>
+              ) : null}
               <div className="return-review-summary-list">
                 {returnRequest.returnProvider ? (
                   <div>
@@ -2250,9 +2287,14 @@ export function ReturnDetailPage() {
               <div className="return-review-card-header">
                 <div>
                   <p className="eyebrow">Navlungo return pickup</p>
-                  <h3>Provider return shipment</h3>
+                  <h3>{terminalRefundedReturn ? 'Provider sync diagnostics' : 'Provider return shipment'}</h3>
                 </div>
               </div>
+              {terminalRefundedReturn ? (
+                <p className="page-description">
+                  Return is already closed/refunded; these fields are historical sync diagnostics.
+                </p>
+              ) : null}
               {returnRequest.returnProviderShipmentId ? (
                 <div className="return-review-summary-list">
                   <div>

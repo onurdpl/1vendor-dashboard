@@ -1,3 +1,5 @@
+import { isTerminalRefundedReturn } from './returnOperationalState';
+
 export type WorkflowActionTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention';
 
 export type WorkflowActionGuidance = {
@@ -185,11 +187,24 @@ export function getOrderWorkflowAction(input: {
 
 export function getReturnWorkflowAction(input: {
   status?: string | null;
+  returnLifecycleStatus?: string | null;
   sourceType?: string | null;
   vendorReceivedAt?: string | null;
+  vendorReviewedAt?: string | null;
   vendorDecision?: string | null;
   refundStatus?: string | null;
+  sourceShopifyRefundId?: string | null;
+  refundRecordCount?: number | null;
+  refundedItems?: unknown[] | null;
 }): WorkflowActionGuidance {
+  if (isTerminalRefundedReturn(input)) {
+    return {
+      actionLabel: 'No action required',
+      description: 'Refund is complete. Settlement accounting review may remain in Finance.',
+      tone: 'success',
+    };
+  }
+
   const status = normalize(input.status);
   const refundStatus = normalize(input.refundStatus);
   const isPendingReturn =

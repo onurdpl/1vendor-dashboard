@@ -124,6 +124,24 @@ const awaitingReviewReturn: ReturnDetail = {
   ],
 };
 
+const closedRefundedReturnRequest: ReturnDetail = {
+  ...pendingReturn,
+  id: 'RET-A-CLOSED-1098',
+  sourceShopifyOrderNumber: 1098,
+  sourceShopifyRefundId: 'gid://shopify/Refund/1098',
+  status: 'Closed',
+  amount: '$4099.00',
+  reason: 'Return closed after refund.',
+  resolution: 'Refund processed.',
+  vendorReceivedAt: '2026-06-20T10:00:00Z',
+  vendorReviewedAt: '2026-06-20T10:05:00Z',
+  vendorDecision: 'approved',
+  timeline: [
+    { label: 'Return requested', at: '2026-06-19T10:00:00Z' },
+    { label: 'Refund processed', at: '2026-06-20T10:10:00Z' },
+  ],
+};
+
 const otherVendorReturn: ReturnDetail = {
   ...processedRefund,
   id: 'RET-B-REFUND-1002',
@@ -292,8 +310,16 @@ describe('ReturnsPage control center', () => {
   });
 
   it('uses workflow query params to open pending return review and allows reset', async () => {
-    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
-    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+    listReturnsMock.mockResolvedValue([
+      toSummary(pendingReturn),
+      toSummary(processedRefund),
+      toSummary(closedRefundedReturnRequest),
+    ]);
+    getReturnMock.mockImplementation(async (returnId) => {
+      if (returnId === processedRefund.id) return processedRefund;
+      if (returnId === closedRefundedReturnRequest.id) return closedRefundedReturnRequest;
+      return pendingReturn;
+    });
 
     renderReturnsPage(['/returns?workflow=pending-review']);
 
@@ -301,14 +327,16 @@ describe('ReturnsPage control center', () => {
     expect(screen.getByRole('button', { name: /Pending review/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Barcode gateway license')).not.toBeInTheDocument();
+    expect(screen.queryByText('#1098')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
 
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(await screen.findByText('#1098')).toBeInTheDocument();
   });
 
   it('renders an honest empty state for empty return workflow queues', async () => {
-    listReturnsMock.mockResolvedValue([toSummary(processedRefund)]);
+    listReturnsMock.mockResolvedValue([toSummary(processedRefund), toSummary(closedRefundedReturnRequest)]);
     getReturnMock.mockResolvedValue(processedRefund);
 
     renderReturnsPage(['/returns?workflow=pending-review']);
@@ -318,6 +346,25 @@ describe('ReturnsPage control center', () => {
     expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
     expect(screen.getByText('No return selected')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+  });
+
+  it('shows closed refunded Shopify return requests in the refunded filter, not pending review', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(closedRefundedReturnRequest)]);
+    getReturnMock.mockImplementation(async (returnId) =>
+      returnId === closedRefundedReturnRequest.id ? closedRefundedReturnRequest : pendingReturn,
+    );
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('#1098')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Pending review/i }));
+    expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('#1098')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Refunded/i }));
+    expect(await screen.findByText('#1098')).toBeInTheDocument();
+    expect(screen.queryByText('#1001')).not.toBeInTheDocument();
   });
 
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {

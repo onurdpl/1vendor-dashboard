@@ -27,6 +27,35 @@ describe('workflow action guidance', () => {
     ).toBe('Approve or reject return');
   });
 
+  it('maps terminal refunded returns to no-action guidance', () => {
+    const guidance = getReturnWorkflowAction({
+      status: 'Closed',
+      sourceType: 'shopify_return_request',
+      vendorReceivedAt: '2026-06-20T10:00:00.000Z',
+      vendorReviewedAt: '2026-06-20T10:05:00.000Z',
+      vendorDecision: 'approved',
+      refundStatus: 'Refunded',
+      sourceShopifyRefundId: 'gid://shopify/Refund/1',
+    });
+
+    expect(guidance.actionLabel).toBe('No action required');
+    expect(guidance.description).toContain('Settlement accounting review may remain in Finance');
+    expect(guidance.tone).toBe('success');
+  });
+
+  it('keeps approved returns without refunds in the active return flow', () => {
+    const guidance = getReturnWorkflowAction({
+      status: 'Approved',
+      sourceType: 'shopify_return_request',
+      vendorReceivedAt: '2026-06-20T10:00:00.000Z',
+      vendorReviewedAt: '2026-06-20T10:05:00.000Z',
+      vendorDecision: 'approved',
+      refundStatus: 'Refund pending',
+    });
+
+    expect(guidance.actionLabel).toBe('Monitor refund progress');
+  });
+
   it('uses settlement review language without final payout certainty', () => {
     const guidance = getFinanceWorkflowAction({
       status: 'Pending',

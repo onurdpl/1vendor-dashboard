@@ -183,6 +183,30 @@ const returnDetail: ReturnDetail = {
   ],
 };
 
+const closedRefundedReturnDetail: ReturnDetail = {
+  ...returnDetail,
+  status: 'Closed',
+  sourceShopifyRefundId: 'gid://shopify/Refund/9001',
+  vendorReceivedAt: '2026-06-20T10:00:00Z',
+  vendorReviewedAt: '2026-06-20T10:05:00Z',
+  vendorDecision: 'approved',
+  updatedAt: '2026-06-20T10:10:00Z',
+  amount: '$4099.00',
+  refundMethod: 'Original payment method',
+  processedBy: 'Shopify refund webhook ingestion via backend',
+  returnProvider: 'navlungo',
+  returnProviderShipmentId: 'navlungo-return-1098',
+  returnCarrierName: 'Navlungo',
+  returnTrackingNumber: 'RET-1098',
+  returnProviderSnapshot: {
+    shopifyReturnSyncSkippedReason: 'tracking_missing',
+  },
+  timeline: [
+    { label: 'Return requested', at: '2026-06-19T10:00:00Z' },
+    { label: 'Refund processed', at: '2026-06-20T10:10:00Z' },
+  ],
+};
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -1466,6 +1490,65 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByText('Refund processed')).toBeInTheDocument();
+  });
+
+  it('renders closed refunded returns as complete with no active review actions', async () => {
+    getReturnMock.mockResolvedValue(closedRefundedReturnDetail);
+    getReturnFinanceRecordsMock.mockResolvedValue({
+      records: [
+        {
+          id: 'finance-refund-1098',
+          category: 'refund',
+          amount: -4099,
+          status: 'pending',
+          date: '2026-06-20T10:10:00Z',
+          settlementRefundAdjustments: [],
+        },
+        {
+          id: 'finance-payout-1098',
+          category: 'sale',
+          amount: 4099,
+          status: 'pending',
+          date: '2026-06-20T10:11:00Z',
+          settlementRefundAdjustments: [],
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return completed' })).toBeInTheDocument();
+    expect(screen.getByText('Return is closed and refund is complete. No vendor action is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
+      'Refund is complete. Settlement accounting review may remain in Finance.',
+    );
+    expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Settlement review pending/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Payout accounting pending/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider sync diagnostics').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText('Return is already closed/refunded; these fields are historical sync diagnostics.').length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      status: 'Approved',
+      vendorReceivedAt: '2026-06-20T10:00:00Z',
+      vendorReviewedAt: '2026-06-20T10:05:00Z',
+      vendorDecision: 'approved',
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Vendor review' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor refund progress');
+    expect(screen.queryByText('Return completed')).not.toBeInTheDocument();
   });
 
   it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
