@@ -1249,7 +1249,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(screen.getByText('paid')).toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('TRY')).toBeInTheDocument();
@@ -1287,6 +1289,41 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/rawPayload/i)).not.toBeInTheDocument();
   });
 
+  it('shows split-specific Shopify snapshot scope copy on split order detail', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      splitSummary: {
+        sourceAllocationId: orderWithShipmentSummary.id,
+        childAllocationId: 'alloc-child-1028',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorName: null,
+        lineageRole: 'source',
+        movedItems: [],
+      },
+    });
+
+    renderOrderDetail();
+
+    const snapshot = await screen.findByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(within(snapshot).getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(within(snapshot).getByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Vendor integration')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Tax total')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Shipping amount')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Discount amount')).toBeInTheDocument();
+  });
+
   it('renders duplicate shipping district only once when the address already contains it as a segment', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1314,7 +1351,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     const shippingAddressRow = screen.getByText('Shipping address').closest('div');
     expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3, Maltepe · İstanbul · 34841 · TR');
     expect(shippingAddressRow).not.toHaveTextContent('Maltepe · Maltepe');
@@ -1348,7 +1385,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     const shippingAddressRow = screen.getByText('Shipping address').closest('div');
     expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3/1 · Maltepe · İstanbul · 34841 · TR');
   });
@@ -1380,7 +1417,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     const shippingAddressRow = screen.getByText('Shipping address').closest('div');
     expect(shippingAddressRow).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3/1 · İstanbul · 34841 · TR');
   });
@@ -1412,7 +1449,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     expect(screen.getByText('Shipping address')).toBeInTheDocument();
     expect(screen.getByText(/NA, NA NA/)).toBeInTheDocument();
     expect(screen.getByText('Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.')).toBeInTheDocument();
@@ -1483,7 +1520,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.queryByText('Integration note')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Vendor Invoice' })).not.toBeInTheDocument();

@@ -1239,8 +1239,16 @@ export function OrdersPage() {
                 </div>
               </section>
 
-              <section className="orders-detail-card" aria-label="Integration snapshot">
-                <h4>Integration Snapshot</h4>
+              <section className="orders-detail-card" aria-label="Shopify order snapshot">
+                <h4>Shopify order snapshot</h4>
+                <p className="page-description">
+                  Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.
+                </p>
+                {selectedOrder.splitSummary ? (
+                  <p className="page-description">
+                    This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.
+                  </p>
+                ) : null}
                 <div className="orders-rail-summary-list">
                   <div>
                     <span>Financial status</span>

@@ -655,7 +655,9 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('processing')).toBeInTheDocument();
     expect(screen.getByText('External shipment')).toBeInTheDocument();
@@ -671,6 +673,36 @@ describe('OrdersPage control center', () => {
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*650\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Line total incl\. VAT TRY\s*1,950\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).toBeInTheDocument();
+  });
+
+  it('shows split-specific Shopify snapshot scope copy on split orders', async () => {
+    const splitOrder = {
+      ...orderDetail,
+      splitSummary: {
+        sourceAllocationId: orderDetail.id,
+        childAllocationId: 'alloc-child-1002',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorName: null,
+        lineageRole: 'source' as const,
+        movedItems: [],
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(splitOrder)]);
+    getOrderMock.mockResolvedValue(splitOrder);
+
+    renderOrdersPage();
+
+    const customerLabels = await screen.findAllByText('Acme Supply Co.');
+    await userEvent.click(customerLabels[0]);
+
+    const snapshot = screen.getByLabelText('Shopify order snapshot');
+    expect(within(snapshot).getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(within(snapshot).getByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Vendor integration')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Tax total')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Shipping')).toBeInTheDocument();
+    expect(within(snapshot).getByText('Discount')).toBeInTheDocument();
   });
 
   it('opens an existing shipment label without creating a duplicate shipment', async () => {
@@ -1114,7 +1146,7 @@ describe('OrdersPage control center', () => {
     expect(within(fulfillmentCard as HTMLElement).getByText('Blocked')).toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
-    const integrationSnapshot = screen.getByLabelText('Integration snapshot');
+    const integrationSnapshot = screen.getByLabelText('Shopify order snapshot');
     expect(within(integrationSnapshot).getByText('Held')).toBeInTheDocument();
     expect(within(integrationSnapshot).getByText('Vendor integration')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
@@ -1160,7 +1192,7 @@ describe('OrdersPage control center', () => {
     );
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
 
-    const integrationSnapshot = screen.getByLabelText('Integration snapshot');
+    const integrationSnapshot = screen.getByLabelText('Shopify order snapshot');
     expect(within(integrationSnapshot).getByText('Refund completed')).toBeInTheDocument();
     expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
   });

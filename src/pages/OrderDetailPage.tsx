@@ -6099,11 +6099,14 @@ export function OrderDetailPage() {
             </div>
           </article>
 
-          <article className="order-detail-card-v2 order-workspace-panel" aria-label="Integration snapshot">
+          <article className="order-detail-card-v2 order-workspace-panel" aria-label="Shopify order snapshot">
             <div className="order-card-heading">
               <div>
-                <h2>Integration Snapshot</h2>
-                <p>Read-only Shopify order fields persisted for vendor integration providers.</p>
+                <h2>Shopify order snapshot</h2>
+                <p>Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.</p>
+                {order.splitSummary ? (
+                  <p>This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.</p>
+                ) : null}
               </div>
             </div>
             <div className="order-financial-impact-grid order-finance-preview-grid">

@@ -718,6 +718,7 @@ export type OrderSummary = {
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
   assignmentHistory: AssignmentHistoryEntry[];
+  splitSummary?: AllocationSplitSummary | null;
   fulfillmentActionState: FulfillmentActionState;
   fulfillmentActionAvailable: boolean;
   fulfilledAt?: string;
