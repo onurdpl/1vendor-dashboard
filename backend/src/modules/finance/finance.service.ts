@@ -1106,6 +1106,7 @@ export async function getVendorFinanceDashboard(
     withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
+        ...activeFinanceLedgerWhere,
       },
       select: {
         id: true,
@@ -1150,6 +1151,7 @@ export async function getVendorFinanceDashboard(
               },
             },
             financeEntries: {
+              where: activeFinanceLedgerWhere,
               select: {
                 id: true,
                 entryType: true,
@@ -1262,6 +1264,7 @@ export async function getVendorFinanceDashboard(
     withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
+        ...activeFinanceLedgerWhere,
       },
       select: {
         id: true,
@@ -1323,6 +1326,7 @@ export async function getVendorFinanceDashboard(
               },
             },
             financeEntries: {
+              where: activeFinanceLedgerWhere,
               select: {
                 id: true,
                 entryType: true,
@@ -1742,6 +1746,7 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
   const summaryEntries = await withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
     where: {
       vendorId,
+      ...activeFinanceLedgerWhere,
     },
     select: {
       entryType: true,

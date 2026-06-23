@@ -31,6 +31,17 @@ function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+type SplitEventFixture = {
+  id: string;
+  sourceAllocationId: string;
+  childAllocationId: string;
+  reason: string;
+  createdAt: Date;
+  sourceFinanceLedgerEntryId: string | null;
+  remainingFinanceLedgerEntryId: string | null;
+  childFinanceLedgerEntryId: string | null;
+};
+
 type LedgerFixture = {
   id: string;
   entryType: string;
@@ -54,6 +65,12 @@ type LedgerFixture = {
   payableAt: Date | null;
   settledAt: Date | null;
   settlementHoldReason: string | null;
+  voidedAt?: Date | null;
+  voidReason?: string | null;
+  supersededByLedgerId?: string | null;
+  sourceAllocationSplitEvents?: SplitEventFixture[];
+  remainingAllocationSplitEvents?: SplitEventFixture[];
+  childAllocationSplitEvents?: SplitEventFixture[];
   settlementApprovalLines?: Array<{
     settlementApproval: {
       id: string;
@@ -92,6 +109,12 @@ function buildSaleFixture(input: {
 	  deliveredAt?: string | null;
 	  settlementDelayDaysSnapshot?: number;
 	  allocationStatus?: string;
+	  voidedAt?: Date | null;
+	  voidReason?: string | null;
+	  supersededByLedgerId?: string | null;
+	  sourceAllocationSplitEvents?: SplitEventFixture[];
+	  remainingAllocationSplitEvents?: SplitEventFixture[];
+	  childAllocationSplitEvents?: SplitEventFixture[];
 	}): LedgerFixture {
   const createdAt = new Date(input.createdAt);
   const fulfilled = input.fulfilled ?? true;
@@ -128,6 +151,12 @@ function buildSaleFixture(input: {
     payableAt: eligibleAt,
     settledAt: null,
     settlementHoldReason: null,
+    voidedAt: input.voidedAt ?? null,
+    voidReason: input.voidReason ?? null,
+    supersededByLedgerId: input.supersededByLedgerId ?? null,
+    sourceAllocationSplitEvents: input.sourceAllocationSplitEvents ?? [],
+    remainingAllocationSplitEvents: input.remainingAllocationSplitEvents ?? [],
+    childAllocationSplitEvents: input.childAllocationSplitEvents ?? [],
 	    vendorAllocation: {
 	      id: `alloc-${input.orderId}`,
 	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
@@ -237,9 +266,13 @@ describe('persisted vendor finance calculations', () => {
       };
       return activeProfile;
     });
-    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
+    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown; where?: { voidedAt?: Date | null } }) => {
+      const matchingRows =
+        args.where && 'voidedAt' in args.where && args.where.voidedAt === null
+          ? ledgerRows.filter((row) => row.voidedAt === null || row.voidedAt === undefined)
+          : ledgerRows;
       if (args.select) {
-        return ledgerRows.map((row) => ({
+        return matchingRows.map((row) => ({
           id: row.id,
           entryType: row.entryType,
           amount: row.amount,
@@ -277,10 +310,13 @@ describe('persisted vendor finance calculations', () => {
             : null,
           payoutBatchLines: row.payoutBatchLines ?? [],
           settlementApprovalLines: row.settlementApprovalLines ?? [],
+          sourceAllocationSplitEvents: row.sourceAllocationSplitEvents ?? [],
+          remainingAllocationSplitEvents: row.remainingAllocationSplitEvents ?? [],
+          childAllocationSplitEvents: row.childAllocationSplitEvents ?? [],
         }));
       }
 
-      return ledgerRows;
+      return matchingRows;
     });
   });
 
@@ -422,6 +458,92 @@ describe('persisted vendor finance calculations', () => {
       eligibleNetAmount: '0.00',
       blockedRowCount: 1,
     });
+  });
+
+  it('excludes voided split source ledgers from finance dashboard rows and summary totals', async () => {
+    const splitEvent = {
+      id: 'split-1097',
+      sourceAllocationId: 'alloc-source-1097',
+      childAllocationId: 'alloc-child-1097',
+      reason: 'OUT_OF_STOCK',
+      createdAt: new Date('2026-06-20T08:55:00.000Z'),
+      sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+      remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+      childFinanceLedgerEntryId: 'ledger-split-child',
+    };
+    ledgerRows = [
+      buildSaleFixture({
+        id: 'ledger-split-source-original',
+        amount: 7152.5,
+        orderId: 'gid://shopify/Order/1097',
+        orderNumber: '#1097',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 20,
+        createdAt: '2026-06-20T08:50:00.000Z',
+        settlementDelayDaysSnapshot: 0,
+        deliveredAt: '2026-06-20T08:50:00.000Z',
+        voidedAt: new Date('2026-06-20T08:55:00.000Z'),
+        voidReason: 'allocation_split:split-1097',
+        supersededByLedgerId: 'ledger-split-source-remaining',
+        sourceAllocationSplitEvents: [splitEvent],
+      }),
+      buildSaleFixture({
+        id: 'ledger-split-source-remaining',
+        amount: 2939,
+        orderId: 'gid://shopify/Order/1097',
+        orderNumber: '#1097',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 20,
+        createdAt: '2026-06-20T08:55:00.000Z',
+        settlementDelayDaysSnapshot: 0,
+        deliveredAt: '2026-06-20T08:55:00.000Z',
+        remainingAllocationSplitEvents: [splitEvent],
+      }),
+      buildSaleFixture({
+        id: 'ledger-split-child',
+        amount: 4213.5,
+        orderId: 'gid://shopify/Order/1097',
+        orderNumber: '#1097',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 20,
+        createdAt: '2026-06-20T08:55:00.000Z',
+        settlementDelayDaysSnapshot: 0,
+        deliveredAt: '2026-06-20T08:55:00.000Z',
+        allocationStatus: 'VENDOR_BLOCKED',
+        childAllocationSplitEvents: [splitEvent],
+      }),
+    ];
+
+    const dashboard = await getVendorFinanceDashboard('yalispor');
+    const summary = await getVendorFinanceSummary('yalispor');
+
+    expect(dashboard.records.map((record) => record.id)).toEqual([
+      'ledger-split-source-remaining',
+      'ledger-split-child',
+    ]);
+    expect(dashboard.summary.grossSales).toBe('7152.50');
+    expect(summary.summary.grossSales).toBe('7152.50');
+    expect(dashboard.summary.grossSales).not.toBe('14305.00');
+    expect(dashboard.records[0]?.splitFinanceSummary).toMatchObject({
+      sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+      remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+      childFinanceLedgerEntryId: 'ledger-split-child',
+      lineageRole: 'source',
+    });
+    expect(dashboard.records[1]?.splitFinanceSummary).toMatchObject({
+      sourceFinanceLedgerEntryId: 'ledger-split-source-original',
+      remainingFinanceLedgerEntryId: 'ledger-split-source-remaining',
+      childFinanceLedgerEntryId: 'ledger-split-child',
+      lineageRole: 'child',
+    });
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          vendorId: 'yalispor',
+          voidedAt: null,
+        }),
+      }),
+    );
   });
 
   it('uses the new active profile only for new sale ledger snapshots and aggregates mixed rates', async () => {
