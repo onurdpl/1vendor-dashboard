@@ -419,6 +419,10 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
+    expect(screen.getAllByText('Vendor Blocked').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Vendor rejected allocation.').length).toBeGreaterThan(0);
+    expect(screen.queryByText('No tracking yet')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
 
@@ -910,6 +914,17 @@ describe('OrdersPage control center', () => {
       reassignmentRequired: true,
       cancellationReason: 'OUT_OF_STOCK',
       fulfillmentActionAvailable: false,
+      assignmentHistory: [
+        {
+          action: 'vendor_blocked',
+          fromVendorId: 'demo-vendor-a',
+          toVendorId: 'demo-vendor-a',
+          reason: 'OUT_OF_STOCK',
+          actorName: 'Vendor User',
+          actorRole: 'vendor',
+          createdAt: '2026-05-08T09:30:00Z',
+        },
+      ],
     });
     listOrdersMock.mockResolvedValue([toSummary(blockedOrder)]);
     getOrderMock.mockResolvedValue(blockedOrder);
@@ -917,9 +932,26 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'This order is already blocked or no longer active.',
+      'Vendor rejection already submitted. This allocation is awaiting Sporgym admin review.',
     );
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
+      'Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work.',
+    );
+    expect(screen.getByText('Admin action required')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting admin resolution. Shopify not fulfilled.')).toBeInTheDocument();
+    const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
+    expect(fulfillmentCard).not.toBeNull();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Blocked')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
+    const integrationSnapshot = screen.getByLabelText('Integration snapshot');
+    expect(within(integrationSnapshot).getByText('On hold')).toBeInTheDocument();
+    expect(within(integrationSnapshot).getByText('Vendor integration')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
   });
 
   it('clears shipment label success feedback when selecting another order', async () => {

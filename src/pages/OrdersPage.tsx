@@ -38,6 +38,7 @@ import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/s
 import { useMutationAction } from '../hooks/useMutationAction';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
+import { getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 
@@ -154,8 +155,9 @@ function getAttentionLabel(order: OrderSummary) {
 }
 
 function getLifecyclePrimaryLabel(order: OrderSummary) {
-  if (order.allocationStatus === 'vendor_blocked') {
-    return 'Vendor blocked';
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return vendorBlockedStory.primaryLabel;
   }
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Awaiting shipment';
@@ -167,8 +169,9 @@ function getLifecyclePrimaryLabel(order: OrderSummary) {
 }
 
 function getLifecycleSecondaryLabel(order: OrderSummary) {
-  if (order.allocationStatus === 'vendor_blocked') {
-    return 'Awaiting admin resolution';
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return vendorBlockedStory.secondaryLabel;
   }
   if (order.trackingNumber || order.carrier) {
     return 'Tracking visible';
@@ -183,8 +186,9 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
 }
 
 function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
-  if (order.allocationStatus === 'vendor_blocked') {
-    return { label: 'Awaiting admin resolution', tone: 'blocked' as const, helper: 'Vendor rejected allocation.' };
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return { label: vendorBlockedStory.trackingLabel, tone: 'blocked' as const, helper: vendorBlockedStory.trackingHelper };
   }
   if (order.allocationStatus === 'pending_reassignment') {
     return { label: 'Needs review', tone: 'blocked' as const, helper: null };
@@ -208,6 +212,10 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
 }
 
 function getShopifyFulfillmentRailLabel(order: OrderSummary | OrderDetail) {
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return 'Not fulfilled';
+  }
   const detail = order as OrderDetail;
   if (detail.shopifyFulfillmentSync?.fulfillmentIdPresent || detail.shopifyFulfillmentSync?.status === 'synced') {
     return 'Synced';
@@ -222,6 +230,10 @@ function getShopifyFulfillmentRailLabel(order: OrderSummary | OrderDetail) {
 }
 
 function getRailProviderLabel(order: OrderSummary | OrderDetail) {
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return 'Blocked';
+  }
   const detail = order as OrderDetail;
   return (
     formatShippingProviderName(detail.shipmentExecution?.providerCarrierName) ||
@@ -242,6 +254,10 @@ function canRejectOrder(order: OrderSummary | OrderDetail | null | undefined) {
 function getRejectUnavailableReason(order: OrderSummary | OrderDetail | null | undefined) {
   if (!order) {
     return 'This order is not eligible for rejection.';
+  }
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  if (vendorBlockedStory) {
+    return vendorBlockedStory.rejectUnavailableCopy;
   }
   if (order.allocationStatus !== 'active') {
     return 'This order is already blocked or no longer active.';
@@ -1020,12 +1036,15 @@ export function OrdersPage() {
           >
           {selectedOrder ? (
             (() => {
+              const vendorBlockedStory = getVendorBlockedOperationalStory(selectedOrder);
               const shippingOperational = getShippingOperationalLabel(selectedOrder);
               const shopifyFulfillmentState = getShopifyFulfillmentRailLabel(selectedOrder);
               const shipmentExecution = (selectedOrder as OrderDetail).shipmentExecution;
-              const trackingLabel = selectedOrder.trackingNumber
-                ? selectedOrder.trackingNumber
-                : shipmentExecution?.trackingNumber ?? '—';
+              const trackingLabel = vendorBlockedStory
+                ? '—'
+                : selectedOrder.trackingNumber
+                  ? selectedOrder.trackingNumber
+                  : shipmentExecution?.trackingNumber ?? '—';
               const trackingUrl = selectedOrder.trackingUrl ?? shipmentExecution?.trackingUrl ?? null;
               const labelUrl = shipmentExecution?.labelUrl ?? null;
               const workflowGuidance = getOrderWorkflowAction({
@@ -1037,6 +1056,13 @@ export function OrdersPage() {
                 hasShipment: Boolean(shipmentExecution),
                 hasLabel: Boolean(labelUrl),
               });
+              const railGuidance = vendorBlockedStory
+                ? {
+                    actionLabel: vendorBlockedStory.nextAction,
+                    description: vendorBlockedStory.nextActionDescription,
+                    tone: 'warning' as const,
+                  }
+                : workflowGuidance;
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const rejectUnavailableReason = getRejectUnavailableReason(selectedOrder);
               const rejectEligible = currentUser?.role === 'vendor' && canRejectOrder(selectedOrder);
@@ -1048,13 +1074,22 @@ export function OrdersPage() {
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
-              if (selectedOrder.shipmentCreatedAt) {
+              if (vendorBlockedStory) {
+                const vendorBlockedHistory = safeArray((selectedOrder as OrderDetail).assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
+                vendorBlockedStory.timelineEvents.forEach((event) => {
+                  timelineItems.push({
+                    ...event,
+                    at: vendorBlockedHistory?.createdAt ? formatDate(vendorBlockedHistory.createdAt) : undefined,
+                  });
+                });
+              }
+              if (!vendorBlockedStory && selectedOrder.shipmentCreatedAt) {
                 timelineItems.push({ label: 'Shipment created', at: formatDate(selectedOrder.shipmentCreatedAt) });
               }
-              if (selectedOrder.trackingNumber) {
+              if (!vendorBlockedStory && selectedOrder.trackingNumber) {
                 timelineItems.push({ label: 'Tracking assigned', detail: getTrackingLabel(selectedOrder) });
               }
-              if (shopifyFulfillmentState === 'Synced' || selectedOrder.fulfilledAt) {
+              if (!vendorBlockedStory && (shopifyFulfillmentState === 'Synced' || selectedOrder.fulfilledAt)) {
                 timelineItems.push({
                   label: 'Fulfillment synced',
                   at: selectedOrder.fulfilledAt ? formatDate(selectedOrder.fulfilledAt) : undefined,
@@ -1076,50 +1111,52 @@ export function OrdersPage() {
               </div>
 
               <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
-                <strong>{selectedOrder.allocationStatus === 'vendor_blocked' ? 'Admin action required' : selectedOrder.shippingStatus}</strong>
-                <span>{shippingOperational.label}</span>
-                <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span>
+                <strong>{vendorBlockedStory ? vendorBlockedStory.adminActionTitle : selectedOrder.shippingStatus}</strong>
+                <span>{vendorBlockedStory ? vendorBlockedStory.adminActionCopy : shippingOperational.label}</span>
+                {!vendorBlockedStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
               </div>
 
               <WorkflowActionGuidance
-                actionLabel={workflowGuidance.actionLabel}
-                description={workflowGuidance.description}
-                tone={workflowGuidance.tone}
+                actionLabel={railGuidance.actionLabel}
+                description={railGuidance.description}
+                tone={railGuidance.tone}
               />
 
-              <section className="orders-smart-label-card" aria-label="Smart label action">
-                <button
-                  type="button"
-                  className="orders-smart-label-button"
-                  disabled={smartLabelDisabled}
-                  onClick={() => void handleSmartLabelAction(selectedOrder)}
-                >
-                  <span className="orders-smart-label-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M7 8V4h10v4" />
-                      <path d="M7 17H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2" />
-                      <path d="M7 14h10v6H7z" />
-                      <path d="M17 11h.01" />
-                    </svg>
-                  </span>
-                  <span>
-                    <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
-                    <small>
-                      {labelUrl
-                        ? 'Open existing label without creating a duplicate.'
-                        : shipmentExecution
-                          ? 'Shipment exists. Label availability is controlled by the provider.'
-                          : 'Create shipment and open label when available.'}
-                    </small>
-                  </span>
-                  <span className="orders-smart-label-arrow" aria-hidden="true">›</span>
-                </button>
-                {visibleLabelActionFeedback ? (
-                  <p className={`orders-smart-label-feedback orders-smart-label-${visibleLabelActionFeedback.tone}`}>
-                    {visibleLabelActionFeedback.message}
-                  </p>
-                ) : null}
-              </section>
+              {!vendorBlockedStory ? (
+                <section className="orders-smart-label-card" aria-label="Smart label action">
+                  <button
+                    type="button"
+                    className="orders-smart-label-button"
+                    disabled={smartLabelDisabled}
+                    onClick={() => void handleSmartLabelAction(selectedOrder)}
+                  >
+                    <span className="orders-smart-label-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7 8V4h10v4" />
+                        <path d="M7 17H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2" />
+                        <path d="M7 14h10v6H7z" />
+                        <path d="M17 11h.01" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
+                      <small>
+                        {labelUrl
+                          ? 'Open existing label without creating a duplicate.'
+                          : shipmentExecution
+                            ? 'Shipment exists. Label availability is controlled by the provider.'
+                            : 'Create shipment and open label when available.'}
+                      </small>
+                    </span>
+                    <span className="orders-smart-label-arrow" aria-hidden="true">›</span>
+                  </button>
+                  {visibleLabelActionFeedback ? (
+                    <p className={`orders-smart-label-feedback orders-smart-label-${visibleLabelActionFeedback.tone}`}>
+                      {visibleLabelActionFeedback.message}
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
 
               {rejectEligible ? (
                 <section className="orders-detail-card" aria-label="Reject order">
@@ -1141,7 +1178,7 @@ export function OrdersPage() {
                 </section>
               ) : showRejectUnavailableReason ? (
                 <section className="orders-detail-card" aria-label="Reject unavailable">
-                  <h4>Reject unavailable</h4>
+                  <h4>{vendorBlockedStory?.rejectUnavailableTitle ?? 'Reject unavailable'}</h4>
                   <p className="page-description">{rejectUnavailableReason}</p>
                   {shipmentExecution && shipmentExecution.shipmentStatus !== 'failed' && shipmentExecution.shipmentStatus !== 'cancelled' ? (
                     <small className="muted">Shipment status: {safeStatusLabel(shipmentExecution.shipmentStatus)}</small>
@@ -1158,7 +1195,7 @@ export function OrdersPage() {
                   </div>
                   <div>
                     <span>Tracking</span>
-                    <strong>{trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
+                    <strong>{!vendorBlockedStory && trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
                   </div>
                   <div>
                     <span>Shopify sync</span>
@@ -1167,7 +1204,7 @@ export function OrdersPage() {
                   <div>
                     <span>Label</span>
                     <strong>
-                      {labelUrl ? (
+                      {!vendorBlockedStory && labelUrl ? (
                         <button
                           type="button"
                           className="inline-link inline-button-link"
@@ -1176,7 +1213,7 @@ export function OrdersPage() {
                           Open label
                         </button>
                       ) : (
-                        'Unavailable'
+                        vendorBlockedStory?.shipmentLabel ?? 'Unavailable'
                       )}
                     </strong>
                   </div>
@@ -1192,7 +1229,7 @@ export function OrdersPage() {
                 <div className="orders-rail-summary-list">
                   <div>
                     <span>Financial status</span>
-                    <strong>{formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
+                    <strong>{vendorBlockedStory ? 'On hold' : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
                   </div>
                   <div>
                     <span>Payment gateway</span>
@@ -1200,7 +1237,7 @@ export function OrdersPage() {
                   </div>
                   <div>
                     <span>Vendor integration</span>
-                    <strong>{formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
+                    <strong>{vendorBlockedStory ? '—' : formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
                   </div>
                   <div>
                     <span>Currency</span>
