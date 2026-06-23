@@ -2174,6 +2174,50 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
   });
 
+  it('frames vendor-blocked orders as admin-resolution work instead of shipment work', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      reassignmentRequired: true,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      shipmentExecution: null,
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Vendor Blocked')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting Admin Resolution')).toBeInTheDocument();
+    const primaryStatus = screen.getByLabelText('Primary operational status');
+    expect(within(primaryStatus).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(primaryStatus).getByText('Admin action required. Reason: OUT_OF_STOCK.')).toBeInTheDocument();
+
+    const alerts = screen.getByLabelText('Operational alerts');
+    expect(within(alerts).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(alerts).getByText('Reason: OUT_OF_STOCK')).toBeInTheDocument();
+    expect(within(alerts).getByText('Admin resolution required')).toBeInTheDocument();
+    expect(within(alerts).getByText('Transfer allocation, refund review, or return to vendor.')).toBeInTheDocument();
+    expect(within(alerts).queryByText('Tracking missing')).not.toBeInTheDocument();
+    expect(within(alerts).queryByText('Awaiting shipment')).not.toBeInTheDocument();
+
+    expect(screen.getByText('Current state')).toBeInTheDocument();
+    expect(screen.getByText('Fulfillment')).toBeInTheDocument();
+    expect(screen.getByText('Blocked')).toBeInTheDocument();
+    expect(screen.getByText('Finance')).toBeInTheDocument();
+    expect(screen.getByText('Held')).toBeInTheDocument();
+    expect(screen.getAllByText('Next action').length).toBeGreaterThan(0);
+  });
+
   it('keeps support directly below timeline in the right sidebar flow', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

@@ -393,6 +393,14 @@ function getStatusClass(value: string | null | undefined) {
   return (value ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
+function isVendorBlockedStatus(value: string | null | undefined) {
+  return getStatusClass(value) === 'vendor-blocked';
+}
+
+function formatCancellationReason(value: string | null | undefined) {
+  return value?.trim() || null;
+}
+
 function getTrackingTitle(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
   return order.trackingNumber || order.carrier || order.trackingUrl ? 'Tracking Synced' : 'Missing Tracking';
 }
@@ -4774,38 +4782,71 @@ export function OrderDetailPage() {
         !financePreview ? 'ledger_preview_unavailable' : null,
       ].filter(Boolean) as string[]
     : [];
-  const summaryCards = [
-    {
-      label: 'Allocation status',
-      value: toTitleCaseLabel(order.allocationStatus),
-      helper: order.cancellationReason
-        ? `Reason: ${order.cancellationReason.replace(/_/g, ' ')}`
-        : 'Vendor allocation state.',
-      tone: 'danger',
-      icon: 'A',
-    },
-    {
-      label: 'Fulfillment status',
-      value: order.fulfillmentStatus,
-      helper: order.fulfilledAt ? `Fulfilled ${formatDate(order.fulfilledAt)}` : 'Fulfillment is being processed.',
-      tone: 'info',
-      icon: 'F',
-    },
-    {
-      label: 'Shipping status',
-      value: order.shippingStatus,
-      helper: order.shipmentCreatedAt ? `Shipment created ${formatDate(order.shipmentCreatedAt)}` : 'Waiting for shipment progression.',
-      tone: 'warning',
-      icon: 'S',
-    },
-    {
-      label: 'Tracking status',
-      value: trackingTitle,
-      helper: trackingHelper,
-      tone: hasTrackingSync ? 'success' : 'muted',
-      icon: 'T',
-    },
-  ];
+  const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
+  const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
+  const summaryCards = isVendorBlockedOrder
+    ? [
+        {
+          label: 'Current state',
+          value: 'Vendor rejected allocation',
+          helper: vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
+          tone: 'danger',
+          icon: 'A',
+        },
+        {
+          label: 'Fulfillment',
+          value: 'Blocked',
+          helper: 'Shipment work is paused until admin resolves the rejection.',
+          tone: 'warning',
+          icon: 'F',
+        },
+        {
+          label: 'Finance',
+          value: 'Held',
+          helper: 'Settlement and payout movement are held while the allocation is blocked.',
+          tone: 'warning',
+          icon: 'H',
+        },
+        {
+          label: 'Next action',
+          value: 'Admin resolution required',
+          helper: 'Transfer allocation, refund review, or return to vendor.',
+          tone: 'attention',
+          icon: 'N',
+        },
+      ]
+    : [
+        {
+          label: 'Allocation status',
+          value: toTitleCaseLabel(order.allocationStatus),
+          helper: order.cancellationReason
+            ? `Reason: ${order.cancellationReason.replace(/_/g, ' ')}`
+            : 'Vendor allocation state.',
+          tone: 'danger',
+          icon: 'A',
+        },
+        {
+          label: 'Fulfillment status',
+          value: order.fulfillmentStatus,
+          helper: order.fulfilledAt ? `Fulfilled ${formatDate(order.fulfilledAt)}` : 'Fulfillment is being processed.',
+          tone: 'info',
+          icon: 'F',
+        },
+        {
+          label: 'Shipping status',
+          value: order.shippingStatus,
+          helper: order.shipmentCreatedAt ? `Shipment created ${formatDate(order.shipmentCreatedAt)}` : 'Waiting for shipment progression.',
+          tone: 'warning',
+          icon: 'S',
+        },
+        {
+          label: 'Tracking status',
+          value: trackingTitle,
+          helper: trackingHelper,
+          tone: hasTrackingSync ? 'success' : 'muted',
+          icon: 'T',
+        },
+      ];
   const audience = isAdmin ? 'admin' : 'vendor';
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const orderTimelineEvents: OperationalEventInput[] = [];
@@ -5004,8 +5045,14 @@ export function OrderDetailPage() {
   const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
   const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
-  const needsOperationalAttention = Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
-  const orderHealth = needsOperationalAttention
+  const needsOperationalAttention = isVendorBlockedOrder || Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
+  const orderHealth = isVendorBlockedOrder
+    ? {
+        label: 'Vendor rejected allocation',
+        helper: vendorBlockedReason ? `Admin action required. Reason: ${vendorBlockedReason}.` : 'Admin action required.',
+        tone: 'attention',
+      }
+    : needsOperationalAttention
     ? {
         label: 'Needs attention',
         helper: waitingSupportTicket
@@ -5019,6 +5066,26 @@ export function OrderDetailPage() {
         tone: 'healthy',
       };
   const operationalAlerts = [
+    isVendorBlockedOrder
+      ? {
+          id: 'vendor-blocked',
+          label: 'Vendor rejected allocation',
+          detail: vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
+          tone: 'attention',
+          href: null,
+          action: null,
+        }
+      : null,
+    isVendorBlockedOrder
+      ? {
+          id: 'admin-resolution-required',
+          label: 'Admin resolution required',
+          detail: 'Transfer allocation, refund review, or return to vendor.',
+          tone: 'warning',
+          href: null,
+          action: null,
+        }
+      : null,
     hasOperationalReturn
       ? {
           id: 'return-active',
@@ -5031,7 +5098,7 @@ export function OrderDetailPage() {
           action: activeReturn ? 'Open return details' : null,
         }
       : null,
-    !hasOperationalReturn && !hasTrackingSync
+    !isVendorBlockedOrder && !hasOperationalReturn && !hasTrackingSync
       ? {
           id: 'tracking-missing',
           label: 'Tracking missing',
@@ -5041,7 +5108,7 @@ export function OrderDetailPage() {
           action: null,
         }
       : null,
-    !hasOperationalReturn && order.shippingStatus === 'Awaiting Shipment'
+    !isVendorBlockedOrder && !hasOperationalReturn && order.shippingStatus === 'Awaiting Shipment'
       ? {
           id: 'awaiting-shipment',
           label: 'Awaiting shipment',
@@ -5773,12 +5840,20 @@ export function OrderDetailPage() {
           <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
             {toTitleCaseLabel(order.allocationStatus)}
           </span>
-          <span className={`status-badge status-${getStatusClass(order.fulfillmentStatus)}`}>
-            {order.fulfillmentStatus}
-          </span>
-          <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
-            {order.shippingStatus}
-          </span>
+          {isVendorBlockedOrder ? (
+            <span className="status-badge status-awaiting-admin-resolution">
+              Awaiting Admin Resolution
+            </span>
+          ) : (
+            <>
+              <span className={`status-badge status-${getStatusClass(order.fulfillmentStatus)}`}>
+                {order.fulfillmentStatus}
+              </span>
+              <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
+                {order.shippingStatus}
+              </span>
+            </>
+          )}
         </div>
         {!hasOperationalReturn ? (
           <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">

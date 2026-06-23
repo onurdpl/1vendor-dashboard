@@ -154,6 +154,9 @@ function getAttentionLabel(order: OrderSummary) {
 }
 
 function getLifecyclePrimaryLabel(order: OrderSummary) {
+  if (order.allocationStatus === 'vendor_blocked') {
+    return 'Vendor blocked';
+  }
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Awaiting shipment';
   }
@@ -164,13 +167,16 @@ function getLifecyclePrimaryLabel(order: OrderSummary) {
 }
 
 function getLifecycleSecondaryLabel(order: OrderSummary) {
+  if (order.allocationStatus === 'vendor_blocked') {
+    return 'Awaiting admin resolution';
+  }
   if (order.trackingNumber || order.carrier) {
     return 'Tracking visible';
   }
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Tracking pending';
   }
-  if (order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked') {
+  if (order.allocationStatus === 'pending_reassignment') {
     return safeStatusLabel(order.allocationStatus);
   }
   return null;
@@ -178,7 +184,7 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
 
 function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
   if (order.allocationStatus === 'vendor_blocked') {
-    return { label: 'Shipment blocked', tone: 'blocked' as const, helper: null };
+    return { label: 'Awaiting admin resolution', tone: 'blocked' as const, helper: 'Vendor rejected allocation.' };
   }
   if (order.allocationStatus === 'pending_reassignment') {
     return { label: 'Needs review', tone: 'blocked' as const, helper: null };
@@ -1061,12 +1067,16 @@ export function OrdersPage() {
               <div className="orders-detail-rail-header">
                 <div className="orders-detail-rail-badges">
                   <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{safeStatusLabel(selectedOrder.allocationStatus)}</StatusBadge>
-                  <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
+                  {selectedOrder.allocationStatus === 'vendor_blocked' ? (
+                    <StatusBadge tone="warning">Awaiting admin resolution</StatusBadge>
+                  ) : (
+                    <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
+                  )}
                 </div>
               </div>
 
               <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
-                <strong>{selectedOrder.shippingStatus}</strong>
+                <strong>{selectedOrder.allocationStatus === 'vendor_blocked' ? 'Admin action required' : selectedOrder.shippingStatus}</strong>
                 <span>{shippingOperational.label}</span>
                 <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span>
               </div>
