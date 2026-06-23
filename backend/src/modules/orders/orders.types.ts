@@ -9,6 +9,9 @@ export type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  cancelRefundReviewStatus?: string | null;
+  refundRecordCount: number;
+  latestOutboundRefundAttemptStatus?: string | null;
   fulfillmentStatus: string;
   shippingStatus: string;
   carrier: string | null;

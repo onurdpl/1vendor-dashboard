@@ -1636,6 +1636,7 @@ export async function listVendorOrders(
       assignedVendorId: true,
       originalVendorId: true,
       allocationStatus: true,
+      cancelRefundReviewStatus: true,
       fulfillmentStatus: true,
       shippingStatus: true,
       trackingNumber: true,
@@ -1664,6 +1665,20 @@ export async function listVendorOrders(
           lineAmount: true,
         },
       },
+      refundRecords: {
+        select: {
+          id: true,
+        },
+      },
+      outboundShopifyRefundAttempts: {
+        select: {
+          status: true,
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+        take: 1,
+      },
     },
     orderBy: {
       updatedAt: 'desc',
@@ -1674,6 +1689,14 @@ export async function listVendorOrders(
 
   return withDashboardTiming('orders.metrics_aggregation', () => allocations.map((allocation) => {
     const totalAmount = computeTotalAmount(allocation.lineItems);
+    const cancelRefundReviewStatus =
+      allocation.cancelRefundReviewStatus?.trim().toUpperCase() === 'RESOLVED'
+        ? allocation.cancelRefundReviewStatus
+        : null;
+    const latestOutboundRefundAttemptStatus =
+      allocation.outboundShopifyRefundAttempts?.[0]?.status?.trim().toUpperCase() === 'RESOLVED'
+        ? allocation.outboundShopifyRefundAttempts[0]?.status ?? null
+        : null;
     return {
       id: allocation.id,
       sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
@@ -1682,6 +1705,9 @@ export async function listVendorOrders(
       assignedVendorId: allocation.assignedVendorId,
       originalVendorId: allocation.originalVendorId,
       allocationStatus: allocation.allocationStatus,
+      refundRecordCount: (allocation.refundRecords ?? []).length,
+      ...(cancelRefundReviewStatus ? { cancelRefundReviewStatus } : {}),
+      ...(latestOutboundRefundAttemptStatus ? { latestOutboundRefundAttemptStatus } : {}),
       fulfillmentStatus: allocation.fulfillmentStatus,
       shippingStatus: allocation.shippingStatus,
       carrier: allocation.carrier,
@@ -2926,6 +2952,20 @@ export async function getVendorOrderById(
           createdAt: 'asc',
         },
       },
+      refundRecords: {
+        select: {
+          id: true,
+        },
+      },
+      outboundShopifyRefundAttempts: {
+        select: {
+          status: true,
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+        take: 1,
+      },
     },
   });
 
@@ -2935,6 +2975,14 @@ export async function getVendorOrderById(
 
   const totalAmount = computeTotalAmount(allocation.lineItems);
   const shopifyReturnSignal = await getLatestShopifyReturnSignalForOrder(allocation.order.id);
+  const cancelRefundReviewStatus =
+    allocation.cancelRefundReviewStatus?.trim().toUpperCase() === 'RESOLVED'
+      ? allocation.cancelRefundReviewStatus
+      : null;
+  const latestOutboundRefundAttemptStatus =
+    allocation.outboundShopifyRefundAttempts?.[0]?.status?.trim().toUpperCase() === 'RESOLVED'
+      ? allocation.outboundShopifyRefundAttempts[0]?.status ?? null
+      : null;
 
   return {
     id: allocation.id,
@@ -2945,6 +2993,9 @@ export async function getVendorOrderById(
     assignedVendorId: allocation.assignedVendorId,
     originalVendorId: allocation.originalVendorId,
     allocationStatus: allocation.allocationStatus,
+    refundRecordCount: (allocation.refundRecords ?? []).length,
+    ...(cancelRefundReviewStatus ? { cancelRefundReviewStatus } : {}),
+    ...(latestOutboundRefundAttemptStatus ? { latestOutboundRefundAttemptStatus } : {}),
     fulfillmentStatus: allocation.fulfillmentStatus,
     shippingStatus: allocation.shippingStatus,
     totalAmount: toAmountString(totalAmount),

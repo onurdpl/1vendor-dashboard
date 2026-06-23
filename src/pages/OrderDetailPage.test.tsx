@@ -2255,6 +2255,67 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
+  it('shows refund-completed overlay for vendor-blocked orders resolved by Shopify refund', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      reassignmentRequired: true,
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecordCount: 1,
+      latestOutboundRefundAttemptStatus: 'RESOLVED',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      shipmentExecution: null,
+      assignmentHistory: [
+        {
+          action: 'vendor_blocked',
+          fromVendorId: 'sporjinal',
+          toVendorId: 'sporjinal',
+          reason: 'OUT_OF_STOCK',
+          actorName: 'Vendor User',
+          actorRole: 'vendor',
+          createdAt: '2026-05-15T12:12:00.000Z',
+        },
+      ],
+    });
+
+    renderOrderDetail();
+
+    expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Awaiting Admin Resolution')).not.toBeInTheDocument();
+
+    const primaryStatus = screen.getByLabelText('Primary operational status');
+    expect(within(primaryStatus).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(primaryStatus).getByText('Fulfillment is not required for this refunded allocation.')).toBeInTheDocument();
+
+    const settlementPreview = screen.getByLabelText('Order finance preview');
+    expect(within(settlementPreview).getByRole('heading', { name: 'Refund completed' })).toBeInTheDocument();
+    expect(settlementPreview).toHaveTextContent('Refund impact recorded.');
+    expect(within(settlementPreview).queryByLabelText('Finance hold reason')).not.toBeInTheDocument();
+    expect(within(settlementPreview).queryByRole('heading', { name: 'Settlement on hold' })).not.toBeInTheDocument();
+
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    expect(timeline).not.toBeNull();
+    const timelineScope = within(timeline as HTMLElement);
+    expect(timelineScope.getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(timelineScope.getByText('Refund processed')).toBeInTheDocument();
+    expect(timelineScope.getAllByText('Refund completed').length).toBeGreaterThan(0);
+    expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(timelineScope.queryByText('Finance hold activated')).not.toBeInTheDocument();
+    expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+  });
+
   it('keeps support directly below timeline in the right sidebar flow', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

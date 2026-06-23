@@ -38,8 +38,8 @@ import { findBlockingFinanceIntegrityAlerts } from './finance-integrity-alert.se
 import {
   CANCEL_REFUND_REVIEW_HOLD_REASON,
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
+  hasActiveVendorBlockedFinanceHold,
   hasBlockingCancelRefundReviewStatus,
-  hasVendorBlockedAllocationStatus,
 } from './cancel-refund-review-hold.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
@@ -447,7 +447,7 @@ function resolveSettlementStatus(
   if (payoutStatus === 'hold') {
     return 'held';
   }
-  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+  if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
     return 'held';
   }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
@@ -483,7 +483,7 @@ function rowIsEligible(
   if (normalizeStatus(row.payoutStatus) === 'paid') {
     return false;
   }
-  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+  if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
     return false;
   }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
@@ -536,7 +536,7 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = refundOffsetEligibility.reason;
   } else if (payoutStatus === 'hold') {
     eligibilityReason = 'Excluded because payout status is HOLD.';
-  } else if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+  } else if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
     eligibilityReason = VENDOR_BLOCKED_FINANCE_HOLD_REASON;
   } else if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
     eligibilityReason = CANCEL_REFUND_REVIEW_HOLD_REASON;
@@ -975,7 +975,7 @@ function validateApprovalLineAgainstCurrentLedger(
     ));
   }
 
-  if (hasVendorBlockedAllocationStatus(row.vendorAllocation)) {
+  if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
     reasons.push(buildRevalidationReason(
       line,
       'vendor_blocked_finance_hold_active',

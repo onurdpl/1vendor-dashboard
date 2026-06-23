@@ -1229,7 +1229,7 @@ export function OrdersPage() {
                 <div className="orders-rail-summary-list">
                   <div>
                     <span>Financial status</span>
-                    <strong>{vendorBlockedStory ? 'On hold' : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
+                    <strong>{vendorBlockedStory ? vendorBlockedStory.financeLabel : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
                   </div>
                   <div>
                     <span>Payment gateway</span>

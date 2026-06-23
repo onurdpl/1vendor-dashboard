@@ -58,6 +58,7 @@ import {
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
+import { getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
 import type {
   KargonomiLocationLookupDiagnostics,
   NavlungoAuthDiagnostics,
@@ -4601,6 +4602,9 @@ export function OrderDetailPage() {
   const trackingHelper = getTrackingHelper(order);
   const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
   const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
+  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
+  const isRefundResolvedVendorBlockedOrder = Boolean(vendorBlockedStory?.resolvedByRefund);
+  const isActiveVendorBlockedOrder = isVendorBlockedOrder && !isRefundResolvedVendorBlockedOrder;
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
@@ -4612,6 +4616,7 @@ export function OrderDetailPage() {
     Boolean(financePreview && (financePreview.unknowns.includes('shipping_cost') || financePreview.sourceFields.shippingCost === 'unknown')) ||
     payoutCalculation?.shippingCostStatus === 'pending_provider_cost';
   const currentRefundEvidencePresent =
+    isRefundResolvedVendorBlockedOrder ||
     relatedReturns.length > 0 ||
     Boolean(refundFinanceRecord) ||
     Boolean(financePreview && (financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0));
@@ -4659,7 +4664,11 @@ export function OrderDetailPage() {
       state: 'Estimated',
     },
     {
-      label: isVendorBlockedOrder ? 'Held settlement estimate' : 'Estimated settlement',
+      label: isActiveVendorBlockedOrder
+        ? 'Held settlement estimate'
+        : isRefundResolvedVendorBlockedOrder
+          ? 'Refund completed'
+          : 'Estimated settlement',
       value: financePreview
         ? formatFinancePreviewValue(financePreview.balance.netVendorPosition, financePreview.currency, {
             unknown: financePreview.unknowns.includes('vendor_payable'),
@@ -4671,8 +4680,12 @@ export function OrderDetailPage() {
     ...row,
     state: row.value === ORDER_FINANCE_UNKNOWN_VALUE
       ? ORDER_FINANCE_UNKNOWN_VALUE
-      : isVendorBlockedOrder
+      : isActiveVendorBlockedOrder
         ? 'Held estimate'
+      : isRefundResolvedVendorBlockedOrder && row.label === 'Refund impact'
+        ? 'Recorded'
+      : isRefundResolvedVendorBlockedOrder && row.label === 'Refund completed'
+        ? 'Completed'
         : row.state,
   }));
   const financePreviewEntryTime = (eventType: string) =>
@@ -4680,7 +4693,7 @@ export function OrderDetailPage() {
   const commissionEstimateValue = financePreviewRows.find((row) => row.label === 'Commission estimate')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const shippingDeductionValue = financePreviewRows.find((row) => row.label === 'Shipping deduction')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const estimatedSettlementValue =
-    financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate')?.value ??
+    financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate' || row.label === 'Refund completed')?.value ??
     ORDER_FINANCE_UNKNOWN_VALUE;
   const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
@@ -4696,13 +4709,15 @@ export function OrderDetailPage() {
     financePreview || payoutCalculation || settlementTimelineRecord
       ? {
           id: 'finance-settlement-preview-generated',
-          title: 'Settlement preview generated',
-          description: isKnownFinanceValue(estimatedSettlementValue)
+          title: isRefundResolvedVendorBlockedOrder ? 'Refund accounting recorded' : 'Settlement preview generated',
+          description: isRefundResolvedVendorBlockedOrder
+            ? 'Shopify refund evidence is recorded; vendor-blocked settlement hold is closed.'
+            : isKnownFinanceValue(estimatedSettlementValue)
             ? `${estimatedSettlementValue} · Estimated from available order finance data.`
             : 'Settlement preview is waiting for complete finance inputs.',
           at: settlementTimelineRecord?.date ?? financePreviewEntryTime('ORDER_CAPTURED') ?? order.date,
-          status: 'Preview',
-          tone: 'info' as const,
+          status: isRefundResolvedVendorBlockedOrder ? 'Recorded' : 'Preview',
+          tone: isRefundResolvedVendorBlockedOrder ? 'success' as const : 'info' as const,
           href: settlementTimelineRecord ? buildFinanceHref(settlementTimelineRecord) : undefined,
         }
       : null,
@@ -4740,17 +4755,23 @@ export function OrderDetailPage() {
     currentRefundEvidencePresent
       ? {
           id: 'finance-refund-impact',
-          title: isKnownFinanceValue(refundImpactValue) ? 'Refund impact estimated' : 'Refund impact pending',
-          description: isKnownFinanceValue(refundImpactValue)
-            ? `${refundImpactValue} · Estimated from linked return/refund evidence.`
+          title: isRefundResolvedVendorBlockedOrder
+            ? 'Refund completed'
+            : isKnownFinanceValue(refundImpactValue)
+              ? 'Refund impact estimated'
+              : 'Refund impact pending',
+          description: isRefundResolvedVendorBlockedOrder
+            ? `${refundImpactValue} · Refund impact recorded from Shopify refund.`
+            : isKnownFinanceValue(refundImpactValue)
+              ? `${refundImpactValue} · Estimated from linked return/refund evidence.`
             : 'Return or refund evidence exists, but finance impact is not available yet.',
           at: refundFinanceRecord?.date ?? relatedReturns[0]?.date ?? financePreviewEntryTime('RETURN_CREATED') ?? order.date,
-          status: isKnownFinanceValue(refundImpactValue) ? 'Estimated' : 'Pending',
-          tone: 'warning' as const,
+          status: isRefundResolvedVendorBlockedOrder ? 'Completed' : isKnownFinanceValue(refundImpactValue) ? 'Estimated' : 'Pending',
+          tone: isRefundResolvedVendorBlockedOrder ? 'success' as const : 'warning' as const,
           href: refundFinanceRecord ? buildFinanceHref(refundFinanceRecord) : relatedReturns[0] ? `/returns/${relatedReturns[0].id}` : undefined,
         }
       : null,
-    financePreview || payoutCalculation || settlementTimelineRecord
+    (financePreview || payoutCalculation || settlementTimelineRecord) && !isRefundResolvedVendorBlockedOrder
       ? {
           id: 'finance-settlement-review',
           title: 'Settlement awaiting review',
@@ -4794,34 +4815,40 @@ export function OrderDetailPage() {
         !financePreview ? 'ledger_preview_unavailable' : null,
       ].filter(Boolean) as string[]
     : [];
-  const summaryCards = isVendorBlockedOrder
+  const summaryCards = vendorBlockedStory
     ? [
         {
           label: 'Current state',
-          value: 'Vendor rejected allocation',
-          helper: vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
-          tone: 'danger',
+          value: vendorBlockedStory.resolvedByRefund ? 'Refunded' : 'Vendor rejected allocation',
+          helper: vendorBlockedStory.resolvedByRefund
+            ? 'Shopify refund completed for this blocked allocation.'
+            : vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
+          tone: vendorBlockedStory.resolvedByRefund ? 'success' : 'danger',
           icon: 'A',
         },
         {
           label: 'Fulfillment',
-          value: 'Blocked',
-          helper: 'Shipment work is paused until admin resolves the rejection.',
-          tone: 'warning',
+          value: vendorBlockedStory.fulfillmentLabel,
+          helper: vendorBlockedStory.resolvedByRefund
+            ? 'Shipment work is closed for the refunded allocation.'
+            : 'Shipment work is paused until admin resolves the rejection.',
+          tone: vendorBlockedStory.resolvedByRefund ? 'success' : 'warning',
           icon: 'F',
         },
         {
           label: 'Finance',
-          value: 'Held',
-          helper: 'Settlement and payout movement are held while the allocation is blocked.',
-          tone: 'warning',
+          value: vendorBlockedStory.financeLabel,
+          helper: vendorBlockedStory.resolvedByRefund
+            ? 'Refund impact is recorded; vendor-blocked hold no longer applies.'
+            : 'Settlement and payout movement are held while the allocation is blocked.',
+          tone: vendorBlockedStory.resolvedByRefund ? 'success' : 'warning',
           icon: 'H',
         },
         {
           label: 'Next action',
-          value: 'Admin resolution required',
-          helper: 'Transfer allocation, refund review, or return to vendor.',
-          tone: 'attention',
+          value: vendorBlockedStory.nextAction,
+          helper: vendorBlockedStory.nextActionDescription,
+          tone: vendorBlockedStory.resolvedByRefund ? 'success' : 'attention',
           icon: 'N',
         },
       ]
@@ -4867,7 +4894,7 @@ export function OrderDetailPage() {
     at: order.date,
     tone: 'info',
   });
-  if (isVendorBlockedOrder) {
+  if (vendorBlockedStory) {
     const vendorBlockedHistory = safeArray(order.assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
     const vendorBlockedAt = order.assignmentBlockedAt ?? vendorBlockedHistory?.createdAt ?? order.date;
     const rejectionReason = vendorBlockedHistory?.reason ?? vendorBlockedReason;
@@ -4888,30 +4915,57 @@ export function OrderDetailPage() {
       status: 'Rejected',
       tone: 'warning',
     });
-    pushVendorBlockedEvent({
-      id: 'vendor-blocked',
-      title: 'Vendor blocked',
-      description: 'Fulfillment is blocked for this allocation.',
-      at: vendorBlockedAt,
-      status: 'Blocked',
-      tone: 'warning',
-    });
-    pushVendorBlockedEvent({
-      id: 'vendor-blocked-finance-hold',
-      title: 'Finance hold activated',
-      description: 'Settlement and payout movement are held until admin resolution.',
-      at: vendorBlockedAt,
-      status: 'Held',
-      tone: 'attention',
-    });
-    pushVendorBlockedEvent({
-      id: 'vendor-blocked-admin-resolution',
-      title: 'Awaiting admin resolution',
-      description: 'Transfer allocation, refund review, or return to vendor.',
-      at: vendorBlockedAt,
-      status: 'Action required',
-      tone: 'attention',
-    });
+    if (vendorBlockedStory.resolvedByRefund) {
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked-refund-processed',
+        title: 'Refund processed',
+        description: 'Shopify refund webhook recorded refund finance.',
+        at: refundFinanceRecord?.date ?? vendorBlockedAt,
+        status: 'Processed',
+        tone: 'success',
+      });
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked-refund-completed',
+        title: 'Refund completed',
+        description: 'Cancel/refund review resolved.',
+        at: refundFinanceRecord?.date ?? vendorBlockedAt,
+        status: 'Completed',
+        tone: 'success',
+      });
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked-fulfillment-not-required',
+        title: 'Fulfillment not required',
+        description: 'Shipment work is closed for the refunded allocation.',
+        at: refundFinanceRecord?.date ?? vendorBlockedAt,
+        status: 'Closed',
+        tone: 'success',
+      });
+    } else {
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked',
+        title: 'Vendor blocked',
+        description: 'Fulfillment is blocked for this allocation.',
+        at: vendorBlockedAt,
+        status: 'Blocked',
+        tone: 'warning',
+      });
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked-finance-hold',
+        title: 'Finance hold activated',
+        description: 'Settlement and payout movement are held until admin resolution.',
+        at: vendorBlockedAt,
+        status: 'Held',
+        tone: 'attention',
+      });
+      pushVendorBlockedEvent({
+        id: 'vendor-blocked-admin-resolution',
+        title: 'Awaiting admin resolution',
+        description: 'Transfer allocation, refund review, or return to vendor.',
+        at: vendorBlockedAt,
+        status: 'Action required',
+        tone: 'attention',
+      });
+    }
   }
   if (order.shipmentCreatedAt) {
     orderTimelineEvents.push({
@@ -5101,8 +5155,14 @@ export function OrderDetailPage() {
   const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
   const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
-  const needsOperationalAttention = isVendorBlockedOrder || Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
-  const orderHealth = isVendorBlockedOrder
+  const needsOperationalAttention = isActiveVendorBlockedOrder || Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
+  const orderHealth = isRefundResolvedVendorBlockedOrder
+    ? {
+        label: 'Refund completed',
+        helper: 'Fulfillment is not required for this refunded allocation.',
+        tone: 'healthy',
+      }
+    : isActiveVendorBlockedOrder
     ? {
         label: 'Vendor rejected allocation',
         helper: vendorBlockedReason ? `Admin action required. Reason: ${vendorBlockedReason}.` : 'Admin action required.',
@@ -5122,7 +5182,17 @@ export function OrderDetailPage() {
         tone: 'healthy',
       };
   const operationalAlerts = [
-    isVendorBlockedOrder
+    isRefundResolvedVendorBlockedOrder
+      ? {
+          id: 'vendor-blocked-refund-completed',
+          label: 'Refund completed',
+          detail: 'Vendor rejection was resolved by Shopify refund.',
+          tone: 'success',
+          href: null,
+          action: null,
+        }
+      : null,
+    isActiveVendorBlockedOrder
       ? {
           id: 'vendor-blocked',
           label: 'Vendor rejected allocation',
@@ -5132,7 +5202,7 @@ export function OrderDetailPage() {
           action: null,
         }
       : null,
-    isVendorBlockedOrder
+    isActiveVendorBlockedOrder
       ? {
           id: 'admin-resolution-required',
           label: 'Admin resolution required',
@@ -5893,21 +5963,37 @@ export function OrderDetailPage() {
           </div>
         </div>
         <div className="order-detail-status-pills">
-          <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
-            {toTitleCaseLabel(order.allocationStatus)}
-          </span>
-          {isVendorBlockedOrder ? (
-            <span className="status-badge status-awaiting-admin-resolution">
-              Awaiting Admin Resolution
-            </span>
+          {isRefundResolvedVendorBlockedOrder ? (
+            <>
+              <span className="status-badge status-refunded">
+                Refunded
+              </span>
+              <span className="status-badge status-fulfillment-not-required">
+                Fulfillment not required
+              </span>
+              <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
+                Historical: {toTitleCaseLabel(order.allocationStatus)}
+              </span>
+            </>
           ) : (
             <>
-              <span className={`status-badge status-${getStatusClass(order.fulfillmentStatus)}`}>
-                {order.fulfillmentStatus}
+              <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
+                {toTitleCaseLabel(order.allocationStatus)}
               </span>
-              <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
-                {order.shippingStatus}
-              </span>
+              {isVendorBlockedOrder ? (
+                <span className="status-badge status-awaiting-admin-resolution">
+                  Awaiting Admin Resolution
+                </span>
+              ) : (
+                <>
+                  <span className={`status-badge status-${getStatusClass(order.fulfillmentStatus)}`}>
+                    {order.fulfillmentStatus}
+                  </span>
+                  <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
+                    {order.shippingStatus}
+                  </span>
+                </>
+              )}
             </>
           )}
         </div>
@@ -6150,22 +6236,42 @@ export function OrderDetailPage() {
           <article
             id="settlement-preview"
             ref={settlementPreviewRef}
-            className={`order-detail-card-v2 order-financial-summary-card order-workspace-panel${isVendorBlockedOrder ? ' order-financial-summary-held' : ''}`}
+            className={`order-detail-card-v2 order-financial-summary-card order-workspace-panel${isActiveVendorBlockedOrder ? ' order-financial-summary-held' : ''}`}
             aria-label="Order finance preview"
             tabIndex={-1}
           >
             <div className="order-card-heading">
               <div>
-                <h2>{isVendorBlockedOrder ? 'Settlement on hold' : 'Settlement preview'}</h2>
+                <h2>
+                  {isRefundResolvedVendorBlockedOrder
+                    ? 'Refund completed'
+                    : isActiveVendorBlockedOrder
+                      ? 'Settlement on hold'
+                      : 'Settlement preview'}
+                </h2>
                 <p>
-                  {isVendorBlockedOrder
+                  {isRefundResolvedVendorBlockedOrder
+                    ? 'Shopify refund processed. Fulfillment is no longer required.'
+                    : isActiveVendorBlockedOrder
                     ? 'Vendor rejected allocation. Settlement is excluded until resolution.'
                     : ORDER_FINANCE_HELPER_COPY}
                 </p>
               </div>
-              <span className="order-preview-badge">{isVendorBlockedOrder ? 'Held' : 'Preview'}</span>
+              <span className="order-preview-badge">
+                {isRefundResolvedVendorBlockedOrder ? 'Resolved' : isActiveVendorBlockedOrder ? 'Held' : 'Preview'}
+              </span>
             </div>
-            {isVendorBlockedOrder ? (
+            {isRefundResolvedVendorBlockedOrder ? (
+              <div className="finance-hold-notice finance-hold-resolved" aria-label="Refund completion status">
+                <div>
+                  <span>Refund status</span>
+                  <strong>Refund impact recorded.</strong>
+                </div>
+                <p>
+                  Vendor-blocked settlement hold no longer applies because the Shopify refund completed.
+                </p>
+              </div>
+            ) : isActiveVendorBlockedOrder ? (
               <div className="finance-hold-notice" aria-label="Finance hold reason">
                 <div>
                   <span>Finance hold reason</span>
@@ -6182,7 +6288,7 @@ export function OrderDetailPage() {
                 tone={orderSettlementGuidance.tone}
               />
             )}
-            <div className={`order-financial-impact-grid order-finance-preview-grid${isVendorBlockedOrder ? ' order-finance-preview-held' : ''}`}>
+            <div className={`order-financial-impact-grid order-finance-preview-grid${isActiveVendorBlockedOrder ? ' order-finance-preview-held' : ''}`}>
               {financePreviewRows.map((row) => (
                 <div key={row.label}>
                   <span>{row.label}</span>

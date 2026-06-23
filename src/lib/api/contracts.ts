@@ -711,6 +711,9 @@ export type OrderSummary = {
   sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
   allocationStatus: AllocationStatus;
+  cancelRefundReviewStatus?: string | null;
+  refundRecordCount?: number;
+  latestOutboundRefundAttemptStatus?: string | null;
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;

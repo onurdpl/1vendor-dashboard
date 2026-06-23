@@ -903,6 +903,35 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
 
+  it('does not apply vendor-blocked transition hold after refund resolution', async () => {
+    const sale = buildEntry({
+      id: 'sale-vendor-blocked-refunded-transition',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      allocationStatus: 'VENDOR_BLOCKED',
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecords: [{
+        id: 'refund-resolved',
+        sourceShopifyRefundId: 'refund-resolved',
+        amount: 100,
+        createdAt: new Date('2026-05-13T10:00:00Z'),
+      }],
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({
+      status: 'review',
+    });
+    expect(prismaMock.payoutBatch.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'batch-review' },
+      data: expect.objectContaining({ status: 'REVIEW' }),
+    }));
+  });
+
   it('blocks review when a refund arrived after batch creation', async () => {
     const sale = buildEntry({
       id: 'sale-late-refund',

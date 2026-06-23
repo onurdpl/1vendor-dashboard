@@ -123,6 +123,9 @@ type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  cancelRefundReviewStatus?: string | null;
+  refundRecordCount: number;
+  latestOutboundRefundAttemptStatus?: string | null;
   fulfillmentStatus: string;
   shippingStatus: string;
   carrier: string | null;
@@ -439,6 +442,9 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
     status: toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus),
     allocationStatus,
+    cancelRefundReviewStatus: dto.cancelRefundReviewStatus ?? undefined,
+    refundRecordCount: dto.refundRecordCount,
+    latestOutboundRefundAttemptStatus: dto.latestOutboundRefundAttemptStatus ?? undefined,
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     assignmentHistory: [],
     fulfillmentActionState: toFulfillmentActionState(shippingStatus),

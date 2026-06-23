@@ -560,6 +560,24 @@ describe('settlement approval foundation', () => {
     });
   });
 
+  it('does not apply vendor-blocked hold after refund resolution', () => {
+    const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-vendor-blocked-refunded',
+        entryType: 'sale',
+        amount: 1000,
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancelRefundReviewStatus: 'RESOLVED',
+        refundRecords: [{ id: 'refund-resolved', sourceShopifyRefundId: 'refund-resolved', amount: 100 }],
+      }),
+    );
+
+    expect(explanation).toMatchObject({
+      derivedSettlementStatus: 'partially_refunded',
+    });
+    expect(explanation.eligibilityReason).not.toBe('Vendor allocation is blocked and awaiting admin resolution.');
+  });
+
   it('explains cancel/refund review holds as settlement-ineligible', () => {
     const explanation = __settlementApprovalTesting.buildSettlementEligibilityExplanation(
       buildLedgerRow({

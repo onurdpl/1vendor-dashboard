@@ -948,10 +948,54 @@ describe('OrdersPage control center', () => {
     expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
     const integrationSnapshot = screen.getByLabelText('Integration snapshot');
-    expect(within(integrationSnapshot).getByText('On hold')).toBeInTheDocument();
+    expect(within(integrationSnapshot).getByText('Held')).toBeInTheDocument();
     expect(within(integrationSnapshot).getByText('Vendor integration')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
+  });
+
+  it('shows refunded completion story for vendor-blocked orders resolved by refund', async () => {
+    setVendorUser();
+    const refundedBlockedOrder = buildAwaitingRejectableOrder({
+      status: 'On Hold',
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'OUT_OF_STOCK',
+      fulfillmentActionAvailable: false,
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecordCount: 1,
+      latestOutboundRefundAttemptStatus: 'RESOLVED',
+      assignmentHistory: [
+        {
+          action: 'vendor_blocked',
+          fromVendorId: 'demo-vendor-a',
+          toVendorId: 'demo-vendor-a',
+          reason: 'OUT_OF_STOCK',
+          actorName: 'Vendor User',
+          actorRole: 'vendor',
+          createdAt: '2026-05-08T09:30:00Z',
+        },
+      ],
+    });
+    listOrdersMock.mockResolvedValue([toSummary(refundedBlockedOrder)]);
+    getOrderMock.mockResolvedValue(refundedBlockedOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('Refunded')).toBeInTheDocument();
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Reject unavailable')).toHaveTextContent(
+      'Vendor rejection was resolved by Shopify refund. No further rejection action is required.',
+    );
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
+      'Shopify refund is complete and fulfillment is no longer required for this allocation.',
+    );
+    expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
+
+    const integrationSnapshot = screen.getByLabelText('Integration snapshot');
+    expect(within(integrationSnapshot).getByText('Refund completed')).toBeInTheDocument();
+    expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
   });
 
   it('clears shipment label success feedback when selecting another order', async () => {
