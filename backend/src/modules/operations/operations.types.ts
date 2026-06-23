@@ -27,6 +27,7 @@ export type OperationsQueueItemDto = {
   actionLabel: string;
   destinationPath: string | null;
   reassignmentRequired?: boolean;
+  splitChildAllocation?: boolean;
 };
 
 export type OperationsQueueSummaryDto = {
@@ -81,6 +82,7 @@ export type OperationsAttentionItemDto = {
   sourceShopifyOrderId?: string | null;
   sourceShopifyOrderNumber?: string | null;
   cancellationReason?: string | null;
+  splitChildAllocation?: boolean;
 };
 
 export type OperationsVendorRiskDto = {

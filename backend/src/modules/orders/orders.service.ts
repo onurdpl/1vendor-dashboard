@@ -97,11 +97,29 @@ function mapAllocationSplitSummary(event: {
   reason: string;
   note?: string | null;
   actorUserId?: string | null;
+  actorUser?: {
+    name: string;
+  } | null;
   createdAt: Date;
-} | null | undefined): AllocationSplitSummaryDto | null {
+  childAllocation?: {
+    lineItems?: Array<{
+      id: string;
+      quantity: number;
+      lineAmount: unknown;
+      shopifyOrderLineItem: {
+        sourceLineItemId: string;
+        sku?: string | null;
+        title?: string | null;
+      };
+    }>;
+  } | null;
+} | null | undefined, allocationId?: string | null): AllocationSplitSummaryDto | null {
   if (!event) {
     return null;
   }
+
+  const lineageRole: AllocationSplitSummaryDto['lineageRole'] =
+    allocationId === event.sourceAllocationId ? 'source' : allocationId === event.childAllocationId ? 'child' : 'unknown';
 
   return {
     splitEventId: event.id,
@@ -111,6 +129,16 @@ function mapAllocationSplitSummary(event: {
     note: event.note ?? null,
     createdAt: event.createdAt.toISOString(),
     actorUserId: event.actorUserId ?? null,
+    actorName: event.actorUser?.name ?? null,
+    lineageRole,
+    movedItems: (event.childAllocation?.lineItems ?? []).map((lineItem) => ({
+      vendorAllocationLineItemId: lineItem.id,
+      shopifyLineItemId: lineItem.shopifyOrderLineItem.sourceLineItemId,
+      sku: lineItem.shopifyOrderLineItem.sku ?? null,
+      title: lineItem.shopifyOrderLineItem.title ?? null,
+      quantity: lineItem.quantity,
+      lineAmount: toNumber(lineItem.lineAmount),
+    })),
   };
 }
 
@@ -141,6 +169,9 @@ function mapAllocationSplitExecutionResponse(
     reason: input.reason,
     note: input.note ?? null,
     actorUserId: input.actorUserId ?? null,
+    actorName: null,
+    lineageRole: 'unknown',
+    movedItems: [],
   };
 
   return {
@@ -3079,11 +3110,49 @@ export async function getVendorOrderById(
         orderBy: {
           createdAt: 'desc',
         },
+        include: {
+          actorUser: {
+            select: {
+              name: true,
+            },
+          },
+          childAllocation: {
+            include: {
+              lineItems: {
+                include: {
+                  shopifyOrderLineItem: true,
+                },
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
+            },
+          },
+        },
         take: 1,
       },
       childAllocationSplitEvents: {
         orderBy: {
           createdAt: 'desc',
+        },
+        include: {
+          actorUser: {
+            select: {
+              name: true,
+            },
+          },
+          childAllocation: {
+            include: {
+              lineItems: {
+                include: {
+                  shopifyOrderLineItem: true,
+                },
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
+            },
+          },
         },
         take: 1,
       },
@@ -3219,6 +3288,7 @@ export async function getVendorOrderById(
     })),
     splitSummary: mapAllocationSplitSummary(
       allocation.childAllocationSplitEvents[0] ?? allocation.sourceAllocationSplitEvents[0] ?? null,
+      allocation.id,
     ),
   };
 }
@@ -3289,11 +3359,49 @@ export async function getAdminShopifyOrderBreakdown(
             orderBy: {
               createdAt: 'desc',
             },
+            include: {
+              actorUser: {
+                select: {
+                  name: true,
+                },
+              },
+              childAllocation: {
+                include: {
+                  lineItems: {
+                    include: {
+                      shopifyOrderLineItem: true,
+                    },
+                    orderBy: {
+                      createdAt: 'asc',
+                    },
+                  },
+                },
+              },
+            },
             take: 1,
           },
           childAllocationSplitEvents: {
             orderBy: {
               createdAt: 'desc',
+            },
+            include: {
+              actorUser: {
+                select: {
+                  name: true,
+                },
+              },
+              childAllocation: {
+                include: {
+                  lineItems: {
+                    include: {
+                      shopifyOrderLineItem: true,
+                    },
+                    orderBy: {
+                      createdAt: 'asc',
+                    },
+                  },
+                },
+              },
             },
             take: 1,
           },
@@ -3517,6 +3625,7 @@ export async function getAdminShopifyOrderBreakdown(
           : null,
         splitSummary: mapAllocationSplitSummary(
           allocation.childAllocationSplitEvents[0] ?? allocation.sourceAllocationSplitEvents[0] ?? null,
+          allocation.id,
         ),
       };
     }),

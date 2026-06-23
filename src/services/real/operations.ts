@@ -21,6 +21,7 @@ type OperationsResponseDto = {
     actionLabel: string;
     destinationPath: string | null;
     reassignmentRequired?: boolean;
+    splitChildAllocation?: boolean;
   }>;
 };
 
@@ -88,6 +89,7 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
       actionLabel: item.actionLabel,
       actionTo: item.destinationPath ?? undefined,
       reassignmentRequired: item.reassignmentRequired,
+      splitChildAllocation: item.splitChildAllocation,
     })),
   };
 }

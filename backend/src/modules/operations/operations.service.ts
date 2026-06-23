@@ -198,6 +198,16 @@ function getRecommendationForAttentionItem(item: OperationsAttentionItemDto): Pi
 
   if (item.type === 'vendor_blocked') {
     const reason = readVendorBlockedReason(item.description);
+    if (item.splitChildAllocation) {
+      return {
+        type: 'vendor_blocked_review',
+        title: 'Split allocation awaiting admin resolution',
+        description: `Vendor rejected selected line items on ${item.objectReference}.${reason ? ` Reason: ${reason}.` : ''}`,
+        recommendedAction: 'Review the split allocation and choose transfer, refund, or return.',
+        vendorVisible: false,
+      };
+    }
+
     return {
       type: 'vendor_blocked_review',
       title: 'Vendor rejected allocation',
@@ -778,6 +788,12 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         },
         take: 1,
       },
+      childAllocationSplitEvents: {
+        select: {
+          id: true,
+        },
+        take: 1,
+      },
       order: {
         select: {
           sourceShopifyOrderId: true,
@@ -801,17 +817,20 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const shopifyOrderNumber = allocation.order.sourceShopifyOrderNumber;
     const orderReference = formatOrderReference(shopifyOrderNumber, shopifyOrderId) ?? `allocation ${allocation.id}`;
     const resolvedByRefund = isVendorBlockedAllocationResolvedByRefund(allocation);
+    const splitChildAllocation = (allocation.childAllocationSplitEvents ?? []).length > 0;
 
     if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED && !resolvedByRefund) {
-      const description = allocation.cancellationReason
-        ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
-        : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
+      const description = splitChildAllocation
+        ? `Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return.${allocation.cancellationReason ? ` Reason: ${allocation.cancellationReason}.` : ''}`
+        : allocation.cancellationReason
+          ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
+          : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
 
       items.push({
         id: `op-blocked-${allocation.id}`,
         type: 'vendor_blocked',
         severity: 'warning',
-        title: 'Vendor rejected allocation',
+        title: splitChildAllocation ? 'Split allocation awaiting admin resolution' : 'Vendor rejected allocation',
         description,
         vendorId: allocation.assignedVendorId,
         vendorName,
@@ -825,6 +844,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         actionLabel: 'Review allocation',
         destinationPath: `/admin/orders/${shopifyOrderId}`,
         reassignmentRequired: allocation.reassignmentRequired,
+        splitChildAllocation,
       });
     } else if (!resolvedByRefund && (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT)) {
       items.push({
@@ -1101,6 +1121,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     sourceShopifyOrderId: item.relatedShopifyOrderId,
     sourceShopifyOrderNumber: item.relatedShopifyOrderNumber,
     cancellationReason: item.type === 'vendor_blocked' ? readVendorBlockedReason(item.description) : null,
+    splitChildAllocation: item.splitChildAllocation,
   }));
 
   const supportTickets = await prisma.supportTicket.findMany({

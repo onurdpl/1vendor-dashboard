@@ -142,6 +142,7 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
     sourceShopifyOrderId: item.relatedShopifyOrderId ?? null,
     sourceShopifyOrderNumber: item.relatedShopifyOrderNumber ?? null,
     cancellationReason: item.type === 'vendor_blocked' ? item.description.replace(/^Reason:\s*/i, '').replace(/\.$/, '') : null,
+    splitChildAllocation: item.splitChildAllocation,
   };
 }
 
@@ -153,7 +154,9 @@ function mapAttentionItemToRecommendation(item: OperationsAttentionItem): Operat
     id: `recommendation-${item.id}`,
     type: isVendorBlocked ? 'vendor_blocked_review' : isReturn ? 'return_review' : isShipment ? 'shipment_tracking' : 'automation_review',
     severity: item.severity,
-    title: isVendorBlocked ? 'Vendor rejected allocation' : isReturn ? 'Review unresolved return' : isShipment ? 'Review shipment tracking' : 'Review operational suggestion',
+    title: isVendorBlocked && item.splitChildAllocation
+      ? 'Split allocation awaiting admin resolution'
+      : isVendorBlocked ? 'Vendor rejected allocation' : isReturn ? 'Review unresolved return' : isShipment ? 'Review shipment tracking' : 'Review operational suggestion',
     description: isVendorBlocked
       ? `${item.vendorName} rejected ${item.objectReference}. ${item.description}`.trim()
       : `${item.objectReference} has an active operational signal.`,

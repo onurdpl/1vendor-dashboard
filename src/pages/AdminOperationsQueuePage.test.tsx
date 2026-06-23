@@ -265,7 +265,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
-    expect(screen.getByText('Reason: OUT_OF_STOCK')).toBeInTheDocument();
+    expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
@@ -275,6 +275,86 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
+    expect(screen.getAllByRole('link', { name: 'Review allocation' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+  });
+
+  it('renders split child vendor-blocked items with split-aware copy', async () => {
+    const splitDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      summary: {
+        ...dashboard.summary,
+        total: 1,
+        warning: 1,
+        vendorBlocked: 1,
+      },
+      queue: [
+        {
+          id: 'vendor-blocked-split-1091',
+          type: 'vendor_blocked',
+          severity: 'warning',
+          vendorId: 'sporjinal',
+          vendorName: 'Sporjinal',
+          objectType: 'vendor_blocked',
+          objectReference: 'Order #1091',
+          objectId: 'alloc-split-child',
+          status: 'vendor_blocked',
+          ageHours: 1,
+          title: 'Split allocation awaiting admin resolution',
+          description: 'Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return. Reason: OUT_OF_STOCK.',
+          recommendedAction: 'Review allocation',
+          destinationPath: '/admin/orders/7817723773265',
+          createdAt: '2026-05-17T09:30:00.000Z',
+          reassignmentRequired: true,
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          cancellationReason: 'OUT_OF_STOCK',
+          splitChildAllocation: true,
+        },
+      ],
+      sections: [
+        {
+          key: 'vendor_blocked',
+          title: 'Vendor blocked allocations',
+          count: 1,
+          critical: 0,
+          warning: 1,
+          items: [
+            {
+              id: 'vendor-blocked-split-1091',
+              type: 'vendor_blocked',
+              severity: 'warning',
+              vendorId: 'sporjinal',
+              vendorName: 'Sporjinal',
+              objectType: 'vendor_blocked',
+              objectReference: 'Order #1091',
+              objectId: 'alloc-split-child',
+              status: 'vendor_blocked',
+              ageHours: 1,
+              title: 'Split allocation awaiting admin resolution',
+              description: 'Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return. Reason: OUT_OF_STOCK.',
+              recommendedAction: 'Review allocation',
+              destinationPath: '/admin/orders/7817723773265',
+              createdAt: '2026-05-17T09:30:00.000Z',
+              reassignmentRequired: true,
+              sourceShopifyOrderId: '7817723773265',
+              sourceShopifyOrderNumber: '#1091',
+              cancellationReason: 'OUT_OF_STOCK',
+              splitChildAllocation: true,
+            },
+          ],
+        },
+      ],
+      recommendations: [],
+      vendorRisks: [],
+      recentActivity: [],
+    };
+    attentionMock.mockResolvedValueOnce(splitDashboard);
+
+    renderPage();
+
+    expect(await screen.findAllByText('Split allocation awaiting admin resolution')).toHaveLength(2);
+    expect(screen.getAllByText(/Vendor rejected selected line items/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Review allocation' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
   });
 });

@@ -1997,7 +1997,24 @@ describe('vendor order reject operational hold', () => {
         reason: 'OUT_OF_STOCK',
         note: 'One selected line item was unavailable.',
         actorUserId: 'vendor-user-1',
+        actorUser: {
+          name: 'Vendor User',
+        },
         createdAt: new Date('2026-06-21T12:45:00.000Z'),
+        childAllocation: {
+          lineItems: [
+            {
+              id: 'allocation-line-1',
+              quantity: 1,
+              lineAmount: '1000.00',
+              shopifyOrderLineItem: {
+                sourceLineItemId: 'gid://shopify/LineItem/1',
+                sku: 'SKU-1088',
+                title: 'Product',
+              },
+            },
+          ],
+        },
       },
     ];
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
@@ -2012,6 +2029,18 @@ describe('vendor order reject operational hold', () => {
       note: 'One selected line item was unavailable.',
       createdAt: '2026-06-21T12:45:00.000Z',
       actorUserId: 'vendor-user-1',
+      actorName: 'Vendor User',
+      lineageRole: 'child',
+      movedItems: [
+        {
+          vendorAllocationLineItemId: 'allocation-line-1',
+          shopifyLineItemId: 'gid://shopify/LineItem/1',
+          sku: 'SKU-1088',
+          title: 'Product',
+          quantity: 1,
+          lineAmount: 1000,
+        },
+      ],
     });
     expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({
@@ -2026,6 +2055,55 @@ describe('vendor order reject operational hold', () => {
           }),
         }),
       }),
+    }));
+  });
+
+  it('marks source allocations with source split lineage in admin Shopify order breakdown', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.sourceAllocationSplitEvents = [
+      {
+        id: 'split-event-source',
+        sourceAllocationId: 'alloc-1088',
+        childAllocationId: 'alloc-child',
+        reason: 'OUT_OF_STOCK',
+        note: null,
+        actorUserId: 'vendor-user-1',
+        actorUser: null,
+        createdAt: new Date('2026-06-21T12:45:00.000Z'),
+        childAllocation: {
+          lineItems: [
+            {
+              id: 'allocation-line-moved',
+              quantity: 1,
+              lineAmount: '250.00',
+              shopifyOrderLineItem: {
+                sourceLineItemId: 'gid://shopify/LineItem/moved',
+                sku: 'SKU-MOVED',
+                title: 'Moved item',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.allocations[0]?.splitSummary).toEqual(expect.objectContaining({
+      sourceAllocationId: 'alloc-1088',
+      childAllocationId: 'alloc-child',
+      lineageRole: 'source',
+      movedItems: [
+        {
+          vendorAllocationLineItemId: 'allocation-line-moved',
+          shopifyLineItemId: 'gid://shopify/LineItem/moved',
+          sku: 'SKU-MOVED',
+          title: 'Moved item',
+          quantity: 1,
+          lineAmount: 250,
+        },
+      ],
     }));
   });
 
@@ -2106,7 +2184,24 @@ describe('vendor order reject operational hold', () => {
           reason: 'OUT_OF_STOCK',
           note: 'One selected line item was unavailable.',
           actorUserId: 'vendor-user-1',
+          actorUser: {
+            name: 'Vendor User',
+          },
           createdAt: new Date('2026-06-21T12:45:00.000Z'),
+          childAllocation: {
+            lineItems: [
+              {
+                id: 'allocation-line-1',
+                quantity: 1,
+                lineAmount: '1000.00',
+                shopifyOrderLineItem: {
+                  sourceLineItemId: 'gid://shopify/LineItem/1',
+                  sku: 'SKU-1088',
+                  title: 'Product',
+                },
+              },
+            ],
+          },
         },
       ],
     }));
@@ -2121,6 +2216,18 @@ describe('vendor order reject operational hold', () => {
       note: 'One selected line item was unavailable.',
       createdAt: '2026-06-21T12:45:00.000Z',
       actorUserId: 'vendor-user-1',
+      actorName: 'Vendor User',
+      lineageRole: 'child',
+      movedItems: [
+        {
+          vendorAllocationLineItemId: 'allocation-line-1',
+          shopifyLineItemId: 'gid://shopify/LineItem/1',
+          sku: 'SKU-1088',
+          title: 'Product',
+          quantity: 1,
+          lineAmount: 1000,
+        },
+      ],
     });
     expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       include: expect.objectContaining({

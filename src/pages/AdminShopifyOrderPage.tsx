@@ -241,13 +241,58 @@ function getLatestRefundedAt(allocation: ShopifyOrderBreakdown['allocations'][nu
     .at(-1);
 }
 
+function formatSplitLineAmount(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : '0.00';
+}
+
+function getSplitMovedItemCount(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return allocation.splitSummary?.movedItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+}
+
 function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['allocations'][number]) {
-  const events = allocation.assignmentHistory.map((entry, index) => ({
-    key: `${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`,
-    title: `${entry.action.replace(/_/g, ' ')} · ${entry.toVendorId}`,
-    meta: `${entry.fromVendorId ? `From ${entry.fromVendorId} · ` : ''}${entry.reason ?? 'No reason provided'} · ${entry.actorName} (${entry.actorRole}) · ${formatDate(entry.createdAt)}`,
-    at: entry.createdAt,
-  }));
+  const splitSummary = allocation.splitSummary;
+  const events = allocation.assignmentHistory
+    .filter((entry) => {
+      if (!splitSummary) {
+        return true;
+      }
+      const action = normalizeStateToken(entry.action);
+      if (action === 'allocation_split_source_updated') {
+        return false;
+      }
+      return !(splitSummary.lineageRole === 'child' && action === 'vendor_blocked');
+    })
+    .map((entry, index) => ({
+      key: `${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`,
+      title: `${entry.action.replace(/_/g, ' ')} · ${entry.toVendorId}`,
+      meta: `${entry.fromVendorId ? `From ${entry.fromVendorId} · ` : ''}${entry.reason ?? 'No reason provided'} · ${entry.actorName} (${entry.actorRole}) · ${formatDate(entry.createdAt)}`,
+      at: entry.createdAt,
+    }));
+
+  if (splitSummary?.createdAt) {
+    const movedCount = getSplitMovedItemCount(allocation);
+    const roleLabel = splitSummary.lineageRole === 'source' ? 'Source allocation' : splitSummary.lineageRole === 'child' ? 'Child allocation' : 'Allocation';
+    events.push({
+      key: `${allocation.vendorId}-split-created-${splitSummary.splitEventId ?? splitSummary.createdAt}`,
+      title: 'Allocation split created',
+      meta: `${roleLabel} · Reason: ${splitSummary.reason} · Source ${splitSummary.sourceAllocationId} · Child ${splitSummary.childAllocationId} · ${formatDate(splitSummary.createdAt)}`,
+      at: splitSummary.createdAt,
+    });
+    events.push({
+      key: `${allocation.vendorId}-split-items-${splitSummary.splitEventId ?? splitSummary.createdAt}`,
+      title: 'Selected items moved to blocked allocation',
+      meta: `${movedCount} item${movedCount === 1 ? '' : 's'} moved to ${splitSummary.childAllocationId}.`,
+      at: splitSummary.createdAt,
+    });
+    if (splitSummary.lineageRole === 'child') {
+      events.push({
+        key: `${allocation.vendorId}-split-child-awaiting-${splitSummary.splitEventId ?? splitSummary.createdAt}`,
+        title: 'Child allocation awaiting admin resolution',
+        meta: `Review transfer, refund, or return for ${splitSummary.childAllocationId}.`,
+        at: splitSummary.createdAt,
+      });
+    }
+  }
 
   const attempt = allocation.outboundRefundAttemptSummary;
   if (attempt?.submittedAt) {
@@ -1012,6 +1057,83 @@ export function AdminShopifyOrderPage() {
               )}
             </div>
           </header>
+
+          {allocation.splitSummary ? (
+            <section className="split-summary-card" aria-label="Allocation split summary">
+              <div className="split-summary-heading">
+                <div>
+                  <p className="eyebrow">Allocation split</p>
+                  <h4>
+                    {allocation.splitSummary.lineageRole === 'child'
+                      ? 'Line-item split allocation'
+                      : allocation.splitSummary.lineageRole === 'source'
+                        ? 'Remaining allocation after split'
+                        : 'Allocation split context'}
+                  </h4>
+                </div>
+                <span className="status-badge status-warning">
+                  {allocation.splitSummary.lineageRole === 'child' ? 'Blocked child' : allocation.splitSummary.lineageRole === 'source' ? 'Source remainder' : 'Split'}
+                </span>
+              </div>
+              <p className="page-description">
+                {allocation.splitSummary.lineageRole === 'child'
+                  ? 'This allocation was created when the vendor rejected selected line items.'
+                  : allocation.splitSummary.lineageRole === 'source'
+                    ? 'Selected line items were split into a blocked allocation. Remaining items stay fulfillable.'
+                    : 'This allocation is linked to a line-item split event.'}
+              </p>
+              <div className="compact-meta-grid">
+                <div className="meta-item">
+                  <span>Source allocation</span>
+                  <strong>{allocation.splitSummary.sourceAllocationId}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Child allocation</span>
+                  <strong>{allocation.splitSummary.childAllocationId}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Reason</span>
+                  <strong>{allocation.splitSummary.reason}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Created</span>
+                  <strong>{allocation.splitSummary.createdAt ? formatDate(allocation.splitSummary.createdAt) : 'Unknown'}</strong>
+                </div>
+                {allocation.splitSummary.actorName || allocation.splitSummary.actorUserId ? (
+                  <div className="meta-item">
+                    <span>Actor</span>
+                    <strong>{allocation.splitSummary.actorName ?? allocation.splitSummary.actorUserId}</strong>
+                  </div>
+                ) : null}
+              </div>
+              {allocation.splitSummary.note ? (
+                <p className="page-description">Note: {allocation.splitSummary.note}</p>
+              ) : null}
+              <div className="split-moved-items">
+                <strong>Moved items</strong>
+                {allocation.splitSummary.movedItems.length ? (
+                  <div className="line-item-table line-item-table-compact">
+                    <div className="line-item-head">
+                      <span>SKU</span>
+                      <span>Item</span>
+                      <span>Quantity</span>
+                      <span>Amount</span>
+                    </div>
+                    {allocation.splitSummary.movedItems.map((item) => (
+                      <div key={item.vendorAllocationLineItemId} className="line-item-row">
+                        <span>{item.sku ?? 'No SKU'}</span>
+                        <span>{item.title ?? item.shopifyLineItemId}</span>
+                        <span>{item.quantity}</span>
+                        <span>{formatSplitLineAmount(item.lineAmount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="page-description">Moved item details are not available for this split event.</p>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {allocation.financeIntegrityAlerts?.length ? (
             <section className="finance-integrity-alerts" aria-label="Finance integrity alerts">

@@ -881,6 +881,16 @@ export type AllocationSplitSummary = {
   note?: string | null;
   createdAt?: string;
   actorUserId?: string | null;
+  actorName?: string | null;
+  lineageRole: 'source' | 'child' | 'unknown';
+  movedItems: Array<{
+    vendorAllocationLineItemId: string;
+    shopifyLineItemId: string;
+    sku?: string | null;
+    title?: string | null;
+    quantity: number;
+    lineAmount: number;
+  }>;
 };
 
 export type AllocationSplitLineItem = {
@@ -2586,6 +2596,7 @@ export type OperationsQueueItem = {
   actionLabel?: string;
   actionTo?: string;
   reassignmentRequired?: boolean;
+  splitChildAllocation?: boolean;
 };
 
 export type OperationsQueueSummary = {
@@ -2639,6 +2650,7 @@ export type OperationsAttentionItem = {
   sourceShopifyOrderId?: string | null;
   sourceShopifyOrderNumber?: string | null;
   cancellationReason?: string | null;
+  splitChildAllocation?: boolean;
 };
 
 export type OperationsAttentionSection = {

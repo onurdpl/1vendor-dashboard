@@ -524,6 +524,16 @@ export type AllocationSplitSummaryDto = {
   note?: string | null;
   createdAt?: string;
   actorUserId?: string | null;
+  actorName?: string | null;
+  lineageRole: 'source' | 'child' | 'unknown';
+  movedItems: Array<{
+    vendorAllocationLineItemId: string;
+    shopifyLineItemId: string;
+    sku?: string | null;
+    title?: string | null;
+    quantity: number;
+    lineAmount: number;
+  }>;
 };
 
 export type AllocationSplitLineItemDto = {

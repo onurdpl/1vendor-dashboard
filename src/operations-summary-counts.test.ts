@@ -81,6 +81,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     returnRecords: [],
     refundRecords: [],
     outboundShopifyRefundAttempts: [],
+    childAllocationSplitEvents: [],
     order: {
       sourceShopifyOrderId: '7709129507153',
       sourceShopifyOrderNumber: '#1091',
@@ -295,6 +296,55 @@ describe('admin operations summary counts', () => {
         description: 'Vendor 1 rejected Order #1091. Reassignment required: yes.',
       }),
     ]);
+  });
+
+  it('uses split-aware copy for vendor-blocked child allocations created by line-item split', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        id: 'alloc-split-child',
+        assignedVendorId: 'sporjinal',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        assignedVendor: {
+          name: 'Sporjinal',
+        },
+        order: {
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+        },
+        childAllocationSplitEvents: [
+          {
+            id: 'split-event-1',
+          },
+        ],
+      }),
+    ]);
+    mockQueueSummaryCounts({ vendorBlocked: 1 });
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+
+    expect(dashboard.queue).toEqual([
+      expect.objectContaining({
+        id: 'op-blocked-alloc-split-child',
+        type: 'vendor_blocked',
+        title: 'Split allocation awaiting admin resolution',
+        description: 'Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return. Reason: OUT_OF_STOCK.',
+        recommendedAction: 'Review allocation',
+        splitChildAllocation: true,
+        cancellationReason: 'OUT_OF_STOCK',
+      }),
+    ]);
+    expect(dashboard.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'vendor_blocked_review',
+          title: 'Split allocation awaiting admin resolution',
+          description: 'Vendor rejected selected line items on Order #1091. Reason: OUT_OF_STOCK.',
+          recommendedAction: 'Review the split allocation and choose transfer, refund, or return.',
+        }),
+      ]),
+    );
   });
 
   it('preserves vendor-blocked allocations as first-class attention items and recommendations', async () => {
