@@ -7,6 +7,7 @@ const DEFAULT_ORDER_WEBHOOK_BASE_URL = 'https://vendor-dashboard-backend-398h.on
 
 const ORDER_WEBHOOK_TOPICS = [
   { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+  { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
   { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
 ] as const;
 

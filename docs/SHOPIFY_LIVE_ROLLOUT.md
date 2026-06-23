@@ -48,7 +48,7 @@ Behavior:
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
 
 ## Order Webhook Registration (Opt-In)
-Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Order address/contact correction depends on `ORDERS_UPDATED` delivery. Register both through the same idempotent GraphQL helper used for other webhook groups.
+Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Payment snapshot updates depend on `ORDERS_PAID` delivery. Order address/contact correction depends on `ORDERS_UPDATED` delivery. Register all three through the same idempotent GraphQL helper used for other webhook groups.
 
 Registration command from repository root:
 
@@ -73,6 +73,7 @@ Required env for registration:
 
 Registered topics and callbacks:
 - `ORDERS_CREATE` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-create`
+- `ORDERS_PAID` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-paid`
 - `ORDERS_UPDATED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-updated`
 
 ## Starting the Backend for Tunnel Testing

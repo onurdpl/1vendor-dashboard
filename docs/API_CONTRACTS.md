@@ -70,6 +70,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 Backend-only integration skeleton endpoints also exist for future Shopify ingestion:
 
 - `POST /webhooks/shopify/orders-create`
+- `POST /webhooks/shopify/orders-paid`
 - `POST /webhooks/shopify/refunds-create`
 - `POST /webhooks/shopify/returns-request` (pending-return ingestion path)
 - `POST /webhooks/shopify/returns-approve` (lifecycle status update)
@@ -381,6 +382,21 @@ Webhook processing lifecycle states:
   - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
   - future webhook events persist raw payloads for explicit admin replay and reconciliation
 - refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
+
+### POST /webhooks/shopify/orders-paid
+
+- Purpose: receive verified Shopify `orders/paid` webhook payloads and sync narrow payment snapshot fields on an existing Shopify order.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - processed: `{ ok: true, duplicate: false, action: "paid_snapshot_synced", processingStatus: "processed", shopifyOrderId, orderMatched, snapshotUpdated, changedFields }`
+  - ignored unknown order: `{ ok: true, duplicate: false, action: "paid_snapshot_ignored", processingStatus: "processed", orderMatched: false }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+- Expected `202` behavior: valid HMAC signature accepted whether processing updates an existing order, safely ignores an unknown order, or is ignored as duplicate.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Processing note:
+  - updates only `financialStatus` and safe `paymentGatewayName` snapshot data when present
+  - does not create orders, allocations, line items, refunds, returns, fulfillment state, finance ledgers, settlement state, or payout state
+  - `orders/updated` remains limited to contact/address snapshot updates
 
 ### POST /webhooks/shopify/refunds-create
 

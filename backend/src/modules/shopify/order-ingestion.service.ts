@@ -185,7 +185,7 @@ function normalizeComparableSnapshotValue(value: unknown) {
   return typeof value === 'string' ? value.trim() || null : value ?? null;
 }
 
-export async function updateShopifyOrderContactAddressSnapshotFromWebhook(payload: ShopifyOrdersCreateWebhookPayload) {
+function resolveShopifyOrderWebhookIdentifiers(payload: ShopifyOrdersCreateWebhookPayload) {
   const sourceShopifyOrderId = payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
   const sourceShopifyOrderNumber =
     typeof payload.name === 'string' && payload.name.trim()
@@ -193,6 +193,15 @@ export async function updateShopifyOrderContactAddressSnapshotFromWebhook(payloa
       : payload.order_number !== undefined && payload.order_number !== null
         ? `#${String(payload.order_number)}`
         : null;
+
+  return {
+    sourceShopifyOrderId,
+    sourceShopifyOrderNumber,
+  };
+}
+
+export async function updateShopifyOrderContactAddressSnapshotFromWebhook(payload: ShopifyOrdersCreateWebhookPayload) {
+  const { sourceShopifyOrderId, sourceShopifyOrderNumber } = resolveShopifyOrderWebhookIdentifiers(payload);
   const order = await prisma.shopifyOrder.findFirst({
     where: {
       OR: [
@@ -268,6 +277,89 @@ export async function updateShopifyOrderContactAddressSnapshotFromWebhook(payloa
     orderId: order.id,
     sourceShopifyOrderId: order.sourceShopifyOrderId,
     changedFields,
+  };
+}
+
+export async function syncShopifyOrderPaidSnapshotFromWebhook(payload: ShopifyOrdersCreateWebhookPayload) {
+  const { sourceShopifyOrderId, sourceShopifyOrderNumber } = resolveShopifyOrderWebhookIdentifiers(payload);
+  const orderLookup = [
+    ...(sourceShopifyOrderId ? [{ sourceShopifyOrderId }] : []),
+    ...(sourceShopifyOrderNumber
+      ? [
+          { sourceShopifyOrderNumber },
+          { sourceShopifyOrderNumber: sourceShopifyOrderNumber.replace(/^#/, '') },
+        ]
+      : []),
+  ];
+
+  if (orderLookup.length === 0) {
+    return {
+      matched: false,
+      updated: false,
+      orderId: null,
+      sourceShopifyOrderId,
+      changedFields: [],
+      financialStatus: null,
+      paymentGatewayName: null,
+    };
+  }
+
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: orderLookup,
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      financialStatus: true,
+      paymentGatewayName: true,
+    },
+  });
+
+  if (!order) {
+    return {
+      matched: false,
+      updated: false,
+      orderId: null,
+      sourceShopifyOrderId,
+      changedFields: [],
+      financialStatus: null,
+      paymentGatewayName: null,
+    };
+  }
+
+  const financialStatus = readPayloadString(payload.financial_status) ?? 'paid';
+  const paymentGatewayName = resolvePaymentGatewayName(payload);
+  const updateData: { financialStatus?: string; paymentGatewayName?: string } = {};
+  const changedFields: string[] = [];
+
+  if (normalizeComparableSnapshotValue(order.financialStatus) !== financialStatus) {
+    updateData.financialStatus = financialStatus;
+    changedFields.push('financialStatus');
+  }
+
+  if (paymentGatewayName && normalizeComparableSnapshotValue(order.paymentGatewayName) !== paymentGatewayName) {
+    updateData.paymentGatewayName = paymentGatewayName;
+    changedFields.push('paymentGatewayName');
+  }
+
+  if (changedFields.length > 0) {
+    await prisma.shopifyOrder.update({
+      where: {
+        id: order.id,
+      },
+      data: updateData,
+    });
+  }
+
+  return {
+    matched: true,
+    updated: changedFields.length > 0,
+    orderId: order.id,
+    sourceShopifyOrderId: order.sourceShopifyOrderId,
+    changedFields,
+    financialStatus,
+    paymentGatewayName,
   };
 }
 

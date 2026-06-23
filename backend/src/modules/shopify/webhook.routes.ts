@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import type { AppEnv } from '../../config/env.js';
 import { getShopifyWebhookHeaders } from './webhook.types.js';
 import { getOrCreateWebhookEvent } from './webhook-idempotency.service.js';
-import { ingestShopifyOrderWebhook, updateShopifyOrderContactAddressSnapshotFromWebhook } from './order-ingestion.service.js';
+import {
+  ingestShopifyOrderWebhook,
+  syncShopifyOrderPaidSnapshotFromWebhook,
+  updateShopifyOrderContactAddressSnapshotFromWebhook,
+} from './order-ingestion.service.js';
 import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
 import { fetchSellerInfoWithRetry } from './seller-info-retry.service.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
@@ -619,6 +623,105 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       shopifyOrderId: ingestionResult.shopifyOrderId,
       allocationCount: ingestionResult.allocationCount,
     });
+  });
+
+  app.post('/webhooks/shopify/orders-paid', async (request, reply) => {
+    const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
+    const rawBody = rawBodyBuffer.toString('utf8');
+    const headers = getShopifyWebhookHeaders(request);
+    const topic = 'orders/paid';
+    const isValid = verifyShopifyWebhookHmac(
+      rawBodyBuffer,
+      headers.hmac,
+      resolveWebhookSecret(topic),
+    );
+
+    if (!isValid) {
+      logWebhookVerificationFailure({
+        path: '/webhooks/shopify/orders-paid',
+        topic,
+        contentType: request.headers['content-type'] as string | undefined,
+        rawBodyBuffer,
+        hasHmacHeader: !!headers.hmac,
+      });
+
+      return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+    }
+
+    const payload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
+    const sourceShopifyOrderId =
+      payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+
+    if (!env.DATABASE_URL) {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'accepted',
+        processingStatus: 'deferred',
+      });
+    }
+
+    const idempotencyResult = await getOrCreateWebhookEvent({
+      topic,
+      shopDomain: headers.shopDomain,
+      webhookId: headers.webhookId,
+      rawBody,
+    });
+
+    if (idempotencyResult.isDuplicate) {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'duplicate_ignored',
+      });
+    }
+
+    const operationalJob = await createWebhookJob({
+      topic,
+      webhookEventId: idempotencyResult.event.id,
+      payloadRef: idempotencyResult.event.payloadHash,
+      sourceShopifyOrderId,
+    });
+
+    try {
+      await markJobProcessing(operationalJob?.id);
+      await markWebhookProcessing(idempotencyResult.event.id);
+      const syncResult = await syncShopifyOrderPaidSnapshotFromWebhook(payload);
+      await prisma.webhookEvent.update({
+        where: {
+          id: idempotencyResult.event.id,
+        },
+        data: {
+          ...(syncResult.orderId ? { shopifyOrderId: syncResult.orderId } : {}),
+          status: 'PROCESSED',
+          processedAt: new Date(),
+          errorMessage: null,
+        },
+      });
+      await markJobCompleted(operationalJob?.id);
+
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: syncResult.matched ? 'paid_snapshot_synced' : 'paid_snapshot_ignored',
+        processingStatus: 'processed',
+        shopifyOrderId: syncResult.sourceShopifyOrderId,
+        orderMatched: syncResult.matched,
+        snapshotUpdated: syncResult.updated,
+        changedFields: syncResult.changedFields,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Shopify orders/paid snapshot sync failed.';
+      await markJobFailed(operationalJob?.id, message);
+      await markWebhookFailed(idempotencyResult.event.id, message);
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+      });
+    }
   });
 
   app.post('/webhooks/shopify/refunds-create', async (request, reply) => {

@@ -12,6 +12,11 @@ describe('Shopify webhook registration helpers', () => {
       },
       {
         id: 'gid://shopify/WebhookSubscription/2',
+        topic: 'ORDERS_PAID',
+        callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+      },
+      {
+        id: 'gid://shopify/WebhookSubscription/3',
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
@@ -22,6 +27,7 @@ describe('Shopify webhook registration helpers', () => {
       client,
       topics: [
         { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
         { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
       ],
       baseUrl: 'https://backend.example',
@@ -42,9 +48,14 @@ describe('Shopify webhook registration helpers', () => {
           subscriptionId: 'gid://shopify/WebhookSubscription/1',
         },
         {
+          topic: 'ORDERS_PAID',
+          callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+          subscriptionId: 'gid://shopify/WebhookSubscription/2',
+        },
+        {
           topic: 'ORDERS_UPDATED',
           callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
-          subscriptionId: 'gid://shopify/WebhookSubscription/2',
+          subscriptionId: 'gid://shopify/WebhookSubscription/3',
         },
       ],
       failed: [],
@@ -59,6 +70,7 @@ describe('Shopify webhook registration helpers', () => {
       client,
       topics: [
         { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
         { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
       ],
       baseUrl: 'https://backend.example',
@@ -75,6 +87,10 @@ describe('Shopify webhook registration helpers', () => {
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-create',
       },
       {
+        topic: 'ORDERS_PAID',
+        callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+      },
+      {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
@@ -86,6 +102,11 @@ describe('Shopify webhook registration helpers', () => {
         subscriptionId: 'gid://shopify/WebhookSubscription/2',
       },
       {
+        topic: 'ORDERS_PAID',
+        callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+        subscriptionId: 'gid://shopify/WebhookSubscription/2',
+      },
+      {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
         subscriptionId: 'gid://shopify/WebhookSubscription/2',
@@ -94,7 +115,7 @@ describe('Shopify webhook registration helpers', () => {
     expect(summary.failed).toEqual([]);
   });
 
-  it('creates only missing ORDERS_UPDATED when ORDERS_CREATE already exists', async () => {
+  it('creates only missing paid/updated order webhooks when ORDERS_CREATE already exists', async () => {
     const client = {};
     const createCalls: Array<{ topic: string; callbackUrl: string }> = [];
 
@@ -102,6 +123,7 @@ describe('Shopify webhook registration helpers', () => {
       client,
       topics: [
         { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
         { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
       ],
       baseUrl: 'https://backend.example',
@@ -120,6 +142,10 @@ describe('Shopify webhook registration helpers', () => {
 
     expect(createCalls).toEqual([
       {
+        topic: 'ORDERS_PAID',
+        callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+      },
+      {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
@@ -132,6 +158,11 @@ describe('Shopify webhook registration helpers', () => {
       },
     ]);
     expect(summary.created).toEqual([
+      {
+        topic: 'ORDERS_PAID',
+        callbackUrl: 'https://backend.example/webhooks/shopify/orders-paid',
+        subscriptionId: 'gid://shopify/WebhookSubscription/3',
+      },
       {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',

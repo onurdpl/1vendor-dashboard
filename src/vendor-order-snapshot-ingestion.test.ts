@@ -42,7 +42,11 @@ vi.mock('../backend/src/integrations/odoo/odooAllocationOrderSync.service.js', (
   syncOdooSaleOrdersForAllocations: syncOdooSaleOrdersForAllocationsMock,
 }));
 
-const { ingestShopifyOrderWebhook, updateShopifyOrderContactAddressSnapshotFromWebhook } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
+const {
+  ingestShopifyOrderWebhook,
+  syncShopifyOrderPaidSnapshotFromWebhook,
+  updateShopifyOrderContactAddressSnapshotFromWebhook,
+} = await import('../backend/src/modules/shopify/order-ingestion.service.js');
 
 function buildSimpleOrderPayload(orderId = 2001, sku = 'SKU-1') {
   return {
@@ -181,6 +185,163 @@ describe('vendor order snapshot ingestion', () => {
     );
   });
 
+  it('persists pending financial status from orders/create until a paid webhook arrives', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-pending-financial-status' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: {
+        ...buildSimpleOrderPayload(2005),
+        financial_status: 'pending',
+        payment_gateway_names: ['Credit Card Gateway'],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          financialStatus: 'pending',
+          paymentGatewayName: 'Credit Card Gateway',
+        }),
+        update: expect.objectContaining({
+          financialStatus: 'pending',
+          paymentGatewayName: 'Credit Card Gateway',
+        }),
+      }),
+    );
+  });
+
+  it('updates only safe payment snapshot fields from orders/paid webhook', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce({
+      id: 'shopify-order-db-2005',
+      sourceShopifyOrderId: '2005',
+      financialStatus: 'pending',
+      paymentGatewayName: null,
+    });
+
+    const result = await syncShopifyOrderPaidSnapshotFromWebhook({
+      id: 2005,
+      name: '#2005',
+      financial_status: 'paid',
+      payment_gateway_names: ['Credit Card Gateway'],
+      line_items: [
+        {
+          id: 3005,
+          sku: 'SKU-1',
+          title: 'Sports Shoe',
+          quantity: 1,
+          price: '100.00',
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      matched: true,
+      updated: true,
+      orderId: 'shopify-order-db-2005',
+      sourceShopifyOrderId: '2005',
+      changedFields: ['financialStatus', 'paymentGatewayName'],
+      financialStatus: 'paid',
+      paymentGatewayName: 'Credit Card Gateway',
+    });
+    expect(prismaMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-2005' },
+      data: {
+        financialStatus: 'paid',
+        paymentGatewayName: 'Credit Card Gateway',
+      },
+    });
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocationLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to paid when orders/paid payload omits financial_status', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce({
+      id: 'shopify-order-db-2006',
+      sourceShopifyOrderId: '2006',
+      financialStatus: 'pending',
+      paymentGatewayName: 'Existing Gateway',
+    });
+
+    const result = await syncShopifyOrderPaidSnapshotFromWebhook({
+      id: 2006,
+      name: '#2006',
+    });
+
+    expect(result).toMatchObject({
+      matched: true,
+      updated: true,
+      changedFields: ['financialStatus'],
+      financialStatus: 'paid',
+      paymentGatewayName: null,
+    });
+    expect(prismaMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-2006' },
+      data: {
+        financialStatus: 'paid',
+      },
+    });
+  });
+
+  it('ignores orders/paid for an unknown order without creating partial order state', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(null);
+
+    const result = await syncShopifyOrderPaidSnapshotFromWebhook({
+      id: 9999,
+      name: '#9999',
+      financial_status: 'paid',
+    });
+
+    expect(result).toEqual({
+      matched: false,
+      updated: false,
+      orderId: null,
+      sourceShopifyOrderId: '9999',
+      changedFields: [],
+      financialStatus: null,
+      paymentGatewayName: null,
+    });
+    expect(prismaMock.shopifyOrder.update).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps repeated orders/paid sync idempotent when the snapshot is already current', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce({
+      id: 'shopify-order-db-2007',
+      sourceShopifyOrderId: '2007',
+      financialStatus: 'paid',
+      paymentGatewayName: 'Credit Card Gateway',
+    });
+
+    const result = await syncShopifyOrderPaidSnapshotFromWebhook({
+      id: 2007,
+      name: '#2007',
+      financial_status: 'paid',
+      payment_gateway_names: ['Credit Card Gateway'],
+    });
+
+    expect(result).toEqual({
+      matched: true,
+      updated: false,
+      orderId: 'shopify-order-db-2007',
+      sourceShopifyOrderId: '2007',
+      changedFields: [],
+      financialStatus: 'paid',
+      paymentGatewayName: 'Credit Card Gateway',
+    });
+    expect(prismaMock.shopifyOrder.update).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+  });
+
   it('preserves existing allocation workflow state when Shopify order ingestion is replayed', async () => {
     await ingestShopifyOrderWebhook({
       event: { id: 'webhook-replay-preserve-blocked-state' } as never,
@@ -264,6 +425,8 @@ describe('vendor order snapshot ingestion', () => {
     const result = await updateShopifyOrderContactAddressSnapshotFromWebhook({
       id: '1080-shopify',
       name: '#1080',
+      financial_status: 'paid',
+      payment_gateway_names: ['Credit Card Gateway'],
       customer: {
         first_name: 'Orhan',
         last_name: 'Customer',
@@ -334,6 +497,9 @@ describe('vendor order snapshot ingestion', () => {
         billingPostcode: '34160',
       }),
     });
+    const addressUpdateData = prismaMock.shopifyOrder.update.mock.calls[0]?.[0]?.data;
+    expect(addressUpdateData).not.toHaveProperty('financialStatus');
+    expect(addressUpdateData).not.toHaveProperty('paymentGatewayName');
     expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
     expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
     expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
