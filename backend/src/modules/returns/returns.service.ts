@@ -41,6 +41,46 @@ export class ReturnReviewError extends Error {
   }
 }
 
+type TerminalRefundedReturnRecord = {
+  status?: string | null;
+  returnLifecycleStatus?: string | null;
+  returnRequestSource?: string | null;
+  sourceShopifyRefundId?: string | null;
+  vendorReviewedAt?: Date | string | null;
+  vendorDecision?: string | null;
+  vendorAllocation?: {
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null }>;
+  } | null;
+};
+
+function normalizeTerminalReturnValue(value: unknown) {
+  return String(value ?? '').toLowerCase().replace(/[_-]+/g, ' ').trim();
+}
+
+function hasTerminalReturnText(value: string | null | undefined) {
+  return Boolean(value?.trim());
+}
+
+function isTerminalRefundedReturnRecord(record: TerminalRefundedReturnRecord) {
+  const status = normalizeTerminalReturnValue(record.returnLifecycleStatus) || normalizeTerminalReturnValue(record.status);
+  if (status !== 'closed') {
+    return false;
+  }
+
+  const refundRecords = record.vendorAllocation?.refundRecords ?? [];
+  const hasRefundEvidence = hasTerminalReturnText(record.sourceShopifyRefundId) || refundRecords.length > 0;
+  if (!hasRefundEvidence) {
+    return false;
+  }
+
+  const requiresVendorReview = normalizeTerminalReturnValue(record.returnRequestSource).includes('shopify return request');
+  if (!requiresVendorReview) {
+    return true;
+  }
+
+  return Boolean(record.vendorReviewedAt) && hasTerminalReturnText(record.vendorDecision);
+}
+
 export type ReturnActorScope = {
   role: 'admin' | 'vendor' | 'support' | 'finance';
   vendorId?: string | null;
@@ -1413,10 +1453,22 @@ export async function reviewReturn(
     where: { id: returnId },
     select: {
       id: true,
+      status: true,
+      returnLifecycleStatus: true,
+      returnRequestSource: true,
+      sourceShopifyRefundId: true,
       vendorReceivedAt: true,
+      vendorReviewedAt: true,
+      vendorDecision: true,
       vendorAllocation: {
         select: {
           assignedVendorId: true,
+          refundRecords: {
+            select: {
+              id: true,
+              sourceShopifyRefundId: true,
+            },
+          },
         },
       },
     },
@@ -1424,6 +1476,10 @@ export async function reviewReturn(
 
   if (!record || !canActOnReturn(record, actor)) {
     throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (isTerminalRefundedReturnRecord(record)) {
+    throw new ReturnReviewError('Return is already closed and refunded.', 409);
   }
 
   if (!record.vendorReceivedAt) {

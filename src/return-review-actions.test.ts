@@ -119,6 +119,30 @@ describe('return vendor review actions', () => {
     expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
   });
 
+  it('blocks review mutation for closed refunded returns', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      accessRecord({
+        status: 'closed',
+        returnLifecycleStatus: 'closed',
+        returnRequestSource: 'shopify_return_request',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+        vendorReceivedAt: new Date('2026-05-14T10:00:00Z'),
+        vendorReviewedAt: new Date('2026-05-14T10:05:00Z'),
+        vendorDecision: 'approved',
+        vendorAllocation: {
+          assignedVendorId: 'vendor-a',
+          refundRecords: [{ id: 'refund-1', sourceShopifyRefundId: 'gid://shopify/Refund/1' }],
+        },
+      }),
+    );
+
+    await expect(reviewReturn('return-1', { role: 'vendor', vendorId: 'vendor-a' }, { decision: 'approved' })).rejects.toMatchObject({
+      message: 'Return is already closed and refunded.',
+      statusCode: 409,
+    });
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+  });
+
   it('requires a reason for rejected reviews', async () => {
     prismaMock.returnRecord.findUnique.mockResolvedValueOnce(accessRecord({ vendorReceivedAt: new Date('2026-05-14T10:00:00Z') }));
 
