@@ -99,6 +99,17 @@ const splitFinanceEventSelect = {
 type SplitFinanceEventSnapshot = Prisma.AllocationSplitEventGetPayload<{ select: typeof splitFinanceEventSelect }>;
 type SplitFinanceLedgerSnapshot = {
   id: string;
+  entryType?: string | null;
+  vendorAllocation?: {
+    allocationStatus?: string | null;
+    cancelRefundReviewStatus?: string | null;
+    refundRecords?: Array<{ id?: string | null; sourceShopifyRefundId?: string | null; amount?: unknown }>;
+    outboundShopifyRefundAttempts?: Array<{
+      status?: string | null;
+      resolvedAt?: Date | null;
+      mutationResponseJson?: Prisma.JsonValue | null;
+    }>;
+  } | null;
   sourceAllocationSplitEvents?: SplitFinanceEventSnapshot[];
   remainingAllocationSplitEvents?: SplitFinanceEventSnapshot[];
   childAllocationSplitEvents?: SplitFinanceEventSnapshot[];
@@ -168,6 +179,41 @@ function mapPayoutBatchStatus(status: string) {
   return status.trim().toLowerCase() as PayoutBatchDto['status'];
 }
 
+function normalizeFinanceToken(value: string | null | undefined) {
+  return value?.trim().toUpperCase() ?? '';
+}
+
+function hasPostRefundFulfillmentCheckPassed(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const mutationResponse = value as Record<string, unknown>;
+  const postCheck = mutationResponse.postRefundFulfillmentCheck;
+  if (!postCheck || typeof postCheck !== 'object' || Array.isArray(postCheck)) {
+    return false;
+  }
+  return normalizeFinanceToken((postCheck as Record<string, unknown>).status as string | null | undefined) === 'PASSED';
+}
+
+function isRefundedSplitChildSaleBasis(entry: SplitFinanceLedgerSnapshot) {
+  const allocation = entry.vendorAllocation;
+  if (
+    normalizeType(entry.entryType ?? '') !== 'sale' ||
+    !entry.childAllocationSplitEvents?.length ||
+    normalizeFinanceToken(allocation?.allocationStatus) !== 'VENDOR_BLOCKED' ||
+    normalizeFinanceToken(allocation?.cancelRefundReviewStatus) !== 'RESOLVED' ||
+    !(allocation?.refundRecords?.length ?? 0)
+  ) {
+    return false;
+  }
+
+  return (allocation?.outboundShopifyRefundAttempts ?? []).some((attempt) =>
+    normalizeFinanceToken(attempt.status) === 'RESOLVED' &&
+    Boolean(attempt.resolvedAt) &&
+    hasPostRefundFulfillmentCheckPassed(attempt.mutationResponseJson)
+  );
+}
+
 function mapSplitFinanceSummary(entry: SplitFinanceLedgerSnapshot): SplitFinanceSummaryDto | null {
   const sourceEvent = entry.sourceAllocationSplitEvents?.[0] ?? null;
   const remainingEvent = entry.remainingAllocationSplitEvents?.[0] ?? null;
@@ -187,6 +233,12 @@ function mapSplitFinanceSummary(entry: SplitFinanceLedgerSnapshot): SplitFinance
     lineageRole: childEvent ? 'child' : 'source',
     splitReason: event.reason,
     splitCreatedAt: event.createdAt.toISOString(),
+    ...(isRefundedSplitChildSaleBasis(entry)
+      ? {
+          refundedChildSaleBasis: true,
+          refundOffsetStatus: 'settlement_review_pending' as const,
+        }
+      : {}),
   };
 }
 
@@ -1324,6 +1376,17 @@ export async function getVendorFinanceDashboard(
               orderBy: {
                 createdAt: 'asc',
               },
+            },
+            outboundShopifyRefundAttempts: {
+              select: {
+                status: true,
+                resolvedAt: true,
+                mutationResponseJson: true,
+              },
+              orderBy: {
+                updatedAt: 'desc',
+              },
+              take: 1,
             },
             financeEntries: {
               where: activeFinanceLedgerWhere,

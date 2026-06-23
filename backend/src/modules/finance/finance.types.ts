@@ -262,6 +262,8 @@ export type SplitFinanceSummaryDto = {
   lineageRole: 'source' | 'child';
   splitReason: string;
   splitCreatedAt: string;
+  refundedChildSaleBasis?: boolean;
+  refundOffsetStatus?: 'settlement_review_pending' | null;
 };
 
 export type ReturnFinanceRecordDto = {

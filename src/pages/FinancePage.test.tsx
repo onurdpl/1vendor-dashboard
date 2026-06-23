@@ -871,6 +871,61 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Child held ledger created')).toBeInTheDocument();
   });
 
+  it('clarifies refunded split child sale basis without changing finance values', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-split-child',
+          shopifyOrderNumber: '1097',
+          shopifyOrderId: '7819000001097',
+          amount: '$4,213.50',
+          payoutBatch: null,
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            grossAmount: '$4,213.50',
+            refundImpact: '$4,213.50',
+            estimatedPayout: '$0.00',
+          },
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'partially_refunded',
+            payoutReady: true,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+          splitFinanceSummary: {
+            ...splitFinanceSummaryBase,
+            lineageRole: 'child',
+            refundedChildSaleBasis: true,
+            refundOffsetStatus: 'settlement_review_pending',
+          },
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Refunded split sale basis')).toBeInTheDocument();
+    expect(screen.getAllByText('Offset by Shopify refund').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement review pending').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Blocked split allocation ledger')).not.toBeInTheDocument();
+    expect(screen.queryByText('Split allocation hold')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    expect(await screen.findByText('Refund completed. Settlement offset pending review.')).toBeInTheDocument();
+    expect(screen.getByText('Sale basis')).toBeInTheDocument();
+    expect(screen.getByText('Refund offset')).toBeInTheDocument();
+    expect(screen.getByText('Net child effect')).toBeInTheDocument();
+    expect(screen.getAllByText('$4,213.50').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('-$4,213.50').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
+    expect(screen.getByText('Child allocation operationally resolved')).toBeInTheDocument();
+    expect(screen.getByText('Refund offset awaiting settlement review')).toBeInTheDocument();
+  });
+
   it('selects a finance row by ledgerId deep link', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 

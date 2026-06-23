@@ -299,6 +299,9 @@ function getSplitFinanceLedgerRole(record: FinanceTransaction): SplitFinanceLedg
 }
 
 function getSplitFinanceLedgerLabel(record: FinanceTransaction) {
+  if (isRefundedSplitChildSaleBasis(record)) {
+    return 'Offset by Shopify refund';
+  }
   const role = getSplitFinanceLedgerRole(record);
   if (role === 'child') {
     return 'Blocked split allocation ledger';
@@ -313,6 +316,9 @@ function getSplitFinanceLedgerLabel(record: FinanceTransaction) {
 }
 
 function getSplitFinanceExplanation(record: FinanceTransaction) {
+  if (isRefundedSplitChildSaleBasis(record)) {
+    return 'Refund completed. This split child sale basis is offset by the Shopify refund and awaits settlement offset review.';
+  }
   const role = getSplitFinanceLedgerRole(record);
   if (role === 'child') {
     return 'Created from line-item reject split. Held until transfer, refund, or return resolution.';
@@ -330,12 +336,23 @@ function isSplitChildFinanceHold(record: FinanceTransaction) {
   return getSplitFinanceLedgerRole(record) === 'child' && isVendorBlockedFinanceHold(record);
 }
 
+function isRefundedSplitChildSaleBasis(record: FinanceTransaction) {
+  return (
+    record.category === 'Invoice' &&
+    getSplitFinanceLedgerRole(record) === 'child' &&
+    record.splitFinanceSummary?.refundedChildSaleBasis === true
+  );
+}
+
 function isPendingOrHoldRecord(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
   return status === 'Pending' || status === 'Recorded';
 }
 
 function getPayoutActivityType(record: FinanceTransaction) {
+  if (isRefundedSplitChildSaleBasis(record)) {
+    return 'Refunded split sale basis';
+  }
   if (record.category === 'Invoice') {
     return 'Sale estimate';
   }
@@ -346,6 +363,9 @@ function getPayoutActivityType(record: FinanceTransaction) {
 }
 
 function getPayoutActivityDetail(record: FinanceTransaction) {
+  if (isRefundedSplitChildSaleBasis(record)) {
+    return 'Offset by Shopify refund';
+  }
   if (isSplitChildFinanceHold(record)) {
     return 'Split allocation hold';
   }
@@ -413,6 +433,9 @@ function getSettlementReviewDisplay(record: FinanceTransaction) {
 
 function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const status = normalizeFinanceStatus(record.status);
+  if (isRefundedSplitChildSaleBasis(record) && record.splitFinanceSummary?.refundOffsetStatus === 'settlement_review_pending') {
+    return 'Settlement review pending';
+  }
   if (isVendorBlockedFinanceHold(record)) {
     return 'On hold';
   }
@@ -469,6 +492,11 @@ function parseCurrencyValue(value: string | null | undefined) {
     return 0;
   }
   return normalized.startsWith('-') ? -Math.abs(numeric) : numeric;
+}
+
+function formatLikeCurrencyReference(value: number, reference: string | null | undefined) {
+  const currency = reference?.match(/^[^\d-]+/)?.[0] ?? '$';
+  return `${currency}${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getBalanceTone(value: string | null | undefined) {
@@ -571,6 +599,7 @@ function getTotalDeductions(record: FinanceTransaction) {
 function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineItem[] {
   const reviewDisplay = getSettlementReviewDisplay(record);
   const splitRole = getSplitFinanceLedgerRole(record);
+  const refundedSplitChildSaleBasis = isRefundedSplitChildSaleBasis(record);
   const splitItems: Array<FinanceTimelineItem | null> = record.splitFinanceSummary
     ? [
         {
@@ -580,9 +609,16 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
         },
         splitRole === 'child'
           ? {
-              label: 'Child held ledger created',
+              label: refundedSplitChildSaleBasis ? 'Child allocation operationally resolved' : 'Child held ledger created',
               at: record.splitFinanceSummary.splitCreatedAt,
-              status: 'Held',
+              status: refundedSplitChildSaleBasis ? 'Resolved' : 'Held',
+            }
+          : null,
+        refundedSplitChildSaleBasis
+          ? {
+              label: 'Refund offset awaiting settlement review',
+              at: record.date,
+              status: 'Review',
             }
           : null,
         splitRole === 'remaining_source' || splitRole === 'original_source'
@@ -1113,6 +1149,15 @@ export function FinancePage() {
   const selectedReviewDisplay = selectedRecord ? getSettlementReviewDisplay(selectedRecord) : null;
   const selectedSplitLedgerLabel = selectedRecord ? getSplitFinanceLedgerLabel(selectedRecord) : null;
   const selectedSplitExplanation = selectedRecord ? getSplitFinanceExplanation(selectedRecord) : null;
+  const selectedRefundedSplitChildSaleBasis = selectedRecord ? isRefundedSplitChildSaleBasis(selectedRecord) : false;
+  const selectedRefundOffsetValue = selectedRecord?.payoutCalculation?.refundImpact ?? null;
+  const selectedRefundedSplitChildNetEffect =
+    selectedRecord && selectedRefundedSplitChildSaleBasis
+      ? formatLikeCurrencyReference(
+          parseCurrencyValue(selectedRecord.amount) - Math.abs(parseCurrencyValue(selectedRefundOffsetValue)),
+          selectedRecord.amount,
+        )
+      : null;
   const selectedFinanceGuidance = selectedRecord
     ? selectedReviewDisplay?.guidance ?? getFinanceWorkflowAction({
         status: selectedRecord.status,
@@ -1681,9 +1726,19 @@ export function FinancePage() {
                     {getPayoutActivityStatusLabel(selectedRecord, financeAudience)}
                   </StatusBadge>
                 </div>
+                {selectedRefundedSplitChildSaleBasis ? (
+                  <p className="page-description">Refund completed. Settlement offset pending review.</p>
+                ) : null}
                 <div className="finance-detail-rows">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Review status" value={getPayoutActivityStatusLabel(selectedRecord, financeAudience)} />
+                  {selectedRefundedSplitChildSaleBasis ? (
+                    <>
+                      <MetadataRow label="Sale basis" value={<span className="finance-payout-value">{selectedRecord.amount}</span>} />
+                      <MetadataRow label="Refund offset" value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRefundOffsetValue)}</span>} />
+                      <MetadataRow label="Net child effect" value={<span>{selectedRefundedSplitChildNetEffect ?? UNKNOWN_FINANCE_VALUE}</span>} />
+                    </>
+                  ) : null}
                   <MetadataRow
                     label="Estimated payout"
                     value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
