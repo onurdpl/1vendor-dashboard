@@ -2,6 +2,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { AllocationSplitRejectModal } from '../components/AllocationSplitRejectModal';
 import { SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -19,12 +20,14 @@ import {
   probeTryOtoReturnLink,
   refreshShipmentProviderData,
   refreshShipmentExecutionStatus,
+  rejectOrder,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
   syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
+  type AllocationSplitExecutionResponse,
   type OrderDetail,
   type ShipmentCustomerField,
   type ShipmentCustomerOverrides,
@@ -59,6 +62,7 @@ import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
+import { canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
 import type {
   KargonomiLocationLookupDiagnostics,
   NavlungoAuthDiagnostics,
@@ -67,6 +71,8 @@ import type {
   NavlungoCheckPostProbeDiagnostics,
   NavlungoCreatePostProbeDiagnostics,
 } from '../services/real/diagnostics';
+
+type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -1784,6 +1790,7 @@ export function OrderDetailPage() {
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [splitRejectOpen, setSplitRejectOpen] = useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = useState<string | null>(null);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
@@ -1896,6 +1903,25 @@ export function OrderDetailPage() {
     },
     {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
+  const { mutateAsync: rejectOrderMutation } = useMutationAction(
+    async (input: { orderId: string; reason: RejectOrderReason; note: string }) =>
+      rejectOrder(
+        input.orderId,
+        {
+          reason: input.reason,
+          note: input.note,
+        },
+        {
+          vendorId: currentVendor.vendorId,
+        },
+      ),
+    {
+      invalidateQueryKeys: [
+        queryKeys.orders.list(currentVendor.vendorId),
+        orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
+      ],
     },
   );
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
@@ -4598,6 +4624,10 @@ export function OrderDetailPage() {
   const orderItems = safeArray(order.lineItems).length ? safeArray(order.lineItems) : safeArray(order.items);
   const snapshotCurrency = getSnapshotCurrency(order);
   const customerLabel = getCompactCustomerLabel(order.customer);
+  const canOpenSplitReject =
+    currentUser?.role === 'vendor' &&
+    orderItems.length > 1 &&
+    canShowAllocationSplitRejectAction(order);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
   const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
@@ -4613,6 +4643,24 @@ export function OrderDetailPage() {
   const refundFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Refund');
   const settlementFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Payout' || record.category === 'Invoice') ?? null;
   const payoutCalculation = payoutFinanceRecord?.payoutCalculation ?? null;
+
+  async function handleSplitRejectSuccess(_result: AllocationSplitExecutionResponse) {
+    showFeedback('Selected items rejected. A blocked allocation was created for admin review.', 'success');
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+    ]);
+  }
+
+  async function handleSplitFullAllocationReject(input: { orderId: string; reason: RejectOrderReason; note: string }) {
+    await rejectOrderMutation(input);
+    setSplitRejectOpen(false);
+    showFeedback('Order rejected and sent to admin review.', 'success');
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+    ]);
+  }
   const refundCalculation = refundFinanceRecord?.payoutCalculation ?? null;
   const shippingDeductionUnknown =
     Boolean(financePreview && (financePreview.unknowns.includes('shipping_cost') || financePreview.sourceFields.shippingCost === 'unknown')) ||
@@ -6551,6 +6599,21 @@ export function OrderDetailPage() {
                 <p>{hasTrackingSync ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
+            {canOpenSplitReject ? (
+              <div className="allocation-split-entry-card">
+                <div>
+                  <strong>Reject selected items</strong>
+                  <span>Move unavailable items into a blocked allocation while keeping the remaining items fulfillable.</span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-danger"
+                  onClick={() => setSplitRejectOpen(true)}
+                >
+                  Reject selected items
+                </button>
+              </div>
+            ) : null}
             {canUseFulfillmentActions ? (
               <div className="action-row vendor-action-panel">
                 <div className="vendor-actions-heading">
@@ -9552,6 +9615,15 @@ export function OrderDetailPage() {
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
+      {splitRejectOpen ? (
+        <AllocationSplitRejectModal
+          order={order}
+          vendorId={currentVendor.vendorId}
+          onClose={() => setSplitRejectOpen(false)}
+          onSuccess={handleSplitRejectSuccess}
+          onFullAllocationReject={handleSplitFullAllocationReject}
+        />
+      ) : null}
       {order ? (
         <SupportTicketModal
           open={supportOpen}

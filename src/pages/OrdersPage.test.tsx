@@ -4,12 +4,28 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrdersPage } from './OrdersPage';
-import type { OrderDetail, OrderSummary, ShipmentExecution } from '../features/orders/api';
+import type {
+  AllocationSplitExecutionResponse,
+  AllocationSplitPlannerResponse,
+  OrderDetail,
+  OrderSummary,
+  ShipmentExecution,
+} from '../features/orders/api';
 import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
 
 const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 const rejectOrderMock = vi.fn<(orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
+const planAllocationSplitMock = vi.fn<(
+  allocationId: string,
+  payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string },
+  options?: { vendorId?: string | null },
+) => Promise<AllocationSplitPlannerResponse>>();
+const splitAllocationMock = vi.fn<(
+  allocationId: string,
+  payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string; confirmSplit: true },
+  options?: { vendorId?: string | null },
+) => Promise<AllocationSplitExecutionResponse>>();
 const createShipmentExecutionMock = vi.fn<(allocationId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 const retryFailedShipmentExecutionMock = vi.fn<(shipmentExecutionId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 
@@ -21,6 +37,16 @@ vi.mock('../features/orders/api', async () => {
     getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
     rejectOrder: (orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) =>
       rejectOrderMock(orderId, payload, options),
+    planAllocationSplit: (
+      allocationId: string,
+      payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string },
+      options?: { vendorId?: string | null },
+    ) => planAllocationSplitMock(allocationId, payload, options),
+    splitAllocation: (
+      allocationId: string,
+      payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string; confirmSplit: true },
+      options?: { vendorId?: string | null },
+    ) => splitAllocationMock(allocationId, payload, options),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) =>
       createShipmentExecutionMock(allocationId, options),
     retryFailedShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
@@ -299,6 +325,8 @@ describe('OrdersPage control center', () => {
     listOrdersMock.mockReset();
     getOrderMock.mockReset();
     rejectOrderMock.mockReset();
+    planAllocationSplitMock.mockReset();
+    splitAllocationMock.mockReset();
     createShipmentExecutionMock.mockReset();
     retryFailedShipmentExecutionMock.mockReset();
   });
@@ -831,6 +859,142 @@ describe('OrdersPage control center', () => {
       ),
     );
     expect(await screen.findByText('Order rejected and sent to admin review.')).toBeInTheDocument();
+  });
+
+  it('lets a vendor preview and confirm selected line item rejection from the detail rail', async () => {
+    setVendorUser();
+    const firstLine = orderDetail.lineItems[0];
+    const secondLine = {
+      ...firstLine,
+      id: 'line-1002-a2',
+      sku: 'SKU789',
+      name: 'Replacement insole',
+      price: '$120.00',
+      quantity: 1,
+      lineTotalVatIncluded: '120.00',
+    };
+    const multiLineOrder = buildAwaitingRejectableOrder({
+      lineItemCount: 2,
+      amount: '$770.00',
+      lineItems: [
+        {
+          ...firstLine,
+          allocationStatus: 'active',
+          reassignmentRequired: false,
+          fulfillmentStatus: 'Pending',
+          shippingStatus: 'Awaiting Shipment',
+          trackingNumber: undefined,
+          trackingUrl: undefined,
+          carrier: undefined,
+        },
+        secondLine,
+      ],
+      items: [],
+    });
+    const plannerResult: AllocationSplitPlannerResponse = {
+      ok: true,
+      writesPerformed: false,
+      canSplit: true,
+      decision: 'can_split',
+      blockers: [],
+      warnings: [],
+      sourceAllocation: {
+        id: multiLineOrder.id,
+        allocationStatus: 'active',
+        originalVendorId: 'demo-vendor-a',
+        assignedVendorId: 'demo-vendor-a',
+        sourceShopifyOrderId: multiLineOrder.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: multiLineOrder.sourceShopifyOrderNumber,
+      },
+      selectedLines: [
+        {
+          id: secondLine.id,
+          shopifyLineItemId: secondLine.id,
+          quantity: secondLine.quantity,
+          lineAmount: 120,
+          title: secondLine.name,
+          sku: secondLine.sku,
+        },
+      ],
+      remainingLines: [
+        {
+          id: firstLine.id,
+          shopifyLineItemId: firstLine.id,
+          quantity: firstLine.quantity,
+          lineAmount: 650,
+          title: firstLine.name,
+          sku: firstLine.sku,
+        },
+      ],
+      amountPlan: {
+        originalAmount: 770,
+        selectedAmount: 120,
+        remainingAmount: 650,
+      },
+      proposedChildAllocation: {
+        id: 'alloc-child-replacement-insole',
+        deterministic: true,
+      },
+    };
+    const splitResult: AllocationSplitExecutionResponse = {
+      ok: true,
+      splitSummary: {
+        sourceAllocationId: multiLineOrder.id,
+        childAllocationId: 'alloc-child-replacement-insole',
+        reason: 'OUT_OF_STOCK',
+        note: 'Insole is unavailable',
+      },
+      sourceAllocationId: multiLineOrder.id,
+      childAllocationId: 'alloc-child-replacement-insole',
+      sourceSaleLedgerId: 'fin-source',
+      remainingSaleLedgerId: 'fin-remaining',
+      childSaleLedgerId: 'fin-child',
+      idempotent: false,
+    };
+    listOrdersMock.mockResolvedValue([toSummary(multiLineOrder)]);
+    getOrderMock.mockResolvedValue(multiLineOrder);
+    planAllocationSplitMock.mockResolvedValue(plannerResult);
+    splitAllocationMock.mockResolvedValue(splitResult);
+
+    renderOrdersPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
+    const dialog = screen.getByRole('dialog', { name: 'Reject selected items' });
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: /Replacement insole/i }));
+    await userEvent.type(within(dialog).getByLabelText('Note'), 'Insole is unavailable');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() =>
+      expect(planAllocationSplitMock).toHaveBeenCalledWith(
+        multiLineOrder.id,
+        {
+          selectedVendorAllocationLineItemIds: ['line-1002-a2'],
+          reason: 'OUT_OF_STOCK',
+          note: 'Insole is unavailable',
+        },
+        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
+      ),
+    );
+    expect(within(dialog).getByText('Selected items')).toBeInTheDocument();
+    expect(within(dialog).getByText('Remaining items')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Confirm split' })).toBeDisabled();
+
+    await userEvent.click(within(dialog).getByLabelText(/I understand selected items will move/i));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm split' }));
+
+    await waitFor(() =>
+      expect(splitAllocationMock).toHaveBeenCalledWith(
+        multiLineOrder.id,
+        {
+          selectedVendorAllocationLineItemIds: ['line-1002-a2'],
+          reason: 'OUT_OF_STOCK',
+          note: 'Insole is unavailable',
+          confirmSplit: true,
+        },
+        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
+      ),
+    );
+    expect(await within(dialog).findByText('Split completed.')).toBeInTheDocument();
   });
 
   it('shows why reject is unavailable when shipment processing exists', async () => {

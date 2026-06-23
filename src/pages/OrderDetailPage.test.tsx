@@ -3,13 +3,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrderDetail } from '../features/orders/api';
+import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
+const rejectOrderMock = vi.fn();
+const planAllocationSplitMock = vi.fn<(
+  allocationId: string,
+  payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string },
+  options?: { vendorId?: string | null },
+) => Promise<AllocationSplitPlannerResponse>>();
+const splitAllocationMock = vi.fn<(
+  allocationId: string,
+  payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string; confirmSplit: true },
+  options?: { vendorId?: string | null },
+) => Promise<AllocationSplitExecutionResponse>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const getVendorShippingConfigMock = vi.fn();
 const updateVendorShippingConfigMock = vi.fn();
@@ -67,6 +78,18 @@ vi.mock('../features/orders/api', async () => {
   return {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
+    rejectOrder: (orderId: string, payload: unknown, options?: { vendorId?: string | null }) =>
+      rejectOrderMock(orderId, payload, options),
+    planAllocationSplit: (
+      allocationId: string,
+      payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string },
+      options?: { vendorId?: string | null },
+    ) => planAllocationSplitMock(allocationId, payload, options),
+    splitAllocation: (
+      allocationId: string,
+      payload: { selectedVendorAllocationLineItemIds: string[]; reason: string; note?: string; confirmSplit: true },
+      options?: { vendorId?: string | null },
+    ) => splitAllocationMock(allocationId, payload, options),
     getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: string | null }) =>
       getShippingProviderDiagnosticsMock(options),
     getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
@@ -391,6 +414,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     setToken('test-token');
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
+    rejectOrderMock.mockReset();
+    planAllocationSplitMock.mockReset();
+    splitAllocationMock.mockReset();
     getShippingProviderDiagnosticsMock.mockReset();
     getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) => {
       if (options?.provider === 'navlungo') {
@@ -2172,6 +2198,55 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('SHIPPING_EXECUTION_ENABLED')).not.toBeInTheDocument();
     expect(screen.queryByText('Endpoint:')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
+  });
+
+  it('shows selected item rejection on detail for multi-line rejectable allocations', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      lineItemCount: 2,
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+      shipmentExecution: undefined,
+      lineItems: [
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          trackingNumber: undefined,
+          trackingUrl: undefined,
+          carrier: undefined,
+        },
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          id: 'line-1028-extra',
+          sku: 'FQ1833-200-42',
+          variantTitle: '42',
+          name: 'Nike Air Max Alpha Trainer 6 - size 42',
+          trackingNumber: undefined,
+          trackingUrl: undefined,
+          carrier: undefined,
+        },
+      ],
+      items: [],
+    });
+
+    renderOrderDetail();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
+
+    expect(screen.getByRole('dialog', { name: 'Reject selected items' })).toBeInTheDocument();
+    expect(screen.getByText('Move unavailable items into a blocked allocation while keeping the remaining items fulfillable.')).toBeInTheDocument();
   });
 
   it('frames vendor-blocked orders as admin-resolution work instead of shipment work', async () => {

@@ -9868,6 +9868,12 @@ summary.provider-response-heading::-webkit-details-marker {
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
 }
 
+.allocation-split-modal {
+  width: min(780px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
 .support-modal-header {
   display: flex;
   justify-content: space-between;
@@ -9956,6 +9962,212 @@ summary.provider-response-heading::-webkit-details-marker {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.allocation-split-form {
+  gap: 16px;
+}
+
+.allocation-split-two-column {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr);
+  gap: 12px;
+}
+
+.allocation-split-section,
+.allocation-split-success {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.allocation-split-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-size: 0.84rem;
+}
+
+.allocation-split-section-heading span {
+  color: #64748b;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.allocation-split-line-list {
+  display: grid;
+  gap: 8px;
+}
+
+.allocation-split-line-option {
+  display: grid !important;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px !important;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px;
+  color: #334155;
+}
+
+.allocation-split-line-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.allocation-split-line-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.allocation-split-line-option small {
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocation-split-line-option em,
+.allocation-split-line-option b {
+  color: #334155;
+  font-size: 0.82rem;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.allocation-split-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.allocation-split-preview-lines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.allocation-split-preview-lines div {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.allocation-split-preview-lines span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocation-split-preview-grid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.allocation-split-preview-grid span,
+.allocation-split-result-copy span,
+.allocation-split-success span,
+.allocation-split-warning span,
+.allocation-split-blocker-card span {
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.allocation-split-result-copy,
+.allocation-split-warning {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  background: #fffbeb;
+  padding: 10px;
+}
+
+.allocation-split-blockers {
+  display: grid;
+  gap: 8px;
+}
+
+.allocation-split-blocker-card,
+.allocation-split-error {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  padding: 10px;
+  color: #991b1b;
+}
+
+.allocation-split-success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.orders-reject-action-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.allocation-split-entry-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fff7ed;
+  padding: 12px;
+}
+
+.allocation-split-entry-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.allocation-split-entry-card span {
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 720px) {
+  .allocation-split-two-column,
+  .allocation-split-preview-grid,
+  .allocation-split-preview-lines {
+    grid-template-columns: 1fr;
+  }
+
+  .allocation-split-line-option {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .allocation-split-line-option em,
+  .allocation-split-line-option b {
+    grid-column: 3;
+  }
+
+  .allocation-split-entry-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .support-ops-page,

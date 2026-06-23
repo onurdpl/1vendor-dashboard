@@ -18,6 +18,7 @@ import {
   TimelineBlock,
   WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
+import { AllocationSplitRejectModal } from '../components/AllocationSplitRejectModal';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -27,6 +28,7 @@ import {
   listOrders,
   rejectOrder,
   retryFailedShipmentExecution,
+  type AllocationSplitExecutionResponse,
   type OrderDetail,
   type OrderSummary,
   type ShipmentExecution,
@@ -39,6 +41,7 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
+import { canRejectOrder, canShowAllocationSplitRejectAction, getRejectUnavailableReason } from '../lib/rejectEligibility';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 
@@ -253,46 +256,6 @@ function getErrorMessage(error: unknown, fallback = 'Action failed.') {
   return error instanceof Error ? error.message : fallback;
 }
 
-function canRejectOrder(order: OrderSummary | OrderDetail | null | undefined) {
-  return getRejectUnavailableReason(order) === null;
-}
-
-function getRejectUnavailableReason(order: OrderSummary | OrderDetail | null | undefined) {
-  if (!order) {
-    return 'This order is not eligible for rejection.';
-  }
-  const story = getOperationalStory(order);
-  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
-  if (!story.actionVisibility.canReject && vendorBlockedStory) {
-    return vendorBlockedStory.rejectUnavailableCopy;
-  }
-  if (story.state === 'refunded_completed') {
-    return 'Refund completed. No further rejection action is required.';
-  }
-  if (order.allocationStatus !== 'active') {
-    return 'This order is already blocked or no longer active.';
-  }
-  if (order.fulfillmentStatus === 'Fulfilled') {
-    return 'This order cannot be rejected after fulfillment.';
-  }
-  if (order.shippingStatus !== 'Awaiting Shipment') {
-    return 'This order cannot be rejected after shipping has started.';
-  }
-  if (order.trackingNumber) {
-    return 'This order cannot be rejected after tracking has been added.';
-  }
-  if (order.carrier) {
-    return 'This order cannot be rejected after a carrier has been assigned.';
-  }
-
-  const shipmentExecution = (order as OrderDetail).shipmentExecution;
-  if (!shipmentExecution || shipmentExecution.shipmentStatus === 'failed' || shipmentExecution.shipmentStatus === 'cancelled') {
-    return null;
-  }
-
-  return 'This order cannot be rejected because a shipment is already being processed.';
-}
-
 function getItemInitials(name: string) {
   const [first = '', second = ''] = name.trim().split(/\s+/);
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
@@ -476,6 +439,7 @@ export function OrdersPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
   const [rejectOrderTarget, setRejectOrderTarget] = useState<OrderSummary | OrderDetail | null>(null);
+  const [splitRejectTarget, setSplitRejectTarget] = useState<OrderDetail | null>(null);
   const [rejectReason, setRejectReason] = useState<RejectOrderReason>('OUT_OF_STOCK');
   const [rejectNote, setRejectNote] = useState('');
   const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(searchParams.get('workflow')), [searchParams]);
@@ -627,6 +591,7 @@ export function OrdersPage() {
 
   useEffect(() => {
     setRejectOrderTarget(null);
+    setSplitRejectTarget(null);
     setRejectReason('OUT_OF_STOCK');
     setRejectNote('');
   }, [selectedOrderActionContextKey]);
@@ -823,6 +788,24 @@ export function OrdersPage() {
     } catch (mutationError) {
       showFeedback(getErrorMessage(mutationError, 'Order could not be rejected.'), 'error');
     }
+  }
+
+  async function handleSplitRejectSuccess(_result: AllocationSplitExecutionResponse) {
+    showFeedback('Selected items rejected. A blocked allocation was created for admin review.', 'success');
+    await Promise.all([
+      refetch(),
+      orderDetailQuery.refetch(),
+    ]);
+  }
+
+  async function handleSplitFullAllocationReject(input: { orderId: string; reason: RejectOrderReason; note: string }) {
+    await rejectOrderMutation(input);
+    setSplitRejectTarget(null);
+    showFeedback('Order rejected and sent to admin review.', 'success');
+    await Promise.all([
+      refetch(),
+      orderDetailQuery.refetch(),
+    ]);
   }
 
   function getSmartLabelButtonText(shipmentExecution?: ShipmentExecution | null) {
@@ -1078,6 +1061,11 @@ export function OrdersPage() {
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const rejectUnavailableReason = getRejectUnavailableReason(selectedOrder);
               const rejectEligible = currentUser?.role === 'vendor' && canRejectOrder(selectedOrder);
+              const selectedOrderDetail = safeArray((selectedOrder as OrderDetail).lineItems).length > 0 ? (selectedOrder as OrderDetail) : null;
+              const splitRejectEligible =
+                currentUser?.role === 'vendor' &&
+                selectedOrderDetail !== null &&
+                canShowAllocationSplitRejectAction(selectedOrderDetail);
               const showRejectUnavailableReason = currentUser?.role === 'vendor' && rejectUnavailableReason !== null;
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
@@ -1176,19 +1164,32 @@ export function OrdersPage() {
                 <section className="orders-detail-card" aria-label="Reject order">
                   <h4>Operational hold</h4>
                   <p className="page-description">
-                    Rejecting this order blocks fulfillment and sends it to Sporgym admin review.
+                    {splitRejectEligible
+                      ? 'Reject unavailable items or block the full allocation for Sporgym admin review.'
+                      : 'Rejecting this order blocks fulfillment and sends it to Sporgym admin review.'}
                   </p>
-                  <button
-                    type="button"
-                    className="button button-danger"
-                    onClick={() => {
-                      setRejectOrderTarget(selectedOrder);
-                      setRejectReason('OUT_OF_STOCK');
-                      setRejectNote('');
-                    }}
-                  >
-                    Reject order
-                  </button>
+                  <div className="orders-reject-action-stack">
+                    {splitRejectEligible && selectedOrderDetail ? (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        onClick={() => setSplitRejectTarget(selectedOrderDetail)}
+                      >
+                        Reject selected items
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={splitRejectEligible ? 'button button-secondary' : 'button button-danger'}
+                      onClick={() => {
+                        setRejectOrderTarget(selectedOrder);
+                        setRejectReason('OUT_OF_STOCK');
+                        setRejectNote('');
+                      }}
+                    >
+                      Reject order
+                    </button>
+                  </div>
                 </section>
               ) : showRejectUnavailableReason ? (
                 <section className="orders-detail-card" aria-label="Reject unavailable">
@@ -1555,6 +1556,16 @@ export function OrdersPage() {
           </form>
         </section>
       </div>
+    ) : null}
+
+    {splitRejectTarget ? (
+      <AllocationSplitRejectModal
+        order={splitRejectTarget}
+        vendorId={currentVendor.vendorId}
+        onClose={() => setSplitRejectTarget(null)}
+        onSuccess={handleSplitRejectSuccess}
+        onFullAllocationReject={handleSplitFullAllocationReject}
+      />
     ) : null}
 
     {message ? <ActionFeedback tone={tone} message={message} /> : null}
