@@ -1618,6 +1618,12 @@ describe('Finance Settlement approval admin UI', () => {
     expect(within(explanation).getByText('-TRY 4,099.00')).toBeInTheDocument();
     expect(within(explanation).getByText('Net payable')).toBeInTheDocument();
 
+    const payableSales = screen.getByLabelText('Payable sales');
+    expect(within(payableSales).getByText('Total payable sales')).toBeInTheDocument();
+    const payableSubtotal = within(payableSales).getByText('Total payable sales').closest('.settlement-payable-sales-subtotal');
+    expect(payableSubtotal).toBeTruthy();
+    expect(within(payableSubtotal as HTMLElement).getByText('TRY 4,099.00')).toBeInTheDocument();
+
     const packageSummary = screen.getByLabelText('Offset packages');
     expect(within(packageSummary).getByText('#1098')).toBeInTheDocument();
     expect(within(packageSummary).getByText('alloc-yalispor-1098')).toBeInTheDocument();
@@ -1636,6 +1642,7 @@ describe('Finance Settlement approval admin UI', () => {
     expect(adjustments).toBeTruthy();
     expect(within(adjustments as HTMLElement).getByText('adjustment-missing-snapshot')).toBeInTheDocument();
     const auditEvidence = screen.getByLabelText('Audit evidence');
+    expect(auditEvidence).not.toHaveAttribute('open');
     expect(within(auditEvidence).getByText('fle-sale-1098')).toBeInTheDocument();
     expect(screen.getByText('Refunded sale basis')).toBeInTheDocument();
     expect(screen.getByText('Refund offset')).toBeInTheDocument();
@@ -1663,7 +1670,15 @@ describe('Finance Settlement approval admin UI', () => {
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
-    expect(screen.getByText('Accounting review · Zero payable · Contains refund offsets')).toBeInTheDocument();
+    expect(screen.getByText('Accounting review')).toBeInTheDocument();
+    expect(screen.getByText('Accounting review · Zero payable')).toBeInTheDocument();
+  });
+
+  it('labels positive-payable history cards as settlement payout', async () => {
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    expect(screen.getAllByText('Settlement payout').length).toBeGreaterThan(0);
   });
 
   it('loads settlement preview totals and sample lines', async () => {

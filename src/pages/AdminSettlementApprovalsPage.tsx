@@ -389,7 +389,7 @@ function buildRefundOffsetPackages(lines: SettlementApprovalLine[]) {
 
 function getSettlementDecisionMetrics(lines: SettlementApprovalLine[], netPayableMinor: number) {
   const offsetPackages = buildRefundOffsetPackages(lines);
-  const payableSales = lines.filter((line) => isSaleLine(line) && line.payableImpactMinor > 0 && !hasRefundedSaleContext(line));
+  const payableSales = lines.filter((line) => isSaleLine(line) && line.payableImpactMinor > 0);
   const refundAdjustments = lines.filter(isRefundAdjustmentLine);
   return {
     rowCount: lines.length,
@@ -769,7 +769,8 @@ function NetPayableExplanation({
 }
 
 function PayableSalesSection({ lines, currency }: { lines: SettlementApprovalLine[]; currency: string }) {
-  const payableSales = getSettlementDecisionMetrics(lines, 0).payableSales;
+  const metrics = getSettlementDecisionMetrics(lines, 0);
+  const payableSales = metrics.payableSales;
   return (
     <section className="settlement-decision-section" aria-label="Payable sales">
       <div>
@@ -797,6 +798,9 @@ function PayableSalesSection({ lines, currency }: { lines: SettlementApprovalLin
       ) : (
         <p className="settlement-compact-empty">No positive payable sale rows in this review.</p>
       )}
+      <div className="settlement-payable-sales-subtotal">
+        <SummaryField label="Total payable sales" value={formatMinor(metrics.salePayableImpactMinor, currency)} />
+      </div>
     </section>
   );
 }
@@ -1132,6 +1136,7 @@ function RecentApprovalsPanel({
               </div>
               <div className="settlement-approval-card-grid">
                 <SummaryField label="Vendor" value={item.vendorId} />
+                <SummaryField label="Approval type" value={item.netPayableMinor > 0 ? 'Settlement payout' : 'Accounting review'} />
                 <SummaryField label="Rows" value={formatNumber(item.lineCount)} />
                 <SummaryField label="Net payable" value={formatMinor(item.netPayableMinor, item.currency)} />
                 <SummaryField label="Created" value={formatDate(item.createdAt)} />
@@ -1142,8 +1147,11 @@ function RecentApprovalsPanel({
                   ? `${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).payableSales.length)} payable sales · ${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).offsetPackages.length)} offset packages · ${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).refundAdjustments.length)} refund adjustments`
                   : `${formatNumber(item.lineCount)} rows; open approval for row composition.`}
               </p>
+              {activeApproval?.id === item.id && getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).offsetPackages.length > 0 ? (
+                <p className="settlement-line-helper">Contains refund offsets</p>
+              ) : null}
               {item.netPayableMinor === 0 && item.lineCount > 0 ? (
-                <p className="settlement-line-helper">Accounting review · Zero payable · Contains refund offsets</p>
+                <p className="settlement-line-helper">Accounting review · Zero payable</p>
               ) : null}
               <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
                 Open

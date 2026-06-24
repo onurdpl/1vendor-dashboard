@@ -13703,6 +13703,10 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 6px;
 }
 
+.settlement-payable-sales-subtotal {
+  max-width: 320px;
+}
+
 .settlement-composition-card h3,
 .settlement-refund-package h4,
 .settlement-decision-section h3,
