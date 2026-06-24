@@ -124,6 +124,22 @@ const awaitingReviewReturn: ReturnDetail = {
   ],
 };
 
+const approvedRefundPendingReturn: ReturnDetail = {
+  ...pendingReturn,
+  id: 'RET-A-APPROVED-1099',
+  sourceShopifyOrderNumber: 1099,
+  status: 'Approved',
+  sourceShopifyRefundId: '',
+  vendorReceivedAt: '2026-06-21T10:00:00Z',
+  vendorReviewedAt: '2026-06-21T10:05:00Z',
+  vendorDecision: 'approved',
+  timeline: [
+    { label: 'Return requested', at: '2026-06-20T10:00:00Z' },
+    { label: 'Received by vendor', at: '2026-06-21T10:00:00Z' },
+    { label: 'Approved by vendor', at: '2026-06-21T10:05:00Z' },
+  ],
+};
+
 const closedRefundedReturnRequest: ReturnDetail = {
   ...pendingReturn,
   id: 'RET-A-CLOSED-1098',
@@ -367,6 +383,34 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('#1001')).not.toBeInTheDocument();
   });
 
+  it('projects closed refunded returns as completed in the right rail with no review action', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(closedRefundedReturnRequest)]);
+    getReturnMock.mockResolvedValue(closedRefundedReturnRequest);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('#1098')).toBeInTheDocument();
+    expect(screen.getAllByText('Closed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Return completed');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Refund is complete. No vendor action is required.');
+    expect(screen.queryByRole('link', { name: 'Review return' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Contact support' })).toBeInTheDocument();
+
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('.op-panel-section');
+    expect(timeline).toBeTruthy();
+    expect(within(timeline as HTMLElement).getByText('Return requested')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Received by vendor')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Approved by vendor')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Closed')).toBeInTheDocument();
+
+    const summary = screen.getByLabelText('Returns summary');
+    expect(within(summary).getByText('Pending review').closest('article')).toHaveTextContent('0');
+    expect(within(summary).getByText('Refunded').closest('article')).toHaveTextContent('1');
+    expect(within(summary).getByText('Needs action').closest('article')).toHaveTextContent('0');
+  });
+
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
     const returnWithoutImage: ReturnDetail = {
       ...pendingReturn,
@@ -513,6 +557,18 @@ describe('ReturnsPage control center', () => {
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('İncele return for order #1001').length).toBeGreaterThan(0);
+  });
+
+  it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(approvedRefundPendingReturn)]);
+    getReturnMock.mockResolvedValue(approvedRefundPendingReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('#1099')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor refund progress');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Keep return evidence current while admin refund handling continues.');
+    expect(screen.getByRole('link', { name: 'Review return' })).toBeInTheDocument();
   });
 
   it('counts awaiting review returns as actionable review work', async () => {

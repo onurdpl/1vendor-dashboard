@@ -401,22 +401,75 @@ function getVendorTimelineLabel(label: string) {
   if (normalized.includes('requested') || normalized.includes('return')) {
     return 'Return requested';
   }
+  if (normalized.includes('closed')) {
+    return 'Closed';
+  }
+  if (normalized.includes('received') || normalized.includes('delivered')) {
+    return 'Received by vendor';
+  }
   if (normalized.includes('approved')) {
-    return 'Refund approved';
+    return 'Approved by vendor';
   }
   if (normalized.includes('refund')) {
-    return 'Refund approved';
+    return 'Refund processed';
   }
   if (normalized.includes('pending') || normalized.includes('review')) {
     return 'Vendor reviewed';
-  }
-  if (normalized.includes('received') || normalized.includes('delivered')) {
-    return 'Shipment received';
   }
   return '';
 }
 
 function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
+  const terminalRefundedReturn = isTerminalRefundedReturn({
+    status: detail?.status ?? summary.status,
+    sourceType: detail?.sourceType ?? summary.sourceType,
+    refundStatus: getRefundStatusLabel(detail ?? summary),
+    sourceShopifyRefundId: detail?.sourceShopifyRefundId ?? summary.sourceShopifyRefundId,
+    vendorReceivedAt: detail?.vendorReceivedAt ?? summary.vendorReceivedAt,
+    vendorReviewedAt: detail?.vendorReviewedAt ?? summary.vendorReviewedAt,
+    vendorDecision: detail?.vendorDecision ?? summary.vendorDecision,
+    refundedItems: detail?.refundedItems ?? summary.refundedItems,
+  });
+
+  if (terminalRefundedReturn) {
+    const terminalItems = [
+      {
+        label: 'Return requested',
+        at: formatDate(summary.date),
+        rawAt: summary.date,
+        enabled: Boolean(summary.date),
+      },
+      {
+        label: 'Received by vendor',
+        at: formatDate(detail?.vendorReceivedAt ?? summary.vendorReceivedAt),
+        rawAt: detail?.vendorReceivedAt ?? summary.vendorReceivedAt,
+        enabled: Boolean(detail?.vendorReceivedAt ?? summary.vendorReceivedAt),
+      },
+      {
+        label: 'Approved by vendor',
+        at: formatDate(detail?.vendorReviewedAt ?? summary.vendorReviewedAt),
+        rawAt: detail?.vendorReviewedAt ?? summary.vendorReviewedAt,
+        enabled: Boolean((detail?.vendorReviewedAt ?? summary.vendorReviewedAt) && (detail?.vendorDecision ?? summary.vendorDecision)),
+      },
+      {
+        label: 'Refund processed',
+        at: formatDate(detail?.updatedAt ?? summary.updatedAt ?? summary.date),
+        rawAt: detail?.updatedAt ?? summary.updatedAt ?? summary.date,
+        enabled: Boolean(detail?.sourceShopifyRefundId ?? summary.sourceShopifyRefundId),
+      },
+      {
+        label: 'Closed',
+        at: formatDate(detail?.updatedAt ?? summary.updatedAt ?? summary.date),
+        rawAt: detail?.updatedAt ?? summary.updatedAt ?? summary.date,
+        enabled: true,
+      },
+    ];
+
+    return terminalItems
+      .filter((item) => item.enabled)
+      .map(({ label, at }) => ({ label, at }));
+  }
+
   const detailTimeline = detail?.timeline ?? [];
   if (detailTimeline.length > 0) {
     const seenLabels = new Set<string>();
@@ -905,11 +958,31 @@ export function ReturnsPage() {
         >
           {selectedReturn ? (
             (() => {
-              const workflowGuidance = getReturnWorkflowAction({
-                status: selectedReturn.status,
-                sourceType: selectedReturn.sourceType,
-                refundStatus: getRefundStatusLabel(selectedReturn),
+              const terminalRefundedReturn = isTerminalRefundedReturn({
+                status: selectedDetail?.status ?? selectedReturn.status,
+                sourceType: selectedDetail?.sourceType ?? selectedReturn.sourceType,
+                refundStatus: getRefundStatusLabel(selectedDetail ?? selectedReturn),
+                sourceShopifyRefundId: selectedDetail?.sourceShopifyRefundId ?? selectedReturn.sourceShopifyRefundId,
+                vendorReceivedAt: selectedDetail?.vendorReceivedAt ?? selectedReturn.vendorReceivedAt,
+                vendorReviewedAt: selectedDetail?.vendorReviewedAt ?? selectedReturn.vendorReviewedAt,
+                vendorDecision: selectedDetail?.vendorDecision ?? selectedReturn.vendorDecision,
+                refundedItems: selectedDetail?.refundedItems ?? selectedReturn.refundedItems,
               });
+              const workflowGuidance = getReturnWorkflowAction({
+                status: selectedDetail?.status ?? selectedReturn.status,
+                sourceType: selectedDetail?.sourceType ?? selectedReturn.sourceType,
+                vendorReceivedAt: selectedDetail?.vendorReceivedAt ?? selectedReturn.vendorReceivedAt,
+                vendorReviewedAt: selectedDetail?.vendorReviewedAt ?? selectedReturn.vendorReviewedAt,
+                vendorDecision: selectedDetail?.vendorDecision ?? selectedReturn.vendorDecision,
+                refundStatus: getRefundStatusLabel(selectedDetail ?? selectedReturn),
+                sourceShopifyRefundId: selectedDetail?.sourceShopifyRefundId ?? selectedReturn.sourceShopifyRefundId,
+                refundedItems: selectedDetail?.refundedItems ?? selectedReturn.refundedItems,
+              });
+              const actionLabel = terminalRefundedReturn ? 'Return completed' : workflowGuidance.actionLabel;
+              const actionDescription = terminalRefundedReturn
+                ? 'Refund is complete. No vendor action is required.'
+                : workflowGuidance.description;
+              const actionTone = terminalRefundedReturn ? 'success' : workflowGuidance.tone;
 
               return (
             <>
@@ -1012,16 +1085,18 @@ export function ReturnsPage() {
               </div>
 
               <div className="returns-actions-card returns-actions-card-compact">
-                <h4>Actions</h4>
+                <h4>{terminalRefundedReturn ? 'Next action' : 'Actions'}</h4>
                 <WorkflowActionGuidance
-                  actionLabel={workflowGuidance.actionLabel}
-                  description={workflowGuidance.description}
-                  tone={workflowGuidance.tone}
+                  actionLabel={actionLabel}
+                  description={actionDescription}
+                  tone={actionTone}
                 />
                 <OperationalActionGroup>
-                  <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
-                    Review return
-                  </Link>
+                  {terminalRefundedReturn ? null : (
+                    <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
+                      Review return
+                    </Link>
+                  )}
                   <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
                     Contact support
                   </button>
