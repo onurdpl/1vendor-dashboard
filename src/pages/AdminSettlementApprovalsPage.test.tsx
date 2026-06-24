@@ -598,7 +598,7 @@ const zeroPayableRefundOffsetApproval: SettlementApproval = {
       id: 'line-refund-1098',
       financeLedgerEntryId: 'fle-refund-1098',
       lineType: 'REFUND',
-      amountMinor: -409900,
+      amountMinor: 409900,
       commissionMinor: 0,
       commissionVatMinor: 0,
       payableImpactMinor: -409900,
@@ -1604,28 +1604,36 @@ describe('Finance Settlement approval admin UI', () => {
 
     const composition = screen.getByLabelText('Settlement composition');
     expect(within(composition).getByText('Payable sales')).toBeInTheDocument();
-    expect(within(composition).getByText('Refunded sale basis')).toBeInTheDocument();
-    expect(within(composition).getByText('Refund offsets')).toBeInTheDocument();
+    expect(within(composition).getByText('Refunded sale gross basis')).toBeInTheDocument();
+    expect(within(composition).getByText('Refund gross offsets')).toBeInTheDocument();
     expect(within(composition).getByText('Refund adjustments')).toBeInTheDocument();
+    expect(within(composition).getByText('Refund package net payable impact')).toBeInTheDocument();
     expect(within(composition).getByText('Net payable')).toBeInTheDocument();
-    expect(within(composition).getByText('TRY 0.00')).toBeInTheDocument();
+    expect(within(composition).getAllByText('TRY 0.00')).toHaveLength(2);
+    expect(within(composition).getByText('1 row / +TRY 4,099.00')).toBeInTheDocument();
+    expect(within(composition).getByText('1 row / -TRY 4,099.00')).toBeInTheDocument();
 
     const packageSummary = screen.getByLabelText('Refund offset packages');
     expect(within(packageSummary).getByText('Refund offset package')).toBeInTheDocument();
     expect(within(packageSummary).getByText('#1098')).toBeInTheDocument();
     expect(within(packageSummary).getByText('alloc-yalispor-1098')).toBeInTheDocument();
-    expect(within(packageSummary).getByText('Sale basis')).toBeInTheDocument();
-    expect(within(packageSummary).getByText('Refund offset')).toBeInTheDocument();
-    expect(within(packageSummary).getByText('Net settlement effect')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Sale gross basis')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('+TRY 4,099.00')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Refund gross amount')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('-TRY 4,099.00')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Net payable impact')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('TRY 0.00')).toBeInTheDocument();
+    expect(within(packageSummary).queryByText('Net settlement effect')).not.toBeInTheDocument();
+    expect(within(packageSummary).queryByText('TRY 8,198.00')).not.toBeInTheDocument();
 
-    expect(screen.getAllByText('Refunded sale basis').length).toBeGreaterThan(1);
-    expect(screen.getAllByText('Refund offset').length).toBeGreaterThan(1);
+    expect(screen.getByText('Refunded sale basis')).toBeInTheDocument();
+    expect(screen.getByText('Refund offset')).toBeInTheDocument();
     expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
-    expect(screen.getAllByText('Settlement status is the business review state. Ledger state is the stored finance row state.').length).toBeGreaterThan(0);
-    expect(screen.getByText('This adjustment does not have an order/allocation snapshot in the approval line.')).toBeInTheDocument();
-    expect(screen.getByText('Next: Approve accounting review.')).toBeInTheDocument();
-    expect(screen.getByText('This approval records settlement review for offsets and adjustments. It does not create a payable amount.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve accounting review' })).toBeEnabled();
+    expect(screen.getAllByText('Settlement status is the business review state. Ledger state is the stored finance row state.')).toHaveLength(1);
+    expect(screen.getByText('Carry-forward refund adjustment. Original order/allocation snapshot is not available on this settlement line.')).toBeInTheDocument();
+    expect(screen.getByText('Next: Approve zero-payable accounting review.')).toBeInTheDocument();
+    expect(screen.getByText('Records review of offsetting sale/refund rows and adjustments. This does not create a payout amount or send money. Rows: 3. Net payable: TRY 0.00. Payout result: No payout amount.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve zero-payable accounting review' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
   });
 
@@ -1644,7 +1652,7 @@ describe('Finance Settlement approval admin UI', () => {
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
-    expect(screen.getByText('Accounting review / zero payable')).toBeInTheDocument();
+    expect(screen.getByText('Accounting review · Zero payable · Contains refund offsets')).toBeInTheDocument();
   });
 
   it('loads settlement preview totals and sample lines', async () => {

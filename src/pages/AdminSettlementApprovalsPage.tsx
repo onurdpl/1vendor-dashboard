@@ -178,6 +178,12 @@ function formatMinor(value: number | null | undefined, currency = 'TRY') {
   return formatCurrency((Number(value ?? 0) / 100).toFixed(2), currency);
 }
 
+function formatSignedMinor(value: number | null | undefined, currency = 'TRY') {
+  const numericValue = Number(value ?? 0);
+  const formatted = formatMinor(numericValue, currency);
+  return numericValue > 0 ? `+${formatted}` : formatted;
+}
+
 function formatNumber(value: number | null | undefined) {
   return Number(value ?? 0).toLocaleString('en-US');
 }
@@ -322,23 +328,33 @@ function getLineGroupingKey(line: SettlementApprovalLine) {
 function buildSettlementComposition(lines: SettlementApprovalLine[], currency: string, netPayableMinor: number) {
   const buckets = [
     { key: 'payable-sales', label: 'Payable sales', predicate: (line: SettlementApprovalLine) => isSaleLine(line) && !hasRefundedSaleContext(line) },
-    { key: 'refunded-sale-basis', label: 'Refunded sale basis', predicate: (line: SettlementApprovalLine) => isSaleLine(line) && hasRefundedSaleContext(line) },
-    { key: 'refund-offsets', label: 'Refund offsets', predicate: isRefundLine },
+    { key: 'refunded-sale-basis', label: 'Refunded sale gross basis', predicate: (line: SettlementApprovalLine) => isSaleLine(line) && hasRefundedSaleContext(line) },
+    { key: 'refund-offsets', label: 'Refund gross offsets', predicate: isRefundLine },
     { key: 'refund-adjustments', label: 'Refund adjustments', predicate: isRefundAdjustmentLine },
   ];
+  const refundPackageNetPayableImpactMinor = buildRefundOffsetPackages(lines)
+    .reduce((total, item) => total + item.netPayableImpactMinor, 0);
 
   return {
     currency,
     items: buckets.map((bucket) => {
       const matchingLines = lines.filter(bucket.predicate);
+      const grossAmountMinor = matchingLines.reduce((total, line) => {
+        const amountMinor = Number(line.amountMinor ?? 0);
+        if (bucket.key === 'refund-offsets' || bucket.key === 'refund-adjustments') {
+          return total - Math.abs(amountMinor);
+        }
+        return total + amountMinor;
+      }, 0);
       return {
         key: bucket.key,
         label: bucket.label,
         count: matchingLines.length,
-        amountMinor: matchingLines.reduce((total, line) => total + line.amountMinor, 0),
+        amountMinor: grossAmountMinor,
       };
     }),
     netPayableMinor,
+    refundPackageNetPayableImpactMinor,
   };
 }
 
@@ -362,9 +378,9 @@ function buildRefundOffsetPackages(lines: SettlementApprovalLine[]) {
         key,
         orderLabel: getApprovalLineOrderLabel(firstLine),
         allocationLabel: getApprovalLineAllocationLabel(firstLine),
-        saleBasisMinor: saleLines.reduce((total, line) => total + line.amountMinor, 0),
-        refundOffsetMinor: offsetLines.reduce((total, line) => total + line.amountMinor, 0),
-        netEffectMinor: groupLines.reduce((total, line) => total + line.amountMinor, 0),
+        saleGrossBasisMinor: saleLines.reduce((total, line) => total + line.amountMinor, 0),
+        refundGrossAmountMinor: offsetLines.reduce((total, line) => total - Math.abs(line.amountMinor), 0),
+        netPayableImpactMinor: groupLines.reduce((total, line) => total + line.payableImpactMinor, 0),
         lineIds: groupLines.map((line) => line.financeLedgerEntryId),
       };
     })
@@ -613,9 +629,13 @@ function SettlementCompositionSummary({
           <SummaryField
             key={item.key}
             label={item.label}
-            value={`${formatNumber(item.count)} ${item.count === 1 ? 'row' : 'rows'} / ${formatMinor(item.amountMinor, composition.currency)}`}
+            value={`${formatNumber(item.count)} ${item.count === 1 ? 'row' : 'rows'} / ${formatSignedMinor(item.amountMinor, composition.currency)}`}
           />
         ))}
+        <SummaryField
+          label="Refund package net payable impact"
+          value={formatMinor(composition.refundPackageNetPayableImpactMinor, composition.currency)}
+        />
         <SummaryField label="Net payable" value={formatMinor(composition.netPayableMinor, composition.currency)} />
       </div>
     </section>
@@ -638,9 +658,9 @@ function RefundOffsetPackages({ lines, currency }: { lines: SettlementApprovalLi
             {item.allocationLabel ? <small>{item.allocationLabel}</small> : null}
           </div>
           <div className="settlement-refund-package-grid">
-            <SummaryField label="Sale basis" value={formatMinor(item.saleBasisMinor, currency)} />
-            <SummaryField label="Refund offset" value={formatMinor(item.refundOffsetMinor, currency)} />
-            <SummaryField label="Net settlement effect" value={formatMinor(item.netEffectMinor, currency)} />
+            <SummaryField label="Sale gross basis" value={formatSignedMinor(item.saleGrossBasisMinor, currency)} />
+            <SummaryField label="Refund gross amount" value={formatSignedMinor(item.refundGrossAmountMinor, currency)} />
+            <SummaryField label="Net payable impact" value={formatMinor(item.netPayableImpactMinor, currency)} />
           </div>
           <small>Audit rows: {item.lineIds.join(', ')}</small>
         </article>
@@ -671,6 +691,9 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
         netPayableMinor={approval.netPayableMinor}
       />
       <RefundOffsetPackages lines={lines} currency={approval.currency} />
+      <p className="settlement-line-helper">
+        Settlement status is the business review state. Ledger state is the stored finance row state.
+      </p>
       <div className="settlement-approval-lines-list" aria-label="Selected settlement rows">
         {lines.map((line) => {
           const status = getApprovalLineStatus(line);
@@ -721,12 +744,9 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
               </div>
               {orderOrAllocationUnavailable ? (
                 <p className="settlement-line-helper">
-                  This adjustment does not have an order/allocation snapshot in the approval line.
+                  Carry-forward refund adjustment. Original order/allocation snapshot is not available on this settlement line.
                 </p>
               ) : null}
-              <p className="settlement-line-helper">
-                Settlement status is the business review state. Ledger state is the stored finance row state.
-              </p>
               <dl className="settlement-approval-line-money-grid">
                 <div>
                   <dt>Type</dt>
@@ -918,7 +938,7 @@ function RecentApprovalsPanel({
                 <SummaryField label="Approved" value={formatDate(item.approvedAt)} />
               </div>
               {item.netPayableMinor === 0 && item.lineCount > 0 ? (
-                <p className="settlement-line-helper">Accounting review / zero payable</p>
+                <p className="settlement-line-helper">Accounting review · Zero payable · Contains refund offsets</p>
               ) : null}
               <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
                 Open
@@ -1598,7 +1618,7 @@ export function AdminSettlementApprovalsPage() {
     }
     if (approval.status === 'draft') {
       return zeroPayableApprovalReview
-        ? 'Next: Approve accounting review.'
+        ? 'Next: Approve zero-payable accounting review.'
         : 'Next: Approve Settlement.';
     }
     if (approval.status === 'cancelled') {
@@ -1643,9 +1663,9 @@ export function AdminSettlementApprovalsPage() {
     }
     if (approval.status === 'draft') {
       return {
-        label: zeroPayableApprovalReview ? 'Approve accounting review' : 'Approve Settlement',
+        label: zeroPayableApprovalReview ? 'Approve zero-payable accounting review' : 'Approve Settlement',
         detail: zeroPayableApprovalReview
-          ? 'This approval records settlement review for offsets and adjustments. It does not create a payable amount.'
+          ? `Records review of offsetting sale/refund rows and adjustments. This does not create a payout amount or send money. Rows: ${formatNumber(approval.lines.length)}. Net payable: ${formatMinor(approval.netPayableMinor, approval.currency)}. Payout result: No payout amount.`
           : 'Writes local DB approval state only.',
         onClick: () => void handleApprove(),
         disabled: busyAction !== null,
