@@ -3934,6 +3934,7 @@ export async function getAdminShopifyOrderBreakdown(
       sourceShopifyOrderNumber: order.sourceShopifyOrderNumber,
       customerName: order.customerName,
       customerEmail: order.customerEmail,
+      financialStatus: order.financialStatus,
       totalAmount: order.totalPrice ? toAmountString(toNumber(order.totalPrice)) : toAmountString(orderTotal),
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),

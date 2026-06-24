@@ -722,6 +722,7 @@ export type AdminOrderBreakdownDto = {
     sourceShopifyOrderNumber: string;
     customerName: string | null;
     customerEmail: string | null;
+    financialStatus: string | null;
     totalAmount: string;
     createdAt: string;
     updatedAt: string;

@@ -547,7 +547,8 @@ describe('App startup runtime safety', () => {
     expect((await screen.findAllByText('Refund completed')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    expect(screen.getByText('Historical: Vendor blocked')).toBeInTheDocument();
+    expect(screen.getByText('Historical Context')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getByText('Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.')).toBeInTheDocument();
     expect(screen.getByText('Webhook received')).toBeInTheDocument();
     expect(screen.getByText('gid://shopify/Refund/1')).toBeInTheDocument();

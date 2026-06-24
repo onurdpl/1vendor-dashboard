@@ -1281,6 +1281,7 @@ export type ShopifyOrderBreakdown = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
   customer: string;
+  financialStatus?: string | null;
   createdAt: string;
   allocations: VendorAllocationSummary[];
 };

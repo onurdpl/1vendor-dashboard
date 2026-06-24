@@ -206,6 +206,7 @@ type AdminOrderBreakdownDto = {
     sourceShopifyOrderNumber: string;
     customerName: string | null;
     customerEmail: string | null;
+    financialStatus?: string | null;
     totalAmount: string;
     createdAt: string;
     updatedAt: string;
@@ -559,6 +560,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     sourceShopifyOrderId: response.order.sourceShopifyOrderId,
     sourceShopifyOrderNumber: response.order.sourceShopifyOrderNumber,
     customer: response.order.customerName ?? response.order.customerEmail ?? 'Shopify customer',
+    financialStatus: response.order.financialStatus ?? null,
     createdAt: response.order.createdAt,
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {
       const allocationStatus = toAllocationStatus(allocation.allocationStatus);

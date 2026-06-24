@@ -63,6 +63,25 @@ function formatTransferStatus(value: string) {
     .join(' ');
 }
 
+function formatStatusAxisLabel(value: string | null | undefined, fallback = 'Unknown') {
+  if (!value?.trim()) {
+    return fallback;
+  }
+
+  return formatTransferStatus(value);
+}
+
+function getPaymentStatusLabel(
+  breakdown: ShopifyOrderBreakdown,
+  refundCompleted: boolean,
+) {
+  if (refundCompleted) {
+    return 'Refund completed';
+  }
+
+  return formatStatusAxisLabel(breakdown.financialStatus, 'Not synced');
+}
+
 function formatTransferRecoveryClassification(value: string) {
   return formatTransferStatus(value);
 }
@@ -1059,6 +1078,13 @@ export function AdminShopifyOrderPage() {
         const refundCompleted = isAllocationRefundCompleted(allocation);
         const latestRefundedAt = getLatestRefundedAt(allocation);
         const timelineEvents = buildAllocationTimelineEvents(allocation);
+        const operationalStatusLabel = refundCompleted
+          ? 'Refunded'
+          : formatStatusAxisLabel(allocation.allocationStatus);
+        const fulfillmentStatusLabel = refundCompleted
+          ? 'Fulfillment not required'
+          : formatStatusAxisLabel(allocation.shippingStatus);
+        const paymentStatusLabel = getPaymentStatusLabel(breakdown, refundCompleted);
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1067,28 +1093,31 @@ export function AdminShopifyOrderPage() {
               <p className="eyebrow">Vendor allocation</p>
               <h3>{allocation.vendorName}</h3>
             </div>
-            <div className="chip-row">
-              {refundCompleted ? (
-                <>
-                  <span className="status-badge status-refunded">Refunded</span>
-                  <span className="status-badge status-fulfillment-not-required">Fulfillment not required</span>
-                  {normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' ? (
-                    <span className="status-badge status-muted">Historical: Vendor blocked</span>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <span className={`status-badge status-${allocation.allocationStatus}`}>{allocation.allocationStatus}</span>
-                  <span
-                    className={`status-badge status-${getClassToken(allocation.fulfillmentActionState)}`}
-                  >
-                    {allocation.fulfillmentActionState}
-                  </span>
-                  <span className={`status-badge status-${getClassToken(allocation.shippingStatus)}`}>
-                    {allocation.shippingStatus}
-                  </span>
-                </>
-              )}
+            <div className="admin-status-axis-grid" aria-label="Admin allocation status axes">
+              <div className="order-status-axis">
+                <span>Operational Status</span>
+                <span className={`status-badge status-${refundCompleted ? 'refunded' : getClassToken(allocation.allocationStatus)}`}>
+                  {operationalStatusLabel}
+                </span>
+              </div>
+              <div className="order-status-axis">
+                <span>Fulfillment Status</span>
+                <span className={`status-badge status-${refundCompleted ? 'fulfillment-not-required' : getClassToken(allocation.shippingStatus)}`}>
+                  {fulfillmentStatusLabel}
+                </span>
+              </div>
+              <div className="order-status-axis">
+                <span>Payment Status</span>
+                <span className={`status-badge status-${refundCompleted ? 'refund-completed' : getClassToken(paymentStatusLabel)}`}>
+                  {paymentStatusLabel}
+                </span>
+              </div>
+              {refundCompleted && normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' ? (
+                <div className="order-status-axis order-status-axis-muted">
+                  <span>Historical Context</span>
+                  <span className="status-badge status-muted">Vendor blocked</span>
+                </div>
+              ) : null}
             </div>
           </header>
 

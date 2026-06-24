@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import type { ShopifyOrderBreakdown } from '../features/orders/api';
 import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
@@ -127,7 +127,16 @@ function renderPage() {
   );
 }
 
+async function findLatestStatusAxes() {
+  const statusAxes = await screen.findAllByLabelText('Admin allocation status axes');
+  return statusAxes[statusAxes.length - 1];
+}
+
 describe('AdminShopifyOrderPage split visibility', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     setToken('test-token');
@@ -152,11 +161,26 @@ describe('AdminShopifyOrderPage split visibility', () => {
       sourceShopifyOrderId: '7817723773265',
       sourceShopifyOrderNumber: '#1091',
       customer: 'Customer',
+      financialStatus: 'pending',
       createdAt: '2026-06-21T08:00:00.000Z',
-      allocations: [buildAllocation()],
+      allocations: [
+        buildAllocation({
+          fulfillmentActionState: 'awaiting_shipment',
+        }),
+      ],
     });
 
     renderPage();
+
+    const statusAxes = await findLatestStatusAxes();
+    expect(within(statusAxes).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(statusAxes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(statusAxes).getByText('Fulfillment Status')).toBeInTheDocument();
+    expect(within(statusAxes).getByText('Awaiting Shipment')).toBeInTheDocument();
+    expect(within(statusAxes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(statusAxes).getByText('Pending')).toBeInTheDocument();
+    expect(screen.queryByText('vendor_blocked')).not.toBeInTheDocument();
+    expect(screen.queryByText('awaiting_shipment')).not.toBeInTheDocument();
 
     expect(await screen.findByRole('heading', { name: 'Line-item split allocation' })).toBeInTheDocument();
     expect(screen.getByText('This allocation was created when the vendor rejected selected line items.')).toBeInTheDocument();
@@ -179,6 +203,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
         sourceShopifyOrderId: '7817723773265',
         sourceShopifyOrderNumber: '#1098',
         customer: 'Customer',
+        financialStatus: 'paid',
         createdAt: '2026-06-21T08:00:00.000Z',
         allocations: [
           buildAllocation({
@@ -229,5 +254,63 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(ownershipContext).getByText('Yalı Spor (yalispor)')).toBeInTheDocument();
       expect(within(ownershipContext).getAllByText('Sporjinal (sporjinal)').length).toBeGreaterThanOrEqual(2);
       expect(within(ownershipContext).getByText(/Transfer:/)).toHaveTextContent('Yalı Spor (yalispor) to Sporjinal (sporjinal)');
+    });
+
+    it('renders refunded allocations with separated operational, fulfillment, and payment axes', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1099',
+        customer: 'Customer',
+        financialStatus: 'refunded',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            refundTotal: '250.00',
+            refundedItems: [
+              {
+                id: 'refund-line-1',
+                originalVendorId: 'yalispor',
+                assignedVendorId: 'yalispor',
+                vendorId: 'yalispor',
+                sku: 'SKU-1088',
+                variantTitle: 'Refund gid://shopify/Refund/1',
+                name: 'Split item',
+                quantity: 1,
+                condition: 'New',
+                refundAmount: '250.00',
+              },
+            ],
+            outboundRefundAttemptSummary: {
+              id: 'attempt-1',
+              status: 'RESOLVED',
+              restockType: 'CANCEL',
+              refundShipping: false,
+              notifyCustomer: false,
+              shopifyRefundId: 'gid://shopify/Refund/1',
+              previewedAt: '2026-06-21T12:00:00.000Z',
+              requestedAt: '2026-06-21T12:05:00.000Z',
+              submittedAt: '2026-06-21T12:06:00.000Z',
+              resolvedAt: '2026-06-21T12:07:00.000Z',
+              failedAt: null,
+              failureReason: null,
+              postRefundFulfillmentCheckStatus: 'passed',
+              postRefundFulfillmentCheckMessage: 'Selected lines no longer fulfillable.',
+            },
+          }),
+        ],
+      });
+
+      renderPage();
+
+      const statusAxes = await findLatestStatusAxes();
+      expect(within(statusAxes).getByText('Operational Status')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Refunded')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Fulfillment Status')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Fulfillment not required')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Payment Status')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Refund completed')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Historical Context')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Vendor blocked')).toBeInTheDocument();
+      expect(screen.queryByText('vendor_blocked')).not.toBeInTheDocument();
     });
   });

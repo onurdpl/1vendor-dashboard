@@ -4799,6 +4799,13 @@ h3 {
   gap: 8px;
 }
 
+.admin-status-axis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+  justify-items: end;
+}
+
 .orders-status-axis,
 .order-status-axis {
   display: grid;
@@ -6049,6 +6056,13 @@ h3 {
 
 .order-status-axis-muted {
   opacity: 0.82;
+}
+
+@media (max-width: 760px) {
+  .admin-status-axis-grid {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
 }
 
 .order-detail-status-pills .status-badge,
