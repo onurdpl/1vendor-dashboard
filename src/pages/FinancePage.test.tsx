@@ -454,6 +454,14 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(await screen.findByText('Review required')).toBeInTheDocument();
+    expect(screen.getByLabelText('Finance workflow summary')).toHaveTextContent('Review required');
+    expect(screen.getByLabelText('Action Required')).toHaveTextContent('Needs review');
+    expect(screen.getByLabelText('Action Required')).toHaveTextContent('Blocked rows');
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('Settlement estimate');
+    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Settlement review: 1');
+    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Blocked rows: 1');
+    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Unknown categories');
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
@@ -691,6 +699,12 @@ describe('FinancePage control center', () => {
     await screen.findByText('#1002');
     await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
 
+    expect(await screen.findByText('Selected Finance Item')).toBeInTheDocument();
+    expect(screen.getByText('Current finance state')).toBeInTheDocument();
+    expect(screen.getAllByText('Payout readiness').length).toBeGreaterThan(0);
+    expect(screen.getByText('Debt impact on payout')).toBeInTheDocument();
+    expect(screen.getByText('Finance investigation notes')).toBeInTheDocument();
+    expect(screen.getByText('No finance investigation notes.')).toBeInTheDocument();
     expect(await screen.findByText('Settlement preview')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
@@ -715,6 +729,52 @@ describe('FinancePage control center', () => {
     expect(await screen.findByText('Review status')).toBeInTheDocument();
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Settlement impact').length).toBeGreaterThan(0);
+  });
+
+  it('decomposes finance row status into settlement, payout, and blocker columns', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutBatch: null,
+        },
+        ...financeDashboard.transactions.slice(1),
+      ],
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByRole('columnheader', { name: 'Settlement' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Payout' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Hold / Blocker' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Ready for review').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Finance issue').length).toBeGreaterThan(0);
+  });
+
+  it('shows shipping reconciliation as required only when the finance projection needs it', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            shippingDeduction: '$80.00',
+            shippingDeductionSource: 'external_provider',
+            shippingCostStatus: 'pending_provider_cost',
+            shippingMode: 'external_provider',
+            shippingApplied: false,
+          },
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Shipping reconciliation required')).toBeInTheDocument();
+    expect(screen.getByText('Provider shipping cost is missing and may change settlement estimates.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save shipping cost' })).toBeInTheDocument();
   });
 
   it('renders recommendation and settlement sections in the same finance inspector stack', async () => {

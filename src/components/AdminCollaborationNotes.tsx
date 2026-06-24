@@ -61,10 +61,14 @@ export function AdminCollaborationNotes({
   contextType,
   contextId,
   currentUser,
+  title = 'Internal notes',
+  emptyMessage = 'No internal notes yet.',
 }: {
   contextType: AdminCollaborationNote['contextType'];
   contextId: string;
   currentUser: CurrentUser | null;
+  title?: string;
+  emptyMessage?: string;
 }) {
   const isAdmin = currentUser?.role === 'admin';
   const [notes, setNotes] = useState<AdminCollaborationNote[]>([]);
@@ -113,7 +117,7 @@ export function AdminCollaborationNotes({
       <div className="admin-collab-heading">
         <div>
           <p className="eyebrow">Admin collaboration</p>
-          <h3>Internal notes</h3>
+          <h3>{title}</h3>
         </div>
         <span>{visibleNotes.length}</span>
       </div>
@@ -131,7 +135,7 @@ export function AdminCollaborationNotes({
             </div>
           ))
         ) : (
-          <p className="admin-collab-empty">No internal notes yet.</p>
+          <p className="admin-collab-empty">{emptyMessage}</p>
         )}
       </div>
       <form className="admin-collab-form" onSubmit={handleSubmit}>
