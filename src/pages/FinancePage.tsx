@@ -1207,110 +1207,10 @@ export function FinancePage() {
     financeView.summary,
     financeAudience,
   );
-  const actionKpis = [
-    {
-      icon: '!',
-      label: 'Needs review',
-      value: needsReviewBreakdown.needsReviewTotal,
-      detail: 'Finance issues requiring operator attention.',
-      metadata: {
-        scope: 'Vendor finance review signals',
-        timeWindow: 'Loaded finance rows plus payout blockers',
-        generatedAt: 'Current finance view load',
-      },
-      tone: 'danger' as const,
-    },
-    {
-      icon: 'P',
-      label: 'Pending review',
-      value: financeValueOrUnknown(financeView.summary.pendingPayouts ?? financeView.summary.heldBalance),
-      detail: `Settlement-review candidates awaiting action. ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} estimate rows.`,
-      metadata: {
-        scope: 'Vendor finance ledger',
-        timeWindow: 'All eligible settlement-review rows',
-        generatedAt: 'Current finance view load',
-      },
-      tone: 'attention' as const,
-    },
-    {
-      icon: 'B',
-      label: 'Blocked rows',
-      value: financeView.payoutBatchSummary?.blockedRowCount ?? 0,
-      detail: 'Rows excluded from draft settlement preparation.',
-      metadata: {
-        scope: 'Vendor finance ledger',
-        timeWindow: 'Current payout preparation projection',
-        generatedAt: 'Current finance view load',
-      },
-      tone: (financeView.payoutBatchSummary?.blockedRowCount ?? 0) > 0 ? ('danger' as const) : ('neutral' as const),
-    },
-    {
-      icon: 'Q',
-      label: 'Settlement review queue',
-      value: financeView.payoutBatchSummary?.eligibleRowCount ?? 0,
-      detail: isAdmin ? 'Rows ready for draft settlement review.' : 'Rows visible in settlement review.',
-      metadata: {
-        scope: 'Vendor payout preparation',
-        timeWindow: 'Current eligible rows',
-        generatedAt: 'Current finance view load',
-      },
-      tone: (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? ('info' as const) : ('neutral' as const),
-    },
-  ];
-  const financialKpis = [
-    {
-      icon: 'S',
-      label: 'Settlement estimate',
-      value: financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate),
-      detail: 'Vendor finance ledger estimate.',
-      metadata: {
-        scope: 'Vendor finance ledger',
-        timeWindow: 'All loaded ledger rows',
-        generatedAt: 'Current finance view load',
-      },
-      tone: 'success' as const,
-    },
-    {
-      icon: 'R',
-      label: 'Refund deductions',
-      value: formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds),
-      detail: 'Recorded refund deductions',
-      metadata: {
-        scope: 'Vendor finance ledger',
-        timeWindow: financeView.summary.refundsThisMonth ? 'Current period' : 'All recorded refunds',
-        generatedAt: 'Current finance view load',
-      },
-      tone: 'attention' as const,
-    },
-    {
-      icon: 'V',
-      label: 'Vendor balance',
-      value: financeValueOrUnknown(financeView.summary.vendorBalance),
-      detail: isZeroCurrencyValue(financeView.summary.outstandingVendorDebt)
-        ? 'Outstanding vendor balance/debt.'
-        : `Outstanding vendor balance/debt. Debt open: ${financeValueOrUnknown(financeView.summary.outstandingVendorDebt)}`,
-      metadata: {
-        scope: 'Vendor balance ledger',
-        timeWindow: 'All balance events',
-        generatedAt: 'Current finance view load',
-      },
-      tone: getBalanceTone(financeView.summary.vendorBalance),
-    },
-    {
-      icon: 'D',
-      label: isVendorUser ? 'Latest review' : 'Latest draft review',
-      value: getUpcomingPayoutLabel(financeView),
-      detail: isVendorUser
-        ? `Latest payout preparation state. ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review.`
-        : `Latest payout preparation state. ${getUpcomingPayoutDetail(financeView)}`,
-      metadata: {
-        scope: 'Vendor payout preparation',
-        timeWindow: 'Latest payout batch plus current eligible rows',
-        generatedAt: 'Current finance view load',
-      },
-      tone: 'info' as const,
-    },
-  ];
+  const settlementEstimate = financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate);
+  const refundDeductions = formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
+  const vendorBalance = financeValueOrUnknown(financeView.summary.vendorBalance);
+  const latestReview = getUpcomingPayoutLabel(financeView);
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
@@ -1337,79 +1237,20 @@ export function FinancePage() {
         </div>
       </div>
 
-      <div className="finance-operations-summary" aria-label="Finance workflow summary">
-        <div>
-          <p className="eyebrow">Finance workflow</p>
-          <h3>{needsReviewBreakdown.needsReviewTotal > 0 ? 'Review required' : 'No urgent finance review'}</h3>
-          <p className="page-description">
-            {financeView.payoutBatchSummary?.eligibleRowCount ?? 0} settlement review rows · {financeView.payoutBatchSummary?.blockedRowCount ?? 0} blocked rows · Estimated payout {financeValueOrUnknown(financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)}
-          </p>
+      <section className="finance-compact-summary" aria-label="Finance workflow summary">
+        <div className="finance-compact-primary">
+          <span className="finance-compact-label">Action required</span>
+          <strong>{needsReviewBreakdown.needsReviewTotal}</strong>
+          <small aria-label="Needs review breakdown">
+            Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Debt {needsReviewBreakdown.debtReview}
+          </small>
         </div>
-        <div className="finance-workflow-pills" aria-label="Finance workflow status">
-          <StatusBadge tone={needsReviewBreakdown.needsReviewTotal > 0 ? 'danger' : 'success'}>
-            {needsReviewBreakdown.needsReviewTotal > 0 ? 'Action required' : 'Clear'}
-          </StatusBadge>
-          <StatusBadge tone={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'attention' : 'neutral'}>
-            Settlement review {financeView.payoutBatchSummary?.eligibleRowCount ?? 0}
-          </StatusBadge>
-          <StatusBadge tone={isZeroCurrencyValue(financeView.summary.outstandingVendorDebt) ? 'neutral' : 'warning'}>
-            {isZeroCurrencyValue(financeView.summary.outstandingVendorDebt) ? 'No debt impact' : 'Debt impact'}
-          </StatusBadge>
-        </div>
-      </div>
-
-      <section className="finance-kpi-section finance-action-kpis" aria-label="Action Required">
-        <div className="finance-kpi-section-heading">
-          <p className="eyebrow">Action Required</p>
-          <span>Operational work and blockers</span>
-        </div>
-        <div className="op-kpi-row finance-kpi-row finance-kpi-row-actions">
-          {actionKpis.map((kpi) => (
-            <article
-              key={kpi.label}
-              className={`finance-kpi-card op-tone-${kpi.tone}`}
-              title={`Scope: ${kpi.metadata.scope}. Time window: ${kpi.metadata.timeWindow}. Generated: ${kpi.metadata.generatedAt}.`}
-            >
-              <span className="finance-kpi-icon" aria-hidden="true">{kpi.icon}</span>
-              <div>
-                <span>{kpi.label}</span>
-                <strong>{kpi.value}</strong>
-                <small>{kpi.detail}</small>
-              </div>
-            </article>
-          ))}
-        </div>
-        <div className="finance-review-breakdown" aria-label="Needs review breakdown">
-          <strong>Needs review breakdown</strong>
-          <span>Settlement review: {needsReviewBreakdown.settlementReview}</span>
-          <span>Refund review: {needsReviewBreakdown.refundReview}</span>
-          <span>Blocked rows: {needsReviewBreakdown.blockedRows}</span>
-          <span>Shipping reconciliation: {needsReviewBreakdown.shippingReconciliation}</span>
-          <span>Debt review: {needsReviewBreakdown.debtReview}</span>
-          <small>{needsReviewBreakdown.unknownCategoriesLabel}</small>
-        </div>
-      </section>
-
-      <section className="finance-kpi-section finance-financial-kpis" aria-label="Financial Totals">
-        <div className="finance-kpi-section-heading">
-          <p className="eyebrow">Financial Totals</p>
-          <span>Informational totals and latest draft context</span>
-        </div>
-        <div className="op-kpi-row finance-kpi-row finance-kpi-row-financial">
-          {financialKpis.map((kpi) => (
-            <article
-              key={kpi.label}
-              className={`finance-kpi-card op-tone-${kpi.tone}`}
-              title={`Scope: ${kpi.metadata.scope}. Time window: ${kpi.metadata.timeWindow}. Generated: ${kpi.metadata.generatedAt}.`}
-            >
-              <span className="finance-kpi-icon" aria-hidden="true">{kpi.icon}</span>
-              <div>
-                <span>{kpi.label}</span>
-                <strong>{kpi.value}</strong>
-                <small>{kpi.detail}</small>
-              </div>
-            </article>
-          ))}
+        <div className="finance-compact-metrics" aria-label="Financial Totals">
+          <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> settlement review</span>
+          <span><strong>{settlementEstimate}</strong> settlement estimate</span>
+          <span><strong>{refundDeductions}</strong> refund deductions</span>
+          <span><strong>{vendorBalance}</strong> vendor balance</span>
+          <span><strong>{latestReview}</strong> latest draft</span>
         </div>
       </section>
 
@@ -1488,7 +1329,7 @@ export function FinancePage() {
           </div>
 
           <OperationalTable
-            columns={['Date', 'Type', 'Order', 'Settlement', 'Payout', 'Hold / Blocker', 'Amount', 'Settlement impact', 'Action']}
+            columns={['Date', 'Type', 'Order', 'Finance State', 'Amount', 'Settlement impact', 'Updated', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
             {isError && !finance ? (
@@ -1500,7 +1341,7 @@ export function FinancePage() {
                 />
               </OperationalTableRow>
             ) : !authContextReady || isLoading ? (
-              <TableSkeletonRows columns={9} rows={6} />
+              <TableSkeletonRows columns={8} rows={6} />
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
@@ -1540,19 +1381,9 @@ export function FinancePage() {
                     <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
                     <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>
                   </span>
-                  <span className="finance-state-cell">
-                    <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{projection.settlementState}</StatusBadge>
-                    <small>Settlement</small>
-                  </span>
-                  <span className="finance-state-cell">
-                    <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{projection.payoutState}</StatusBadge>
-                    <small>Payout</small>
-                  </span>
-                  <span className="finance-state-cell">
-                    <StatusBadge tone={projection.blockerState === 'None' ? 'neutral' : getPayoutActivityTone(record, financeAudience)}>
-                      {projection.blockerState}
-                    </StatusBadge>
-                    <small>{projection.blockerDetail}</small>
+                  <span className="finance-queue-state">
+                    <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{projection.legacyStatusLabel}</StatusBadge>
+                    <small>{projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState}</small>
                   </span>
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
@@ -1561,6 +1392,10 @@ export function FinancePage() {
                   <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {getPayoutImpact(record)}
                   </strong>
+                  <span>
+                    <strong>{formatDateParts(record.date).date}</strong>
+                    <small>{formatDateParts(record.date).time}</small>
+                  </span>
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
                       <Link className="button button-secondary button-compact" to={orderSettlementHref}>

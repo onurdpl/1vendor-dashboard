@@ -454,27 +454,19 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
-    expect(await screen.findByText('Review required')).toBeInTheDocument();
-    expect(screen.getByLabelText('Finance workflow summary')).toHaveTextContent('Review required');
-    expect(screen.getByLabelText('Action Required')).toHaveTextContent('Needs review');
-    expect(screen.getByLabelText('Action Required')).toHaveTextContent('Blocked rows');
-    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('Settlement estimate');
-    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Settlement review: 1');
-    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Blocked rows: 1');
-    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Unknown categories');
+    expect(await screen.findByLabelText('Finance workflow summary')).toHaveTextContent('Action required');
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('vendor balance');
+    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Breakdown: Refund 0 · Blocked 1 · Shipping 0 · Debt 0');
+    expect(screen.queryByLabelText('Action Required')).not.toBeInTheDocument();
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund deductions')).toBeInTheDocument();
-    expect(screen.getByText('Recorded refund deductions')).toBeInTheDocument();
+    expect(screen.getByText('Action required')).toBeInTheDocument();
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
     expect(screen.queryByText('This period')).not.toBeInTheDocument();
-    const settlementEstimateLabels = screen.getAllByText('Settlement estimate');
-    expect(settlementEstimateLabels.length).toBeGreaterThan(0);
-    expect(settlementEstimateLabels[0].closest('.finance-kpi-card')).toHaveAttribute(
-      'title',
-      expect.stringContaining('Scope: Vendor finance ledger. Time window: All loaded ledger rows.'),
-    );
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
     expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
   });
 
@@ -492,8 +484,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByText('$250.00')).toBeInTheDocument();
-    const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
-    expect(card).toHaveClass('op-tone-success');
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('vendor balance');
   });
 
   it('renders negative vendor balance in red', async () => {
@@ -517,9 +508,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$300.00')).length).toBeGreaterThan(0);
-    const card = screen.getByText('Vendor balance').closest('.finance-kpi-card');
-    expect(card).toHaveClass('op-tone-danger');
-    expect(screen.getByText('Outstanding vendor balance/debt. Debt open: $300.00')).toBeInTheDocument();
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('vendor balance');
   });
 
   it('renders vendor debt history summary and event rows', async () => {
@@ -731,7 +720,7 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Settlement impact').length).toBeGreaterThan(0);
   });
 
-  it('decomposes finance row status into settlement, payout, and blocker columns', async () => {
+  it('renders a compact finance state column while detailed lifecycle states stay in the panel', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       transactions: [
@@ -743,13 +732,21 @@ describe('FinancePage control center', () => {
       ],
     });
 
-    renderFinancePage();
+    const { container } = renderFinancePage();
 
-    expect(await screen.findByRole('columnheader', { name: 'Settlement' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Payout' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Hold / Blocker' })).toBeInTheDocument();
+    expect(await screen.findByRole('columnheader', { name: 'Finance State' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Settlement' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Payout' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Hold / Blocker' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Amount' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelectorAll('.finance-queue-state').length).toBeGreaterThan(0));
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]);
+
+    expect((await screen.findAllByText('Payout readiness')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('Ready for review').length).toBeGreaterThan(0));
-    expect(screen.getAllByText('Finance issue').length).toBeGreaterThan(0);
+    expect(screen.getByText('Hold / blocker')).toBeInTheDocument();
   });
 
   it('shows shipping reconciliation as required only when the finance projection needs it', async () => {
@@ -1299,9 +1296,9 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
-    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund deductions')).toBeInTheDocument();
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
     expect(await screen.findByText('Read-only finance policy')).toBeInTheDocument();
     expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
     expect(screen.getByText('Latest review status')).toBeInTheDocument();
@@ -1329,7 +1326,7 @@ describe('FinancePage control center', () => {
     await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
-    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
