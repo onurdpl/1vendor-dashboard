@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { EmptyStatePanel, SectionErrorRetry, SectionSkeleton, StatusBadge } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -21,8 +21,7 @@ import {
 import { ActionFeedback } from '../components/ActionFeedback';
 import { useActionFeedback } from '../lib/ui';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
-import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
-import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import { OperationalTimeline } from '../components/OperationalTimeline';
 import { MentionText } from '../components/MentionText';
 import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
 import type { OperationsRecommendation } from '../lib/api/contracts';
@@ -75,6 +74,36 @@ function getSnapshotEntries(snapshot: unknown) {
       label: formatSupportLabel(key),
       value: String(value),
     }));
+}
+
+function getBusinessContextEntries(ticket: SupportTicket, story: ReturnType<typeof getSupportOperationalStory>) {
+  return [
+    { label: 'Business context', value: story.contextLabel },
+    { label: 'Vendor', value: ticket.vendorName ?? ticket.vendorId },
+    { label: 'Allocation', value: getSnapshotString(ticket.contextSnapshot, 'allocationStatus') ?? getSnapshotString(ticket.contextSnapshot, 'status') ?? ticket.contextSummary?.status ?? '—' },
+    { label: 'Fulfillment', value: getSnapshotString(ticket.contextSnapshot, 'fulfillmentStatus') ?? getSnapshotString(ticket.contextSnapshot, 'shippingStatus') ?? '—' },
+    { label: 'Created', value: formatDate(ticket.createdAt) },
+    { label: 'Priority', value: formatSupportLabel(ticket.priority) },
+    { label: ticket.assigneeName ? 'Owned by' : 'Owner', value: ticket.assigneeName ?? 'Unassigned' },
+  ];
+}
+
+function getAuditEntries(ticket: SupportTicket) {
+  const entries = [
+    { label: 'Ticket id', value: ticket.id },
+    { label: 'Vendor id', value: ticket.vendorId },
+    { label: 'Raw context id', value: ticket.contextId ?? '—' },
+    { label: 'Context type', value: formatSupportLabel(ticket.contextType) },
+    { label: 'Created at', value: ticket.createdAt },
+    { label: 'Updated at', value: ticket.updatedAt },
+    { label: 'First response due', value: ticket.firstResponseDueAt ?? '—' },
+    { label: 'Next response due', value: ticket.nextResponseDueAt ?? '—' },
+    { label: 'Escalated at', value: ticket.escalatedAt ?? '—' },
+    { label: 'Resolved at', value: ticket.resolvedAt ?? '—' },
+    { label: 'Closed at', value: ticket.closedAt ?? '—' },
+  ];
+
+  return [...entries, ...getSnapshotEntries(ticket.contextSnapshot)];
 }
 
 function getContextSummaryEntries(ticket: SupportTicket | null | undefined) {
@@ -148,7 +177,11 @@ function buildContextLinks(ticket: SupportTicket, isAdmin: boolean): Operational
         (isAdmin ? getSnapshotString(ticket.contextSnapshot, 'returnNumber') : null) ??
         ticket.contextId ??
         'Linked context',
-      description: 'Open the operational record connected to this ticket.',
+      description: [
+        getContextSummaryString(ticket, 'status') ? `Status: ${getContextSummaryString(ticket, 'status')}` : null,
+        ticket.vendorName ? `Vendor: ${ticket.vendorName}` : null,
+        getSnapshotString(ticket.contextSnapshot, 'allocationStatus') ? `Allocation: ${getSnapshotString(ticket.contextSnapshot, 'allocationStatus')}` : null,
+      ].filter(Boolean).join(' · ') || 'Open the operational record connected to this ticket.',
       href: contextLink,
       status: 'Linked',
       tone: 'info',
@@ -183,15 +216,6 @@ function buildContextLinks(ticket: SupportTicket, isAdmin: boolean): Operational
   return links;
 }
 
-function buildTimeline(ticket: SupportTicket) {
-  return [
-    { label: 'Ticket created', at: ticket.createdAt, enabled: true },
-    { label: `Status ${formatSupportLabel(ticket.status)}`, at: ticket.updatedAt, enabled: true },
-    { label: 'Resolved', at: ticket.resolvedAt, enabled: Boolean(ticket.resolvedAt) },
-    { label: 'Closed', at: ticket.closedAt, enabled: Boolean(ticket.closedAt) },
-  ].filter((entry) => entry.enabled);
-}
-
 function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInput[] {
   const events: OperationalEventInput[] = [
     {
@@ -210,13 +234,6 @@ function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInp
       status: formatSupportLabel(reply.authorRole),
       tone: reply.authorRole === 'ADMIN' ? ('info' as const) : ('neutral' as const),
     })),
-    {
-      id: 'ticket-updated',
-      title: `Status ${formatSupportLabel(ticket.status)}`,
-      at: ticket.updatedAt,
-      status: formatSupportLabel(ticket.status),
-      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? 'success' : 'attention',
-    },
   ];
 
   if (ticket.resolvedAt) {
@@ -259,6 +276,29 @@ function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInp
   }
 
   return events;
+}
+
+function dedupeTimelineEvents(events: OperationalEventInput[]) {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const key = [event.title, event.at ?? '', event.description ?? ''].join('|');
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function getReplySummary(ticket: SupportTicket) {
+  const replies = safeArray(ticket.replies);
+  const lastVendorReply = [...replies].reverse().find((reply) => reply.authorRole === 'VENDOR');
+  const lastAdminReply = [...replies].reverse().find((reply) => reply.authorRole === 'ADMIN');
+  return {
+    unreadCount: ticket.adminUnreadCount + ticket.vendorUnreadCount,
+    lastVendorReplyAt: lastVendorReply?.createdAt ?? (ticket.createdByRole === 'vendor' ? ticket.createdAt : null),
+    lastAdminReplyAt: lastAdminReply?.createdAt ?? (ticket.createdByRole === 'admin' ? ticket.createdAt : null),
+  };
 }
 
 function getVendorSupportStatusCopy(ticket: SupportTicket) {
@@ -418,11 +458,6 @@ export function SupportTicketDetailPage() {
     },
   );
 
-  const contextEntries = useMemo(
-    () => getSupportTicketContextEntries(ticket, isAdmin),
-    [isAdmin, ticket?.contextSnapshot, ticket?.contextSummary],
-  );
-
   useEffect(() => {
     if (!ticket) {
       return;
@@ -468,12 +503,14 @@ export function SupportTicketDetailPage() {
     );
   }
 
-  const contextLink = getContextLink(ticket);
   const canReply = ticket.status !== 'CLOSED';
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
   const story = getSupportOperationalStory(ticket);
   const contextLinks = buildContextLinks(ticket, isAdmin);
-  const unifiedTimeline = buildUnifiedSupportTimeline(ticket);
+  const unifiedTimeline = dedupeTimelineEvents(buildUnifiedSupportTimeline(ticket));
+  const replySummary = getReplySummary(ticket);
+  const businessContextEntries = getBusinessContextEntries(ticket, story);
+  const auditEntries = getAuditEntries(ticket);
   const supportRecommendations: OperationsRecommendation[] = [];
   if (isAdmin && ticket.sla?.isOverdue) {
     supportRecommendations.push({
@@ -535,81 +572,135 @@ export function SupportTicketDetailPage() {
       createdAt: ticket.updatedAt,
     });
   }
+  const hasAssignmentRecommendation = supportRecommendations.some((recommendation) => recommendation.type === 'support_assignment');
 
   return (
     <section className="op-page support-detail-page">
-      <div className="support-detail-header">
+      <div className="support-detail-header support-command-header">
         <div>
           <Link to={isAdmin ? '/admin/support' : '/support'} className="return-review-back">
             {'<-'} Back to support
           </Link>
-          <p className="eyebrow">{isAdmin ? 'Support operations' : 'Support request'}</p>
-          <h1>{ticket.subject}</h1>
-          <p>{ticket.message}</p>
+          <p className="eyebrow">Ticket</p>
+          <h1>Support ticket #{ticket.id}</h1>
+          <p>{ticket.subject}</p>
         </div>
-        <div className="support-detail-badges">
-          <StatusBadge tone="info">{story.contextLabel}</StatusBadge>
-          <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
-          <StatusBadge tone="info">{formatSupportLabel(ticket.category)}</StatusBadge>
+        <div className="support-command-status-grid">
+          <div>
+            <span>Business context</span>
+            <strong>{story.contextLabel}</strong>
+          </div>
+          <div>
+            <span>Vendor</span>
+            <strong>{ticket.vendorName ?? ticket.vendorId}</strong>
+          </div>
+          <div>
+            <span>Workflow</span>
+            <StatusBadge tone={story.workflowTone}>{story.workflowLabel}</StatusBadge>
+          </div>
+          <div>
+            <span>SLA</span>
+            <StatusBadge tone={story.slaTone}>{story.slaLabel}</StatusBadge>
+          </div>
+          <div>
+            <span>Owner</span>
+            <StatusBadge tone={story.assignmentTone}>{story.assignmentLabel}</StatusBadge>
+          </div>
+          <div>
+            <span>Next action</span>
+            <StatusBadge tone={story.nextActionTone}>{story.nextActionLabel}</StatusBadge>
+          </div>
         </div>
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
 
+      <article className="support-card support-operations-summary" aria-label="Operations Summary">
+        <div className="support-card-header">
+          <div>
+            <p className="eyebrow">Operations</p>
+            <h3>Operations Summary</h3>
+          </div>
+          <StatusBadge tone={story.nextActionTone}>{story.nextActionLabel}</StatusBadge>
+        </div>
+        <div className="support-command-grid">
+          {businessContextEntries.map((entry) => (
+            <div key={entry.label} className={entry.label === 'Owner' && !ticket.assigneeName ? 'support-owner-warning' : undefined}>
+              <span>{entry.label}</span>
+              <strong>{entry.value}</strong>
+              {entry.label === 'Owner' && !ticket.assigneeName ? <small>Owner required before investigation.</small> : null}
+            </div>
+          ))}
+          <div>
+            <span>Workflow</span>
+            <StatusBadge tone={story.workflowTone}>{story.workflowLabel}</StatusBadge>
+          </div>
+          <div>
+            <span>SLA status</span>
+            <strong>{story.slaSummaryLabel}</strong>
+            <small>{story.slaSummaryDetail}</small>
+          </div>
+          <div>
+            <span>Conversation owner</span>
+            <StatusBadge tone={story.replyOwnerTone}>{story.replyOwnerLabel}</StatusBadge>
+            <small>{story.replyOwnerDetail}</small>
+          </div>
+          <div>
+            <span>Next action</span>
+            <strong>{story.nextActionLabel}</strong>
+            <small>{story.nextActionDetail}</small>
+          </div>
+        </div>
+      </article>
+
       <div className="support-detail-grid">
         <main className="support-detail-main">
-          <article className="support-card">
-            <div className="support-card-header">
-              <div>
-                <p className="eyebrow">Context summary</p>
-                <h3>{formatSupportLabel(ticket.contextType)}</h3>
+          {contextLinks.length ? (
+            <article className="support-card support-context-link-card">
+              <div className="support-card-header">
+                <div>
+                  <p className="eyebrow">Linked context</p>
+                  <h3>Operational record</h3>
+                </div>
               </div>
-              {contextLink ? (
-                <Link to={contextLink} className="button button-secondary button-link">
-                  Open context
-                </Link>
-              ) : null}
-            </div>
-            <div className="support-summary-grid">
-              <div>
-                <span>Vendor</span>
-                <strong>{ticket.vendorName ?? ticket.vendorId}</strong>
-              </div>
-              <div>
-                <span>Context</span>
-                <strong>{story.contextLabel}</strong>
-                {story.contextDetail ? <small>{story.contextDetail}</small> : null}
-              </div>
-              <div>
-                <span>Priority</span>
-                <strong>{formatSupportLabel(ticket.priority)}</strong>
-              </div>
-              <div>
-                <span>Created</span>
-                <strong>{formatDate(ticket.createdAt)}</strong>
-              </div>
-              <div>
-                <span>Assignee</span>
-                <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
-              </div>
-            </div>
-            {contextEntries.length ? (
-              <div className="support-snapshot-grid">
-                {contextEntries.map((entry) => (
-                  <div key={entry.label}>
-                    <span>{entry.label}</span>
-                    <strong>{entry.value}</strong>
-                  </div>
+              <div className="support-context-link-list">
+                {contextLinks.map((link) => (
+                  <Link key={link.id} to={link.href ?? '#'} className="support-context-link-row">
+                    <div>
+                      <span>{link.eyebrow}</span>
+                      <strong>{link.title}</strong>
+                      {link.description ? <small>{link.description}</small> : null}
+                    </div>
+                    <span className="button button-secondary button-compact">Open {formatSupportLabel(ticket.contextType)}</span>
+                  </Link>
                 ))}
               </div>
-            ) : null}
-          </article>
+            </article>
+          ) : null}
 
           <article className="support-card">
             <div className="support-card-header">
               <div>
                 <p className="eyebrow">Conversation</p>
                 <h3>Public thread</h3>
+              </div>
+            </div>
+            <div className="support-conversation-summary">
+              <div>
+                <span>Conversation status</span>
+                <StatusBadge tone={story.replyOwnerTone}>{story.replyOwnerLabel}</StatusBadge>
+              </div>
+              <div>
+                <span>Unread messages</span>
+                <strong>{replySummary.unreadCount}</strong>
+              </div>
+              <div>
+                <span>Last vendor reply</span>
+                <strong>{formatDate(replySummary.lastVendorReplyAt)}</strong>
+              </div>
+              <div>
+                <span>Last admin reply</span>
+                <strong>{formatDate(replySummary.lastAdminReplyAt)}</strong>
               </div>
             </div>
             <div className="support-reply-list">
@@ -687,36 +778,124 @@ export function SupportTicketDetailPage() {
             )}
           </article>
 
-          <OperationalTimeline
-            title="Unified activity"
-            subtitle="Ticket status and public support replies."
-            events={[
-              ...buildTimeline(ticket).map((entry) => ({
-                id: `status-${entry.label}-${entry.at}`,
-                title: entry.label,
-                at: entry.at,
-                tone: 'neutral' as const,
-              })),
-              ...unifiedTimeline,
-            ]}
-            audience={isAdmin ? 'admin' : 'vendor'}
-          />
+          {isAdmin ? (
+            <article className="support-card support-investigation-card">
+              <div className="support-card-header">
+                <div>
+                  <p className="eyebrow">Investigation workspace</p>
+                  <h3>Internal notes</h3>
+                </div>
+              </div>
+              <div className="support-conversation-summary">
+                <div>
+                  <span>Owner</span>
+                  <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
+                </div>
+                <div>
+                  <span>Last update</span>
+                  <strong>{formatDate(ticket.updatedAt)}</strong>
+                </div>
+                <div>
+                  <span>Investigation status</span>
+                  <strong>{safeArray(ticket.notes).length ? 'In progress' : 'Not started'}</strong>
+                </div>
+              </div>
+              <div className="support-notes-list">
+                {safeArray(ticket.notes).length ? (
+                  safeArray(ticket.notes).map((item) => (
+                    <div key={item.id} className="support-note">
+                      <strong>{item.authorName}</strong>
+                      <span>{formatDate(item.createdAt)}</span>
+                      <p>
+                        <MentionText text={item.content} />
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyStatePanel title="No investigation started." description="Add an internal note when support investigation begins." />
+                )}
+              </div>
+              <form
+                className="support-note-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!note.trim()) {
+                    return;
+                  }
+                  void noteMutation.mutateAsync(note);
+                }}
+              >
+                <textarea
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder="Add an internal note..."
+                  rows={4}
+                />
+                <button type="submit" className="button button-primary" disabled={noteMutation.isPending || !note.trim()}>
+                  Add note
+                </button>
+              </form>
+            </article>
+          ) : null}
+
+          <details className="support-card support-history-details">
+            <summary>
+              <span>
+                <span className="eyebrow">History</span>
+                <strong>Activity history ({unifiedTimeline.length} events)</strong>
+              </span>
+              <span>Expand to view events</span>
+            </summary>
+            <OperationalTimeline
+              title="Activity history"
+              subtitle="Historical ticket activity and support replies."
+              events={unifiedTimeline}
+              audience={isAdmin ? 'admin' : 'vendor'}
+            />
+          </details>
         </main>
 
         <aside className="support-detail-side">
-          <OperationalRecommendations
-            title="Suggested next steps"
-            subtitle="Contextual, read-only support guidance."
-            recommendations={supportRecommendations}
-            audience={isAdmin ? 'admin' : 'vendor'}
-          />
-
-          <OperationalLinkCards
-            title="Context links"
-            subtitle="Operational records connected to this support ticket."
-            links={contextLinks}
-            audience={isAdmin ? 'admin' : 'vendor'}
-          />
+          {supportRecommendations.length ? (
+            <article className="support-card support-action-panel">
+              <div className="support-card-header">
+                <div>
+                  <p className="eyebrow">Next action</p>
+                  <h3>Suggested action</h3>
+                </div>
+              </div>
+              <div className="support-action-recommendation-list">
+                {supportRecommendations.map((recommendation) => (
+                  <div key={recommendation.id} className="support-action-recommendation">
+                    <div>
+                      <strong>{recommendation.title}</strong>
+                      <p>{recommendation.description}</p>
+                      <span>{recommendation.recommendedAction}</span>
+                    </div>
+                    {recommendation.type === 'support_assignment' && isAdmin ? (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={assignMutation.isPending || assignedToCurrentUser}
+                        onClick={() => void assignMutation.mutateAsync(undefined)}
+                      >
+                        Assign to me
+                      </button>
+                    ) : recommendation.type === 'support_escalation' && isAdmin ? (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={statusMutation.isPending || ticket.status === 'WAITING_FOR_VENDOR'}
+                        onClick={() => void statusMutation.mutateAsync('WAITING_FOR_VENDOR')}
+                      >
+                        Mark Waiting For Vendor
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
 
           {isAdmin ? (
             <article className="support-card">
@@ -730,6 +909,14 @@ export function SupportTicketDetailPage() {
                 </StatusBadge>
               </div>
               <div className="support-summary-grid">
+                <div>
+                  <span>SLA status</span>
+                  <strong>{story.slaSummaryLabel}</strong>
+                </div>
+                <div>
+                  <span>Operational summary</span>
+                  <strong>{story.slaSummaryDetail}</strong>
+                </div>
                 <div>
                   <span>First response due</span>
                   <strong>{formatDate(ticket.firstResponseDueAt)}</strong>
@@ -775,7 +962,7 @@ export function SupportTicketDetailPage() {
                   >
                     Unassign
                   </button>
-                ) : (
+                ) : !hasAssignmentRecommendation ? (
                   <button
                     type="button"
                     className="button button-secondary"
@@ -784,7 +971,7 @@ export function SupportTicketDetailPage() {
                   >
                     Assign to me
                   </button>
-                )}
+                ) : null}
                 {ADMIN_STATUSES.map((status) => (
                   <button
                     key={status}
@@ -801,49 +988,23 @@ export function SupportTicketDetailPage() {
           ) : null}
 
           {isAdmin ? (
-            <article className="support-card">
-              <div className="support-card-header">
-                <div>
-                  <p className="eyebrow">Internal notes</p>
-                  <h3>Investigation</h3>
-                </div>
+            <details className="support-card support-audit-details">
+              <summary>
+                <span>
+                  <span className="eyebrow">Audit</span>
+                  <strong>Audit Details</strong>
+                </span>
+                <span>Technical references</span>
+              </summary>
+              <div className="support-snapshot-grid">
+                {auditEntries.map((entry) => (
+                  <div key={`${entry.label}-${entry.value}`}>
+                    <span>{entry.label}</span>
+                    <strong>{entry.value}</strong>
+                  </div>
+                ))}
               </div>
-              <div className="support-notes-list">
-                {safeArray(ticket.notes).length ? (
-                  safeArray(ticket.notes).map((item) => (
-                    <div key={item.id} className="support-note">
-                      <strong>{item.authorName}</strong>
-                      <span>{formatDate(item.createdAt)}</span>
-                      <p>
-                        <MentionText text={item.content} />
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyStatePanel title="No internal notes" description="Add investigation notes for admins." />
-                )}
-              </div>
-              <form
-                className="support-note-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!note.trim()) {
-                    return;
-                  }
-                  void noteMutation.mutateAsync(note);
-                }}
-              >
-                <textarea
-                  value={note}
-                  onChange={(event) => setNote(event.target.value)}
-                  placeholder="Add an internal note..."
-                  rows={4}
-                />
-                <button type="submit" className="button button-primary" disabled={noteMutation.isPending || !note.trim()}>
-                  Add note
-                </button>
-              </form>
-            </article>
+            </details>
           ) : (
             <article className="support-card">
               <div className="support-card-header">

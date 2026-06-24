@@ -22,6 +22,11 @@ export type SupportOperationalStory = {
   nextActionLabel: string;
   nextActionDetail: string;
   nextActionTone: 'danger' | 'warning' | 'info' | 'success' | 'neutral';
+  replyOwnerLabel: string;
+  replyOwnerDetail: string;
+  replyOwnerTone: 'danger' | 'warning' | 'info' | 'success' | 'neutral';
+  slaSummaryLabel: string;
+  slaSummaryDetail: string;
   escalationLabel: string | null;
   escalationReason: string | null;
   needsAssignment: boolean;
@@ -153,39 +158,84 @@ export function getSupportOperationalStory(ticket: SupportTicket): SupportOperat
   let nextActionLabel = 'Review ticket';
   let nextActionDetail = 'Open the ticket and review the latest support context.';
   let nextActionTone: SupportOperationalStory['nextActionTone'] = 'info';
+  let replyOwnerLabel = 'Admin reply required';
+  let replyOwnerDetail = 'Support should review the ticket and decide the next response.';
+  let replyOwnerTone: SupportOperationalStory['replyOwnerTone'] = 'warning';
+  let slaSummaryLabel = ticket.sla?.dueLabel ?? 'No active SLA';
+  let slaSummaryDetail = 'No active response deadline is currently projected.';
 
   if (isClosed) {
     nextActionLabel = 'Closed';
     nextActionDetail = 'No support action is required.';
     nextActionTone = 'neutral';
+    replyOwnerLabel = 'Closed';
+    replyOwnerDetail = 'Conversation is closed.';
+    replyOwnerTone = 'neutral';
+    slaSummaryLabel = 'Closed';
+    slaSummaryDetail = 'SLA tracking is complete.';
   } else if (isResolved) {
     nextActionLabel = 'Resolved';
     nextActionDetail = 'Review only if new information arrives.';
     nextActionTone = 'success';
+    replyOwnerLabel = 'Resolved';
+    replyOwnerDetail = 'No reply is currently required.';
+    replyOwnerTone = 'success';
+    slaSummaryLabel = 'Resolved';
+    slaSummaryDetail = 'SLA tracking is complete.';
   } else if (isWaitingOnVendor) {
     nextActionLabel = 'Waiting vendor response';
     nextActionDetail = 'No admin response is due until the vendor replies.';
     nextActionTone = 'neutral';
+    replyOwnerLabel = 'Vendor reply required';
+    replyOwnerDetail = 'Support is waiting for the vendor to respond.';
+    replyOwnerTone = 'info';
+    slaSummaryLabel = 'Waiting vendor response';
+    slaSummaryDetail = 'Admin response timer is paused or inactive while vendor input is pending.';
   } else if (isEscalated) {
     nextActionLabel = 'Escalation review required';
     nextActionDetail = ticket.escalationReason ?? 'Review the escalation reason and owner.';
     nextActionTone = 'danger';
+    replyOwnerLabel = 'Admin reply required';
+    replyOwnerDetail = 'Escalation needs support review.';
+    replyOwnerTone = 'danger';
+    slaSummaryLabel = 'Escalated by vendor';
+    slaSummaryDetail = ticket.escalationReason ?? 'Vendor escalation is active.';
   } else if (isOverdue) {
     nextActionLabel = 'Needs admin reply';
     nextActionDetail = ticket.sla?.dueLabel ?? 'SLA is overdue.';
     nextActionTone = 'danger';
+    replyOwnerLabel = 'Admin reply required';
+    replyOwnerDetail = 'Response required now.';
+    replyOwnerTone = 'danger';
+    slaSummaryLabel = ticket.sla?.overdueByHours ? `${ticket.sla.overdueByHours}h overdue` : 'Overdue';
+    slaSummaryDetail = ticket.sla?.dueLabel ?? 'SLA is overdue.';
   } else if (needsAssignment) {
     nextActionLabel = 'Needs assignment';
     nextActionDetail = 'Assign an operator before continuing investigation.';
     nextActionTone = 'warning';
+    replyOwnerLabel = 'Admin reply required';
+    replyOwnerDetail = 'Owner required before investigation.';
+    replyOwnerTone = 'warning';
+    slaSummaryLabel = getSlaLabel(ticket);
+    slaSummaryDetail = ticket.sla?.dueLabel ?? 'No active response deadline is currently projected.';
   } else if (needsAdminResponse) {
     nextActionLabel = 'Needs admin reply';
     nextActionDetail = 'Vendor has unread or recent context waiting for admin review.';
     nextActionTone = 'warning';
+    replyOwnerLabel = 'Admin reply required';
+    replyOwnerDetail = 'Vendor has unread or recent context waiting for admin review.';
+    replyOwnerTone = 'warning';
+    slaSummaryLabel = getSlaLabel(ticket);
+    slaSummaryDetail = ticket.sla?.dueLabel ?? 'No active response deadline is currently projected.';
   } else if (ticket.status === 'IN_REVIEW') {
     nextActionLabel = 'Continue review';
     nextActionDetail = 'Owner should continue investigation or reply to the vendor.';
     nextActionTone = 'info';
+    replyOwnerLabel = 'Admin reply required';
+    replyOwnerDetail = 'Support owns the next update while review is active.';
+    replyOwnerTone = 'info';
+    slaSummaryLabel = getSlaLabel(ticket);
+    slaSummaryDetail = ticket.sla?.dueLabel ?? 'No active response deadline is currently projected.';
   }
 
   return {
@@ -200,6 +250,11 @@ export function getSupportOperationalStory(ticket: SupportTicket): SupportOperat
     nextActionLabel,
     nextActionDetail,
     nextActionTone,
+    replyOwnerLabel,
+    replyOwnerDetail,
+    replyOwnerTone,
+    slaSummaryLabel,
+    slaSummaryDetail,
     escalationLabel: isEscalated ? 'Escalated' : null,
     escalationReason: ticket.escalationReason,
     needsAssignment,
