@@ -1535,7 +1535,8 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Settlement outcome' })).toBeInTheDocument();
+    expect(screen.getByText('Vendor payout eligible after approval.')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
   });
@@ -1565,11 +1566,14 @@ describe('Finance Settlement approval admin UI', () => {
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Selected settlement rows' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Settlement decision workspace')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Settlement outcome' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'How net payable was calculated' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Payable sales' })).toBeInTheDocument();
     expect(screen.getByLabelText('Selected settlement rows')).toHaveClass('settlement-approval-lines-list');
     expect(screen.getAllByText('#1081').length).toBeGreaterThan(0);
     expect(screen.getByText('fle-sale-1081-a')).toBeInTheDocument();
-    expect(screen.getByText('alloc-yalispor-1081-a')).toBeInTheDocument();
+    expect(screen.getAllByText('alloc-yalispor-1081-a').length).toBeGreaterThan(0);
     expect(screen.getAllByText('TRY 3,115.18').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Approve Settlement' })).toBeEnabled();
   });
@@ -1584,11 +1588,11 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
     expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
-    expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
+    expect(screen.getAllByText('adjustment-1086').length).toBeGreaterThan(0);
     expect(screen.getByText('order-1086')).toBeInTheDocument();
-    expect(screen.getByText((_content, element) =>
+    expect(screen.getAllByText((_content, element) =>
       element?.textContent?.replace(/\u00a0/g, ' ') === '-TRY 400.00'
-    )).toBeInTheDocument();
+    ).length).toBeGreaterThan(0);
     expect(screen.getAllByText('APPLIED').length).toBeGreaterThan(0);
   });
 
@@ -1602,19 +1606,19 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
 
-    const composition = screen.getByLabelText('Settlement composition');
-    expect(within(composition).getByText('Payable sales')).toBeInTheDocument();
-    expect(within(composition).getByText('Refunded sale gross basis')).toBeInTheDocument();
-    expect(within(composition).getByText('Refund gross offsets')).toBeInTheDocument();
-    expect(within(composition).getByText('Refund adjustments')).toBeInTheDocument();
-    expect(within(composition).getByText('Refund package net payable impact')).toBeInTheDocument();
-    expect(within(composition).getByText('Net payable')).toBeInTheDocument();
-    expect(within(composition).getAllByText('TRY 0.00')).toHaveLength(2);
-    expect(within(composition).getByText('1 row / +TRY 4,099.00')).toBeInTheDocument();
-    expect(within(composition).getByText('1 row / -TRY 4,099.00')).toBeInTheDocument();
+    const outcome = screen.getByLabelText('Settlement outcome');
+    expect(within(outcome).getByText('Accounting review')).toBeInTheDocument();
+    expect(within(outcome).getByText('Accounting review only. No payout amount will be created.')).toBeInTheDocument();
 
-    const packageSummary = screen.getByLabelText('Refund offset packages');
-    expect(within(packageSummary).getByText('Refund offset package')).toBeInTheDocument();
+    const explanation = screen.getByLabelText('How net payable was calculated');
+    expect(within(explanation).getByText('Payable sales')).toBeInTheDocument();
+    expect(within(explanation).getByText('Refund offsets')).toBeInTheDocument();
+    expect(within(explanation).getByText('Refund adjustments')).toBeInTheDocument();
+    expect(within(explanation).getByText('+TRY 4,099.00')).toBeInTheDocument();
+    expect(within(explanation).getByText('-TRY 4,099.00')).toBeInTheDocument();
+    expect(within(explanation).getByText('Net payable')).toBeInTheDocument();
+
+    const packageSummary = screen.getByLabelText('Offset packages');
     expect(within(packageSummary).getByText('#1098')).toBeInTheDocument();
     expect(within(packageSummary).getByText('alloc-yalispor-1098')).toBeInTheDocument();
     expect(within(packageSummary).getByText('Sale gross basis')).toBeInTheDocument();
@@ -1623,17 +1627,24 @@ describe('Finance Settlement approval admin UI', () => {
     expect(within(packageSummary).getByText('-TRY 4,099.00')).toBeInTheDocument();
     expect(within(packageSummary).getByText('Net payable impact')).toBeInTheDocument();
     expect(within(packageSummary).getByText('TRY 0.00')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Fully offset')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('View audit details')).toBeInTheDocument();
     expect(within(packageSummary).queryByText('Net settlement effect')).not.toBeInTheDocument();
     expect(within(packageSummary).queryByText('TRY 8,198.00')).not.toBeInTheDocument();
 
+    const adjustments = screen.getByText('Carry-forward refund adjustments').closest('details');
+    expect(adjustments).toBeTruthy();
+    expect(within(adjustments as HTMLElement).getByText('adjustment-missing-snapshot')).toBeInTheDocument();
+    const auditEvidence = screen.getByLabelText('Audit evidence');
+    expect(within(auditEvidence).getByText('fle-sale-1098')).toBeInTheDocument();
     expect(screen.getByText('Refunded sale basis')).toBeInTheDocument();
     expect(screen.getByText('Refund offset')).toBeInTheDocument();
     expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
     expect(screen.getAllByText('Settlement status is the business review state. Ledger state is the stored finance row state.')).toHaveLength(1);
-    expect(screen.getByText('Carry-forward refund adjustment. Original order/allocation snapshot is not available on this settlement line.')).toBeInTheDocument();
-    expect(screen.getByText('Next: Approve zero-payable accounting review.')).toBeInTheDocument();
-    expect(screen.getByText('Records review of offsetting sale/refund rows and adjustments. This does not create a payout amount or send money. Rows: 3. Net payable: TRY 0.00. Payout result: No payout amount.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve zero-payable accounting review' })).toBeEnabled();
+    expect(screen.getAllByText('Carry-forward refund adjustment. Original order/allocation snapshot is not available on this settlement line.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Next: Approve Accounting Review.')).toBeInTheDocument();
+    expect(screen.getByText('Approving this review reviews 3 rows, includes 1 refund offset packages, includes 1 refund adjustments, and leaves audit history intact. Result: No payout amount. Accounting review only.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve Accounting Review' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
   });
 

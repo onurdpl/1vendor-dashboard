@@ -13659,8 +13659,54 @@ summary.provider-response-heading::-webkit-details-marker {
   background: var(--op-surface-soft);
 }
 
+.settlement-decision-workspace,
+.settlement-decision-section,
+.settlement-outcome-card {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settlement-decision-section,
+.settlement-outcome-card {
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-outcome-card {
+  background: var(--op-surface);
+}
+
+.settlement-outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-2);
+}
+
+.settlement-collapsible-section summary,
+.settlement-audit-evidence summary,
+.settlement-audit-details summary {
+  cursor: pointer;
+  color: var(--op-text-strong);
+  font-weight: 800;
+}
+
+.settlement-collapsible-section summary span,
+.settlement-audit-evidence summary span {
+  display: inline-grid;
+  gap: 2px;
+}
+
+.settlement-audit-details {
+  display: grid;
+  gap: 6px;
+}
+
 .settlement-composition-card h3,
-.settlement-refund-package h4 {
+.settlement-refund-package h4,
+.settlement-decision-section h3,
+.settlement-outcome-card h3 {
   margin: 0;
   color: var(--op-text-strong);
   font-size: 0.95rem;
