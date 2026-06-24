@@ -9,6 +9,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { getAdminSupportAnalytics, type SupportAnalyticsCategoryInsight } from '../features/support/api';
 import { formatSupportLabel } from './AdminSupportTicketsPage';
@@ -65,10 +66,13 @@ function getCategoryTone(entry: SupportAnalyticsCategoryInsight) {
 
 export function AdminSupportAnalyticsPage() {
   const appReadiness = useAppReadiness();
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
   const { data: analytics, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.support.analytics(),
     ({ signal }) => getAdminSupportAnalytics({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const analyticsView = analytics ?? {
@@ -162,7 +166,13 @@ export function AdminSupportAnalyticsPage() {
           description={error ?? 'Unable to load support analytics.'}
           onRetry={() => void refetch()}
         />
-      ) : !appReadiness.ready || isLoading ? (
+      ) : pageReadiness.status === 'unauthorized' ? (
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load support analytics."
+          onRetry={() => void refetch()}
+        />
+      ) : isLoading ? (
         <SectionSkeleton title="Loading support analytics" description="Aggregating support ticket trends in the background." />
       ) : null}
 

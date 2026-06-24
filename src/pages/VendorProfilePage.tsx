@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
+  EmptyStatePanel,
   MetadataGroup,
   MetadataRow,
   OperationalActionGroup,
@@ -55,6 +56,7 @@ import type {
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
 import { useActionFeedback } from '../lib/ui';
 import { safeArray, safeStatusLabel } from '../services/real/formatting';
@@ -975,6 +977,10 @@ export function VendorProfilePage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: currentVendor.vendorId,
+  });
   const isAdmin = currentUser?.role === 'admin';
   const { message, tone, showFeedback } = useActionFeedback();
   const [billingEditOpen, setBillingEditOpen] = useState(false);
@@ -1005,27 +1011,27 @@ export function VendorProfilePage() {
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
     ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const financeQuery = useQueryResource(
     queryKeys.vendorProfile.financeProfile(currentVendor.vendorId),
     ({ signal }) => getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const billingQuery = useQueryResource(
     queryKeys.vendorProfile.billingProfile(currentVendor.vendorId),
     ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
-    { enabled: appReadiness.ready && isAdmin },
+    { enabled: pageReadiness.ready && isAdmin },
   );
   const auditLogQuery = useQueryResource(
     queryKeys.vendorProfile.auditLogs(currentVendor.vendorId),
     ({ signal }) => listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 }),
-    { enabled: appReadiness.ready && isAdmin },
+    { enabled: pageReadiness.ready && isAdmin },
   );
   const supportQuery = useQueryResource(
     queryKeys.vendorProfile.supportTickets(currentVendor.vendorId),
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const shippingConfig = shippingQuery.data;
@@ -1725,6 +1731,36 @@ export function VendorProfilePage() {
     void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
 
+  if (pageReadiness.status === 'missing_vendor_context') {
+    return (
+      <section className="op-page vendor-profile-page">
+        <EmptyStatePanel
+          title="Select vendor"
+          description="No vendor context available. Choose a vendor context before loading vendor profile settings."
+        />
+      </section>
+    );
+  }
+
+  if (pageReadiness.status === 'waiting_vendor_context') {
+    return (
+      <section className="op-page vendor-profile-page">
+        <EmptyStatePanel
+          title="Waiting for vendor context"
+          description="Vendor profile settings will load after the authenticated vendor scope is ready."
+        />
+      </section>
+    );
+  }
+
+  if (pageReadiness.status === 'unauthorized') {
+    return (
+      <section className="op-page vendor-profile-page">
+        <EmptyStatePanel title="Sign in required" description="Sign in before loading vendor profile settings." />
+      </section>
+    );
+  }
+
   return (
     <section className="op-page vendor-profile-page">
       <div className="vendor-profile-hero operational-card">
@@ -1749,7 +1785,7 @@ export function VendorProfilePage() {
             type="button"
             className="button"
             onClick={handleContactSupport}
-            disabled={!appReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
+            disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
           >
             {existingProfileTicket
               ? 'Open correction ticket'
@@ -3379,7 +3415,7 @@ export function VendorProfilePage() {
               type="button"
               className="button button-secondary"
               onClick={handleContactSupport}
-              disabled={!appReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
+              disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
             >
               {existingProfileTicket ? 'Open correction ticket' : 'Report configuration issue'}
             </button>

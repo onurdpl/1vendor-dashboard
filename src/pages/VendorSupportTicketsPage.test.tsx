@@ -126,4 +126,23 @@ describe('VendorSupportTicketsPage workflow filtering', () => {
     expect(await screen.findByText('No open support issues')).toBeInTheDocument();
     expect(screen.getByText('This workflow queue is clear. Clear the workflow to inspect all support history.')).toBeInTheDocument();
   });
+
+  it('renders missing vendor context as a terminal state instead of loading support requests', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+    listVendorSupportTicketsMock.mockResolvedValue([]);
+
+    renderSupportPage();
+
+    expect(await screen.findByText('Select vendor')).toBeInTheDocument();
+    expect(screen.queryByText('Loading support requests')).not.toBeInTheDocument();
+    expect(listVendorSupportTicketsMock).not.toHaveBeenCalled();
+  });
 });

@@ -29,6 +29,7 @@ import {
   preparePayoutBatch,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import type { FinanceTransaction, OperationsRecommendation, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
@@ -847,7 +848,11 @@ export function FinancePage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
-  const authContextReady = appReadiness.ready;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: currentVendor.vendorId,
+  });
+  const authContextReady = pageReadiness.ready;
   const { data: finance, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
@@ -1340,7 +1345,25 @@ export function FinancePage() {
                   onRetry={() => void refetch()}
                 />
               </OperationalTableRow>
-            ) : !authContextReady || isLoading ? (
+            ) : pageReadiness.status === 'missing_vendor_context' ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="Select vendor"
+                  description="No vendor context available. Choose a vendor context before loading vendor-scoped finance activity."
+                />
+              </OperationalTableRow>
+            ) : pageReadiness.status === 'waiting_vendor_context' ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="Waiting for vendor context"
+                  description="Finance activity will load after the authenticated vendor scope is ready."
+                />
+              </OperationalTableRow>
+            ) : pageReadiness.status === 'unauthorized' ? (
+              <OperationalTableRow>
+                <EmptyStatePanel title="Sign in required" description="Sign in before loading finance activity." />
+              </OperationalTableRow>
+            ) : isLoading ? (
               <TableSkeletonRows columns={8} rows={6} />
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>

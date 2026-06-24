@@ -15,6 +15,7 @@ import type { DashboardOverview, DashboardPriorityItem, DashboardStat, OrderSumm
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 
 type VendorActionCard = {
   title: string;
@@ -332,6 +333,10 @@ export function DashboardPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const vendorId = currentVendor.vendorId;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: vendorId,
+  });
   const [shouldLoadDeferredDashboard, setShouldLoadDeferredDashboard] = useState(false);
   const dashboardRequestId = useMemo(() => createDashboardRequestId(), [vendorId]);
 
@@ -344,7 +349,7 @@ export function DashboardPage() {
   } = useQueryResource(
     queryKeys.dashboard.overview(vendorId),
     ({ signal }) => getDashboardOverview(vendorId, { signal, requestId: dashboardRequestId }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const initialDashboard = dashboardShell?.vendorId === vendorId ? dashboardShell : null;
@@ -354,7 +359,7 @@ export function DashboardPage() {
   }, [vendorId]);
 
   useEffect(() => {
-    if (!appReadiness.ready || !initialDashboard) {
+    if (!pageReadiness.ready || !initialDashboard) {
       return undefined;
     }
 
@@ -365,7 +370,7 @@ export function DashboardPage() {
 
     const timeoutId = window.setTimeout(() => setShouldLoadDeferredDashboard(true), 0);
     return () => window.clearTimeout(timeoutId);
-  }, [appReadiness.ready, initialDashboard, vendorId]);
+  }, [pageReadiness.ready, initialDashboard, vendorId]);
 
   const {
     data: deferredDashboard,
@@ -373,7 +378,7 @@ export function DashboardPage() {
   } = useQueryResource(
     queryKeys.dashboard.deferredOverview(vendorId),
     ({ signal }) => getDashboardDeferredOverview(vendorId, { signal, requestId: dashboardRequestId }),
-    { enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard) },
+    { enabled: pageReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard) },
   );
 
   const {
@@ -383,7 +388,7 @@ export function DashboardPage() {
   } = useQueryResource(
     queryKeys.orders.list(vendorId),
     ({ signal }) => listOrders({ vendorId, signal }),
-    { enabled: appReadiness.ready && Boolean(vendorId) },
+    { enabled: pageReadiness.ready && Boolean(vendorId) },
   );
 
   async function refetchDashboard() {
@@ -398,12 +403,42 @@ export function DashboardPage() {
     ? deferredDashboard
     : initialDashboard ?? createFallbackDashboard(vendorId, currentVendor.vendorName);
   const actionCards = buildActionCards(dashboardView);
-  const isDashboardLoading = !appReadiness.ready || (isLoading && !initialDashboard);
+  const isDashboardLoading = pageReadiness.ready && isLoading && !initialDashboard;
   const upcomingPayment = asDisplayValue(dashboardView.financeSnapshot?.payoutEstimate, 'TRY 0');
   const lastPayment = 'TRY 0';
   const lastPaymentDate = 'Not available';
   const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
+
+  if (pageReadiness.status === 'missing_vendor_context') {
+    return (
+      <section className="op-page dashboard-vendor-launchpad">
+        <EmptyStatePanel
+          title="Select vendor"
+          description="No vendor context available. Choose a vendor context before loading the vendor dashboard."
+        />
+      </section>
+    );
+  }
+
+  if (pageReadiness.status === 'waiting_vendor_context') {
+    return (
+      <section className="op-page dashboard-vendor-launchpad">
+        <EmptyStatePanel
+          title="Waiting for vendor context"
+          description="Dashboard activity will load after the authenticated vendor scope is ready."
+        />
+      </section>
+    );
+  }
+
+  if (pageReadiness.status === 'unauthorized') {
+    return (
+      <section className="op-page dashboard-vendor-launchpad">
+        <EmptyStatePanel title="Sign in required" description="Sign in before loading the vendor dashboard." />
+      </section>
+    );
+  }
 
   if (isError && !initialDashboard) {
     return (

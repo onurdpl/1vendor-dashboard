@@ -12,6 +12,7 @@ import {
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import type {
@@ -97,9 +98,12 @@ function getActionLabel(item: OperationsAttentionItem) {
 
 export function AdminOperationsQueuePage() {
   const appReadiness = useAppReadiness();
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
   const { data, isLoading, isError, error, refetch } = useQueryResource(queryKeys.admin.operations.attention(), ({ signal }) =>
     runtimeServices.operations.attention({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const dataView = data ?? {
@@ -158,7 +162,13 @@ export function AdminOperationsQueuePage() {
           description={error ?? 'Operational attention signals could not be loaded.'}
           onRetry={() => void refetch()}
         />
-      ) : !appReadiness.ready || isLoading ? (
+      ) : pageReadiness.status === 'unauthorized' ? (
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load the attention center."
+          onRetry={() => void refetch()}
+        />
+      ) : isLoading ? (
         <SectionSkeleton
           title="Loading attention center"
           description="Deriving operational signals from orders, returns, finance, shipments, and support."

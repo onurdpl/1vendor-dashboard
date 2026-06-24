@@ -222,6 +222,26 @@ describe('DashboardPage vendor launchpad', () => {
     await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' })));
   });
 
+  it('renders missing vendor context as a terminal state instead of dashboard skeletons', async () => {
+    setCurrentVendorId(null);
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('Select vendor')).toBeInTheDocument();
+    expect(screen.getByText('No vendor context available. Choose a vendor context before loading the vendor dashboard.')).toBeInTheDocument();
+    expect(getDashboardOverviewMock).not.toHaveBeenCalled();
+    expect(listOrdersMock).not.toHaveBeenCalled();
+  });
+
   it('loads deferred dashboard data after the initial launchpad shell renders', async () => {
     const deferredDashboard = deferred<DashboardOverview>();
     getDashboardOverviewMock.mockResolvedValue({

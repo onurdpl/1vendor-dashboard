@@ -156,6 +156,33 @@ describe('AdminShopifyOrderPage split visibility', () => {
     getAdminShopifyOrderBreakdownMock.mockReset();
   });
 
+  it('loads admin order detail for an authenticated admin even when vendor context is missing', async () => {
+    setCurrentVendorId(null);
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+      sourceShopifyOrderId: '7817723773265',
+      sourceShopifyOrderNumber: '#1091',
+      customer: 'Customer',
+      financialStatus: 'pending',
+      createdAt: '2026-06-21T08:00:00.000Z',
+      allocations: [buildAllocation()],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Line-item split allocation' })).toBeInTheDocument();
+    expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Loading Shopify breakdown')).not.toBeInTheDocument();
+  });
+
     it('renders child split summary card, moved items, and split timeline events', async () => {
     getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
       sourceShopifyOrderId: '7817723773265',

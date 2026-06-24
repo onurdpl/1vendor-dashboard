@@ -17,6 +17,7 @@ import { listVendorSupportTickets } from '../features/support/api';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import {
   buildVendorCommunicationFeed,
   filterCommunicationEvents,
@@ -63,6 +64,10 @@ function formatEventType(type: string) {
 export function VendorInboxPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: currentVendor.vendorId,
+  });
   const [activeFilter, setActiveFilter] = useState<CommunicationFilter>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -70,26 +75,26 @@ export function VendorInboxPage() {
   const supportQuery = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const ordersQuery = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const returnsQuery = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const financeQuery = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const isLoading =
-    !appReadiness.ready || supportQuery.isLoading || ordersQuery.isLoading || returnsQuery.isLoading || financeQuery.isLoading;
+    supportQuery.isLoading || ordersQuery.isLoading || returnsQuery.isLoading || financeQuery.isLoading;
   const firstError =
     supportQuery.isError ? supportQuery.error :
     ordersQuery.isError ? ordersQuery.error :
@@ -199,6 +204,18 @@ export function VendorInboxPage() {
                 void financeQuery.refetch();
               }}
             />
+          ) : pageReadiness.status === 'missing_vendor_context' ? (
+            <EmptyStatePanel
+              title="Select vendor"
+              description="No vendor context available. Choose a vendor context before loading the communication center."
+            />
+          ) : pageReadiness.status === 'waiting_vendor_context' ? (
+            <EmptyStatePanel
+              title="Waiting for vendor context"
+              description="Communication updates will load after the authenticated vendor scope is ready."
+            />
+          ) : pageReadiness.status === 'unauthorized' ? (
+            <EmptyStatePanel title="Sign in required" description="Sign in before loading the communication center." />
           ) : isLoading ? (
             <SectionSkeleton title="Loading communication center" description="Collecting support replies and operational updates." />
           ) : filteredFeed.length ? (

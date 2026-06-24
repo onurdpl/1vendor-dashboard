@@ -23,6 +23,7 @@ import {
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeConfig } from '../config/runtime';
@@ -146,26 +147,29 @@ export function AdminDiagnosticsPage() {
   const [eligibilityFilter, setEligibilityFilter] = useState('all');
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
   const isRealMode = runtimeConfig.apiMode === 'real';
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
 
   const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), ({ signal }) =>
     runtimeServices.diagnostics.webhooks({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const reconciliationQuery = useQueryResource(queryKeys.admin.diagnostics.reconciliation(), ({ signal }) =>
     runtimeServices.diagnostics.reconciliation({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const syncEventsQuery = useQueryResource(queryKeys.admin.diagnostics.syncEvents(), ({ signal }) =>
     runtimeServices.diagnostics.syncEvents({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), ({ signal }) =>
     runtimeServices.observability.summary({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const runtimeHealthQuery = useQueryResource(queryKeys.admin.runtime.health(), ({ signal }) =>
     runtimeServices.runtime.health({ signal }),
-    { enabled: appReadiness.ready && isRealMode },
+    { enabled: pageReadiness.ready && isRealMode },
   );
 
   const latestWebhookEventId = selectedWebhookEventId ?? webhooksQuery.data?.events[0]?.id ?? null;
@@ -186,7 +190,7 @@ export function AdminDiagnosticsPage() {
       return runtimeServices.diagnostics.webhookDetail(latestWebhookEventId, { signal });
     },
     {
-      enabled: appReadiness.ready && Boolean(latestWebhookEventId) && isRealMode,
+      enabled: pageReadiness.ready && Boolean(latestWebhookEventId) && isRealMode,
     },
   );
 
@@ -305,7 +309,7 @@ export function AdminDiagnosticsPage() {
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
   const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
 
-  const isLoading = !appReadiness.ready || webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
+  const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? webhookDetailQuery.error;
   const pageDiagnostics = webhooksQuery.diagnostics
     ?? reconciliationQuery.diagnostics
@@ -346,6 +350,25 @@ export function AdminDiagnosticsPage() {
         <EmptyStatePanel
           title="Switch to real API mode"
           description="Inspect operational recovery state after switching modes."
+        />
+      </section>
+    );
+  }
+
+  if (pageReadiness.status === 'unauthorized') {
+    return (
+      <section className="op-page diagnostics-control-center">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Admin diagnostics</p>
+            <h2>Diagnostics workspace</h2>
+            <p className="page-description">Sign in before loading diagnostics.</p>
+          </div>
+        </div>
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load diagnostics."
+          onRetry={() => void webhooksQuery.refetch()}
         />
       </section>
     );

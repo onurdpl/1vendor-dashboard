@@ -4,19 +4,36 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorInboxPage } from './VendorInboxPage';
 
+const appReadinessOverride = vi.hoisted(() => ({
+  value: {
+    status: 'ready',
+    ready: true,
+    sessionReady: true,
+    vendorReady: true,
+    unauthorized: false,
+    token: 'test-token',
+    currentUser: {
+      email: 'vendor@demo.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    },
+    currentVendor: {
+      vendorId: 'demo-vendor-a',
+      vendorName: 'Demo Vendor A',
+    },
+  },
+}));
 const listVendorSupportTicketsMock = vi.fn();
 const listOrdersMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 
 vi.mock('../lib/appReadiness', () => ({
-  useAppReadiness: () => ({
-    ready: true,
-    currentVendor: {
-      vendorId: 'demo-vendor-a',
-      vendorName: 'Demo Vendor A',
-    },
-  }),
+  useAppReadiness: () => appReadinessOverride.value,
 }));
 
 vi.mock('../features/support/api', () => ({
@@ -55,6 +72,27 @@ function renderVendorInboxPage() {
 
 describe('VendorInboxPage', () => {
   beforeEach(() => {
+    appReadinessOverride.value = {
+      status: 'ready',
+      ready: true,
+      sessionReady: true,
+      vendorReady: true,
+      unauthorized: false,
+      token: 'test-token',
+      currentUser: {
+        email: 'vendor@demo.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'demo-vendor-a',
+      },
+      currentVendor: {
+        vendorId: 'demo-vendor-a',
+        vendorName: 'Demo Vendor A',
+      },
+    };
     listVendorSupportTicketsMock.mockResolvedValue([]);
     listOrdersMock.mockResolvedValue([]);
     listReturnsMock.mockResolvedValue([]);
@@ -80,5 +118,27 @@ describe('VendorInboxPage', () => {
       'title',
       expect.stringContaining('Scope: Communication events. Time window: Current vendor feed.'),
     );
+  });
+
+  it('renders missing vendor context as a terminal state instead of loading forever', async () => {
+    appReadinessOverride.value = {
+      ...appReadinessOverride.value,
+      status: 'missing_vendor_context',
+      ready: false,
+      vendorReady: false,
+      currentVendor: {
+        vendorId: '',
+        vendorName: 'All vendors',
+      },
+    };
+
+    renderVendorInboxPage();
+
+    expect(await screen.findByText('Select vendor')).toBeInTheDocument();
+    expect(screen.queryByText('Loading communication center')).not.toBeInTheDocument();
+    expect(listVendorSupportTicketsMock).not.toHaveBeenCalled();
+    expect(listOrdersMock).not.toHaveBeenCalled();
+    expect(listReturnsMock).not.toHaveBeenCalled();
+    expect(getFinanceDashboardMock).not.toHaveBeenCalled();
   });
 });

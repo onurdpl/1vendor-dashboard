@@ -17,6 +17,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import {
   assignAdminSupportTicketToSelf,
   listAdminSupportTickets,
@@ -138,12 +139,15 @@ export function isAdminSupportEscalated(ticket: SupportTicket) {
 export function AdminSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
   const [searchParams, setSearchParams] = useSearchParams();
   const initialBucket = (searchParams.get('filter') ?? 'all') as SupportActionBucket;
   const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.support.tickets(),
     ({ signal }) => listAdminSupportTickets({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<(typeof ALL_STATUSES)[number]>('all');
@@ -355,7 +359,13 @@ export function AdminSupportTicketsPage() {
           description={error ?? 'Unable to load support tickets.'}
           onRetry={() => void refetch()}
         />
-      ) : !appReadiness.ready || isLoading ? (
+      ) : pageReadiness.status === 'unauthorized' ? (
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load support tickets."
+          onRetry={() => void refetch()}
+        />
+      ) : isLoading ? (
         <SectionSkeleton title="Loading support tickets" description="Collecting vendor support requests in the background." />
       ) : filteredTickets.length ? (
         <OperationalTable

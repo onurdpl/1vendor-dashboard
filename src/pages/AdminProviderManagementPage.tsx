@@ -10,6 +10,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import type { VendorIntegrationProviderSummary } from '../lib/api/contracts';
 import { runtimeServices } from '../services/runtime-services';
@@ -142,10 +143,13 @@ function PermissionChips({ provider }: { provider: VendorIntegrationProviderSumm
 
 export function AdminProviderManagementPage() {
   const appReadiness = useAppReadiness();
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
   const { data, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.vendorIntegration.providers(),
     ({ signal }) => runtimeServices.vendorIntegration.providers({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
   const providers = safeArray(data?.providers);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -226,7 +230,13 @@ export function AdminProviderManagementPage() {
           description={error ?? 'Provider management data could not be loaded.'}
           onRetry={() => void refetch()}
         />
-      ) : !appReadiness.ready || isLoading ? (
+      ) : pageReadiness.status === 'unauthorized' ? (
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load provider management."
+          onRetry={() => void refetch()}
+        />
+      ) : isLoading ? (
         <SectionSkeleton title="Loading provider management" description="Reading integration client metadata and audit logs." />
       ) : null}
 

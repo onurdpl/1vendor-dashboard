@@ -25,6 +25,7 @@ import {
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
@@ -486,6 +487,9 @@ export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const queryClient = useQueryClient();
   const appReadiness = useAppReadiness();
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: false,
+  });
   const { message, tone, showFeedback } = useActionFeedback();
   const [resolutionAction, setResolutionAction] = useState<AdminAllocationResolutionAction | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
@@ -524,7 +528,7 @@ export function AdminShopifyOrderPage() {
       return getAdminShopifyOrderBreakdown(shopifyOrderId, { signal });
     },
     {
-      enabled: appReadiness.ready && Boolean(shopifyOrderId),
+      enabled: pageReadiness.ready && Boolean(shopifyOrderId),
     },
   );
   const returnToVendorMutation = useMutationAction(
@@ -1001,7 +1005,26 @@ export function AdminShopifyOrderPage() {
     }
   }
 
-  if (!appReadiness.ready || (isLoading && !breakdown)) {
+  if (pageReadiness.status === 'unauthorized') {
+    return (
+      <section className="dashboard order-detail">
+        <div className="hero-card operational-card">
+          <div>
+            <p className="eyebrow">Admin orders</p>
+            <h2>Shopify order breakdown</h2>
+            <p className="page-description">Sign in before loading admin order operations.</p>
+          </div>
+        </div>
+        <SectionErrorRetry
+          title="Sign in required"
+          description="An authenticated admin session is required to load this page."
+          onRetry={() => void refetch()}
+        />
+      </section>
+    );
+  }
+
+  if (isLoading && !breakdown) {
     return (
       <section className="dashboard order-detail">
         <div className="hero-card operational-card">

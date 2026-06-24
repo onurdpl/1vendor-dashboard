@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { AllocationSplitRejectModal } from '../components/AllocationSplitRejectModal';
-import { SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -46,6 +46,7 @@ import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeAr
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
 import { escalateVendorSupportTicket, listAdminSupportTickets, listVendorSupportTickets, type SupportTicket } from '../features/support/api';
@@ -1798,7 +1799,11 @@ export function OrderDetailPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
-  const authContextReady = appReadiness.ready;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: currentVendor.vendorId,
+  });
+  const authContextReady = pageReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
   const isRealMode = runtimeConfig.apiMode === 'real';
   const { message, tone, showFeedback } = useActionFeedback();
@@ -4624,7 +4629,31 @@ export function OrderDetailPage() {
     </section>
   );
 
-  if (!authContextReady || (isLoading && !order)) {
+  if (pageReadiness.status === 'missing_vendor_context') {
+    return renderOrderDetailFrame(
+      <EmptyStatePanel
+        title="Select vendor"
+        description="No vendor context available. Choose a vendor context before loading vendor-scoped order details."
+      />,
+    );
+  }
+
+  if (pageReadiness.status === 'waiting_vendor_context') {
+    return renderOrderDetailFrame(
+      <EmptyStatePanel
+        title="Waiting for vendor context"
+        description="Order detail will load after the authenticated vendor scope is ready."
+      />,
+    );
+  }
+
+  if (pageReadiness.status === 'unauthorized') {
+    return renderOrderDetailFrame(
+      <EmptyStatePanel title="Sign in required" description="Sign in before loading order details." />,
+    );
+  }
+
+  if (isLoading && !order) {
     return renderOrderDetailFrame();
   }
 

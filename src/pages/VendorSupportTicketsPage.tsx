@@ -13,6 +13,7 @@ import {
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
+import { getPageReadinessState } from '../lib/pageReadiness';
 import { listVendorSupportTickets, type SupportTicket } from '../features/support/api';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
 import { formatDateTime, safeArray } from '../services/real/formatting';
@@ -47,12 +48,16 @@ export function VendorSupportTicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
+  const pageReadiness = getPageReadinessState(appReadiness, {
+    requiresVendorContext: true,
+    currentVendorId: currentVendor.vendorId,
+  });
   const [unreadOnly, setUnreadOnly] = useState(false);
   const workflowOpenSupportIssues = searchParams.get('workflow') === 'open-support-issues';
   const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
-    { enabled: appReadiness.ready },
+    { enabled: pageReadiness.ready },
   );
 
   const filteredTickets = useMemo(() => {
@@ -117,7 +122,19 @@ export function VendorSupportTicketsPage() {
           description={error ?? 'Unable to load support requests.'}
           onRetry={() => void refetch()}
         />
-      ) : !appReadiness.ready || isLoading ? (
+      ) : pageReadiness.status === 'missing_vendor_context' ? (
+        <EmptyStatePanel
+          title="Select vendor"
+          description="No vendor context available. Choose a vendor context before loading support requests."
+        />
+      ) : pageReadiness.status === 'waiting_vendor_context' ? (
+        <EmptyStatePanel
+          title="Waiting for vendor context"
+          description="Support requests will load after the authenticated vendor scope is ready."
+        />
+      ) : pageReadiness.status === 'unauthorized' ? (
+        <EmptyStatePanel title="Sign in required" description="Sign in before loading support requests." />
+      ) : isLoading ? (
         <SectionSkeleton title="Loading support requests" description="Collecting your vendor support requests in the background." />
       ) : filteredTickets.length ? (
         <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']} className="support-vendor-table">
