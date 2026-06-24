@@ -131,6 +131,8 @@ describe('AdminSupportAnalyticsPage readability', () => {
     expect(screen.queryByText('Avg delay')).not.toBeInTheDocument();
     expect(screen.getByText('Last 7 days')).toBeInTheDocument();
     expect(screen.getByText('Vendors with elevated support load')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Overdue tickets/i })).toHaveAttribute('href', '/admin/support?filter=overdue');
+    expect(screen.getByRole('link', { name: /Waiting on vendor/i })).toHaveAttribute('href', '/admin/support?filter=waiting_vendor');
     expect(screen.queryByText('Operational support load')).not.toBeInTheDocument();
     expect(screen.queryByText('Workload')).not.toBeInTheDocument();
     expect(screen.queryByText('Assignee')).not.toBeInTheDocument();

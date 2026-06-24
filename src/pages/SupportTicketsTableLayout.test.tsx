@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,11 +11,13 @@ import { VendorSupportTicketsPage } from './VendorSupportTicketsPage';
 
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
+const assignAdminSupportTicketToSelfMock = vi.fn<(ticketId: string) => Promise<SupportTicket>>();
 
 vi.mock('../features/support/api', async () => {
   const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
   return {
     ...actual,
+    assignAdminSupportTicketToSelf: (ticketId: string) => assignAdminSupportTicketToSelfMock(ticketId),
     listAdminSupportTickets: () => listAdminSupportTicketsMock(),
     listVendorSupportTickets: () => listVendorSupportTicketsMock(),
   };
@@ -84,9 +87,10 @@ describe('support ticket table layout', () => {
     setToken('test-token');
     listAdminSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockReset();
+    assignAdminSupportTicketToSelfMock.mockReset();
   });
 
-  it('renders admin support tickets as aligned grid cells instead of table-cell dumps', async () => {
+  it('renders admin support tickets as action-oriented rows instead of table-cell dumps', async () => {
     setCurrentUser({
       email: 'admin@example.com',
       name: 'Admin User',
@@ -106,10 +110,57 @@ describe('support ticket table layout', () => {
     expect(row).toBeTruthy();
     expect(row?.querySelectorAll(':scope > [role="cell"]')).toHaveLength(11);
     expect(row?.querySelector('td')).toBeNull();
+    expect(screen.getByRole('button', { name: /Needs assignment/i })).toHaveTextContent('1');
+    expect(within(row as HTMLElement).getByText('Order #1030')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText('Workflow')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText('SLA')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getAllByText('Needs assignment').length).toBeGreaterThan(0);
     expect(within(row as HTMLElement).getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       '/admin/support/ticket-1',
     );
+  });
+
+  it('filters by support action bucket and assigns tickets inline', async () => {
+    const user = userEvent.setup();
+    const baseTicket = supportTicket();
+    assignAdminSupportTicketToSelfMock.mockResolvedValue({
+      ...baseTicket,
+      assigneeUserId: 'admin-user',
+      assigneeName: 'Admin User',
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    listAdminSupportTicketsMock.mockResolvedValue([
+      baseTicket,
+      supportTicket({
+        id: 'ticket-2',
+        subject: 'Closed support history',
+        status: 'CLOSED',
+        closedAt: '2026-05-15T11:00:00Z',
+        assigneeUserId: 'admin-user',
+        assigneeName: 'Admin User',
+      }),
+    ]);
+
+    renderPage(<AdminSupportTicketsPage />);
+
+    expect(await screen.findByText('Shipment tracking help')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Resolved today/i }));
+    expect(screen.queryByText('Shipment tracking help')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Quick filter'), 'needs_assignment');
+    expect(await screen.findByText('Shipment tracking help')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Assign to me' }));
+
+    expect(assignAdminSupportTicketToSelfMock).toHaveBeenCalledWith('ticket-1');
   });
 
   it('renders vendor support tickets as aligned grid cells instead of table-cell dumps', async () => {

@@ -139,14 +139,22 @@ export function AdminSupportAnalyticsPage() {
       </div>
 
       <div className="support-analytics-kpis">
-        <KPIStatCard label="Open tickets" value={kpis.openTickets} detail="Unresolved support load" tone="info" />
-        <KPIStatCard label="Overdue tickets" value={kpis.overdueTickets} detail="SLA currently breached" tone={kpis.overdueTickets ? 'danger' : 'success'} />
+        <Link to="/admin/support" className="support-analytics-kpi-link">
+          <KPIStatCard label="Open tickets" value={kpis.openTickets} detail="Unresolved support load" tone="info" />
+        </Link>
+        <Link to="/admin/support?filter=overdue" className="support-analytics-kpi-link">
+          <KPIStatCard label="Overdue tickets" value={kpis.overdueTickets} detail="SLA currently breached" tone={kpis.overdueTickets ? 'danger' : 'success'} />
+        </Link>
         <KPIStatCard label="Avg first response" value={formatHours(kpis.avgFirstResponseHours)} detail="First admin public reply" tone="neutral" />
         {avgResolutionKpi ? (
           <KPIStatCard label="Avg resolution" value={avgResolutionKpi} detail="Resolved or closed tickets" tone="neutral" />
         ) : null}
-        <KPIStatCard label="Waiting on vendor" value={kpis.waitingOnVendor} detail="Vendor response needed" tone="warning" />
-        <KPIStatCard label="Resolved today" value={kpis.resolvedToday} detail="Closed support work" tone="success" />
+        <Link to="/admin/support?filter=waiting_vendor" className="support-analytics-kpi-link">
+          <KPIStatCard label="Waiting on vendor" value={kpis.waitingOnVendor} detail="Vendor response needed" tone="warning" />
+        </Link>
+        <Link to="/admin/support?filter=resolved" className="support-analytics-kpi-link">
+          <KPIStatCard label="Resolved today" value={kpis.resolvedToday} detail="Closed support work" tone="success" />
+        </Link>
       </div>
       {isError && !analytics ? (
         <SectionErrorRetry

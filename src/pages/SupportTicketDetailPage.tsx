@@ -26,6 +26,7 @@ import { OperationalRecommendations } from '../components/OperationalRecommendat
 import { MentionText } from '../components/MentionText';
 import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
 import type { OperationsRecommendation } from '../lib/api/contracts';
+import { getSupportOperationalStory } from '../lib/supportOperationalStory';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 
 const ADMIN_STATUSES: SupportTicketStatus[] = ['IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
@@ -234,6 +235,26 @@ function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInp
       at: ticket.closedAt,
       status: 'Closed',
       tone: 'neutral',
+    });
+  }
+  if (ticket.assigneeName) {
+    events.push({
+      id: 'ticket-assignment-current',
+      title: 'Assignment current',
+      description: `Owner: ${ticket.assigneeName}`,
+      at: ticket.updatedAt,
+      status: 'Assigned',
+      tone: 'info',
+    });
+  }
+  if (ticket.escalatedAt) {
+    events.push({
+      id: 'ticket-escalated',
+      title: 'Ticket escalated',
+      description: ticket.escalationReason ?? 'Escalation requested.',
+      at: ticket.escalatedAt,
+      status: 'Escalated',
+      tone: 'warning',
     });
   }
 
@@ -450,6 +471,7 @@ export function SupportTicketDetailPage() {
   const contextLink = getContextLink(ticket);
   const canReply = ticket.status !== 'CLOSED';
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
+  const story = getSupportOperationalStory(ticket);
   const contextLinks = buildContextLinks(ticket, isAdmin);
   const unifiedTimeline = buildUnifiedSupportTimeline(ticket);
   const supportRecommendations: OperationsRecommendation[] = [];
@@ -526,6 +548,7 @@ export function SupportTicketDetailPage() {
           <p>{ticket.message}</p>
         </div>
         <div className="support-detail-badges">
+          <StatusBadge tone="info">{story.contextLabel}</StatusBadge>
           <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
           <StatusBadge tone="info">{formatSupportLabel(ticket.category)}</StatusBadge>
         </div>
@@ -554,7 +577,8 @@ export function SupportTicketDetailPage() {
               </div>
               <div>
                 <span>Context</span>
-                <strong>{ticket.contextId ?? 'General'}</strong>
+                <strong>{story.contextLabel}</strong>
+                {story.contextDetail ? <small>{story.contextDetail}</small> : null}
               </div>
               <div>
                 <span>Priority</span>

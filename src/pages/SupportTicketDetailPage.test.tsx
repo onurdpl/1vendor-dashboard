@@ -141,6 +141,39 @@ describe('SupportTicketDetailPage context visibility', () => {
       expect(screen.getByText('internal-review')).toBeInTheDocument();
     });
     expect(screen.getByText('webhook-synced')).toBeInTheDocument();
+    expect(screen.getAllByText('Order #1023').length).toBeGreaterThan(0);
+  });
+
+  it('renders assignment and escalation events when ticket data contains them', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'vendor-a',
+    });
+    getAdminSupportTicketMock.mockResolvedValueOnce(ticket({
+      assigneeUserId: 'admin-1',
+      assigneeName: 'Admin User',
+      escalatedAt: '2026-05-16T11:00:00.000Z',
+      escalationReason: 'Vendor dispute',
+      sla: {
+        isOverdue: false,
+        dueLabel: 'Escalated',
+        escalationLevel: 'escalated',
+        dueAt: null,
+        overdueByHours: null,
+      },
+    }));
+
+    renderPage('/admin/support/ticket-1');
+
+    expect(await screen.findByText('Assignment current')).toBeInTheDocument();
+    expect(screen.getByText('Owner: Admin User')).toBeInTheDocument();
+    expect(screen.getByText('Ticket escalated')).toBeInTheDocument();
+    expect(screen.getAllByText('Vendor dispute').length).toBeGreaterThan(0);
   });
 
   it('lets admins insert editable public reply templates', async () => {

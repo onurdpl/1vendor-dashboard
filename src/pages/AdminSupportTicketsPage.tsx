@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
   FilterBar,
+  KPIStatCard,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -11,16 +12,38 @@ import {
   SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
-import { listAdminSupportTickets, type SupportTicket, type SupportTicketCategory, type SupportTicketStatus } from '../features/support/api';
+import {
+  assignAdminSupportTicketToSelf,
+  listAdminSupportTickets,
+  type SupportTicket,
+  type SupportTicketCategory,
+  type SupportTicketStatus,
+} from '../features/support/api';
+import {
+  getSupportOperationalStory,
+  isResolvedToday,
+  ticketMatchesSupportActionBucket,
+  type SupportActionBucket,
+} from '../lib/supportOperationalStory';
 import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
 const ALL_PRIORITIES = ['all', 'low', 'normal', 'high'] as const;
 const ASSIGNEE_FILTERS = ['all', 'unassigned', 'me'] as const;
+const ACTION_BUCKETS: Array<{ key: SupportActionBucket; label: string; detail: string; tone: 'info' | 'warning' | 'danger' | 'success' | 'neutral' }> = [
+  { key: 'needs_assignment', label: 'Needs assignment', detail: 'No owner yet', tone: 'warning' },
+  { key: 'needs_response', label: 'Needs admin response', detail: 'Vendor update waiting', tone: 'warning' },
+  { key: 'escalated', label: 'Escalated', detail: 'Vendor raised urgency', tone: 'danger' },
+  { key: 'overdue', label: 'Overdue', detail: 'SLA breached', tone: 'danger' },
+  { key: 'waiting_vendor', label: 'Waiting on vendor', detail: 'Vendor owes next reply', tone: 'info' },
+  { key: 'resolved', label: 'Resolved today', detail: 'Recently closed work', tone: 'success' },
+];
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -40,23 +63,11 @@ function formatLastReply(ticket: SupportTicket) {
 }
 
 function getSlaTone(ticket: SupportTicket) {
-  if (ticket.sla?.escalationLevel === 'escalated' || ticket.sla?.isOverdue) {
-    return 'danger' as const;
-  }
-  if (ticket.sla?.escalationLevel === 'due_soon') {
-    return 'warning' as const;
-  }
-  return 'neutral' as const;
+  return getSupportOperationalStory(ticket).slaTone;
 }
 
 function getSlaLabel(ticket: SupportTicket) {
-  if (!ticket.sla || ticket.sla.escalationLevel === 'none') {
-    return ticket.sla?.dueLabel ?? 'No active SLA';
-  }
-  if (ticket.sla.escalationLevel === 'due_soon') {
-    return 'Due soon';
-  }
-  return ticket.sla.escalationLevel === 'escalated' ? 'Escalated' : 'Overdue';
+  return getSupportOperationalStory(ticket).slaLabel;
 }
 
 function getPriorityTone(priority: SupportTicket['priority']) {
@@ -90,10 +101,7 @@ export function formatSupportLabel(value: string) {
 }
 
 function getContextLabel(ticket: SupportTicket) {
-  if (!ticket.contextId) {
-    return formatSupportLabel(ticket.contextType);
-  }
-  return `${formatSupportLabel(ticket.contextType)} ${ticket.contextId}`;
+  return getSupportOperationalStory(ticket).contextLabel;
 }
 
 function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
@@ -123,12 +131,15 @@ export function isAdminSupportNeedsResponse(ticket: SupportTicket) {
 }
 
 export function isAdminSupportEscalated(ticket: SupportTicket) {
-  return Boolean(ticket.sla?.isOverdue || ticket.sla?.escalationLevel === 'escalated');
+  const story = getSupportOperationalStory(ticket);
+  return story.isEscalated || story.isOverdue;
 }
 
 export function AdminSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialBucket = (searchParams.get('filter') ?? 'all') as SupportActionBucket;
   const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.support.tickets(),
     ({ signal }) => listAdminSupportTickets({ signal }),
@@ -139,12 +150,62 @@ export function AdminSupportTicketsPage() {
   const [categoryFilter, setCategoryFilter] = useState<(typeof ALL_CATEGORIES)[number]>('all');
   const [priorityFilter, setPriorityFilter] = useState<(typeof ALL_PRIORITIES)[number]>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<(typeof ASSIGNEE_FILTERS)[number]>('all');
-  const [unresolvedOnly, setUnresolvedOnly] = useState(true);
+  const [unresolvedOnly, setUnresolvedOnly] = useState(initialBucket === 'resolved' ? false : true);
   const [needsResponseOnly, setNeedsResponseOnly] = useState(false);
   const [escalatedOnly, setEscalatedOnly] = useState(false);
+  const [actionBucket, setActionBucket] = useState<SupportActionBucket>(
+    ACTION_BUCKETS.some((bucket) => bucket.key === initialBucket) ? initialBucket : 'all',
+  );
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+
+  const assignMutation = useMutationAction(
+    (ticketId: string) => assignAdminSupportTicketToSelf(ticketId),
+    {
+      onSuccess: async () => {
+        setAssignmentError(null);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() });
+      },
+      onError: (error) => {
+        setAssignmentError(error instanceof Error ? error.message : 'Unable to assign support ticket.');
+      },
+    },
+  );
+
+  const allTickets = safeArray(tickets);
+  const bucketCounts = useMemo(() => {
+    return ACTION_BUCKETS.reduce<Record<SupportActionBucket, number>>((counts, bucket) => {
+      counts[bucket.key] = allTickets.filter((ticket) => ticketMatchesSupportActionBucket(ticket, bucket.key)).length;
+      return counts;
+    }, {
+      all: allTickets.length,
+      needs_assignment: 0,
+      needs_response: 0,
+      escalated: 0,
+      overdue: 0,
+      waiting_vendor: 0,
+      resolved: 0,
+    });
+  }, [allTickets]);
+
+  function selectActionBucket(bucket: SupportActionBucket) {
+    setActionBucket(bucket);
+    setNeedsResponseOnly(false);
+    setEscalatedOnly(false);
+    setUnresolvedOnly(bucket === 'resolved' ? false : true);
+    const nextParams = new URLSearchParams(searchParams);
+    if (bucket === 'all') {
+      nextParams.delete('filter');
+    } else {
+      nextParams.set('filter', bucket);
+    }
+    setSearchParams(nextParams, { replace: true });
+  }
 
   const filteredTickets = useMemo(() => {
-    return safeArray(tickets).filter((ticket) => {
+    return allTickets.filter((ticket) => {
+      if (!ticketMatchesSupportActionBucket(ticket, actionBucket)) {
+        return false;
+      }
       if (unresolvedOnly && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) {
         return false;
       }
@@ -176,14 +237,16 @@ export function AdminSupportTicketsPage() {
       }
       return ticketMatchesSearch(ticket, searchTerm);
     }).sort((left, right) => {
-      const leftRank = left.sla?.isOverdue ? 0 : left.sla?.escalationLevel === 'due_soon' ? 1 : 2;
-      const rightRank = right.sla?.isOverdue ? 0 : right.sla?.escalationLevel === 'due_soon' ? 1 : 2;
+      const leftStory = getSupportOperationalStory(left);
+      const rightStory = getSupportOperationalStory(right);
+      const leftRank = leftStory.isEscalated ? 0 : leftStory.isOverdue ? 1 : leftStory.needsAssignment ? 2 : leftStory.needsAdminResponse ? 3 : 4;
+      const rightRank = rightStory.isEscalated ? 0 : rightStory.isOverdue ? 1 : rightStory.needsAssignment ? 2 : rightStory.needsAdminResponse ? 3 : 4;
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
       }
       return getSafeTimestamp(right.updatedAt, 0) - getSafeTimestamp(left.updatedAt, 0);
     });
-  }, [assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
+  }, [actionBucket, allTickets, assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, unresolvedOnly]);
 
   return (
     <section className="op-page support-ops-page">
@@ -196,6 +259,24 @@ export function AdminSupportTicketsPage() {
         <Link to="/admin/support/analytics" className="button button-secondary button-link support-analytics-link">
           View analytics
         </Link>
+      </div>
+
+      <div className="support-action-buckets" aria-label="Support action buckets">
+        {ACTION_BUCKETS.map((bucket) => (
+          <button
+            key={bucket.key}
+            type="button"
+            className={`support-action-bucket ${actionBucket === bucket.key ? 'is-active' : ''}`}
+            onClick={() => selectActionBucket(bucket.key)}
+          >
+            <KPIStatCard
+              label={bucket.label}
+              value={bucketCounts[bucket.key] ?? 0}
+              detail={bucket.detail}
+              tone={bucket.tone}
+            />
+          </button>
+        ))}
       </div>
 
       <OperationalToolbar>
@@ -241,6 +322,15 @@ export function AdminSupportTicketsPage() {
               {currentUser?.name ? <option value="me">Assigned to me</option> : null}
             </select>
           </label>
+          <label className="support-filter-field" htmlFor="support-action-filter">
+            <span>Quick filter</span>
+            <select id="support-action-filter" value={actionBucket} onChange={(event) => selectActionBucket(event.target.value as SupportActionBucket)}>
+              <option value="all">All tickets</option>
+              {ACTION_BUCKETS.map((bucket) => (
+                <option key={bucket.key} value={bucket.key}>{bucket.label}</option>
+              ))}
+            </select>
+          </label>
           <div className="support-toggle-group" aria-label="Support ticket quick filters">
             <label className="support-toggle">
               <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
@@ -257,6 +347,7 @@ export function AdminSupportTicketsPage() {
           </div>
         </FilterBar>
       </OperationalToolbar>
+      {assignmentError ? <p className="support-inline-error" role="alert">{assignmentError}</p> : null}
 
       {isError && !tickets ? (
         <SectionErrorRetry
@@ -268,41 +359,69 @@ export function AdminSupportTicketsPage() {
         <SectionSkeleton title="Loading support tickets" description="Collecting vendor support requests in the background." />
       ) : filteredTickets.length ? (
         <OperationalTable
-          columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'SLA', 'Assignee', 'Last reply', 'Updated', 'Action']}
+          columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Workflow', 'SLA', 'Assignment', 'Next action', 'Last reply', 'Action']}
           className="support-admin-table"
         >
-          {filteredTickets.map((ticket) => (
-            <OperationalTableRow key={ticket.id}>
-              <span role="cell" className="support-ticket-cell">
-                <strong>{ticket.subject}</strong>
-                <span>{ticket.id}</span>
-                {ticket.adminUnreadCount > 0 ? (
-                  <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
-                ) : null}
-              </span>
-              <span role="cell" className="support-muted-cell">{ticket.vendorName ?? ticket.vendorId}</span>
-              <span role="cell" className="support-context-cell">{getContextLabel(ticket)}</span>
-              <span role="cell">{formatSupportLabel(ticket.category)}</span>
-              <span role="cell">
-                <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
-              </span>
-              <span role="cell">
-                <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
-              </span>
-              <span role="cell" className="support-sla-cell">
-                <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
-                <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
-              </span>
-              <span role="cell" className="support-muted-cell">{ticket.assigneeName ?? 'Unassigned'}</span>
-              <span role="cell" className="support-last-reply-cell">{formatLastReply(ticket)}</span>
-              <span role="cell" className="support-muted-cell">{formatDate(ticket.updatedAt)}</span>
-              <span role="cell" className="support-action-cell">
-                <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
-                  Open
-                </Link>
-              </span>
-            </OperationalTableRow>
-          ))}
+          {filteredTickets.map((ticket) => {
+            const story = getSupportOperationalStory(ticket);
+            const canAssignInline = story.needsAssignment && Boolean(currentUser?.name);
+            return (
+              <OperationalTableRow key={ticket.id}>
+                <span role="cell" className="support-ticket-cell">
+                  <strong>{ticket.subject}</strong>
+                  <span title={ticket.id}>{ticket.id}</span>
+                  {ticket.adminUnreadCount > 0 ? (
+                    <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
+                  ) : null}
+                </span>
+                <span role="cell" className="support-muted-cell">{ticket.vendorName ?? ticket.vendorId}</span>
+                <span role="cell" className="support-context-cell" title={story.contextDetail ?? ticket.contextId ?? story.contextLabel}>
+                  <strong>{getContextLabel(ticket)}</strong>
+                  {story.contextDetail ? <small>{story.contextDetail}</small> : null}
+                </span>
+                <span role="cell">{formatSupportLabel(ticket.category)}</span>
+                <span role="cell">
+                  <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
+                </span>
+                <span role="cell" className="support-axis-cell">
+                  <small>Workflow</small>
+                  <StatusBadge tone={getSupportStatusTone(ticket.status)}>{story.workflowLabel}</StatusBadge>
+                </span>
+                <span role="cell" className="support-sla-cell support-axis-cell">
+                  <small>SLA</small>
+                  <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
+                  <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
+                </span>
+                <span role="cell" className={`support-assignment-cell ${story.needsAssignment ? 'is-unassigned' : ''}`}>
+                  <strong>{story.assignmentLabel}</strong>
+                  {canAssignInline ? (
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      disabled={assignMutation.isPending}
+                      onClick={() => assignMutation.mutate(ticket.id)}
+                    >
+                      Assign to me
+                    </button>
+                  ) : null}
+                </span>
+                <span role="cell" className="support-next-action-cell">
+                  <StatusBadge tone={story.nextActionTone}>{story.nextActionLabel}</StatusBadge>
+                  <small>{story.nextActionDetail}</small>
+                  {story.escalationReason ? <small>Escalated: {story.escalationReason}</small> : null}
+                </span>
+                <span role="cell" className="support-last-reply-cell">
+                  {formatLastReply(ticket)}
+                  <small>Updated {formatDate(ticket.updatedAt)}</small>
+                </span>
+                <span role="cell" className="support-action-cell">
+                  <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
+                    Open
+                  </Link>
+                </span>
+              </OperationalTableRow>
+            );
+          })}
         </OperationalTable>
       ) : (
         <EmptyStatePanel title="No support tickets" description="No tickets match the current filters." />
