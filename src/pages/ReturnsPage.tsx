@@ -549,8 +549,10 @@ export function ReturnsPage() {
   const { data: returns, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady },
+    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
   );
+  const returnsMissingVendorContext = appReadiness.status === 'missing_vendor_context';
+  const returnsWaitingForVendorContext = !returnsMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [vendorFilter, setVendorFilter] = useState('all');
@@ -890,7 +892,21 @@ export function ReturnsPage() {
                   onRetry={() => void refetch()}
                 />
               </OperationalTableRow>
-            ) : !authContextReady || isLoading ? (
+            ) : returnsMissingVendorContext ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="Select vendor"
+                  description="No vendor context available. Choose a vendor context before loading vendor-scoped returns."
+                />
+              </OperationalTableRow>
+            ) : returnsWaitingForVendorContext ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="Waiting for vendor context"
+                  description="Returns will load after the authenticated vendor scope is ready."
+                />
+              </OperationalTableRow>
+            ) : isLoading ? (
               <TableSkeletonRows columns={6} rows={5} />
             ) : filteredReturns.length === 0 ? (
               <OperationalTableRow>

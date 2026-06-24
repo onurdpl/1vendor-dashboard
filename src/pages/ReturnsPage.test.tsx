@@ -5,7 +5,7 @@ import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { clearToken, setCurrentUser, setToken } from '../lib/auth';
 
 const listReturnsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<ReturnSummary[]>>();
 const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
@@ -287,19 +287,60 @@ describe('ReturnsPage control center', () => {
     const returnsResult = deferred<ReturnSummary[]>();
     listReturnsMock.mockReturnValue(returnsResult.promise);
 
-    renderReturnsPage();
+    const { container } = renderReturnsPage();
 
     expect(screen.getByRole('heading', { name: /return requests/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Item' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Return status' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+    expect(container.querySelector('.op-skeleton-row')).not.toBeNull();
     expect(screen.queryByText('Returns unavailable')).not.toBeInTheDocument();
 
     await act(async () => {
       returnsResult.resolve([]);
       await returnsResult.promise;
     });
+  });
+
+  it('renders missing vendor context as a terminal state instead of skeleton rows', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: '',
+    });
+
+    const { container } = renderReturnsPage();
+
+    expect(await screen.findByText('Select vendor')).toBeInTheDocument();
+    expect(screen.getByText('No vendor context available. Choose a vendor context before loading vendor-scoped returns.')).toBeInTheDocument();
+    expect(container.querySelector('.op-skeleton-row')).toBeNull();
+    expect(listReturnsMock).not.toHaveBeenCalled();
+  });
+
+  it('renders waiting vendor context as diagnostic UI instead of stale skeleton rows', async () => {
+    clearToken();
+
+    const { container } = renderReturnsPage();
+
+    expect(await screen.findByText('Waiting for vendor context')).toBeInTheDocument();
+    expect(screen.getByText('Returns will load after the authenticated vendor scope is ready.')).toBeInTheDocument();
+    expect(container.querySelector('.op-skeleton-row')).toBeNull();
+    expect(listReturnsMock).not.toHaveBeenCalled();
+  });
+
+  it('renders an error state for failed enabled return queries', async () => {
+    listReturnsMock.mockRejectedValue(new Error('Returns API unavailable.'));
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Returns unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Returns API unavailable.')).toBeInTheDocument();
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('renders pending return requests separately from processed refunds', async () => {
