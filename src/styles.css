@@ -8119,6 +8119,57 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 6px;
 }
 
+.return-review-completion-banner {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 13px;
+  background: #f0fdf4;
+}
+
+.return-review-completion-banner > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.return-review-completion-banner span,
+.return-review-completion-banner p {
+  margin: 0;
+  color: #166534;
+  font-size: 0.74rem;
+}
+
+.return-review-completion-banner strong {
+  color: #14532d;
+  font-size: 0.84rem;
+}
+
+.return-ownership-transfer-lineage {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 11px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.return-ownership-transfer-lineage strong {
+  color: #0f172a;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.return-ownership-transfer-lineage span,
+.return-ownership-transfer-lineage small {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
 .return-review-side > * {
   width: 100%;
   min-width: 0;

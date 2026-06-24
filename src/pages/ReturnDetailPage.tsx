@@ -103,6 +103,29 @@ function isRefundFinanceRecord(record: { category: string }) {
   return record.category.toLowerCase() === 'refund';
 }
 
+function getLinkedFinanceTitle(record: { category: string }) {
+  return isRefundFinanceRecord(record) ? 'Refund offset' : 'Sale payable impact';
+}
+
+function getLinkedFinanceTone(record: { category: string; status: string }): OperationalEventInput['tone'] {
+  if (record.status.toLowerCase() === 'pending') {
+    return 'warning';
+  }
+
+  return isRefundFinanceRecord(record) ? 'warning' : 'success';
+}
+
+function sortOperationalEventsByTimestamp(events: OperationalEventInput[]) {
+  return [...events].sort((left, right) => {
+    const leftTime = left.at ? Date.parse(left.at) : Number.NaN;
+    const rightTime = right.at ? Date.parse(right.at) : Number.NaN;
+    if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0;
+    if (Number.isNaN(leftTime)) return 1;
+    if (Number.isNaN(rightTime)) return -1;
+    return leftTime - rightTime;
+  });
+}
+
 function getStatusLabel(returnRequest: ReturnDetail) {
   const normalized = returnRequest.status?.toLowerCase() ?? '';
   if (returnRequest.sourceType === 'shopify_return_request' && normalized === 'requested') {
@@ -401,35 +424,42 @@ function getTimeline(returnRequest: ReturnDetail) {
     {
       label: 'Return requested',
       at: formatDate(returnRequest.date),
+      rawAt: returnRequest.date,
       enabled: true,
     },
     {
       label: 'Return approved',
       at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      rawAt: returnRequest.updatedAt ?? returnRequest.date,
       enabled: normalizedStatus === 'approved',
     },
     {
       label: 'Return shipment created',
       at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      rawAt: returnRequest.updatedAt ?? returnRequest.date,
       enabled: hasReturnTracking,
-    },
-    {
-      label: 'Refund processed',
-      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
-      enabled:
-        returnRequest.sourceType !== 'shopify_return_request' ||
-        normalizedStatus === 'processed' ||
-        normalizedStatus === 'refunded',
     },
     {
       label: 'Received by vendor',
       at: formatDate(returnRequest.vendorReceivedAt),
+      rawAt: returnRequest.vendorReceivedAt,
       enabled: Boolean(returnRequest.vendorReceivedAt),
     },
     {
       label: returnRequest.vendorDecision === 'rejected' ? 'Rejected by vendor' : 'Approved by vendor',
       at: formatDate(returnRequest.vendorReviewedAt),
+      rawAt: returnRequest.vendorReviewedAt,
       enabled: Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision),
+    },
+    {
+      label: 'Refund processed',
+      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      rawAt: returnRequest.updatedAt ?? returnRequest.date,
+      enabled:
+        returnRequest.sourceType !== 'shopify_return_request' ||
+        normalizedStatus === 'processed' ||
+        normalizedStatus === 'refunded' ||
+        Boolean(returnRequest.sourceShopifyRefundId),
     },
   ].filter((entry) => entry.enabled);
 
@@ -442,6 +472,7 @@ function getTimeline(returnRequest: ReturnDetail) {
     .map((entry) => ({
       label: getTimelineLabel(entry.label),
       at: formatDate(entry.at),
+      rawAt: entry.at,
     }))
     .filter((entry) => {
       if (!entry.label || seenLabels.has(entry.label)) {
@@ -456,8 +487,12 @@ function getTimeline(returnRequest: ReturnDetail) {
   }
 
   return [
-    { label: 'Return requested', at: formatDate(returnRequest.date) },
-    { label: returnRequest.sourceType === 'shopify_return_request' ? 'Vendor reviewed' : 'Refund approved', at: formatDate(returnRequest.updatedAt ?? returnRequest.date) },
+    { label: 'Return requested', at: formatDate(returnRequest.date), rawAt: returnRequest.date },
+    {
+      label: returnRequest.sourceType === 'shopify_return_request' ? 'Vendor reviewed' : 'Refund approved',
+      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      rawAt: returnRequest.updatedAt ?? returnRequest.date,
+    },
   ];
 }
 
@@ -1235,6 +1270,8 @@ export function ReturnDetailPage() {
   );
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const audience = isAdmin ? 'admin' : 'vendor';
+  const returnTimelineTitle = isAdmin ? 'Return Lifecycle' : 'Return timeline';
+  const financeTimelineTitle = isAdmin ? 'Finance Lifecycle' : 'Finance timeline';
   const returnCrossLinks: OperationalLinkInput[] = [
     {
       id: `order-${returnRequest.relatedOrderId}`,
@@ -1248,11 +1285,11 @@ export function ReturnDetailPage() {
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
       eyebrow: 'Finance',
-      title: isRefundFinanceRecord(record) ? 'Refund impact' : 'Payout activity',
+      title: getLinkedFinanceTitle(record),
       description: `${record.amount} · ${getLinkedFinanceStatusLabel(record)}`,
       href: buildFinanceHref(record),
       status: record.category,
-      tone: isRefundFinanceRecord(record) ? ('warning' as const) : ('success' as const),
+      tone: getLinkedFinanceTone(record),
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
@@ -1264,31 +1301,13 @@ export function ReturnDetailPage() {
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
     })),
   ];
-  const unifiedTimelineEvents: OperationalEventInput[] = [
+  const returnLifecycleEvents: OperationalEventInput[] = [
     ...timeline.map((entry, index) => ({
       id: `return-${index}-${entry.label}-${entry.at}`,
       title: entry.label,
-      at: returnRequest.timeline[index]?.at ?? returnRequest.date,
+      at: entry.rawAt ?? returnRequest.timeline[index]?.at ?? returnRequest.date,
       description: entry.at,
       tone: 'neutral' as const,
-    })),
-    ...relatedFinanceRecords.map((record) => ({
-      id: `finance-${record.id}`,
-      title: isRefundFinanceRecord(record) ? 'Refund processed' : 'Finance entry created',
-      description: `${record.category} · ${record.amount}`,
-      at: record.date,
-      status: getLinkedFinanceStatusLabel(record),
-      tone: isRefundFinanceRecord(record) ? ('warning' as const) : ('success' as const),
-      href: buildFinanceHref(record),
-    })),
-    ...relatedSupportTickets.map((ticket) => ({
-      id: `support-${ticket.id}`,
-      title: 'Support ticket opened',
-      description: ticket.subject ?? 'Support ticket',
-      at: ticket.createdAt,
-      status: safeStatusLabel(ticket.status),
-      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
-      href: `${supportBasePath}/${ticket.id}`,
     })),
     ...(returnRequest.navlungoReturnCreatedAt
       ? [
@@ -1330,6 +1349,28 @@ export function ReturnDetailPage() {
           : event.title === 'Delivered' || event.title === 'Returned to warehouse'
             ? ('success' as const)
             : ('info' as const),
+    })),
+  ];
+  const financeLifecycleEvents: OperationalEventInput[] = sortOperationalEventsByTimestamp([
+    ...relatedFinanceRecords.map((record) => ({
+      id: `finance-${record.id}`,
+      title: isRefundFinanceRecord(record) ? 'Refund processed' : 'Finance entry created',
+      description: `${record.category} · ${record.amount}`,
+      at: record.date,
+      status: getLinkedFinanceStatusLabel(record),
+      tone: getLinkedFinanceTone(record),
+      href: buildFinanceHref(record),
+    })),
+  ]);
+  const supportLifecycleEvents: OperationalEventInput[] = [
+    ...relatedSupportTickets.map((ticket) => ({
+      id: `support-${ticket.id}`,
+      title: 'Support ticket opened',
+      description: ticket.subject ?? 'Support ticket',
+      at: ticket.createdAt,
+      status: safeStatusLabel(ticket.status),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      href: `${supportBasePath}/${ticket.id}`,
     })),
   ];
   const returnRecommendations: OperationsRecommendation[] = [];
@@ -1435,6 +1476,22 @@ export function ReturnDetailPage() {
 
       <div className="return-review-grid">
         <main className="return-review-main">
+          {terminalRefundedReturn ? (
+            <article className="return-review-completion-banner" aria-label="Return completion summary">
+              <div>
+                <span>Return completed</span>
+                <strong>Refund completed</strong>
+              </div>
+              <div>
+                <span>Ownership verified</span>
+                <strong>No vendor action required.</strong>
+              </div>
+              {relatedFinanceRecords.length ? (
+                <p>Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.</p>
+              ) : null}
+            </article>
+          ) : null}
+
           <article className="return-review-card">
             <div className="return-review-card-header">
               <div>
@@ -1498,7 +1555,11 @@ export function ReturnDetailPage() {
 
           <OperationalLinkCards
             title="Related operational records"
-            subtitle="Order, payout impact, and support linked to this return."
+            subtitle={
+              terminalRefundedReturn && relatedFinanceRecords.length
+                ? 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.'
+                : 'Order, settlement offsets, payout accounting, and support linked to this return.'
+            }
             links={returnCrossLinks}
             audience={audience}
           />
@@ -1605,7 +1666,7 @@ export function ReturnDetailPage() {
                 <p className="page-description">
                   Return and refund ownership are resolved from the allocation and active economic owner at the time records are created.
                 </p>
-                {hasOwnerLineageChange(returnRequest.returnOwnershipSummary) ? (
+                {hasOwnerLineageChange(returnRequest.returnOwnershipSummary) && !returnRequest.returnOwnershipSummary.transferSummary ? (
                   <p className="page-description">
                     <strong>
                       {formatOwnerLabel(
@@ -1672,30 +1733,55 @@ export function ReturnDetailPage() {
                   </div>
                 </div>
                 {returnRequest.returnOwnershipSummary.transferSummary ? (
-                  <p className="page-description">
-                    Transfer:{' '}
-                    {formatOwnerLabel(
-                      returnRequest.returnOwnershipSummary.transferSummary.fromVendorId,
-                      returnRequest.returnOwnershipSummary.transferSummary.fromVendorName,
-                    )}{' '}
-                    to{' '}
-                    {formatOwnerLabel(
-                      returnRequest.returnOwnershipSummary.transferSummary.toVendorId,
-                      returnRequest.returnOwnershipSummary.transferSummary.toVendorName,
-                    )}
-                    {returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt
-                      ? ` · ${formatDate(returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt)}`
-                      : ''}
-                  </p>
+                  <div className="return-ownership-transfer-lineage" aria-label="Return ownership transfer lineage">
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.transferSummary.fromVendorId,
+                        returnRequest.returnOwnershipSummary.transferSummary.fromVendorName,
+                      )}
+                    </strong>
+                    <span>↓ Transfer</span>
+                    <strong>
+                      {formatOwnerLabel(
+                        returnRequest.returnOwnershipSummary.transferSummary.toVendorId,
+                        returnRequest.returnOwnershipSummary.transferSummary.toVendorName,
+                      )}
+                    </strong>
+                    {returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt ? (
+                      <small>{formatDate(returnRequest.returnOwnershipSummary.transferSummary.transferCompletedAt)}</small>
+                    ) : null}
+                  </div>
                 ) : null}
               </article>
             ) : null}
 
             <OperationalTimeline
-              title="Timeline"
-              events={unifiedTimelineEvents}
+              title={returnTimelineTitle}
+              subtitle="Return request, receipt, vendor review, and refund completion."
+              events={returnLifecycleEvents}
             audience={audience}
           />
+
+          {financeLifecycleEvents.length ? (
+            <OperationalTimeline
+              title={financeTimelineTitle}
+              subtitle={
+                terminalRefundedReturn
+                  ? 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.'
+                  : 'Settlement and payout accounting linked to this return.'
+              }
+              events={financeLifecycleEvents}
+              audience={audience}
+            />
+          ) : null}
+
+          {supportLifecycleEvents.length ? (
+            <OperationalTimeline
+              title="Support Activity"
+              events={supportLifecycleEvents}
+              audience={audience}
+            />
+          ) : null}
 
           <OperationalRecommendations
             title="Operations"

@@ -443,7 +443,7 @@ describe('operational deep-link smoke navigation', () => {
     renderOperationalRoutes(`/returns/${targetReturn.id}`);
 
     await screen.findByRole('heading', { name: 'Return request' });
-    await user.click(await findLinkedRecordAnchor('Refund impact'));
+    await user.click(await findLinkedRecordAnchor('Refund offset'));
 
     expect(await screen.findByRole('heading', { name: 'Order #1031' })).toBeInTheDocument();
     expect((await screen.findAllByText('-$77.00')).length).toBeGreaterThan(0);
