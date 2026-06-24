@@ -243,8 +243,12 @@ function getApprovalLineOrderLabel(line: SettlementApprovalLine) {
     readSnapshotString(line, 'sourceShopifyOrderNumber') ??
     readSnapshotString(line, 'sourceShopifyOrderId') ??
     readSnapshotString(line, 'originalOrderId') ??
-    'Unknown order'
+    'Unavailable'
   );
+}
+
+function getApprovalLineAllocationLabel(line: SettlementApprovalLine) {
+  return readSnapshotString(line, 'vendorAllocationId') ?? readSnapshotString(line, 'allocationId') ?? null;
 }
 
 function getApprovalLineStatus(line: SettlementApprovalLine) {
@@ -258,6 +262,113 @@ function getApprovalLineStatus(line: SettlementApprovalLine) {
       readSnapshotString(line, 'derivedSettlementStatus') ??
       readSnapshotString(line, 'resolvedSettlementStatus'),
   };
+}
+
+function getLineTypeToken(line: SettlementApprovalLine) {
+  return String(line.lineType).toUpperCase();
+}
+
+function isSaleLine(line: SettlementApprovalLine) {
+  return getLineTypeToken(line) === 'SALE';
+}
+
+function isRefundLine(line: SettlementApprovalLine) {
+  return getLineTypeToken(line) === 'REFUND';
+}
+
+function isRefundAdjustmentLine(line: SettlementApprovalLine) {
+  return getLineTypeToken(line) === 'REFUND_ADJUSTMENT';
+}
+
+function hasRefundedSaleContext(line: SettlementApprovalLine) {
+  const status = getApprovalLineStatus(line);
+  return Boolean(
+    line.refundDetected ||
+    (line.refundCount ?? 0) > 0 ||
+    String(status.derived ?? '').toLowerCase().includes('refund') ||
+    String(status.stored ?? '').toLowerCase().includes('refund'),
+  );
+}
+
+function getSettlementLineDisplayLabel(line: SettlementApprovalLine) {
+  if (isSaleLine(line)) {
+    return hasRefundedSaleContext(line) ? 'Refunded sale basis' : 'Payable sale';
+  }
+  if (isRefundLine(line)) {
+    return 'Refund offset';
+  }
+  if (isRefundAdjustmentLine(line)) {
+    return 'Refund adjustment';
+  }
+  return safeStatusLabel(line.lineType);
+}
+
+function getSettlementLineTone(line: SettlementApprovalLine): 'neutral' | 'info' | 'success' | 'warning' {
+  if (isRefundLine(line) || isRefundAdjustmentLine(line) || hasRefundedSaleContext(line)) {
+    return 'warning';
+  }
+  return line.payableImpactMinor > 0 ? 'success' : 'neutral';
+}
+
+function getLineGroupingKey(line: SettlementApprovalLine) {
+  const orderLabel = getApprovalLineOrderLabel(line);
+  const allocationLabel = getApprovalLineAllocationLabel(line);
+  if (orderLabel === 'Unavailable' || !allocationLabel) {
+    return null;
+  }
+  return `${orderLabel}::${allocationLabel}`;
+}
+
+function buildSettlementComposition(lines: SettlementApprovalLine[], currency: string, netPayableMinor: number) {
+  const buckets = [
+    { key: 'payable-sales', label: 'Payable sales', predicate: (line: SettlementApprovalLine) => isSaleLine(line) && !hasRefundedSaleContext(line) },
+    { key: 'refunded-sale-basis', label: 'Refunded sale basis', predicate: (line: SettlementApprovalLine) => isSaleLine(line) && hasRefundedSaleContext(line) },
+    { key: 'refund-offsets', label: 'Refund offsets', predicate: isRefundLine },
+    { key: 'refund-adjustments', label: 'Refund adjustments', predicate: isRefundAdjustmentLine },
+  ];
+
+  return {
+    currency,
+    items: buckets.map((bucket) => {
+      const matchingLines = lines.filter(bucket.predicate);
+      return {
+        key: bucket.key,
+        label: bucket.label,
+        count: matchingLines.length,
+        amountMinor: matchingLines.reduce((total, line) => total + line.amountMinor, 0),
+      };
+    }),
+    netPayableMinor,
+  };
+}
+
+function buildRefundOffsetPackages(lines: SettlementApprovalLine[]) {
+  const groups = new Map<string, SettlementApprovalLine[]>();
+  for (const line of lines) {
+    const key = getLineGroupingKey(line);
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), line]);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, groupLines]) => {
+      const saleLines = groupLines.filter(isSaleLine);
+      const offsetLines = groupLines.filter((line) => isRefundLine(line) || isRefundAdjustmentLine(line));
+      if (!saleLines.length || !offsetLines.length) {
+        return null;
+      }
+      const firstLine = groupLines[0];
+      return {
+        key,
+        orderLabel: getApprovalLineOrderLabel(firstLine),
+        allocationLabel: getApprovalLineAllocationLabel(firstLine),
+        saleBasisMinor: saleLines.reduce((total, line) => total + line.amountMinor, 0),
+        refundOffsetMinor: offsetLines.reduce((total, line) => total + line.amountMinor, 0),
+        netEffectMinor: groupLines.reduce((total, line) => total + line.amountMinor, 0),
+        lineIds: groupLines.map((line) => line.financeLedgerEntryId),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
 function getStatusTone(status: WorkflowStepStatus) {
@@ -447,7 +558,7 @@ function SettlementDraftFailurePanel({
   );
 }
 
-function LineSamples({ lines }: { lines: SettlementApprovalLine[] }) {
+function LineSamples({ lines, currency }: { lines: SettlementApprovalLine[]; currency: string }) {
   const visibleLines = lines.slice(0, 10);
 
   if (!visibleLines.length) {
@@ -455,25 +566,86 @@ function LineSamples({ lines }: { lines: SettlementApprovalLine[] }) {
   }
 
   return (
-    <OperationalTable
-      columns={['Ledger row', 'Type', 'Amount', 'Commission', 'VAT', 'Payable impact']}
-      className="settlement-lines-table"
-      stickyHeader={false}
-    >
-      {visibleLines.map((line) => (
-        <OperationalTableRow key={`${line.financeLedgerEntryId}-${line.lineType}`}>
-          <span>
-            <strong>{line.financeLedgerEntryId}</strong>
-            <small>{safeStatusLabel(line.eligibilityDecision, 'included')}</small>
-          </span>
-          <span>{line.lineType}</span>
-          <span>{formatMinor(line.amountMinor)}</span>
-          <span>{formatMinor(line.commissionMinor)}</span>
-          <span>{formatMinor(line.commissionVatMinor)}</span>
-          <span>{formatMinor(line.payableImpactMinor)}</span>
-        </OperationalTableRow>
+    <>
+      <RefundOffsetPackages lines={visibleLines} currency={currency} />
+      <OperationalTable
+        columns={['Ledger row', 'Type', 'Amount', 'Commission', 'VAT', 'Payable impact']}
+        className="settlement-lines-table"
+        stickyHeader={false}
+      >
+        {visibleLines.map((line) => (
+          <OperationalTableRow key={`${line.financeLedgerEntryId}-${line.lineType}`}>
+            <span>
+              <strong>{line.financeLedgerEntryId}</strong>
+              <small>{safeStatusLabel(line.eligibilityDecision, 'included')}</small>
+            </span>
+            <span><StatusBadge tone={getSettlementLineTone(line)}>{getSettlementLineDisplayLabel(line)}</StatusBadge></span>
+            <span>{formatMinor(line.amountMinor)}</span>
+            <span>{formatMinor(line.commissionMinor)}</span>
+            <span>{formatMinor(line.commissionVatMinor)}</span>
+            <span>{formatMinor(line.payableImpactMinor)}</span>
+          </OperationalTableRow>
+        ))}
+      </OperationalTable>
+    </>
+  );
+}
+
+function SettlementCompositionSummary({
+  lines,
+  currency,
+  netPayableMinor,
+}: {
+  lines: SettlementApprovalLine[];
+  currency: string;
+  netPayableMinor: number;
+}) {
+  const composition = buildSettlementComposition(lines, currency, netPayableMinor);
+
+  return (
+    <section className="settlement-composition-card" aria-label="Settlement composition">
+      <div>
+        <p className="eyebrow">Settlement composition</p>
+        <h3>Rows included in this review</h3>
+      </div>
+      <div className="settlement-composition-grid">
+        {composition.items.map((item) => (
+          <SummaryField
+            key={item.key}
+            label={item.label}
+            value={`${formatNumber(item.count)} ${item.count === 1 ? 'row' : 'rows'} / ${formatMinor(item.amountMinor, composition.currency)}`}
+          />
+        ))}
+        <SummaryField label="Net payable" value={formatMinor(composition.netPayableMinor, composition.currency)} />
+      </div>
+    </section>
+  );
+}
+
+function RefundOffsetPackages({ lines, currency }: { lines: SettlementApprovalLine[]; currency: string }) {
+  const packages = buildRefundOffsetPackages(lines);
+  if (!packages.length) {
+    return null;
+  }
+
+  return (
+    <section className="settlement-refund-packages" aria-label="Refund offset packages">
+      {packages.map((item) => (
+        <article key={item.key} className="settlement-refund-package">
+          <div>
+            <p className="eyebrow">Refund offset package</p>
+            <h4>{item.orderLabel}</h4>
+            {item.allocationLabel ? <small>{item.allocationLabel}</small> : null}
+          </div>
+          <div className="settlement-refund-package-grid">
+            <SummaryField label="Sale basis" value={formatMinor(item.saleBasisMinor, currency)} />
+            <SummaryField label="Refund offset" value={formatMinor(item.refundOffsetMinor, currency)} />
+            <SummaryField label="Net settlement effect" value={formatMinor(item.netEffectMinor, currency)} />
+          </div>
+          <small>Audit rows: {item.lineIds.join(', ')}</small>
+        </article>
       ))}
-    </OperationalTable>
+    </section>
   );
 }
 
@@ -493,16 +665,22 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
           These rows come from the SettlementApprovalLine snapshot. Current candidate previews do not recalculate these totals.
         </p>
       </div>
+      <SettlementCompositionSummary
+        lines={lines}
+        currency={approval.currency}
+        netPayableMinor={approval.netPayableMinor}
+      />
+      <RefundOffsetPackages lines={lines} currency={approval.currency} />
       <div className="settlement-approval-lines-list" aria-label="Selected settlement rows">
         {lines.map((line) => {
           const status = getApprovalLineStatus(line);
           const shopifyOrderId = readSnapshotString(line, 'sourceShopifyOrderId');
-          const allocationId = readSnapshotString(line, 'vendorAllocationId');
+          const allocationId = getApprovalLineAllocationLabel(line);
           const orderLabel = getApprovalLineOrderLabel(line);
           const adjustmentId = line.settlementRefundAdjustmentId ?? readSnapshotString(line, 'settlementRefundAdjustmentId');
           const adjustmentApplicationId =
             line.settlementRefundAdjustmentApplicationId ?? readSnapshotString(line, 'settlementRefundAdjustmentApplicationId');
-          const isRefundAdjustmentLine = String(line.lineType).toUpperCase() === 'REFUND_ADJUSTMENT';
+          const orderOrAllocationUnavailable = orderLabel === 'Unavailable' || !allocationId;
 
           return (
             <article
@@ -529,10 +707,10 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
                 </div>
                 <div>
                   <span>Status</span>
-                  <StatusBadge status={String(status.derived ?? 'unknown')}>{safeStatusLabel(status.derived ?? 'Unknown')}</StatusBadge>
-                  <small>Stored {valueOrDash(status.stored)}</small>
+                  <strong>Settlement status: {safeStatusLabel(status.derived ?? 'Unknown')}</strong>
+                  <small>Ledger state: {safeStatusLabel(status.stored ?? 'Unknown')}</small>
                 </div>
-                {isRefundAdjustmentLine ? (
+                {isRefundAdjustmentLine(line) ? (
                   <div>
                     <span>Adjustment</span>
                     <StatusBadge tone="success">APPLIED</StatusBadge>
@@ -541,10 +719,18 @@ function ApprovalSnapshotLines({ approval }: { approval: SettlementApproval }) {
                   </div>
                 ) : null}
               </div>
+              {orderOrAllocationUnavailable ? (
+                <p className="settlement-line-helper">
+                  This adjustment does not have an order/allocation snapshot in the approval line.
+                </p>
+              ) : null}
+              <p className="settlement-line-helper">
+                Settlement status is the business review state. Ledger state is the stored finance row state.
+              </p>
               <dl className="settlement-approval-line-money-grid">
                 <div>
                   <dt>Type</dt>
-                  <dd>{line.lineType}</dd>
+                  <dd><StatusBadge tone={getSettlementLineTone(line)}>{getSettlementLineDisplayLabel(line)}</StatusBadge></dd>
                 </div>
                 <div>
                   <dt>Amount</dt>
@@ -731,6 +917,9 @@ function RecentApprovalsPanel({
                 <SummaryField label="Created" value={formatDate(item.createdAt)} />
                 <SummaryField label="Approved" value={formatDate(item.approvedAt)} />
               </div>
+              {item.netPayableMinor === 0 && item.lineCount > 0 ? (
+                <p className="settlement-line-helper">Accounting review / zero payable</p>
+              ) : null}
               <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
                 Open
               </button>
@@ -1257,6 +1446,7 @@ export function AdminSettlementApprovalsPage() {
   const workspaceApprovalStatus = approval?.status ?? 'not created';
   const workspaceQualityLabel = approval ? 'SNAPSHOT' : candidateQualityClassification;
   const workspaceState = approval ? 'approval' : preview ? 'preview' : 'empty';
+  const zeroPayableApprovalReview = Boolean(approval?.status === 'draft' && approval.netPayableMinor === 0);
   const previewDebtProjection = preview
     ? {
         outstandingVendorDebtMinor: preview.summary.outstandingVendorDebtMinor ?? 0,
@@ -1407,7 +1597,9 @@ export function AdminSettlementApprovalsPage() {
       return 'Next: Create Draft.';
     }
     if (approval.status === 'draft') {
-      return 'Next: Approve Settlement.';
+      return zeroPayableApprovalReview
+        ? 'Next: Approve accounting review.'
+        : 'Next: Approve Settlement.';
     }
     if (approval.status === 'cancelled') {
       return 'Settlement is cancelled. Select or create another approval.';
@@ -1451,8 +1643,10 @@ export function AdminSettlementApprovalsPage() {
     }
     if (approval.status === 'draft') {
       return {
-        label: 'Approve Settlement',
-        detail: 'Writes local DB approval state only.',
+        label: zeroPayableApprovalReview ? 'Approve accounting review' : 'Approve Settlement',
+        detail: zeroPayableApprovalReview
+          ? 'This approval records settlement review for offsets and adjustments. It does not create a payable amount.'
+          : 'Writes local DB approval state only.',
         onClick: () => void handleApprove(),
         disabled: busyAction !== null,
       };
@@ -2092,7 +2286,7 @@ export function AdminSettlementApprovalsPage() {
                 <KPIStatCard label="Gross sales" value={formatMinor(approval.grossSalesMinor, approval.currency)} tone="info" />
                 <KPIStatCard label="Commission" value={formatMinor(approval.commissionMinor, approval.currency)} tone="info" />
                 <KPIStatCard label="Commission VAT" value={formatMinor(approval.commissionVatMinor, approval.currency)} tone="info" />
-                <KPIStatCard label="Net payable" value={formatMinor(approval.netPayableMinor, approval.currency)} tone="success" />
+                <KPIStatCard label="Net payable" value={formatMinor(approval.netPayableMinor, approval.currency)} tone={approval.netPayableMinor > 0 ? 'success' : 'neutral'} />
               </div>
               <ApprovalSnapshotLines approval={approval} />
             </>
@@ -2113,12 +2307,17 @@ export function AdminSettlementApprovalsPage() {
                   <KPIStatCard label="Gross sales" value={formatMinor(preview.summary.grossSalesMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission" value={formatMinor(preview.summary.commissionMinor, preview.summary.currency)} tone="info" />
                   <KPIStatCard label="Commission VAT" value={formatMinor(preview.summary.commissionVatMinor, preview.summary.currency)} tone="info" />
-                  <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone="success" />
+                  <KPIStatCard label="Net payable" value={formatMinor(preview.summary.netPayableMinor, preview.summary.currency)} tone={preview.summary.netPayableMinor > 0 ? 'success' : 'neutral'} />
                   <KPIStatCard label="Outstanding debt" value={formatMinor(previewDebtProjection?.outstandingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.outstandingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
                   <KPIStatCard label="Debt offset" value={formatMinor(previewDebtProjection?.debtOffsetPreviewMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.debtOffsetPreviewMinor ?? 0) > 0 ? 'warning' : 'neutral'} />
                   <KPIStatCard label="Net after debt" value={formatMinor(previewDebtProjection?.netPayableAfterDebtOffsetMinor ?? preview.summary.netPayableMinor, preview.summary.currency)} tone={(previewDebtProjection?.netPayableAfterDebtOffsetMinor ?? preview.summary.netPayableMinor) > 0 ? 'success' : 'neutral'} />
                   <KPIStatCard label="Remaining debt" value={formatMinor(previewDebtProjection?.remainingVendorDebtMinor ?? 0, preview.summary.currency)} tone={(previewDebtProjection?.remainingVendorDebtMinor ?? 0) > 0 ? 'danger' : 'neutral'} />
                 </div>
+                <SettlementCompositionSummary
+                  lines={preview.lines}
+                  currency={preview.summary.currency}
+                  netPayableMinor={preview.summary.netPayableMinor}
+                />
                 <CandidateQualityCard
                   preview={preview}
                   classification={candidateQualityClassification}
@@ -2693,7 +2892,7 @@ export function AdminSettlementApprovalsPage() {
             </MetadataGroup>
             <section className="op-panel-section">
               <h3>Sample eligible lines</h3>
-              <LineSamples lines={preview.lines} />
+              <LineSamples lines={preview.lines} currency={preview.summary.currency} />
             </section>
           </>
         ) : null}

@@ -562,6 +562,80 @@ const draftApprovalWithAdjustmentLine: SettlementApproval = {
   ],
 };
 
+const zeroPayableRefundOffsetApproval: SettlementApproval = {
+  ...draftApproval,
+  id: 'approval-zero-offset',
+  grossSalesMinor: 409900,
+  refundTotalMinor: 409900,
+  commissionMinor: 0,
+  commissionVatMinor: 0,
+  netPayableMinor: 0,
+  lines: [
+    {
+      id: 'line-sale-refunded-1098',
+      financeLedgerEntryId: 'fle-sale-1098',
+      lineType: 'SALE',
+      amountMinor: 409900,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      payableImpactMinor: 409900,
+      sourceSnapshotJson: {
+        financeLedgerEntryId: 'fle-sale-1098',
+        vendorAllocationId: 'alloc-yalispor-1098',
+        sourceShopifyOrderId: 'shopify-order-1098',
+        sourceShopifyOrderNumber: '#1098',
+        settlementStatus: 'ACCRUING',
+        resolvedSettlementStatus: 'PARTIALLY_REFUNDED',
+      },
+      storedSettlementStatus: 'ACCRUING',
+      derivedSettlementStatus: 'PARTIALLY_REFUNDED',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Refunded sale basis retained for settlement offset review.',
+      refundDetected: true,
+      refundCount: 1,
+    },
+    {
+      id: 'line-refund-1098',
+      financeLedgerEntryId: 'fle-refund-1098',
+      lineType: 'REFUND',
+      amountMinor: -409900,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      payableImpactMinor: -409900,
+      sourceSnapshotJson: {
+        financeLedgerEntryId: 'fle-refund-1098',
+        vendorAllocationId: 'alloc-yalispor-1098',
+        sourceShopifyOrderId: 'shopify-order-1098',
+        sourceShopifyOrderNumber: '#1098',
+        settlementStatus: 'PENDING_REVIEW',
+        resolvedSettlementStatus: 'REFUND_OFFSET',
+      },
+      storedSettlementStatus: 'PENDING_REVIEW',
+      derivedSettlementStatus: 'REFUND_OFFSET',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Refund offset included for settlement review.',
+    },
+    {
+      id: 'line-adjustment-unavailable',
+      financeLedgerEntryId: 'fle-refund-adjustment',
+      settlementRefundAdjustmentId: 'adjustment-missing-snapshot',
+      lineType: 'REFUND_ADJUSTMENT',
+      amountMinor: 0,
+      commissionMinor: 0,
+      commissionVatMinor: 0,
+      payableImpactMinor: 0,
+      sourceSnapshotJson: {
+        settlementRefundAdjustmentId: 'adjustment-missing-snapshot',
+        adjustmentStatus: 'APPLIED',
+      },
+      storedSettlementStatus: 'pending_adjustment',
+      derivedSettlementStatus: 'refund_adjustment_applied',
+      eligibilityDecision: 'included',
+      eligibilityReason: 'Adjustment carried forward.',
+    },
+  ],
+};
+
 const approvedApproval: SettlementApproval = {
   ...draftApproval,
   status: 'approved',
@@ -1509,13 +1583,68 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
-    expect(screen.getByText('REFUND_ADJUSTMENT')).toBeInTheDocument();
+    expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
     expect(screen.getByText('adjustment-1086')).toBeInTheDocument();
     expect(screen.getByText('order-1086')).toBeInTheDocument();
     expect(screen.getByText((_content, element) =>
       element?.textContent?.replace(/\u00a0/g, ' ') === '-TRY 400.00'
     )).toBeInTheDocument();
     expect(screen.getAllByText('APPLIED').length).toBeGreaterThan(0);
+  });
+
+  it('clarifies zero-payable refund offset packages in loaded approval snapshots', async () => {
+    getSettlementApprovalMock.mockResolvedValueOnce(zeroPayableRefundOffsetApproval);
+    renderPage();
+
+    const openButtons = await screen.findAllByRole('button', { name: 'Open' });
+    await userEvent.click(openButtons[1]);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
+
+    const composition = screen.getByLabelText('Settlement composition');
+    expect(within(composition).getByText('Payable sales')).toBeInTheDocument();
+    expect(within(composition).getByText('Refunded sale basis')).toBeInTheDocument();
+    expect(within(composition).getByText('Refund offsets')).toBeInTheDocument();
+    expect(within(composition).getByText('Refund adjustments')).toBeInTheDocument();
+    expect(within(composition).getByText('Net payable')).toBeInTheDocument();
+    expect(within(composition).getByText('TRY 0.00')).toBeInTheDocument();
+
+    const packageSummary = screen.getByLabelText('Refund offset packages');
+    expect(within(packageSummary).getByText('Refund offset package')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('#1098')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('alloc-yalispor-1098')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Sale basis')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Refund offset')).toBeInTheDocument();
+    expect(within(packageSummary).getByText('Net settlement effect')).toBeInTheDocument();
+
+    expect(screen.getAllByText('Refunded sale basis').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Refund offset').length).toBeGreaterThan(1);
+    expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
+    expect(screen.getAllByText('Settlement status is the business review state. Ledger state is the stored finance row state.').length).toBeGreaterThan(0);
+    expect(screen.getByText('This adjustment does not have an order/allocation snapshot in the approval line.')).toBeInTheDocument();
+    expect(screen.getByText('Next: Approve accounting review.')).toBeInTheDocument();
+    expect(screen.getByText('This approval records settlement review for offsets and adjustments. It does not create a payable amount.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve accounting review' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+  });
+
+  it('labels zero-payable history as accounting review', async () => {
+    listSettlementApprovalsMock.mockResolvedValueOnce({
+      ...recentApprovalsResponse,
+      approvals: [
+        {
+          ...recentApprovalsResponse.approvals[0],
+          id: 'approval-zero-history',
+          netPayableMinor: 0,
+          lineCount: 2,
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    expect(screen.getByText('Accounting review / zero payable')).toBeInTheDocument();
   });
 
   it('loads settlement preview totals and sample lines', async () => {
