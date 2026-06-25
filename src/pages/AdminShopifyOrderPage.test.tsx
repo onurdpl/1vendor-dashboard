@@ -82,6 +82,7 @@ function buildAllocation(
     transferSummary: null,
     cancelRefundReview: null,
     outboundRefundAttemptSummary: null,
+    productPanelVariantDisableEvents: [],
     splitSummary: {
       splitEventId: 'split-event-1',
       sourceAllocationId: 'alloc-source',
@@ -193,6 +194,36 @@ describe('AdminShopifyOrderPage split visibility', () => {
       allocations: [
         buildAllocation({
           fulfillmentActionState: 'awaiting_shipment',
+          productPanelVariantDisableEvents: [
+            {
+              id: 'product-panel-event-1',
+              status: 'RESOLVED_DRY_RUN',
+              shopifyVariantId: 'gid://shopify/ProductVariant/111',
+              shopifyLineItemId: 'gid://shopify/LineItem/1',
+              variantSku: 'SKU-1088',
+              reasonCode: 'OUT_OF_STOCK',
+              reasonText: 'Selected size is unavailable.',
+              quantity: 1,
+              requestedAt: '2026-06-21T12:46:00.000Z',
+              environment: 'test',
+              dryRun: true,
+              attemptCount: 1,
+              error: null,
+              resolvedAt: '2026-06-21T12:47:00.000Z',
+              failedAt: null,
+              response: {
+                accepted: true,
+                dryRun: true,
+                canResolve: true,
+                parentSku: 'PARENT-SKU-1088',
+                normalizedSize: '42',
+                sizeKey: '42',
+                resolutionMethod: 'shopify_variant_metafield',
+                confidence: 'high',
+                writesPerformed: false,
+              },
+            },
+          ],
         }),
       ],
     });
@@ -223,6 +254,10 @@ describe('AdminShopifyOrderPage split visibility', () => {
     expect(screen.getByText('Allocation split created')).toBeInTheDocument();
     expect(screen.getByText('Selected items moved to blocked allocation')).toBeInTheDocument();
       expect(screen.getByText('Child allocation awaiting admin resolution')).toBeInTheDocument();
+    expect(screen.getByText('Variant Disable dry-run resolved')).toBeInTheDocument();
+    expect(screen.getByText(/Parent SKU: PARENT-SKU-1088/)).toBeInTheDocument();
+    expect(screen.getByText(/Size: 42/)).toBeInTheDocument();
+    expect(screen.getByText(/Confidence: high/)).toBeInTheDocument();
     });
 
     it('renders return ownership context for allocations with return records', async () => {

@@ -56,6 +56,7 @@ import {
   splitAllocationForLineItemReject,
   type AllocationSplitServiceResult,
 } from './allocation-split.service.js';
+import { enqueueProductPanelVariantDisableEventsForRejectedAllocation } from '../product-panel/product-panel-variant-disable-outbox.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
@@ -212,6 +213,64 @@ function mapAllocationSplitSummary(event: {
       quantity: lineItem.quantity,
       lineAmount: toNumber(lineItem.lineAmount),
     })),
+  };
+}
+
+function readProductPanelResponseValue(response: unknown, key: string) {
+  return response && typeof response === 'object' && !Array.isArray(response)
+    ? (response as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function mapProductPanelVariantDisableEventSummary(event: {
+  id: string;
+  status: string;
+  shopifyVariantId: string | null;
+  shopifyLineItemId: string;
+  variantSku: string | null;
+  reasonCode: string;
+  reasonText: string | null;
+  quantity: number;
+  requestedAt: Date;
+  environment: string;
+  dryRun: boolean;
+  attemptCount: number;
+  error: string | null;
+  resolvedAt: Date | null;
+  failedAt: Date | null;
+  responseJson: unknown;
+}) {
+  const response = event.responseJson
+    ? {
+        accepted: readProductPanelResponseValue(event.responseJson, 'accepted'),
+        dryRun: readProductPanelResponseValue(event.responseJson, 'dryRun'),
+        canResolve: readProductPanelResponseValue(event.responseJson, 'canResolve'),
+        parentSku: readProductPanelResponseValue(event.responseJson, 'parentSku'),
+        normalizedSize: readProductPanelResponseValue(event.responseJson, 'normalizedSize'),
+        sizeKey: readProductPanelResponseValue(event.responseJson, 'sizeKey'),
+        resolutionMethod: readProductPanelResponseValue(event.responseJson, 'resolutionMethod'),
+        confidence: readProductPanelResponseValue(event.responseJson, 'confidence'),
+        writesPerformed: readProductPanelResponseValue(event.responseJson, 'writesPerformed'),
+      }
+    : null;
+
+  return {
+    id: event.id,
+    status: event.status,
+    shopifyVariantId: event.shopifyVariantId,
+    shopifyLineItemId: event.shopifyLineItemId,
+    variantSku: event.variantSku,
+    reasonCode: event.reasonCode,
+    reasonText: event.reasonText,
+    quantity: event.quantity,
+    requestedAt: event.requestedAt.toISOString(),
+    environment: event.environment,
+    dryRun: event.dryRun,
+    attemptCount: event.attemptCount,
+    error: event.error,
+    resolvedAt: toIsoString(event.resolvedAt),
+    failedAt: toIsoString(event.failedAt),
+    response,
   };
 }
 
@@ -2220,6 +2279,22 @@ export async function rejectVendorOrderAllocation(
     });
   });
 
+  if (reason === CancellationReason.OUT_OF_STOCK) {
+    try {
+      await enqueueProductPanelVariantDisableEventsForRejectedAllocation({
+        allocationId: orderId,
+        reasonCode: reason,
+        reasonText: note,
+      });
+    } catch (error) {
+      console.warn('Product Panel variant disable outbox enqueue failed after vendor reject.', {
+        allocationId: orderId,
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const updatedOrder = await getVendorOrderById(vendorId, orderId);
   if (!updatedOrder) {
     throw new OrderRejectValidationError('Order not found after reject update.', 404);
@@ -3909,6 +3984,29 @@ export async function getAdminShopifyOrderBreakdown(
             },
             take: 1,
           },
+          productPanelVariantDisableEvents: {
+            select: {
+              id: true,
+              status: true,
+              shopifyVariantId: true,
+              shopifyLineItemId: true,
+              variantSku: true,
+              reasonCode: true,
+              reasonText: true,
+              quantity: true,
+              requestedAt: true,
+              environment: true,
+              dryRun: true,
+              attemptCount: true,
+              error: true,
+              resolvedAt: true,
+              failedAt: true,
+              responseJson: true,
+            },
+            orderBy: {
+              requestedAt: 'desc',
+            },
+          },
         },
         orderBy: {
           createdAt: 'asc',
@@ -4050,6 +4148,9 @@ export async function getAdminShopifyOrderBreakdown(
         splitSummary: mapAllocationSplitSummary(
           allocation.childAllocationSplitEvents[0] ?? allocation.sourceAllocationSplitEvents[0] ?? null,
           allocation.id,
+        ),
+        productPanelVariantDisableEvents: allocation.productPanelVariantDisableEvents.map(
+          mapProductPanelVariantDisableEventSummary,
         ),
       };
     }),

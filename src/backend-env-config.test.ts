@@ -219,6 +219,22 @@ describe('backend env shipping provider gates', () => {
     expect(env.KARGONOMI_APP_KEY).toBeUndefined();
   });
 
+  it('parses Product Panel variant disable dry-run feature flags safely disabled by default', () => {
+    resetEnv({
+      PRODUCT_PANEL_BASE_URL: 'https://product-panel.example',
+      PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: undefined,
+      PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: undefined,
+      PRODUCT_PANEL_HMAC_SECRET: 'configured-product-panel-secret',
+    });
+
+    const env = loadEnv();
+
+    expect(env.PRODUCT_PANEL_BASE_URL).toBe('https://product-panel.example');
+    expect(env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED).toBe(false);
+    expect(env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN).toBe(true);
+    expect(env.PRODUCT_PANEL_HMAC_SECRET).toBe('configured-product-panel-secret');
+  });
+
   it('parses Navlungo env values without switching provider by default', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'hepsijet',

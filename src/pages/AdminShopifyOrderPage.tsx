@@ -270,6 +270,36 @@ function getSplitMovedItemCount(allocation: ShopifyOrderBreakdown['allocations']
   return allocation.splitSummary?.movedItems?.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
 }
 
+function formatProductPanelResponseValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  return String(value);
+}
+
+function buildProductPanelVariantDisableMeta(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
+) {
+  const response = event.response;
+  const parentSku = formatProductPanelResponseValue(response?.parentSku);
+  const normalizedSize = formatProductPanelResponseValue(response?.normalizedSize);
+  const confidence = formatProductPanelResponseValue(response?.confidence);
+  const resolutionMethod = formatProductPanelResponseValue(response?.resolutionMethod);
+  const parts = [
+    event.variantSku ?? event.shopifyVariantId ?? 'Variant',
+    `Reason: ${event.reasonCode}`,
+    parentSku ? `Parent SKU: ${parentSku}` : null,
+    normalizedSize ? `Size: ${normalizedSize}` : null,
+    confidence ? `Confidence: ${confidence}` : null,
+    resolutionMethod ? `Resolution: ${resolutionMethod}` : null,
+    event.error ? `Error: ${event.error}` : null,
+    event.dryRun ? 'Dry run' : null,
+    formatDate(event.resolvedAt ?? event.failedAt ?? event.requestedAt),
+  ].filter(Boolean);
+
+  return parts.join(' · ');
+}
+
 function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['allocations'][number]) {
   const splitSummary = allocation.splitSummary;
   const events = allocation.assignmentHistory
@@ -313,6 +343,22 @@ function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['alloca
         at: splitSummary.createdAt,
       });
     }
+  }
+
+  for (const productPanelEvent of allocation.productPanelVariantDisableEvents ?? []) {
+    const normalizedStatus = normalizeStateToken(productPanelEvent.status);
+    const title =
+      normalizedStatus === 'resolved_dry_run'
+        ? 'Variant Disable dry-run resolved'
+        : normalizedStatus === 'failed'
+          ? 'Variant Disable dry-run failed'
+          : 'Variant Disable dry-run queued';
+    events.push({
+      key: `${allocation.vendorId}-product-panel-${productPanelEvent.id}`,
+      title,
+      meta: buildProductPanelVariantDisableMeta(productPanelEvent),
+      at: productPanelEvent.resolvedAt ?? productPanelEvent.failedAt ?? productPanelEvent.requestedAt,
+    });
   }
 
   const attempt = allocation.outboundRefundAttemptSummary;

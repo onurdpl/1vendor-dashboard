@@ -665,6 +665,35 @@ export type AdminOutboundRefundAttemptSummaryDto = {
   postRefundFulfillmentCheckMessage: string | null;
 };
 
+export type AdminProductPanelVariantDisableEventSummaryDto = {
+  id: string;
+  status: string;
+  shopifyVariantId: string | null;
+  shopifyLineItemId: string;
+  variantSku: string | null;
+  reasonCode: string;
+  reasonText: string | null;
+  quantity: number;
+  requestedAt: string;
+  environment: string;
+  dryRun: boolean;
+  attemptCount: number;
+  error: string | null;
+  resolvedAt: string | null;
+  failedAt: string | null;
+  response: {
+    accepted?: unknown;
+    dryRun?: unknown;
+    canResolve?: unknown;
+    parentSku?: unknown;
+    normalizedSize?: unknown;
+    sizeKey?: unknown;
+    resolutionMethod?: unknown;
+    confidence?: unknown;
+    writesPerformed?: unknown;
+  } | null;
+};
+
 export type AdminOrderBreakdownAllocationDto = {
   id: string;
   vendorId: string;
@@ -714,6 +743,7 @@ export type AdminOrderBreakdownAllocationDto = {
   splitSummary?: AllocationSplitSummaryDto | null;
   cancelRefundReview: AdminCancelRefundReviewDto | null;
   outboundRefundAttemptSummary: AdminOutboundRefundAttemptSummaryDto | null;
+  productPanelVariantDisableEvents: AdminProductPanelVariantDisableEventSummaryDto[];
 };
 
 export type AdminOrderBreakdownDto = {

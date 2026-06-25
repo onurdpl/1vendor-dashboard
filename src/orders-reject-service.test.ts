@@ -32,6 +32,7 @@ const prismaMock = vi.hoisted(() => ({
   },
 }));
 const transferAllocationEconomicsMock = vi.hoisted(() => vi.fn());
+const enqueueProductPanelVariantDisableEventsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
@@ -39,6 +40,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
   transferAllocationEconomics: transferAllocationEconomicsMock,
+}));
+
+vi.mock('../backend/src/modules/product-panel/product-panel-variant-disable-outbox.service.js', () => ({
+  enqueueProductPanelVariantDisableEventsForRejectedAllocation: enqueueProductPanelVariantDisableEventsMock,
 }));
 
 const {
@@ -167,6 +172,7 @@ function buildDetailAllocation(overrides: Record<string, unknown> = {}) {
     economicTransfers: [] as Array<Record<string, unknown>>,
     financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
     outboundShopifyRefundAttempts: [] as Array<Record<string, unknown>>,
+    productPanelVariantDisableEvents: [] as Array<Record<string, unknown>>,
     ...overrides,
   };
 }
@@ -297,6 +303,7 @@ function buildAdminOrderBreakdownDb() {
         refundRecords: [],
         financeIntegrityAlerts: [] as Array<Record<string, unknown>>,
         outboundShopifyRefundAttempts: [] as Array<Record<string, unknown>>,
+        productPanelVariantDisableEvents: [] as Array<Record<string, unknown>>,
       },
     ],
   };
@@ -306,6 +313,7 @@ describe('vendor order reject operational hold', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    enqueueProductPanelVariantDisableEventsMock.mockResolvedValue([]);
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
     prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
@@ -374,9 +382,66 @@ describe('vendor order reject operational hold', () => {
         actorUserId: 'user-1',
       },
     });
+    expect(enqueueProductPanelVariantDisableEventsMock).toHaveBeenCalledWith({
+      allocationId: 'alloc-1088',
+      reasonCode: 'OUT_OF_STOCK',
+      reasonText: 'Missing stock',
+    });
+    expect(enqueueProductPanelVariantDisableEventsMock.mock.invocationCallOrder[0]).toBeGreaterThan(
+      prismaMock.$transaction.mock.invocationCallOrder[0],
+    );
     expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
     expect(result.reassignmentRequired).toBe(true);
     expect(result.cancellationReason).toBe('OUT_OF_STOCK');
+  });
+
+  it('does not enqueue Product Panel availability events for non-stock rejection reasons', async () => {
+    prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
+      .mockResolvedValueOnce(
+        buildDetailAllocation({
+          cancellationReason: 'FULFILLMENT_ISSUE',
+        }),
+      );
+
+    const result = await rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
+      reason: 'FULFILLMENT_ISSUE',
+      note: 'Cannot fulfill this order safely',
+      actorUserId: 'user-1',
+    });
+
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
+      where: { id: 'alloc-1088' },
+      data: {
+        allocationStatus: 'VENDOR_BLOCKED',
+        reassignmentRequired: true,
+        cancellationReason: 'FULFILLMENT_ISSUE',
+      },
+    });
+    expect(enqueueProductPanelVariantDisableEventsMock).not.toHaveBeenCalled();
+    expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
+  });
+
+  it('keeps vendor reject successful when Product Panel outbox enqueue fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    enqueueProductPanelVariantDisableEventsMock.mockRejectedValueOnce(new Error('outbox unavailable'));
+    prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
+      .mockResolvedValueOnce(buildDetailAllocation());
+
+    try {
+      const result = await rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: 'Missing stock',
+        actorUserId: 'user-1',
+      });
+
+      expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
+      expect(prismaMock.vendorAllocation.update).toHaveBeenCalled();
+      expect(enqueueProductPanelVariantDisableEventsMock).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('blocks another vendor from rejecting the allocation', async () => {

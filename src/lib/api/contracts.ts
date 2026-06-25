@@ -1019,6 +1019,35 @@ export type OutboundRefundAttemptSummary = {
   postRefundFulfillmentCheckMessage: string | null;
 };
 
+export type ProductPanelVariantDisableEventSummary = {
+  id: string;
+  status: string;
+  shopifyVariantId: string | null;
+  shopifyLineItemId: string;
+  variantSku: string | null;
+  reasonCode: string;
+  reasonText: string | null;
+  quantity: number;
+  requestedAt: string;
+  environment: string;
+  dryRun: boolean;
+  attemptCount: number;
+  error: string | null;
+  resolvedAt: string | null;
+  failedAt: string | null;
+  response: {
+    accepted?: unknown;
+    dryRun?: unknown;
+    canResolve?: unknown;
+    parentSku?: unknown;
+    normalizedSize?: unknown;
+    sizeKey?: unknown;
+    resolutionMethod?: unknown;
+    confidence?: unknown;
+    writesPerformed?: unknown;
+  } | null;
+};
+
 export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
 
 export type FulfillmentOrderCancellationClassification =
@@ -1174,6 +1203,7 @@ export type VendorAllocationSummary = {
   splitSummary?: AllocationSplitSummary | null;
   cancelRefundReview?: CancelRefundReviewSummary | null;
   outboundRefundAttemptSummary?: OutboundRefundAttemptSummary | null;
+  productPanelVariantDisableEvents?: ProductPanelVariantDisableEventSummary[];
 };
 
 export type FinanceIntegrityAlertSummary = {

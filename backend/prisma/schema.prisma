@@ -29,6 +29,12 @@ enum CancellationReason {
   FULFILLMENT_ISSUE
 }
 
+enum ProductPanelVariantDisableOutboxStatus {
+  CREATED
+  RESOLVED_DRY_RUN
+  FAILED
+}
+
 enum WebhookStatus {
   RECEIVED
   PROCESSING
@@ -603,21 +609,21 @@ model ShopifyOrderLineItem {
 }
 
 model VendorAllocation {
-  id                                     String                           @id @default(cuid())
+  id                                     String                                  @id @default(cuid())
   sourceShopifyOrderId                   String
   sourceShopifyOrderNumber               String
   originalVendorId                       String
   assignedVendorId                       String
-  allocationStatus                       AllocationStatus                 @default(ACTIVE)
+  allocationStatus                       AllocationStatus                        @default(ACTIVE)
   cancellationReason                     CancellationReason?
-  reassignmentRequired                   Boolean                          @default(false)
+  reassignmentRequired                   Boolean                                 @default(false)
   cancelRefundReviewStatus               String?
   cancelRefundReviewReason               String?
   cancelRefundReviewNote                 String?
   cancelRefundReviewRequestedAt          DateTime?
   cancelRefundReviewRequestedByUserId    String?
-  fulfillmentStatus                      String                           @default("Pending")
-  shippingStatus                         String                           @default("Awaiting Shipment")
+  fulfillmentStatus                      String                                  @default("Pending")
+  shippingStatus                         String                                  @default("Awaiting Shipment")
   trackingNumber                         String?
   carrier                                String?
   vendorIntegrationTrackingUrl           String?
@@ -634,14 +640,14 @@ model VendorAllocation {
   vendorInvoiceNumber                    String?
   vendorInvoiceDate                      DateTime?
   vendorInvoiceUrl                       String?
-  vendorInvoiceAmount                    Decimal?                         @db.Decimal(10, 2)
+  vendorInvoiceAmount                    Decimal?                                @db.Decimal(10, 2)
   vendorInvoiceReceivedAt                DateTime?
   lastVendorIntegrationInvoiceRequestId  String?
-  createdAt                              DateTime                         @default(now())
-  updatedAt                              DateTime                         @updatedAt
-  order                                  ShopifyOrder                     @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
-  originalVendor                         Vendor                           @relation("originalVendor", fields: [originalVendorId], references: [id])
-  assignedVendor                         Vendor                           @relation("assignedVendor", fields: [assignedVendorId], references: [id])
+  createdAt                              DateTime                                @default(now())
+  updatedAt                              DateTime                                @updatedAt
+  order                                  ShopifyOrder                            @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
+  originalVendor                         Vendor                                  @relation("originalVendor", fields: [originalVendorId], references: [id])
+  assignedVendor                         Vendor                                  @relation("assignedVendor", fields: [assignedVendorId], references: [id])
   lineItems                              VendorAllocationLineItem[]
   assignmentHistory                      AllocationAssignmentHistory[]
   fulfillment                            Fulfillment?
@@ -659,8 +665,9 @@ model VendorAllocation {
   vendorIntegrationShipmentEvents        VendorIntegrationShipmentEvent[]
   vendorIntegrationInvoiceEvents         VendorIntegrationInvoiceEvent[]
   outboundShopifyRefundAttempts          OutboundShopifyRefundAttempt[]
-  sourceAllocationSplitEvents            AllocationSplitEvent[]           @relation("allocationSplitSourceAllocation")
-  childAllocationSplitEvents             AllocationSplitEvent[]           @relation("allocationSplitChildAllocation")
+  productPanelVariantDisableEvents       ProductPanelVariantDisableOutboxEvent[]
+  sourceAllocationSplitEvents            AllocationSplitEvent[]                  @relation("allocationSplitSourceAllocation")
+  childAllocationSplitEvents             AllocationSplitEvent[]                  @relation("allocationSplitChildAllocation")
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
@@ -767,17 +774,55 @@ model VendorIntegrationStatusEvent {
 }
 
 model VendorAllocationLineItem {
-  id                   String               @id @default(cuid())
-  vendorAllocationId   String
-  shopifyLineItemId    String
-  quantity             Int                  @default(1)
-  lineAmount           Decimal?             @db.Decimal(10, 2)
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  vendorAllocation     VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  shopifyOrderLineItem ShopifyOrderLineItem @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
+  id                               String                                  @id @default(cuid())
+  vendorAllocationId               String
+  shopifyLineItemId                String
+  quantity                         Int                                     @default(1)
+  lineAmount                       Decimal?                                @db.Decimal(10, 2)
+  createdAt                        DateTime                                @default(now())
+  updatedAt                        DateTime                                @updatedAt
+  vendorAllocation                 VendorAllocation                        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  shopifyOrderLineItem             ShopifyOrderLineItem                    @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
+  productPanelVariantDisableEvents ProductPanelVariantDisableOutboxEvent[]
 
   @@unique([vendorAllocationId, shopifyLineItemId])
+}
+
+model ProductPanelVariantDisableOutboxEvent {
+  id                         String                                 @id @default(cuid())
+  allocationId               String
+  vendorAllocationLineItemId String
+  shopifyVariantId           String?
+  shopifyLineItemId          String
+  variantSku                 String?
+  vendorId                   String
+  vendorName                 String?
+  shopifyOrderId             String
+  shopifyOrderName           String?
+  reasonCode                 String
+  reasonText                 String?
+  quantity                   Int
+  requestedAt                DateTime                               @default(now())
+  environment                String
+  dryRun                     Boolean                                @default(true)
+  attemptCount               Int                                    @default(0)
+  status                     ProductPanelVariantDisableOutboxStatus @default(CREATED)
+  error                      String?
+  idempotencyKey             String                                 @unique
+  requestPayloadJson         Json?
+  responseJson               Json?
+  resolvedAt                 DateTime?
+  failedAt                   DateTime?
+  createdAt                  DateTime                               @default(now())
+  updatedAt                  DateTime                               @updatedAt
+  allocation                 VendorAllocation                       @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  vendorAllocationLineItem   VendorAllocationLineItem               @relation(fields: [vendorAllocationLineItemId], references: [id], onDelete: Cascade)
+
+  @@index([allocationId])
+  @@index([vendorAllocationLineItemId])
+  @@index([vendorId])
+  @@index([shopifyOrderId])
+  @@index([status, requestedAt])
 }
 
 model AllocationAssignmentHistory {
