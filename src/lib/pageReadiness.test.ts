@@ -19,6 +19,8 @@ function makeReadiness(overrides: Partial<AppReadinessState> = {}): AppReadiness
       vendorId: 'demo-vendor-a',
       vendorName: 'Demo Vendor A',
     },
+    authConfirmed: true,
+    authRestorePhase: 'confirmed',
     sessionReady: true,
     vendorReady: true,
     ready: true,

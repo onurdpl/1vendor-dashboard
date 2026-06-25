@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
-import { login, probePublicLoginReadiness } from './services/backend-auth';
+import { login, me, probePublicLoginReadiness } from './services/backend-auth';
 
 describe('backend auth client diagnostics', () => {
   const fetchMock = vi.fn();
@@ -109,6 +109,19 @@ describe('backend auth client diagnostics', () => {
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/auth/diagnostics/public-login-readiness');
     expect((init as RequestInit).credentials).toBe('same-origin');
     expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-probe123');
+    expect(JSON.stringify(init)).not.toContain('sporgym_session=');
+    expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('sends restore attempt id on /auth/me without exposing session material', async () => {
+    await me({ authAttemptId: 'restore-test123' });
+
+    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const headers = new Headers((init as RequestInit).headers);
+
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/auth/me');
+    expect((init as RequestInit).credentials).toBe('same-origin');
+    expect(headers.get('X-Auth-Attempt-Id')).toBe('restore-test123');
     expect(JSON.stringify(init)).not.toContain('sporgym_session=');
     expect(JSON.stringify(init)).not.toContain('csrf-token');
   });

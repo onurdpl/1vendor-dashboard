@@ -3,11 +3,13 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken } from '../lib/auth';
 import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
+import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
 import { ActionFeedback } from './ActionFeedback';
+import { runtimeConfig } from '../config/runtime';
 
 type ShellIconName =
   | 'dashboard'
@@ -170,6 +172,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const appReadiness = useAppReadiness();
+  const authRestore = useAuthRestoreSnapshot();
   const currentUser = appReadiness.currentUser;
   const isAdmin = currentUser?.role === 'admin';
   const isDashboardRoute = location.pathname === '/';
@@ -188,6 +191,13 @@ export function AppShell() {
     : vendors;
   const currentVendor =
     visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0] ?? missingVendorContext;
+  const showSessionRestoreBanner = runtimeConfig.apiMode === 'real' && Boolean(currentUser) && !appReadiness.authConfirmed;
+  const sessionRestoreNeedsAttention = authRestore.phase === 'restore_error' || authRestore.delayed;
+  const frontendBuildLabel = [
+    runtimeConfig.gitCommit ? `commit ${runtimeConfig.gitCommit}` : null,
+    runtimeConfig.buildTimestamp ? `built ${runtimeConfig.buildTimestamp}` : null,
+    `version ${runtimeConfig.appVersion}`,
+  ].filter(Boolean).join(' · ');
 
   useEffect(() => {
     setSelectedVendorId(appReadiness.currentVendor.vendorId);
@@ -200,6 +210,11 @@ export function AppShell() {
     globalThis.setTimeout(() => {
       navigate('/login', { replace: true });
     }, 180);
+  }
+
+  function handleSignInAgain() {
+    clearToken();
+    navigate('/login', { replace: true });
   }
 
   function handleVendorChange(nextVendorId: string) {
@@ -317,6 +332,38 @@ export function AppShell() {
             </div>
           </>
         )}
+        {showSessionRestoreBanner ? (
+          <section
+            className={`auth-restore-banner ${sessionRestoreNeedsAttention ? 'auth-restore-banner-attention' : ''}`}
+            role={sessionRestoreNeedsAttention ? 'alert' : 'status'}
+          >
+            <div>
+              <p className="eyebrow">Session</p>
+              <h2>
+                {sessionRestoreNeedsAttention
+                  ? 'Session check is taking longer than expected'
+                  : 'Checking your session'}
+              </h2>
+              <p>
+                {sessionRestoreNeedsAttention
+                  ? 'The workspace shell is available, but protected data remains locked until the backend confirms your session.'
+                  : 'Protected data will load after the backend confirms your session.'}
+              </p>
+              <div className="auth-restore-meta">
+                {authRestore.restoreAttemptId ? <span>Reference {authRestore.restoreAttemptId}</span> : null}
+                <span>{frontendBuildLabel}</span>
+              </div>
+            </div>
+            <div className="auth-restore-actions">
+              <button type="button" className="button button-secondary" onClick={requestAuthRestoreRetry}>
+                Retry
+              </button>
+              <button type="button" className="button button-ghost" onClick={handleSignInAgain}>
+                Sign in again
+              </button>
+            </div>
+          </section>
+        ) : null}
         <main className="page-frame">
           <Outlet />
         </main>

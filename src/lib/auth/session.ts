@@ -1,5 +1,6 @@
 import type { UserRole } from './permissions';
 import type { VendorId } from './vendorContext';
+import { clearAuthRestoreState } from './restoreState';
 
 const TOKEN_KEY = 'vendor-dashboard.session-token';
 const CURRENT_USER_KEY = 'vendor-dashboard.current-user';
@@ -233,6 +234,7 @@ export function clearToken(options: { reason?: 'expired'; intendedPath?: string 
   }
 
   window.localStorage.removeItem(TOKEN_KEY);
+  clearAuthRestoreState();
   clearCurrentUser();
 }
 
@@ -299,6 +301,7 @@ export function createCurrentUserFromVendorAccess(input: {
 
 export function clearCurrentUser() {
   window.localStorage.removeItem(CURRENT_USER_KEY);
+  clearAuthRestoreState();
   dispatchSessionReset();
 }
 

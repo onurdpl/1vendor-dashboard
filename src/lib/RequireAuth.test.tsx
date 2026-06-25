@@ -1,8 +1,9 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RequireAuth } from './RequireAuth';
-import { clearToken, setCurrentUser, setToken } from './auth';
+import { clearAuthRestoreState, clearToken, setCurrentUser, setToken } from './auth';
 import { ApiError } from './api/errors';
 
 function seedSession() {
@@ -41,12 +42,24 @@ function RouteProbe() {
   );
 }
 
+function makeDeferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 afterEach(() => {
   cleanup();
   vi.doUnmock('../config/runtime');
   vi.doUnmock('../services/runtime-services');
   vi.resetModules();
   vi.useRealTimers();
+  clearAuthRestoreState();
   window.localStorage.clear();
   window.history.replaceState({}, '', '/');
 });
@@ -76,28 +89,45 @@ describe('RequireAuth', () => {
     expect(screen.getByText('Login screen')).toBeInTheDocument();
   });
 
-  it('does not render protected routes in real mode until /auth/me restores the cookie session', async () => {
+  it('renders cached shell immediately in real mode while protected data stays locked until /auth/me confirms', async () => {
     vi.resetModules();
     vi.doMock('../config/runtime', () => ({
       runtimeConfig: {
         apiMode: 'real',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
       },
     }));
-    let resolveMe: ((user: ReturnType<typeof buildTestUser>) => void) | null = null;
-    const meMock = vi.fn(() => new Promise<ReturnType<typeof buildTestUser>>((resolve) => {
-      resolveMe = resolve;
-    }));
+    const deferred = makeDeferred<ReturnType<typeof buildTestUser>>();
+    const meMock = vi.fn(() => deferred.promise);
     vi.doMock('../services/runtime-services', () => ({
       runtimeServices: {
         auth: {
           me: meMock,
         },
       },
-    }));
-    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+	    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth, appReadiness] = await Promise.all([
       import('./RequireAuth'),
       import('./auth'),
+      import('./appReadiness'),
     ]);
+    const protectedLoader = vi.fn();
+    function DataGateProbe() {
+      const readiness = appReadiness.useAppReadiness();
+      useEffect(() => {
+        if (readiness.ready) {
+          protectedLoader();
+        }
+      }, [readiness.ready]);
+      return (
+        <div>
+          <span>Shell frame</span>
+          <span>{readiness.ready ? 'Protected data unlocked' : 'Protected data locked'}</span>
+        </div>
+      );
+    }
     auth.setCurrentUser(buildTestUser());
     window.history.replaceState({}, '', '/orders');
 
@@ -105,22 +135,28 @@ describe('RequireAuth', () => {
       <MemoryRouter initialEntries={['/orders']}>
         <Routes>
           <Route element={<RealModeRequireAuth />}>
-            <Route path="/orders" element={<div>Orders workspace</div>} />
+            <Route path="/orders" element={<DataGateProbe />} />
           </Route>
           <Route path="/login" element={<div>Login screen</div>} />
         </Routes>
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
-    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
+    expect(screen.getByText('Shell frame')).toBeInTheDocument();
+    expect(screen.getByText('Protected data locked')).toBeInTheDocument();
+    expect(protectedLoader).not.toHaveBeenCalled();
     expect(meMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      resolveMe?.(buildTestUser());
+    expect(meMock).toHaveBeenCalledWith({
+      authAttemptId: expect.stringMatching(/^restore-/),
+      signal: expect.any(AbortSignal),
     });
 
-    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    await act(async () => {
+      deferred.resolve(buildTestUser());
+    });
+
+    await waitFor(() => expect(screen.getByText('Protected data unlocked')).toBeInTheDocument());
+    expect(protectedLoader).toHaveBeenCalledTimes(1);
     expect(auth.getCurrentUser()?.email).toBe('vendor@example.com');
   });
 
@@ -129,6 +165,9 @@ describe('RequireAuth', () => {
     vi.doMock('../config/runtime', () => ({
       runtimeConfig: {
         apiMode: 'real',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
       },
     }));
     const meMock = vi.fn().mockResolvedValue(buildTestUser());
@@ -152,9 +191,12 @@ describe('RequireAuth', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
+    expect(screen.getByRole('status')).toHaveTextContent('Checking your session');
     await waitFor(() => expect(screen.getByText('Orders workspace')).toBeInTheDocument());
-    expect(meMock).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+    expect(meMock).toHaveBeenCalledWith({
+      authAttemptId: expect.stringMatching(/^restore-/),
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('preserves a deep order URL after real-mode session restore', async () => {
@@ -255,7 +297,7 @@ describe('RequireAuth', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(meMock).toHaveBeenCalledTimes(1);
   });
@@ -448,7 +490,7 @@ describe('RequireAuth', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
+    expect(screen.getByRole('status')).toHaveTextContent('Checking your session');
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20000);
@@ -505,5 +547,69 @@ describe('RequireAuth', () => {
       '/orders/alloc-yalispor-7709129507153#provider-response-summary',
     );
     expect(meMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores stale restore results after a newer retry succeeds', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
+      },
+    }));
+    const firstRestore = makeDeferred<ReturnType<typeof buildTestUser>>();
+    const secondRestore = makeDeferred<ReturnType<typeof buildTestUser>>();
+    const meMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstRestore.promise)
+      .mockImplementationOnce(() => secondRestore.promise);
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
+    auth.setCurrentUser(buildTestUser());
+    window.history.replaceState({}, '', '/orders');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    expect(meMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      auth.requestAuthRestoreRetry();
+    });
+    await waitFor(() => expect(meMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      secondRestore.resolve(buildTestUser());
+    });
+    await waitFor(() => expect(screen.getByText('Orders workspace')).toBeInTheDocument());
+    expect(auth.getAuthRestoreSnapshot().authConfirmed).toBe(true);
+
+    await act(async () => {
+      firstRestore.reject(new ApiError('Unauthorized request.', 'unauthorized', { status: 401 }));
+    });
+
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+    expect(auth.getAuthRestoreSnapshot().authConfirmed).toBe(true);
   });
 });

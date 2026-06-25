@@ -1,19 +1,38 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { clearToken, isAuthenticated, onSessionReset, setSession } from './auth';
+import { useEffect, useRef, useState } from 'react';
+import {
+  clearToken,
+  getCurrentUser,
+  getAuthRestoreSnapshot,
+  isAuthenticated,
+  markAuthConfirmed,
+  onAuthRestoreRetryRequest,
+  onSessionReset,
+  setAuthRestoreSnapshot,
+  setSession,
+} from './auth';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from './api/errors';
 
-type AuthGateStatus = 'checking' | 'authenticated' | 'unauthenticated' | 'restore-error';
+type AuthGateStatus =
+  | 'restoring'
+  | 'authenticated_unconfirmed'
+  | 'authenticated'
+  | 'unauthenticated'
+  | 'restore-error';
 const AUTH_RESTORE_TIMEOUT_MS = 10000;
+const AUTH_RESTORE_DELAYED_UI_MS = 4000;
 const AUTH_RESTORE_RECOVERABLE_MESSAGE =
   'Session restore is taking longer than expected. Please retry or sign in again.';
 const AUTH_RESTORE_RECOVERY_RETRY_LIMIT = 1;
 
 function getInitialAuthGateStatus(): AuthGateStatus {
   if (runtimeConfig.apiMode === 'real') {
-    return 'checking';
+    if (getCurrentUser() && getAuthRestoreSnapshot().authConfirmed) {
+      return 'authenticated';
+    }
+    return getCurrentUser() ? 'authenticated_unconfirmed' : 'restoring';
   }
 
   if (!isAuthenticated()) {
@@ -75,10 +94,35 @@ function isUnauthorizedRestoreFailure(error: unknown) {
   return candidate.kind === 'unauthorized' || candidate.status === 401;
 }
 
-function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>) {
+function createRestoreAttemptId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `restore-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+  }
+
+  return `restore-${Math.random().toString(36).slice(2, 12).padEnd(10, '0')}`;
+}
+
+function getFrontendBuildLabel() {
+  return [
+    runtimeConfig.gitCommit ? `commit ${runtimeConfig.gitCommit}` : null,
+    runtimeConfig.buildTimestamp ? `built ${runtimeConfig.buildTimestamp}` : null,
+    `version ${runtimeConfig.appVersion}`,
+  ].filter(Boolean).join(' · ');
+}
+
+function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>, parentSignal?: AbortSignal) {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let didTimeout = false;
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+  };
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
 
   const timeout = new Promise<T>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -93,13 +137,17 @@ function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>) {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
+      parentSignal?.removeEventListener('abort', abortFromParent);
     }),
     didTimeout: () => didTimeout,
   };
 }
 
-async function restoreCurrentSessionWithTimeout() {
-  const restore = withRestoreTimeout((signal) => runtimeServices.auth.me({ signal }));
+async function restoreCurrentSessionWithTimeout(input: { parentSignal?: AbortSignal; restoreAttemptId: string }) {
+  const restore = withRestoreTimeout(
+    (signal) => runtimeServices.auth.me({ authAttemptId: input.restoreAttemptId, signal }),
+    input.parentSignal,
+  );
   try {
     return {
       user: await restore.promise,
@@ -126,45 +174,103 @@ export function RequireAuth() {
   const [authGateStatus, setAuthGateStatus] = useState<AuthGateStatus>(getInitialAuthGateStatus);
   const [restoreErrorMessage, setRestoreErrorMessage] = useState<string | null>(null);
   const [restoreRetryCount, setRestoreRetryCount] = useState(0);
+  const latestRestoreAttemptIdRef = useRef<string | null>(null);
+  const activeRestoreControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let restoreSequence = 0;
     let suppressNextSessionReset = false;
+    let delayedUiTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const isLatestRestore = (restoreAttemptId: string) =>
+      !cancelled && latestRestoreAttemptIdRef.current === restoreAttemptId;
+
+    function clearDelayedUiTimer() {
+      if (delayedUiTimer) {
+        clearTimeout(delayedUiTimer);
+        delayedUiTimer = null;
+      }
+    }
+
+    function abortActiveRestore() {
+      activeRestoreControllerRef.current?.abort();
+      activeRestoreControllerRef.current = null;
+    }
+
+    async function runRestoreRequest(restoreAttemptId: string) {
+      const controller = new AbortController();
+      activeRestoreControllerRef.current = controller;
+      try {
+        return await restoreCurrentSessionWithTimeout({
+          parentSignal: controller.signal,
+          restoreAttemptId,
+        });
+      } finally {
+        if (activeRestoreControllerRef.current === controller) {
+          activeRestoreControllerRef.current = null;
+        }
+      }
+    }
 
     async function restoreSession() {
-      const restoreId = ++restoreSequence;
       if (runtimeConfig.apiMode !== 'real' && !isAuthenticated()) {
         setAuthGateStatus('unauthenticated');
         return;
       }
 
       if (runtimeConfig.apiMode !== 'real') {
+        markAuthConfirmed();
         setAuthGateStatus('authenticated');
         return;
       }
 
-      setAuthGateStatus('checking');
+      if (getCurrentUser() && getAuthRestoreSnapshot().authConfirmed) {
+        setAuthGateStatus('authenticated');
+        return;
+      }
+
+      abortActiveRestore();
+      clearDelayedUiTimer();
+      const cachedUser = getCurrentUser();
+      const restoreAttemptId = createRestoreAttemptId();
+      latestRestoreAttemptIdRef.current = restoreAttemptId;
+      setAuthGateStatus(cachedUser ? 'authenticated_unconfirmed' : 'restoring');
       setRestoreErrorMessage(null);
       const startedAt = Date.now();
-      logAuthRestoreInfo('AUTH_RESTORE_START', { restoreId });
+      setAuthRestoreSnapshot({
+        phase: 'restoring',
+        authConfirmed: false,
+        restoreAttemptId,
+        startedAt,
+        delayed: false,
+        errorMessage: null,
+      });
+      delayedUiTimer = setTimeout(() => {
+        if (!isLatestRestore(restoreAttemptId)) {
+          return;
+        }
+        setAuthRestoreSnapshot({ delayed: true });
+      }, AUTH_RESTORE_DELAYED_UI_MS);
+      logAuthRestoreInfo('AUTH_RESTORE_START', { restoreAttemptId, cachedUserPresent: Boolean(cachedUser) });
       try {
-        const { user } = await restoreCurrentSessionWithTimeout();
-        if (!cancelled) {
+        const { user } = await runRestoreRequest(restoreAttemptId);
+        if (isLatestRestore(restoreAttemptId)) {
           if (!user) {
             throw new Error('Session restore did not return a user.');
           }
           suppressNextSessionReset = true;
           setSession(null, user);
-          logAuthRestoreInfo('AUTH_RESTORE_SUCCESS', { restoreId, durationMs: Date.now() - startedAt });
+          markAuthConfirmed({ restoreAttemptId });
+          clearDelayedUiTimer();
+          logAuthRestoreInfo('AUTH_RESTORE_SUCCESS', { restoreAttemptId, durationMs: Date.now() - startedAt });
           setAuthGateStatus('authenticated');
         }
       } catch (error) {
-        if (!cancelled) {
+        if (isLatestRestore(restoreAttemptId)) {
           const isUnauthorized = isUnauthorizedRestoreFailure(error);
           const firstFailureMessage = error instanceof Error ? error.message : 'Session restore failed.';
           logAuthRestoreWarn(didRestoreTimeout(error) ? 'AUTH_RESTORE_TIMEOUT' : 'AUTH_RESTORE_FAILURE', {
-            restoreId,
+            restoreAttemptId,
             durationMs: Date.now() - startedAt,
             message: firstFailureMessage,
           });
@@ -176,13 +282,13 @@ export function RequireAuth() {
             for (let attempt = 1; attempt <= AUTH_RESTORE_RECOVERY_RETRY_LIMIT; attempt += 1) {
               try {
                 logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_START', {
-                  restoreId,
+                  restoreAttemptId,
                   attempt,
                   previousFailureMessage: firstFailureMessage,
                 });
                 const retryStartedAt = Date.now();
-                const { user } = await restoreCurrentSessionWithTimeout();
-                if (cancelled) {
+                const { user } = await runRestoreRequest(restoreAttemptId);
+                if (!isLatestRestore(restoreAttemptId)) {
                   return;
                 }
                 if (!user) {
@@ -190,8 +296,10 @@ export function RequireAuth() {
                 }
                 suppressNextSessionReset = true;
                 setSession(null, user);
+                markAuthConfirmed({ restoreAttemptId });
+                clearDelayedUiTimer();
                 logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_SUCCESS', {
-                  restoreId,
+                  restoreAttemptId,
                   attempt,
                   durationMs: Date.now() - retryStartedAt,
                   totalDurationMs: Date.now() - startedAt,
@@ -199,12 +307,12 @@ export function RequireAuth() {
                 setAuthGateStatus('authenticated');
                 return;
               } catch (retryError) {
-                if (cancelled) {
+                if (!isLatestRestore(restoreAttemptId)) {
                   return;
                 }
                 const retryIsUnauthorized = isUnauthorizedRestoreFailure(retryError);
                 logAuthRestoreWarn('AUTH_RESTORE_RECOVERY_RETRY_FAILURE', {
-                  restoreId,
+                  restoreAttemptId,
                   attempt,
                   durationMs: Date.now() - startedAt,
                   message: retryError instanceof Error ? retryError.message : 'Session restore retry failed.',
@@ -217,8 +325,18 @@ export function RequireAuth() {
                 }
               }
             }
-            clearToken();
+            clearDelayedUiTimer();
+            if (!getCurrentUser()) {
+              clearToken();
+            }
             setRestoreErrorMessage(AUTH_RESTORE_RECOVERABLE_MESSAGE);
+            setAuthRestoreSnapshot({
+              phase: 'restore_error',
+              authConfirmed: false,
+              restoreAttemptId,
+              delayed: true,
+              errorMessage: AUTH_RESTORE_RECOVERABLE_MESSAGE,
+            });
             setAuthGateStatus('restore-error');
           }
         }
@@ -226,6 +344,16 @@ export function RequireAuth() {
     }
 
     void restoreSession();
+    const unsubscribeRetry = onAuthRestoreRetryRequest(() => {
+      setRestoreRetryCount((count) => count + 1);
+    });
+    const handleVisibilityChange = () => {
+      const snapshot = getAuthRestoreSnapshot();
+      if (document.visibilityState === 'visible' && snapshot.phase === 'restoring' && !snapshot.authConfirmed) {
+        setRestoreRetryCount((count) => count + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     const unsubscribeSession = onSessionReset(() => {
       if (suppressNextSessionReset) {
         suppressNextSessionReset = false;
@@ -236,15 +364,35 @@ export function RequireAuth() {
 
     return () => {
       cancelled = true;
+      clearDelayedUiTimer();
+      abortActiveRestore();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribeSession();
+      unsubscribeRetry();
     };
   }, [restoreRetryCount]);
 
-  if (authGateStatus === 'checking') {
-    return <div role="status">Restoring session...</div>;
+  if (authGateStatus === 'authenticated_unconfirmed') {
+    return <Outlet />;
+  }
+
+  if (authGateStatus === 'restoring') {
+    return (
+      <div className="auth-page">
+        <section className="auth-panel" role="status">
+          <p className="eyebrow">Secure access</p>
+          <h1>Checking your session</h1>
+          <p className="page-description">We are confirming your session before opening protected data.</p>
+        </section>
+      </div>
+    );
   }
 
   if (authGateStatus === 'restore-error') {
+    if (getCurrentUser()) {
+      return <Outlet />;
+    }
+
     return (
       <div className="auth-page">
         <section className="auth-panel" role="alert">
@@ -253,6 +401,7 @@ export function RequireAuth() {
           <p className="page-description">
             {restoreErrorMessage ?? AUTH_RESTORE_RECOVERABLE_MESSAGE}
           </p>
+          <p className="session-meta">{getFrontendBuildLabel()}</p>
           <div className="state-actions">
             <button
               type="button"

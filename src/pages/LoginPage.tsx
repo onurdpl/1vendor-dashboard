@@ -6,6 +6,7 @@ import {
   consumeExpiredSessionNotice,
   getDemoUsers,
   isAuthenticated,
+  markAuthConfirmed,
   sanitizeInternalPath,
   setCurrentVendorId,
   setSession,
@@ -283,6 +284,7 @@ export function LoginPage() {
 
       setErrorMessage(null);
       setSession(token, user);
+      markAuthConfirmed();
       logAuthDiagnostic('setSession completed', {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,

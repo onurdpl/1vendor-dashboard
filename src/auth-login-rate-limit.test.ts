@@ -622,6 +622,7 @@ describe('auth login rate limiting', () => {
         info: vi.fn(),
       },
       headers: {
+        'x-auth-attempt-id': 'restore-test123',
         cookie: sessionCookie,
       },
     };
@@ -642,6 +643,7 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
         requestId: 'auth-me-test',
+        authAttemptId: 'restore-test123',
         cookiePresent: true,
         authFailureStage: null,
         middlewareValidationDurationMs: expect.any(Number),

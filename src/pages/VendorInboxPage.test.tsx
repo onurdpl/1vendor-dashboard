@@ -6,9 +6,11 @@ import { VendorInboxPage } from './VendorInboxPage';
 
 const appReadinessOverride = vi.hoisted(() => ({
   value: {
-    status: 'ready',
-    ready: true,
-    sessionReady: true,
+	    status: 'ready',
+	    ready: true,
+	    authConfirmed: true,
+	    authRestorePhase: 'confirmed',
+	    sessionReady: true,
     vendorReady: true,
     unauthorized: false,
     token: 'test-token',
@@ -73,9 +75,11 @@ function renderVendorInboxPage() {
 describe('VendorInboxPage', () => {
   beforeEach(() => {
     appReadinessOverride.value = {
-      status: 'ready',
-      ready: true,
-      sessionReady: true,
+	      status: 'ready',
+	      ready: true,
+	      authConfirmed: true,
+	      authRestorePhase: 'confirmed',
+	      sessionReady: true,
       vendorReady: true,
       unauthorized: false,
       token: 'test-token',

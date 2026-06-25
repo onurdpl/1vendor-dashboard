@@ -772,9 +772,9 @@ export const runtimeServices = {
         },
       };
     },
-    async me(options: { signal?: AbortSignal } = {}) {
+    async me(options: { authAttemptId?: string; signal?: AbortSignal } = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        const user = await backendAuth.me({ signal: options.signal });
+        const user = await backendAuth.me({ authAttemptId: options.authAttemptId, signal: options.signal });
         return createCurrentUserFromVendorAccess({
           email: user.email,
           name: user.name,

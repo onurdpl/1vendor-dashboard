@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getCurrentUser, getToken, onSessionReset, type CurrentUser } from './auth/session';
+import { getAuthRestoreSnapshot, onAuthRestoreStateChange, type AuthRestorePhase } from './auth/restoreState';
 import { getCurrentVendorContext, onVendorChange, type VendorContext } from './auth/vendorContext';
+import { runtimeConfig } from '../config/runtime';
 
 export type AppReadinessStatus =
   | 'loading_session'
@@ -14,6 +16,8 @@ export type AppReadinessState = {
   token: string | null;
   currentUser: CurrentUser | null;
   currentVendor: VendorContext;
+  authConfirmed: boolean;
+  authRestorePhase: AuthRestorePhase;
   sessionReady: boolean;
   vendorReady: boolean;
   ready: boolean;
@@ -29,6 +33,8 @@ export function getAppReadinessSnapshot(): AppReadinessState {
       token: null,
       currentUser: null,
       currentVendor,
+      authConfirmed: false,
+      authRestorePhase: 'unconfirmed',
       sessionReady: false,
       vendorReady: false,
       ready: false,
@@ -38,6 +44,11 @@ export function getAppReadinessSnapshot(): AppReadinessState {
 
   const token = getToken();
   const currentUser = getCurrentUser();
+  const authRestore = getAuthRestoreSnapshot();
+  const authConfirmed =
+    runtimeConfig.apiMode !== 'real' ||
+    runtimeConfig.appEnvironment === 'test' ||
+    authRestore.authConfirmed;
 
   if (!currentUser) {
     return {
@@ -45,10 +56,27 @@ export function getAppReadinessSnapshot(): AppReadinessState {
       token,
       currentUser,
       currentVendor,
+      authConfirmed: false,
+      authRestorePhase: authRestore.phase,
       sessionReady: false,
       vendorReady: Boolean(currentVendor.vendorId),
       ready: false,
       unauthorized: true,
+    };
+  }
+
+  if (!authConfirmed) {
+    return {
+      status: 'loading_session',
+      token,
+      currentUser,
+      currentVendor,
+      authConfirmed,
+      authRestorePhase: authRestore.phase,
+      sessionReady: false,
+      vendorReady: Boolean(currentVendor.vendorId),
+      ready: false,
+      unauthorized: false,
     };
   }
 
@@ -58,6 +86,8 @@ export function getAppReadinessSnapshot(): AppReadinessState {
       token,
       currentUser,
       currentVendor,
+      authConfirmed,
+      authRestorePhase: authRestore.phase,
       sessionReady: true,
       vendorReady: false,
       ready: false,
@@ -70,6 +100,8 @@ export function getAppReadinessSnapshot(): AppReadinessState {
     token,
     currentUser,
     currentVendor,
+    authConfirmed,
+    authRestorePhase: authRestore.phase,
     sessionReady: true,
     vendorReady: true,
     ready: true,
@@ -85,11 +117,13 @@ export function useAppReadiness() {
     refresh();
 
     const unsubscribeSession = onSessionReset(refresh);
+    const unsubscribeAuthRestore = onAuthRestoreStateChange(refresh);
     const unsubscribeVendor = onVendorChange(refresh);
     window.addEventListener('storage', refresh);
 
     return () => {
       unsubscribeSession();
+      unsubscribeAuthRestore();
       unsubscribeVendor();
       window.removeEventListener('storage', refresh);
     };

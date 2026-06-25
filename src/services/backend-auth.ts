@@ -185,23 +185,26 @@ export async function probePublicLoginReadiness(
   }
 }
 
-export async function me(options: { signal?: AbortSignal } = {}) {
+export async function me(options: { authAttemptId?: string; signal?: AbortSignal } = {}) {
   const startedAt = Date.now();
-  logAuthClientInfo('AUTH_SESSION_CHECK_START');
+  logAuthClientInfo('AUTH_SESSION_CHECK_START', { authAttemptId: options.authAttemptId ?? null });
 
   try {
     const response = await apiClient.get<{ user: BackendAuthUser; csrfToken?: string | null }>('/auth/me', {
+      headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
       vendorId: null,
       signal: options.signal,
     });
     setCsrfToken(response.csrfToken);
     logAuthClientInfo('AUTH_SESSION_CHECK_SUCCESS', {
+      authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
     });
 
     return response.user;
   } catch (error) {
     logAuthClientWarn('AUTH_SESSION_CHECK_FAILURE', {
+      authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
       ...getErrorDiagnostics(error),
     });

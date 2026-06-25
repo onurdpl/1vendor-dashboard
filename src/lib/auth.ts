@@ -28,6 +28,19 @@ export {
 } from './auth/session';
 
 export {
+  clearAuthRestoreState,
+  getAuthRestoreSnapshot,
+  markAuthConfirmed,
+  onAuthRestoreRetryRequest,
+  onAuthRestoreStateChange,
+  requestAuthRestoreRetry,
+  setAuthRestoreSnapshot,
+  useAuthRestoreSnapshot,
+  type AuthRestorePhase,
+  type AuthRestoreSnapshot,
+} from './auth/restoreState';
+
+export {
   canPerformAction,
   getDefaultRole,
   hasPermission,

@@ -3,6 +3,7 @@ import type { createAuthService } from './auth.service.js';
 import type { AuthRestoreDiagnostics } from './auth.types.js';
 import { CSRF_HEADER_NAME, getSessionCookieToken } from './session-cookie.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { normalizeAuthAttemptId } from '../../lib/request-timing.js';
 
 function startTimer() {
   return process.hrtime.bigint();
@@ -62,12 +63,13 @@ function logAuthMeRestoreDiagnostics(
     return;
   }
 
-  const diagnostics = request.authDiagnostics;
-  request.log.info(
-    {
-      event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
-      requestId: request.requestId ?? null,
-      cookiePresent: diagnostics?.cookiePresent ?? false,
+      const diagnostics = request.authDiagnostics;
+      request.log.info(
+        {
+          event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+          requestId: request.requestId ?? null,
+          authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
+          cookiePresent: diagnostics?.cookiePresent ?? false,
       authFailureStage: diagnostics?.authFailureStage ?? null,
       authFailureReason: request.authFailureReason ?? (diagnostics ? getAuthFailureReason(diagnostics) : 'unknown'),
       middlewareValidationDurationMs: request.authSessionValidationDurationMs ?? null,

@@ -1842,6 +1842,63 @@ h3 {
   background: var(--surface-strong);
 }
 
+.auth-restore-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: 14px;
+  background: rgba(239, 246, 255, 0.86);
+  padding: 14px 16px;
+  color: #1e3a8a;
+}
+
+.auth-restore-banner h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.auth-restore-banner p {
+  margin: 0;
+}
+
+.auth-restore-banner .eyebrow {
+  margin-bottom: 4px;
+  color: #1d4ed8;
+}
+
+.auth-restore-banner-attention {
+  border-color: rgba(217, 119, 6, 0.28);
+  background: rgba(255, 251, 235, 0.94);
+  color: #78350f;
+}
+
+.auth-restore-banner-attention .eyebrow {
+  color: #b45309;
+}
+
+.auth-restore-meta,
+.auth-restore-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-restore-meta {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: rgba(30, 41, 59, 0.74);
+}
+
+.auth-restore-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
 .auth-form {
   display: grid;
   gap: 16px;

@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAppReadinessSnapshot } from './appReadiness';
 import { createCurrentUserFromVendorAccess, setCurrentUser, setCurrentVendorId, setSession, setToken } from './auth';
 
 describe('app readiness', () => {
   beforeEach(() => {
     window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it('does not become ready without a hydrated session', () => {
@@ -94,5 +99,43 @@ describe('app readiness', () => {
     expect(user.defaultVendorId).toBe('');
     expect(readiness.status).toBe('missing_vendor_context');
     expect(readiness.ready).toBe(false);
+  });
+
+  it('keeps real-mode cached users unconfirmed until backend session restore succeeds', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    window.localStorage.clear();
+
+    const auth = await import('./auth');
+    const readinessModule = await import('./appReadiness');
+    auth.setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    auth.setCurrentVendorId('demo-vendor-a');
+
+    expect(readinessModule.getAppReadinessSnapshot()).toMatchObject({
+      status: 'loading_session',
+      authConfirmed: false,
+      sessionReady: false,
+      ready: false,
+      currentUser: expect.objectContaining({ email: 'admin@demo.com' }),
+    });
+
+    auth.markAuthConfirmed();
+
+    expect(readinessModule.getAppReadinessSnapshot()).toMatchObject({
+      status: 'ready',
+      authConfirmed: true,
+      sessionReady: true,
+      ready: true,
+    });
   });
 });

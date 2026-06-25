@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { markAuthConfirmed, setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
@@ -412,6 +412,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     cleanup();
     window.localStorage.clear();
     setToken('test-token');
+    markAuthConfirmed({ restoreAttemptId: 'order-detail-test-restore' });
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
     rejectOrderMock.mockReset();
