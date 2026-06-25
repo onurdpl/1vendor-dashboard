@@ -135,6 +135,16 @@ function buildProductPanelEvent(
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -288,7 +298,15 @@ describe('AdminShopifyOrderPage split visibility', () => {
     expect(screen.getByText(/Confidence: high/)).toBeInTheDocument();
     });
 
-    it('renders manual Product Panel dry-run send action for queued events and refreshes detail', async () => {
+    it('renders Product Panel dry-run sending and success feedback, then refreshes detail', async () => {
+      const sendResult = createDeferred<{
+        ok: true;
+        attempted: number;
+        resolved: number;
+        failed: number;
+        skipped: number;
+        latestEventStatuses: [];
+      }>();
       getAdminShopifyOrderBreakdownMock
         .mockResolvedValueOnce({
           sourceShopifyOrderId: '7817723773265',
@@ -315,6 +333,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
                   status: 'RESOLVED_DRY_RUN',
                   attemptCount: 1,
                   resolvedAt: '2026-06-21T12:47:00.000Z',
+                  error: null,
                   response: {
                     accepted: true,
                     dryRun: true,
@@ -327,7 +346,27 @@ describe('AdminShopifyOrderPage split visibility', () => {
             }),
           ],
         });
-      sendAdminProductPanelVariantDisableDryRunMock.mockResolvedValueOnce({
+      sendAdminProductPanelVariantDisableDryRunMock.mockReturnValueOnce(sendResult.promise);
+
+      renderPage();
+
+      expect(await screen.findByRole('heading', { name: 'Variant availability validation' })).toBeInTheDocument();
+      expect(screen.getByText('Validates Product Panel resolver. Does not disable products or change Shopify inventory.')).toBeInTheDocument();
+      const dryRunCard = screen.getByLabelText('Product Panel variant disable dry-run');
+      expect(within(dryRunCard).getByText('Latest status')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Created')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Attempt count')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Not attempted')).toBeInTheDocument();
+      const sendButton = within(dryRunCard).getByRole('button', { name: 'Send dry-run now' });
+      fireEvent.click(sendButton);
+
+      await waitFor(() => {
+        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+      });
+      expect(within(dryRunCard).getByRole('button', { name: 'Sending dry-run...' })).toBeDisabled();
+      expect(within(dryRunCard).getAllByText('Sending dry-run...').length).toBeGreaterThan(0);
+
+      sendResult.resolve({
         ok: true,
         attempted: 1,
         resolved: 1,
@@ -336,20 +375,18 @@ describe('AdminShopifyOrderPage split visibility', () => {
         latestEventStatuses: [],
       });
 
-      renderPage();
-
-      expect(await screen.findByRole('heading', { name: 'Variant availability validation' })).toBeInTheDocument();
-      expect(screen.getByText('Validates Product Panel resolver. Does not disable products or change Shopify inventory.')).toBeInTheDocument();
-      const sendButton = screen.getByRole('button', { name: 'Send dry-run now' });
-      fireEvent.click(sendButton);
-
       await waitFor(() => {
-        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+        expect(screen.getAllByText('Dry-run sent. Refreshing validation status.').length).toBeGreaterThan(0);
       });
+      const resultGrid = await screen.findByLabelText('Product Panel dry-run send result');
+      expect(within(resultGrid).getByText('Attempted')).toBeInTheDocument();
+      expect(within(resultGrid).getAllByText('1').length).toBeGreaterThanOrEqual(2);
+      expect(within(resultGrid).getByText('Skipped')).toBeInTheDocument();
       await waitFor(() => {
         expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
       });
       expect(await screen.findByText('Variant Disable dry-run resolved')).toBeInTheDocument();
+      expect(within(screen.getByLabelText('Product Panel variant disable dry-run')).getByText('Resolved Dry Run')).toBeInTheDocument();
     });
 
     it('hides manual Product Panel dry-run send action when no event is retryable', async () => {
@@ -377,6 +414,81 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(await screen.findByRole('heading', { name: 'Variant availability validation' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Send dry-run now' })).not.toBeInTheDocument();
       expect(sendAdminProductPanelVariantDisableDryRunMock).not.toHaveBeenCalled();
+    });
+
+    it('renders inline Product Panel dry-run failure feedback with safe error detail', async () => {
+      const initialBreakdown = {
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+        customer: 'Customer',
+        financialStatus: 'pending',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            productPanelVariantDisableEvents: [buildProductPanelEvent()],
+          }),
+        ],
+      };
+      getAdminShopifyOrderBreakdownMock
+        .mockResolvedValueOnce(initialBreakdown)
+        .mockResolvedValueOnce(initialBreakdown);
+      sendAdminProductPanelVariantDisableDryRunMock.mockRejectedValueOnce(new Error('Product Panel route unavailable.'));
+
+      renderPage();
+
+      const dryRunCard = await screen.findByLabelText('Product Panel variant disable dry-run');
+      fireEvent.click(within(dryRunCard).getByRole('button', { name: 'Send dry-run now' }));
+
+      await waitFor(() => {
+        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('Dry-run delivery failed. No product availability changed.').length).toBeGreaterThan(0);
+      });
+      expect(screen.getAllByText('Product Panel route unavailable.').length).toBeGreaterThan(0);
+      expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('renders inline Product Panel dry-run zero-attempt feedback', async () => {
+      const initialBreakdown = {
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+        customer: 'Customer',
+        financialStatus: 'pending',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            productPanelVariantDisableEvents: [buildProductPanelEvent()],
+          }),
+        ],
+      };
+      getAdminShopifyOrderBreakdownMock
+        .mockResolvedValueOnce(initialBreakdown)
+        .mockResolvedValueOnce(initialBreakdown);
+      sendAdminProductPanelVariantDisableDryRunMock.mockResolvedValueOnce({
+        ok: true,
+        attempted: 0,
+        resolved: 0,
+        failed: 0,
+        skipped: 0,
+        latestEventStatuses: [],
+      });
+
+      renderPage();
+
+      const dryRunCard = await screen.findByLabelText('Product Panel variant disable dry-run');
+      fireEvent.click(within(dryRunCard).getByRole('button', { name: 'Send dry-run now' }));
+
+      await waitFor(() => {
+        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('No queued Product Panel dry-run events were eligible to send.').length).toBeGreaterThan(0);
+      });
+      const resultGrid = screen.getByLabelText('Product Panel dry-run send result');
+      expect(within(resultGrid).getByText('Attempted')).toBeInTheDocument();
+      expect(within(resultGrid).getAllByText('0').length).toBeGreaterThanOrEqual(4);
+      expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
     });
 
     it('renders return ownership context for allocations with return records', async () => {

@@ -153,6 +153,16 @@ type FinanceIntegrityAlertRescanSummary = {
   message: string;
 };
 
+type ProductPanelDryRunFeedback = {
+  tone: 'success' | 'info' | 'error';
+  message: string;
+  detail?: string;
+  attempted?: number;
+  resolved?: number;
+  failed?: number;
+  skipped?: number;
+};
+
 function formatPreviewMoney(amount: string | null | undefined, currencyCode: string | null | undefined) {
   if (!amount) {
     return currencyCode ? `0.00 ${currencyCode}` : 'Not returned';
@@ -320,6 +330,31 @@ function summarizeProductPanelDryRunEvents(
   const failed = events.filter((event) => normalizeStateToken(event.status) === 'failed').length;
   const resolved = events.filter((event) => normalizeStateToken(event.status) === 'resolved_dry_run').length;
   return { queued, failed, resolved };
+}
+
+function readProductPanelEventTimestamp(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
+) {
+  return event.resolvedAt ?? event.failedAt ?? event.requestedAt;
+}
+
+function getLatestProductPanelEvent(
+  events: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>,
+) {
+  return [...events].sort((left, right) => {
+    const leftTime = Date.parse(readProductPanelEventTimestamp(left));
+    const rightTime = Date.parse(readProductPanelEventTimestamp(right));
+    return rightTime - leftTime;
+  })[0] ?? null;
+}
+
+function getProductPanelLastAttemptedAt(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number] | null,
+) {
+  if (!event || event.attemptCount <= 0) {
+    return null;
+  }
+  return event.resolvedAt ?? event.failedAt ?? event.requestedAt;
 }
 
 function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['allocations'][number]) {
@@ -586,6 +621,7 @@ export function AdminShopifyOrderPage() {
   const [retryTransferConfirmed, setRetryTransferConfirmed] = useState(false);
   const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
   const [shopifyRefundPreviews, setShopifyRefundPreviews] = useState<Record<string, ShopifyRefundPreviewResult>>({});
+  const [productPanelDryRunFeedback, setProductPanelDryRunFeedback] = useState<Record<string, ProductPanelDryRunFeedback>>({});
   const { data: breakdown, isLoading, isError, error, refetch } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
     ({ signal }) => {
@@ -1090,18 +1126,47 @@ export function AdminShopifyOrderPage() {
     }
   }
 
-  async function handleProductPanelDryRunSend() {
+  async function handleProductPanelDryRunSend(allocationId: string) {
+    setProductPanelDryRunFeedback((current) => ({
+      ...current,
+      [allocationId]: {
+        tone: 'info',
+        message: 'Sending dry-run...',
+      },
+    }));
+
     try {
       const result = await productPanelDryRunMutation.mutateAsync(undefined);
-      const hasFailure = result.failed > 0;
-      showFeedback(
-        hasFailure
-          ? 'Dry-run delivery finished with failures. No product availability changed.'
-          : 'Product Panel dry-run sent. No product availability changed.',
-        hasFailure ? 'error' : 'success',
-      );
+      const message = result.attempted === 0
+        ? 'No queued Product Panel dry-run events were eligible to send.'
+        : result.failed > 0
+          ? 'Dry-run delivery failed. No product availability changed.'
+          : 'Dry-run sent. Refreshing validation status.';
+      const tone = result.failed > 0 ? 'error' : result.attempted === 0 ? 'info' : 'success';
+
+      setProductPanelDryRunFeedback((current) => ({
+        ...current,
+        [allocationId]: {
+          tone,
+          message,
+          attempted: result.attempted,
+          resolved: result.resolved,
+          failed: result.failed,
+          skipped: result.skipped,
+        },
+      }));
+      showFeedback(message, tone);
       await refetch();
-    } catch {
+    } catch (mutationError) {
+      const detail = getActionErrorMessage(mutationError, '');
+      setProductPanelDryRunFeedback((current) => ({
+        ...current,
+        [allocationId]: {
+          tone: 'error',
+          message: 'Dry-run delivery failed. No product availability changed.',
+          detail,
+        },
+      }));
       await refetch();
       // The mutation onError handler owns user-facing failure copy.
     }
@@ -1213,6 +1278,9 @@ export function AdminShopifyOrderPage() {
         const productPanelEvents = allocation.productPanelVariantDisableEvents ?? [];
         const productPanelDryRunSummary = summarizeProductPanelDryRunEvents(productPanelEvents);
         const hasRetryableProductPanelDryRunEvent = productPanelEvents.some(isRetryableProductPanelDryRunEvent);
+        const latestProductPanelEvent = getLatestProductPanelEvent(productPanelEvents);
+        const latestProductPanelAttemptedAt = getProductPanelLastAttemptedAt(latestProductPanelEvent);
+        const productPanelFeedback = productPanelDryRunFeedback[allocation.allocationOrderId];
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1355,7 +1423,51 @@ export function AdminShopifyOrderPage() {
                   <span>Latest reason</span>
                   <strong>{productPanelEvents[0]?.reasonCode ?? 'Not recorded'}</strong>
                 </div>
+                <div className="meta-item">
+                  <span>Latest status</span>
+                  <strong>{latestProductPanelEvent ? formatTransferStatus(latestProductPanelEvent.status) : 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Attempt count</span>
+                  <strong>{latestProductPanelEvent?.attemptCount ?? 0}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Last attempted</span>
+                  <strong>{latestProductPanelAttemptedAt ? formatDate(latestProductPanelAttemptedAt) : 'Not attempted'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Latest error</span>
+                  <strong>{latestProductPanelEvent?.error ?? 'None'}</strong>
+                </div>
               </div>
+              {productPanelFeedback ? (
+                <>
+                  <ActionFeedback tone={productPanelFeedback.tone} message={productPanelFeedback.message} />
+                  {productPanelFeedback.detail ? (
+                    <p className="page-description">{productPanelFeedback.detail}</p>
+                  ) : null}
+                  {typeof productPanelFeedback.attempted === 'number' ? (
+                    <div className="compact-meta-grid" aria-label="Product Panel dry-run send result">
+                      <div className="meta-item">
+                        <span>Attempted</span>
+                        <strong>{productPanelFeedback.attempted}</strong>
+                      </div>
+                      <div className="meta-item">
+                        <span>Resolved</span>
+                        <strong>{productPanelFeedback.resolved ?? 0}</strong>
+                      </div>
+                      <div className="meta-item">
+                        <span>Failed</span>
+                        <strong>{productPanelFeedback.failed ?? 0}</strong>
+                      </div>
+                      <div className="meta-item">
+                        <span>Skipped</span>
+                        <strong>{productPanelFeedback.skipped ?? 0}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
               {productPanelDryRunSummary.failed > 0 ? (
                 <p className="page-description">Dry-run delivery failed. No product availability changed.</p>
               ) : null}
@@ -1365,7 +1477,7 @@ export function AdminShopifyOrderPage() {
                     type="button"
                     className="button button-secondary"
                     disabled={productPanelDryRunMutation.isPending}
-                    onClick={() => void handleProductPanelDryRunSend()}
+                    onClick={() => void handleProductPanelDryRunSend(allocation.allocationOrderId)}
                   >
                     {productPanelDryRunMutation.isPending ? 'Sending dry-run...' : 'Send dry-run now'}
                   </button>
