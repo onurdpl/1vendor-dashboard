@@ -393,6 +393,19 @@ async function runSmoke() {
     if (!dbHealthJson || !validDbStatuses.has(dbHealthJson.status)) {
       throw new Error(`/health/db payload invalid: ${JSON.stringify(dbHealthJson)}`);
     }
+    const dbSmokeMode = dbHealthJson.status;
+    if (dbSmokeMode === 'unavailable') {
+      if (backendEnv.DATABASE_URL) {
+        throw new Error(
+          'DATABASE_URL is configured but not reachable; DB-backed webhook smoke tests cannot run. Check DATABASE_URL or run with a reachable local database.',
+        );
+      }
+
+      throw new Error('/health/db reported unavailable; no explicit no-DB smoke mode is configured.');
+    }
+    if (dbSmokeMode === 'not_configured') {
+      console.log('Database not configured; running no-DB-safe smoke checks only.');
+    }
 
     const corsPreflightResponse = await fetch(`${baseUrl}/auth/login`, {
       method: 'OPTIONS',
@@ -537,7 +550,7 @@ async function runSmoke() {
       throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
     }
     const validWebhookJson = await validWebhookResponse.json();
-    if (!backendEnv.DATABASE_URL) {
+    if (dbSmokeMode === 'not_configured') {
       if (
         validWebhookJson?.duplicate !== false ||
         validWebhookJson?.action !== 'accepted' ||
@@ -559,7 +572,7 @@ async function runSmoke() {
         throw new Error(`/webhooks/shopify/orders-create invalid signature expected 401, got ${invalidWebhookResponse.status}`);
       }
 
-      console.log('Backend smoke check passed (database not configured; DB-backed webhook processing skipped).');
+      console.log('Backend smoke check passed (database not configured; DB-backed webhook processing skipped intentionally).');
       return;
     }
 
