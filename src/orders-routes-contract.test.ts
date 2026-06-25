@@ -12,6 +12,7 @@ const addBlockedAllocationResolutionNoteMock = vi.hoisted(() => vi.fn());
 const requestCancelRefundReviewForAdminOrderMock = vi.hoisted(() => vi.fn());
 const previewShopifyRefundForAdminOrderMock = vi.hoisted(() => vi.fn());
 const transferAllocationEconomicsForAdminOrderMock = vi.hoisted(() => vi.fn());
+const sendProductPanelVariantDisableDryRunEventsForOrderMock = vi.hoisted(() => vi.fn());
 const MockOrderRejectValidationError = vi.hoisted(() => class MockOrderRejectValidationError extends Error {
   statusCode: number;
 
@@ -24,6 +25,14 @@ const MockEconomicTransferValidationError = vi.hoisted(() => class MockEconomicT
   statusCode: number;
 
   constructor(message: string, statusCode = 400) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+});
+const MockProductPanelVariantDisableDryRunSendError = vi.hoisted(() => class MockProductPanelVariantDisableDryRunSendError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 409) {
     super(message);
     this.statusCode = statusCode;
   }
@@ -53,6 +62,11 @@ vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
 
 vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
   EconomicTransferValidationError: MockEconomicTransferValidationError,
+}));
+
+vi.mock('../backend/src/modules/product-panel/product-panel-variant-disable-outbox.service.js', () => ({
+  ProductPanelVariantDisableDryRunSendError: MockProductPanelVariantDisableDryRunSendError,
+  sendProductPanelVariantDisableDryRunEventsForOrder: sendProductPanelVariantDisableDryRunEventsForOrderMock,
 }));
 
 vi.mock('../backend/src/modules/orders/allocation-split.service.js', () => ({
@@ -86,6 +100,7 @@ describe('orders route contract', () => {
     requestCancelRefundReviewForAdminOrderMock.mockReset();
     previewShopifyRefundForAdminOrderMock.mockReset();
     transferAllocationEconomicsForAdminOrderMock.mockReset();
+    sendProductPanelVariantDisableDryRunEventsForOrderMock.mockReset();
   });
 
   it('keeps vendor order detail as a DB read without Shopify image backfill service wiring', async () => {
@@ -488,6 +503,121 @@ describe('orders route contract', () => {
     expect(response).toEqual({ statusCode: 403, payload: { message: 'Forbidden' } });
     expect(planAllocationSplitForVendorOrderMock).not.toHaveBeenCalled();
     expect(splitAllocationForVendorOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('wires admin Product Panel dry-run send route to the scoped sender', async () => {
+    const env = {
+      PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: true,
+      PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: true,
+      PRODUCT_PANEL_BASE_URL: 'https://product-panel.example',
+      PRODUCT_PANEL_HMAC_SECRET: 'secret',
+    };
+    sendProductPanelVariantDisableDryRunEventsForOrderMock.mockResolvedValueOnce({
+      ok: true,
+      attempted: 1,
+      resolved: 1,
+      failed: 0,
+      skipped: 0,
+      latestEventStatuses: [],
+    });
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, env as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/product-panel-variant-disable/send-dry-run')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'gid://shopify/Order/1101' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      ok: true,
+      attempted: 1,
+      resolved: 1,
+      failed: 0,
+      skipped: 0,
+      latestEventStatuses: [],
+    });
+    expect(sendProductPanelVariantDisableDryRunEventsForOrderMock).toHaveBeenCalledWith(env, {
+      shopifyOrderId: 'gid://shopify/Order/1101',
+    });
+  });
+
+  it('blocks non-admin Product Panel dry-run send requests', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/product-panel-variant-disable/send-dry-run')?.({
+      authUser: { id: 'vendor-1', role: 'vendor' },
+      params: { shopifyOrderId: 'gid://shopify/Order/1101' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({ statusCode: 403, payload: { message: 'Forbidden' } });
+    expect(sendProductPanelVariantDisableDryRunEventsForOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('returns Product Panel dry-run send validation errors from the admin route', async () => {
+    sendProductPanelVariantDisableDryRunEventsForOrderMock.mockRejectedValueOnce(
+      new MockProductPanelVariantDisableDryRunSendError('Product Panel hard-disable mode is not allowed from this manual dry-run action.'),
+    );
+    const posts = new Map<string, (request: {
+      authUser?: { id?: string; role?: string };
+      params: { shopifyOrderId: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { id?: string; role?: string };
+        params: { shopifyOrderId: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/orders/:shopifyOrderId/product-panel-variant-disable/send-dry-run')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { shopifyOrderId: 'gid://shopify/Order/1101' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 409,
+      payload: { message: 'Product Panel hard-disable mode is not allowed from this manual dry-run action.' },
+    });
   });
 
   it('wires admin return-to-vendor route to the allocation resolution service', async () => {

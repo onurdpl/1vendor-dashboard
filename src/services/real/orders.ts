@@ -16,6 +16,8 @@ import type {
   ShippingProviderDiagnostics,
   OrderStatus,
   OrderSummary,
+  ProductPanelVariantDisableDryRunSendResult,
+  ProductPanelVariantDisableEventSummary,
   ShippingStatus,
   ShopifyRefundExecutionPayload,
   ShopifyRefundExecutionResult,
@@ -315,6 +317,7 @@ type AdminOrderBreakdownDto = {
       adminActorUserId: string | null;
     } | null;
     splitSummary?: AllocationSplitSummary | null;
+    productPanelVariantDisableEvents?: ProductPanelVariantDisableEventSummary[];
   }>;
 };
 
@@ -655,6 +658,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         splitSummary: allocation.splitSummary ?? null,
         cancelRefundReview: allocation.cancelRefundReview ?? null,
         outboundRefundAttemptSummary: allocation.outboundRefundAttemptSummary ?? null,
+        productPanelVariantDisableEvents: allocation.productPanelVariantDisableEvents ?? [],
       };
     }),
   };
@@ -803,6 +807,16 @@ export async function executeAdminShopifyRefund(
   return apiClient.post<ShopifyRefundExecutionResult>(
     `/admin/orders/${encodeURIComponent(shopifyOrderId)}/allocations/${encodeURIComponent(allocationId)}/shopify-refund`,
     payload,
+    { skipVendorContext: true },
+  );
+}
+
+export async function sendAdminProductPanelVariantDisableDryRun(
+  shopifyOrderId: string,
+): Promise<ProductPanelVariantDisableDryRunSendResult> {
+  return apiClient.post<ProductPanelVariantDisableDryRunSendResult>(
+    `/admin/orders/${encodeURIComponent(shopifyOrderId)}/product-panel-variant-disable/send-dry-run`,
+    {},
     { skipVendorContext: true },
   );
 }

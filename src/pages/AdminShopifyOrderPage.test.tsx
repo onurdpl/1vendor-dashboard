@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
@@ -7,12 +7,15 @@ import type { ShopifyOrderBreakdown } from '../features/orders/api';
 import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
 
 const getAdminShopifyOrderBreakdownMock = vi.fn<() => Promise<ShopifyOrderBreakdown>>();
+const sendAdminProductPanelVariantDisableDryRunMock = vi.fn();
 
 vi.mock('../features/orders/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/orders/api')>();
   return {
     ...actual,
     getAdminShopifyOrderBreakdown: () => getAdminShopifyOrderBreakdownMock(),
+    sendAdminProductPanelVariantDisableDryRun: (shopifyOrderId: string) =>
+      sendAdminProductPanelVariantDisableDryRunMock(shopifyOrderId),
   };
 });
 
@@ -108,6 +111,30 @@ function buildAllocation(
   };
 }
 
+function buildProductPanelEvent(
+  overrides: Partial<NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number]> = {},
+): NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number] {
+  return {
+    id: 'product-panel-event-1',
+    status: 'CREATED',
+    shopifyVariantId: 'gid://shopify/ProductVariant/111',
+    shopifyLineItemId: 'gid://shopify/LineItem/1',
+    variantSku: 'SKU-1088',
+    reasonCode: 'OUT_OF_STOCK',
+    reasonText: 'Selected size is unavailable.',
+    quantity: 1,
+    requestedAt: '2026-06-21T12:46:00.000Z',
+    environment: 'test',
+    dryRun: true,
+    attemptCount: 0,
+    error: null,
+    resolvedAt: null,
+    failedAt: null,
+    response: null,
+    ...overrides,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -155,6 +182,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getAdminShopifyOrderBreakdownMock.mockReset();
+    sendAdminProductPanelVariantDisableDryRunMock.mockReset();
   });
 
   it('loads admin order detail for an authenticated admin even when vendor context is missing', async () => {
@@ -258,6 +286,97 @@ describe('AdminShopifyOrderPage split visibility', () => {
     expect(screen.getByText(/Parent SKU: PARENT-SKU-1088/)).toBeInTheDocument();
     expect(screen.getByText(/Size: 42/)).toBeInTheDocument();
     expect(screen.getByText(/Confidence: high/)).toBeInTheDocument();
+    });
+
+    it('renders manual Product Panel dry-run send action for queued events and refreshes detail', async () => {
+      getAdminShopifyOrderBreakdownMock
+        .mockResolvedValueOnce({
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          customer: 'Customer',
+          financialStatus: 'pending',
+          createdAt: '2026-06-21T08:00:00.000Z',
+          allocations: [
+            buildAllocation({
+              productPanelVariantDisableEvents: [buildProductPanelEvent()],
+            }),
+          ],
+        })
+        .mockResolvedValueOnce({
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          customer: 'Customer',
+          financialStatus: 'pending',
+          createdAt: '2026-06-21T08:00:00.000Z',
+          allocations: [
+            buildAllocation({
+              productPanelVariantDisableEvents: [
+                buildProductPanelEvent({
+                  status: 'RESOLVED_DRY_RUN',
+                  attemptCount: 1,
+                  resolvedAt: '2026-06-21T12:47:00.000Z',
+                  response: {
+                    accepted: true,
+                    dryRun: true,
+                    canResolve: true,
+                    parentSku: 'PARENT-SKU-1088',
+                    writesPerformed: false,
+                  },
+                }),
+              ],
+            }),
+          ],
+        });
+      sendAdminProductPanelVariantDisableDryRunMock.mockResolvedValueOnce({
+        ok: true,
+        attempted: 1,
+        resolved: 1,
+        failed: 0,
+        skipped: 0,
+        latestEventStatuses: [],
+      });
+
+      renderPage();
+
+      expect(await screen.findByRole('heading', { name: 'Variant availability validation' })).toBeInTheDocument();
+      expect(screen.getByText('Validates Product Panel resolver. Does not disable products or change Shopify inventory.')).toBeInTheDocument();
+      const sendButton = screen.getByRole('button', { name: 'Send dry-run now' });
+      fireEvent.click(sendButton);
+
+      await waitFor(() => {
+        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+      });
+      await waitFor(() => {
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+      });
+      expect(await screen.findByText('Variant Disable dry-run resolved')).toBeInTheDocument();
+    });
+
+    it('hides manual Product Panel dry-run send action when no event is retryable', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+        customer: 'Customer',
+        financialStatus: 'pending',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            productPanelVariantDisableEvents: [
+              buildProductPanelEvent({
+                status: 'RESOLVED_DRY_RUN',
+                attemptCount: 1,
+                resolvedAt: '2026-06-21T12:47:00.000Z',
+              }),
+            ],
+          }),
+        ],
+      });
+
+      renderPage();
+
+      expect(await screen.findByRole('heading', { name: 'Variant availability validation' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Send dry-run now' })).not.toBeInTheDocument();
+      expect(sendAdminProductPanelVariantDisableDryRunMock).not.toHaveBeenCalled();
     });
 
     it('renders return ownership context for allocations with return records', async () => {

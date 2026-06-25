@@ -1048,6 +1048,15 @@ export type ProductPanelVariantDisableEventSummary = {
   } | null;
 };
 
+export type ProductPanelVariantDisableDryRunSendResult = {
+  ok: true;
+  attempted: number;
+  resolved: number;
+  failed: number;
+  skipped: number;
+  latestEventStatuses: ProductPanelVariantDisableEventSummary[];
+};
+
 export type ShopifyRefundPreviewRestockType = 'CANCEL' | 'NO_RESTOCK';
 
 export type FulfillmentOrderCancellationClassification =

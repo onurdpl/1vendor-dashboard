@@ -10,6 +10,7 @@ import {
   previewAdminShopifyRefund,
   requestAdminCancelRefundReview,
   returnAdminBlockedAllocationToVendor,
+  sendAdminProductPanelVariantDisableDryRun,
   transferAdminAllocationEconomics,
   type ShopifyRefundExecutionPayload,
   type ShopifyRefundPreviewResult,
@@ -298,6 +299,27 @@ function buildProductPanelVariantDisableMeta(
   ].filter(Boolean);
 
   return parts.join(' · ');
+}
+
+function isRetryableProductPanelDryRunEvent(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
+) {
+  const status = normalizeStateToken(event.status);
+  return (
+    event.dryRun &&
+    normalizeStateToken(event.reasonCode) === 'out_of_stock' &&
+    (status === 'created' || status === 'failed') &&
+    Boolean(event.shopifyVariantId)
+  );
+}
+
+function summarizeProductPanelDryRunEvents(
+  events: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>,
+) {
+  const queued = events.filter((event) => normalizeStateToken(event.status) === 'created').length;
+  const failed = events.filter((event) => normalizeStateToken(event.status) === 'failed').length;
+  const resolved = events.filter((event) => normalizeStateToken(event.status) === 'resolved_dry_run').length;
+  return { queued, failed, resolved };
 }
 
 function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['allocations'][number]) {
@@ -718,6 +740,23 @@ export function AdminShopifyOrderPage() {
       },
     },
   );
+  const productPanelDryRunMutation = useMutationAction(
+    async () => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return sendAdminProductPanelVariantDisableDryRun(shopifyOrderId);
+    },
+    {
+      onError: (mutationError) => {
+        showFeedback(
+          getActionErrorMessage(mutationError, 'Dry-run delivery failed. No product availability changed.'),
+          'error',
+        );
+      },
+    },
+  );
 
   async function handleResolutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1051,6 +1090,23 @@ export function AdminShopifyOrderPage() {
     }
   }
 
+  async function handleProductPanelDryRunSend() {
+    try {
+      const result = await productPanelDryRunMutation.mutateAsync(undefined);
+      const hasFailure = result.failed > 0;
+      showFeedback(
+        hasFailure
+          ? 'Dry-run delivery finished with failures. No product availability changed.'
+          : 'Product Panel dry-run sent. No product availability changed.',
+        hasFailure ? 'error' : 'success',
+      );
+      await refetch();
+    } catch {
+      await refetch();
+      // The mutation onError handler owns user-facing failure copy.
+    }
+  }
+
   if (pageReadiness.status === 'unauthorized') {
     return (
       <section className="dashboard order-detail">
@@ -1154,6 +1210,9 @@ export function AdminShopifyOrderPage() {
           ? 'Fulfillment not required'
           : formatStatusAxisLabel(allocation.shippingStatus);
         const paymentStatusLabel = getPaymentStatusLabel(breakdown, refundCompleted);
+        const productPanelEvents = allocation.productPanelVariantDisableEvents ?? [];
+        const productPanelDryRunSummary = summarizeProductPanelDryRunEvents(productPanelEvents);
+        const hasRetryableProductPanelDryRunEvent = productPanelEvents.some(isRetryableProductPanelDryRunEvent);
 
         return (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">
@@ -1264,6 +1323,54 @@ export function AdminShopifyOrderPage() {
                   <p className="page-description">Moved item details are not available for this split event.</p>
                 )}
               </div>
+            </section>
+          ) : null}
+
+          {productPanelEvents.length ? (
+            <section className="economic-transfer-summary-card" aria-label="Product Panel variant disable dry-run">
+              <div className="economic-transfer-summary-header">
+                <div>
+                  <p className="eyebrow">Product Panel dry-run</p>
+                  <h4>Variant availability validation</h4>
+                </div>
+                <span className="status-badge status-info">Dry run only</span>
+              </div>
+              <p className="page-description">
+                Validates Product Panel resolver. Does not disable products or change Shopify inventory.
+              </p>
+              <div className="compact-meta-grid">
+                <div className="meta-item">
+                  <span>Queued</span>
+                  <strong>{productPanelDryRunSummary.queued}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Resolved</span>
+                  <strong>{productPanelDryRunSummary.resolved}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Failed</span>
+                  <strong>{productPanelDryRunSummary.failed}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Latest reason</span>
+                  <strong>{productPanelEvents[0]?.reasonCode ?? 'Not recorded'}</strong>
+                </div>
+              </div>
+              {productPanelDryRunSummary.failed > 0 ? (
+                <p className="page-description">Dry-run delivery failed. No product availability changed.</p>
+              ) : null}
+              {hasRetryableProductPanelDryRunEvent ? (
+                <div className="support-modal-actions refund-preview-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={productPanelDryRunMutation.isPending}
+                    onClick={() => void handleProductPanelDryRunSend()}
+                  >
+                    {productPanelDryRunMutation.isPending ? 'Sending dry-run...' : 'Send dry-run now'}
+                  </button>
+                </div>
+              ) : null}
             </section>
           ) : null}
 

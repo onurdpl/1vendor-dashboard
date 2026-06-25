@@ -915,6 +915,13 @@ export const runtimeServices = {
 
       throw new ApiError('Economic transfer is available in real API mode only.', 'server', { status: 400 });
     },
+    async sendAdminProductPanelVariantDisableDryRun(shopifyOrderId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.sendAdminProductPanelVariantDisableDryRun(shopifyOrderId);
+      }
+
+      throw new ApiError('Product Panel dry-run send is available in real API mode only.', 'server', { status: 400 });
+    },
     async submitFulfillmentTracking(allocationId: string, payload: SubmitFulfillmentTrackingPayload) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.submitFulfillmentTracking(allocationId, payload);

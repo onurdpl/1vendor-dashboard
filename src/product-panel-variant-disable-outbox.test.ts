@@ -22,6 +22,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const {
   enqueueProductPanelVariantDisableEventsForRejectedAllocation,
   sendProductPanelVariantDisableDryRunEvents,
+  sendProductPanelVariantDisableDryRunEventsForOrder,
   shouldQueueProductPanelVariantDisableEvent,
 } = await import('../backend/src/modules/product-panel/product-panel-variant-disable-outbox.service.js');
 
@@ -292,5 +293,135 @@ describe('Product Panel variant disable outbox', () => {
         }),
       }),
     );
+  });
+
+  it('manually sends queued and failed retryable OUT_OF_STOCK dry-run events for one order', async () => {
+    const failedEvent = buildOutboxEvent({
+      id: 'event-failed',
+      status: 'FAILED',
+      attemptCount: 1,
+      error: 'Previous Product Panel timeout.',
+    });
+    const resolvedEvent = buildOutboxEvent({
+      id: 'event-failed',
+      status: 'RESOLVED_DRY_RUN',
+      attemptCount: 2,
+      error: null,
+      resolvedAt: new Date('2026-06-25T10:01:00.000Z'),
+      responseJson: {
+        accepted: true,
+        dryRun: true,
+        canResolve: true,
+        writesPerformed: false,
+      },
+    });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany
+      .mockResolvedValueOnce([failedEvent])
+      .mockResolvedValueOnce([failedEvent])
+      .mockResolvedValueOnce([resolvedEvent]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      text: async () =>
+        JSON.stringify({
+          accepted: true,
+          dryRun: true,
+          canResolve: true,
+          writesPerformed: false,
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEventsForOrder(buildEnv(), {
+      shopifyOrderId: 'gid://shopify/Order/1099',
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      attempted: 1,
+      resolved: 1,
+      failed: 0,
+      skipped: 0,
+      latestEventStatuses: [
+        expect.objectContaining({
+          id: 'event-failed',
+          status: 'RESOLVED_DRY_RUN',
+          response: expect.objectContaining({
+            accepted: true,
+            dryRun: true,
+            writesPerformed: false,
+          }),
+        }),
+      ],
+    });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        shopifyOrderId: 'gid://shopify/Order/1099',
+        dryRun: true,
+        reasonCode: 'OUT_OF_STOCK',
+        status: {
+          in: ['CREATED', 'FAILED'],
+        },
+      },
+      orderBy: {
+        requestedAt: 'asc',
+      },
+      take: 25,
+    });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        status: {
+          in: ['CREATED', 'FAILED'],
+        },
+        dryRun: true,
+        id: {
+          in: ['event-failed'],
+        },
+      },
+      orderBy: {
+        requestedAt: 'asc',
+      },
+      take: 1,
+    });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not send non-OUT_OF_STOCK events from the manual order action', async () => {
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const fetchImpl = vi.fn();
+
+    const result = await sendProductPanelVariantDisableDryRunEventsForOrder(buildEnv(), {
+      shopifyOrderId: 'gid://shopify/Order/1099',
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ attempted: 0, resolved: 0, failed: 0, skipped: 0 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).toHaveBeenNthCalledWith(1, {
+      where: expect.objectContaining({
+        shopifyOrderId: 'gid://shopify/Order/1099',
+        reasonCode: 'OUT_OF_STOCK',
+      }),
+      orderBy: {
+        requestedAt: 'asc',
+      },
+      take: 25,
+    });
+  });
+
+  it('refuses manual send when dry-run mode is disabled', async () => {
+    await expect(
+      sendProductPanelVariantDisableDryRunEventsForOrder(
+        buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+        { shopifyOrderId: 'gid://shopify/Order/1099' },
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Product Panel hard-disable mode is not allowed from this manual dry-run action.',
+    });
+
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).not.toHaveBeenCalled();
   });
 });

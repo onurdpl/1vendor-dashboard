@@ -21,6 +21,10 @@ import {
 import { EconomicTransferValidationError } from '../finance/economic-transfer.service.js';
 import { AllocationSplitValidationError } from './allocation-split.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import {
+  ProductPanelVariantDisableDryRunSendError,
+  sendProductPanelVariantDisableDryRunEventsForOrder,
+} from '../product-panel/product-panel-variant-disable-outbox.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
@@ -245,6 +249,34 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return breakdown;
+    },
+  );
+
+  app.post<{
+    Params: { shopifyOrderId: string };
+  }>(
+    '/admin/orders/:shopifyOrderId/product-panel-variant-disable/send-dry-run',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      try {
+        const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
+        return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/product-panel-variant-disable/send-dry-run', () =>
+          sendProductPanelVariantDisableDryRunEventsForOrder(env, {
+            shopifyOrderId,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof ProductPanelVariantDisableDryRunSendError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
     },
   );
 

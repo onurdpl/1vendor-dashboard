@@ -3,6 +3,7 @@ import {
   executeAdminShopifyRefund,
   previewAdminShopifyRefund,
   requestAdminCancelRefundReview,
+  sendAdminProductPanelVariantDisableDryRun,
   transferAdminAllocationEconomics,
 } from './orders';
 
@@ -282,6 +283,60 @@ describe('real orders economic transfer service', () => {
       writesPerformed: true,
       status: 'SHOPIFY_ACTION_PENDING',
       attemptId: 'attempt-1',
+    });
+  });
+
+  it('posts admin Product Panel variant-disable dry-run send without vendor context', async () => {
+    apiClientPost.mockResolvedValueOnce({
+      ok: true,
+      attempted: 1,
+      resolved: 1,
+      failed: 0,
+      skipped: 0,
+      latestEventStatuses: [
+        {
+          id: 'product-panel-event-1',
+          status: 'RESOLVED_DRY_RUN',
+          shopifyVariantId: 'gid://shopify/ProductVariant/111',
+          shopifyLineItemId: 'gid://shopify/LineItem/1',
+          variantSku: 'SKU-1088',
+          reasonCode: 'OUT_OF_STOCK',
+          reasonText: 'Out of stock',
+          quantity: 1,
+          requestedAt: '2026-06-21T12:46:00.000Z',
+          environment: 'test',
+          dryRun: true,
+          attemptCount: 1,
+          error: null,
+          resolvedAt: '2026-06-21T12:47:00.000Z',
+          failedAt: null,
+          response: {
+            accepted: true,
+            dryRun: true,
+            writesPerformed: false,
+          },
+        },
+      ],
+    });
+
+    const result = await sendAdminProductPanelVariantDisableDryRun('gid://shopify/Order/1001');
+
+    expect(apiClientPost).toHaveBeenCalledWith(
+      '/admin/orders/gid%3A%2F%2Fshopify%2FOrder%2F1001/product-panel-variant-disable/send-dry-run',
+      {},
+      { skipVendorContext: true },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      attempted: 1,
+      resolved: 1,
+      failed: 0,
+      latestEventStatuses: [
+        expect.objectContaining({
+          id: 'product-panel-event-1',
+          status: 'RESOLVED_DRY_RUN',
+        }),
+      ],
     });
   });
 });

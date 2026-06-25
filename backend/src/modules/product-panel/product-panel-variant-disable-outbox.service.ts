@@ -48,6 +48,15 @@ type QueueEventInput = {
   dryRun?: boolean;
 };
 
+export class ProductPanelVariantDisableDryRunSendError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 409) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 type ProductPanelDisablePayload = {
   shopifyVariantId: string;
   variantSku: string | null;
@@ -131,6 +140,39 @@ function buildDisablePayload(event: ProductPanelVariantDisableOutboxEvent): Prod
     sourceSystem: PRODUCT_PANEL_SOURCE_SYSTEM,
     sourceEventType: PRODUCT_PANEL_SOURCE_EVENT_TYPE,
     sourceStatus: PRODUCT_PANEL_SOURCE_STATUS,
+  };
+}
+
+function mapEventStatusSummary(event: ProductPanelVariantDisableOutboxEvent) {
+  return {
+    id: event.id,
+    status: event.status,
+    shopifyVariantId: event.shopifyVariantId,
+    shopifyLineItemId: event.shopifyLineItemId,
+    variantSku: event.variantSku,
+    reasonCode: event.reasonCode,
+    reasonText: event.reasonText,
+    quantity: event.quantity,
+    requestedAt: event.requestedAt.toISOString(),
+    environment: event.environment,
+    dryRun: event.dryRun,
+    attemptCount: event.attemptCount,
+    error: event.error,
+    resolvedAt: event.resolvedAt?.toISOString() ?? null,
+    failedAt: event.failedAt?.toISOString() ?? null,
+    response: event.responseJson && typeof event.responseJson === 'object' && !Array.isArray(event.responseJson)
+      ? {
+          accepted: (event.responseJson as Record<string, unknown>).accepted,
+          dryRun: (event.responseJson as Record<string, unknown>).dryRun,
+          canResolve: (event.responseJson as Record<string, unknown>).canResolve,
+          parentSku: (event.responseJson as Record<string, unknown>).parentSku,
+          normalizedSize: (event.responseJson as Record<string, unknown>).normalizedSize,
+          sizeKey: (event.responseJson as Record<string, unknown>).sizeKey,
+          resolutionMethod: (event.responseJson as Record<string, unknown>).resolutionMethod,
+          confidence: (event.responseJson as Record<string, unknown>).confidence,
+          writesPerformed: (event.responseJson as Record<string, unknown>).writesPerformed,
+        }
+      : null,
   };
 }
 
@@ -360,6 +402,8 @@ export async function sendProductPanelVariantDisableDryRunEvents(
   options: {
     limit?: number;
     fetchImpl?: FetchLike;
+    eventIds?: string[];
+    statuses?: ProductPanelVariantDisableOutboxStatus[];
   } = {},
 ) {
   if (!env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED) {
@@ -385,10 +429,27 @@ export async function sendProductPanelVariantDisableDryRunEvents(
 
   const baseUrl = env.PRODUCT_PANEL_BASE_URL?.trim();
   const secret = env.PRODUCT_PANEL_HMAC_SECRET?.trim();
+  const eventIds = options.eventIds?.map((eventId) => eventId.trim()).filter(Boolean);
+  if (options.eventIds && !eventIds?.length) {
+    return {
+      processed: 0,
+      resolved: 0,
+      failed: 0,
+      skipped: 0,
+      disabled: false,
+    };
+  }
+
+  const statuses = options.statuses?.length
+    ? options.statuses
+    : [ProductPanelVariantDisableOutboxStatus.CREATED];
   const events = await prisma.productPanelVariantDisableOutboxEvent.findMany({
     where: {
-      status: ProductPanelVariantDisableOutboxStatus.CREATED,
+      status: {
+        in: statuses,
+      },
       dryRun: true,
+      ...(eventIds?.length ? { id: { in: eventIds } } : {}),
     },
     orderBy: {
       requestedAt: 'asc',
@@ -486,5 +547,90 @@ export async function sendProductPanelVariantDisableDryRunEvents(
     failed,
     skipped: 0,
     disabled: false,
+  };
+}
+
+export async function sendProductPanelVariantDisableDryRunEventsForOrder(
+  env: ProductPanelEnv,
+  input: {
+    shopifyOrderId: string;
+    limit?: number;
+    fetchImpl?: FetchLike;
+  },
+) {
+  const shopifyOrderId = input.shopifyOrderId.trim();
+  if (!shopifyOrderId) {
+    throw new ProductPanelVariantDisableDryRunSendError('Shopify order id is required.', 400);
+  }
+
+  if (!env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED) {
+    throw new ProductPanelVariantDisableDryRunSendError('Product Panel variant disable dry-run sender is disabled.');
+  }
+
+  if (!env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN) {
+    throw new ProductPanelVariantDisableDryRunSendError('Product Panel hard-disable mode is not allowed from this manual dry-run action.');
+  }
+
+  if (!env.PRODUCT_PANEL_BASE_URL?.trim() || !env.PRODUCT_PANEL_HMAC_SECRET?.trim()) {
+    throw new ProductPanelVariantDisableDryRunSendError('Product Panel base URL or HMAC secret is not configured.');
+  }
+
+  const retryableStatuses = [
+    ProductPanelVariantDisableOutboxStatus.CREATED,
+    ProductPanelVariantDisableOutboxStatus.FAILED,
+  ];
+  const candidates = await prisma.productPanelVariantDisableOutboxEvent.findMany({
+    where: {
+      shopifyOrderId,
+      dryRun: true,
+      reasonCode: CancellationReason.OUT_OF_STOCK,
+      status: {
+        in: retryableStatuses,
+      },
+    },
+    orderBy: {
+      requestedAt: 'asc',
+    },
+    take: input.limit ?? 25,
+  });
+  const sendableEventIds = candidates
+    .filter((event) => Boolean(event.shopifyVariantId))
+    .map((event) => event.id);
+  const skippedBeforeSend = candidates.length - sendableEventIds.length;
+
+  const sendResult = sendableEventIds.length
+    ? await sendProductPanelVariantDisableDryRunEvents(env, {
+        eventIds: sendableEventIds,
+        statuses: retryableStatuses,
+        limit: sendableEventIds.length,
+        fetchImpl: input.fetchImpl,
+      })
+    : {
+        processed: 0,
+        resolved: 0,
+        failed: 0,
+        skipped: 0,
+        disabled: false,
+      };
+
+  const latestEvents = await prisma.productPanelVariantDisableOutboxEvent.findMany({
+    where: {
+      shopifyOrderId,
+      dryRun: true,
+      reasonCode: CancellationReason.OUT_OF_STOCK,
+    },
+    orderBy: {
+      requestedAt: 'desc',
+    },
+    take: input.limit ?? 25,
+  });
+
+  return {
+    ok: true,
+    attempted: sendResult.processed,
+    resolved: sendResult.resolved,
+    failed: sendResult.failed,
+    skipped: skippedBeforeSend + sendResult.skipped,
+    latestEventStatuses: latestEvents.map(mapEventStatusSummary),
   };
 }

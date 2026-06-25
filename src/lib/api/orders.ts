@@ -73,6 +73,10 @@ export async function transferAdminAllocationEconomics(
   return runtimeServices.orders.transferAdminAllocationEconomics(shopifyOrderId, allocationId, payload);
 }
 
+export async function sendAdminProductPanelVariantDisableDryRun(shopifyOrderId: string) {
+  return runtimeServices.orders.sendAdminProductPanelVariantDisableDryRun(shopifyOrderId);
+}
+
 export async function submitFulfillmentTracking(
   allocationId: string,
   payload: {
