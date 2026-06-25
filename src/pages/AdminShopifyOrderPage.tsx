@@ -288,6 +288,30 @@ function formatProductPanelResponseValue(value: unknown) {
   return String(value);
 }
 
+function formatProductPanelMissingHeaders(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const headers = value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : null))
+    .filter(Boolean);
+  return headers.length ? `Missing headers: ${headers.join(', ')}` : null;
+}
+
+function getProductPanelDisplayError(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number] | null,
+) {
+  if (!event) {
+    return null;
+  }
+
+  const message = formatProductPanelResponseValue(event.response?.message);
+  const error = formatProductPanelResponseValue(event.response?.error);
+  const missingHeaders = formatProductPanelMissingHeaders(event.response?.missingHeaders);
+  return message ?? error ?? missingHeaders ?? event.error;
+}
+
 function buildProductPanelVariantDisableMeta(
   event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
 ) {
@@ -303,7 +327,7 @@ function buildProductPanelVariantDisableMeta(
     normalizedSize ? `Size: ${normalizedSize}` : null,
     confidence ? `Confidence: ${confidence}` : null,
     resolutionMethod ? `Resolution: ${resolutionMethod}` : null,
-    event.error ? `Error: ${event.error}` : null,
+    getProductPanelDisplayError(event) ? `Error: ${getProductPanelDisplayError(event)}` : null,
     event.dryRun ? 'Dry run' : null,
     formatDate(event.resolvedAt ?? event.failedAt ?? event.requestedAt),
   ].filter(Boolean);
@@ -1280,6 +1304,7 @@ export function AdminShopifyOrderPage() {
         const hasRetryableProductPanelDryRunEvent = productPanelEvents.some(isRetryableProductPanelDryRunEvent);
         const latestProductPanelEvent = getLatestProductPanelEvent(productPanelEvents);
         const latestProductPanelAttemptedAt = getProductPanelLastAttemptedAt(latestProductPanelEvent);
+        const latestProductPanelError = getProductPanelDisplayError(latestProductPanelEvent);
         const productPanelFeedback = productPanelDryRunFeedback[allocation.allocationOrderId];
 
         return (
@@ -1437,7 +1462,7 @@ export function AdminShopifyOrderPage() {
                 </div>
                 <div className="meta-item">
                   <span>Latest error</span>
-                  <strong>{latestProductPanelEvent?.error ?? 'None'}</strong>
+                  <strong>{latestProductPanelError ?? 'None'}</strong>
                 </div>
               </div>
               {productPanelFeedback ? (

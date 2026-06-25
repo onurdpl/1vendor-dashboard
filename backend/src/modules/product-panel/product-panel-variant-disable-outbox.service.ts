@@ -144,6 +144,9 @@ function buildDisablePayload(event: ProductPanelVariantDisableOutboxEvent): Prod
 }
 
 function mapEventStatusSummary(event: ProductPanelVariantDisableOutboxEvent) {
+  const responseJson = event.responseJson && typeof event.responseJson === 'object' && !Array.isArray(event.responseJson)
+    ? (event.responseJson as Record<string, unknown>)
+    : null;
   return {
     id: event.id,
     status: event.status,
@@ -160,33 +163,36 @@ function mapEventStatusSummary(event: ProductPanelVariantDisableOutboxEvent) {
     error: event.error,
     resolvedAt: event.resolvedAt?.toISOString() ?? null,
     failedAt: event.failedAt?.toISOString() ?? null,
-    response: event.responseJson && typeof event.responseJson === 'object' && !Array.isArray(event.responseJson)
+    response: responseJson
       ? {
-          accepted: (event.responseJson as Record<string, unknown>).accepted,
-          dryRun: (event.responseJson as Record<string, unknown>).dryRun,
-          canResolve: (event.responseJson as Record<string, unknown>).canResolve,
-          parentSku: (event.responseJson as Record<string, unknown>).parentSku,
-          normalizedSize: (event.responseJson as Record<string, unknown>).normalizedSize,
-          sizeKey: (event.responseJson as Record<string, unknown>).sizeKey,
-          resolutionMethod: (event.responseJson as Record<string, unknown>).resolutionMethod,
-          confidence: (event.responseJson as Record<string, unknown>).confidence,
-          writesPerformed: (event.responseJson as Record<string, unknown>).writesPerformed,
+          accepted: responseJson.accepted,
+          dryRun: responseJson.dryRun,
+          canResolve: responseJson.canResolve,
+          parentSku: responseJson.parentSku,
+          normalizedSize: responseJson.normalizedSize,
+          sizeKey: responseJson.sizeKey,
+          resolutionMethod: responseJson.resolutionMethod,
+          confidence: responseJson.confidence,
+          writesPerformed: responseJson.writesPerformed,
+          error: responseJson.error,
+          message: responseJson.message,
+          missingHeaders: responseJson.missingHeaders,
         }
       : null,
   };
 }
 
 function signPayload(secret: string, body: string, idempotencyKey: string) {
-  const timestamp = new Date().toISOString();
+  const timestamp = Math.floor(Date.now() / 1000).toString();
   const nonce = randomUUID();
   const signature = createHmac('sha256', secret)
-    .update(`${timestamp}.${nonce}.${idempotencyKey}.${body}`)
+    .update(`${timestamp}\n${nonce}\n${idempotencyKey}\n${body}`)
     .digest('hex');
 
   return {
     timestamp,
     nonce,
-    signature: `sha256=${signature}`,
+    signature,
   };
 }
 
@@ -495,9 +501,9 @@ export async function sendProductPanelVariantDisableDryRunEvents(
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': event.idempotencyKey,
-          'X-Product-Panel-Timestamp': signature.timestamp,
-          'X-Product-Panel-Nonce': signature.nonce,
-          'X-Product-Panel-Signature': signature.signature,
+          'X-Sporgym-Timestamp': signature.timestamp,
+          'X-Sporgym-Nonce': signature.nonce,
+          'X-Sporgym-Signature': signature.signature,
         },
         body,
       });

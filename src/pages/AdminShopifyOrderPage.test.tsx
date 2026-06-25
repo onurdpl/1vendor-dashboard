@@ -449,6 +449,40 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
     });
 
+    it('renders Product Panel response auth message as the latest error', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+        customer: 'Customer',
+        financialStatus: 'pending',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            productPanelVariantDisableEvents: [
+              buildProductPanelEvent({
+                status: 'FAILED',
+                attemptCount: 1,
+                error: 'Product Panel dry-run failed with status 401.',
+                failedAt: '2026-06-21T12:47:00.000Z',
+                response: {
+                  error: 'unauthorized',
+                  message: 'Invalid HMAC signature.',
+                  missingHeaders: ['X-Sporgym-Signature'],
+                },
+              }),
+            ],
+          }),
+        ],
+      });
+
+      renderPage();
+
+      const dryRunCard = await screen.findByLabelText('Product Panel variant disable dry-run');
+      expect(within(dryRunCard).getByText('Latest error')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Invalid HMAC signature.')).toBeInTheDocument();
+      expect(screen.getByText(/Error: Invalid HMAC signature./)).toBeInTheDocument();
+    });
+
     it('renders inline Product Panel dry-run zero-attempt feedback', async () => {
       const initialBreakdown = {
         sourceShopifyOrderId: '7817723773265',

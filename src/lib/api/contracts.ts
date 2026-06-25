@@ -1045,6 +1045,9 @@ export type ProductPanelVariantDisableEventSummary = {
     resolutionMethod?: unknown;
     confidence?: unknown;
     writesPerformed?: unknown;
+    error?: unknown;
+    message?: unknown;
+    missingHeaders?: unknown;
   } | null;
 };
 

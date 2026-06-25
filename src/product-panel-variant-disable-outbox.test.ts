@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHmac } from 'node:crypto';
 
 const prismaMock = vi.hoisted(() => ({
   vendorAllocation: {
@@ -213,11 +214,40 @@ describe('Product Panel variant disable outbox', () => {
       expect.objectContaining({
         'Content-Type': 'application/json',
         'Idempotency-Key': event.idempotencyKey,
-        'X-Product-Panel-Timestamp': expect.any(String),
-        'X-Product-Panel-Nonce': expect.any(String),
-        'X-Product-Panel-Signature': expect.stringMatching(/^sha256=/),
+        'X-Sporgym-Timestamp': expect.stringMatching(/^\d+$/),
+        'X-Sporgym-Nonce': expect.any(String),
+        'X-Sporgym-Signature': expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
+    expect(request.headers).not.toHaveProperty('X-Product-Panel-Timestamp');
+    expect(request.headers).not.toHaveProperty('X-Product-Panel-Nonce');
+    expect(request.headers).not.toHaveProperty('X-Product-Panel-Signature');
+    const timestamp = request.headers['X-Sporgym-Timestamp'];
+    expect(Number(timestamp)).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect(Number(timestamp)).toBeGreaterThan(Math.floor(Date.now() / 1000) - 10);
+    const expectedBody = JSON.stringify({
+      shopifyVariantId: 'gid://shopify/ProductVariant/111',
+      variantSku: 'SKU-42',
+      shopifyLineItemId: 'shopify-line-1',
+      allocationId: 'alloc-1099',
+      vendorId: 'yalispor',
+      vendorName: 'Yalı Spor',
+      sourceOrderId: 'gid://shopify/Order/1099',
+      sourceOrderName: '#1099',
+      reasonCode: 'OUT_OF_STOCK',
+      reasonText: 'Out of stock',
+      quantity: 2,
+      requestedAt: '2026-06-25T10:00:00.000Z',
+      environment: 'test',
+      sourceSystem: 'vendor_allocation_panel',
+      sourceEventType: 'vendor_allocation_rejected',
+      sourceStatus: 'vendor_reported',
+    });
+    expect(request.body).toBe(expectedBody);
+    const expectedSignature = createHmac('sha256', 'test-product-panel-secret')
+      .update(`${timestamp}\n${request.headers['X-Sporgym-Nonce']}\n${event.idempotencyKey}\n${expectedBody}`)
+      .digest('hex');
+    expect(request.headers['X-Sporgym-Signature']).toBe(expectedSignature);
     expect(JSON.parse(request.body)).toEqual({
       shopifyVariantId: 'gid://shopify/ProductVariant/111',
       variantSku: 'SKU-42',
@@ -247,6 +277,37 @@ describe('Product Panel variant disable outbox', () => {
           dryRun: true,
           parentSku: 'PARENT-1',
           writesPerformed: false,
+        }),
+      }),
+    });
+  });
+
+  it('stores Product Panel 401 auth response details', async () => {
+    const event = buildOutboxEvent();
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      text: async () =>
+        JSON.stringify({
+          error: 'unauthorized',
+          message: 'Invalid HMAC signature.',
+          missingHeaders: ['X-Sporgym-Signature'],
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEvents(buildEnv(), { fetchImpl });
+
+    expect(result).toMatchObject({ processed: 1, resolved: 0, failed: 1 });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        error: 'Product Panel dry-run failed with status 401.',
+        responseJson: expect.objectContaining({
+          error: 'unauthorized',
+          message: 'Invalid HMAC signature.',
+          missingHeaders: ['X-Sporgym-Signature'],
         }),
       }),
     });
