@@ -1328,6 +1328,10 @@ export type ShopifyOrderBreakdown = {
   customer: string;
   financialStatus?: string | null;
   createdAt: string;
+  productPanelVariantDisableMode?: {
+    enabled: boolean;
+    dryRun: boolean;
+  };
   allocations: VendorAllocationSummary[];
 };
 

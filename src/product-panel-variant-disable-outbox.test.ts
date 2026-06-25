@@ -374,12 +374,12 @@ describe('Product Panel variant disable outbox', () => {
       attemptCount: 2,
       error: null,
       resolvedAt: new Date('2026-06-25T10:01:00.000Z'),
-      responseJson: {
-        accepted: true,
-        dryRun: true,
-        canResolve: true,
-        writesPerformed: false,
-      },
+        responseJson: {
+          accepted: true,
+          dryRun: true,
+          canResolve: true,
+          writesPerformed: false,
+        },
     });
     prismaMock.productPanelVariantDisableOutboxEvent.findMany
       .mockResolvedValueOnce([failedEvent])
@@ -412,11 +412,11 @@ describe('Product Panel variant disable outbox', () => {
         expect.objectContaining({
           id: 'event-failed',
           status: 'RESOLVED_DRY_RUN',
-          response: expect.objectContaining({
-            accepted: true,
-            dryRun: true,
-            writesPerformed: false,
-          }),
+        response: expect.objectContaining({
+          accepted: true,
+          dryRun: true,
+          writesPerformed: false,
+        }),
         }),
       ],
     });
@@ -483,6 +483,9 @@ describe('Product Panel variant disable outbox', () => {
       status: 201,
       text: async () =>
         JSON.stringify({
+          accepted: true,
+          dryRun: false,
+          canResolve: true,
           created: true,
           duplicate: false,
           ruleId: 'rule-123',
@@ -508,10 +511,12 @@ describe('Product Panel variant disable outbox', () => {
     expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
       where: { id: 'event-1' },
       data: expect.objectContaining({
-        status: 'RESOLVED_DRY_RUN',
+        status: 'RESOLVED',
         dryRun: false,
         error: null,
         responseJson: expect.objectContaining({
+          accepted: true,
+          canResolve: true,
           created: true,
           duplicate: false,
           ruleId: 'rule-123',
@@ -531,6 +536,9 @@ describe('Product Panel variant disable outbox', () => {
       status: 200,
       text: async () =>
         JSON.stringify({
+          accepted: true,
+          dryRun: false,
+          canResolve: true,
           created: false,
           duplicate: true,
           ruleId: 'rule-existing',
@@ -549,13 +557,103 @@ describe('Product Panel variant disable outbox', () => {
     expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
       where: { id: 'event-1' },
       data: expect.objectContaining({
-        status: 'RESOLVED_DRY_RUN',
+        status: 'RESOLVED',
         dryRun: false,
+        error: null,
         responseJson: expect.objectContaining({
+          accepted: true,
+          canResolve: true,
           created: false,
           duplicate: true,
           ruleId: 'rule-existing',
           writesPerformed: false,
+        }),
+      }),
+    });
+  });
+
+  it('treats accepted writable real responses as resolved even when created is false', async () => {
+    const event = buildOutboxEvent({ dryRun: true, status: 'FAILED', error: 'Product Panel variant disable failed with status 200.' });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          accepted: true,
+          dryRun: false,
+          canResolve: true,
+          writesPerformed: true,
+          created: false,
+          duplicate: true,
+          ruleId: 'rule-accepted',
+          parentSku: 'PARENT-1',
+          normalizedSize: '42',
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEvents(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      {
+        statuses: ['CREATED', 'FAILED'] as never,
+        fetchImpl,
+      },
+    );
+
+    expect(result).toMatchObject({ processed: 1, resolved: 1, failed: 0 });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED',
+        dryRun: false,
+        error: null,
+        failedAt: null,
+        responseJson: expect.objectContaining({
+          accepted: true,
+          canResolve: true,
+          writesPerformed: true,
+          created: false,
+          duplicate: true,
+          ruleId: 'rule-accepted',
+        }),
+      }),
+    });
+  });
+
+  it('keeps HTTP 200 accepted=false real responses failed and retryable', async () => {
+    const event = buildOutboxEvent({ dryRun: true });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          accepted: false,
+          dryRun: false,
+          canResolve: false,
+          writesPerformed: false,
+          created: false,
+          duplicate: false,
+          error: 'not_resolved',
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEvents(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      { fetchImpl },
+    );
+
+    expect(result).toMatchObject({ processed: 1, resolved: 0, failed: 1 });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        dryRun: false,
+        error: 'Product Panel variant disable failed with status 200.',
+        responseJson: expect.objectContaining({
+          accepted: false,
+          canResolve: false,
+          error: 'not_resolved',
         }),
       }),
     });

@@ -763,5 +763,9 @@ export type AdminOrderBreakdownDto = {
     createdAt: string;
     updatedAt: string;
   };
+  productPanelVariantDisableMode: {
+    enabled: boolean;
+    dryRun: boolean;
+  };
   allocations: AdminOrderBreakdownAllocationDto[];
 };

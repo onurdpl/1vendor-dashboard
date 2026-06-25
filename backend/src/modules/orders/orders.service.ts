@@ -222,6 +222,30 @@ function readProductPanelResponseValue(response: unknown, key: string) {
     : undefined;
 }
 
+function readBooleanEnv(value: string | undefined, fallback: boolean) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  return fallback;
+}
+
+function getProductPanelVariantDisableMode() {
+  return {
+    enabled: readBooleanEnv(process.env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED, false),
+    dryRun: readBooleanEnv(process.env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN, true),
+  };
+}
+
 function mapProductPanelVariantDisableEventSummary(event: {
   id: string;
   status: string;
@@ -4043,6 +4067,7 @@ export async function getAdminShopifyOrderBreakdown(
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),
     },
+    productPanelVariantDisableMode: getProductPanelVariantDisableMode(),
     allocations: order.allocations.map((allocation) => {
       const allocationTotal = allocation.lineItems.reduce(
         (sum, lineItem) => sum + toNumber(lineItem.lineAmount),

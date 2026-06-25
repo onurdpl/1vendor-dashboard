@@ -330,6 +330,12 @@ function getProductPanelOutcomeLabel(
   return null;
 }
 
+function getProductPanelRuleId(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number] | null,
+) {
+  return formatProductPanelResponseValue(event?.response?.ruleId);
+}
+
 function buildProductPanelVariantDisableMeta(
   event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
 ) {
@@ -338,11 +344,13 @@ function buildProductPanelVariantDisableMeta(
   const normalizedSize = formatProductPanelResponseValue(response?.normalizedSize);
   const confidence = formatProductPanelResponseValue(response?.confidence);
   const resolutionMethod = formatProductPanelResponseValue(response?.resolutionMethod);
+  const ruleId = formatProductPanelResponseValue(response?.ruleId);
   const outcomeLabel = getProductPanelOutcomeLabel(event);
   const parts = [
     event.variantSku ?? event.shopifyVariantId ?? 'Variant',
     `Reason: ${event.reasonCode}`,
     outcomeLabel,
+    ruleId ? `Rule: ${ruleId}` : null,
     parentSku ? `Parent SKU: ${parentSku}` : null,
     normalizedSize ? `Size: ${normalizedSize}` : null,
     confidence ? `Confidence: ${confidence}` : null,
@@ -360,7 +368,6 @@ function isRetryableProductPanelDryRunEvent(
 ) {
   const status = normalizeStateToken(event.status);
   return (
-    event.dryRun &&
     normalizeStateToken(event.reasonCode) === 'out_of_stock' &&
     (status === 'created' || status === 'failed') &&
     Boolean(event.shopifyVariantId)
@@ -372,7 +379,10 @@ function summarizeProductPanelDryRunEvents(
 ) {
   const queued = events.filter((event) => normalizeStateToken(event.status) === 'created').length;
   const failed = events.filter((event) => normalizeStateToken(event.status) === 'failed').length;
-  const resolved = events.filter((event) => normalizeStateToken(event.status) === 'resolved_dry_run').length;
+  const resolved = events.filter((event) => {
+    const status = normalizeStateToken(event.status);
+    return status === 'resolved_dry_run' || status === 'resolved';
+  }).length;
   return { queued, failed, resolved };
 }
 
@@ -1170,22 +1180,28 @@ export function AdminShopifyOrderPage() {
     }
   }
 
-  async function handleProductPanelDryRunSend(allocationId: string) {
+  async function handleProductPanelDryRunSend(allocationId: string, realMode: boolean) {
     setProductPanelDryRunFeedback((current) => ({
       ...current,
       [allocationId]: {
         tone: 'info',
-        message: 'Sending dry-run...',
+        message: realMode ? 'Sending disable...' : 'Sending dry-run...',
       },
     }));
 
     try {
       const result = await productPanelDryRunMutation.mutateAsync(undefined);
       const message = result.attempted === 0
-        ? 'No queued Product Panel dry-run events were eligible to send.'
+        ? realMode
+          ? 'No queued Product Panel disable events were eligible to send.'
+          : 'No queued Product Panel dry-run events were eligible to send.'
         : result.failed > 0
-          ? 'Dry-run delivery failed. No product availability changed.'
-          : 'Dry-run sent. Refreshing validation status.';
+          ? realMode
+            ? 'Disable delivery failed. No product availability changed.'
+            : 'Dry-run delivery failed. No product availability changed.'
+          : realMode
+            ? 'Disable request sent. Refreshing validation status.'
+            : 'Dry-run sent. Refreshing validation status.';
       const tone = result.failed > 0 ? 'error' : result.attempted === 0 ? 'info' : 'success';
 
       setProductPanelDryRunFeedback((current) => ({
@@ -1207,7 +1223,9 @@ export function AdminShopifyOrderPage() {
         ...current,
         [allocationId]: {
           tone: 'error',
-          message: 'Dry-run delivery failed. No product availability changed.',
+          message: realMode
+            ? 'Disable delivery failed. No product availability changed.'
+            : 'Dry-run delivery failed. No product availability changed.',
           detail,
         },
       }));
@@ -1326,7 +1344,12 @@ export function AdminShopifyOrderPage() {
         const latestProductPanelAttemptedAt = getProductPanelLastAttemptedAt(latestProductPanelEvent);
         const latestProductPanelError = getProductPanelDisplayError(latestProductPanelEvent);
         const latestProductPanelOutcome = getProductPanelOutcomeLabel(latestProductPanelEvent);
-        const productPanelRealModeSeen = productPanelEvents.some((event) => event.dryRun === false);
+        const productPanelRealModeEnabled = breakdown.productPanelVariantDisableMode?.enabled === true &&
+          breakdown.productPanelVariantDisableMode.dryRun === false;
+        const productPanelRealModeSeen = productPanelRealModeEnabled || productPanelEvents.some((event) => event.dryRun === false);
+        const latestProductPanelRuleId = getProductPanelRuleId(latestProductPanelEvent);
+        const latestProductPanelParentSku = formatProductPanelResponseValue(latestProductPanelEvent?.response?.parentSku);
+        const latestProductPanelNormalizedSize = formatProductPanelResponseValue(latestProductPanelEvent?.response?.normalizedSize);
         const productPanelFeedback = productPanelDryRunFeedback[allocation.allocationOrderId];
 
         return (
@@ -1448,7 +1471,9 @@ export function AdminShopifyOrderPage() {
                   <p className="eyebrow">{productPanelRealModeSeen ? 'Product Panel disable' : 'Product Panel dry-run'}</p>
                   <h4>Variant availability validation</h4>
                 </div>
-                <span className="status-badge status-info">{productPanelRealModeSeen ? 'Real send' : 'Dry run only'}</span>
+                <span className={`status-badge ${productPanelRealModeSeen ? 'status-warning' : 'status-info'}`}>
+                  {productPanelRealModeSeen ? 'Real disable enabled' : 'Dry run only'}
+                </span>
               </div>
               <p className="page-description">
                 {productPanelRealModeSeen
@@ -1479,6 +1504,18 @@ export function AdminShopifyOrderPage() {
                 <div className="meta-item">
                   <span>Latest outcome</span>
                   <strong>{latestProductPanelOutcome ?? 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Rule ID</span>
+                  <strong>{latestProductPanelRuleId ?? 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Parent SKU</span>
+                  <strong>{latestProductPanelParentSku ?? 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Normalized size</span>
+                  <strong>{latestProductPanelNormalizedSize ?? 'Not recorded'}</strong>
                 </div>
                 <div className="meta-item">
                   <span>Attempt count</span>
@@ -1530,9 +1567,15 @@ export function AdminShopifyOrderPage() {
                     type="button"
                     className="button button-secondary"
                     disabled={productPanelDryRunMutation.isPending}
-                    onClick={() => void handleProductPanelDryRunSend(allocation.allocationOrderId)}
+                    onClick={() => void handleProductPanelDryRunSend(allocation.allocationOrderId, productPanelRealModeEnabled)}
                   >
-                    {productPanelDryRunMutation.isPending ? 'Sending dry-run...' : 'Send dry-run now'}
+                    {productPanelDryRunMutation.isPending
+                      ? productPanelRealModeEnabled
+                        ? 'Sending disable...'
+                        : 'Sending dry-run...'
+                      : productPanelRealModeEnabled
+                        ? 'Send disable now'
+                        : 'Send dry-run now'}
                   </button>
                 </div>
               ) : null}

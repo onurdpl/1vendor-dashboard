@@ -213,6 +213,10 @@ type AdminOrderBreakdownDto = {
     createdAt: string;
     updatedAt: string;
   };
+  productPanelVariantDisableMode?: {
+    enabled: boolean;
+    dryRun: boolean;
+  };
   allocations: Array<{
     id: string;
     vendorId: string;
@@ -565,6 +569,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     customer: response.order.customerName ?? response.order.customerEmail ?? 'Shopify customer',
     financialStatus: response.order.financialStatus ?? null,
     createdAt: response.order.createdAt,
+    productPanelVariantDisableMode: response.productPanelVariantDisableMode,
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {
       const allocationStatus = toAllocationStatus(allocation.allocationStatus);
       const shippingStatus = toShippingStatus(allocation.shippingStatus);

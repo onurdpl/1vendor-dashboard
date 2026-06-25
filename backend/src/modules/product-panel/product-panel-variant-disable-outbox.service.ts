@@ -211,10 +211,18 @@ function isProductPanelDisableResolved(responseBody: Record<string, unknown>, dr
   }
 
   return (
+    (responseBody.accepted === true &&
+      responseBody.canResolve === true &&
+      responseBody.writesPerformed === true) ||
     responseBody.created === true ||
-    responseBody.duplicate === true ||
-    (typeof responseBody.ruleId === 'string' && responseBody.ruleId.trim().length > 0)
+    responseBody.duplicate === true
   );
+}
+
+function getResolvedProductPanelStatus(dryRun: boolean) {
+  return dryRun
+    ? ProductPanelVariantDisableOutboxStatus.RESOLVED_DRY_RUN
+    : ProductPanelVariantDisableOutboxStatus.RESOLVED;
 }
 
 async function markProductPanelEventFailed(
@@ -522,7 +530,7 @@ export async function sendProductPanelVariantDisableDryRunEvents(
             id: event.id,
           },
           data: {
-            status: ProductPanelVariantDisableOutboxStatus.RESOLVED_DRY_RUN,
+            status: getResolvedProductPanelStatus(requestDryRun),
             dryRun: requestDryRun,
             attemptCount: event.attemptCount + 1,
             error: null,

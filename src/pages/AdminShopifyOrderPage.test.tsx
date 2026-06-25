@@ -534,10 +534,102 @@ describe('AdminShopifyOrderPage split visibility', () => {
 
       const dryRunCard = await screen.findByLabelText('Product Panel variant disable dry-run');
       expect(within(dryRunCard).getByText('Product Panel disable')).toBeInTheDocument();
-      expect(within(dryRunCard).getByText('Real send')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Real disable enabled')).toBeInTheDocument();
       expect(within(dryRunCard).getByText('Latest outcome')).toBeInTheDocument();
       expect(within(dryRunCard).getByText('Disable rule created')).toBeInTheDocument();
       expect(screen.getByText(/Duplicate active rule accepted/)).toBeInTheDocument();
+    });
+
+    it('renders real Product Panel disable button copy from backend mode', async () => {
+      const sendResult = createDeferred<{
+        ok: true;
+        attempted: number;
+        resolved: number;
+        failed: number;
+        skipped: number;
+        latestEventStatuses: [];
+      }>();
+      getAdminShopifyOrderBreakdownMock
+        .mockResolvedValueOnce({
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          customer: 'Customer',
+          financialStatus: 'pending',
+          createdAt: '2026-06-21T08:00:00.000Z',
+          productPanelVariantDisableMode: {
+            enabled: true,
+            dryRun: false,
+          },
+          allocations: [
+            buildAllocation({
+              productPanelVariantDisableEvents: [buildProductPanelEvent()],
+            }),
+          ],
+        })
+        .mockResolvedValueOnce({
+          sourceShopifyOrderId: '7817723773265',
+          sourceShopifyOrderNumber: '#1091',
+          customer: 'Customer',
+          financialStatus: 'pending',
+          createdAt: '2026-06-21T08:00:00.000Z',
+          productPanelVariantDisableMode: {
+            enabled: true,
+            dryRun: false,
+          },
+          allocations: [
+            buildAllocation({
+              productPanelVariantDisableEvents: [
+                buildProductPanelEvent({
+                  status: 'RESOLVED',
+                  dryRun: false,
+                  attemptCount: 1,
+                  resolvedAt: '2026-06-21T12:47:00.000Z',
+                  error: null,
+                  response: {
+                    accepted: true,
+                    dryRun: false,
+                    canResolve: true,
+                    writesPerformed: true,
+                    created: false,
+                    duplicate: true,
+                    ruleId: 'pvd_123',
+                    parentSku: 'PARENT-SKU-1088',
+                    normalizedSize: '42',
+                  },
+                }),
+              ],
+            }),
+          ],
+        });
+      sendAdminProductPanelVariantDisableDryRunMock.mockReturnValueOnce(sendResult.promise);
+
+      renderPage();
+
+      const card = await screen.findByLabelText('Product Panel variant disable dry-run');
+      expect(within(card).getByRole('button', { name: 'Send disable now' })).toBeInTheDocument();
+      fireEvent.click(within(card).getByRole('button', { name: 'Send disable now' }));
+
+      await waitFor(() => {
+        expect(sendAdminProductPanelVariantDisableDryRunMock).toHaveBeenCalledWith('7817723773265');
+      });
+      expect(within(card).getByRole('button', { name: 'Sending disable...' })).toBeDisabled();
+
+      sendResult.resolve({
+        ok: true,
+        attempted: 1,
+        resolved: 1,
+        failed: 0,
+        skipped: 0,
+        latestEventStatuses: [],
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Disable request sent. Refreshing validation status.').length).toBeGreaterThan(0);
+      });
+      expect(await screen.findByText('Duplicate active rule accepted')).toBeInTheDocument();
+      expect(screen.getByText('pvd_123')).toBeInTheDocument();
+      expect(screen.getByText('PARENT-SKU-1088')).toBeInTheDocument();
+      expect(screen.getByText('42')).toBeInTheDocument();
     });
 
     it('renders inline Product Panel dry-run zero-attempt feedback', async () => {
