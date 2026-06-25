@@ -1,3 +1,9 @@
+import {
+  OperationalSignalSeverity,
+  OperationalSignalSourceArea,
+  OperationalSignalStatus,
+  Prisma,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { buildSaleLedgerEntryId, upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
@@ -49,6 +55,18 @@ function buildExpectedRefundLedgerIdForReconciliation(input: {
   vendorAllocationId: string;
 }) {
   return buildRefundLedgerEntryId(input);
+}
+
+const CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY = 'canonical_fulfillment_match_missing';
+const CANONICAL_FULFILLMENT_MATCH_MISSING_MESSAGE =
+  'Canonical fulfillment line could not be matched. Local state preserved. Manual review recommended.';
+
+function sanitizeSignalPart(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+function buildCanonicalFulfillmentMatchMissingSignalId(allocationId: string) {
+  return `signal-${sanitizeSignalPart(CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY)}-${sanitizeSignalPart(allocationId)}`;
 }
 
 function isCancelledStatus(value: string | null | undefined) {
@@ -105,6 +123,118 @@ function getLatestFulfillmentEvent(fulfillment: ShopifyOrderFulfillment) {
 function getCanonicalEventStatus(fulfillment: ShopifyOrderFulfillment) {
   const latestEvent = getLatestFulfillmentEvent(fulfillment);
   return normalizeFulfillmentEventStatus((latestEvent?.status ?? '').toLowerCase());
+}
+
+function hasLocalFulfillmentEvidence(input: {
+  fulfillmentStatus: string | null;
+  shippingStatus: string | null;
+  trackingNumber?: string | null;
+  carrier?: string | null;
+  fulfillment?: {
+    trackingUrl?: string | null;
+    shopifyFulfillmentId?: string | null;
+    fulfilledAt?: Date | null;
+    shipmentCreatedAt?: Date | null;
+    shipmentUpdatedAt?: Date | null;
+  } | null;
+}) {
+  const lifecycle = `${input.fulfillmentStatus ?? ''} ${input.shippingStatus ?? ''}`.trim().toLowerCase();
+  return Boolean(
+    input.trackingNumber ||
+      input.carrier ||
+      input.fulfillment?.trackingUrl ||
+      input.fulfillment?.shopifyFulfillmentId ||
+      input.fulfillment?.fulfilledAt ||
+      input.fulfillment?.shipmentCreatedAt ||
+      input.fulfillment?.shipmentUpdatedAt ||
+      lifecycle.includes('fulfilled') ||
+      lifecycle.includes('shipped') ||
+      lifecycle.includes('in_transit') ||
+      lifecycle.includes('in transit') ||
+      lifecycle.includes('delivered') ||
+      lifecycle.includes('label_created') ||
+      lifecycle.includes('label created'),
+  );
+}
+
+async function upsertCanonicalFulfillmentMatchMissingSignal(input: {
+  allocationId: string;
+  vendorId: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+  fulfillmentState: ShopifyOrderFulfillmentState;
+  localFulfillmentStatus: string | null;
+  localShippingStatus: string | null;
+  localTrackingNumber?: string | null;
+  localCarrier?: string | null;
+}) {
+  const reconciledAt = new Date();
+  const metadata: Prisma.InputJsonObject = {
+    reason: CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY,
+    diagnosticReason: CANONICAL_FULFILLMENT_MATCH_MISSING_MESSAGE,
+    vendorId: input.vendorId,
+    allocationId: input.allocationId,
+    sourceShopifyOrderId: input.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: input.sourceShopifyOrderNumber,
+    fulfillmentIds: input.fulfillmentState.fulfillments.map((fulfillment) => fulfillment.sourceFulfillmentId || fulfillment.id),
+    fulfillmentOrderIds: input.fulfillmentState.fulfillmentOrders.map((fulfillmentOrder) => fulfillmentOrder.id),
+    displayFulfillmentStatus: input.fulfillmentState.displayFulfillmentStatus,
+    localFulfillmentStatus: input.localFulfillmentStatus,
+    localShippingStatus: input.localShippingStatus,
+    localTrackingNumber: input.localTrackingNumber ?? null,
+    localCarrier: input.localCarrier ?? null,
+    reconciledAt: reconciledAt.toISOString(),
+  };
+
+  await prisma.operationalSignal.upsert({
+    where: {
+      id: buildCanonicalFulfillmentMatchMissingSignalId(input.allocationId),
+    },
+    update: {
+      type: 'reconciliation_issue',
+      severity: OperationalSignalSeverity.WARNING,
+      sourceArea: OperationalSignalSourceArea.RECONCILIATION,
+      vendorId: input.vendorId,
+      allocationId: input.allocationId,
+      title: 'Fulfillment reconciliation needs attention',
+      description: CANONICAL_FULFILLMENT_MATCH_MISSING_MESSAGE,
+      suggestedAction: 'Retry fulfillment reconciliation or review Shopify fulfillment line-item mapping.',
+      status: OperationalSignalStatus.ACTIVE,
+      ruleKey: CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY,
+      triggeredAt: reconciledAt,
+      resolvedAt: null,
+      metadata,
+    },
+    create: {
+      id: buildCanonicalFulfillmentMatchMissingSignalId(input.allocationId),
+      type: 'reconciliation_issue',
+      severity: OperationalSignalSeverity.WARNING,
+      sourceArea: OperationalSignalSourceArea.RECONCILIATION,
+      vendorId: input.vendorId,
+      allocationId: input.allocationId,
+      title: 'Fulfillment reconciliation needs attention',
+      description: CANONICAL_FULFILLMENT_MATCH_MISSING_MESSAGE,
+      suggestedAction: 'Retry fulfillment reconciliation or review Shopify fulfillment line-item mapping.',
+      ruleKey: CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY,
+      triggeredAt: reconciledAt,
+      metadata,
+    },
+  });
+}
+
+async function resolveCanonicalFulfillmentMatchMissingSignal(allocationId: string) {
+  await prisma.operationalSignal.updateMany({
+    where: {
+      id: buildCanonicalFulfillmentMatchMissingSignalId(allocationId),
+      status: {
+        in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED],
+      },
+    },
+    data: {
+      status: OperationalSignalStatus.RESOLVED,
+      resolvedAt: new Date(),
+    },
+  });
 }
 
 function recordChange(input: {
@@ -301,167 +431,187 @@ export function createReconciliationService(env: AppEnv) {
       const representativeFulfillment = matchedFulfilledIds.length > 0
         ? canonicalMaps.fulfillmentByLineItemId.get(matchedFulfilledIds[0])
         : null;
+      const hasCanonicalFulfillmentTruth = Boolean(representativeFulfillment) || matchedCancelledIds.length > 0;
 
-      let desiredFulfillmentStatus = 'pending';
-      let desiredShippingStatus = 'awaiting_shipment';
-      let desiredTrackingNumber: string | null = null;
-      let desiredCarrier: string | null = null;
-      let desiredTrackingUrl: string | null = null;
-      let desiredFulfilledAt: Date | null = null;
-      let desiredShipmentCreatedAt: Date | null = null;
-      let desiredShipmentUpdatedAt: Date | null = null;
-      let desiredSyncStatus = matchedCancelledIds.length > 0 ? 'shopify_reconciled_cancelled' : 'shopify_reconciled';
-
-      if (representativeFulfillment) {
-        const tracking = getTrackingInfo(representativeFulfillment);
-        const canonicalEventStatus = getCanonicalEventStatus(representativeFulfillment);
-        desiredFulfillmentStatus = allItemsFulfilled ? 'fulfilled' : 'partially_fulfilled';
-        desiredShippingStatus =
-          canonicalEventStatus === 'delivered'
-            ? 'delivered'
-            : canonicalEventStatus === 'in_transit'
-              ? 'in_transit'
-              : canonicalEventStatus === 'fulfillment_event_attention'
-                ? 'fulfillment_event_attention'
-                : allItemsFulfilled
-                  ? 'shipped'
-                  : 'partially_shipped';
-        desiredTrackingNumber = tracking?.number ?? null;
-        desiredCarrier = tracking?.company ?? null;
-        desiredTrackingUrl = tracking?.url ?? null;
-        desiredFulfilledAt = toDate(representativeFulfillment.createdAt);
-        const latestEvent = getLatestFulfillmentEvent(representativeFulfillment);
-        desiredShipmentCreatedAt = desiredFulfilledAt;
-        desiredShipmentUpdatedAt = latestDate([
-          toDate(latestEvent?.happenedAt ?? null),
-          toDate(representativeFulfillment.updatedAt),
-          desiredFulfilledAt,
-        ]);
-      }
-
-      if (!representativeFulfillment && matchedCancelledIds.length > 0) {
-        desiredSyncStatus = 'shopify_reconciled_cancelled';
-      }
-
-      if (
-        allocation.fulfillmentStatus.toLowerCase().includes('fulfilled') &&
-        matchedFulfilledIds.length === 0 &&
-        matchedCancelledIds.length === 0
-      ) {
-        allocationResult.warnings.push('Local allocation is fulfilled, but canonical Shopify state has no active fulfillment line items.');
-      }
-
-      const fieldComparisons = [
-        recordChange({
-          scope: allocation.id,
-          field: 'fulfillmentStatus',
-          localValue: allocation.fulfillmentStatus,
-          canonicalValue: desiredFulfillmentStatus,
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'shippingStatus',
-          localValue: allocation.shippingStatus,
-          canonicalValue: desiredShippingStatus,
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'trackingNumber',
-          localValue: allocation.trackingNumber,
-          canonicalValue: desiredTrackingNumber,
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'carrier',
-          localValue: allocation.carrier,
-          canonicalValue: desiredCarrier,
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'trackingUrl',
-          localValue: allocation.fulfillment?.trackingUrl ?? null,
-          canonicalValue: desiredTrackingUrl,
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'fulfilledAt',
-          localValue: toIso(allocation.fulfillment?.fulfilledAt),
-          canonicalValue: toIso(desiredFulfilledAt),
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'shipmentCreatedAt',
-          localValue: toIso(allocation.fulfillment?.shipmentCreatedAt),
-          canonicalValue: toIso(desiredShipmentCreatedAt),
-        }),
-        recordChange({
-          scope: allocation.id,
-          field: 'shipmentUpdatedAt',
-          localValue: toIso(allocation.fulfillment?.shipmentUpdatedAt),
-          canonicalValue: toIso(desiredShipmentUpdatedAt),
-        }),
-      ].filter((change): change is ReconciliationFieldChange => Boolean(change));
-
-      allocationResult.staleFields.push(...fieldComparisons);
-      staleFields.push(...fieldComparisons);
-
-      if (fieldComparisons.length > 0 && transferRepairBlockerReason) {
-        for (const change of fieldComparisons) {
+      if (!hasCanonicalFulfillmentTruth) {
+        if (hasLocalFulfillmentEvidence(allocation)) {
           recordSkippedRepair({
-            scope: change.scope,
-            field: change.field,
-            localValue: change.localValue,
-            canonicalValue: change.canonicalValue,
-            reason: transferRepairBlockerReason,
+            scope: allocation.id,
+            field: 'canonicalFulfillmentMatch',
+            localValue: 'local_fulfillment_state_preserved',
+            canonicalValue: null,
+            reason: CANONICAL_FULFILLMENT_MATCH_MISSING_MESSAGE,
             skippedFields,
             allocationResult,
           });
+          await upsertCanonicalFulfillmentMatchMissingSignal({
+            allocationId: allocation.id,
+            vendorId: allocation.assignedVendorId,
+            sourceShopifyOrderId: shopifyOrder.sourceShopifyOrderId,
+            sourceShopifyOrderNumber: shopifyOrder.sourceShopifyOrderNumber,
+            fulfillmentState,
+            localFulfillmentStatus: allocation.fulfillmentStatus,
+            localShippingStatus: allocation.shippingStatus,
+            localTrackingNumber: allocation.trackingNumber,
+            localCarrier: allocation.carrier,
+          });
+          affectedVendorIds.add(allocation.assignedVendorId);
         }
-      } else if (fieldComparisons.length > 0) {
-        await prisma.$transaction(async (tx) => {
-          await tx.vendorAllocation.update({
-            where: { id: allocation.id },
-            data: {
-              fulfillmentStatus: desiredFulfillmentStatus,
-              shippingStatus: desiredShippingStatus,
-              trackingNumber: desiredTrackingNumber,
-              carrier: desiredCarrier,
-            },
+      } else {
+        let desiredFulfillmentStatus = 'pending';
+        let desiredShippingStatus = 'awaiting_shipment';
+        let desiredTrackingNumber: string | null = null;
+        let desiredCarrier: string | null = null;
+        let desiredTrackingUrl: string | null = null;
+        let desiredFulfilledAt: Date | null = null;
+        let desiredShipmentCreatedAt: Date | null = null;
+        let desiredShipmentUpdatedAt: Date | null = null;
+        let desiredSyncStatus = matchedCancelledIds.length > 0 ? 'shopify_reconciled_cancelled' : 'shopify_reconciled';
+
+        if (representativeFulfillment) {
+          const tracking = getTrackingInfo(representativeFulfillment);
+          const canonicalEventStatus = getCanonicalEventStatus(representativeFulfillment);
+          desiredFulfillmentStatus = allItemsFulfilled ? 'fulfilled' : 'partially_fulfilled';
+          desiredShippingStatus =
+            canonicalEventStatus === 'delivered'
+              ? 'delivered'
+              : canonicalEventStatus === 'in_transit'
+                ? 'in_transit'
+                : canonicalEventStatus === 'fulfillment_event_attention'
+                  ? 'fulfillment_event_attention'
+                  : allItemsFulfilled
+                    ? 'shipped'
+                    : 'partially_shipped';
+          desiredTrackingNumber = tracking?.number ?? null;
+          desiredCarrier = tracking?.company ?? null;
+          desiredTrackingUrl = tracking?.url ?? null;
+          desiredFulfilledAt = toDate(representativeFulfillment.createdAt);
+          const latestEvent = getLatestFulfillmentEvent(representativeFulfillment);
+          desiredShipmentCreatedAt = desiredFulfilledAt;
+          desiredShipmentUpdatedAt = latestDate([
+            toDate(latestEvent?.happenedAt ?? null),
+            toDate(representativeFulfillment.updatedAt),
+            desiredFulfilledAt,
+          ]);
+        }
+
+        if (!representativeFulfillment && matchedCancelledIds.length > 0) {
+          desiredSyncStatus = 'shopify_reconciled_cancelled';
+        }
+
+        const fieldComparisons = [
+          recordChange({
+            scope: allocation.id,
+            field: 'fulfillmentStatus',
+            localValue: allocation.fulfillmentStatus,
+            canonicalValue: desiredFulfillmentStatus,
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'shippingStatus',
+            localValue: allocation.shippingStatus,
+            canonicalValue: desiredShippingStatus,
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'trackingNumber',
+            localValue: allocation.trackingNumber,
+            canonicalValue: desiredTrackingNumber,
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'carrier',
+            localValue: allocation.carrier,
+            canonicalValue: desiredCarrier,
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'trackingUrl',
+            localValue: allocation.fulfillment?.trackingUrl ?? null,
+            canonicalValue: desiredTrackingUrl,
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'fulfilledAt',
+            localValue: toIso(allocation.fulfillment?.fulfilledAt),
+            canonicalValue: toIso(desiredFulfilledAt),
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'shipmentCreatedAt',
+            localValue: toIso(allocation.fulfillment?.shipmentCreatedAt),
+            canonicalValue: toIso(desiredShipmentCreatedAt),
+          }),
+          recordChange({
+            scope: allocation.id,
+            field: 'shipmentUpdatedAt',
+            localValue: toIso(allocation.fulfillment?.shipmentUpdatedAt),
+            canonicalValue: toIso(desiredShipmentUpdatedAt),
+          }),
+        ].filter((change): change is ReconciliationFieldChange => Boolean(change));
+
+        allocationResult.staleFields.push(...fieldComparisons);
+        staleFields.push(...fieldComparisons);
+
+        if (fieldComparisons.length > 0 && transferRepairBlockerReason) {
+          for (const change of fieldComparisons) {
+            recordSkippedRepair({
+              scope: change.scope,
+              field: change.field,
+              localValue: change.localValue,
+              canonicalValue: change.canonicalValue,
+              reason: transferRepairBlockerReason,
+              skippedFields,
+              allocationResult,
+            });
+          }
+        } else if (fieldComparisons.length > 0) {
+          await prisma.$transaction(async (tx) => {
+            await tx.vendorAllocation.update({
+              where: { id: allocation.id },
+              data: {
+                fulfillmentStatus: desiredFulfillmentStatus,
+                shippingStatus: desiredShippingStatus,
+                trackingNumber: desiredTrackingNumber,
+                carrier: desiredCarrier,
+              },
+            });
+
+            await tx.fulfillment.upsert({
+              where: { vendorAllocationId: allocation.id },
+              update: {
+                fulfillmentStatus: desiredFulfillmentStatus,
+                trackingNumber: desiredTrackingNumber,
+                carrier: desiredCarrier,
+                trackingUrl: desiredTrackingUrl,
+                fulfilledAt: desiredFulfilledAt,
+                shipmentCreatedAt: desiredShipmentCreatedAt,
+                shipmentUpdatedAt: desiredShipmentUpdatedAt ?? new Date(),
+                syncStatus: desiredSyncStatus,
+                errorMessage: null,
+              },
+              create: {
+                vendorAllocationId: allocation.id,
+                fulfillmentStatus: desiredFulfillmentStatus,
+                trackingNumber: desiredTrackingNumber,
+                carrier: desiredCarrier,
+                trackingUrl: desiredTrackingUrl,
+                notifyCustomer: false,
+                fulfilledAt: desiredFulfilledAt,
+                shipmentCreatedAt: desiredShipmentCreatedAt,
+                shipmentUpdatedAt: desiredShipmentUpdatedAt ?? new Date(),
+                syncStatus: desiredSyncStatus,
+              },
+            });
           });
 
-          await tx.fulfillment.upsert({
-            where: { vendorAllocationId: allocation.id },
-            update: {
-              fulfillmentStatus: desiredFulfillmentStatus,
-              trackingNumber: desiredTrackingNumber,
-              carrier: desiredCarrier,
-              trackingUrl: desiredTrackingUrl,
-              fulfilledAt: desiredFulfilledAt,
-              shipmentCreatedAt: desiredShipmentCreatedAt,
-              shipmentUpdatedAt: desiredShipmentUpdatedAt ?? new Date(),
-              syncStatus: desiredSyncStatus,
-              errorMessage: null,
-            },
-            create: {
-              vendorAllocationId: allocation.id,
-              fulfillmentStatus: desiredFulfillmentStatus,
-              trackingNumber: desiredTrackingNumber,
-              carrier: desiredCarrier,
-              trackingUrl: desiredTrackingUrl,
-              notifyCustomer: false,
-              fulfilledAt: desiredFulfilledAt,
-              shipmentCreatedAt: desiredShipmentCreatedAt,
-              shipmentUpdatedAt: desiredShipmentUpdatedAt ?? new Date(),
-              syncStatus: desiredSyncStatus,
-            },
-          });
-        });
+          allocationResult.repairedFields.push(...fieldComparisons);
+          repairedFields.push(...fieldComparisons);
+          affectedVendorIds.add(allocation.assignedVendorId);
+        }
 
-        allocationResult.repairedFields.push(...fieldComparisons);
-        repairedFields.push(...fieldComparisons);
-        affectedVendorIds.add(allocation.assignedVendorId);
+        await resolveCanonicalFulfillmentMatchMissingSignal(allocation.id);
       }
-
       for (const refundRecord of allocation.refundRecords) {
         if (refundRecord.status !== 'processed') {
           const change = recordChange({
@@ -793,4 +943,6 @@ export function createReconciliationService(env: AppEnv) {
 export const __reconciliationTesting = {
   buildExpectedSaleLedgerIdForReconciliation,
   buildExpectedRefundLedgerIdForReconciliation,
+  buildCanonicalFulfillmentMatchMissingSignalId,
+  CANONICAL_FULFILLMENT_MATCH_MISSING_RULE_KEY,
 };
