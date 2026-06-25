@@ -1,6 +1,7 @@
 import type { AppEnv } from '../../config/env.js';
 import { Buffer } from 'node:buffer';
 import type {
+  CanonicalShopifyOrderSnapshot,
   CancelFulfillmentOrderResult,
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
@@ -8,6 +9,7 @@ import type {
   CreateShopifyRefundInput,
   CreateShopifyRefundResult,
   FetchOrderLineItemImagesResult,
+  FetchCanonicalShopifyOrderSnapshotResult,
   FetchOrderTaxSnapshotResult,
   FetchShopifyReturnDetailsResult,
   FetchShopifyReturnReverseDeliveryInputsResult,
@@ -109,6 +111,101 @@ type OrderTaxSnapshotQueryResponse = {
         };
       }>;
     };
+  } | null;
+};
+
+type CanonicalOrderAddressNode = {
+  name?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  phone?: string | null;
+  country?: string | null;
+  countryCodeV2?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  province?: string | null;
+  address1?: string | null;
+  address2?: string | null;
+};
+
+type CanonicalOrderSnapshotQueryResponse = {
+  order: {
+    id: string;
+    legacyResourceId?: string | null;
+    name?: string | null;
+    createdAt?: string | null;
+    currencyCode?: string | null;
+    displayFinancialStatus?: string | null;
+    paymentGatewayNames?: string[] | null;
+    taxesIncluded?: boolean | null;
+    note?: string | null;
+    tags?: string[] | null;
+    email?: string | null;
+    phone?: string | null;
+    totalPriceSet?: ShopifyMoneySetNode;
+    currentTotalTaxSet?: ShopifyMoneySetNode;
+    totalShippingPriceSet?: ShopifyMoneySetNode;
+    currentTotalDiscountsSet?: ShopifyMoneySetNode;
+    customer?: {
+      email?: string | null;
+      firstName?: string | null;
+      lastName?: string | null;
+      phone?: string | null;
+    } | null;
+    shippingAddress?: CanonicalOrderAddressNode | null;
+    billingAddress?: CanonicalOrderAddressNode | null;
+    metafield?: {
+      value?: string | null;
+    } | null;
+    lineItems: {
+      pageInfo?: {
+        hasNextPage?: boolean | null;
+      } | null;
+      edges: Array<{
+        node: OrderLineItemImageNode & {
+          title?: string | null;
+          name?: string | null;
+          quantity?: number | null;
+          originalUnitPriceSet?: ShopifyMoneySetNode;
+          discountedTotalSet?: ShopifyMoneySetNode;
+          taxLines?: ShopifyTaxLineNode[];
+          variant?: OrderLineItemImageNode['variant'] & {
+            legacyResourceId?: string | null;
+          };
+          product?: OrderLineItemImageNode['product'] & {
+            legacyResourceId?: string | null;
+          };
+        };
+      }>;
+    };
+    fulfillmentOrders?: {
+      pageInfo?: {
+        hasNextPage?: boolean | null;
+      } | null;
+      edges: Array<{
+        node: {
+          id: string;
+          status?: string | null;
+          requestStatus?: string | null;
+          lineItems?: {
+            pageInfo?: {
+              hasNextPage?: boolean | null;
+            } | null;
+            edges: Array<{
+              node: {
+                id: string;
+                remainingQuantity?: number | null;
+                totalQuantity?: number | null;
+                lineItem?: {
+                  id?: string | null;
+                } | null;
+              };
+            }>;
+          } | null;
+        };
+      }>;
+    } | null;
   } | null;
 };
 
@@ -484,6 +581,84 @@ function mapShopifyTaxLine(value: ShopifyTaxLineNode): ShopifyTaxLineSnapshot {
   };
 }
 
+function normalizeShopifyString(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? '';
+  return trimmed || null;
+}
+
+function toMoneyAmountString(value: string | number | null | undefined) {
+  const parsed = Number(value ?? '');
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : null;
+}
+
+function readMoneyAmount(value: ShopifyMoneySetNode) {
+  return toMoneyAmountString(value?.shopMoney?.amount ?? null);
+}
+
+function readCanonicalAddressDistrict(address: CanonicalOrderAddressNode | null | undefined) {
+  return normalizeShopifyString(address?.address2) ?? normalizeShopifyString(address?.province);
+}
+
+function buildCanonicalAddressLine(address: CanonicalOrderAddressNode | null | undefined) {
+  const parts = [normalizeShopifyString(address?.address1), normalizeShopifyString(address?.address2)].filter(
+    (part): part is string => Boolean(part),
+  );
+  return parts.join(', ') || null;
+}
+
+function buildCanonicalCustomerName(order: NonNullable<CanonicalOrderSnapshotQueryResponse['order']>) {
+  const firstName = normalizeShopifyString(order.customer?.firstName);
+  const lastName = normalizeShopifyString(order.customer?.lastName);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || null;
+}
+
+function buildCanonicalBillingFullName(address: CanonicalOrderAddressNode | null | undefined) {
+  const name = normalizeShopifyString(address?.name);
+  if (name) {
+    return name;
+  }
+  const firstName = normalizeShopifyString(address?.firstName);
+  const lastName = normalizeShopifyString(address?.lastName);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || null;
+}
+
+function normalizeCanonicalOrderSnapshot(value: unknown): FetchCanonicalShopifyOrderSnapshotResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const snapshot = value as CanonicalShopifyOrderSnapshot;
+  if (!snapshot.sourceShopifyOrderId || !snapshot.sourceShopifyOrderNumber) {
+    return null;
+  }
+  return {
+    ...snapshot,
+    source: snapshot.source ?? 'mock',
+    lineItems: Array.isArray(snapshot.lineItems) ? snapshot.lineItems : [],
+    fulfillmentOrders: Array.isArray(snapshot.fulfillmentOrders) ? snapshot.fulfillmentOrders : [],
+    orderTags: Array.isArray(snapshot.orderTags) ? snapshot.orderTags : [],
+    sellerInfo: snapshot.sellerInfo && typeof snapshot.sellerInfo === 'object' ? snapshot.sellerInfo : null,
+  };
+}
+
+function parseMockCanonicalOrderSnapshots(rawValue: string | undefined): Record<string, CanonicalShopifyOrderSnapshot> {
+  if (!rawValue) {
+    return {};
+  }
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT must be a JSON object keyed by Shopify order id.');
+  }
+  return Object.entries(parsed).reduce<Record<string, CanonicalShopifyOrderSnapshot>>((acc, [orderId, value]) => {
+    const snapshot = normalizeCanonicalOrderSnapshot(value);
+    if (snapshot) {
+      acc[orderId] = snapshot;
+    }
+    return acc;
+  }, {});
+}
+
 export function resolveShopifyLineItemImageUrl(lineItem: OrderLineItemImageNode) {
   const lineItemImageUrl = lineItem.image?.url?.trim() || null;
   if (lineItemImageUrl) {
@@ -842,6 +1017,9 @@ export function createShopifyAdminService(env: AppEnv) {
   const mockOrderLineItemImagesByOrderId = parseMockOrderLineItemImagesByOrderId(
     (env as { SHOPIFY_MOCK_LINE_ITEM_IMAGES?: string }).SHOPIFY_MOCK_LINE_ITEM_IMAGES,
   );
+  const mockCanonicalOrderSnapshotsByOrderId = parseMockCanonicalOrderSnapshots(
+    (env as { SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT?: string }).SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT,
+  );
   const mockReturnDetailsByReturnGid = parseMockReturnDetailsByReturnGid(env.SHOPIFY_MOCK_RETURN_DETAILS);
   const mockOrderFulfillmentStateByOrderId = parseMockOrderFulfillmentStateByOrderId(
     env.SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE,
@@ -1126,6 +1304,319 @@ export function createShopifyAdminService(env: AppEnv) {
         originalUnitPrice: mapShopifyMoney(edge.node.originalUnitPriceSet ?? null),
         discountedTotal: mapShopifyMoney(edge.node.discountedTotalSet ?? null),
         taxLines: (edge.node.taxLines ?? []).map(mapShopifyTaxLine),
+      })),
+      source: 'shopify_admin',
+    };
+  }
+
+  async function fetchCanonicalOrderSnapshot(orderId: string): Promise<FetchCanonicalShopifyOrderSnapshotResult> {
+    const mockSnapshot = mockCanonicalOrderSnapshotsByOrderId[orderId];
+    if (mockSnapshot) {
+      return {
+        ...mockSnapshot,
+        source: 'mock',
+      };
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      return null;
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query CanonicalOrderSnapshot($orderId: ID!) {
+              order(id: $orderId) {
+                id
+                legacyResourceId
+                name
+                createdAt
+                currencyCode
+                displayFinancialStatus
+                paymentGatewayNames
+                taxesIncluded
+                note
+                tags
+                email
+                phone
+                totalPriceSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                currentTotalTaxSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                totalShippingPriceSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                currentTotalDiscountsSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                customer {
+                  email
+                  firstName
+                  lastName
+                  phone
+                }
+                shippingAddress {
+                  name
+                  firstName
+                  lastName
+                  company
+                  phone
+                  country
+                  countryCodeV2
+                  zip
+                  city
+                  province
+                  address1
+                  address2
+                }
+                billingAddress {
+                  name
+                  firstName
+                  lastName
+                  company
+                  phone
+                  country
+                  countryCodeV2
+                  zip
+                  city
+                  province
+                  address1
+                  address2
+                }
+                metafield(namespace: "custom", key: "seller_info") {
+                  value
+                }
+                lineItems(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  edges {
+                    node {
+                      id
+                      sku
+                      title
+                      name
+                      quantity
+                      image {
+                        url
+                        altText
+                      }
+                      originalUnitPriceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      discountedTotalSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      taxLines {
+                        title
+                        rate
+                        ratePercentage
+                        priceSet {
+                          shopMoney {
+                            amount
+                            currencyCode
+                          }
+                        }
+                      }
+                      variant {
+                        id
+                        legacyResourceId
+                        image {
+                          url
+                          altText
+                        }
+                      }
+                      product {
+                        id
+                        legacyResourceId
+                        featuredMedia {
+                          ... on MediaImage {
+                            image {
+                              url
+                              altText
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                fulfillmentOrders(first: 50) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  edges {
+                    node {
+                      id
+                      status
+                      requestStatus
+                      lineItems(first: 50) {
+                        pageInfo {
+                          hasNextPage
+                        }
+                        edges {
+                          node {
+                            id
+                            remainingQuantity
+                            totalQuantity
+                            lineItem {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            orderId: toShopifyOrderGid(orderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify canonical order snapshot fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<CanonicalOrderSnapshotQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify canonical order snapshot fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      return null;
+    }
+
+    const shippingAddress = order.shippingAddress ?? null;
+    const billingAddress = order.billingAddress ?? null;
+    const taxesIncluded = typeof order.taxesIncluded === 'boolean' ? order.taxesIncluded : null;
+    if (order.lineItems.pageInfo?.hasNextPage) {
+      throw new Error('Shopify canonical order snapshot line item pagination incomplete.');
+    }
+    if (order.fulfillmentOrders?.pageInfo?.hasNextPage) {
+      throw new Error('Shopify canonical order snapshot fulfillment order pagination incomplete.');
+    }
+    const paginatedFulfillmentOrder = (order.fulfillmentOrders?.edges ?? []).find((edge) =>
+      edge.node.lineItems?.pageInfo?.hasNextPage
+    );
+    if (paginatedFulfillmentOrder) {
+      throw new Error(
+        `Shopify canonical order snapshot fulfillment order ${paginatedFulfillmentOrder.node.id} line item pagination incomplete.`,
+      );
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
+      sourceShopifyOrderNumber: normalizeShopifyString(order.name) ?? `#${extractShopifyGidTail(order.id) ?? orderId}`,
+      shopifyCreatedAt: order.createdAt ?? null,
+      currency: normalizeShopifyString(order.currencyCode),
+      financialStatus: normalizeShopifyString(order.displayFinancialStatus)?.toLowerCase() ?? null,
+      paymentGatewayName:
+        normalizeShopifyString(order.paymentGatewayNames?.find((gateway) => Boolean(normalizeShopifyString(gateway)))) ??
+        null,
+      taxesIncluded,
+      orderTaxAmount: readMoneyAmount(order.currentTotalTaxSet ?? null),
+      shippingAmount: readMoneyAmount(order.totalShippingPriceSet ?? null),
+      discountAmount: readMoneyAmount(order.currentTotalDiscountsSet ?? null),
+      totalPrice: readMoneyAmount(order.totalPriceSet ?? null),
+      orderNote: normalizeShopifyString(order.note),
+      orderTags: order.tags ?? [],
+      customerName: buildCanonicalCustomerName(order),
+      customerEmail: normalizeShopifyString(order.customer?.email) ?? normalizeShopifyString(order.email),
+      customerPhone:
+        normalizeShopifyString(shippingAddress?.phone) ??
+        normalizeShopifyString(order.phone) ??
+        normalizeShopifyString(order.customer?.phone),
+      billingFullName: buildCanonicalBillingFullName(billingAddress),
+      billingCompany: normalizeShopifyString(billingAddress?.company),
+      billingPhone: normalizeShopifyString(billingAddress?.phone),
+      billingCity: normalizeShopifyString(billingAddress?.city),
+      billingDistrict: readCanonicalAddressDistrict(billingAddress),
+      billingAddress1: normalizeShopifyString(billingAddress?.address1),
+      billingAddress2: normalizeShopifyString(billingAddress?.address2),
+      billingPostcode: normalizeShopifyString(billingAddress?.zip),
+      shippingCountry: normalizeShopifyString(shippingAddress?.countryCodeV2) ?? normalizeShopifyString(shippingAddress?.country),
+      shippingPostcode: normalizeShopifyString(shippingAddress?.zip),
+      shippingCity: normalizeShopifyString(shippingAddress?.city),
+      shippingDistrict: readCanonicalAddressDistrict(shippingAddress),
+      shippingAddress: buildCanonicalAddressLine(shippingAddress),
+      sellerInfo: parseSellerInfoValue(order.metafield?.value ?? null),
+      lineItems: (order.lineItems.edges ?? []).map((edge) => {
+        const node = edge.node;
+        const resolvedImage = resolveShopifyLineItemImageUrl(node);
+        const taxLine = node.taxLines?.[0];
+        const discountedTotal = readMoneyAmount(node.discountedTotalSet ?? null);
+        const unitPrice = readMoneyAmount(node.originalUnitPriceSet ?? null);
+        const quantity = typeof node.quantity === 'number' && Number.isFinite(node.quantity) ? node.quantity : 1;
+        return {
+          lineItemGid: node.id,
+          sourceLineItemId: extractShopifyGidTail(node.id) ?? node.id,
+          shopifyProductId: node.product?.legacyResourceId ?? (node.product?.id ? extractShopifyGidTail(node.product.id) : null),
+          sourceVariantId: node.variant?.legacyResourceId ?? (node.variant?.id ? extractShopifyGidTail(node.variant.id) : null),
+          sku: normalizeShopifyString(node.sku),
+          title: normalizeShopifyString(node.title) ?? normalizeShopifyString(node.name),
+          imageUrl: resolvedImage.imageUrl,
+          quantity,
+          unitPrice,
+          unitPriceVatIncluded: taxesIncluded === true
+            ? toMoneyAmountString(discountedTotal ? Number(discountedTotal) / Math.max(quantity, 1) : unitPrice)
+            : unitPrice,
+          lineTotalVatIncluded: taxesIncluded === true ? discountedTotal : unitPrice && (Number(unitPrice) * quantity).toFixed(2),
+          lineTaxAmount: readMoneyAmount(taxLine?.priceSet ?? null),
+          vatRate:
+            typeof taxLine?.ratePercentage === 'number' && Number.isFinite(taxLine.ratePercentage)
+              ? taxLine.ratePercentage.toFixed(2)
+              : typeof taxLine?.rate === 'number' && Number.isFinite(taxLine.rate)
+                ? (taxLine.rate * 100).toFixed(2)
+                : null,
+        };
+      }),
+      fulfillmentOrders: (order.fulfillmentOrders?.edges ?? []).map((edge) => ({
+        id: edge.node.id,
+        status: edge.node.status ?? null,
+        requestStatus: edge.node.requestStatus ?? null,
+        lineItems: (edge.node.lineItems?.edges ?? []).map((lineItemEdge) => ({
+          id: lineItemEdge.node.id,
+          lineItemId: lineItemEdge.node.lineItem?.id ?? null,
+          remainingQuantity:
+            typeof lineItemEdge.node.remainingQuantity === 'number' ? lineItemEdge.node.remainingQuantity : null,
+          totalQuantity: typeof lineItemEdge.node.totalQuantity === 'number' ? lineItemEdge.node.totalQuantity : null,
+        })),
       })),
       source: 'shopify_admin',
     };
@@ -2790,6 +3281,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderSellerInfo,
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,
+    fetchCanonicalOrderSnapshot,
     previewSuggestedRefund,
     fetchReturnDetails,
     fetchReturnCancellationState,

@@ -132,6 +132,71 @@ export type FetchOrderTaxSnapshotResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type CanonicalShopifyOrderLineItemSnapshot = {
+  lineItemGid: string;
+  sourceLineItemId: string;
+  shopifyProductId: string | null;
+  sourceVariantId: string | null;
+  sku: string | null;
+  title: string | null;
+  imageUrl: string | null;
+  quantity: number;
+  unitPrice: string | null;
+  unitPriceVatIncluded: string | null;
+  lineTotalVatIncluded: string | null;
+  lineTaxAmount: string | null;
+  vatRate: string | null;
+};
+
+export type CanonicalShopifyOrderSnapshot = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+  shopifyCreatedAt: string | null;
+  currency: string | null;
+  financialStatus: string | null;
+  paymentGatewayName: string | null;
+  taxesIncluded: boolean | null;
+  orderTaxAmount: string | null;
+  shippingAmount: string | null;
+  discountAmount: string | null;
+  totalPrice: string | null;
+  orderNote: string | null;
+  orderTags: string[];
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
+  billingFullName: string | null;
+  billingCompany: string | null;
+  billingPhone: string | null;
+  billingCity: string | null;
+  billingDistrict: string | null;
+  billingAddress1: string | null;
+  billingAddress2: string | null;
+  billingPostcode: string | null;
+  shippingCountry: string | null;
+  shippingPostcode: string | null;
+  shippingCity: string | null;
+  shippingDistrict: string | null;
+  shippingAddress: string | null;
+  sellerInfo: SellerInfoMap | null;
+  lineItems: CanonicalShopifyOrderLineItemSnapshot[];
+  fulfillmentOrders: Array<{
+    id: string;
+    status: string | null;
+    requestStatus: string | null;
+    lineItems: Array<{
+      id: string;
+      lineItemId: string | null;
+      remainingQuantity: number | null;
+      totalQuantity: number | null;
+    }>;
+  }>;
+  source: 'mock' | 'shopify_admin';
+};
+
+export type FetchCanonicalShopifyOrderSnapshotResult = CanonicalShopifyOrderSnapshot | null;
+
 export type ShopifyReturnLineItem = {
   returnLineItemGid: string;
   fulfillmentLineItemGid: string | null;
