@@ -9,6 +9,10 @@ import {
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
+import {
+  buildLegacyRefundLedgerEntryId,
+  buildRefundLedgerEntryId,
+} from '../finance/refund-ledger-id.service.js';
 import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from '../orders/outbound-shopify-refund-attempt.service.js';
@@ -142,14 +146,6 @@ function buildRefundReturnRecordId(input: {
   vendorAllocationId: string;
 }) {
   return `return-${input.originalVendorId}-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
-}
-
-function buildRefundLedgerId(input: {
-  vendorId: string;
-  sourceShopifyRefundId: string;
-  vendorAllocationId: string;
-}) {
-  return `fin-${input.vendorId}-refund-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
 }
 
 async function resolveCancelRefundReviewAfterRefundIngestion(
@@ -512,10 +508,14 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           });
         }
 
-        const expectedRefundLedgerId = buildRefundLedgerId({
+        const expectedRefundLedgerId = buildRefundLedgerEntryId({
           vendorId,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
           vendorAllocationId,
+        });
+        const legacyRefundLedgerId = buildLegacyRefundLedgerEntryId({
+          vendorId,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
         });
         const refundLedgerEntries = await tx.financeLedgerEntry.findMany({
           where: {
@@ -524,7 +524,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             voidedAt: null,
             OR: [
               {
-                id: `fin-${vendorId}-refund-${parsedRefund.sourceShopifyRefundId}`,
+                id: legacyRefundLedgerId,
               },
               {
                 id: expectedRefundLedgerId,

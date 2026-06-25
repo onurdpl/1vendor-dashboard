@@ -12,6 +12,11 @@ import {
   classifyPostApprovalRefundRisk,
   getUnsettledRefundOffsetEligibility,
 } from '../finance/refund-offset.service.js';
+import {
+  buildLegacyRefundLedgerEntryId,
+  buildRefundLedgerEntryId,
+  matchesRefundLedgerSource,
+} from '../finance/refund-ledger-id.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { isLedgerVoided } from '../finance/active-ledger-policy.service.js';
 import {
@@ -36,6 +41,14 @@ function buildExpectedSaleLedgerIdForReconciliation(input: {
   vendorAllocationId: string;
 }) {
   return buildSaleLedgerEntryId(input.assignedVendorId, input.sourceShopifyOrderId, input.vendorAllocationId);
+}
+
+function buildExpectedRefundLedgerIdForReconciliation(input: {
+  vendorId: string;
+  sourceShopifyRefundId: string;
+  vendorAllocationId: string;
+}) {
+  return buildRefundLedgerEntryId(input);
 }
 
 function isCancelledStatus(value: string | null | undefined) {
@@ -483,6 +496,7 @@ export function createReconciliationService(env: AppEnv) {
         }
 
         let expectedLedgerId: string | null = null;
+        let legacyLedgerId: string | null = null;
         let economicOwnerVendorId: string | null = null;
         let activeSaleLedgerId: string | null = null;
         let refundLedgerRepairReason: string | null = transferRepairBlockerReason;
@@ -494,24 +508,52 @@ export function createReconciliationService(env: AppEnv) {
             });
             economicOwnerVendorId = economicOwner.economicOwnerVendorId;
             activeSaleLedgerId = economicOwner.activeSaleLedgerId;
-            expectedLedgerId = `fin-${economicOwnerVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
+            expectedLedgerId = buildExpectedRefundLedgerIdForReconciliation({
+              vendorId: economicOwnerVendorId,
+              sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+              vendorAllocationId: allocation.id,
+            });
+            legacyLedgerId = buildLegacyRefundLedgerEntryId({
+              vendorId: economicOwnerVendorId,
+              sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+            });
           } catch (error) {
             refundLedgerRepairReason = error instanceof Error ? error.message : 'Refund ledger repair owner resolution failed.';
           }
         }
 
         const hasActiveLedger = expectedLedgerId
-          ? allocation.financeEntries.some((entry) => entry.id === expectedLedgerId && !isLedgerVoided(entry))
-          : false;
-        const conflictingActiveLedger = expectedLedgerId
-          ? allocation.financeEntries.find((entry) =>
+          ? allocation.financeEntries.some((entry) =>
+              entry.id === expectedLedgerId &&
               entry.entryType === 'refund' &&
-              entry.id.endsWith(`-refund-${refundRecord.sourceShopifyRefundId}`) &&
-              entry.id !== expectedLedgerId &&
+              entry.vendorId === economicOwnerVendorId &&
+              !isLedgerVoided(entry)
+            )
+          : false;
+        const legacyActiveLedger = legacyLedgerId
+          ? allocation.financeEntries.find((entry) =>
+              entry.id === legacyLedgerId &&
+              entry.entryType === 'refund' &&
+              entry.vendorId === economicOwnerVendorId &&
               !isLedgerVoided(entry)
             )
           : null;
-        if (conflictingActiveLedger) {
+        const conflictingActiveLedger = expectedLedgerId
+          ? allocation.financeEntries.find((entry) =>
+              entry.entryType === 'refund' &&
+              matchesRefundLedgerSource({
+                ledgerId: entry.id,
+                sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+              }) &&
+              entry.id !== expectedLedgerId &&
+              entry.id !== legacyLedgerId &&
+              !isLedgerVoided(entry)
+            )
+          : null;
+        if (!hasActiveLedger && legacyActiveLedger) {
+          refundLedgerRepairReason =
+            `Legacy refund ledger ${legacyActiveLedger.id} already exists for allocation ${allocation.id}; manual migration/backfill is required before allocation-scoped repair.`;
+        } else if (conflictingActiveLedger) {
           refundLedgerRepairReason =
             `Active refund ledger ${conflictingActiveLedger.id} already exists for allocation ${allocation.id} under a different economic owner.`;
         }
@@ -750,4 +792,5 @@ export function createReconciliationService(env: AppEnv) {
 
 export const __reconciliationTesting = {
   buildExpectedSaleLedgerIdForReconciliation,
+  buildExpectedRefundLedgerIdForReconciliation,
 };

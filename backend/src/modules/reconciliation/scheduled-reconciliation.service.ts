@@ -13,6 +13,10 @@ import {
 import { createReconciliationService } from './reconciliation.service.js';
 import type { OrderReconciliationResult } from './reconciliation.types.js';
 import { isLedgerVoided } from '../finance/active-ledger-policy.service.js';
+import {
+  buildLegacyRefundLedgerEntryId,
+  buildRefundLedgerEntryId,
+} from '../finance/refund-ledger-id.service.js';
 import { resolveActiveEconomicOwnerForRepair } from './reconciliation-transfer-policy.service.js';
 
 export type ScheduledReconciliationCandidateType =
@@ -251,6 +255,7 @@ export async function findScheduledReconciliationCandidates(options: {
               },
               select: {
                 id: true,
+                vendorId: true,
                 voidedAt: true,
               },
             },
@@ -339,28 +344,53 @@ export async function findScheduledReconciliationCandidates(options: {
 
   for (const refundRecord of refundRecords) {
     let expectedLedgerId: string | null = null;
+    let legacyLedgerId: string | null = null;
+    let economicOwnerVendorId: string | null = null;
     let ownerResolutionReason: string | null = null;
     try {
       const economicOwner = await resolveActiveEconomicOwnerForRepair({
         vendorAllocationId: refundRecord.vendorAllocationId,
       });
-      expectedLedgerId = `fin-${economicOwner.economicOwnerVendorId}-refund-${refundRecord.sourceShopifyRefundId}`;
+      economicOwnerVendorId = economicOwner.economicOwnerVendorId;
+      expectedLedgerId = buildRefundLedgerEntryId({
+        vendorId: economicOwner.economicOwnerVendorId,
+        sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+        vendorAllocationId: refundRecord.vendorAllocationId,
+      });
+      legacyLedgerId = buildLegacyRefundLedgerEntryId({
+        vendorId: economicOwner.economicOwnerVendorId,
+        sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+      });
     } catch (error) {
       ownerResolutionReason = error instanceof Error ? error.message : 'Refund ledger owner resolution failed.';
     }
 
     const hasExpectedLedger = expectedLedgerId
-      ? refundRecord.vendorAllocation.financeEntries.some((entry) => entry.id === expectedLedgerId && !isLedgerVoided(entry))
+      ? refundRecord.vendorAllocation.financeEntries.some((entry) =>
+          entry.id === expectedLedgerId &&
+          entry.vendorId === economicOwnerVendorId &&
+          !isLedgerVoided(entry)
+        )
       : false;
     if (hasExpectedLedger) {
       continue;
     }
 
+    const legacyLedger = legacyLedgerId
+      ? refundRecord.vendorAllocation.financeEntries.find((entry) =>
+          entry.id === legacyLedgerId &&
+          entry.vendorId === economicOwnerVendorId &&
+          !isLedgerVoided(entry)
+        )
+      : null;
+
     candidates.push(buildScheduledReconciliationCandidate({
       type: 'missing_refund_ledger',
       reason: ownerResolutionReason
         ? `Refund ${refundRecord.sourceShopifyRefundId} cannot be repaired automatically: ${ownerResolutionReason}`
-        : `Refund ${refundRecord.sourceShopifyRefundId} has no matching active operational finance ledger entry.`,
+        : legacyLedger
+          ? `Refund ${refundRecord.sourceShopifyRefundId} has legacy refund ledger ${legacyLedger.id}; manual migration/backfill is required before allocation-scoped repair.`
+          : `Refund ${refundRecord.sourceShopifyRefundId} has no matching active allocation-scoped operational finance ledger entry.`,
       sourceShopifyOrderId: refundRecord.vendorAllocation.order.sourceShopifyOrderId,
       vendorAllocationId: refundRecord.vendorAllocationId,
       refundRecordId: refundRecord.id,
