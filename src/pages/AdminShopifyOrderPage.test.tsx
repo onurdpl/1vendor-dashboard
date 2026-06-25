@@ -483,6 +483,63 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(screen.getByText(/Error: Invalid HMAC signature./)).toBeInTheDocument();
     });
 
+    it('renders real Product Panel created and duplicate outcomes', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773265',
+        sourceShopifyOrderNumber: '#1091',
+        customer: 'Customer',
+        financialStatus: 'pending',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [
+          buildAllocation({
+            productPanelVariantDisableEvents: [
+              buildProductPanelEvent({
+                id: 'product-panel-event-created',
+                status: 'RESOLVED_DRY_RUN',
+                dryRun: false,
+                attemptCount: 1,
+                error: null,
+                resolvedAt: '2026-06-21T12:48:00.000Z',
+                response: {
+                  created: true,
+                  duplicate: false,
+                  ruleId: 'rule-123',
+                  parentSku: 'PARENT-SKU-1088',
+                  normalizedSize: '42',
+                  writesPerformed: true,
+                },
+              }),
+              buildProductPanelEvent({
+                id: 'product-panel-event-duplicate',
+                status: 'RESOLVED_DRY_RUN',
+                dryRun: false,
+                attemptCount: 1,
+                error: null,
+                resolvedAt: '2026-06-21T12:47:00.000Z',
+                response: {
+                  created: false,
+                  duplicate: true,
+                  ruleId: 'rule-123',
+                  parentSku: 'PARENT-SKU-1088',
+                  normalizedSize: '42',
+                  writesPerformed: false,
+                },
+              }),
+            ],
+          }),
+        ],
+      });
+
+      renderPage();
+
+      const dryRunCard = await screen.findByLabelText('Product Panel variant disable dry-run');
+      expect(within(dryRunCard).getByText('Product Panel disable')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Real send')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Latest outcome')).toBeInTheDocument();
+      expect(within(dryRunCard).getByText('Disable rule created')).toBeInTheDocument();
+      expect(screen.getByText(/Duplicate active rule accepted/)).toBeInTheDocument();
+    });
+
     it('renders inline Product Panel dry-run zero-attempt feedback', async () => {
       const initialBreakdown = {
         sourceShopifyOrderId: '7817723773265',

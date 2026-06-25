@@ -242,6 +242,7 @@ describe('Product Panel variant disable outbox', () => {
       sourceSystem: 'vendor_allocation_panel',
       sourceEventType: 'vendor_allocation_rejected',
       sourceStatus: 'vendor_reported',
+      dryRun: true,
     });
     expect(request.body).toBe(expectedBody);
     const expectedSignature = createHmac('sha256', 'test-product-panel-secret')
@@ -265,11 +266,13 @@ describe('Product Panel variant disable outbox', () => {
       sourceSystem: 'vendor_allocation_panel',
       sourceEventType: 'vendor_allocation_rejected',
       sourceStatus: 'vendor_reported',
+      dryRun: true,
     });
     expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
       where: { id: 'event-1' },
       data: expect.objectContaining({
         status: 'RESOLVED_DRY_RUN',
+        dryRun: true,
         attemptCount: 1,
         error: null,
         responseJson: expect.objectContaining({
@@ -303,7 +306,8 @@ describe('Product Panel variant disable outbox', () => {
       where: { id: 'event-1' },
       data: expect.objectContaining({
         status: 'FAILED',
-        error: 'Product Panel dry-run failed with status 401.',
+        dryRun: true,
+        error: 'Product Panel variant disable dry-run failed with status 401.',
         responseJson: expect.objectContaining({
           error: 'unauthorized',
           message: 'Invalid HMAC signature.',
@@ -336,8 +340,9 @@ describe('Product Panel variant disable outbox', () => {
       where: { id: 'event-1' },
       data: expect.objectContaining({
         status: 'FAILED',
+        dryRun: true,
         attemptCount: 1,
-        error: 'Product Panel dry-run failed with status 422.',
+        error: 'Product Panel variant disable dry-run failed with status 422.',
         responseJson: expect.objectContaining({
           canResolve: false,
           error: 'Missing custom.main_sku',
@@ -347,7 +352,7 @@ describe('Product Panel variant disable outbox', () => {
     expect(prismaMock.operationalSignal.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          title: 'Product Panel variant dry-run failed',
+          title: 'Product Panel variant disable failed',
           sourceArea: 'DIAGNOSTICS',
           vendorId: 'yalispor',
           allocationId: 'alloc-1099',
@@ -418,7 +423,6 @@ describe('Product Panel variant disable outbox', () => {
     expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).toHaveBeenNthCalledWith(1, {
       where: {
         shopifyOrderId: 'gid://shopify/Order/1099',
-        dryRun: true,
         reasonCode: 'OUT_OF_STOCK',
         status: {
           in: ['CREATED', 'FAILED'],
@@ -434,7 +438,6 @@ describe('Product Panel variant disable outbox', () => {
         status: {
           in: ['CREATED', 'FAILED'],
         },
-        dryRun: true,
         id: {
           in: ['event-failed'],
         },
@@ -472,17 +475,128 @@ describe('Product Panel variant disable outbox', () => {
     });
   });
 
-  it('refuses manual send when dry-run mode is disabled', async () => {
-    await expect(
-      sendProductPanelVariantDisableDryRunEventsForOrder(
-        buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
-        { shopifyOrderId: 'gid://shopify/Order/1099' },
-      ),
-    ).rejects.toMatchObject({
-      statusCode: 409,
-      message: 'Product Panel hard-disable mode is not allowed from this manual dry-run action.',
+  it('sends real variant-disable payload when dry-run mode is explicitly disabled', async () => {
+    const event = buildOutboxEvent({ dryRun: true });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: async () =>
+        JSON.stringify({
+          created: true,
+          duplicate: false,
+          ruleId: 'rule-123',
+          parentSku: 'PARENT-1',
+          normalizedSize: '42',
+          writesPerformed: true,
+        }),
     });
 
-    expect(prismaMock.productPanelVariantDisableOutboxEvent.findMany).not.toHaveBeenCalled();
+    const result = await sendProductPanelVariantDisableDryRunEvents(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      { fetchImpl },
+    );
+
+    expect(result).toMatchObject({ processed: 1, resolved: 1, failed: 0 });
+    const [, request] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual(
+      expect.objectContaining({
+        dryRun: false,
+        shopifyVariantId: 'gid://shopify/ProductVariant/111',
+      }),
+    );
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED_DRY_RUN',
+        dryRun: false,
+        error: null,
+        responseJson: expect.objectContaining({
+          created: true,
+          duplicate: false,
+          ruleId: 'rule-123',
+          parentSku: 'PARENT-1',
+          normalizedSize: '42',
+          writesPerformed: true,
+        }),
+      }),
+    });
+  });
+
+  it('accepts duplicate active rules in real variant-disable mode', async () => {
+    const event = buildOutboxEvent({ dryRun: true });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          created: false,
+          duplicate: true,
+          ruleId: 'rule-existing',
+          parentSku: 'PARENT-1',
+          normalizedSize: '42',
+          writesPerformed: false,
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEvents(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      { fetchImpl },
+    );
+
+    expect(result).toMatchObject({ processed: 1, resolved: 1, failed: 0 });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED_DRY_RUN',
+        dryRun: false,
+        responseJson: expect.objectContaining({
+          created: false,
+          duplicate: true,
+          ruleId: 'rule-existing',
+          writesPerformed: false,
+        }),
+      }),
+    });
+  });
+
+  it('keeps failed real variant-disable responses failed and retryable', async () => {
+    const event = buildOutboxEvent({ status: 'FAILED', attemptCount: 1, dryRun: true });
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      text: async () =>
+        JSON.stringify({
+          error: 'resolver_failed',
+          message: 'Variant resolver could not find parent SKU.',
+          writesPerformed: false,
+        }),
+    });
+
+    const result = await sendProductPanelVariantDisableDryRunEvents(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      {
+        statuses: ['CREATED', 'FAILED'] as never,
+        fetchImpl,
+      },
+    );
+
+    expect(result).toMatchObject({ processed: 1, resolved: 0, failed: 1 });
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        dryRun: false,
+        attemptCount: 2,
+        error: 'Product Panel variant disable failed with status 422.',
+        responseJson: expect.objectContaining({
+          error: 'resolver_failed',
+          message: 'Variant resolver could not find parent SKU.',
+          writesPerformed: false,
+        }),
+      }),
+    });
   });
 });

@@ -312,6 +312,24 @@ function getProductPanelDisplayError(
   return message ?? error ?? missingHeaders ?? event.error;
 }
 
+function getProductPanelOutcomeLabel(
+  event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number] | null,
+) {
+  if (!event?.response) {
+    return null;
+  }
+
+  if (event.response.created === true) {
+    return 'Disable rule created';
+  }
+
+  if (event.response.duplicate === true) {
+    return 'Duplicate active rule accepted';
+  }
+
+  return null;
+}
+
 function buildProductPanelVariantDisableMeta(
   event: NonNullable<ShopifyOrderBreakdown['allocations'][number]['productPanelVariantDisableEvents']>[number],
 ) {
@@ -320,9 +338,11 @@ function buildProductPanelVariantDisableMeta(
   const normalizedSize = formatProductPanelResponseValue(response?.normalizedSize);
   const confidence = formatProductPanelResponseValue(response?.confidence);
   const resolutionMethod = formatProductPanelResponseValue(response?.resolutionMethod);
+  const outcomeLabel = getProductPanelOutcomeLabel(event);
   const parts = [
     event.variantSku ?? event.shopifyVariantId ?? 'Variant',
     `Reason: ${event.reasonCode}`,
+    outcomeLabel,
     parentSku ? `Parent SKU: ${parentSku}` : null,
     normalizedSize ? `Size: ${normalizedSize}` : null,
     confidence ? `Confidence: ${confidence}` : null,
@@ -1305,6 +1325,8 @@ export function AdminShopifyOrderPage() {
         const latestProductPanelEvent = getLatestProductPanelEvent(productPanelEvents);
         const latestProductPanelAttemptedAt = getProductPanelLastAttemptedAt(latestProductPanelEvent);
         const latestProductPanelError = getProductPanelDisplayError(latestProductPanelEvent);
+        const latestProductPanelOutcome = getProductPanelOutcomeLabel(latestProductPanelEvent);
+        const productPanelRealModeSeen = productPanelEvents.some((event) => event.dryRun === false);
         const productPanelFeedback = productPanelDryRunFeedback[allocation.allocationOrderId];
 
         return (
@@ -1423,13 +1445,15 @@ export function AdminShopifyOrderPage() {
             <section className="economic-transfer-summary-card" aria-label="Product Panel variant disable dry-run">
               <div className="economic-transfer-summary-header">
                 <div>
-                  <p className="eyebrow">Product Panel dry-run</p>
+                  <p className="eyebrow">{productPanelRealModeSeen ? 'Product Panel disable' : 'Product Panel dry-run'}</p>
                   <h4>Variant availability validation</h4>
                 </div>
-                <span className="status-badge status-info">Dry run only</span>
+                <span className="status-badge status-info">{productPanelRealModeSeen ? 'Real send' : 'Dry run only'}</span>
               </div>
               <p className="page-description">
-                Validates Product Panel resolver. Does not disable products or change Shopify inventory.
+                {productPanelRealModeSeen
+                  ? 'Product Panel accepted the variant-disable request. Sporgym did not mutate Shopify directly.'
+                  : 'Validates Product Panel resolver. Does not disable products or change Shopify inventory.'}
               </p>
               <div className="compact-meta-grid">
                 <div className="meta-item">
@@ -1451,6 +1475,10 @@ export function AdminShopifyOrderPage() {
                 <div className="meta-item">
                   <span>Latest status</span>
                   <strong>{latestProductPanelEvent ? formatTransferStatus(latestProductPanelEvent.status) : 'Not recorded'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Latest outcome</span>
+                  <strong>{latestProductPanelOutcome ?? 'Not recorded'}</strong>
                 </div>
                 <div className="meta-item">
                   <span>Attempt count</span>

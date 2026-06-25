@@ -691,6 +691,12 @@ export type AdminProductPanelVariantDisableEventSummaryDto = {
     resolutionMethod?: unknown;
     confidence?: unknown;
     writesPerformed?: unknown;
+    error?: unknown;
+    message?: unknown;
+    missingHeaders?: unknown;
+    created?: unknown;
+    duplicate?: unknown;
+    ruleId?: unknown;
   } | null;
 };
 

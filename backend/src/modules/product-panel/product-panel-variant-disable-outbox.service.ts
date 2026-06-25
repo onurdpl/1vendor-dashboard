@@ -74,6 +74,7 @@ type ProductPanelDisablePayload = {
   sourceSystem: typeof PRODUCT_PANEL_SOURCE_SYSTEM;
   sourceEventType: typeof PRODUCT_PANEL_SOURCE_EVENT_TYPE;
   sourceStatus: typeof PRODUCT_PANEL_SOURCE_STATUS;
+  dryRun: boolean;
 };
 
 function normalizeReasonCode(reasonCode: string) {
@@ -118,7 +119,7 @@ function parseJsonObject(text: string) {
   }
 }
 
-function buildDisablePayload(event: ProductPanelVariantDisableOutboxEvent): ProductPanelDisablePayload | null {
+function buildDisablePayload(event: ProductPanelVariantDisableOutboxEvent, dryRun: boolean): ProductPanelDisablePayload | null {
   if (!event.shopifyVariantId) {
     return null;
   }
@@ -140,6 +141,7 @@ function buildDisablePayload(event: ProductPanelVariantDisableOutboxEvent): Prod
     sourceSystem: PRODUCT_PANEL_SOURCE_SYSTEM,
     sourceEventType: PRODUCT_PANEL_SOURCE_EVENT_TYPE,
     sourceStatus: PRODUCT_PANEL_SOURCE_STATUS,
+    dryRun,
   };
 }
 
@@ -177,6 +179,9 @@ function mapEventStatusSummary(event: ProductPanelVariantDisableOutboxEvent) {
           error: responseJson.error,
           message: responseJson.message,
           missingHeaders: responseJson.missingHeaders,
+          created: responseJson.created,
+          duplicate: responseJson.duplicate,
+          ruleId: responseJson.ruleId,
         }
       : null,
   };
@@ -196,11 +201,19 @@ function signPayload(secret: string, body: string, idempotencyKey: string) {
   };
 }
 
-function isDryRunResolved(responseBody: Record<string, unknown>) {
+function isProductPanelDisableResolved(responseBody: Record<string, unknown>, dryRun: boolean) {
+  if (dryRun) {
+    return (
+      responseBody.accepted === true &&
+      responseBody.dryRun === true &&
+      responseBody.writesPerformed !== true
+    );
+  }
+
   return (
-    responseBody.accepted === true &&
-    responseBody.dryRun === true &&
-    responseBody.writesPerformed !== true
+    responseBody.created === true ||
+    responseBody.duplicate === true ||
+    (typeof responseBody.ruleId === 'string' && responseBody.ruleId.trim().length > 0)
   );
 }
 
@@ -209,6 +222,7 @@ async function markProductPanelEventFailed(
   error: string,
   responseJson?: Prisma.InputJsonValue,
   requestPayloadJson?: Prisma.InputJsonValue,
+  dryRun?: boolean,
 ) {
   const failedAt = new Date();
   const updated = await prisma.productPanelVariantDisableOutboxEvent.update({
@@ -217,6 +231,7 @@ async function markProductPanelEventFailed(
     },
     data: {
       status: ProductPanelVariantDisableOutboxStatus.FAILED,
+      ...(typeof dryRun === 'boolean' ? { dryRun } : {}),
       attemptCount: event.attemptCount + 1,
       error,
       requestPayloadJson,
@@ -240,9 +255,9 @@ async function createProductPanelFailureSignal(event: ProductPanelVariantDisable
       sourceArea: OperationalSignalSourceArea.DIAGNOSTICS,
       vendorId: event.vendorId,
       allocationId: event.allocationId,
-      title: 'Product Panel variant dry-run failed',
-      description: `Product Panel availability dry-run failed for ${event.variantSku ?? event.shopifyVariantId ?? 'variant'}. Reject workflow was preserved.`,
-      suggestedAction: 'Review Product Panel availability mapping or retry the dry-run sender.',
+      title: 'Product Panel variant disable failed',
+      description: `Product Panel availability request failed for ${event.variantSku ?? event.shopifyVariantId ?? 'variant'}. Reject workflow was preserved.`,
+      suggestedAction: 'Review Product Panel availability mapping or retry the sender.',
       status: OperationalSignalStatus.ACTIVE,
       ruleKey: PRODUCT_PANEL_FAILURE_RULE_KEY,
       triggeredAt: new Date(),
@@ -262,9 +277,9 @@ async function createProductPanelFailureSignal(event: ProductPanelVariantDisable
     update: {
       severity: OperationalSignalSeverity.WARNING,
       sourceArea: OperationalSignalSourceArea.DIAGNOSTICS,
-      title: 'Product Panel variant dry-run failed',
-      description: `Product Panel availability dry-run failed for ${event.variantSku ?? event.shopifyVariantId ?? 'variant'}. Reject workflow was preserved.`,
-      suggestedAction: 'Review Product Panel availability mapping or retry the dry-run sender.',
+      title: 'Product Panel variant disable failed',
+      description: `Product Panel availability request failed for ${event.variantSku ?? event.shopifyVariantId ?? 'variant'}. Reject workflow was preserved.`,
+      suggestedAction: 'Review Product Panel availability mapping or retry the sender.',
       status: OperationalSignalStatus.ACTIVE,
       resolvedAt: null,
       triggeredAt: new Date(),
@@ -422,17 +437,7 @@ export async function sendProductPanelVariantDisableDryRunEvents(
     };
   }
 
-  if (!env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN) {
-    return {
-      processed: 0,
-      resolved: 0,
-      failed: 0,
-      skipped: 0,
-      disabled: false,
-      error: 'Product Panel variant disable sender is dry-run only in this phase.',
-    };
-  }
-
+  const requestDryRun = env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN;
   const baseUrl = env.PRODUCT_PANEL_BASE_URL?.trim();
   const secret = env.PRODUCT_PANEL_HMAC_SECRET?.trim();
   const eventIds = options.eventIds?.map((eventId) => eventId.trim()).filter(Boolean);
@@ -454,7 +459,6 @@ export async function sendProductPanelVariantDisableDryRunEvents(
       status: {
         in: statuses,
       },
-      dryRun: true,
       ...(eventIds?.length ? { id: { in: eventIds } } : {}),
     },
     orderBy: {
@@ -468,14 +472,15 @@ export async function sendProductPanelVariantDisableDryRunEvents(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
   for (const event of events) {
-    const payload = buildDisablePayload(event);
+    const payload = buildDisablePayload(event, requestDryRun);
     const requestPayloadJson = payload ? toJsonObject(payload) : undefined;
     if (!payload) {
       await markProductPanelEventFailed(
         event,
-        'Missing Shopify variant id for Product Panel availability dry-run.',
+        `Missing Shopify variant id for Product Panel availability ${requestDryRun ? 'dry-run' : 'disable request'}.`,
         undefined,
         requestPayloadJson,
+        requestDryRun,
       );
       failed += 1;
       continue;
@@ -487,6 +492,7 @@ export async function sendProductPanelVariantDisableDryRunEvents(
         'Product Panel base URL or HMAC secret is not configured.',
         undefined,
         requestPayloadJson,
+        requestDryRun,
       );
       failed += 1;
       continue;
@@ -510,13 +516,14 @@ export async function sendProductPanelVariantDisableDryRunEvents(
       const responseBody = parseJsonObject(await response.text());
       const responseJson = toResponseJson(responseBody);
 
-      if (response.ok && isDryRunResolved(responseBody)) {
+      if (response.ok && isProductPanelDisableResolved(responseBody, requestDryRun)) {
         await prisma.productPanelVariantDisableOutboxEvent.update({
           where: {
             id: event.id,
           },
           data: {
             status: ProductPanelVariantDisableOutboxStatus.RESOLVED_DRY_RUN,
+            dryRun: requestDryRun,
             attemptCount: event.attemptCount + 1,
             error: null,
             requestPayloadJson,
@@ -530,18 +537,20 @@ export async function sendProductPanelVariantDisableDryRunEvents(
       } else {
         await markProductPanelEventFailed(
           event,
-          `Product Panel dry-run failed with status ${response.status}.`,
+          `Product Panel variant disable ${requestDryRun ? 'dry-run ' : ''}failed with status ${response.status}.`,
           responseJson,
           requestPayloadJson,
+          requestDryRun,
         );
         failed += 1;
       }
     } catch (error) {
       await markProductPanelEventFailed(
         event,
-        error instanceof Error ? error.message : 'Product Panel dry-run request failed.',
+        error instanceof Error ? error.message : 'Product Panel variant disable request failed.',
         undefined,
         requestPayloadJson,
+        requestDryRun,
       );
       failed += 1;
     }
@@ -573,10 +582,6 @@ export async function sendProductPanelVariantDisableDryRunEventsForOrder(
     throw new ProductPanelVariantDisableDryRunSendError('Product Panel variant disable dry-run sender is disabled.');
   }
 
-  if (!env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN) {
-    throw new ProductPanelVariantDisableDryRunSendError('Product Panel hard-disable mode is not allowed from this manual dry-run action.');
-  }
-
   if (!env.PRODUCT_PANEL_BASE_URL?.trim() || !env.PRODUCT_PANEL_HMAC_SECRET?.trim()) {
     throw new ProductPanelVariantDisableDryRunSendError('Product Panel base URL or HMAC secret is not configured.');
   }
@@ -588,7 +593,6 @@ export async function sendProductPanelVariantDisableDryRunEventsForOrder(
   const candidates = await prisma.productPanelVariantDisableOutboxEvent.findMany({
     where: {
       shopifyOrderId,
-      dryRun: true,
       reasonCode: CancellationReason.OUT_OF_STOCK,
       status: {
         in: retryableStatuses,
@@ -622,7 +626,6 @@ export async function sendProductPanelVariantDisableDryRunEventsForOrder(
   const latestEvents = await prisma.productPanelVariantDisableOutboxEvent.findMany({
     where: {
       shopifyOrderId,
-      dryRun: true,
       reasonCode: CancellationReason.OUT_OF_STOCK,
     },
     orderBy: {

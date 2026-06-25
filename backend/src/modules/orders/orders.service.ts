@@ -251,6 +251,12 @@ function mapProductPanelVariantDisableEventSummary(event: {
         resolutionMethod: readProductPanelResponseValue(event.responseJson, 'resolutionMethod'),
         confidence: readProductPanelResponseValue(event.responseJson, 'confidence'),
         writesPerformed: readProductPanelResponseValue(event.responseJson, 'writesPerformed'),
+        error: readProductPanelResponseValue(event.responseJson, 'error'),
+        message: readProductPanelResponseValue(event.responseJson, 'message'),
+        missingHeaders: readProductPanelResponseValue(event.responseJson, 'missingHeaders'),
+        created: readProductPanelResponseValue(event.responseJson, 'created'),
+        duplicate: readProductPanelResponseValue(event.responseJson, 'duplicate'),
+        ruleId: readProductPanelResponseValue(event.responseJson, 'ruleId'),
       }
     : null;
 
