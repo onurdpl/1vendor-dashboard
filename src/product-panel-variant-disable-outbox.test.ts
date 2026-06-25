@@ -25,6 +25,7 @@ const {
   sendProductPanelVariantDisableDryRunEvents,
   sendProductPanelVariantDisableDryRunEventsForOrder,
   shouldQueueProductPanelVariantDisableEvent,
+  triggerProductPanelVariantDisableAutoSend,
 } = await import('../backend/src/modules/product-panel/product-panel-variant-disable-outbox.service.js');
 
 function buildAllocation() {
@@ -448,6 +449,141 @@ describe('Product Panel variant disable outbox', () => {
       take: 1,
     });
     expect(prismaMock.productPanelVariantDisableOutboxEvent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('auto-schedules OUT_OF_STOCK outbox events and sends dry-run payloads', async () => {
+    const event = buildOutboxEvent();
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          accepted: true,
+          dryRun: true,
+          canResolve: true,
+          writesPerformed: false,
+        }),
+    });
+    let scheduledTask: (() => Promise<void>) | null = null;
+
+    const schedule = triggerProductPanelVariantDisableAutoSend(buildEnv(), [event], {
+      fetchImpl,
+      scheduler: (task) => {
+        scheduledTask = task;
+      },
+    });
+
+    expect(schedule).toMatchObject({
+      scheduled: true,
+      reason: 'scheduled',
+      eventIds: ['event-1'],
+    });
+    expect(scheduledTask).not.toBeNull();
+
+    await scheduledTask!();
+
+    const [, request] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual(
+      expect.objectContaining({
+        dryRun: true,
+        reasonCode: 'OUT_OF_STOCK',
+        shopifyVariantId: 'gid://shopify/ProductVariant/111',
+      }),
+    );
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED_DRY_RUN',
+        dryRun: true,
+        error: null,
+      }),
+    });
+  });
+
+  it('auto-schedules real disable payloads when dry-run mode is disabled', async () => {
+    const event = buildOutboxEvent();
+    prismaMock.productPanelVariantDisableOutboxEvent.findMany.mockResolvedValueOnce([event]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          accepted: true,
+          dryRun: false,
+          canResolve: true,
+          writesPerformed: true,
+          created: true,
+          duplicate: false,
+        }),
+    });
+    let scheduledTask: (() => Promise<void>) | null = null;
+
+    const schedule = triggerProductPanelVariantDisableAutoSend(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false }),
+      [event],
+      {
+        fetchImpl,
+        scheduler: (task) => {
+          scheduledTask = task;
+        },
+      },
+    );
+
+    expect(schedule.scheduled).toBe(true);
+    await scheduledTask!();
+
+    const [, request] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual(
+      expect.objectContaining({
+        dryRun: false,
+        shopifyVariantId: 'gid://shopify/ProductVariant/111',
+      }),
+    );
+    expect(prismaMock.productPanelVariantDisableOutboxEvent.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED',
+        dryRun: false,
+        error: null,
+      }),
+    });
+  });
+
+  it('does not auto-schedule when Product Panel sending is disabled', () => {
+    const event = buildOutboxEvent();
+    const scheduler = vi.fn();
+
+    const schedule = triggerProductPanelVariantDisableAutoSend(
+      buildEnv({ PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: false }),
+      [event],
+      { scheduler },
+    );
+
+    expect(schedule).toMatchObject({
+      scheduled: false,
+      reason: 'disabled',
+      eventIds: [],
+    });
+    expect(scheduler).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-schedule failed or non-stock outbox events', () => {
+    const scheduler = vi.fn();
+
+    const schedule = triggerProductPanelVariantDisableAutoSend(buildEnv(), [
+      buildOutboxEvent({ status: 'FAILED' }),
+      buildOutboxEvent({ id: 'event-2', reasonCode: 'VENDOR_CANCELLED' }),
+    ], {
+      scheduler,
+    });
+
+    expect(schedule).toMatchObject({
+      scheduled: false,
+      reason: 'no_sendable_events',
+      eventIds: [],
+    });
+    expect(scheduler).not.toHaveBeenCalled();
   });
 
   it('does not send non-OUT_OF_STOCK events from the manual order action', async () => {

@@ -56,7 +56,11 @@ import {
   splitAllocationForLineItemReject,
   type AllocationSplitServiceResult,
 } from './allocation-split.service.js';
-import { enqueueProductPanelVariantDisableEventsForRejectedAllocation } from '../product-panel/product-panel-variant-disable-outbox.service.js';
+import {
+  enqueueProductPanelVariantDisableEventsForRejectedAllocation,
+  triggerProductPanelVariantDisableAutoSend,
+  type ProductPanelEnv,
+} from '../product-panel/product-panel-variant-disable-outbox.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
@@ -243,6 +247,30 @@ function getProductPanelVariantDisableMode() {
   return {
     enabled: readBooleanEnv(process.env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED, false),
     dryRun: readBooleanEnv(process.env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN, true),
+  };
+}
+
+function readProductPanelNodeEnv(): ProductPanelEnv['NODE_ENV'] {
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') {
+    return process.env.NODE_ENV;
+  }
+
+  return 'development';
+}
+
+function getProductPanelVariantDisableEnvFromProcess(): ProductPanelEnv {
+  return {
+    NODE_ENV: readProductPanelNodeEnv(),
+    PRODUCT_PANEL_BASE_URL: process.env.PRODUCT_PANEL_BASE_URL?.trim() || undefined,
+    PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: readBooleanEnv(
+      process.env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED,
+      false,
+    ),
+    PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: readBooleanEnv(
+      process.env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN,
+      true,
+    ),
+    PRODUCT_PANEL_HMAC_SECRET: process.env.PRODUCT_PANEL_HMAC_SECRET?.trim() || undefined,
   };
 }
 
@@ -2229,6 +2257,9 @@ export async function rejectVendorOrderAllocation(
   vendorId: string,
   orderId: string,
   input: RejectVendorOrderInput,
+  options: {
+    productPanelEnv?: ProductPanelEnv;
+  } = {},
 ): Promise<OrderDetailDto> {
   const reason = normalizeRejectReason(input.reason);
   const note = normalizeRejectNote(input.note);
@@ -2311,13 +2342,17 @@ export async function rejectVendorOrderAllocation(
 
   if (reason === CancellationReason.OUT_OF_STOCK) {
     try {
-      await enqueueProductPanelVariantDisableEventsForRejectedAllocation({
+      const productPanelEvents = await enqueueProductPanelVariantDisableEventsForRejectedAllocation({
         allocationId: orderId,
         reasonCode: reason,
         reasonText: note,
       });
+      triggerProductPanelVariantDisableAutoSend(
+        options.productPanelEnv ?? getProductPanelVariantDisableEnvFromProcess(),
+        productPanelEvents,
+      );
     } catch (error) {
-      console.warn('Product Panel variant disable outbox enqueue failed after vendor reject.', {
+      console.warn('Product Panel variant disable automation failed after vendor reject.', {
         allocationId: orderId,
         reason,
         error: error instanceof Error ? error.message : String(error),

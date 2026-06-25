@@ -137,6 +137,8 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             reason: request.body?.reason,
             note: request.body?.note,
             actorUserId: request.authUser?.id ?? null,
+          }, {
+            productPanelEnv: env,
           }),
         );
       } catch (error) {

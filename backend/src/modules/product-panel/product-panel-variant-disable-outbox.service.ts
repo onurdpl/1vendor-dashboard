@@ -17,7 +17,7 @@ const PRODUCT_PANEL_SOURCE_EVENT_TYPE = 'vendor_allocation_rejected';
 const PRODUCT_PANEL_SOURCE_STATUS = 'vendor_reported';
 const PRODUCT_PANEL_FAILURE_RULE_KEY = 'product_panel_variant_disable_dry_run_failed';
 
-type ProductPanelEnv = Pick<
+export type ProductPanelEnv = Pick<
   AppEnv,
   | 'NODE_ENV'
   | 'PRODUCT_PANEL_BASE_URL'
@@ -38,6 +38,8 @@ type FetchLike = (
   status: number;
   text(): Promise<string>;
 }>;
+
+type ProductPanelAutoSendScheduler = (task: () => Promise<void>) => void;
 
 type QueueEventInput = {
   allocationId: string;
@@ -223,6 +225,16 @@ function getResolvedProductPanelStatus(dryRun: boolean) {
   return dryRun
     ? ProductPanelVariantDisableOutboxStatus.RESOLVED_DRY_RUN
     : ProductPanelVariantDisableOutboxStatus.RESOLVED;
+}
+
+function scheduleProductPanelAutoSend(task: () => Promise<void>) {
+  setTimeout(() => {
+    void task().catch((error) => {
+      console.warn('Automatic Product Panel variant disable sender failed.', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, 0);
 }
 
 async function markProductPanelEventFailed(
@@ -570,6 +582,77 @@ export async function sendProductPanelVariantDisableDryRunEvents(
     failed,
     skipped: 0,
     disabled: false,
+  };
+}
+
+export function triggerProductPanelVariantDisableAutoSend(
+  env: ProductPanelEnv,
+  events: ProductPanelVariantDisableOutboxEvent[],
+  options: {
+    fetchImpl?: FetchLike;
+    scheduler?: ProductPanelAutoSendScheduler;
+  } = {},
+) {
+  if (!env.PRODUCT_PANEL_VARIANT_DISABLE_ENABLED) {
+    return {
+      scheduled: false,
+      reason: 'disabled',
+      eventIds: [],
+    };
+  }
+
+  const eventIds = events
+    .filter((event) =>
+      event.reasonCode === CancellationReason.OUT_OF_STOCK &&
+      event.status === ProductPanelVariantDisableOutboxStatus.CREATED &&
+      Boolean(event.shopifyVariantId),
+    )
+    .map((event) => event.id);
+
+  if (!eventIds.length) {
+    return {
+      scheduled: false,
+      reason: 'no_sendable_events',
+      eventIds,
+    };
+  }
+
+  const task = async () => {
+    const result = await sendProductPanelVariantDisableDryRunEvents(env, {
+      eventIds,
+      statuses: [ProductPanelVariantDisableOutboxStatus.CREATED],
+      limit: eventIds.length,
+      fetchImpl: options.fetchImpl,
+    });
+
+    if (result.failed > 0) {
+      console.warn('Automatic Product Panel variant disable sender completed with failures.', {
+        attempted: result.processed,
+        resolved: result.resolved,
+        failed: result.failed,
+        dryRun: env.PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN,
+      });
+    }
+  };
+
+  try {
+    (options.scheduler ?? scheduleProductPanelAutoSend)(task);
+  } catch (error) {
+    console.warn('Automatic Product Panel variant disable sender could not be scheduled.', {
+      eventIds,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      scheduled: false,
+      reason: 'scheduler_failed',
+      eventIds,
+    };
+  }
+
+  return {
+    scheduled: true,
+    reason: 'scheduled',
+    eventIds,
   };
 }
 

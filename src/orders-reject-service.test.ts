@@ -33,6 +33,7 @@ const prismaMock = vi.hoisted(() => ({
 }));
 const transferAllocationEconomicsMock = vi.hoisted(() => vi.fn());
 const enqueueProductPanelVariantDisableEventsMock = vi.hoisted(() => vi.fn());
+const triggerProductPanelVariantDisableAutoSendMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
@@ -44,6 +45,7 @@ vi.mock('../backend/src/modules/finance/economic-transfer.service.js', () => ({
 
 vi.mock('../backend/src/modules/product-panel/product-panel-variant-disable-outbox.service.js', () => ({
   enqueueProductPanelVariantDisableEventsForRejectedAllocation: enqueueProductPanelVariantDisableEventsMock,
+  triggerProductPanelVariantDisableAutoSend: triggerProductPanelVariantDisableAutoSendMock,
 }));
 
 const {
@@ -314,6 +316,11 @@ describe('vendor order reject operational hold', () => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     enqueueProductPanelVariantDisableEventsMock.mockResolvedValue([]);
+    triggerProductPanelVariantDisableAutoSendMock.mockReturnValue({
+      scheduled: false,
+      reason: 'no_sendable_events',
+      eventIds: [],
+    });
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
     prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
@@ -354,6 +361,13 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('lets a vendor reject their own active allocation and records assignment history', async () => {
+    const productPanelEvent = {
+      id: 'product-panel-event-1',
+      status: 'CREATED',
+      reasonCode: 'OUT_OF_STOCK',
+      shopifyVariantId: 'gid://shopify/ProductVariant/111',
+    };
+    enqueueProductPanelVariantDisableEventsMock.mockResolvedValueOnce([productPanelEvent]);
     prismaMock.vendorAllocation.findFirst
       .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildDetailAllocation());
@@ -362,6 +376,14 @@ describe('vendor order reject operational hold', () => {
       reason: 'OUT_OF_STOCK',
       note: 'Missing stock',
       actorUserId: 'user-1',
+    }, {
+      productPanelEnv: {
+        NODE_ENV: 'test',
+        PRODUCT_PANEL_BASE_URL: 'https://product-panel.example',
+        PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: true,
+        PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: true,
+        PRODUCT_PANEL_HMAC_SECRET: 'secret',
+      },
     });
 
     expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
@@ -387,8 +409,21 @@ describe('vendor order reject operational hold', () => {
       reasonCode: 'OUT_OF_STOCK',
       reasonText: 'Missing stock',
     });
+    expect(triggerProductPanelVariantDisableAutoSendMock).toHaveBeenCalledWith(
+      {
+        NODE_ENV: 'test',
+        PRODUCT_PANEL_BASE_URL: 'https://product-panel.example',
+        PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: true,
+        PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: true,
+        PRODUCT_PANEL_HMAC_SECRET: 'secret',
+      },
+      [productPanelEvent],
+    );
     expect(enqueueProductPanelVariantDisableEventsMock.mock.invocationCallOrder[0]).toBeGreaterThan(
       prismaMock.$transaction.mock.invocationCallOrder[0],
+    );
+    expect(triggerProductPanelVariantDisableAutoSendMock.mock.invocationCallOrder[0]).toBeGreaterThan(
+      enqueueProductPanelVariantDisableEventsMock.mock.invocationCallOrder[0],
     );
     expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
     expect(result.reassignmentRequired).toBe(true);
@@ -419,6 +454,7 @@ describe('vendor order reject operational hold', () => {
       },
     });
     expect(enqueueProductPanelVariantDisableEventsMock).not.toHaveBeenCalled();
+    expect(triggerProductPanelVariantDisableAutoSendMock).not.toHaveBeenCalled();
     expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
   });
 
@@ -439,6 +475,53 @@ describe('vendor order reject operational hold', () => {
       expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
       expect(prismaMock.vendorAllocation.update).toHaveBeenCalled();
       expect(enqueueProductPanelVariantDisableEventsMock).toHaveBeenCalledTimes(1);
+      expect(triggerProductPanelVariantDisableAutoSendMock).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('keeps vendor reject successful when automatic Product Panel sender scheduling fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const productPanelEvent = {
+      id: 'product-panel-event-1',
+      status: 'CREATED',
+      reasonCode: 'OUT_OF_STOCK',
+      shopifyVariantId: 'gid://shopify/ProductVariant/111',
+    };
+    enqueueProductPanelVariantDisableEventsMock.mockResolvedValueOnce([productPanelEvent]);
+    triggerProductPanelVariantDisableAutoSendMock.mockImplementationOnce(() => {
+      throw new Error('scheduler unavailable');
+    });
+    prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
+      .mockResolvedValueOnce(buildDetailAllocation());
+
+    try {
+      const result = await rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: 'Missing stock',
+        actorUserId: 'user-1',
+      });
+
+      expect(result.allocationStatus).toBe('VENDOR_BLOCKED');
+      expect(enqueueProductPanelVariantDisableEventsMock).toHaveBeenCalledTimes(1);
+      expect(triggerProductPanelVariantDisableAutoSendMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          NODE_ENV: expect.any(String),
+          PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: expect.any(Boolean),
+          PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: expect.any(Boolean),
+        }),
+        [productPanelEvent],
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Product Panel variant disable automation failed after vendor reject.',
+        expect.objectContaining({
+          allocationId: 'alloc-1088',
+          reason: 'OUT_OF_STOCK',
+          error: 'scheduler unavailable',
+        }),
+      );
     } finally {
       warnSpy.mockRestore();
     }

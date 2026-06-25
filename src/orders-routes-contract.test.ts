@@ -148,7 +148,14 @@ describe('orders route contract', () => {
       }),
     };
 
-    registerOrdersRoutes(app as never, {} as never);
+    const env = {
+      PRODUCT_PANEL_VARIANT_DISABLE_ENABLED: true,
+      PRODUCT_PANEL_VARIANT_DISABLE_DRY_RUN: false,
+      PRODUCT_PANEL_BASE_URL: 'https://product-panel.example',
+      PRODUCT_PANEL_HMAC_SECRET: 'secret',
+    };
+
+    registerOrdersRoutes(app as never, env as never);
     const response = await posts.get('/orders/:orderId/reject')?.({
       authUser: { id: 'user-1', role: 'vendor' },
       vendorContext: { vendorId: 'vendor-a' },
@@ -165,6 +172,8 @@ describe('orders route contract', () => {
       reason: 'OUT_OF_STOCK',
       note: 'Missing stock',
       actorUserId: 'user-1',
+    }, {
+      productPanelEnv: env,
     });
   });
 
