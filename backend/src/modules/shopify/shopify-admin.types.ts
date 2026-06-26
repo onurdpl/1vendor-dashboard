@@ -141,6 +141,8 @@ export type CanonicalShopifyOrderLineItemSnapshot = {
   title: string | null;
   imageUrl: string | null;
   quantity: number;
+  currentQuantity: number | null;
+  refundableQuantity: number | null;
   unitPrice: string | null;
   unitPriceVatIncluded: string | null;
   lineTotalVatIncluded: string | null;
@@ -155,6 +157,8 @@ export type CanonicalShopifyOrderSnapshot = {
   shopifyCreatedAt: string | null;
   currency: string | null;
   financialStatus: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
   paymentGatewayName: string | null;
   taxesIncluded: boolean | null;
   orderTaxAmount: string | null;

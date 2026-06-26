@@ -141,6 +141,8 @@ type CanonicalOrderSnapshotQueryResponse = {
     createdAt?: string | null;
     currencyCode?: string | null;
     displayFinancialStatus?: string | null;
+    cancelledAt?: string | null;
+    cancelReason?: string | null;
     paymentGatewayNames?: string[] | null;
     taxesIncluded?: boolean | null;
     note?: string | null;
@@ -171,6 +173,8 @@ type CanonicalOrderSnapshotQueryResponse = {
           title?: string | null;
           name?: string | null;
           quantity?: number | null;
+          currentQuantity?: number | null;
+          refundableQuantity?: number | null;
           originalUnitPriceSet?: ShopifyMoneySetNode;
           discountedTotalSet?: ShopifyMoneySetNode;
           taxLines?: ShopifyTaxLineNode[];
@@ -1502,6 +1506,8 @@ export function createShopifyAdminService(env: AppEnv) {
                 createdAt
                 currencyCode
                 displayFinancialStatus
+                cancelledAt
+                cancelReason
                 paymentGatewayNames
                 taxesIncluded
                 note
@@ -1580,6 +1586,8 @@ export function createShopifyAdminService(env: AppEnv) {
                       title
                       name
                       quantity
+                      currentQuantity
+                      refundableQuantity
                       image {
                         url
                         altText
@@ -1708,6 +1716,8 @@ export function createShopifyAdminService(env: AppEnv) {
       shopifyCreatedAt: order.createdAt ?? null,
       currency: normalizeShopifyString(order.currencyCode),
       financialStatus: normalizeShopifyString(order.displayFinancialStatus)?.toLowerCase() ?? null,
+      cancelledAt: order.cancelledAt ?? null,
+      cancelReason: normalizeShopifyString(order.cancelReason)?.toLowerCase() ?? null,
       paymentGatewayName:
         normalizeShopifyString(order.paymentGatewayNames?.find((gateway) => Boolean(normalizeShopifyString(gateway)))) ??
         null,
@@ -1754,6 +1764,14 @@ export function createShopifyAdminService(env: AppEnv) {
           title: normalizeShopifyString(node.title) ?? normalizeShopifyString(node.name),
           imageUrl: resolvedImage.imageUrl,
           quantity,
+          currentQuantity:
+            typeof node.currentQuantity === 'number' && Number.isFinite(node.currentQuantity)
+              ? node.currentQuantity
+              : null,
+          refundableQuantity:
+            typeof node.refundableQuantity === 'number' && Number.isFinite(node.refundableQuantity)
+              ? node.refundableQuantity
+              : null,
           unitPrice,
           unitPriceVatIncluded: taxesIncluded === true
             ? toMoneyAmountString(discountedTotal ? Number(discountedTotal) / Math.max(quantity, 1) : unitPrice)

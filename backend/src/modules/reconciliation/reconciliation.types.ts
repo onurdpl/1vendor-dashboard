@@ -88,3 +88,29 @@ export type CanonicalReturnReconciliationReport = {
   signalsCreatedOrUpdated: number;
   results: CanonicalReturnReconciliationItemResult[];
 };
+
+export type CanonicalOrderCancellationState =
+  | 'none'
+  | 'full_order_cancelled'
+  | 'partial_line_cancelled'
+  | 'unknown_requires_manual_review';
+
+export type CanonicalOrderCancellationReconciliationItemResult = {
+  status: 'reconciled' | 'already_current' | 'skipped' | 'failed';
+  reason: string | null;
+  vendorId: string | null;
+  allocationId: string | null;
+  financeLedgerEntryId: string | null;
+};
+
+export type CanonicalOrderCancellationReconciliationReport = {
+  shopifyOrderId: string;
+  cancellationState: CanonicalOrderCancellationState;
+  affectedAllocations: string[];
+  affectedLineItems: string[];
+  ledgersHeldOrVoided: string[];
+  skippedCount: number;
+  failedCount: number;
+  signalsCreatedOrUpdated: number;
+  results: CanonicalOrderCancellationReconciliationItemResult[];
+};

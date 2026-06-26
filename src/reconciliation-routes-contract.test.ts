@@ -5,6 +5,7 @@ const reconcileAllocationMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderRefundsMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderReturnsMock = vi.hoisted(() => vi.fn());
+const reconcileShopifyOrderCancellationMock = vi.hoisted(() => vi.fn());
 const createOperationalJobMock = vi.hoisted(() => vi.fn());
 const markOperationalJobProcessingMock = vi.hoisted(() => vi.fn());
 const markOperationalJobCompletedMock = vi.hoisted(() => vi.fn());
@@ -26,6 +27,12 @@ vi.mock('../backend/src/modules/reconciliation/canonical-refund-reconciliation.s
 vi.mock('../backend/src/modules/reconciliation/canonical-return-reconciliation.service.js', () => ({
   createCanonicalReturnReconciliationService: vi.fn(() => ({
     reconcileShopifyOrderReturns: reconcileShopifyOrderReturnsMock,
+  })),
+}));
+
+vi.mock('../backend/src/modules/reconciliation/canonical-cancellation-reconciliation.service.js', () => ({
+  createCanonicalCancellationReconciliationService: vi.fn(() => ({
+    reconcileShopifyOrderCancellation: reconcileShopifyOrderCancellationMock,
   })),
 }));
 
@@ -225,6 +232,96 @@ describe('reconciliation route contract', () => {
     expect(markOperationalJobFailedMock).toHaveBeenCalledWith(
       'job-1',
       'Shopify order returns not found or Shopify Admin is not configured.',
+    );
+  });
+
+  it('wires admin canonical Shopify order cancellation reconciliation route', async () => {
+    reconcileShopifyOrderCancellationMock.mockResolvedValueOnce({
+      shopifyOrderId: 'order-1',
+      cancellationState: 'full_order_cancelled',
+      affectedAllocations: ['alloc-a'],
+      affectedLineItems: ['line-1'],
+      ledgersHeldOrVoided: ['ledger-1'],
+      skippedCount: 0,
+      failedCount: 0,
+      signalsCreatedOrUpdated: 1,
+      results: [],
+    });
+    const posts = new Map<string, (request: {
+      authUser?: { role?: string };
+      params: { shopifyOrderId: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+        params: { shopifyOrderId: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      log: {
+        error: vi.fn(),
+      },
+    };
+
+    registerReconciliationRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/reconciliation/shopify-order/:shopifyOrderId/cancellation')?.({
+      authUser: { role: 'admin' },
+      params: { shopifyOrderId: 'order-1' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toMatchObject({
+      shopifyOrderId: 'order-1',
+      cancellationState: 'full_order_cancelled',
+    });
+    expect(createOperationalJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      jobType: 'reconciliation',
+      sourceShopifyOrderId: 'order-1',
+    }));
+    expect(reconcileShopifyOrderCancellationMock).toHaveBeenCalledWith('order-1');
+    expect(markOperationalJobCompletedMock).toHaveBeenCalledWith('job-1');
+  });
+
+  it('returns 404 when canonical cancellation reconciliation has no Shopify order source', async () => {
+    reconcileShopifyOrderCancellationMock.mockResolvedValueOnce(null);
+    const posts = new Map<string, (request: {
+      authUser?: { role?: string };
+      params: { shopifyOrderId: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+        params: { shopifyOrderId: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      log: {
+        error: vi.fn(),
+      },
+    };
+
+    registerReconciliationRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/reconciliation/shopify-order/:shopifyOrderId/cancellation')?.({
+      authUser: { role: 'admin' },
+      params: { shopifyOrderId: 'order-1' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 404,
+      payload: {
+        message: 'Shopify order cancellation state not found or Shopify Admin is not configured.',
+      },
+    });
+    expect(markOperationalJobFailedMock).toHaveBeenCalledWith(
+      'job-1',
+      'Shopify order cancellation state not found or Shopify Admin is not configured.',
     );
   });
 });
