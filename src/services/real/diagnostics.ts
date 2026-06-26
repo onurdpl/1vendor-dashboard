@@ -163,6 +163,48 @@ type ReconciliationResponseDto = {
   items: DiagnosticsReconciliationItem[];
 };
 
+export type CanonicalReconciliationRunReport = {
+  id: string;
+  mode: 'dry-run' | 'repair';
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'BLOCKED';
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  lookbackDays: number;
+  orderLimit: number;
+  ordersScanned: number;
+  repairOpportunities: number;
+  wouldRepairOrders: number;
+  wouldRepairFulfillment: number;
+  wouldRepairRefunds: number;
+  wouldRepairReturns: number;
+  wouldRepairCancellations: number;
+  wouldCreateSignals: number;
+  wouldRepairLedgers: number;
+  wouldRepairFinanceEvents: number;
+  errors: Array<{ shopifyOrderId?: string; message: string }>;
+  perOrderDetails: Array<{
+    shopifyOrderId: string;
+    status: 'scanned' | 'failed';
+    wouldRepair: {
+      order: number;
+      fulfillment: number;
+      refunds: number;
+      returns: number;
+      cancellations: number;
+      signals: number;
+      ledgers: number;
+      financeEvents: number;
+    };
+    actions: string[];
+    errors: string[];
+  }>;
+};
+
+export type CanonicalReconciliationSummaryResponse = {
+  lastRun: CanonicalReconciliationRunReport | null;
+};
+
 export type OrderReconciliationResult = {
   reconciliationStatus: 'in_sync' | 'repaired' | 'needs_attention';
   staleFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
@@ -505,4 +547,8 @@ export async function reconcileAllocation(allocationId: string) {
 
 export async function reconcileShopifyOrder(shopifyOrderId: string) {
   return apiClient.post<OrderReconciliationResult>(`/admin/reconciliation/shopify-order/${shopifyOrderId}`);
+}
+
+export async function canonicalReconciliationSummary(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<CanonicalReconciliationSummaryResponse>('/admin/reconciliation/canonical/summary', { signal: options.signal });
 }

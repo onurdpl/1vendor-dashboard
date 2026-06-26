@@ -1553,6 +1553,34 @@ model OperationalJob {
   @@index([sourceShopifyOrderId])
 }
 
+model CanonicalReconciliationRun {
+  id                       String   @id @default(cuid())
+  mode                     String
+  status                   String
+  startedAt                DateTime @default(now())
+  finishedAt               DateTime?
+  durationMs               Int?
+  lookbackDays             Int
+  orderLimit               Int
+  ordersScanned            Int      @default(0)
+  repairOpportunities      Int      @default(0)
+  wouldRepairOrders        Int      @default(0)
+  wouldRepairFulfillment   Int      @default(0)
+  wouldRepairRefunds       Int      @default(0)
+  wouldRepairReturns       Int      @default(0)
+  wouldRepairCancellations Int      @default(0)
+  wouldCreateSignals       Int      @default(0)
+  wouldRepairLedgers       Int      @default(0)
+  wouldRepairFinanceEvents Int      @default(0)
+  errorsJson               Json?
+  perOrderDetailsJson      Json?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([startedAt])
+  @@index([mode, status])
+}
+
 model OperationalSignal {
   id                   String                      @id
   type                 String

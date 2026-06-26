@@ -6,6 +6,8 @@ const reconcileShopifyOrderMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderRefundsMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderReturnsMock = vi.hoisted(() => vi.fn());
 const reconcileShopifyOrderCancellationMock = vi.hoisted(() => vi.fn());
+const runCanonicalReconciliationMock = vi.hoisted(() => vi.fn());
+const getLatestCanonicalReconciliationRunMock = vi.hoisted(() => vi.fn());
 const createOperationalJobMock = vi.hoisted(() => vi.fn());
 const markOperationalJobProcessingMock = vi.hoisted(() => vi.fn());
 const markOperationalJobCompletedMock = vi.hoisted(() => vi.fn());
@@ -36,6 +38,11 @@ vi.mock('../backend/src/modules/reconciliation/canonical-cancellation-reconcilia
   })),
 }));
 
+vi.mock('../backend/src/modules/reconciliation/canonical-reconciliation-runner.service.js', () => ({
+  runCanonicalReconciliation: runCanonicalReconciliationMock,
+  getLatestCanonicalReconciliationRun: getLatestCanonicalReconciliationRunMock,
+}));
+
 vi.mock('../backend/src/modules/operational-jobs/operational-jobs.service.js', () => ({
   createOperationalJob: createOperationalJobMock,
   markOperationalJobCompleted: markOperationalJobCompletedMock,
@@ -50,6 +57,33 @@ describe('reconciliation route contract', () => {
     markOperationalJobProcessingMock.mockResolvedValue(undefined);
     markOperationalJobCompletedMock.mockResolvedValue(undefined);
     markOperationalJobFailedMock.mockResolvedValue(undefined);
+    runCanonicalReconciliationMock.mockResolvedValue({
+      id: 'canonical-run-1',
+      mode: 'dry-run',
+      status: 'COMPLETED',
+      startedAt: '2026-06-26T03:00:00.000Z',
+      finishedAt: '2026-06-26T03:00:08.000Z',
+      durationMs: 8000,
+      lookbackDays: 3,
+      orderLimit: 500,
+      ordersScanned: 10,
+      repairOpportunities: 2,
+      wouldRepairOrders: 1,
+      wouldRepairFulfillment: 0,
+      wouldRepairRefunds: 1,
+      wouldRepairReturns: 0,
+      wouldRepairCancellations: 0,
+      wouldCreateSignals: 0,
+      wouldRepairLedgers: 1,
+      wouldRepairFinanceEvents: 1,
+      errors: [],
+      perOrderDetails: [],
+    });
+    getLatestCanonicalReconciliationRunMock.mockResolvedValue({
+      id: 'canonical-run-1',
+      mode: 'dry-run',
+      status: 'COMPLETED',
+    });
   });
 
   it('wires admin canonical Shopify refund reconciliation route', async () => {
@@ -76,6 +110,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -117,6 +152,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -167,6 +203,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -208,6 +245,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -258,6 +296,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -298,6 +337,7 @@ describe('reconciliation route contract', () => {
       }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
         posts.set(path, handler);
       }),
+      get: vi.fn(),
       log: {
         error: vi.fn(),
       },
@@ -323,5 +363,116 @@ describe('reconciliation route contract', () => {
       'job-1',
       'Shopify order cancellation state not found or Shopify Admin is not configured.',
     );
+  });
+
+  it('wires admin canonical reconciliation manual dry-run route', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { role?: string };
+      body?: { lookbackDays?: number; limit?: number; mode?: 'dry-run' | 'repair' };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+        body?: { lookbackDays?: number; limit?: number; mode?: 'dry-run' | 'repair' };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      get: vi.fn(),
+      log: {
+        error: vi.fn(),
+      },
+    };
+
+    registerReconciliationRoutes(app as never, { CANONICAL_RECONCILIATION_MODE: 'dry-run' } as never);
+    const response = await posts.get('/admin/reconciliation/canonical/run')?.({
+      authUser: { role: 'admin' },
+      body: { lookbackDays: 2, limit: 25, mode: 'dry-run' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toMatchObject({
+      id: 'canonical-run-1',
+      mode: 'dry-run',
+      ordersScanned: 10,
+    });
+    expect(runCanonicalReconciliationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ CANONICAL_RECONCILIATION_MODE: 'dry-run' }),
+      { lookbackDays: 2, limit: 25, mode: 'dry-run' },
+    );
+  });
+
+  it('blocks manual canonical repair unless repair mode is enabled by config', async () => {
+    const posts = new Map<string, (request: {
+      authUser?: { role?: string };
+      body?: { lookbackDays?: number; limit?: number; mode?: 'dry-run' | 'repair' };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+        body?: { lookbackDays?: number; limit?: number; mode?: 'dry-run' | 'repair' };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      get: vi.fn(),
+      log: {
+        error: vi.fn(),
+      },
+    };
+
+    registerReconciliationRoutes(app as never, { CANONICAL_RECONCILIATION_MODE: 'dry-run' } as never);
+    const response = await posts.get('/admin/reconciliation/canonical/run')?.({
+      authUser: { role: 'admin' },
+      body: { mode: 'repair' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 400,
+      payload: {
+        message: 'Canonical reconciliation repair mode is disabled. Set CANONICAL_RECONCILIATION_MODE=repair to enable it.',
+      },
+    });
+    expect(runCanonicalReconciliationMock).not.toHaveBeenCalled();
+  });
+
+  it('wires admin canonical reconciliation summary route', async () => {
+    const gets = new Map<string, (request: {
+      authUser?: { role?: string };
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn(),
+      get: vi.fn((path: string, _options: unknown, handler: (request: {
+        authUser?: { role?: string };
+      }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      log: {
+        error: vi.fn(),
+      },
+    };
+
+    registerReconciliationRoutes(app as never, { CANONICAL_RECONCILIATION_MODE: 'dry-run' } as never);
+    const response = await gets.get('/admin/reconciliation/canonical/summary')?.({
+      authUser: { role: 'admin' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      lastRun: {
+        id: 'canonical-run-1',
+        mode: 'dry-run',
+        status: 'COMPLETED',
+      },
+    });
+    expect(getLatestCanonicalReconciliationRunMock).toHaveBeenCalledTimes(1);
   });
 });

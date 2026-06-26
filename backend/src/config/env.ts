@@ -35,6 +35,11 @@ export type AppEnv = {
   SCHEDULED_RECONCILIATION_INTERVAL_MS: number;
   SCHEDULED_RECONCILIATION_COOLDOWN_MS: number;
   SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT: number;
+  CANONICAL_RECONCILIATION_ENABLED: boolean;
+  CANONICAL_RECONCILIATION_MODE: 'dry-run' | 'repair';
+  CANONICAL_RECONCILIATION_SCHEDULE_HOUR: number;
+  CANONICAL_RECONCILIATION_LOOKBACK_DAYS: number;
+  CANONICAL_RECONCILIATION_ORDER_LIMIT: number;
   SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: boolean;
   SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: boolean;
   APPROVED_RETURN_AUTO_CANCEL_ENABLED?: boolean;
@@ -143,6 +148,34 @@ function parseBoolean(value: string | undefined, fallback: boolean) {
   }
 
   throw new Error('Expected a boolean configuration value.');
+}
+
+function parseIntegerInRange(value: string | undefined, fallback: number, input: {
+  min: number;
+  max: number;
+  name: string;
+}) {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < input.min || parsed > input.max) {
+    throw new Error(`Invalid ${input.name} value. Expected integer between ${input.min} and ${input.max}.`);
+  }
+
+  return parsed;
+}
+
+function parseCanonicalReconciliationMode(value: string | undefined): 'dry-run' | 'repair' {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === 'dry-run') {
+    return 'dry-run';
+  }
+  if (normalized === 'repair') {
+    return 'repair';
+  }
+  throw new Error('Invalid CANONICAL_RECONCILIATION_MODE value. Expected dry-run or repair.');
 }
 
 function parseCorsOrigins(value: string | undefined, nodeEnv: NodeEnv) {
@@ -383,6 +416,28 @@ export function loadEnv(): AppEnv {
     SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT: parsePositiveInteger(
       process.env.SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT,
       25,
+    ),
+    CANONICAL_RECONCILIATION_ENABLED: parseBoolean(
+      process.env.CANONICAL_RECONCILIATION_ENABLED,
+      nodeEnv !== 'test',
+    ),
+    CANONICAL_RECONCILIATION_MODE: parseCanonicalReconciliationMode(process.env.CANONICAL_RECONCILIATION_MODE),
+    CANONICAL_RECONCILIATION_SCHEDULE_HOUR: parseIntegerInRange(
+      process.env.CANONICAL_RECONCILIATION_SCHEDULE_HOUR,
+      3,
+      {
+        min: 0,
+        max: 23,
+        name: 'CANONICAL_RECONCILIATION_SCHEDULE_HOUR',
+      },
+    ),
+    CANONICAL_RECONCILIATION_LOOKBACK_DAYS: parsePositiveInteger(
+      process.env.CANONICAL_RECONCILIATION_LOOKBACK_DAYS,
+      3,
+    ),
+    CANONICAL_RECONCILIATION_ORDER_LIMIT: parsePositiveInteger(
+      process.env.CANONICAL_RECONCILIATION_ORDER_LIMIT,
+      500,
     ),
     SETTLEMENT_AUTO_DRAFT_JOB_ENABLED: parseBoolean(process.env.SETTLEMENT_AUTO_DRAFT_JOB_ENABLED, false),
     SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN: parseBoolean(process.env.SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN, true),

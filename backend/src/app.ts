@@ -22,6 +22,7 @@ import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.j
 import { registerShopifyOrderWebhookRegistrationRoutes } from './modules/shopify/order-webhook-registration.routes.js';
 import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.routes.js';
+import { registerCanonicalReconciliationScheduler } from './modules/reconciliation/canonical-reconciliation-runner.service.js';
 import { registerScheduledReconciliationScheduler } from './modules/reconciliation/scheduled-reconciliation.service.js';
 import { registerAbandonedApprovedReturnAutoCancelScheduler } from './modules/returns/abandoned-approved-return-auto-cancel.service.js';
 import { registerObservabilityRoutes } from './modules/observability/observability.routes.js';
@@ -446,6 +447,7 @@ export function createApp() {
   registerOdooDiscoveryProbeRoutes(app);
   registerShopifyOrderWebhookRegistrationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
+  registerCanonicalReconciliationScheduler(app, env);
   registerScheduledReconciliationScheduler(app, env);
   registerAbandonedApprovedReturnAutoCancelScheduler(app, env);
 

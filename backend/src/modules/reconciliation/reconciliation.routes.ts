@@ -7,6 +7,11 @@ import { createCanonicalRefundReconciliationService } from './canonical-refund-r
 import { createCanonicalReturnReconciliationService } from './canonical-return-reconciliation.service.js';
 import { createCanonicalCancellationReconciliationService } from './canonical-cancellation-reconciliation.service.js';
 import {
+  getLatestCanonicalReconciliationRun,
+  runCanonicalReconciliation,
+  type CanonicalReconciliationRunMode,
+} from './canonical-reconciliation-runner.service.js';
+import {
   createOperationalJob,
   markOperationalJobCompleted,
   markOperationalJobFailed,
@@ -230,6 +235,54 @@ export function registerReconciliationRoutes(app: FastifyInstance, env: AppEnv) 
 
       await markJobCompleted(operationalJob?.id);
       return result;
+    },
+  );
+
+  app.post<{
+    Body: {
+      lookbackDays?: number;
+      limit?: number;
+      mode?: CanonicalReconciliationRunMode;
+    };
+  }>(
+    '/admin/reconciliation/canonical/run',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const body = request.body ?? {};
+      const requestedMode = body.mode ?? env.CANONICAL_RECONCILIATION_MODE;
+      if (requestedMode === 'repair' && env.CANONICAL_RECONCILIATION_MODE !== 'repair') {
+        return reply.code(400).send({
+          message: 'Canonical reconciliation repair mode is disabled. Set CANONICAL_RECONCILIATION_MODE=repair to enable it.',
+        });
+      }
+
+      return runCanonicalReconciliation(env, {
+        lookbackDays: body.lookbackDays,
+        limit: body.limit,
+        mode: requestedMode,
+      });
+    },
+  );
+
+  app.get(
+    '/admin/reconciliation/canonical/summary',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return {
+        lastRun: await getLatestCanonicalReconciliationRun(),
+      };
     },
   );
 }

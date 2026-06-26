@@ -44,6 +44,16 @@ function formatDate(value: string | null | undefined) {
   }, 'Not synced');
 }
 
+function formatDuration(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return 'Not recorded';
+  }
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+  return `${Math.round(value / 1000)}s`;
+}
+
 function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'normal') {
   if (severity === 'critical') {
     return 'danger' as const;
@@ -163,6 +173,10 @@ export function AdminDiagnosticsPage() {
     runtimeServices.diagnostics.syncEvents({ signal }),
     { enabled: pageReadiness.ready },
   );
+  const canonicalReconciliationQuery = useQueryResource(queryKeys.admin.diagnostics.canonicalReconciliation(), ({ signal }) =>
+    runtimeServices.diagnostics.canonicalReconciliationSummary({ signal }),
+    { enabled: pageReadiness.ready },
+  );
   const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), ({ signal }) =>
     runtimeServices.observability.summary({ signal }),
     { enabled: pageReadiness.ready },
@@ -198,6 +212,7 @@ export function AdminDiagnosticsPage() {
     queryKeys.admin.diagnostics.webhooks(),
     queryKeys.admin.diagnostics.syncEvents(),
     queryKeys.admin.diagnostics.reconciliation(),
+    queryKeys.admin.diagnostics.canonicalReconciliation(),
     ...(latestWebhookEventId ? [queryKeys.admin.diagnostics.webhookDetail(latestWebhookEventId)] : []),
   ];
 
@@ -305,15 +320,17 @@ export function AdminDiagnosticsPage() {
   }, [webhooksQuery.data?.events]);
 
   const selectedWebhook = webhookDetailQuery.data;
+  const canonicalRun = canonicalReconciliationQuery.data?.lastRun ?? null;
   const visibleWebhooks = filteredWebhooks.slice(0, 20);
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
   const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
 
-  const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
-  const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? webhookDetailQuery.error;
+  const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading || canonicalReconciliationQuery.isLoading;
+  const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? canonicalReconciliationQuery.error ?? webhookDetailQuery.error;
   const pageDiagnostics = webhooksQuery.diagnostics
     ?? reconciliationQuery.diagnostics
     ?? syncEventsQuery.diagnostics
+    ?? canonicalReconciliationQuery.diagnostics
     ?? webhookDetailQuery.diagnostics
     ?? observabilityQuery.diagnostics
     ?? runtimeHealthQuery.diagnostics;
@@ -480,6 +497,21 @@ export function AdminDiagnosticsPage() {
           tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current operational job state', generatedAt: 'Current diagnostics load' }}
         />
+        <KPIStatCard
+          label="Canonical dry-run"
+          value={canonicalRun ? canonicalRun.repairOpportunities : 'No run'}
+          detail={
+            canonicalRun
+              ? `${canonicalRun.ordersScanned} orders · ${canonicalRun.errors.length} errors`
+              : 'No nightly report yet'
+          }
+          tone={!canonicalRun ? 'neutral' : canonicalRun.status === 'COMPLETED' ? 'success' : 'warning'}
+          metadata={{
+            scope: 'Canonical Shopify reconciliation',
+            timeWindow: canonicalRun ? `Lookback ${canonicalRun.lookbackDays}d` : 'No run recorded',
+            generatedAt: canonicalRun ? formatDate(canonicalRun.finishedAt ?? canonicalRun.startedAt) : 'Not synced',
+          }}
+        />
       </div>
 
       <OperationalSection
@@ -521,6 +553,45 @@ export function AdminDiagnosticsPage() {
             </p>
           </MetadataGroup>
         </div>
+      </OperationalSection>
+
+      <OperationalSection
+        title="Canonical reconciliation"
+        description="Nightly Shopify canonical dry-run report across order snapshots, fulfillment, refunds, returns, and cancellations."
+      >
+        {canonicalRun ? (
+          <div className="deployment-runtime-grid">
+            <MetadataGroup title="Last run">
+              <MetadataRow label="Mode" value={canonicalRun.mode === 'dry-run' ? 'Dry-run' : 'Repair'} />
+              <MetadataRow label="Status" value={canonicalRun.status} />
+              <MetadataRow label="Started" value={formatDate(canonicalRun.startedAt)} />
+              <MetadataRow label="Finished" value={formatDate(canonicalRun.finishedAt)} />
+              <MetadataRow label="Duration" value={formatDuration(canonicalRun.durationMs)} />
+            </MetadataGroup>
+            <MetadataGroup title="Dry-run summary">
+              <MetadataRow label="Orders scanned" value={canonicalRun.ordersScanned} />
+              <MetadataRow label="Repair opportunities" value={canonicalRun.repairOpportunities} />
+              <MetadataRow label="Would create signals" value={canonicalRun.wouldCreateSignals} />
+              <MetadataRow label="Would repair ledgers" value={canonicalRun.wouldRepairLedgers} />
+              <MetadataRow label="Errors" value={canonicalRun.errors.length} />
+            </MetadataGroup>
+            <MetadataGroup title="View Report">
+              <MetadataRow label="Orders" value={canonicalRun.wouldRepairOrders} />
+              <MetadataRow label="Fulfillment" value={canonicalRun.wouldRepairFulfillment} />
+              <MetadataRow label="Refunds" value={canonicalRun.wouldRepairRefunds} />
+              <MetadataRow label="Returns" value={canonicalRun.wouldRepairReturns} />
+              <MetadataRow label="Cancellations" value={canonicalRun.wouldRepairCancellations} />
+              <p className="page-description diagnostics-inline-note">
+                Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.
+              </p>
+            </MetadataGroup>
+          </div>
+        ) : (
+          <EmptyStatePanel
+            title="No canonical reconciliation run recorded"
+            description="The nightly dry-run report will appear here after the scheduler or manual admin endpoint runs."
+          />
+        )}
       </OperationalSection>
 
       <div className="op-control-layout diagnostics-layout-redesign">

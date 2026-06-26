@@ -16,6 +16,7 @@ const diagnosticsMocks = vi.hoisted(() => ({
   retryOperationalJob: vi.fn(),
   reconcileAllocation: vi.fn(),
   reconcileShopifyOrder: vi.fn(),
+  canonicalReconciliationSummary: vi.fn(),
   observabilitySummary: vi.fn(),
   runtimeHealth: vi.fn(),
 }));
@@ -177,6 +178,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.retryOperationalJob.mockReset();
     diagnosticsMocks.reconcileAllocation.mockReset();
     diagnosticsMocks.reconcileShopifyOrder.mockReset();
+    diagnosticsMocks.canonicalReconciliationSummary.mockReset();
     diagnosticsMocks.observabilitySummary.mockReset();
     diagnosticsMocks.runtimeHealth.mockReset();
 
@@ -249,6 +251,30 @@ describe('AdminDiagnosticsPage control center', () => {
       processingStatus: 'needs_attention',
       message: 'Retry scheduled after transient failure.',
     });
+    diagnosticsMocks.canonicalReconciliationSummary.mockResolvedValue({
+      lastRun: {
+        id: 'canonical-run-1',
+        mode: 'dry-run',
+        status: 'COMPLETED',
+        startedAt: '2026-05-12T03:00:00Z',
+        finishedAt: '2026-05-12T03:00:08Z',
+        durationMs: 8000,
+        lookbackDays: 3,
+        orderLimit: 500,
+        ordersScanned: 42,
+        repairOpportunities: 3,
+        wouldRepairOrders: 1,
+        wouldRepairFulfillment: 0,
+        wouldRepairRefunds: 1,
+        wouldRepairReturns: 1,
+        wouldRepairCancellations: 0,
+        wouldCreateSignals: 1,
+        wouldRepairLedgers: 1,
+        wouldRepairFinanceEvents: 1,
+        errors: [],
+        perOrderDetails: [],
+      },
+    });
     diagnosticsMocks.observabilitySummary.mockResolvedValue({
       health: 'warning',
       generatedAt: '2026-05-12T10:05:00Z',
@@ -310,6 +336,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
     expect(screen.getByText('Health warning')).toBeInTheDocument();
     expect(screen.getByText('Retry pressure')).toBeInTheDocument();
+    expect(screen.getByText('Canonical reconciliation')).toBeInTheDocument();
+    expect(screen.getByText('Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.')).toBeInTheDocument();
   });
 
   it('renders safe deployment runtime diagnostics without exposing secrets', async () => {

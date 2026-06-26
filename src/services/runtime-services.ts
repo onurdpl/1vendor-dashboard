@@ -3463,6 +3463,12 @@ export const runtimeServices = {
             warnings: [],
             requiresManualReview: false,
           }),
+    canonicalReconciliationSummary: (options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.canonicalReconciliationSummary({ signal: options.signal })
+        : Promise.resolve({
+            lastRun: null,
+          }),
   },
   observability: {
     summary: (options: ReadRequestOptions = {}) =>
