@@ -197,6 +197,35 @@ export type CanonicalShopifyOrderSnapshot = {
 
 export type FetchCanonicalShopifyOrderSnapshotResult = CanonicalShopifyOrderSnapshot | null;
 
+export type CanonicalShopifyRefundLineItemSnapshot = {
+  refundLineItemGid: string;
+  sourceRefundLineItemId: string;
+  lineItemGid: string | null;
+  sourceLineItemId: string | null;
+  sku: string | null;
+  title: string | null;
+  name: string | null;
+  variantTitle: string | null;
+  quantity: number;
+  subtotalAmount: string | null;
+  currencyCode: string | null;
+};
+
+export type CanonicalShopifyRefundSnapshot = {
+  refundGid: string;
+  sourceShopifyRefundId: string;
+  createdAt: string | null;
+  note: string | null;
+  refundLineItems: CanonicalShopifyRefundLineItemSnapshot[];
+};
+
+export type FetchCanonicalShopifyRefundsForOrderResult = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  refunds: CanonicalShopifyRefundSnapshot[];
+  source: 'mock' | 'shopify_admin';
+} | null;
+
 export type ShopifyReturnLineItem = {
   returnLineItemGid: string;
   fulfillmentLineItemGid: string | null;

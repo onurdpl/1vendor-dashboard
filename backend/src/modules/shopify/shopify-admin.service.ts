@@ -2,6 +2,7 @@ import type { AppEnv } from '../../config/env.js';
 import { Buffer } from 'node:buffer';
 import type {
   CanonicalShopifyOrderSnapshot,
+  CanonicalShopifyRefundSnapshot,
   CancelFulfillmentOrderResult,
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
@@ -10,6 +11,7 @@ import type {
   CreateShopifyRefundResult,
   FetchOrderLineItemImagesResult,
   FetchCanonicalShopifyOrderSnapshotResult,
+  FetchCanonicalShopifyRefundsForOrderResult,
   FetchOrderTaxSnapshotResult,
   FetchShopifyReturnDetailsResult,
   FetchShopifyReturnReverseDeliveryInputsResult,
@@ -206,6 +208,45 @@ type CanonicalOrderSnapshotQueryResponse = {
         };
       }>;
     } | null;
+  } | null;
+};
+
+type CanonicalRefundsForOrderQueryResponse = {
+  order: {
+    id: string;
+    legacyResourceId?: string | null;
+    refunds: {
+      pageInfo?: {
+        hasNextPage?: boolean | null;
+      } | null;
+      edges: Array<{
+        node: {
+          id: string;
+          legacyResourceId?: string | null;
+          createdAt?: string | null;
+          note?: string | null;
+          refundLineItems: {
+            pageInfo?: {
+              hasNextPage?: boolean | null;
+            } | null;
+            edges: Array<{
+              node: {
+                id: string;
+                quantity?: number | null;
+                subtotalSet?: ShopifyMoneySetNode;
+                lineItem?: {
+                  id?: string | null;
+                  sku?: string | null;
+                  title?: string | null;
+                  name?: string | null;
+                  variantTitle?: string | null;
+                } | null;
+              };
+            }>;
+          };
+        };
+      }>;
+    };
   } | null;
 };
 
@@ -659,6 +700,42 @@ function parseMockCanonicalOrderSnapshots(rawValue: string | undefined): Record<
   }, {});
 }
 
+function normalizeCanonicalRefundSnapshot(value: unknown): CanonicalShopifyRefundSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const refund = value as CanonicalShopifyRefundSnapshot;
+  if (!refund.sourceShopifyRefundId && !refund.refundGid) {
+    return null;
+  }
+
+  return {
+    ...refund,
+    sourceShopifyRefundId: refund.sourceShopifyRefundId ?? extractShopifyGidTail(refund.refundGid) ?? refund.refundGid,
+    refundLineItems: Array.isArray(refund.refundLineItems) ? refund.refundLineItems : [],
+  };
+}
+
+function parseMockCanonicalRefundsByOrderId(rawValue: string | undefined): Record<string, CanonicalShopifyRefundSnapshot[]> {
+  if (!rawValue) {
+    return {};
+  }
+
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SHOPIFY_MOCK_CANONICAL_REFUNDS must be a JSON object keyed by Shopify order id.');
+  }
+
+  return Object.entries(parsed).reduce<Record<string, CanonicalShopifyRefundSnapshot[]>>((acc, [orderId, value]) => {
+    const values = Array.isArray(value) ? value : [];
+    acc[orderId] = values
+      .map(normalizeCanonicalRefundSnapshot)
+      .filter((refund): refund is CanonicalShopifyRefundSnapshot => Boolean(refund));
+    return acc;
+  }, {});
+}
+
 export function resolveShopifyLineItemImageUrl(lineItem: OrderLineItemImageNode) {
   const lineItemImageUrl = lineItem.image?.url?.trim() || null;
   if (lineItemImageUrl) {
@@ -1020,6 +1097,7 @@ export function createShopifyAdminService(env: AppEnv) {
   const mockCanonicalOrderSnapshotsByOrderId = parseMockCanonicalOrderSnapshots(
     (env as { SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT?: string }).SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT,
   );
+  const mockCanonicalRefundsByOrderId = parseMockCanonicalRefundsByOrderId(env.SHOPIFY_MOCK_CANONICAL_REFUNDS);
   const mockReturnDetailsByReturnGid = parseMockReturnDetailsByReturnGid(env.SHOPIFY_MOCK_RETURN_DETAILS);
   const mockOrderFulfillmentStateByOrderId = parseMockOrderFulfillmentStateByOrderId(
     env.SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE,
@@ -1619,6 +1697,141 @@ export function createShopifyAdminService(env: AppEnv) {
         })),
       })),
       source: 'shopify_admin',
+    };
+  }
+
+  async function fetchCanonicalRefundsForOrder(orderId: string): Promise<FetchCanonicalShopifyRefundsForOrderResult> {
+    const mockRefunds = mockCanonicalRefundsByOrderId[orderId];
+    if (mockRefunds) {
+      return {
+        orderGid: toShopifyOrderGid(orderId),
+        sourceShopifyOrderId: orderId,
+        refunds: mockRefunds,
+        source: 'mock',
+      };
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      return null;
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query CanonicalRefundsForOrder($orderId: ID!) {
+              order(id: $orderId) {
+                id
+                legacyResourceId
+                refunds(first: 50) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  edges {
+                    node {
+                      id
+                      legacyResourceId
+                      createdAt
+                      note
+                      refundLineItems(first: 100) {
+                        pageInfo {
+                          hasNextPage
+                        }
+                        edges {
+                          node {
+                            id
+                            quantity
+                            subtotalSet {
+                              shopMoney {
+                                amount
+                                currencyCode
+                              }
+                            }
+                            lineItem {
+                              id
+                              sku
+                              title
+                              name
+                              variantTitle
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            orderId: toShopifyOrderGid(orderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify canonical refund fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<CanonicalRefundsForOrderQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify canonical refund fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      return null;
+    }
+
+    if (order.refunds.pageInfo?.hasNextPage) {
+      throw new Error('Shopify canonical refund pagination incomplete.');
+    }
+
+    const paginatedRefund = (order.refunds.edges ?? []).find((edge) =>
+      edge.node.refundLineItems.pageInfo?.hasNextPage
+    );
+    if (paginatedRefund) {
+      throw new Error(`Shopify canonical refund ${paginatedRefund.node.id} line item pagination incomplete.`);
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
+      source: 'shopify_admin',
+      refunds: (order.refunds.edges ?? []).map((edge) => {
+        const refund = edge.node;
+        return {
+          refundGid: refund.id,
+          sourceShopifyRefundId: refund.legacyResourceId ?? extractShopifyGidTail(refund.id) ?? refund.id,
+          createdAt: refund.createdAt ?? null,
+          note: normalizeShopifyString(refund.note),
+          refundLineItems: (refund.refundLineItems.edges ?? []).map((lineItemEdge) => {
+            const lineItem = lineItemEdge.node;
+            return {
+              refundLineItemGid: lineItem.id,
+              sourceRefundLineItemId: extractShopifyGidTail(lineItem.id) ?? lineItem.id,
+              lineItemGid: lineItem.lineItem?.id ?? null,
+              sourceLineItemId: lineItem.lineItem?.id ? extractShopifyGidTail(lineItem.lineItem.id) : null,
+              sku: normalizeShopifyString(lineItem.lineItem?.sku),
+              title: normalizeShopifyString(lineItem.lineItem?.title),
+              name: normalizeShopifyString(lineItem.lineItem?.name),
+              variantTitle: normalizeShopifyString(lineItem.lineItem?.variantTitle),
+              quantity: typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1,
+              subtotalAmount: readMoneyAmount(lineItem.subtotalSet ?? null),
+              currencyCode: lineItem.subtotalSet?.shopMoney?.currencyCode ?? null,
+            };
+          }),
+        };
+      }),
     };
   }
 
@@ -3282,6 +3495,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,
     fetchCanonicalOrderSnapshot,
+    fetchCanonicalRefundsForOrder,
     previewSuggestedRefund,
     fetchReturnDetails,
     fetchReturnCancellationState,

@@ -1180,7 +1180,7 @@ describe('Shopify refund return linking', () => {
     );
   });
 
-  it('does not create duplicate refund finance events when the refund ledger row already exists', async () => {
+  it('repairs missing refund finance events idempotently when the refund ledger row already exists', async () => {
     setupOrder();
     txMock.financeLedgerEntry.findMany.mockReset();
     txMock.financeLedgerEntry.findFirst.mockReset();
@@ -1220,7 +1220,19 @@ describe('Shopify refund return linking', () => {
       },
     });
 
-    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'REFUND_RECORDED',
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:REFUND_RECORDED',
+        }),
+        expect.objectContaining({
+          eventType: 'COMMISSION_VAT_REVERSED',
+          idempotencyKey: 'fin-sporjinal-refund-1074533826897:COMMISSION_VAT_REVERSED',
+        }),
+      ]),
+      skipDuplicates: true,
+    });
   });
 
   it('keeps refund ledger held when the related sale is already paid', async () => {

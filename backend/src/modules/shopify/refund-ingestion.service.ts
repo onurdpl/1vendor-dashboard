@@ -689,74 +689,72 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
           });
         }
 
-        if (!existingRefundLedgerEntry) {
-          const refundOffset = calculateRefundOffsetAmounts({
-            refundAmount: totalRefundAmount,
-            commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
-            commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
-          });
-          const baseEvent = {
-            vendorId,
-            shopifyOrderId: shopifyOrder.id,
+        const refundOffset = calculateRefundOffsetAmounts({
+          refundAmount: totalRefundAmount,
+          commissionPercentSnapshot: saleLedgerEntry?.commissionPercentSnapshot,
+          commissionVatPercentSnapshot: saleLedgerEntry?.commissionVatPercentSnapshot,
+        });
+        const baseEvent = {
+          vendorId,
+          shopifyOrderId: shopifyOrder.id,
+          financeLedgerEntryId: refundLedgerId,
+          currency: shopifyOrder.currency ?? 'TRY',
+          referenceType: 'shopify_refund',
+          referenceId: parsedRefund.sourceShopifyRefundId,
+          createdBy: 'system:shopify_refunds_create',
+          metadataJson: {
+            sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+            sourceShopifyOrderNumber: orderNumber,
+            sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+            vendorAllocationId,
             financeLedgerEntryId: refundLedgerId,
-            currency: shopifyOrder.currency ?? 'TRY',
-            referenceType: 'shopify_refund',
-            referenceId: parsedRefund.sourceShopifyRefundId,
-            createdBy: 'system:shopify_refunds_create',
-            metadataJson: {
-              sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
-              sourceShopifyOrderNumber: orderNumber,
-              sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
-              vendorAllocationId,
-              financeLedgerEntryId: refundLedgerId,
-              commissionPercentSnapshot: refundOffset.commissionPercent,
-              commissionVatPercentSnapshot: refundOffset.commissionVatPercent,
-              commissionReversalMinor: refundOffset.commissionReversalMinor,
-              commissionVatReversalMinor: refundOffset.commissionVatReversalMinor,
-              vendorPayableReversalMinor: refundOffset.vendorPayableReversalMinor,
-              refundOffsetEligibility: refundOffsetEligibility.code,
-              postApprovalRefundRisk: postApprovalRefundRisk.state,
-              originalVendorIds: [...new Set(vendorLineItems.map((lineItem) => lineItem.originalVendorId))],
-              activeSaleLedgerId: vendorLineItems[0].activeSaleLedgerId,
-              supersededFromLedgerIds: [
-                ...new Set(vendorLineItems.flatMap((lineItem) => lineItem.supersededFromLedgerIds)),
-              ],
-              sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
-              sourceLineItemIds,
-            },
-          };
+            commissionPercentSnapshot: refundOffset.commissionPercent,
+            commissionVatPercentSnapshot: refundOffset.commissionVatPercent,
+            commissionReversalMinor: refundOffset.commissionReversalMinor,
+            commissionVatReversalMinor: refundOffset.commissionVatReversalMinor,
+            vendorPayableReversalMinor: refundOffset.vendorPayableReversalMinor,
+            refundOffsetEligibility: refundOffsetEligibility.code,
+            postApprovalRefundRisk: postApprovalRefundRisk.state,
+            originalVendorIds: [...new Set(vendorLineItems.map((lineItem) => lineItem.originalVendorId))],
+            activeSaleLedgerId: vendorLineItems[0].activeSaleLedgerId,
+            supersededFromLedgerIds: [
+              ...new Set(vendorLineItems.flatMap((lineItem) => lineItem.supersededFromLedgerIds)),
+            ],
+            sourceRefundLineItemIds: vendorLineItems.map((lineItem) => lineItem.sourceRefundLineItemId),
+            sourceLineItemIds,
+          },
+        };
 
-          const refundEvents = [
-            {
-              ...baseEvent,
-              eventType: FinanceEventType.REFUND_RECORDED,
-              amountMinor: refundOffset.refundMinor,
-              idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
-            },
-            {
-              ...baseEvent,
-              eventType: FinanceEventType.COMMISSION_REVERSED,
-              amountMinor: -refundOffset.commissionReversalMinor,
-              idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
-            },
-            refundOffset.commissionVatReversalMinor > 0
-              ? {
-                  ...baseEvent,
-                  eventType: FinanceEventType.COMMISSION_VAT_REVERSED,
-                  amountMinor: -refundOffset.commissionVatReversalMinor,
-                  idempotencyKey: `${refundLedgerId}:COMMISSION_VAT_REVERSED`,
-                }
-              : null,
-            {
-              ...baseEvent,
-              eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
-              amountMinor: -refundOffset.vendorPayableReversalMinor,
-              idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
-            },
-          ].filter((event): event is NonNullable<typeof event> => Boolean(event));
+        const refundEvents = [
+          {
+            ...baseEvent,
+            eventType: FinanceEventType.REFUND_RECORDED,
+            amountMinor: refundOffset.refundMinor,
+            idempotencyKey: `${refundLedgerId}:REFUND_RECORDED`,
+          },
+          {
+            ...baseEvent,
+            eventType: FinanceEventType.COMMISSION_REVERSED,
+            amountMinor: -refundOffset.commissionReversalMinor,
+            idempotencyKey: `${refundLedgerId}:COMMISSION_REVERSED`,
+          },
+          refundOffset.commissionVatReversalMinor > 0
+            ? {
+                ...baseEvent,
+                eventType: FinanceEventType.COMMISSION_VAT_REVERSED,
+                amountMinor: -refundOffset.commissionVatReversalMinor,
+                idempotencyKey: `${refundLedgerId}:COMMISSION_VAT_REVERSED`,
+              }
+            : null,
+          {
+            ...baseEvent,
+            eventType: FinanceEventType.VENDOR_PAYABLE_REVERSED,
+            amountMinor: -refundOffset.vendorPayableReversalMinor,
+            idempotencyKey: `${refundLedgerId}:VENDOR_PAYABLE_REVERSED`,
+          },
+        ].filter((event): event is NonNullable<typeof event> => Boolean(event));
 
-          await createEventsIdempotently(refundEvents, tx);
-        }
+        await createEventsIdempotently(refundEvents, tx);
 
         await resolveCancelRefundReviewAfterRefundIngestion(tx, {
           vendorAllocationId,

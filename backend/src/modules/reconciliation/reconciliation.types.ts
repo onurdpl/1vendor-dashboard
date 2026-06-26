@@ -45,3 +45,25 @@ export type OrderReconciliationResult = {
   warnings: string[];
   requiresManualReview: boolean;
 };
+
+export type CanonicalRefundReconciliationItemResult = {
+  refundId: string;
+  status: 'created' | 'already_present' | 'repaired' | 'skipped' | 'failed';
+  reason: string | null;
+  affectedAllocationIds: string[];
+  affectedVendorIds: string[];
+  affectedRefundRecordIds: string[];
+};
+
+export type CanonicalRefundReconciliationReport = {
+  shopifyOrderId: string;
+  refundsFetched: number;
+  refundsAlreadyPresent: number;
+  refundsCreated: number;
+  ledgersRepaired: number;
+  eventsRepaired: number;
+  skippedCount: number;
+  failedCount: number;
+  signalsCreatedOrUpdated: number;
+  results: CanonicalRefundReconciliationItemResult[];
+};
