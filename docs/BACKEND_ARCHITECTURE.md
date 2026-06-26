@@ -175,8 +175,8 @@ Alternative for quick schema sync without migration history:
 - Unknown or empty vendor metafield values resolve safely to `null`.
 - Temporary non-production diagnostic route:
   - `GET /debug/shopify/vendor-mapping?value=Yalı%20Spor`
-- Confirmed Shopify integration discoveries and open implementation questions are documented in [SHOPIFY_DISCOVERIES.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_DISCOVERIES.md) and should be reviewed before Shopify-dependent implementation.
-- Live rollout readiness and manual webhook rollout steps are documented in [SHOPIFY_LIVE_ROLLOUT.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_LIVE_ROLLOUT.md).
+- Confirmed Shopify integration discoveries and open implementation questions are documented in [SHOPIFY_DISCOVERIES.md](docs/SHOPIFY_DISCOVERIES.md) and should be reviewed before Shopify-dependent implementation.
+- Live rollout readiness and manual webhook rollout steps are documented in [SHOPIFY_LIVE_ROLLOUT.md](docs/SHOPIFY_LIVE_ROLLOUT.md).
 
 ## Shopify Live Readiness Foundation (Phase 14-1)
 - Live Shopify rollout now has a dedicated readiness command:
@@ -207,7 +207,7 @@ Alternative for quick schema sync without migration history:
 - This keeps normal build, smoke, and dry-run flows isolated from live Shopify dependencies until rollout is intentional.
 
 ## Phase 14 Closure Checkpoint
-- The official Phase 14 operational readiness checkpoint is documented in [PHASE_14_CLOSURE.md](/Users/onur/Documents/New project 4/docs/PHASE_14_CLOSURE.md).
+- The official Phase 14 operational readiness checkpoint is documented in [PHASE_14_CLOSURE.md](docs/PHASE_14_CLOSURE.md).
 - Use that document as the source of truth for:
   - live-verified Shopify capabilities
   - current operational limitations
@@ -216,7 +216,7 @@ Alternative for quick schema sync without migration history:
   - recommended production-readiness steps before real merchant rollout
 
 ## Phase 15 Roadmap Baseline
-- The official Phase 15 roadmap baseline is documented in [PHASE_15_PLAN.md](/Users/onur/Documents/New project 4/docs/PHASE_15_PLAN.md).
+- The official Phase 15 roadmap baseline is documented in [PHASE_15_PLAN.md](docs/PHASE_15_PLAN.md).
 - Use that document as the planning source of truth for:
   - operational frontend maturity targets
   - async processing preparation boundaries
@@ -225,7 +225,7 @@ Alternative for quick schema sync without migration history:
   - operational UX and reliability-hardening workstreams
 
 ## Phase 17A Async Processing Foundation
-- The lightweight async operational foundation is documented in [PHASE_17A_ASYNC_FOUNDATION.md](/Users/onur/Documents/New project 4/docs/PHASE_17A_ASYNC_FOUNDATION.md).
+- The lightweight async operational foundation is documented in [PHASE_17A_ASYNC_FOUNDATION.md](docs/PHASE_17A_ASYNC_FOUNDATION.md).
 - Backend now includes an `OperationalJob` model for internal processing lifecycle persistence.
 - Current execution remains inline after the existing safety boundaries:
   1. Shopify HMAC verification
@@ -258,7 +258,7 @@ Alternative for quick schema sync without migration history:
 - Render production must run `prisma migrate deploy` against Render Postgres before operational job persistence is considered production-verified
 
 ## Phase 17B Retry and Dead-letter Foundation
-- The retry and dead-letter lifecycle is documented in [PHASE_17B_RETRY_AND_DEADLETTER.md](/Users/onur/Documents/New project 4/docs/PHASE_17B_RETRY_AND_DEADLETTER.md).
+- The retry and dead-letter lifecycle is documented in [PHASE_17B_RETRY_AND_DEADLETTER.md](docs/PHASE_17B_RETRY_AND_DEADLETTER.md).
 - `OperationalJob` now models retry execution and escalation metadata:
   - `retrying`
   - `dead_letter_ready`
@@ -278,7 +278,7 @@ Alternative for quick schema sync without migration history:
 - This phase still does not add daemon workers, polling schedulers, Redis, BullMQ, Kafka, RabbitMQ, websocket infrastructure, or external DLQ infrastructure.
 
 ## Phase 17C Scheduled Reconciliation Foundation
-- The scheduled reconciliation foundation is documented in [PHASE_17C_SCHEDULED_RECONCILIATION.md](/Users/onur/Documents/New project 4/docs/PHASE_17C_SCHEDULED_RECONCILIATION.md).
+- The scheduled reconciliation foundation is documented in [PHASE_17C_SCHEDULED_RECONCILIATION.md](docs/PHASE_17C_SCHEDULED_RECONCILIATION.md).
 - Backend now includes an opt-in in-process reconciliation scan that creates `reconciliation` operational jobs for stale candidates.
 - Scheduler env controls:
   - `SCHEDULED_RECONCILIATION_ENABLED` defaults to `false`
@@ -299,7 +299,7 @@ Alternative for quick schema sync without migration history:
 - This phase still does not add Redis, BullMQ, Kafka, RabbitMQ, Kubernetes cron, distributed workers, websocket infrastructure, or event-sourcing changes.
 
 ## Phase 17D Operational Observability and Metrics
-- The lightweight observability layer is documented in [PHASE_17D_OBSERVABILITY.md](/Users/onur/Documents/New project 4/docs/PHASE_17D_OBSERVABILITY.md).
+- The lightweight observability layer is documented in [PHASE_17D_OBSERVABILITY.md](docs/PHASE_17D_OBSERVABILITY.md).
 - Admin-only observability endpoints:
   - `GET /admin/observability/summary`
   - `GET /admin/observability/metrics`
@@ -323,7 +323,7 @@ Alternative for quick schema sync without migration history:
 - This phase does not add Prometheus, Grafana, OpenTelemetry, external metrics storage, distributed tracing, websocket infrastructure, or realtime delivery.
 
 ## Phase 17E Performance and Scale Hardening
-- Performance hardening is documented in [PHASE_17E_PERFORMANCE_HARDENING.md](/Users/onur/Documents/New project 4/docs/PHASE_17E_PERFORMANCE_HARDENING.md).
+- Performance hardening is documented in [PHASE_17E_PERFORMANCE_HARDENING.md](docs/PHASE_17E_PERFORMANCE_HARDENING.md).
 - Backend list endpoints now share bounded `limit`/`offset` pagination semantics:
   - default limit 100
   - max limit 250

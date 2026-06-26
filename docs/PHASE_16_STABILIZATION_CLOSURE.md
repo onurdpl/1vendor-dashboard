@@ -148,7 +148,7 @@ GraphQL-managed subscriptions may not appear in the Shopify Admin UI. Use Shopif
 Production also requires `JWT_SECRET` and `CORS_ORIGIN` at runtime, although they are outside the Shopify-specific audit list.
 
 ## Production Smoke Checklist
-- Dedicated checklist: [PRODUCTION_OPERATIONAL_SMOKE_CHECKLIST.md](/Users/onur/Documents/New project 4/docs/PRODUCTION_OPERATIONAL_SMOKE_CHECKLIST.md)
+- Dedicated checklist: [PRODUCTION_OPERATIONAL_SMOKE_CHECKLIST.md](docs/PRODUCTION_OPERATIONAL_SMOKE_CHECKLIST.md)
 - Coverage includes login, order ingest, return request, return approval/decline/close, refund ingest, fulfillment update, tracking sync, cancellation rollback, diagnostics replay/recover, reconciliation, and vendor isolation verification.
 
 ## Known Limitations And Intentional Non-Goals

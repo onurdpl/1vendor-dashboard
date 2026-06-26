@@ -158,4 +158,4 @@ https://<public-domain>/webhooks/shopify/orders-create
 - Do not register live webhooks automatically from the app.
 - Do not treat readiness success as proof that webhook delivery is already configured.
 - Do not call live Shopify from CI or standard smoke checks.
-- Review [SHOPIFY_DISCOVERIES.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_DISCOVERIES.md) before changing Shopify-dependent behavior.
+- Review [SHOPIFY_DISCOVERIES.md](docs/SHOPIFY_DISCOVERIES.md) before changing Shopify-dependent behavior.
