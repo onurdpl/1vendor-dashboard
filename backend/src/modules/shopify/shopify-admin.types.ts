@@ -226,6 +226,34 @@ export type FetchCanonicalShopifyRefundsForOrderResult = {
   source: 'mock' | 'shopify_admin';
 } | null;
 
+export type CanonicalShopifyReturnLineItemSnapshot = {
+  returnLineItemGid: string;
+  fulfillmentLineItemGid: string | null;
+  lineItemGid: string | null;
+  sourceLineItemId: string | null;
+  sku: string | null;
+  returnReason: string | null;
+  returnReasonNote: string | null;
+  customerNote: string | null;
+};
+
+export type CanonicalShopifyReturnSnapshot = {
+  returnGid: string;
+  sourceShopifyReturnId: string;
+  status: string;
+  createdAt: string | null;
+  requestApprovedAt: string | null;
+  closedAt: string | null;
+  returnLineItems: CanonicalShopifyReturnLineItemSnapshot[];
+};
+
+export type FetchCanonicalShopifyReturnsForOrderResult = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  returns: CanonicalShopifyReturnSnapshot[];
+  source: 'mock' | 'shopify_admin';
+} | null;
+
 export type ShopifyReturnLineItem = {
   returnLineItemGid: string;
   fulfillmentLineItemGid: string | null;

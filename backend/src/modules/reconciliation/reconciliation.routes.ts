@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createReconciliationService } from './reconciliation.service.js';
 import { createCanonicalRefundReconciliationService } from './canonical-refund-reconciliation.service.js';
+import { createCanonicalReturnReconciliationService } from './canonical-return-reconciliation.service.js';
 import {
   createOperationalJob,
   markOperationalJobCompleted,
@@ -16,6 +17,7 @@ export function registerReconciliationRoutes(app: FastifyInstance, env: AppEnv) 
   const authMiddleware = createAuthMiddleware(authService);
   const reconciliationService = createReconciliationService(env);
   const canonicalRefundReconciliationService = createCanonicalRefundReconciliationService(env);
+  const canonicalReturnReconciliationService = createCanonicalReturnReconciliationService(env);
 
   const createReconciliationJob = async (input: {
     vendorAllocationId?: string | null;
@@ -152,6 +154,41 @@ export function registerReconciliationRoutes(app: FastifyInstance, env: AppEnv) 
       if (!result) {
         await markJobFailed(operationalJob?.id, 'Shopify order refunds not found or Shopify Admin is not configured.');
         return reply.code(404).send({ message: 'Shopify order refunds not found or Shopify Admin is not configured.' });
+      }
+
+      await markJobCompleted(operationalJob?.id);
+      return result;
+    },
+  );
+
+  app.post<{ Params: { shopifyOrderId: string } }>(
+    '/admin/reconciliation/shopify-order/:shopifyOrderId/returns',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const operationalJob = await createReconciliationJob({
+        sourceShopifyOrderId: request.params.shopifyOrderId,
+      });
+      await markJobProcessing(operationalJob?.id);
+
+      let result;
+      try {
+        result = await canonicalReturnReconciliationService.reconcileShopifyOrderReturns(
+          request.params.shopifyOrderId,
+        );
+      } catch (error) {
+        await markJobFailed(operationalJob?.id, error);
+        throw error;
+      }
+
+      if (!result) {
+        await markJobFailed(operationalJob?.id, 'Shopify order returns not found or Shopify Admin is not configured.');
+        return reply.code(404).send({ message: 'Shopify order returns not found or Shopify Admin is not configured.' });
       }
 
       await markJobCompleted(operationalJob?.id);
