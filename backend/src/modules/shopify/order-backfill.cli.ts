@@ -54,6 +54,13 @@ if (result) {
   console.log(`Order: ${result.orderName}`);
   console.log(`Shopify order id: ${result.shopifyOrderId ?? 'unknown'}`);
   console.log(`Webhook id: ${result.webhookId ?? 'unknown'}`);
+  console.log(`Eligible for live backfill: ${result.eligibleForLiveBackfill ? 'yes' : 'no'}`);
+  console.log(`Live backfill attempted: ${result.liveBackfillAttempted ? 'yes' : 'no'}`);
+  console.log(`Blocked reasons: ${result.blockedReasonCodes.length > 0 ? result.blockedReasonCodes.join(', ') : 'none'}`);
+  console.log(`Missing fields: ${result.missingFields.length > 0 ? result.missingFields.join(', ') : 'none'}`);
+  console.log(`Expected vendors: ${result.expectedVendors.length > 0 ? result.expectedVendors.join(', ') : 'none'}`);
+  console.log(`Expected allocations: ${result.expectedAllocations.length > 0 ? result.expectedAllocations.join(', ') : 'none'}`);
+  console.log(`Expected sale ledgers: ${result.expectedSaleLedgerIds.length > 0 ? result.expectedSaleLedgerIds.join(', ') : 'none'}`);
   console.log(`Backend HTTP status: ${result.backendStatus ?? 'unknown'}`);
   console.log(`Backend action: ${result.backendAction ?? 'unknown'}`);
   console.log(`Duplicate ignored: ${result.duplicate ? 'yes' : 'no'}`);
