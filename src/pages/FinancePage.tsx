@@ -67,7 +67,7 @@ type FinanceTimelineItem = {
 };
 
 const FINANCE_ESTIMATE_HELPER =
-  'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
+  'Values update as orders become eligible, refunds are processed, or reviews are completed.';
 const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement review is completed.';
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
 
@@ -478,12 +478,6 @@ function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof g
     : financeValueOrUnknown(finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate);
 }
 
-function getUpcomingPayoutDetail(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
-  return finance.payoutBatchSummary?.latestBatch?.createdAt
-    ? 'Draft review created'
-    : `${finance.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`;
-}
-
 function getOverviewBalanceValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
   return financeValueOrUnknown(finance.summary.payableBalance ?? finance.summary.availableBalance ?? finance.summary.payoutEstimate);
 }
@@ -496,10 +490,6 @@ function getOverviewHoldValue(finance: NonNullable<Awaited<ReturnType<typeof get
   return financeValueOrUnknown(finance.summary.heldBalance);
 }
 
-function getOverviewDebtValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
-  return financeValueOrUnknown(finance.summary.outstandingVendorDebt ?? finance.payoutBatchSummary?.outstandingDebtAmount);
-}
-
 function getOverviewPaymentValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
   return financeValueOrUnknown(
     finance.payoutBatchSummary?.netEligibleAfterDebtOffset ??
@@ -507,6 +497,111 @@ function getOverviewPaymentValue(finance: NonNullable<Awaited<ReturnType<typeof 
       finance.summary.netPayableAfterDebt ??
       finance.summary.payoutEstimate,
   );
+}
+
+function getOverviewPaymentDate(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  if (finance.payoutBatchSummary?.latestBatch?.createdAt) {
+    return `Preparation started ${formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date}`;
+  }
+  if (finance.profile?.weeklySettlementDay) {
+    return `${safeStatusLabel(finance.profile.weeklySettlementDay)} after review`;
+  }
+  return 'After settlement review';
+}
+
+function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor') {
+  if (finance.payoutBatchSummary?.latestBatch) {
+    return getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status, audience);
+  }
+  if ((finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) {
+    return 'Ready for review';
+  }
+  return 'Building balance';
+}
+
+function getRelativeActivityDay(value: string) {
+  const timestamp = getSafeTimestamp(value);
+  if (!timestamp) {
+    return 'Recent';
+  }
+  const today = new Date();
+  const activity = new Date(timestamp);
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const activityStart = new Date(activity.getFullYear(), activity.getMonth(), activity.getDate()).getTime();
+  const dayDifference = Math.round((todayStart - activityStart) / 86_400_000);
+  if (dayDifference <= 0) {
+    return 'Today';
+  }
+  if (dayDifference === 1) {
+    return 'Yesterday';
+  }
+  return `${dayDifference} days ago`;
+}
+
+function getRecentChangeTitle(record: FinanceTransaction) {
+  if (record.category === 'Refund') {
+    return 'Refund deducted';
+  }
+  if (record.category === 'Payout') {
+    return 'Payment preparation updated';
+  }
+  if (record.category === 'Adjustment') {
+    return 'Balance adjusted';
+  }
+  if (record.settlement?.payoutReady) {
+    return 'Order became eligible';
+  }
+  return 'Sale recorded';
+}
+
+function getRecentChangeDetail(record: FinanceTransaction) {
+  const orderLabel = record.shopifyOrderNumber ? `Order #${record.shopifyOrderNumber}` : 'Marketplace activity';
+  if (record.category === 'Refund') {
+    return `${orderLabel} reduced the current balance by ${record.amount}.`;
+  }
+  if (record.category === 'Payout') {
+    return `${record.amount} moved through payment preparation.`;
+  }
+  if (record.category === 'Adjustment') {
+    return `${record.amount} changed the balance.`;
+  }
+  if (record.settlement?.payoutReady) {
+    return `${orderLabel} is now ready for payment review.`;
+  }
+  return `${orderLabel} was added to finance activity.`;
+}
+
+function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  const hasActivity = safeArray(finance.transactions).length > 0;
+  const hasEligibleRows = (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0;
+  const hasPaymentPreparation = Boolean(finance.payoutBatchSummary?.latestBatch);
+  return [
+    {
+      label: 'Sales',
+      detail: hasActivity ? 'Sales recorded' : 'Waiting for first sale',
+      state: hasActivity ? 'complete' : 'upcoming',
+    },
+    {
+      label: 'Delivered',
+      detail: hasEligibleRows || hasPaymentPreparation ? 'Orders eligible' : 'Waiting for delivery',
+      state: hasEligibleRows || hasPaymentPreparation ? 'complete' : hasActivity ? 'current' : 'upcoming',
+    },
+    {
+      label: 'Settlement',
+      detail: hasEligibleRows || hasPaymentPreparation ? 'Review ready' : 'Not ready yet',
+      state: hasPaymentPreparation ? 'complete' : hasEligibleRows ? 'current' : 'upcoming',
+    },
+    {
+      label: 'Payment preparation',
+      detail: hasPaymentPreparation ? 'In progress' : 'Not started',
+      state: hasPaymentPreparation ? 'current' : 'upcoming',
+    },
+    {
+      label: 'Paid',
+      detail: 'Payment evidence pending',
+      state: 'upcoming',
+    },
+  ] as const;
 }
 
 function getPayoutImpact(record: FinanceTransaction) {
@@ -1256,36 +1351,11 @@ export function FinancePage() {
   const overviewAvailableBalance = getOverviewBalanceValue(financeView);
   const overviewPendingBalance = getOverviewPendingValue(financeView);
   const overviewHoldBalance = getOverviewHoldValue(financeView);
-  const overviewDebtBalance = getOverviewDebtValue(financeView);
   const overviewPaymentEstimate = getOverviewPaymentValue(financeView);
+  const overviewPaymentDate = getOverviewPaymentDate(financeView);
+  const overviewPaymentStatus = getOverviewPaymentStatus(financeView, financeAudience);
   const overviewRecentActivity = safeArray(financeView.transactions).slice(0, 5);
-  const overviewDeductionRows = [
-    {
-      label: 'Commission',
-      value: formatDeductionValue(financeView.summary.platformFee),
-      detail: `${financeView.profile?.commissionPercent ?? '10.00'}% marketplace commission`,
-    },
-    {
-      label: 'Commission VAT',
-      value: optionalDeductionValue(financeView.summary.commissionVat),
-      detail: `${financeView.profile?.commissionVatPercent ?? '0.00'}% tax on commission`,
-    },
-    {
-      label: 'Shipping deductions',
-      value: optionalDeductionValue(financeView.summary.shippingDeductions),
-      detail: financeView.profile?.shippingMode ? safeStatusLabel(financeView.profile.shippingMode) : 'Shipping deductions disabled',
-    },
-    {
-      label: 'Refunds',
-      value: refundDeductions,
-      detail: 'Customer refunds and offset reviews',
-    },
-    {
-      label: 'Vendor debt',
-      value: optionalDeductionValue(financeView.summary.outstandingVendorDebt ?? financeView.payoutBatchSummary?.outstandingDebtAmount),
-      detail: 'Refund-after-payment debt still to offset',
-    },
-  ];
+  const overviewProgressSteps = getPaymentProgressSteps(financeView);
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
@@ -1294,7 +1364,7 @@ export function FinancePage() {
           <p className="eyebrow">Finance</p>
           <h2>Finance workspace</h2>
           <p className="page-description">
-            Track balances, upcoming payments, deductions, and finance activity for your marketplace sales.
+            Track balances, upcoming payments, and recent finance activity for your marketplace sales.
           </p>
           <p className="page-description">{FINANCE_ESTIMATE_HELPER}</p>
         </div>
@@ -1335,91 +1405,76 @@ export function FinancePage() {
 
       {activeFinanceTab === 'overview' ? (
         <section className="finance-overview-workspace" aria-label="Finance overview">
-          <div className="finance-overview-hero">
-            <article className="finance-overview-balance-card finance-overview-balance-primary">
-              <span>Available balance</span>
-              <strong>{overviewAvailableBalance}</strong>
-              <small>Ready for settlement review based on completed sales and current finance holds.</small>
-            </article>
-            <article className="finance-overview-balance-card">
-              <span>Pending balance</span>
-              <strong>{overviewPendingBalance}</strong>
-              <small>Sales still waiting for delivery, review, or settlement timing.</small>
-            </article>
-            <article className="finance-overview-balance-card">
-              <span>On hold</span>
-              <strong>{overviewHoldBalance}</strong>
-              <small>Orders paused by vendor block, refund review, return hold, or finance review.</small>
-            </article>
-            <article className="finance-overview-balance-card">
-              <span>Refund offsets</span>
-              <strong>{overviewDebtBalance}</strong>
-              <small>Refund debt or offsets that may reduce a future payment.</small>
-            </article>
-            <article className="finance-overview-balance-card finance-overview-payment-card">
-              <span>Upcoming payment</span>
-              <strong>{overviewPaymentEstimate}</strong>
-              <small>{getUpcomingPayoutDetail(financeView)}</small>
-            </article>
-          </div>
-
-          <div className="finance-overview-grid">
-            <section className="finance-overview-panel finance-balance-explainer">
+          <section className="finance-money-home" aria-label="Finance money summary">
+            <article className="finance-available-hero">
               <div>
-                <p className="eyebrow">Balance explanation</p>
-                <h3>How your balance is calculated</h3>
-                <p className="page-description">
-                  Sales move from pending to available after fulfillment evidence and settlement timing are ready. Refunds, commission, taxes,
-                  shipping deductions, and vendor debt reduce the payment estimate.
-                </p>
-              </div>
-              <div className="finance-explainer-list">
-                <p>
-                  <strong>Available</strong>
-                  <span>{overviewAvailableBalance} is currently ready for settlement review.</span>
-                </p>
-                <p>
-                  <strong>Pending</strong>
-                  <span>{overviewPendingBalance} is waiting for delivery, timing, or review evidence.</span>
-                </p>
-                <p>
-                  <strong>On hold</strong>
-                  <span>{overviewHoldBalance} is paused until an operational or finance review is resolved.</span>
-                </p>
-                <p>
-                  <strong>Deductions</strong>
-                  <span>Commission, commission VAT, shipping deductions, refunds, and vendor debt are shown before payment preparation.</span>
-                </p>
-              </div>
-            </section>
-
-            <section className="finance-overview-panel finance-deductions-panel">
-              <div>
-                <p className="eyebrow">Deductions</p>
-                <h3>What was deducted</h3>
-              </div>
-              <div className="finance-deduction-summary">
-                {overviewDeductionRows.map((row) => (
-                  <p key={row.label}>
-                    <span>
-                      <strong>{row.label}</strong>
-                      <small>{row.detail}</small>
-                    </span>
-                    <b>{row.value}</b>
-                  </p>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent finance activity">
-            <div className="finance-overview-panel-heading">
-              <div>
-                <p className="eyebrow">Recent activity</p>
-                <h3>Latest finance updates</h3>
+                <p className="eyebrow">Available balance</p>
+                <strong>{overviewAvailableBalance}</strong>
+                <span>Money currently ready for payment review.</span>
               </div>
               <button type="button" className="button button-secondary button-compact" onClick={() => setActiveFinanceTab('transactions')}>
                 View transactions
+              </button>
+            </article>
+
+            <aside className="finance-next-payment-card" aria-label="Next payment">
+              <div>
+                <p className="eyebrow">Next payment</p>
+                <strong>{overviewPaymentEstimate}</strong>
+                <span>{overviewPaymentDate}</span>
+              </div>
+              <StatusBadge tone={(financeView.payoutBatchSummary?.latestBatch || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) ? 'success' : 'neutral'}>
+                {overviewPaymentStatus}
+              </StatusBadge>
+            </aside>
+
+            <div className="finance-balance-secondary-grid">
+              <article>
+                <span>Pending balance</span>
+                <strong>{overviewPendingBalance}</strong>
+                <small>Waiting for delivery, timing, or review.</small>
+              </article>
+              <article>
+                <span>Held balance</span>
+                <strong>{overviewHoldBalance}</strong>
+                <small>Paused until a review is resolved.</small>
+              </article>
+            </div>
+          </section>
+
+          <section className="finance-overview-panel finance-balance-story" aria-label="Balance explanation">
+            <div>
+              <p className="eyebrow">Why money is waiting</p>
+              <h3>Your balance moves in stages</h3>
+            </div>
+            <div className="finance-balance-story-grid">
+              <p>
+                <strong>Available</strong>
+                <span>Completed sales that are ready for payment review.</span>
+              </p>
+              <p>
+                <strong>Pending</strong>
+                <span>Sales still waiting for delivery evidence or payment timing.</span>
+              </p>
+              <p>
+                <strong>Held</strong>
+                <span>Items waiting for an operational or finance review before payment.</span>
+              </p>
+              <p>
+                <strong>Changed recently</strong>
+                <span>Refunds, adjustments, and newly eligible orders appear below as activity.</span>
+              </p>
+            </div>
+          </section>
+
+          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent changes">
+            <div className="finance-overview-panel-heading">
+              <div>
+                <p className="eyebrow">Recent changes</p>
+                <h3>What changed since your last check</h3>
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={() => setActiveFinanceTab('transactions')}>
+                See all
               </button>
             </div>
             {isError && !finance ? (
@@ -1450,33 +1505,65 @@ export function FinancePage() {
                 description="Sales, refunds, and payment preparation updates will appear here after your first finance event."
               />
             ) : (
-              <div className="finance-activity-strip">
-                {overviewRecentActivity.map((record) => {
-                  const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
-                  return (
+              <ol className="finance-recent-change-timeline">
+                {overviewRecentActivity.map((record) => (
+                  <li key={record.id}>
+                    <time>{getRelativeActivityDay(record.date)}</time>
                     <button
                       type="button"
-                      key={record.id}
-                      className="finance-activity-tile"
                       onClick={() => {
                         setSelectedRecordId(record.id);
                         setActiveFinanceTab('transactions');
                       }}
                     >
-                      <span>
-                        <strong>{getPayoutActivityType(record)}</strong>
-                        <small>{record.shopifyOrderNumber ? `Order #${record.shopifyOrderNumber}` : getPayoutActivityDetail(record)}</small>
-                      </span>
-                      <b className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'}>
-                        {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
-                        {record.amount}
-                      </b>
-                      <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{projection.legacyStatusLabel}</StatusBadge>
+                      <strong>{getRecentChangeTitle(record)}</strong>
+                      <span>{getRecentChangeDetail(record)}</span>
                     </button>
-                  );
-                })}
-              </div>
+                    <b className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'}>
+                      {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
+                      {record.amount}
+                    </b>
+                  </li>
+                ))}
+              </ol>
             )}
+          </section>
+
+          <section className="finance-overview-panel finance-payment-progress" aria-label="Payment progress">
+            <div className="finance-overview-panel-heading">
+              <div>
+                <p className="eyebrow">Payment progress</p>
+                <h3>How sales become money paid out</h3>
+              </div>
+            </div>
+            <ol className="finance-payment-progress-steps">
+              {overviewProgressSteps.map((step) => (
+                <li key={step.label} className={`is-${step.state}`}>
+                  <span aria-hidden="true" />
+                  <strong>{step.label}</strong>
+                  <small>{step.detail}</small>
+                </li>
+              ))}
+            </ol>
+          </section>
+
+          <section className="finance-quick-links" aria-label="Finance quick links">
+            {[
+              ['Transactions', 'Sales, refunds, deductions, and details'],
+              ['Settlements', 'Review status and payment readiness'],
+              ['Payments', 'Payment preparation and history'],
+              ['Reports', 'Statements and exports'],
+              ['Refunds', 'Refund activity and adjustments'],
+            ].map(([label, detail]) => (
+              <button
+                type="button"
+                key={label}
+                onClick={() => setActiveFinanceTab('transactions')}
+              >
+                <strong>{label}</strong>
+                <span>{detail}</span>
+              </button>
+            ))}
           </section>
         </section>
       ) : (
