@@ -56,6 +56,8 @@ type FinanceDeepLinkTarget = {
   value: string;
 };
 
+type FinanceWorkspaceTab = 'overview' | 'transactions';
+
 type FinanceTimelineItem = {
   label: string;
   at: string | null;
@@ -453,6 +455,9 @@ function formatDeductionValue(value: string | null | undefined) {
   if (!value) {
     return UNKNOWN_FINANCE_VALUE;
   }
+  if (value === UNKNOWN_FINANCE_VALUE) {
+    return value;
+  }
   if (value.startsWith('-') || isZeroCurrencyValue(value)) {
     return value;
   }
@@ -477,6 +482,31 @@ function getUpcomingPayoutDetail(finance: NonNullable<Awaited<ReturnType<typeof 
   return finance.payoutBatchSummary?.latestBatch?.createdAt
     ? 'Draft review created'
     : `${finance.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`;
+}
+
+function getOverviewBalanceValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return financeValueOrUnknown(finance.summary.payableBalance ?? finance.summary.availableBalance ?? finance.summary.payoutEstimate);
+}
+
+function getOverviewPendingValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return financeValueOrUnknown(finance.summary.accruedBalance ?? finance.summary.pendingPayouts ?? finance.summary.pendingSettlement);
+}
+
+function getOverviewHoldValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return financeValueOrUnknown(finance.summary.heldBalance);
+}
+
+function getOverviewDebtValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return financeValueOrUnknown(finance.summary.outstandingVendorDebt ?? finance.payoutBatchSummary?.outstandingDebtAmount);
+}
+
+function getOverviewPaymentValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return financeValueOrUnknown(
+    finance.payoutBatchSummary?.netEligibleAfterDebtOffset ??
+      finance.payoutBatchSummary?.eligibleNetAmount ??
+      finance.summary.netPayableAfterDebt ??
+      finance.summary.payoutEstimate,
+  );
 }
 
 function getPayoutImpact(record: FinanceTransaction) {
@@ -880,6 +910,7 @@ export function FinancePage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [selectedDebtEventId, setSelectedDebtEventId] = useState<string | null>(null);
+  const [activeFinanceTab, setActiveFinanceTab] = useState<FinanceWorkspaceTab>('overview');
   const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
@@ -897,6 +928,12 @@ export function FinancePage() {
   useEffect(() => {
     setSelectedDebtEventId(null);
   }, [currentVendor.vendorId]);
+
+  useEffect(() => {
+    if (requestedFinanceTarget || activeWorkflowFilter) {
+      setActiveFinanceTab('transactions');
+    }
+  }, [activeWorkflowFilter, requestedFinanceTarget]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -1216,15 +1253,48 @@ export function FinancePage() {
   const refundDeductions = formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
   const vendorBalance = financeValueOrUnknown(financeView.summary.vendorBalance);
   const latestReview = getUpcomingPayoutLabel(financeView);
+  const overviewAvailableBalance = getOverviewBalanceValue(financeView);
+  const overviewPendingBalance = getOverviewPendingValue(financeView);
+  const overviewHoldBalance = getOverviewHoldValue(financeView);
+  const overviewDebtBalance = getOverviewDebtValue(financeView);
+  const overviewPaymentEstimate = getOverviewPaymentValue(financeView);
+  const overviewRecentActivity = safeArray(financeView.transactions).slice(0, 5);
+  const overviewDeductionRows = [
+    {
+      label: 'Commission',
+      value: formatDeductionValue(financeView.summary.platformFee),
+      detail: `${financeView.profile?.commissionPercent ?? '10.00'}% marketplace commission`,
+    },
+    {
+      label: 'Commission VAT',
+      value: optionalDeductionValue(financeView.summary.commissionVat),
+      detail: `${financeView.profile?.commissionVatPercent ?? '0.00'}% tax on commission`,
+    },
+    {
+      label: 'Shipping deductions',
+      value: optionalDeductionValue(financeView.summary.shippingDeductions),
+      detail: financeView.profile?.shippingMode ? safeStatusLabel(financeView.profile.shippingMode) : 'Shipping deductions disabled',
+    },
+    {
+      label: 'Refunds',
+      value: refundDeductions,
+      detail: 'Customer refunds and offset reviews',
+    },
+    {
+      label: 'Vendor debt',
+      value: optionalDeductionValue(financeView.summary.outstandingVendorDebt ?? financeView.payoutBatchSummary?.outstandingDebtAmount),
+      detail: 'Refund-after-payment debt still to offset',
+    },
+  ];
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
       <div className="op-page-heading finance-page-header">
         <div>
           <p className="eyebrow">Finance</p>
-          <h2>Finance control center</h2>
+          <h2>Finance workspace</h2>
           <p className="page-description">
-            Review settlement estimates, refund impact, shipping reconciliation, and payout preparation.
+            Track balances, upcoming payments, deductions, and finance activity for your marketplace sales.
           </p>
           <p className="page-description">{FINANCE_ESTIMATE_HELPER}</p>
         </div>
@@ -1242,6 +1312,175 @@ export function FinancePage() {
         </div>
       </div>
 
+      <div className="finance-workspace-tabs" role="tablist" aria-label="Finance workspace sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeFinanceTab === 'overview'}
+          className={activeFinanceTab === 'overview' ? 'is-active' : undefined}
+          onClick={() => setActiveFinanceTab('overview')}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeFinanceTab === 'transactions'}
+          className={activeFinanceTab === 'transactions' ? 'is-active' : undefined}
+          onClick={() => setActiveFinanceTab('transactions')}
+        >
+          Transactions
+        </button>
+      </div>
+
+      {activeFinanceTab === 'overview' ? (
+        <section className="finance-overview-workspace" aria-label="Finance overview">
+          <div className="finance-overview-hero">
+            <article className="finance-overview-balance-card finance-overview-balance-primary">
+              <span>Available balance</span>
+              <strong>{overviewAvailableBalance}</strong>
+              <small>Ready for settlement review based on completed sales and current finance holds.</small>
+            </article>
+            <article className="finance-overview-balance-card">
+              <span>Pending balance</span>
+              <strong>{overviewPendingBalance}</strong>
+              <small>Sales still waiting for delivery, review, or settlement timing.</small>
+            </article>
+            <article className="finance-overview-balance-card">
+              <span>On hold</span>
+              <strong>{overviewHoldBalance}</strong>
+              <small>Orders paused by vendor block, refund review, return hold, or finance review.</small>
+            </article>
+            <article className="finance-overview-balance-card">
+              <span>Refund offsets</span>
+              <strong>{overviewDebtBalance}</strong>
+              <small>Refund debt or offsets that may reduce a future payment.</small>
+            </article>
+            <article className="finance-overview-balance-card finance-overview-payment-card">
+              <span>Upcoming payment</span>
+              <strong>{overviewPaymentEstimate}</strong>
+              <small>{getUpcomingPayoutDetail(financeView)}</small>
+            </article>
+          </div>
+
+          <div className="finance-overview-grid">
+            <section className="finance-overview-panel finance-balance-explainer">
+              <div>
+                <p className="eyebrow">Balance explanation</p>
+                <h3>How your balance is calculated</h3>
+                <p className="page-description">
+                  Sales move from pending to available after fulfillment evidence and settlement timing are ready. Refunds, commission, taxes,
+                  shipping deductions, and vendor debt reduce the payment estimate.
+                </p>
+              </div>
+              <div className="finance-explainer-list">
+                <p>
+                  <strong>Available</strong>
+                  <span>{overviewAvailableBalance} is currently ready for settlement review.</span>
+                </p>
+                <p>
+                  <strong>Pending</strong>
+                  <span>{overviewPendingBalance} is waiting for delivery, timing, or review evidence.</span>
+                </p>
+                <p>
+                  <strong>On hold</strong>
+                  <span>{overviewHoldBalance} is paused until an operational or finance review is resolved.</span>
+                </p>
+                <p>
+                  <strong>Deductions</strong>
+                  <span>Commission, commission VAT, shipping deductions, refunds, and vendor debt are shown before payment preparation.</span>
+                </p>
+              </div>
+            </section>
+
+            <section className="finance-overview-panel finance-deductions-panel">
+              <div>
+                <p className="eyebrow">Deductions</p>
+                <h3>What was deducted</h3>
+              </div>
+              <div className="finance-deduction-summary">
+                {overviewDeductionRows.map((row) => (
+                  <p key={row.label}>
+                    <span>
+                      <strong>{row.label}</strong>
+                      <small>{row.detail}</small>
+                    </span>
+                    <b>{row.value}</b>
+                  </p>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent finance activity">
+            <div className="finance-overview-panel-heading">
+              <div>
+                <p className="eyebrow">Recent activity</p>
+                <h3>Latest finance updates</h3>
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={() => setActiveFinanceTab('transactions')}>
+                View transactions
+              </button>
+            </div>
+            {isError && !finance ? (
+              <SectionErrorRetry
+                title="Finance overview unavailable"
+                description={error ?? 'The finance overview could not be loaded.'}
+                onRetry={() => void refetch()}
+              />
+            ) : pageReadiness.status === 'missing_vendor_context' ? (
+              <EmptyStatePanel
+                title="Select vendor"
+                description="No vendor context available. Choose a vendor context before loading finance activity."
+              />
+            ) : pageReadiness.status === 'waiting_vendor_context' ? (
+              <EmptyStatePanel
+                title="Waiting for vendor context"
+                description="Finance activity will load after the authenticated vendor scope is ready."
+              />
+            ) : pageReadiness.status === 'unauthorized' ? (
+              <EmptyStatePanel title="Sign in required" description="Sign in before loading finance activity." />
+            ) : isLoading ? (
+              <div className="finance-overview-activity-skeleton" aria-label="Loading recent finance activity">
+                <TableSkeletonRows columns={4} rows={3} />
+              </div>
+            ) : overviewRecentActivity.length === 0 ? (
+              <EmptyStatePanel
+                title="No finance activity yet"
+                description="Sales, refunds, and payment preparation updates will appear here after your first finance event."
+              />
+            ) : (
+              <div className="finance-activity-strip">
+                {overviewRecentActivity.map((record) => {
+                  const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
+                  return (
+                    <button
+                      type="button"
+                      key={record.id}
+                      className="finance-activity-tile"
+                      onClick={() => {
+                        setSelectedRecordId(record.id);
+                        setActiveFinanceTab('transactions');
+                      }}
+                    >
+                      <span>
+                        <strong>{getPayoutActivityType(record)}</strong>
+                        <small>{record.shopifyOrderNumber ? `Order #${record.shopifyOrderNumber}` : getPayoutActivityDetail(record)}</small>
+                      </span>
+                      <b className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'}>
+                        {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
+                        {record.amount}
+                      </b>
+                      <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{projection.legacyStatusLabel}</StatusBadge>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </section>
+      ) : (
+        <>
       <section className="finance-compact-summary" aria-label="Finance workflow summary">
         <div className="finance-compact-primary">
           <span className="finance-compact-label">Action required</span>
@@ -1887,6 +2126,8 @@ export function FinancePage() {
           )}
         </SideDetailPanel>
       </div>
+        </>
+      )}
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>
