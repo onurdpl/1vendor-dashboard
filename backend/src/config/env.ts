@@ -52,7 +52,7 @@ export type AppEnv = {
   EMAIL_ADMIN_RECIPIENTS: string[];
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
-  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'navlungo';
+  SHIPPING_PROVIDER: 'hepsijet' | 'try_oto' | 'kargonomi' | 'navlungo';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?: string;
@@ -206,7 +206,6 @@ function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROV
   const normalized = (value || 'hepsijet').trim().toLowerCase();
   if (
     normalized === 'hepsijet' ||
-    normalized === 'kargo_entegrator' ||
     normalized === 'try_oto' ||
     normalized === 'kargonomi' ||
     normalized === 'navlungo'
@@ -214,7 +213,7 @@ function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROV
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, try_oto, kargonomi, or navlungo.');
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, try_oto, kargonomi, or navlungo.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -222,30 +221,6 @@ function parseCommaList(value: string | undefined) {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function parseKargoCargoIntegrationEnv() {
-  const primary = process.env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?.trim();
-  const deprecated = process.env.ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?.trim();
-
-  if (primary) {
-    return {
-      value: primary,
-      source: 'primary' as const,
-    };
-  }
-
-  if (deprecated) {
-    return {
-      value: deprecated,
-      source: 'deprecated' as const,
-    };
-  }
-
-  return {
-    value: undefined,
-    source: undefined,
-  };
 }
 
 export function loadEnv(): AppEnv {
@@ -273,10 +248,7 @@ export function loadEnv(): AppEnv {
     throw new Error('SHOPIFY_SHOP_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN are required in production.');
   }
 
-  const kargoCargoIntegration = parseKargoCargoIntegrationEnv();
   const shippingProvider = parseShippingProvider(process.env.SHIPPING_PROVIDER);
-  const kargoWebhookIngestEnabled = false;
-  const kargoWebhookSharedSecret = process.env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?.trim() || undefined;
   const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
   const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
@@ -445,13 +417,6 @@ export function loadEnv(): AppEnv {
     SHIPPING_EXECUTION_ENABLED: parseBoolean(process.env.SHIPPING_EXECUTION_ENABLED, false),
     SHIPPING_SANDBOX_MODE: parseBoolean(process.env.SHIPPING_SANDBOX_MODE, false),
     SHIPPING_PROVIDER: shippingProvider,
-    KARGO_ENTEGRATOR_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_ENABLED, false),
-    KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: kargoWebhookIngestEnabled,
-    KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET: kargoWebhookSharedSecret,
-    KARGO_ENTEGRATOR_BASE_URL: process.env.KARGO_ENTEGRATOR_BASE_URL || undefined,
-    KARGO_ENTEGRATOR_API_KEY: process.env.KARGO_ENTEGRATOR_API_KEY || undefined,
-    KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: kargoCargoIntegration.value,
-    KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE: kargoCargoIntegration.source,
     TRY_OTO_ENABLED: parseBoolean(process.env.TRY_OTO_ENABLED, false),
     TRY_OTO_BASE_URL: process.env.TRY_OTO_BASE_URL || undefined,
     TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
@@ -489,5 +454,5 @@ export function loadEnv(): AppEnv {
     LIDIO_MERCHANT_KEY: lidioMerchantKey,
     LIDIO_API_PASSWORD: lidioApiPassword,
     LIDIO_SUBSELLER_PROFILE_ID: lidioSubsellerProfileId,
-  };
+  } as AppEnv;
 }
