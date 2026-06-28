@@ -31,7 +31,7 @@ const vendorNavItems = [
   { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
   { to: '/orders', label: 'Orders', icon: 'orders' },
   { to: '/returns', label: 'Returns', icon: 'returns' },
-  { to: '/finance', label: 'Payments', icon: 'payments' },
+  { to: '/finance', label: 'Finance', icon: 'payments' },
   { to: '/support/inbox', label: 'Inbox', icon: 'inbox' },
   { to: '/vendor/profile', label: 'Settings', icon: 'settings' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName; end?: boolean }>;
@@ -168,19 +168,12 @@ function getVendorInitial(vendorName: string) {
   return vendorName.trim().charAt(0).toUpperCase() || 'V';
 }
 
-export function AppShell() {
+function useShellContext() {
   const navigate = useNavigate();
   const location = useLocation();
   const appReadiness = useAppReadiness();
   const authRestore = useAuthRestoreSnapshot();
   const currentUser = appReadiness.currentUser;
-  const isAdmin = currentUser?.role === 'admin';
-  const isDashboardRoute = location.pathname === '/';
-  const isOrdersRoute = location.pathname === '/orders';
-  const isOrderDetailRoute = location.pathname.startsWith('/orders/');
-  const isFinanceRoute = location.pathname === '/finance';
-  const isVendorProfileRoute = location.pathname === '/vendor/profile';
-  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute || isOrderDetailRoute || isFinanceRoute || isVendorProfileRoute;
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
@@ -235,27 +228,145 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['admin', 'diagnostics'] });
   }
 
-  return (
-    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''} ${isOrdersRoute ? 'orders-shell-active' : ''} ${isOrderDetailRoute ? 'order-detail-shell-active' : ''} ${isFinanceRoute ? 'finance-shell-active' : ''}`}>
-      <aside className="sidebar">
-        <div className="brand shell-brand">
-          <div className="brand-mark" aria-hidden="true">
-            VD
-          </div>
-          <div>
-            <div className="brand-name">VendorOps</div>
-            <div className="brand-subtitle">Vendor Dashboard</div>
-          </div>
-        </div>
+  return {
+    authRestore,
+    currentUser,
+    currentVendor,
+    frontendBuildLabel,
+    handleLogout,
+    handleSignInAgain,
+    handleVendorChange,
+    location,
+    message,
+    selectedVendorId,
+    sessionRestoreNeedsAttention,
+    showSessionRestoreBanner,
+    tone,
+    visibleVendors,
+  };
+}
 
-        <div className="nav-group vendor-nav-group">
-          <nav className="nav" aria-label="Primary">
+type ShellContext = ReturnType<typeof useShellContext>;
+
+function BrandLockup({ subtitle }: { subtitle: string }) {
+  return (
+    <div className="brand shell-brand">
+      <div className="brand-mark" aria-hidden="true">
+        VD
+      </div>
+      <div>
+        <div className="brand-name">VendorOps</div>
+        <div className="brand-subtitle">{subtitle}</div>
+      </div>
+    </div>
+  );
+}
+
+function ShellAccountCard({ context, roleLabel }: { context: ShellContext; roleLabel: string }) {
+  return (
+    <div className="vendor-account-card shell-card">
+      <div className="vendor-account-main">
+        <span className="vendor-account-avatar" aria-hidden="true">
+          {getVendorInitial(context.currentVendor.vendorName)}
+        </span>
+        <div className="vendor-account-copy">
+          <strong>{context.currentVendor.vendorName}</strong>
+          <span>{roleLabel}</span>
+        </div>
+        {context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0 ? (
+          <label className="vendor-account-switcher">
+            <span className="sr-only">Select vendor</span>
+            <select
+              className="vendor-account-select"
+              value={context.selectedVendorId}
+              onChange={(event) => context.handleVendorChange(event.target.value)}
+            >
+              {context.visibleVendors.map((vendor) => (
+                <option key={vendor.vendorId} value={vendor.vendorId}>
+                  {vendor.vendorName}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+      <button type="button" className="vendor-logout-button" onClick={context.handleLogout}>
+        <ShellIcon name="logout" />
+        Log out
+      </button>
+    </div>
+  );
+}
+
+function SessionRestoreBanner({ context }: { context: ShellContext }) {
+  if (!context.showSessionRestoreBanner) {
+    return null;
+  }
+
+  return (
+    <section
+      className={`auth-restore-banner ${context.sessionRestoreNeedsAttention ? 'auth-restore-banner-attention' : ''}`}
+      role={context.sessionRestoreNeedsAttention ? 'alert' : 'status'}
+    >
+      <div>
+        <p className="eyebrow">Session</p>
+        <h2>
+          {context.sessionRestoreNeedsAttention
+            ? 'Session check is taking longer than expected'
+            : 'Checking your session'}
+        </h2>
+        <p>
+          {context.sessionRestoreNeedsAttention
+            ? 'The workspace shell is available, but protected data remains locked until the backend confirms your session.'
+            : 'Protected data will load after the backend confirms your session.'}
+        </p>
+        <div className="auth-restore-meta">
+          {context.authRestore.restoreAttemptId ? <span>Reference {context.authRestore.restoreAttemptId}</span> : null}
+          <span>{context.frontendBuildLabel}</span>
+        </div>
+      </div>
+      <div className="auth-restore-actions">
+        <button type="button" className="button button-secondary" onClick={requestAuthRestoreRetry}>
+          Retry
+        </button>
+        <button type="button" className="button button-ghost" onClick={context.handleSignInAgain}>
+          Sign in again
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function getVendorShellClasses(pathname: string) {
+  const isDashboardRoute = pathname === '/';
+  const isOrdersRoute = pathname === '/orders';
+  const isOrderDetailRoute = pathname.startsWith('/orders/');
+  const isFinanceRoute = pathname === '/finance';
+  return [
+    'app-shell',
+    'vendor-app-shell',
+    isDashboardRoute ? 'dashboard-shell-active' : '',
+    isOrdersRoute ? 'orders-shell-active' : '',
+    isOrderDetailRoute ? 'order-detail-shell-active' : '',
+    isFinanceRoute ? 'finance-shell-active' : '',
+  ].filter(Boolean).join(' ');
+}
+
+export function VendorShell() {
+  const context = useShellContext();
+
+  return (
+    <div className={getVendorShellClasses(context.location.pathname)}>
+      <header className="vendor-shell-header">
+        <div className="vendor-shell-header-inner">
+          <BrandLockup subtitle="Vendor workspace" />
+          <nav className="vendor-shell-nav" aria-label="Primary">
             {vendorNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={item.end}
-                className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+                className={({ isActive }) => (isActive ? 'vendor-shell-nav-link active' : 'vendor-shell-nav-link')}
               >
                 <span className="nav-icon" aria-hidden="true">
                   <ShellIcon name={item.icon} />
@@ -264,9 +375,30 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
+          <ShellAccountCard context={context} roleLabel={context.currentUser?.role === 'admin' ? 'Admin view' : 'Vendor'} />
         </div>
+        {context.message ? <ActionFeedback tone={context.tone} message={context.message} /> : null}
+      </header>
 
-        {isAdmin ? (
+      <div className="app-content vendor-shell-content">
+        <SessionRestoreBanner context={context} />
+        <main className="page-frame">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export function AdminShell() {
+  const context = useShellContext();
+
+  return (
+    <div className="app-shell admin-app-shell">
+      <aside className="sidebar">
+        <BrandLockup subtitle="Admin workspace" />
+
+        {context.currentUser?.role === 'admin' ? (
           <div className="nav-group">
             <div className="nav-group-label admin-nav-label">Admin tools</div>
             <nav className="nav" aria-label="Admin tools">
@@ -286,88 +418,27 @@ export function AppShell() {
           </div>
         ) : null}
 
-        <div className="vendor-account-card shell-card">
-          <div className="vendor-account-main">
-            <span className="vendor-account-avatar" aria-hidden="true">
-              {getVendorInitial(currentVendor.vendorName)}
-            </span>
-            <div className="vendor-account-copy">
-              <strong>{currentVendor.vendorName}</strong>
-              <span>{currentUser?.role === 'admin' ? 'Admin' : 'Vendor'}</span>
-            </div>
-            {currentUser?.canSwitchVendors && visibleVendors.length > 0 ? (
-              <label className="vendor-account-switcher">
-                <span className="sr-only">Select vendor</span>
-                <select
-                  className="vendor-account-select"
-                  value={selectedVendorId}
-                  onChange={(event) => handleVendorChange(event.target.value)}
-                >
-                  {visibleVendors.map((vendor) => (
-                    <option key={vendor.vendorId} value={vendor.vendorId}>
-                      {vendor.vendorName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-          </div>
-          <button type="button" className="vendor-logout-button" onClick={handleLogout}>
-            <ShellIcon name="logout" />
-            Log out
-          </button>
-        </div>
+        <ShellAccountCard context={context} roleLabel="Admin" />
 
-        {message ? <ActionFeedback tone={tone} message={message} /> : null}
+        {context.message ? <ActionFeedback tone={context.tone} message={context.message} /> : null}
       </aside>
 
       <div className="app-content">
-        {usesModernWorkspaceFrame ? null : (
-          <>
-            <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
-            <div className="shell-context-bar">
-              <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
-              <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'Unauthenticated'}</span>
-              <span className="severity-chip severity-low">Vendor {currentVendor.vendorName}</span>
-            </div>
-          </>
-        )}
-        {showSessionRestoreBanner ? (
-          <section
-            className={`auth-restore-banner ${sessionRestoreNeedsAttention ? 'auth-restore-banner-attention' : ''}`}
-            role={sessionRestoreNeedsAttention ? 'alert' : 'status'}
-          >
-            <div>
-              <p className="eyebrow">Session</p>
-              <h2>
-                {sessionRestoreNeedsAttention
-                  ? 'Session check is taking longer than expected'
-                  : 'Checking your session'}
-              </h2>
-              <p>
-                {sessionRestoreNeedsAttention
-                  ? 'The workspace shell is available, but protected data remains locked until the backend confirms your session.'
-                  : 'Protected data will load after the backend confirms your session.'}
-              </p>
-              <div className="auth-restore-meta">
-                {authRestore.restoreAttemptId ? <span>Reference {authRestore.restoreAttemptId}</span> : null}
-                <span>{frontendBuildLabel}</span>
-              </div>
-            </div>
-            <div className="auth-restore-actions">
-              <button type="button" className="button button-secondary" onClick={requestAuthRestoreRetry}>
-                Retry
-              </button>
-              <button type="button" className="button button-ghost" onClick={handleSignInAgain}>
-                Sign in again
-              </button>
-            </div>
-          </section>
-        ) : null}
+        <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
+        <div className="shell-context-bar">
+          <span className="severity-chip severity-normal">User {context.currentUser?.name ?? 'Unknown user'}</span>
+          <span className="severity-chip severity-attention">Role {context.currentUser?.role ?? 'Unauthenticated'}</span>
+          <span className="severity-chip severity-low">Vendor {context.currentVendor.vendorName}</span>
+        </div>
+        <SessionRestoreBanner context={context} />
         <main className="page-frame">
           <Outlet />
         </main>
       </div>
     </div>
   );
+}
+
+export function AppShell() {
+  return <VendorShell />;
 }

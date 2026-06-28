@@ -59,6 +59,8 @@ describe('App startup runtime safety', () => {
     }));
     vi.doMock('./components/AppShell', () => ({
       AppShell: () => <Outlet />,
+      AdminShell: () => <Outlet />,
+      VendorShell: () => <Outlet />,
     }));
     vi.doMock('./lib/appReadiness', () => ({
       useAppReadiness: () => ({
@@ -207,6 +209,8 @@ describe('App startup runtime safety', () => {
     }));
     vi.doMock('./components/AppShell', () => ({
       AppShell: () => <Outlet />,
+      AdminShell: () => <Outlet />,
+      VendorShell: () => <Outlet />,
     }));
     vi.doMock('./lib/appReadiness', () => ({
       useAppReadiness: () => ({
@@ -335,6 +339,8 @@ describe('App startup runtime safety', () => {
     }));
     vi.doMock('./components/AppShell', () => ({
       AppShell: () => <Outlet />,
+      AdminShell: () => <Outlet />,
+      VendorShell: () => <Outlet />,
     }));
     vi.doMock('./lib/appReadiness', () => ({
       useAppReadiness: () => ({
@@ -421,6 +427,8 @@ describe('App startup runtime safety', () => {
     }));
     vi.doMock('./components/AppShell', () => ({
       AppShell: () => <Outlet />,
+      AdminShell: () => <Outlet />,
+      VendorShell: () => <Outlet />,
     }));
     vi.doMock('./lib/appReadiness', () => ({
       useAppReadiness: () => ({

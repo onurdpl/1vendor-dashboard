@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { DataStatePanel } from './components/DataStatePanel';
-import { AppShell } from './components/AppShell';
+import { AdminShell, VendorShell } from './components/AppShell';
 import { SectionSkeleton } from './components/OperationalPrimitives';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
@@ -104,7 +104,7 @@ export default function App() {
         <Route
           element={
             <ErrorBoundary>
-              <AppShell />
+              <VendorShell />
             </ErrorBoundary>
           }
         >
@@ -125,6 +125,78 @@ export default function App() {
               </RequirePermission>
             }
           />
+          <Route
+            path="/returns"
+            element={
+              <RequirePermission permission="returns:read">
+                {resilientRoute('Returns', <ReturnsPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/returns/:returnId"
+            element={
+              <RequirePermission permission="returns:read">
+                {resilientRoute('Return detail', <ReturnDetailPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/finance"
+            element={
+              <RequirePermission permission="finance:read">
+                {resilientRoute('Finance', <FinancePage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/automation"
+            element={
+              <RequirePermission permission="automation:read">
+                {resilientRoute('Automation', <AutomationPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/vendor/profile"
+            element={
+              <RequirePermission permission="orders:read">
+                {resilientRoute('Vendor profile', <VendorProfilePage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support/inbox"
+            element={
+              <RequirePermission permission="orders:read">
+                {resilientRoute('Inbox', <VendorInboxPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support"
+            element={
+              <RequirePermission permission="orders:read">
+                {resilientRoute('Support', <VendorSupportTicketsPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support/:ticketId"
+            element={
+              <RequirePermission permission="orders:read">
+                {resilientRoute('Support ticket', <SupportTicketDetailPage />)}
+              </RequirePermission>
+            }
+          />
+        </Route>
+        <Route
+          element={
+            <ErrorBoundary>
+              <AdminShell />
+            </ErrorBoundary>
+          }
+        >
           <Route
             path="/admin/operations"
             element={
@@ -194,70 +266,6 @@ export default function App() {
             element={
               <RequirePermission permission="orders:write">
                 {resilientRoute('Scheduled settlements', <AdminScheduledSettlementsPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/returns"
-            element={
-              <RequirePermission permission="returns:read">
-                {resilientRoute('Returns', <ReturnsPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/returns/:returnId"
-            element={
-              <RequirePermission permission="returns:read">
-                {resilientRoute('Return detail', <ReturnDetailPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/finance"
-            element={
-              <RequirePermission permission="finance:read">
-                {resilientRoute('Finance', <FinancePage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/automation"
-            element={
-              <RequirePermission permission="automation:read">
-                {resilientRoute('Automation', <AutomationPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/vendor/profile"
-            element={
-              <RequirePermission permission="orders:read">
-                {resilientRoute('Vendor profile', <VendorProfilePage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/support/inbox"
-            element={
-              <RequirePermission permission="orders:read">
-                {resilientRoute('Inbox', <VendorInboxPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/support"
-            element={
-              <RequirePermission permission="orders:read">
-                {resilientRoute('Support', <VendorSupportTicketsPage />)}
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/support/:ticketId"
-            element={
-              <RequirePermission permission="orders:read">
-                {resilientRoute('Support ticket', <SupportTicketDetailPage />)}
               </RequirePermission>
             }
           />
