@@ -1169,10 +1169,32 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByLabelText('Order detail render frame')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order detail' })).toBeInTheDocument();
     expect(screen.getByLabelText('Order summary skeleton')).toBeInTheDocument();
+    expect(screen.getByText('Shopify ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Order line item skeleton')).toBeInTheDocument();
     expect(screen.getByLabelText('Order timeline skeleton')).toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
     expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('hides source identifiers from the vendor loading frame', () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const orderResult = deferred<OrderDetail>();
+    getOrderMock.mockReturnValue(orderResult.promise);
+
+    renderOrderDetail();
+
+    expect(screen.getByLabelText('Order summary skeleton')).toBeInTheDocument();
+    expect(screen.queryByText('Shopify ID')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
   });
 
   it('separates active operational and paid payment status in the header', async () => {
@@ -1833,7 +1855,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('button', { name: 'Cancel Navlungo shipment' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Cancel shipment' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel Navlungo shipment' })).not.toBeInTheDocument();
     expect(screen.queryByText('Update Navlungo shipment')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
   });
@@ -2085,7 +2108,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shipment updated');
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment updated')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Updated')).toBeInTheDocument();
@@ -2125,7 +2148,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shipment cancelled');
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment cancelled')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
@@ -2165,7 +2188,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Order created');
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText('Shipment updated')).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Shipment cancelled')).not.toBeInTheDocument();
@@ -2198,7 +2221,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Customer unavailable')).length).toBeGreaterThan(0);
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/provider status/i)).not.toBeInTheDocument();
@@ -2283,7 +2306,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Vendor actions' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Timeline' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
@@ -2397,7 +2421,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Finance')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     const rejectedEvent = timelineScope.getByText('Vendor rejected selected items');
@@ -2464,7 +2488,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Vendor rejected selected items')).toBeInTheDocument();
@@ -2499,7 +2523,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const sidebarFlow = rail.querySelector('.order-detail-sidebar-flow');
     expect(sidebarFlow).toBeInstanceOf(HTMLElement);
 
-    const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Order activity' }).closest('article');
     const supportCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Support' }).closest('article');
 
     expect(timelineCard).not.toBeNull();
@@ -4905,7 +4929,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
-  it('lets vendors request full Navlungo sender details for one failed retry', async () => {
+  it('keeps full Navlungo sender retry diagnostics admin-only for vendors', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
@@ -4948,15 +4972,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const fullSenderToggle = await screen.findByLabelText('Use full Navlungo sender details for this retry');
-    await user.click(fullSenderToggle);
-    await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
+    expect(screen.queryByLabelText('Use full Navlungo sender details for this retry')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Retry shipment' }));
 
     await waitFor(() =>
       expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
         vendorId: 'sporjinal',
         customerOverrides: undefined,
-        useFullSenderDetailsForThisRetry: true,
+        useFullSenderDetailsForThisRetry: undefined,
       }),
     );
   });
@@ -5196,9 +5219,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('button', { name: 'Sync Navlungo status' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Transfer Aşamasında')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getAllByText('Transfer Aşamasında')).toHaveLength(1);
@@ -5206,13 +5229,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('SURAT-1054').length).toBeGreaterThan(0);
     expect(screen.getAllByText('created').length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole('button', { name: 'Sync Navlungo status' }));
+    await user.click(screen.getByRole('button', { name: 'Refresh shipment status' }));
 
     expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
       vendorId: 'sporjinal',
     });
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('Navlungo status synced.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
   });
 
   it('automatically refreshes Try OTO created shipments while tracking or label is missing', async () => {
@@ -5422,10 +5445,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
     expect(screen.getByText('Shipment processing')).toBeInTheDocument();
     expect(screen.queryByText('SearchingDriver')).not.toBeInTheDocument();
-    expect(screen.getByText('Shipment reference')).toBeInTheDocument();
+    expect(screen.queryByText('Shipment reference')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();
-    expect(screen.getByText('shopify-cmpce0fbh0003cf3...1783322961')).toBeInTheDocument();
+    expect(screen.queryByText('shopify-cmpce0fbh0003cf3...1783322961')).not.toBeInTheDocument();
     expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('Same as tracking')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
@@ -5486,7 +5509,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'https://tracking.tryoto.example/RET-TRACK-1028',
     );
     expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
@@ -7152,7 +7175,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText('Shipment action completed.')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Endpoint:\s*POST \/shipments\/create/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Provider id: yes · Barcode: yes/)).not.toBeInTheDocument();
-    expect(screen.getByText('ke-created-1028')).toBeInTheDocument();
+    expect(screen.queryByText('ke-created-1028')).not.toBeInTheDocument();
     expect(screen.getByText('barcode-1028')).toBeInTheDocument();
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
   });

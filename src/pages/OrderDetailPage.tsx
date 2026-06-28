@@ -2314,7 +2314,7 @@ export function OrderDetailPage() {
   );
   const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
   const canUseFullNavlungoSenderRetry =
-    canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
+    isAdmin && canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
   const shouldShowFailedShipmentRetryDiagnostics =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
@@ -2531,22 +2531,15 @@ export function OrderDetailPage() {
       .then((shipment) => {
         const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.labelUrl);
         const isNavlungoStatusSync = shipment.provider === 'navlungo';
+        const successMessage = isNavlungoStatusSync && isAdmin ? 'Navlungo status synced.' : 'Shipment status refreshed.';
         setShipmentActionState({
           tone: hasNewShipmentEvidence ? 'success' : 'info',
-          message: hasNewShipmentEvidence
-            ? isNavlungoStatusSync
-              ? 'Navlungo status synced.'
-              : 'Shipment status refreshed.'
-            : 'Shipment was created. Tracking or label may still be processing.',
+          message: hasNewShipmentEvidence ? successMessage : 'Shipment was created. Tracking or label may still be processing.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
         });
         showFeedback(
-          hasNewShipmentEvidence
-            ? isNavlungoStatusSync
-              ? 'Navlungo status synced.'
-              : 'Shipment status refreshed.'
-            : 'Shipment was created. Tracking or label may still be processing.',
+          hasNewShipmentEvidence ? successMessage : 'Shipment was created. Tracking or label may still be processing.',
           hasNewShipmentEvidence ? 'success' : 'info',
         );
         void refetch();
@@ -2630,10 +2623,16 @@ export function OrderDetailPage() {
         const cancelled = shipment.shipmentStatus === 'cancelled';
         const needsReview = shipment.providerResponseSummary?.navlungoCancelAttempted === true && !shipment.providerResponseSummary.navlungoCancelSucceeded;
         const message = cancelled
-          ? 'Navlungo shipment cancelled.'
+          ? isAdmin
+            ? 'Navlungo shipment cancelled.'
+            : 'Shipment cancelled.'
           : needsReview
-            ? 'Navlungo cancellation needs attention.'
-            : 'Navlungo cancellation request completed.';
+            ? isAdmin
+              ? 'Navlungo cancellation needs attention.'
+              : 'Shipment cancellation needs attention.'
+            : isAdmin
+              ? 'Navlungo cancellation request completed.'
+              : 'Shipment cancellation request completed.';
         const tone = cancelled ? 'success' : needsReview ? 'error' : 'info';
         setShipmentActionState({
           tone,
@@ -4529,7 +4528,10 @@ export function OrderDetailPage() {
     setShipmentActionState(null);
   }, [order?.id]);
 
-  const renderOrderDetailFrame = (body?: ReactNode) => (
+  const renderOrderDetailFrame = (body?: ReactNode) => {
+    const summarySkeletonLabels = isAdmin ? ['Created', 'Vendor', 'Customer', 'Shopify ID'] : ['Created', 'Vendor', 'Customer'];
+
+    return (
     <section className="order-detail-workspace order-detail-cockpit order-detail-dense" aria-label="Order detail render frame">
       <header className="order-detail-topbar">
         <Link className="order-detail-back" to="/orders">
@@ -4542,7 +4544,7 @@ export function OrderDetailPage() {
               <span className="order-source-pill">Loading</span>
             </div>
             <div className="order-detail-meta-strip" aria-label="Order summary skeleton">
-              {['Created', 'Vendor', 'Customer', 'Shopify ID'].map((label) => (
+              {summarySkeletonLabels.map((label) => (
                 <div key={label}>
                   <span>{label}</span>
                   <strong>
@@ -4610,7 +4612,7 @@ export function OrderDetailPage() {
           <div className="order-detail-sidebar-flow">
             <article className="operational-timeline-card order-detail-card-v2">
               <div className="order-card-heading">
-                <h2>Timeline</h2>
+                <h2>{isAdmin ? 'Timeline' : 'Order activity'}</h2>
               </div>
               <div className="order-timeline-list" aria-label="Order timeline skeleton">
                 <SkeletonText width="70%" />
@@ -4627,7 +4629,8 @@ export function OrderDetailPage() {
         </aside>
       </div>
     </section>
-  );
+    );
+  };
 
   if (pageReadiness.status === 'missing_vendor_context') {
     return renderOrderDetailFrame(
@@ -6542,7 +6545,7 @@ export function OrderDetailPage() {
         <aside className="order-detail-right-rail" aria-label="Order timeline and support">
           <div className="order-detail-sidebar-flow">
             <OperationalTimeline
-              title="Timeline"
+              title={isAdmin ? 'Timeline' : 'Order activity'}
               subtitle="Order, shipment, return, and support activity."
               events={groupOrderDetailTimelineEvents([
                 ...safeArray(order.timeline)
@@ -6778,18 +6781,20 @@ export function OrderDetailPage() {
                                 <span>{isAdmin ? 'Shipment provider' : 'Carrier'}</span>
                                 <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                               </div>
-                              {visibleShipmentExecution.warehouseId ? (
+                              {isAdmin && visibleShipmentExecution.warehouseId ? (
                                 <div className="summary-row">
                                   <span>Warehouse</span>
                                   <strong>{visibleShipmentExecution.warehouseId}</strong>
                                 </div>
                               ) : null}
-                              <div className="summary-row">
-                                <span>{isAdmin ? getShipmentReferenceLabel(visibleShipmentExecution) : 'Shipment reference'}</span>
-                                <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
-                                  {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
-                                </strong>
-                              </div>
+                              {isAdmin ? (
+                                <div className="summary-row">
+                                  <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
+                                  <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
+                                    {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
+                                  </strong>
+                                </div>
+                              ) : null}
                               <div className="summary-row">
                                 <span>Barcode</span>
                                 <strong
@@ -7456,9 +7461,13 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         {canCancelNavlungoShipment ? (
-                          <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
-                            <strong>Navlungo cancellation</strong>
-                            <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                          <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment cancellation' : 'Shipment cancellation'}>
+                            <strong>{isAdmin ? 'Navlungo cancellation' : 'Shipment cancellation'}</strong>
+                            <span>
+                              {isAdmin
+                                ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.'
+                                : 'Cancel this shipment before delivery.'}
+                            </span>
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -7466,16 +7475,20 @@ export function OrderDetailPage() {
                                 disabled={isCancellingShipment}
                                 onClick={handleCancelNavlungoShipment}
                               >
-                                {isCancellingShipment ? 'Cancelling...' : 'Cancel Navlungo shipment'}
+                                {isCancellingShipment ? 'Cancelling...' : isAdmin ? 'Cancel Navlungo shipment' : 'Cancel shipment'}
                               </button>
                             </div>
                           </div>
                         ) : null}
                         <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
                         {canSyncNavlungoShipmentStatus ? (
-                          <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
-                            <strong>Navlungo status sync</strong>
-                            <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                          <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
+                            <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
+                            <span>
+                              {isAdmin
+                                ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.'
+                                : 'Refresh the latest carrier status for this shipment.'}
+                            </span>
                             {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                               <span className="warning-copy">Carrier reported address validation issue.</span>
                             ) : null}
@@ -7486,7 +7499,7 @@ export function OrderDetailPage() {
                                 disabled={isRefreshingShipmentStatus}
                                 onClick={handleRefreshShipmentStatus}
                               >
-                                {isRefreshingShipmentStatus ? 'Syncing...' : 'Sync Navlungo status'}
+                                {isRefreshingShipmentStatus ? (isAdmin ? 'Syncing...' : 'Refreshing...') : isAdmin ? 'Sync Navlungo status' : 'Refresh shipment status'}
                               </button>
                             </div>
                           </div>
@@ -7509,9 +7522,13 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         {canRefreshKargonomiProviderData ? (
-                          <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
-                            <strong>Kargonomi provider data refresh</strong>
-                            <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                          <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}>
+                            <strong>{isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}</strong>
+                            <span>
+                              {isAdmin
+                                ? 'Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.'
+                                : 'Update shipment information for the existing shipment. This does not create a new shipment.'}
+                            </span>
                             {kargonomiShipmentCancelled ? (
                               <span>Kargonomi shipment cancelled. Tracking and label are retained as historical data.</span>
                             ) : null}
@@ -7522,7 +7539,7 @@ export function OrderDetailPage() {
                                 disabled={isRefreshingShipmentProviderData}
                                 onClick={handleRefreshShipmentProviderData}
                               >
-                                {isRefreshingShipmentProviderData ? 'Refreshing...' : 'Refresh provider data'}
+                                {isRefreshingShipmentProviderData ? 'Refreshing...' : isAdmin ? 'Refresh provider data' : 'Update shipment information'}
                               </button>
                             </div>
                           </div>
@@ -7981,7 +7998,7 @@ export function OrderDetailPage() {
                             <strong>{navlungoProviderStatusBadge}</strong>
                           </div>
                         ) : null}
-                        {visibleShipmentExecution.warehouseId ? (
+                        {isAdmin && visibleShipmentExecution.warehouseId ? (
                           <div className="summary-row">
                             <span>Warehouse</span>
                             <strong>{visibleShipmentExecution.warehouseId}</strong>
@@ -8518,9 +8535,13 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {canCancelNavlungoShipment ? (
-                      <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
-                        <strong>Navlungo cancellation</strong>
-                        <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                      <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment cancellation' : 'Shipment cancellation'}>
+                        <strong>{isAdmin ? 'Navlungo cancellation' : 'Shipment cancellation'}</strong>
+                        <span>
+                          {isAdmin
+                            ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.'
+                            : 'Cancel this shipment before delivery.'}
+                        </span>
                         <div className="order-inline-actions">
                           <button
                             type="button"
@@ -8528,16 +8549,20 @@ export function OrderDetailPage() {
                             disabled={isCancellingShipment}
                             onClick={handleCancelNavlungoShipment}
                           >
-                            {isCancellingShipment ? 'Cancelling...' : 'Cancel Navlungo shipment'}
+                            {isCancellingShipment ? 'Cancelling...' : isAdmin ? 'Cancel Navlungo shipment' : 'Cancel shipment'}
                           </button>
                         </div>
                       </div>
                     ) : null}
                     <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
                     {canSyncNavlungoShipmentStatus ? (
-                      <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
-                        <strong>Navlungo status sync</strong>
-                        <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                      <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
+                        <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
+                        <span>
+                          {isAdmin
+                            ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.'
+                            : 'Refresh the latest carrier status for this shipment.'}
+                        </span>
                         {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                           <span className="warning-copy">Carrier reported address validation issue.</span>
                         ) : null}
@@ -8548,7 +8573,7 @@ export function OrderDetailPage() {
                             disabled={isRefreshingShipmentStatus}
                             onClick={handleRefreshShipmentStatus}
                           >
-                            {isRefreshingShipmentStatus ? 'Syncing...' : 'Sync Navlungo status'}
+                            {isRefreshingShipmentStatus ? (isAdmin ? 'Syncing...' : 'Refreshing...') : isAdmin ? 'Sync Navlungo status' : 'Refresh shipment status'}
                           </button>
                         </div>
                       </div>
@@ -8571,9 +8596,13 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {canRefreshKargonomiProviderData ? (
-                      <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
-                        <strong>Kargonomi provider data refresh</strong>
-                        <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                      <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}>
+                        <strong>{isAdmin ? 'Kargonomi provider data refresh' : 'Shipment information update'}</strong>
+                        <span>
+                          {isAdmin
+                            ? 'Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.'
+                            : 'Update shipment information for the existing shipment. This does not create a new shipment.'}
+                        </span>
                         {kargonomiShipmentCancelled ? (
                           <span>Kargonomi shipment cancelled. Tracking and label are retained as historical data.</span>
                         ) : null}
@@ -8584,7 +8613,7 @@ export function OrderDetailPage() {
                             disabled={isRefreshingShipmentProviderData}
                             onClick={handleRefreshShipmentProviderData}
                           >
-                            {isRefreshingShipmentProviderData ? 'Refreshing...' : 'Refresh provider data'}
+                            {isRefreshingShipmentProviderData ? 'Refreshing...' : isAdmin ? 'Refresh provider data' : 'Update shipment information'}
                           </button>
                         </div>
                       </div>
