@@ -631,7 +631,6 @@ export function OrdersPage() {
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
     { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
-    { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
   ];
   const workflowTabs: Array<{
     key: OrderWorkflowTabKey;
