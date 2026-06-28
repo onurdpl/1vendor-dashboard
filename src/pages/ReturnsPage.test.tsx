@@ -38,6 +38,9 @@ const pendingReturn: ReturnDetail = {
   returnCarrierName: null,
   returnTrackingNumber: null,
   returnTrackingUrl: null,
+  vendorReceivedAt: null,
+  vendorReviewedAt: null,
+  vendorDecision: null,
   amount: '$0.00',
   refundedSkus: ['SKU-A-1'],
   resolution: 'Pending merchant review.',
@@ -115,12 +118,26 @@ const awaitingReviewReturn: ReturnDetail = {
   id: 'RET-A-AWAITING-1071',
   sourceShopifyOrderNumber: 1071,
   status: 'Awaiting Review',
-  vendorReceivedAt: null,
+  vendorReceivedAt: '2026-05-11T10:00:00Z',
   vendorReviewedAt: null,
   vendorDecision: null,
   timeline: [
     { label: 'Return requested', at: '2026-05-10T08:20:00Z' },
+    { label: 'Received by vendor', at: '2026-05-11T10:00:00Z' },
     { label: 'Awaiting review', at: '2026-05-10T08:32:00Z' },
+  ],
+};
+
+const receivedNeedsActionReturn: ReturnDetail = {
+  ...pendingReturn,
+  id: 'RET-A-RECEIVED-1072',
+  sourceShopifyOrderNumber: 1072,
+  vendorReceivedAt: '2026-05-11T10:00:00Z',
+  vendorReviewedAt: null,
+  vendorDecision: null,
+  timeline: [
+    { label: 'Return requested', at: '2026-05-10T08:20:00Z' },
+    { label: 'Received by vendor', at: '2026-05-11T10:00:00Z' },
   ],
 };
 
@@ -369,12 +386,14 @@ describe('ReturnsPage control center', () => {
   it('uses workflow query params to open pending return review and allows reset', async () => {
     listReturnsMock.mockResolvedValue([
       toSummary(pendingReturn),
+      toSummary(receivedNeedsActionReturn),
       toSummary(processedRefund),
       toSummary(closedRefundedReturnRequest),
     ]);
     getReturnMock.mockImplementation(async (returnId) => {
       if (returnId === processedRefund.id) return processedRefund;
       if (returnId === closedRefundedReturnRequest.id) return closedRefundedReturnRequest;
+      if (returnId === receivedNeedsActionReturn.id) return receivedNeedsActionReturn;
       return pendingReturn;
     });
 
@@ -383,6 +402,8 @@ describe('ReturnsPage control center', () => {
     const workflowTabs = await screen.findByLabelText('Returns workflow tabs');
     expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('#1072')).toBeInTheDocument();
+    expect(screen.queryByText('#1001')).not.toBeInTheDocument();
     expect(screen.queryByText('Barcode gateway license')).not.toBeInTheDocument();
     expect(screen.queryByText('#1098')).not.toBeInTheDocument();
 
@@ -398,17 +419,42 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage(['/returns?workflow=pending-review']);
 
-    expect(await screen.findByText('No returns currently awaiting review')).toBeInTheDocument();
-    expect(screen.getByText('The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.')).toBeInTheDocument();
+    expect(await screen.findByText('No received returns need action')).toBeInTheDocument();
+    expect(screen.getByText('Received returns that still need approval, rejection, or processing will appear here.')).toBeInTheDocument();
     expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect(screen.getByText('No return selected')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
   });
 
+  it('separates pre-arrival requested returns from received returns needing action', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(receivedNeedsActionReturn)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === receivedNeedsActionReturn.id ? receivedNeedsActionReturn : pendingReturn));
+
+    renderReturnsPage();
+
+    const workflowTabs = await screen.findByLabelText('Returns workflow tabs');
+    expect(await screen.findByText('#1001')).toBeInTheDocument();
+    expect(await screen.findByText('#1072')).toBeInTheDocument();
+    await waitFor(() => expect(within(workflowTabs).getByRole('button', { name: /Requested/i })).toHaveTextContent('1'));
+    expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveTextContent('1');
+
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /Requested/i }));
+    expect(await screen.findByText('#1001')).toBeInTheDocument();
+    expect(screen.queryByText('#1072')).not.toBeInTheDocument();
+
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /Needs Action/i }));
+    expect(await screen.findByText('#1072')).toBeInTheDocument();
+    expect(screen.queryByText('#1001')).not.toBeInTheDocument();
+  });
+
   it('shows closed refunded Shopify return requests in the refunded filter, not pending review', async () => {
-    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(closedRefundedReturnRequest)]);
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(receivedNeedsActionReturn), toSummary(closedRefundedReturnRequest)]);
     getReturnMock.mockImplementation(async (returnId) =>
-      returnId === closedRefundedReturnRequest.id ? closedRefundedReturnRequest : pendingReturn,
+      returnId === closedRefundedReturnRequest.id
+        ? closedRefundedReturnRequest
+        : returnId === receivedNeedsActionReturn.id
+          ? receivedNeedsActionReturn
+          : pendingReturn,
     );
 
     renderReturnsPage();
@@ -418,6 +464,8 @@ describe('ReturnsPage control center', () => {
     const workflowTabs = screen.getByLabelText('Returns workflow tabs');
     await userEvent.click(within(workflowTabs).getByRole('button', { name: /Needs Action/i }));
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('#1072')).toBeInTheDocument();
+    expect(screen.queryByText('#1001')).not.toBeInTheDocument();
     expect(screen.queryByText('#1098')).not.toBeInTheDocument();
 
     await userEvent.click(within(workflowTabs).getByRole('button', { name: /Refunded/i }));

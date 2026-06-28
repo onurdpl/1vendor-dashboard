@@ -29,7 +29,7 @@ import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
 import { isActiveReturnReviewStatus, isTerminalRefundedReturn } from '../lib/returnOperationalState';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
-type ReturnWorkflowTabKey = 'all' | 'needs-action' | 'approved' | 'refunded' | 'closed';
+type ReturnWorkflowTabKey = 'all' | 'requested' | 'needs-action' | 'approved' | 'refunded' | 'closed';
 type ReturnRowItemCandidate = {
   name?: unknown;
   title?: unknown;
@@ -173,21 +173,48 @@ function isRefundedReturn(item: ReturnSummary) {
 }
 
 function needsAttention(item: ReturnSummary) {
-  const normalized = item.status?.toLowerCase() ?? '';
-  return normalized === 'requested' || normalized === 'awaiting_review' || normalized === 'awaiting review' || normalized === 'pending' || normalized === 'in review';
+  return isRequestedLikeReturn(item) && hasVendorReceivedReturn(item) && !hasVendorDecision(item);
 }
 
 function normalizeReturnStatus(value: string | null | undefined) {
   return String(value ?? '').toLowerCase().replace(/[_-]+/g, ' ').trim();
 }
 
+function getReturnLifecycleStatus(item: ReturnSummary) {
+  return (item as ReturnSummary & { returnLifecycleStatus?: string | null }).returnLifecycleStatus ?? null;
+}
+
+function getNormalizedReturnStates(item: ReturnSummary) {
+  return [item.status, getReturnLifecycleStatus(item)].map(normalizeReturnStatus).filter(Boolean);
+}
+
+function hasVendorReceivedReturn(item: ReturnSummary) {
+  return Boolean(item.vendorReceivedAt?.trim());
+}
+
+function hasVendorDecision(item: ReturnSummary) {
+  return Boolean(item.vendorDecision?.trim());
+}
+
+function isRequestedLikeReturn(item: ReturnSummary) {
+  return getNormalizedReturnStates(item).some((state) => ['requested', 'awaiting review', 'pending', 'in review'].includes(state));
+}
+
+function isRequestedReturn(item: ReturnSummary) {
+  return isRequestedLikeReturn(item) && !hasVendorReceivedReturn(item);
+}
+
+function isClosedStatusReturn(item: ReturnSummary) {
+  return getNormalizedReturnStates(item).some((state) => ['closed', 'cancelled', 'declined', 'rejected'].includes(state));
+}
+
 function isApprovedReturn(item: ReturnSummary) {
-  return normalizeReturnStatus(item.status) === 'approved';
+  const approved = getNormalizedReturnStates(item).includes('approved') || normalizeReturnStatus(item.vendorDecision) === 'approved';
+  return approved && !isRefundedReturn(item) && !isClosedStatusReturn(item);
 }
 
 function isClosedReturn(item: ReturnSummary) {
-  const normalized = normalizeReturnStatus(item.status);
-  return ['closed', 'cancelled', 'declined', 'rejected'].includes(normalized) && !isRefundedReturn(item);
+  return isClosedStatusReturn(item) && !isRefundedReturn(item);
 }
 
 function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
@@ -545,10 +572,20 @@ function getReturnsWorkflowFilter(workflow: string | null) {
     return {
       key: 'needs-action' as ReturnWorkflowTabKey,
       label: 'Needs Action',
-      description: 'Showing Shopify return requests that need vendor review.',
-      emptyTitle: 'No returns currently awaiting review',
-      emptyDescription: 'The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.',
+      description: 'Received returns needing review',
+      emptyTitle: 'No received returns need action',
+      emptyDescription: 'Received returns that still need approval, rejection, or processing will appear here.',
       matches: needsAttention,
+    };
+  }
+  if (workflow === 'requested') {
+    return {
+      key: 'requested' as ReturnWorkflowTabKey,
+      label: 'Requested',
+      description: 'Showing return requests waiting for product arrival.',
+      emptyTitle: 'No requested returns',
+      emptyDescription: 'Customer return requests will appear here until the product arrives back to the vendor.',
+      matches: isRequestedReturn,
     };
   }
   if (workflow === 'approved') {
@@ -764,6 +801,7 @@ export function ReturnsPage() {
   const selectedDetail = detailQuery.data;
 
   const returnRows = safeArray(returns);
+  const requestedCount = returnRows.filter(isRequestedReturn).length;
   const approvedCount = returnRows.filter(isApprovedReturn).length;
   const processedCount = returnRows.filter(isRefundedReturn).length;
   const attentionCount = returnRows.filter(needsAttention).length;
@@ -781,6 +819,12 @@ export function ReturnsPage() {
       label: 'All',
       description: 'Full return list',
       count: returnRows.length,
+    },
+    {
+      key: 'requested',
+      label: 'Requested',
+      description: 'Awaiting arrival',
+      count: requestedCount,
     },
     {
       key: 'needs-action',
