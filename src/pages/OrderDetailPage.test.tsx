@@ -2299,10 +2299,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Items/ })).toBeInTheDocument();
+    const financialSummary = screen.getByLabelText('Order financial summary');
+    expect(within(financialSummary).getByRole('heading', { name: 'Order financial summary' })).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Order total')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 4,999.00')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Payment status')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('paid')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Gross order amount')).not.toBeInTheDocument();
     expect(screen.queryByText('Estimated settlement')).not.toBeInTheDocument();
-    expect(screen.queryByText('Estimated marketplace commission')).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission estimate')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipping deduction')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Vendor actions' })).toBeInTheDocument();
@@ -2955,6 +2962,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Contact support');
+    expect(screen.getByLabelText('Order financial summary')).toBeInTheDocument();
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance timeline')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance ledger preview')).not.toBeInTheDocument();

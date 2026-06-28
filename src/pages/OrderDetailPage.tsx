@@ -4801,6 +4801,38 @@ export function OrderDetailPage() {
   const estimatedSettlementValue =
     financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate' || row.label === 'Refund completed')?.value ??
     ORDER_FINANCE_UNKNOWN_VALUE;
+  const grossOrderAmountValue =
+    financePreviewRows.find((row) => row.label === 'Gross order amount')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
+  const vendorFinancialSummaryRows = [
+    isKnownFinanceValue(grossOrderAmountValue)
+      ? {
+          label: 'Order total',
+          value: grossOrderAmountValue,
+          helper: 'Total value for this order.',
+        }
+      : null,
+    isKnownFinanceValue(paymentStatusLabel)
+      ? {
+          label: 'Payment status',
+          value: paymentStatusLabel,
+          helper: 'Current payment state for this order.',
+        }
+      : null,
+    currentRefundEvidencePresent && isKnownFinanceValue(refundImpactValue)
+      ? {
+          label: 'Refund impact',
+          value: refundImpactValue,
+          helper: isRefundResolvedVendorBlockedOrder ? 'Refund completed for this order.' : 'Refund activity linked to this order.',
+        }
+      : null,
+    !isActiveVendorBlockedOrder && isKnownFinanceValue(payoutCalculation?.estimatedPayout)
+      ? {
+          label: 'Estimated earnings',
+          value: payoutCalculation?.estimatedPayout ?? ORDER_FINANCE_UNKNOWN_VALUE,
+          helper: 'Estimated amount for this order.',
+        }
+      : null,
+  ].filter((row): row is { label: string; value: string; helper: string } => Boolean(row));
   const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
   const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
@@ -6170,6 +6202,26 @@ export function OrderDetailPage() {
               )}
             </div>
           </article>
+
+          {!isAdmin && vendorFinancialSummaryRows.length ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order financial summary">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Order financial summary</h2>
+                  <p>Simple payment summary for this order. Detailed deductions are available in Finance.</p>
+                </div>
+              </div>
+              <div className="order-financial-impact-grid order-finance-preview-grid">
+                {vendorFinancialSummaryRows.map((row) => (
+                  <div key={row.label}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                    <em>{row.helper}</em>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
 
           {isAdmin ? (
           <article className="order-detail-card-v2 order-workspace-panel" aria-label="Shopify order snapshot">
