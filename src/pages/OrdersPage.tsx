@@ -1042,7 +1042,7 @@ export function OrdersPage() {
           <SideDetailPanel
             eyebrow={selectedOrder ? currentVendor.vendorName : 'Order detail'}
             title={selectedOrder ? formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber) : 'No order selected'}
-            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>İNCELE</Link> : null}
+            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>View details</Link> : null}
           >
           {selectedOrder ? (
             (() => {
@@ -1201,7 +1201,7 @@ export function OrdersPage() {
 
               {rejectEligible ? (
                 <section className="orders-detail-card" aria-label="Reject order">
-                  <h4>Operational hold</h4>
+                  <h4>Order issue</h4>
                   <p className="page-description">
                     {splitRejectEligible
                       ? 'Reject unavailable items or send the full order for Sporgym admin review.'
@@ -1226,7 +1226,7 @@ export function OrdersPage() {
                         setRejectNote('');
                       }}
                     >
-                      Reject order
+                      Reject full order
                     </button>
                   </div>
                 </section>
@@ -1241,10 +1241,10 @@ export function OrdersPage() {
               ) : null}
 
               <section className="orders-detail-card">
-                <h4>Fulfillment and shipping</h4>
+                <h4>{isAdmin ? 'Fulfillment and shipping' : 'Shipment'}</h4>
                 <div className="orders-rail-summary-list">
                   <div>
-                    <span>Provider</span>
+                    <span>{isAdmin ? 'Provider' : 'Carrier'}</span>
                     <strong>{getRailProviderLabel(selectedOrder)}</strong>
                   </div>
                   <div>
@@ -1252,11 +1252,11 @@ export function OrdersPage() {
                     <strong>{!hasCanonicalTerminalStory && trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
                   </div>
                   <div>
-                    <span>{isAdmin ? 'Shopify sync' : 'Fulfillment'}</span>
+                    <span>{isAdmin ? 'Shopify sync' : 'Shipment status'}</span>
                     <strong>{isAdmin ? shopifyFulfillmentState : fulfillmentRailValue}</strong>
                   </div>
                   <div>
-                    <span>Label</span>
+                    <span>{isAdmin ? 'Label' : 'Shipping label'}</span>
                     <strong>
                       {operationalStory.actionVisibility.canCreateShipment && labelUrl ? (
                         <button
@@ -1379,7 +1379,7 @@ export function OrdersPage() {
               ) : null}
 
               <section className="orders-detail-card">
-                <h4>Line items</h4>
+                <h4>{isAdmin ? 'Line items' : 'Items'}</h4>
                 {(selectedOrder as OrderDetail).lineItems?.length ? (
                   <div className="order-detail-items">
                     {safeArray((selectedOrder as OrderDetail).lineItems).map((item) => (
@@ -1420,7 +1420,7 @@ export function OrdersPage() {
               </section>
 
               <section className="orders-detail-card">
-                <h4>Operational timeline</h4>
+                <h4>{isAdmin ? 'Operational timeline' : 'Order activity'}</h4>
                 <TimelineBlock items={timelineItems} />
               </section>
 

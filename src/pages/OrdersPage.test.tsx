@@ -352,7 +352,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'İNCELE' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor delivery evidence');
     expect(screen.getByRole('img', { name: 'Barcode gateway license product image' })).toHaveAttribute(
@@ -556,7 +556,12 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    expect(await screen.findByText('Fulfillment and shipping')).toBeInTheDocument();
+    expect(await screen.findByText('Shipment')).toBeInTheDocument();
+    expect(screen.getByText('Carrier')).toBeInTheDocument();
+    expect(screen.getByText('Shipment status')).toBeInTheDocument();
+    expect(screen.getByText('Shipping label')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
     expect(screen.queryByText('Internal metadata')).not.toBeInTheDocument();
     expect(screen.queryByText(orderDetail.sourceShopifyOrderId)).not.toBeInTheDocument();
     expect(screen.queryByText(orderDetail.id)).not.toBeInTheDocument();
@@ -917,7 +922,8 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Reject order' }));
+    expect(await screen.findByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Reject full order' }));
     const dialog = screen.getByRole('dialog', { name: 'Reject order' });
     await userEvent.selectOptions(within(dialog).getByLabelText('Reason'), 'DAMAGED_INVENTORY');
     await userEvent.type(within(dialog).getByLabelText('Note'), 'Damaged box on shelf');
@@ -1184,7 +1190,7 @@ describe('OrdersPage control center', () => {
     );
     expect(screen.getByText('Admin action required')).toBeInTheDocument();
     expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();
-    const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
+    const fulfillmentCard = screen.getByRole('heading', { name: 'Shipment' }).closest('section');
     expect(fulfillmentCard).not.toBeNull();
     expect(within(fulfillmentCard as HTMLElement).getAllByText('Blocked').length).toBeGreaterThan(0);
     expect(within(fulfillmentCard as HTMLElement).queryByText('Not fulfilled')).not.toBeInTheDocument();
