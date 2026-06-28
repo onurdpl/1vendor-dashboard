@@ -9695,6 +9695,74 @@ summary.provider-response-heading::-webkit-details-marker {
   backdrop-filter: none;
 }
 
+.vendor-app-shell.dashboard-shell-active,
+.vendor-app-shell.orders-shell-active,
+.vendor-app-shell.order-detail-shell-active,
+.vendor-app-shell.finance-shell-active {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.vendor-app-shell .vendor-shell-header {
+  grid-column: 1;
+}
+
+.vendor-app-shell .vendor-shell-content {
+  grid-column: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.vendor-app-shell .vendor-shell-header .shell-brand {
+  margin: 0;
+}
+
+.vendor-app-shell .vendor-shell-header .brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #7c3aed 0%, #4f20ff 100%);
+  box-shadow: 0 14px 26px rgba(79, 32, 255, 0.18);
+}
+
+.vendor-app-shell .vendor-shell-header .brand-name {
+  color: #0f172a;
+}
+
+.vendor-app-shell .vendor-shell-header .brand-subtitle {
+  color: #46536a;
+}
+
+.vendor-app-shell .vendor-shell-header .nav-icon {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: currentColor;
+  box-shadow: none;
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-account-card {
+  align-self: center;
+  margin: 0;
+  border-color: #e6eaf2;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-account-copy span,
+.vendor-app-shell .vendor-shell-header .vendor-account-select {
+  color: #46536a;
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-logout-button {
+  color: #0f172a;
+  border-top-color: #e6eaf2;
+}
+
 .dashboard-enterprise-shell {
   gap: 18px;
 }
