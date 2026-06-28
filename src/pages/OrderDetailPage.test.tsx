@@ -2418,7 +2418,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const orderIssue = await screen.findByLabelText('Order issue');
     expect(within(orderIssue).getByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
+    expect(within(orderIssue).getByText('Reject selected items or send the full order to admin review.')).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
+    expect(within(orderIssue).getByRole('button', { name: 'Reject full order' })).toBeInTheDocument();
     const shipmentSection = screen.getByRole('heading', { name: 'Shipment & delivery' }).closest('article') as HTMLElement;
     expect(within(shipmentSection).queryByRole('button', {
       name: 'Reject selected items',
@@ -2430,7 +2432,59 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
 
     expect(screen.getByRole('dialog', { name: 'Reject selected items' })).toBeInTheDocument();
-    expect(screen.getByText('Move unavailable items into admin review while keeping the remaining items fulfillable.')).toBeInTheDocument();
+  });
+
+  it('lets a vendor reject the full order from the detail right panel', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const rejectableOrder = {
+      ...orderWithoutShipment,
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+    };
+    getOrderMock.mockResolvedValue(rejectableOrder);
+    rejectOrderMock.mockResolvedValue({
+      ...rejectableOrder,
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'DAMAGED_INVENTORY',
+      fulfillmentActionAvailable: false,
+    });
+
+    renderOrderDetail();
+
+    const orderIssue = await screen.findByLabelText('Order issue');
+    expect(within(orderIssue).queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    await user.click(within(orderIssue).getByRole('button', { name: 'Reject full order' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Reject order' });
+    await user.selectOptions(within(dialog).getByLabelText('Reason'), 'DAMAGED_INVENTORY');
+    await user.type(within(dialog).getByLabelText('Note'), 'Damaged box on shelf');
+    await user.click(within(dialog).getByRole('button', { name: 'Reject order' }));
+
+    await waitFor(() =>
+      expect(rejectOrderMock).toHaveBeenCalledWith(
+        rejectableOrder.id,
+        {
+          reason: 'DAMAGED_INVENTORY',
+          note: 'Damaged box on shelf',
+        },
+        expect.objectContaining({ vendorId: 'sporjinal' }),
+      ),
+    );
+    expect(await screen.findByText('Order rejected and sent to admin review.')).toBeInTheDocument();
   });
 
   it('frames vendor-blocked orders as admin-resolution work instead of shipment work', async () => {

@@ -63,7 +63,7 @@ import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
-import { canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
+import { canRejectOrder, canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
 import type {
   KargonomiLocationLookupDiagnostics,
   NavlungoAuthDiagnostics,
@@ -74,6 +74,13 @@ import type {
 } from '../services/real/diagnostics';
 
 type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
+
+const REJECT_ORDER_REASONS: Array<{ value: RejectOrderReason; label: string }> = [
+  { value: 'OUT_OF_STOCK', label: 'Out of stock' },
+  { value: 'VENDOR_CANCELLED', label: 'Vendor cancelled' },
+  { value: 'DAMAGED_INVENTORY', label: 'Damaged inventory' },
+  { value: 'FULFILLMENT_ISSUE', label: 'Fulfillment issue' },
+];
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -1813,6 +1820,9 @@ export function OrderDetailPage() {
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [splitRejectOpen, setSplitRejectOpen] = useState(false);
+  const [fullRejectOpen, setFullRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState<RejectOrderReason>('OUT_OF_STOCK');
+  const [rejectNote, setRejectNote] = useState('');
   const [copiedDiagnostics, setCopiedDiagnostics] = useState<string | null>(null);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
@@ -1927,7 +1937,7 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
-  const { mutateAsync: rejectOrderMutation } = useMutationAction(
+  const { mutateAsync: rejectOrderMutation, isPending: isRejectingOrder } = useMutationAction(
     async (input: { orderId: string; reason: RejectOrderReason; note: string }) =>
       rejectOrder(
         input.orderId,
@@ -4677,6 +4687,8 @@ export function OrderDetailPage() {
     currentUser?.role === 'vendor' &&
     orderItems.length > 1 &&
     canShowAllocationSplitRejectAction(order);
+  const canOpenFullReject = currentUser?.role === 'vendor' && canRejectOrder(order);
+  const canShowOrderIssueActions = canOpenSplitReject || canOpenFullReject;
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
   const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
@@ -4713,6 +4725,36 @@ export function OrderDetailPage() {
   async function handleSplitFullAllocationReject(input: { orderId: string; reason: RejectOrderReason; note: string }) {
     await rejectOrderMutation(input);
     setSplitRejectOpen(false);
+    showFeedback('Order rejected and sent to admin review.', 'success');
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
+    ]);
+  }
+
+  async function handleFullOrderRejectSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!order) {
+      return;
+    }
+    const note = rejectNote.trim();
+    if (!note) {
+      showFeedback('Reject note is required.', 'error');
+      return;
+    }
+    if (note.length > 500) {
+      showFeedback('Reject note must be 500 characters or fewer.', 'error');
+      return;
+    }
+
+    await rejectOrderMutation({
+      orderId: order.id,
+      reason: rejectReason,
+      note,
+    });
+    setFullRejectOpen(false);
+    setRejectReason('OUT_OF_STOCK');
+    setRejectNote('');
     showFeedback('Order rejected and sent to admin review.', 'success');
     await Promise.all([
       refetch(),
@@ -9769,7 +9811,7 @@ export function OrderDetailPage() {
             )}
           </article>
 
-          {canOpenSplitReject ? (
+          {canShowOrderIssueActions ? (
             <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
               <div className="order-card-heading">
                 <div>
@@ -9778,16 +9820,33 @@ export function OrderDetailPage() {
               </div>
               <div className="allocation-split-entry-card">
                 <div>
-                  <strong>Reject selected items</strong>
-                  <span>Move unavailable items into admin review while keeping the remaining items fulfillable.</span>
+                  <strong>Unavailable items</strong>
+                  <span>Reject selected items or send the full order to admin review.</span>
                 </div>
-                <button
-                  type="button"
-                  className="button button-danger"
-                  onClick={() => setSplitRejectOpen(true)}
-                >
-                  Reject selected items
-                </button>
+                <div className="orders-reject-action-stack">
+                  {canOpenSplitReject ? (
+                    <button
+                      type="button"
+                      className="button button-danger"
+                      onClick={() => setSplitRejectOpen(true)}
+                    >
+                      Reject selected items
+                    </button>
+                  ) : null}
+                  {canOpenFullReject ? (
+                    <button
+                      type="button"
+                      className={canOpenSplitReject ? 'button button-secondary' : 'button button-danger'}
+                      onClick={() => {
+                        setRejectReason('OUT_OF_STOCK');
+                        setRejectNote('');
+                        setFullRejectOpen(true);
+                      }}
+                    >
+                      Reject full order
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </article>
           ) : null}
@@ -9795,6 +9854,68 @@ export function OrderDetailPage() {
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
+      {fullRejectOpen ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section className="support-modal" role="dialog" aria-modal="true" aria-labelledby="reject-order-title">
+            <div className="support-modal-header">
+              <div>
+                <h2 id="reject-order-title">Reject order</h2>
+                <p>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</p>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                onClick={() => setFullRejectOpen(false)}
+                aria-label="Close reject order form"
+                disabled={isRejectingOrder}
+              >
+                x
+              </button>
+            </div>
+            <form className="support-ticket-form" onSubmit={handleFullOrderRejectSubmit}>
+              <label>
+                Reason
+                <select
+                  value={rejectReason}
+                  onChange={(event) => setRejectReason(event.target.value as RejectOrderReason)}
+                  required
+                >
+                  {REJECT_ORDER_REASONS.map((reason) => (
+                    <option key={reason.value} value={reason.value}>{reason.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Note
+                <textarea
+                  value={rejectNote}
+                  onChange={(event) => setRejectNote(event.target.value)}
+                  maxLength={500}
+                  rows={5}
+                  required
+                  placeholder="Explain why this allocation cannot be fulfilled."
+                />
+              </label>
+              <p className="support-context-note">
+                This will block fulfillment and send the order to Sporgym admin review.
+              </p>
+              <div className="support-modal-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setFullRejectOpen(false)}
+                  disabled={isRejectingOrder}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button-danger" disabled={isRejectingOrder}>
+                  {isRejectingOrder ? 'Rejecting...' : 'Reject order'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
       {splitRejectOpen ? (
         <AllocationSplitRejectModal
           order={order}

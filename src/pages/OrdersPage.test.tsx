@@ -905,44 +905,21 @@ describe('OrdersPage control center', () => {
     openMock.mockRestore();
   });
 
-  it('lets a vendor reject an eligible active order from the detail rail', async () => {
+  it('does not show reject actions in the orders detail rail', async () => {
     setVendorUser();
     const awaitingShipmentOrder = buildAwaitingRejectableOrder();
-    const blockedOrder: OrderDetail = {
-      ...awaitingShipmentOrder,
-      status: 'On Hold',
-      allocationStatus: 'vendor_blocked',
-      reassignmentRequired: true,
-      cancellationReason: 'damaged_inventory',
-      fulfillmentActionAvailable: false,
-    };
     listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
-    getOrderMock.mockResolvedValueOnce(awaitingShipmentOrder).mockResolvedValue(blockedOrder);
-    rejectOrderMock.mockResolvedValue(blockedOrder);
+    getOrderMock.mockResolvedValue(awaitingShipmentOrder);
 
     renderOrdersPage();
 
-    expect(await screen.findByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Reject full order' }));
-    const dialog = screen.getByRole('dialog', { name: 'Reject order' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('Reason'), 'DAMAGED_INVENTORY');
-    await userEvent.type(within(dialog).getByLabelText('Note'), 'Damaged box on shelf');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Reject order' }));
-
-    await waitFor(() =>
-      expect(rejectOrderMock).toHaveBeenCalledWith(
-        'ORD-A-1002',
-        {
-          reason: 'DAMAGED_INVENTORY',
-          note: 'Damaged box on shelf',
-        },
-        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
-      ),
-    );
-    expect(await screen.findByText('Order rejected and sent to admin review.')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Order status axes')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Order issue' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
   });
 
-  it('lets a vendor preview and confirm selected line item rejection from the detail rail', async () => {
+  it('does not show selected line item rejection in the orders detail rail', async () => {
     setVendorUser();
     const firstLine = orderDetail.lineItems[0];
     const secondLine = {
@@ -972,113 +949,17 @@ describe('OrdersPage control center', () => {
       ],
       items: [],
     });
-    const plannerResult: AllocationSplitPlannerResponse = {
-      ok: true,
-      writesPerformed: false,
-      canSplit: true,
-      decision: 'can_split',
-      blockers: [],
-      warnings: [],
-      sourceAllocation: {
-        id: multiLineOrder.id,
-        allocationStatus: 'active',
-        originalVendorId: 'demo-vendor-a',
-        assignedVendorId: 'demo-vendor-a',
-        sourceShopifyOrderId: multiLineOrder.sourceShopifyOrderId,
-        sourceShopifyOrderNumber: multiLineOrder.sourceShopifyOrderNumber,
-      },
-      selectedLines: [
-        {
-          id: secondLine.id,
-          shopifyLineItemId: secondLine.id,
-          quantity: secondLine.quantity,
-          lineAmount: 120,
-          title: secondLine.name,
-          sku: secondLine.sku,
-        },
-      ],
-      remainingLines: [
-        {
-          id: firstLine.id,
-          shopifyLineItemId: firstLine.id,
-          quantity: firstLine.quantity,
-          lineAmount: 650,
-          title: firstLine.name,
-          sku: firstLine.sku,
-        },
-      ],
-      amountPlan: {
-        originalAmount: 770,
-        selectedAmount: 120,
-        remainingAmount: 650,
-      },
-      proposedChildAllocation: {
-        id: 'alloc-child-replacement-insole',
-        deterministic: true,
-      },
-    };
-    const splitResult: AllocationSplitExecutionResponse = {
-      ok: true,
-      splitSummary: {
-        sourceAllocationId: multiLineOrder.id,
-        childAllocationId: 'alloc-child-replacement-insole',
-        reason: 'OUT_OF_STOCK',
-        note: 'Insole is unavailable',
-        actorName: null,
-        lineageRole: 'unknown',
-        movedItems: [],
-      },
-      sourceAllocationId: multiLineOrder.id,
-      childAllocationId: 'alloc-child-replacement-insole',
-      sourceSaleLedgerId: 'fin-source',
-      remainingSaleLedgerId: 'fin-remaining',
-      childSaleLedgerId: 'fin-child',
-      idempotent: false,
-    };
     listOrdersMock.mockResolvedValue([toSummary(multiLineOrder)]);
     getOrderMock.mockResolvedValue(multiLineOrder);
-    planAllocationSplitMock.mockResolvedValue(plannerResult);
-    splitAllocationMock.mockResolvedValue(splitResult);
 
     renderOrdersPage();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
-    const dialog = screen.getByRole('dialog', { name: 'Reject selected items' });
-    await userEvent.click(within(dialog).getByRole('checkbox', { name: /Replacement insole/i }));
-    await userEvent.type(within(dialog).getByLabelText('Note'), 'Insole is unavailable');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() =>
-      expect(planAllocationSplitMock).toHaveBeenCalledWith(
-        multiLineOrder.id,
-        {
-          selectedVendorAllocationLineItemIds: ['line-1002-a2'],
-          reason: 'OUT_OF_STOCK',
-          note: 'Insole is unavailable',
-        },
-        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
-      ),
-    );
-    expect(within(dialog).getByText('Selected items')).toBeInTheDocument();
-    expect(within(dialog).getByText('Remaining items')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Confirm split' })).toBeDisabled();
-
-    await userEvent.click(within(dialog).getByLabelText(/I understand selected items will move/i));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm split' }));
-
-    await waitFor(() =>
-      expect(splitAllocationMock).toHaveBeenCalledWith(
-        multiLineOrder.id,
-        {
-          selectedVendorAllocationLineItemIds: ['line-1002-a2'],
-          reason: 'OUT_OF_STOCK',
-          note: 'Insole is unavailable',
-          confirmSplit: true,
-        },
-        expect.objectContaining({ vendorId: 'demo-vendor-a' }),
-      ),
-    );
-    expect(await within(dialog).findByText('Split completed.')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Order status axes')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Order issue' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
+    expect(planAllocationSplitMock).not.toHaveBeenCalled();
+    expect(splitAllocationMock).not.toHaveBeenCalled();
   });
 
   it('shows why reject is unavailable when shipment processing exists', async () => {
