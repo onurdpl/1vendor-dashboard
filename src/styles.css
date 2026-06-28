@@ -5219,6 +5219,89 @@ h3 {
   min-width: 0;
 }
 
+.orders-workflow-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(203, 213, 225, 0.78);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.orders-workflow-tabs button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  min-width: 0;
+  min-height: 62px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.orders-workflow-tabs button:hover,
+.orders-workflow-tabs button:focus-visible {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: rgba(248, 250, 252, 0.92);
+  color: #1d4ed8;
+  outline: none;
+}
+
+.orders-workflow-tabs button.is-active {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.09);
+}
+
+.orders-workflow-tabs span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orders-workflow-tabs strong {
+  justify-self: end;
+  color: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.orders-workflow-tabs small {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orders-workflow-tabs button.is-active small {
+  color: #2563eb;
+}
+
 .orders-table-shell {
   min-width: 0;
 }
@@ -10699,6 +10782,10 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-template-columns: 1fr;
   }
 
+  .orders-workflow-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .orders-filter-card {
     padding: 14px;
   }
@@ -10784,7 +10871,8 @@ summary.provider-response-heading::-webkit-details-marker {
   .finance-balance-secondary-grid,
   .finance-balance-story-grid,
   .finance-compact-metrics,
-  .dashboard-workspace-status-grid {
+  .dashboard-workspace-status-grid,
+  .orders-workflow-tabs {
     grid-template-columns: 1fr;
   }
 

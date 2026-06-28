@@ -46,6 +46,7 @@ import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 
 type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
+type OrderWorkflowTabKey = 'all' | 'awaiting-shipment' | 'blocked-allocation' | 'stale-fulfillment' | 'tracking-missing';
 type RejectOrderReason = 'OUT_OF_STOCK' | 'VENDOR_CANCELLED' | 'DAMAGED_INVENTORY' | 'FULFILLMENT_ISSUE';
 type LabelActionFeedback = {
   tone: 'success' | 'warning' | 'error';
@@ -379,7 +380,7 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       label: 'Blocked allocation',
       description: 'Showing orders with blocked or reassignment-needed vendor allocations.',
       emptyTitle: 'No blocked allocations currently need action',
-      emptyDescription: 'This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.',
+      emptyDescription: 'This workflow queue is clear for the current vendor scope. Switch to All orders to review the full list.',
       quickFilter: 'blocked' as OrderQuickFilter,
     };
   }
@@ -388,7 +389,7 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       label: 'Awaiting shipment',
       description: 'Showing orders that need shipment creation or provider progress.',
       emptyTitle: 'No shipments currently awaiting action',
-      emptyDescription: 'This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.',
+      emptyDescription: 'This workflow queue is clear for the current vendor scope. Switch to All orders to review the full list.',
       quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
@@ -397,7 +398,7 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       label: 'Stale fulfillment',
       description: 'Showing fulfillment work that still needs shipment progress.',
       emptyTitle: 'No stale fulfillment work in this queue',
-      emptyDescription: 'No stale fulfillment items match this workflow right now. Clear the workflow to inspect the full orders list.',
+      emptyDescription: 'No stale fulfillment items match this workflow right now. Switch to All orders to inspect the full list.',
       quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
@@ -406,7 +407,7 @@ function getOrdersWorkflowFilter(workflow: string | null) {
       label: 'Tracking missing',
       description: 'Showing orders without carrier or tracking evidence.',
       emptyTitle: 'No orders missing tracking',
-      emptyDescription: 'Tracking evidence is present for the current workflow queue. Clear the workflow to review all orders.',
+      emptyDescription: 'Tracking evidence is present for the current workflow queue. Switch to All orders to review the full list.',
       quickFilter: 'tracking_missing' as OrderQuickFilter,
     };
   }
@@ -471,6 +472,16 @@ export function OrdersPage() {
     }
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function setWorkflowTab(workflow: OrderWorkflowTabKey) {
+    const nextParams = new URLSearchParams(searchParams);
+    if (workflow === 'all') {
+      nextParams.delete('workflow');
+    } else {
+      nextParams.set('workflow', workflow);
+    }
     setSearchParams(nextParams, { replace: true });
   }
 
@@ -688,6 +699,53 @@ export function OrdersPage() {
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
     { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
   ];
+  const workflowTabs: Array<{
+    key: OrderWorkflowTabKey;
+    workflow: OrderWorkflowTabKey | null;
+    label: string;
+    description: string;
+    count: number;
+  }> = [
+    {
+      key: 'all',
+      workflow: null,
+      label: 'All orders',
+      description: 'Full order list',
+      count: orders?.length ?? 0,
+    },
+    {
+      key: 'awaiting-shipment',
+      workflow: 'awaiting-shipment',
+      label: 'Ready to ship',
+      description: 'Awaiting shipment',
+      count: summary.awaitingShipment,
+    },
+    {
+      key: 'blocked-allocation',
+      workflow: 'blocked-allocation',
+      label: 'Blocked',
+      description: 'Needs admin resolution',
+      count: summary.blocked,
+    },
+    {
+      key: 'stale-fulfillment',
+      workflow: 'stale-fulfillment',
+      label: 'Shipment review',
+      description: 'Stale fulfillment',
+      count: summary.awaitingShipment,
+    },
+    {
+      key: 'tracking-missing',
+      workflow: 'tracking-missing',
+      label: 'Tracking missing',
+      description: 'Needs tracking evidence',
+      count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length,
+    },
+  ];
+  const workflowParam = searchParams.get('workflow');
+  const activeWorkflowKey: OrderWorkflowTabKey = workflowTabs.some((tab) => tab.key === workflowParam)
+    ? (workflowParam as OrderWorkflowTabKey)
+    : 'all';
   const effectiveQuickFilter = activeWorkflowFilter?.quickFilter ?? quickFilter;
 
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
@@ -851,6 +909,25 @@ export function OrdersPage() {
 
         <div className="op-control-layout orders-control-layout orders-workspace-grid">
           <div className="orders-left-column">
+            <div className="orders-workflow-tabs" aria-label="Orders workflow tabs">
+              {workflowTabs.map((tab) => {
+                const isActive = activeWorkflowKey === tab.key || (activeWorkflowKey === 'all' && tab.key === 'all');
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    className={isActive ? 'is-active' : ''}
+                    aria-pressed={isActive}
+                    onClick={() => setWorkflowTab(tab.workflow ?? 'all')}
+                  >
+                    <span>{tab.label}</span>
+                    <strong>{tab.count}</strong>
+                    <small>{tab.description}</small>
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="orders-enterprise-kpis" aria-label="Orders operational metrics">
               {orderKpis.map((metric) => (
                 <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
@@ -925,19 +1002,6 @@ export function OrdersPage() {
                   </button>
                 </FilterBar>
               </OperationalToolbar>
-
-              {activeWorkflowFilter ? (
-                <div className="workflow-filter-banner" aria-label="Active workflow filter">
-                  <div>
-                    <span>Workflow filter</span>
-                    <strong>{activeWorkflowFilter.label}</strong>
-                    <small>{activeWorkflowFilter.description}</small>
-                  </div>
-                  <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
-                    Clear workflow
-                  </button>
-                </div>
-              ) : null}
 
               <div className="orders-filter-summary" aria-label="Order quick filters">
                 {quickFilters.map((filter) => (

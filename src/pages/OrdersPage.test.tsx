@@ -443,12 +443,13 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
 
-    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
-    expect(screen.getByRole('button', { name: /Awaiting shipment/i })).toHaveClass('is-active');
+    const workflowTabs = await screen.findByLabelText('Orders workflow tabs');
+    expect(workflowTabs).toHaveTextContent('Ready to ship');
+    expect(within(workflowTabs).getByRole('button', { name: /Ready to ship/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /All orders/i }));
 
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
   });
@@ -480,8 +481,9 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage(['/orders?workflow=blocked-allocation']);
 
-    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Blocked allocation');
-    expect(screen.getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
+    const workflowTabs = await screen.findByLabelText('Orders workflow tabs');
+    expect(workflowTabs).toHaveTextContent('Blocked');
+    expect(within(workflowTabs).getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
@@ -490,7 +492,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Vendor rejected allocation.').length).toBeGreaterThan(0);
     expect(screen.queryByText('No tracking yet')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /All orders/i }));
 
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
   });
@@ -502,8 +504,8 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
 
     expect(await screen.findByText('No shipments currently awaiting action')).toBeInTheDocument();
-    expect(screen.getByText('This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
+    expect(screen.getByText('This workflow queue is clear for the current vendor scope. Switch to All orders to review the full list.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Orders workflow tabs')).toHaveTextContent('Ready to ship');
   });
 
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
