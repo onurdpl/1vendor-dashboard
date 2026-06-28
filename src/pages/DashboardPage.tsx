@@ -86,6 +86,18 @@ function hasAttentionValue(value: string | null | undefined) {
   return Number.isFinite(normalized) && normalized > 0;
 }
 
+function hasMeaningfulMoneyValue(value: string | null | undefined) {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === '—' || normalized === 'not available') {
+    return false;
+  }
+  const numericValue = Number(normalized.replace(/[^\d.-]/g, ''));
+  return Number.isFinite(numericValue) && numericValue !== 0;
+}
+
 function createFallbackDashboard(vendorId: string, vendorName: string): DashboardOverview {
   return {
     vendorId,
@@ -486,9 +498,9 @@ export function DashboardPage() {
   const heroAction = buildHeroAction(dashboardView);
   const actionCards = buildSupportingCards(dashboardView);
   const isDashboardLoading = pageReadiness.ready && isLoading && !initialDashboard;
-  const upcomingPayment = asDisplayValue(dashboardView.financeSnapshot?.payoutEstimate, 'TRY 0');
-  const lastPayment = 'TRY 0';
-  const lastPaymentDate = 'Not available';
+  const upcomingPayment = hasMeaningfulMoneyValue(dashboardView.financeSnapshot?.payoutEstimate)
+    ? dashboardView.financeSnapshot?.payoutEstimate
+    : null;
   const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
   const recentChanges = buildRecentChanges(dashboardView, recentOrders);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
@@ -706,22 +718,26 @@ export function DashboardPage() {
       <section className="dashboard-vendor-panel dashboard-vendor-payment-panel" aria-label="Payment summary">
         <h2>Payment Summary</h2>
         <div className="dashboard-vendor-payment-summary">
-          <div className="dashboard-vendor-payment-metric">
-            <span>Upcoming Payment</span>
-            <strong>{isDashboardLoading ? <SkeletonText width="5rem" /> : upcomingPayment}</strong>
-            <small>
-              <CalendarIcon />
-              Not available
-            </small>
-          </div>
-          <div className="dashboard-vendor-payment-divider" aria-hidden="true" />
-          <div className="dashboard-vendor-payment-metric">
-            <span>Last Payment</span>
-            <strong>{lastPayment}</strong>
-            <small>
-              <CalendarIcon />
-              {lastPaymentDate}
-            </small>
+          {isDashboardLoading ? (
+            <div className="dashboard-vendor-payment-metric">
+              <span>Upcoming Payment</span>
+              <strong><SkeletonText width="5rem" /></strong>
+            </div>
+          ) : upcomingPayment ? (
+            <div className="dashboard-vendor-payment-metric">
+              <span>Upcoming Payment</span>
+              <strong>{upcomingPayment}</strong>
+              <small>Estimated from current payment preparation.</small>
+            </div>
+          ) : (
+            <div className="dashboard-vendor-payment-note">
+              <strong>No upcoming payment estimate yet.</strong>
+              <span>Payment timing will appear here when orders become eligible.</span>
+            </div>
+          )}
+          <div className="dashboard-vendor-payment-note">
+            <strong>No payment history available yet.</strong>
+            <span>Completed payments will appear in Finance after payment records exist.</span>
           </div>
           <Link className="dashboard-vendor-payment-link" to="/finance">
             Payment History
