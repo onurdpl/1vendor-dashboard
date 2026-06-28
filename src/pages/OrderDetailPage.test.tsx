@@ -2282,6 +2282,45 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: false,
       defaultVendorId: 'sporjinal',
     });
+    getFinanceDashboardMock.mockResolvedValueOnce({
+      summary: {
+        grossSales: 'TRY 4,999.00',
+        refunds: 'TRY 0.00',
+        netRevenue: 'TRY 4,449.20',
+        platformFee: 'TRY 499.90',
+        payoutEstimate: 'TRY 4,449.20',
+      },
+      transactions: [
+        {
+          id: 'finance-sale-1028',
+          category: 'Invoice',
+          shopifyOrderId: '7616544244049',
+          shopifyOrderNumber: '#1028',
+          amount: 'TRY 4,999.00',
+          date: '2026-05-15T12:08:00.000Z',
+          status: 'Pending review',
+          payoutCalculation: {
+            grossAmount: 'TRY 4,999.00',
+            commission: 'TRY 499.90',
+            shippingDeduction: 'TRY 49.90',
+            estimatedPayout: 'TRY 4,449.20',
+            shippingCostStatus: 'confirmed',
+          },
+        },
+        {
+          id: 'finance-refund-1028',
+          category: 'Refund',
+          shopifyOrderId: '7616544244049',
+          shopifyOrderNumber: '#1028',
+          amount: 'TRY 0.00',
+          date: '2026-05-15T12:08:00.000Z',
+          status: 'Recorded',
+          payoutCalculation: {
+            refundImpact: 'TRY 0.00',
+          },
+        },
+      ],
+    });
 
     renderOrderDetail();
 
@@ -2301,10 +2340,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('heading', { name: /Items/ })).toBeInTheDocument();
     const financialSummary = screen.getByLabelText('Order financial summary');
     expect(within(financialSummary).getByRole('heading', { name: 'Order financial summary' })).toBeInTheDocument();
-    expect(within(financialSummary).getByText('Order total')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Gross Order Amount')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,999.00')).toBeInTheDocument();
-    expect(within(financialSummary).getByText('Payment status')).toBeInTheDocument();
-    expect(within(financialSummary).getByText('paid')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 499.90')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Shipping Deduction')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 49.90')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 0.00')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
+    expect(within(financialSummary).queryByText('Payment status')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Gross order amount')).not.toBeInTheDocument();
     expect(screen.queryByText('Estimated settlement')).not.toBeInTheDocument();
@@ -2312,7 +2358,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Shipping deduction')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Vendor actions' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vendor actions' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipment, tracking, and return controls for this order.')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
@@ -2367,6 +2415,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
 
     renderOrderDetail();
+
+    const orderIssue = await screen.findByLabelText('Order issue');
+    expect(within(orderIssue).getByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
+    expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
+    expect(within(screen.getByRole('heading', { name: 'Shipment & delivery' }).closest('article') as HTMLElement).queryByRole('button', {
+      name: 'Reject selected items',
+    })).not.toBeInTheDocument();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
 

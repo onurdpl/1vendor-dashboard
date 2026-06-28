@@ -4806,29 +4806,36 @@ export function OrderDetailPage() {
   const vendorFinancialSummaryRows = [
     isKnownFinanceValue(grossOrderAmountValue)
       ? {
-          label: 'Order total',
+          label: 'Gross Order Amount',
           value: grossOrderAmountValue,
           helper: 'Total value for this order.',
         }
       : null,
-    isKnownFinanceValue(paymentStatusLabel)
+    isKnownFinanceValue(commissionEstimateValue)
       ? {
-          label: 'Payment status',
-          value: paymentStatusLabel,
-          helper: 'Current payment state for this order.',
+          label: 'Commission',
+          value: commissionEstimateValue,
+          helper: 'Commission for this order.',
+        }
+      : null,
+    isKnownFinanceValue(shippingDeductionValue)
+      ? {
+          label: 'Shipping Deduction',
+          value: shippingDeductionValue,
+          helper: 'Shipping deduction for this order.',
         }
       : null,
     currentRefundEvidencePresent && isKnownFinanceValue(refundImpactValue)
       ? {
-          label: 'Refund impact',
+          label: 'Refund Impact',
           value: refundImpactValue,
           helper: isRefundResolvedVendorBlockedOrder ? 'Refund completed for this order.' : 'Refund activity linked to this order.',
         }
       : null,
-    !isActiveVendorBlockedOrder && isKnownFinanceValue(payoutCalculation?.estimatedPayout)
+    !isActiveVendorBlockedOrder && isKnownFinanceValue(estimatedSettlementValue)
       ? {
-          label: 'Estimated earnings',
-          value: payoutCalculation?.estimatedPayout ?? ORDER_FINANCE_UNKNOWN_VALUE,
+          label: 'Estimated Earnings',
+          value: estimatedSettlementValue,
           helper: 'Estimated amount for this order.',
         }
       : null,
@@ -6725,14 +6732,13 @@ export function OrderDetailPage() {
             ) : null}
           </div>
 
-          <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
-            <div className="order-card-heading">
-              <div>
-                <h2>Shipment & delivery</h2>
-                <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
+          {canOpenSplitReject ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Order issue</h2>
+                </div>
               </div>
-            </div>
-            {canOpenSplitReject ? (
               <div className="allocation-split-entry-card">
                 <div>
                   <strong>Reject selected items</strong>
@@ -6746,12 +6752,20 @@ export function OrderDetailPage() {
                   Reject selected items
                 </button>
               </div>
-            ) : null}
+            </article>
+          ) : null}
+
+          <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
+            <div className="order-card-heading">
+              <div>
+                <h2>Shipment & delivery</h2>
+                <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
+              </div>
+            </div>
             {canUseFulfillmentActions ? (
               <div className="action-row vendor-action-panel">
                 <div className="vendor-actions-heading">
-                  <h3>Vendor actions</h3>
-                  <span>Shipment, tracking, and return controls for this order.</span>
+                  <h3>Shipment</h3>
                 </div>
                 {isRealMode ? (
                   <>
