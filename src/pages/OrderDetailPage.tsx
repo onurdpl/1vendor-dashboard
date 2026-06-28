@@ -4693,6 +4693,8 @@ export function OrderDetailPage() {
     : formatSnapshotValue(order.orderSnapshot?.financialStatus);
   const isRefundResolvedVendorBlockedOrder = operationalStory.state === 'vendor_blocked_resolved_by_refund';
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
+  const shouldShowCreateShipmentAction =
+    operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
@@ -5267,6 +5269,7 @@ export function OrderDetailPage() {
         ]
       : []),
   ];
+  const hasVisibleLinkedRecords = orderCrossLinks.some((link) => !link.visibility || link.visibility === audience);
   const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
   const openLinkedSupportTicket = relatedSupportTickets.find(isOpenSupportTicket) ?? null;
@@ -6087,9 +6090,7 @@ export function OrderDetailPage() {
               <strong>
                 {order.shippingAddress && order.shippingAddress !== 'Unknown'
                   ? order.shippingAddress
-                  : isAdmin
-                    ? 'Shopify shipping address available in future detail sync.'
-                    : 'Shipping address will appear when available.'}
+                  : 'Shipping address will appear when available.'}
               </strong>
             </div>
           </div>
@@ -6569,36 +6570,38 @@ export function OrderDetailPage() {
             </article>
           ) : null}
 
-          <div className="order-linked-records-panel">
-            <OperationalLinkCards
-              title="Linked records"
-              subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
-              links={orderCrossLinks}
-              audience={audience}
-            />
-            {relatedSupportTickets.length > 1 ? (
-              <details className="finance-support-history">
-                <summary>
-                  <span>
-                    <strong>Support history</strong>
-                    {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
-                  </span>
-                  <span className="op-badge op-tone-neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</span>
-                </summary>
-                <div className="finance-support-history-list">
-                  {relatedSupportTickets.map((ticket) => (
-                    <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                      <span>
-                        <strong>{ticket.subject}</strong>
-                        <small>{formatSupportTicketStatus(ticket.status)} · {formatSupportTicketPriority(ticket.priority)}</small>
-                      </span>
-                      <small>{formatOptionalDate(getSupportLatestActivityAt(ticket))}</small>
-                    </Link>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-          </div>
+          {isAdmin || hasVisibleLinkedRecords ? (
+            <div className="order-linked-records-panel">
+              <OperationalLinkCards
+                title="Linked records"
+                subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
+                links={orderCrossLinks}
+                audience={audience}
+              />
+              {relatedSupportTickets.length > 1 ? (
+                <details className="finance-support-history">
+                  <summary>
+                    <span>
+                      <strong>Support history</strong>
+                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
+                    </span>
+                    <span className="op-badge op-tone-neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</span>
+                  </summary>
+                  <div className="finance-support-history-list">
+                    {relatedSupportTickets.map((ticket) => (
+                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span>
+                          <strong>{ticket.subject}</strong>
+                          <small>{formatSupportTicketStatus(ticket.status)} · {formatSupportTicketPriority(ticket.priority)}</small>
+                        </span>
+                        <small>{formatOptionalDate(getSupportLatestActivityAt(ticket))}</small>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
         </main>
 
         <aside className="order-detail-right-rail" aria-label="Order timeline and support">
@@ -6731,29 +6734,6 @@ export function OrderDetailPage() {
               <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
             ) : null}
           </div>
-
-          {canOpenSplitReject ? (
-            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
-              <div className="order-card-heading">
-                <div>
-                  <h2>Order issue</h2>
-                </div>
-              </div>
-              <div className="allocation-split-entry-card">
-                <div>
-                  <strong>Reject selected items</strong>
-                  <span>Move unavailable items into admin review while keeping the remaining items fulfillable.</span>
-                </div>
-                <button
-                  type="button"
-                  className="button button-danger"
-                  onClick={() => setSplitRejectOpen(true)}
-                >
-                  Reject selected items
-                </button>
-              </div>
-            </article>
-          ) : null}
 
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">
@@ -7827,7 +7807,7 @@ export function OrderDetailPage() {
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
-                    {operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution ? (
+                    {shouldShowCreateShipmentAction ? (
                       <div className="detail-actions">
                         <button
                           type="button"
@@ -8001,7 +7981,11 @@ export function OrderDetailPage() {
                           />
                           <span>Notify customer</span>
                         </label>
-                        <button type="submit" className="button button-primary" disabled={isSubmittingTracking}>
+                        <button
+                          type="submit"
+                          className={`button ${shouldShowCreateShipmentAction ? 'button-secondary' : 'button-primary'}`}
+                          disabled={isSubmittingTracking}
+                        >
                           {isSubmittingTracking ? 'Submitting...' : 'Add tracking information'}
                         </button>
                       </form>
@@ -9784,6 +9768,29 @@ export function OrderDetailPage() {
               </div>
             )}
           </article>
+
+          {canOpenSplitReject ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Order issue</h2>
+                </div>
+              </div>
+              <div className="allocation-split-entry-card">
+                <div>
+                  <strong>Reject selected items</strong>
+                  <span>Move unavailable items into admin review while keeping the remaining items fulfillable.</span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-danger"
+                  onClick={() => setSplitRejectOpen(true)}
+                >
+                  Reject selected items
+                </button>
+              </div>
+            </article>
+          ) : null}
         </aside>
       </div>
 

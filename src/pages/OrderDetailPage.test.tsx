@@ -2357,7 +2357,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Commission estimate')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping deduction')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Vendor actions' })).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment, tracking, and return controls for this order.')).not.toBeInTheDocument();
@@ -2419,9 +2419,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const orderIssue = await screen.findByLabelText('Order issue');
     expect(within(orderIssue).getByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
-    expect(within(screen.getByRole('heading', { name: 'Shipment & delivery' }).closest('article') as HTMLElement).queryByRole('button', {
+    const shipmentSection = screen.getByRole('heading', { name: 'Shipment & delivery' }).closest('article') as HTMLElement;
+    expect(within(shipmentSection).queryByRole('button', {
       name: 'Reject selected items',
     })).not.toBeInTheDocument();
+    expect(
+      shipmentSection.compareDocumentPosition(orderIssue) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
 
@@ -7229,7 +7233,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+    const createShipmentButton = await screen.findByRole('button', { name: 'Create shipment' });
+    expect(createShipmentButton).toHaveClass('button-primary');
+    expect(screen.getByRole('button', { name: 'Add tracking information' })).toHaveClass('button-secondary');
+
+    await user.click(createShipmentButton);
 
     expect(createShipmentExecutionMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', {
       vendorId: 'sporjinal',
