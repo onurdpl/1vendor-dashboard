@@ -6383,411 +6383,17 @@ export function OrderDetailPage() {
           </article>
           ) : null}
 
-          {isAdmin && order.orderSnapshot?.vendorInvoiceNumber ? (
-            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Vendor invoice">
-              <div className="order-card-heading">
-                <div>
-                  <h2>Vendor Invoice</h2>
-                  <p>Provider-reported invoice reference. Informational only; no accounting posting is created here.</p>
-                </div>
-              </div>
-              <div className="order-financial-impact-grid order-finance-preview-grid">
-                <div>
-                  <span>Invoice Number</span>
-                  <strong>{order.orderSnapshot.vendorInvoiceNumber}</strong>
-                </div>
-                <div>
-                  <span>Invoice Date</span>
-                  <strong>{order.orderSnapshot.vendorInvoiceDate ?? '—'}</strong>
-                </div>
-                <div>
-                  <span>Invoice Amount</span>
-                  <strong>{formatSnapshotAmount(order.orderSnapshot.vendorInvoiceAmount, snapshotCurrency)}</strong>
-                </div>
-                <div>
-                  <span>Received At</span>
-                  <strong>{order.orderSnapshot.vendorInvoiceReceivedAt ? formatOptionalDate(order.orderSnapshot.vendorInvoiceReceivedAt) : '—'}</strong>
-                </div>
-              </div>
-              {order.orderSnapshot.vendorInvoiceUrl ? (
-                <div className="orders-rail-summary-list">
-                  <div>
-                    <span>Invoice URL</span>
-                    <strong>
-                      <a className="inline-link" href={order.orderSnapshot.vendorInvoiceUrl} target="_blank" rel="noreferrer">
-                        Open invoice
-                      </a>
-                    </strong>
-                  </div>
-                </div>
-              ) : null}
-            </article>
-          ) : null}
-
-          {isAdmin ? (
-          <article
-            id="settlement-preview"
-            ref={settlementPreviewRef}
-            className={`order-detail-card-v2 order-financial-summary-card order-workspace-panel${isActiveVendorBlockedOrder ? ' order-financial-summary-held' : ''}`}
-            aria-label="Order finance preview"
-            tabIndex={-1}
-          >
-            <div className="order-card-heading">
-              <div>
-                <h2>
-                  {isRefundResolvedVendorBlockedOrder
-                    ? 'Refund completed'
-                    : isActiveVendorBlockedOrder
-                      ? 'Settlement on hold'
-                      : 'Settlement preview'}
-                </h2>
-                <p>
-                  {isRefundResolvedVendorBlockedOrder
-                    ? 'Shopify refund processed. Fulfillment is no longer required.'
-                    : isActiveVendorBlockedOrder
-                    ? 'Vendor rejected allocation. Settlement is excluded until resolution.'
-                    : ORDER_FINANCE_HELPER_COPY}
-                </p>
-              </div>
-              <span className="order-preview-badge">
-                {isRefundResolvedVendorBlockedOrder ? 'Resolved' : isActiveVendorBlockedOrder ? 'Held' : 'Preview'}
-              </span>
-            </div>
-            {isRefundResolvedVendorBlockedOrder ? (
-              <div className="finance-hold-notice finance-hold-resolved" aria-label="Refund completion status">
-                <div>
-                  <span>Refund status</span>
-                  <strong>Refund impact recorded.</strong>
-                </div>
-                <p>
-                  Vendor-blocked settlement hold no longer applies because the Shopify refund completed.
-                </p>
-              </div>
-            ) : isActiveVendorBlockedOrder ? (
-              <div className="finance-hold-notice" aria-label="Finance hold reason">
-                <div>
-                  <span>Finance hold reason</span>
-                  <strong>Vendor blocked allocation.</strong>
-                </div>
-                <p>
-                  Settlement eligibility returns only after transfer completed or refund resolved.
-                </p>
-              </div>
-            ) : (
-              <WorkflowActionGuidance
-                actionLabel={orderSettlementGuidance.actionLabel}
-                description={orderSettlementGuidance.description}
-                tone={orderSettlementGuidance.tone}
-              />
-            )}
-            <div className={`order-financial-impact-grid order-finance-preview-grid${isActiveVendorBlockedOrder ? ' order-finance-preview-held' : ''}`}>
-              {financePreviewRows.map((row) => (
-                <div key={row.label}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                  <em>{row.state}</em>
-                </div>
-              ))}
-            </div>
-            {financeUnknownIndicators.length ? (
-              <div className="finance-inline-unknowns" aria-label="Finance unknown indicators">
-                <span>Unknown inputs</span>
-                {Array.from(new Set(financeUnknownIndicators)).map((unknown) => (
-                  <strong key={unknown}>{toTitleCaseLabel(unknown.replace(/_/g, ' '))}</strong>
-                ))}
-              </div>
-            ) : null}
-          </article>
-          ) : null}
-
-          {isAdmin ? (
-          <article className="order-detail-card-v2 order-finance-timeline-card order-workspace-panel" aria-label="Finance timeline">
-            <div className="order-card-heading">
-              <div>
-                <h2>Finance timeline</h2>
-                <p>{ORDER_FINANCE_TIMELINE_HELPER_COPY}</p>
-              </div>
-              <span className="order-preview-badge">Preview</span>
-            </div>
-            {visibleFinanceTimelineItems.length ? (
-              <ol className="order-finance-timeline-list">
-                {visibleFinanceTimelineItems.map((item) => (
-                  <li key={item.id}>
-                    <span className={`order-finance-timeline-dot op-tone-${item.tone ?? 'neutral'}`} aria-hidden="true" />
-                    <div className="order-finance-timeline-content">
-                      <div className="order-finance-timeline-title-row">
-                        {item.href ? <Link to={item.href}>{item.title}</Link> : <strong>{item.title}</strong>}
-                        {item.status ? (
-                          <span className={`order-finance-timeline-status op-tone-${item.tone ?? 'neutral'}`}>{item.status}</span>
-                        ) : null}
-                      </div>
-                      {item.description ? <p>{item.description}</p> : null}
-                      <small>{formatOptionalDate(item.at ?? undefined)}</small>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="order-empty-copy">No finance events available yet.</p>
-            )}
-          </article>
-          ) : null}
-
-          {isAdmin && order.financeLedgerPreview ? (
-            <article className="order-detail-card-v2 order-finance-ledger-card order-workspace-panel" aria-label="Finance ledger preview">
-              <div className="order-card-heading">
-                <div>
-                  <h2>Finance ledger preview</h2>
-                  <p>Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.</p>
-                </div>
-              </div>
-              <div className="order-financial-impact-grid">
-                <div>
-                  <span>Vendor settlement estimate</span>
-                  <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
-                </div>
-                <div>
-                  <span>Marketplace commission estimate</span>
-                  <strong>{formatCurrency(order.financeLedgerPreview.balance.marketplaceCommission, order.financeLedgerPreview.currency)}</strong>
-                </div>
-                <div>
-                  <span>Refund impact</span>
-                  <strong>
-                    {order.financeLedgerPreview.balance.vendorDebt !== '0.00'
-                      ? `Debt ${formatCurrency(order.financeLedgerPreview.balance.vendorDebt, order.financeLedgerPreview.currency)}`
-                      : formatCurrency(
-                          String(
-                            Math.max(
-                              Number(order.financeLedgerPreview.balance.grossSales) -
-                                Number(order.financeLedgerPreview.balance.marketplaceCommission) -
-                                Number(order.financeLedgerPreview.balance.vendorPayable),
-                              0,
-                            ).toFixed(2),
-                          ),
-                          order.financeLedgerPreview.currency,
-                        )}
-                  </strong>
-                </div>
-              </div>
-              <details className="provider-response-summary admin-diagnostics-panel" aria-label="Finance preview diagnostics">
-                <summary className="provider-response-heading">
-                  <strong>Finance preview diagnostics</strong>
-                  <span>Admin diagnostics</span>
-                </summary>
-                <div className="summary-row">
-                  <span>Status</span>
-                  <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Unknown fields</span>
-                  <strong>{order.financeLedgerPreview.unknowns.length ? order.financeLedgerPreview.unknowns.join(', ') : '—'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Source fields</span>
-                  <strong>
-                    {order.financeLedgerPreview.sourceFields.lineItemCount} line items · {order.financeLedgerPreview.sourceFields.returnCount} returns ·{' '}
-                    {order.financeLedgerPreview.sourceFields.refundCount} refunds
-                  </strong>
-                </div>
-                <div className="summary-row">
-                  <span>Assumptions</span>
-                  <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
-                </div>
-                <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
-                  {safeArray(order.financeLedgerPreview.entries).slice(0, 12).map((entry) => (
-                    <div className="summary-row" key={entry.id}>
-                      <span>{toTitleCaseLabel(entry.eventType)}</span>
-                      <strong>
-                        {[
-                          entry.impact.vendorPayable ? `settlement ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
-                          entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
-                          entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
-                          entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
-                        ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </article>
-          ) : null}
-
-          {isAdmin || hasVisibleLinkedRecords ? (
-            <div className="order-linked-records-panel">
-              <OperationalLinkCards
-                title="Linked records"
-                subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
-                links={orderCrossLinks}
-                audience={audience}
-              />
-              {relatedSupportTickets.length > 1 ? (
-                <details className="finance-support-history">
-                  <summary>
-                    <span>
-                      <strong>Support history</strong>
-                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
-                    </span>
-                    <span className="op-badge op-tone-neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</span>
-                  </summary>
-                  <div className="finance-support-history-list">
-                    {relatedSupportTickets.map((ticket) => (
-                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                        <span>
-                          <strong>{ticket.subject}</strong>
-                          <small>{formatSupportTicketStatus(ticket.status)} · {formatSupportTicketPriority(ticket.priority)}</small>
-                        </span>
-                        <small>{formatOptionalDate(getSupportLatestActivityAt(ticket))}</small>
-                      </Link>
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          ) : null}
-        </main>
-
-        <aside className="order-detail-right-rail" aria-label="Order timeline and support">
-          <div className="order-detail-sidebar-flow">
-            <OperationalTimeline
-              title={isAdmin ? 'Timeline' : 'Order activity'}
-              subtitle="Order, shipment, return, and support activity."
-              events={groupOrderDetailTimelineEvents([
-                ...safeArray(order.timeline)
-                  .filter((entry) => !isRawProviderTimelineLabel(entry.label))
-                  .map((entry) => ({
-                    id: `order-native-${entry.label}-${entry.at}`,
-                    title: getVendorTimelineLabel(entry.label),
-                    at: entry.at,
-                    tone: 'neutral' as const,
-                    visibility: getNativeTimelineVisibility(entry.label),
-                  })),
-                ...orderTimelineEvents,
-              ]).sort(
-                (left, right) =>
-                  getSafeTimestamp(left.at ?? order.date, Number.POSITIVE_INFINITY) -
-                  getSafeTimestamp(right.at ?? order.date, Number.POSITIVE_INFINITY),
-              )}
-              audience={audience}
-              emptyMessage="No records available."
-            />
-
-            <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
-              <div className="order-card-heading">
-                <div>
-                  <h2>Support</h2>
-                  <p>{isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.'}</p>
-                </div>
-              </div>
-              <div className="order-support-compact-stack">
-                {isVendorAssignedOwner ? (
-                  <>
-                    <div className="order-support-action-row">
-                      {linkedSupportTicketHref ? (
-                        <Link className="button button-secondary button-compact order-support-contact-button" to={linkedSupportTicketHref}>
-                          Contact support
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          className="button button-secondary button-compact order-support-contact-button"
-                          onClick={() => setSupportOpen(true)}
-                          disabled={!canReportIssue}
-                        >
-                          Contact support
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => {
-                          if (openLinkedSupportTicket) {
-                            void escalateSupportTicketMutation(openLinkedSupportTicket.id);
-                          }
-                        }}
-                        disabled={!openLinkedSupportTicket || linkedSupportTicketEscalated || isEscalatingSupportTicket}
-                      >
-                        {isEscalatingSupportTicket ? 'Escalating…' : linkedSupportTicketEscalated ? 'Escalated' : 'Escalate'}
-                      </button>
-                    </div>
-                    {!canReportIssue ? (
-                      <span className="muted">Support is available for active or fulfilled assigned orders.</span>
-                    ) : openLinkedSupportTicket ? (
-                      <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
-                    ) : (
-                      <span className="muted">Order, shipment, and return context attached. Create a support ticket before escalating.</span>
-                    )}
-                  </>
-                ) : null}
-
-                {relatedSupportTickets.length ? (
-                  <div className="order-support-ticket-list" aria-label="Support ticket summary">
-                    <strong>Tickets · {relatedSupportTickets.length}</strong>
-                    {relatedSupportTickets.slice(0, 3).map((ticket) => (
-                      <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                        <span className="order-support-ticket-status">{formatSupportTicketStatus(ticket.status)}</span>
-                        <strong>{ticket.subject}</strong>
-                        <span className="order-support-ticket-meta">
-                          <span>{formatSupportTicketPriority(ticket.priority)}</span>
-                          <span>Updated {formatOptionalDate(ticket.updatedAt)}</span>
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="muted">No support tickets linked to this order yet.</span>
-                )}
-
-                {isAdmin ? (
-                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
-                    <summary className="provider-response-heading">
-                      <strong>Admin support context</strong>
-                      <span>Copy utilities</span>
-                    </summary>
-                    {relatedSupportTickets[0] ? (
-                      <>
-                        <div className="summary-row">
-                          <span>Latest vendor note</span>
-                          <strong>{relatedSupportTickets[0].message || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Latest status</span>
-                          <strong>{formatSupportTicketStatus(relatedSupportTickets[0].status)}</strong>
-                        </div>
-                      </>
-                    ) : null}
-                    <div className="order-inline-actions">
-                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('diagnostics')}>
-                        Copy diagnostics
-                      </button>
-                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment-summary')}>
-                        Copy shipment summary
-                      </button>
-                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return-summary')}>
-                        Copy return summary
-                      </button>
-                    </div>
-                    {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics}.</span> : null}
-                  </details>
-                ) : null}
-              </div>
-            </article>
-
-            {order ? (
-              <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
-            ) : null}
-          </div>
-
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">
               <div>
-                <h2>Shipment & delivery</h2>
+                <h2>{isAdmin ? 'Shipment & delivery' : 'Shipment'}</h2>
                 <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
             {canUseFulfillmentActions ? (
               <div className="action-row vendor-action-panel">
                 <div className="vendor-actions-heading">
-                  <h3>Shipment</h3>
+                  <h3>Shipment details</h3>
                 </div>
                 {isRealMode ? (
                   <>
@@ -7849,18 +7455,6 @@ export function OrderDetailPage() {
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
-                    {shouldShowCreateShipmentAction ? (
-                      <div className="detail-actions">
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          disabled={isCreatingShipment}
-                          onClick={() => handleCreateShipment()}
-                        >
-                          {isCreatingShipment ? 'Creating...' : 'Create shipment'}
-                        </button>
-                      </div>
-                    ) : null}
                     {shipmentActionState ? (
                       <div className={`shipment-action-feedback action-feedback action-${shipmentActionState.tone}`} aria-live="polite">
                         <strong>{isAdmin ? shipmentActionState.message : getVendorShipmentActionMessage(shipmentActionState)}</strong>
@@ -7947,7 +7541,7 @@ export function OrderDetailPage() {
                     ) : null}
                     {shouldShowRealTrackingForm ? (
                       <form
-                        className="detail-actions tracking-form order-tracking-form"
+                        className="detail-actions tracking-form order-tracking-form order-shipment-action-form"
                         onSubmit={(event) => {
                           event.preventDefault();
 
@@ -8031,6 +7625,18 @@ export function OrderDetailPage() {
                           {isSubmittingTracking ? 'Submitting...' : 'Add tracking information'}
                         </button>
                       </form>
+                    ) : null}
+                    {shouldShowCreateShipmentAction ? (
+                      <div className="detail-actions order-shipment-primary-action">
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          disabled={isCreatingShipment}
+                          onClick={() => handleCreateShipment()}
+                        >
+                          {isCreatingShipment ? 'Creating...' : 'Create shipment'}
+                        </button>
+                      </div>
                     ) : null}
                   </>
                 ) : (
@@ -9811,45 +9417,463 @@ export function OrderDetailPage() {
             )}
           </article>
 
-          {canShowOrderIssueActions ? (
-            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
+          {isAdmin && order.orderSnapshot?.vendorInvoiceNumber ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Vendor invoice">
               <div className="order-card-heading">
                 <div>
-                  <h2>Order issue</h2>
+                  <h2>Vendor Invoice</h2>
+                  <p>Provider-reported invoice reference. Informational only; no accounting posting is created here.</p>
                 </div>
               </div>
-              <div className="allocation-split-entry-card">
+              <div className="order-financial-impact-grid order-finance-preview-grid">
                 <div>
-                  <strong>Unavailable items</strong>
-                  <span>Reject selected items or send the full order to admin review.</span>
+                  <span>Invoice Number</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceNumber}</strong>
                 </div>
-                <div className="orders-reject-action-stack">
-                  {canOpenSplitReject ? (
-                    <button
-                      type="button"
-                      className="button button-danger"
-                      onClick={() => setSplitRejectOpen(true)}
-                    >
-                      Reject selected items
-                    </button>
-                  ) : null}
-                  {canOpenFullReject ? (
-                    <button
-                      type="button"
-                      className={canOpenSplitReject ? 'button button-secondary' : 'button button-danger'}
-                      onClick={() => {
-                        setRejectReason('OUT_OF_STOCK');
-                        setRejectNote('');
-                        setFullRejectOpen(true);
-                      }}
-                    >
-                      Reject full order
-                    </button>
-                  ) : null}
+                <div>
+                  <span>Invoice Date</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceDate ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Invoice Amount</span>
+                  <strong>{formatSnapshotAmount(order.orderSnapshot.vendorInvoiceAmount, snapshotCurrency)}</strong>
+                </div>
+                <div>
+                  <span>Received At</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceReceivedAt ? formatOptionalDate(order.orderSnapshot.vendorInvoiceReceivedAt) : '—'}</strong>
+                </div>
+              </div>
+              {order.orderSnapshot.vendorInvoiceUrl ? (
+                <div className="orders-rail-summary-list">
+                  <div>
+                    <span>Invoice URL</span>
+                    <strong>
+                      <a className="inline-link" href={order.orderSnapshot.vendorInvoiceUrl} target="_blank" rel="noreferrer">
+                        Open invoice
+                      </a>
+                    </strong>
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          ) : null}
+
+          {isAdmin ? (
+          <article
+            id="settlement-preview"
+            ref={settlementPreviewRef}
+            className={`order-detail-card-v2 order-financial-summary-card order-workspace-panel${isActiveVendorBlockedOrder ? ' order-financial-summary-held' : ''}`}
+            aria-label="Order finance preview"
+            tabIndex={-1}
+          >
+            <div className="order-card-heading">
+              <div>
+                <h2>
+                  {isRefundResolvedVendorBlockedOrder
+                    ? 'Refund completed'
+                    : isActiveVendorBlockedOrder
+                      ? 'Settlement on hold'
+                      : 'Settlement preview'}
+                </h2>
+                <p>
+                  {isRefundResolvedVendorBlockedOrder
+                    ? 'Shopify refund processed. Fulfillment is no longer required.'
+                    : isActiveVendorBlockedOrder
+                    ? 'Vendor rejected allocation. Settlement is excluded until resolution.'
+                    : ORDER_FINANCE_HELPER_COPY}
+                </p>
+              </div>
+              <span className="order-preview-badge">
+                {isRefundResolvedVendorBlockedOrder ? 'Resolved' : isActiveVendorBlockedOrder ? 'Held' : 'Preview'}
+              </span>
+            </div>
+            {isRefundResolvedVendorBlockedOrder ? (
+              <div className="finance-hold-notice finance-hold-resolved" aria-label="Refund completion status">
+                <div>
+                  <span>Refund status</span>
+                  <strong>Refund impact recorded.</strong>
+                </div>
+                <p>
+                  Vendor-blocked settlement hold no longer applies because the Shopify refund completed.
+                </p>
+              </div>
+            ) : isActiveVendorBlockedOrder ? (
+              <div className="finance-hold-notice" aria-label="Finance hold reason">
+                <div>
+                  <span>Finance hold reason</span>
+                  <strong>Vendor blocked allocation.</strong>
+                </div>
+                <p>
+                  Settlement eligibility returns only after transfer completed or refund resolved.
+                </p>
+              </div>
+            ) : (
+              <WorkflowActionGuidance
+                actionLabel={orderSettlementGuidance.actionLabel}
+                description={orderSettlementGuidance.description}
+                tone={orderSettlementGuidance.tone}
+              />
+            )}
+            <div className={`order-financial-impact-grid order-finance-preview-grid${isActiveVendorBlockedOrder ? ' order-finance-preview-held' : ''}`}>
+              {financePreviewRows.map((row) => (
+                <div key={row.label}>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                  <em>{row.state}</em>
+                </div>
+              ))}
+            </div>
+            {financeUnknownIndicators.length ? (
+              <div className="finance-inline-unknowns" aria-label="Finance unknown indicators">
+                <span>Unknown inputs</span>
+                {Array.from(new Set(financeUnknownIndicators)).map((unknown) => (
+                  <strong key={unknown}>{toTitleCaseLabel(unknown.replace(/_/g, ' '))}</strong>
+                ))}
+              </div>
+            ) : null}
+          </article>
+          ) : null}
+
+          {isAdmin ? (
+          <article className="order-detail-card-v2 order-finance-timeline-card order-workspace-panel" aria-label="Finance timeline">
+            <div className="order-card-heading">
+              <div>
+                <h2>Finance timeline</h2>
+                <p>{ORDER_FINANCE_TIMELINE_HELPER_COPY}</p>
+              </div>
+              <span className="order-preview-badge">Preview</span>
+            </div>
+            {visibleFinanceTimelineItems.length ? (
+              <ol className="order-finance-timeline-list">
+                {visibleFinanceTimelineItems.map((item) => (
+                  <li key={item.id}>
+                    <span className={`order-finance-timeline-dot op-tone-${item.tone ?? 'neutral'}`} aria-hidden="true" />
+                    <div className="order-finance-timeline-content">
+                      <div className="order-finance-timeline-title-row">
+                        {item.href ? <Link to={item.href}>{item.title}</Link> : <strong>{item.title}</strong>}
+                        {item.status ? (
+                          <span className={`order-finance-timeline-status op-tone-${item.tone ?? 'neutral'}`}>{item.status}</span>
+                        ) : null}
+                      </div>
+                      {item.description ? <p>{item.description}</p> : null}
+                      <small>{formatOptionalDate(item.at ?? undefined)}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="order-empty-copy">No finance events available yet.</p>
+            )}
+          </article>
+          ) : null}
+
+          {isAdmin && order.financeLedgerPreview ? (
+            <article className="order-detail-card-v2 order-finance-ledger-card order-workspace-panel" aria-label="Finance ledger preview">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Finance ledger preview</h2>
+                  <p>Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.</p>
+                </div>
+              </div>
+              <div className="order-financial-impact-grid">
+                <div>
+                  <span>Vendor settlement estimate</span>
+                  <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
+                </div>
+                <div>
+                  <span>Marketplace commission estimate</span>
+                  <strong>{formatCurrency(order.financeLedgerPreview.balance.marketplaceCommission, order.financeLedgerPreview.currency)}</strong>
+                </div>
+                <div>
+                  <span>Refund impact</span>
+                  <strong>
+                    {order.financeLedgerPreview.balance.vendorDebt !== '0.00'
+                      ? `Debt ${formatCurrency(order.financeLedgerPreview.balance.vendorDebt, order.financeLedgerPreview.currency)}`
+                      : formatCurrency(
+                          String(
+                            Math.max(
+                              Number(order.financeLedgerPreview.balance.grossSales) -
+                                Number(order.financeLedgerPreview.balance.marketplaceCommission) -
+                                Number(order.financeLedgerPreview.balance.vendorPayable),
+                              0,
+                            ).toFixed(2),
+                          ),
+                          order.financeLedgerPreview.currency,
+                        )}
+                  </strong>
+                </div>
+              </div>
+              <details className="provider-response-summary admin-diagnostics-panel" aria-label="Finance preview diagnostics">
+                <summary className="provider-response-heading">
+                  <strong>Finance preview diagnostics</strong>
+                  <span>Admin diagnostics</span>
+                </summary>
+                <div className="summary-row">
+                  <span>Status</span>
+                  <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Unknown fields</span>
+                  <strong>{order.financeLedgerPreview.unknowns.length ? order.financeLedgerPreview.unknowns.join(', ') : '—'}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Source fields</span>
+                  <strong>
+                    {order.financeLedgerPreview.sourceFields.lineItemCount} line items · {order.financeLedgerPreview.sourceFields.returnCount} returns ·{' '}
+                    {order.financeLedgerPreview.sourceFields.refundCount} refunds
+                  </strong>
+                </div>
+                <div className="summary-row">
+                  <span>Assumptions</span>
+                  <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
+                </div>
+                <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
+                  {safeArray(order.financeLedgerPreview.entries).slice(0, 12).map((entry) => (
+                    <div className="summary-row" key={entry.id}>
+                      <span>{toTitleCaseLabel(entry.eventType)}</span>
+                      <strong>
+                        {[
+                          entry.impact.vendorPayable ? `settlement ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
+                          entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
+                          entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
+                          entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
+                        ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </article>
+          ) : null}
+
+          {isAdmin || hasVisibleLinkedRecords ? (
+            <div className="order-linked-records-panel">
+              <OperationalLinkCards
+                title="Linked records"
+                subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
+                links={orderCrossLinks}
+                audience={audience}
+              />
+              {relatedSupportTickets.length > 1 ? (
+                <details className="finance-support-history">
+                  <summary>
+                    <span>
+                      <strong>Support history</strong>
+                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
+                    </span>
+                    <span className="op-badge op-tone-neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</span>
+                  </summary>
+                  <div className="finance-support-history-list">
+                    {relatedSupportTickets.map((ticket) => (
+                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span>
+                          <strong>{ticket.subject}</strong>
+                          <small>{formatSupportTicketStatus(ticket.status)} · {formatSupportTicketPriority(ticket.priority)}</small>
+                        </span>
+                        <small>{formatOptionalDate(getSupportLatestActivityAt(ticket))}</small>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
+        </main>
+
+        <aside className="order-detail-right-rail" aria-label="Order timeline and support">
+          <div className="order-detail-sidebar-flow">
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Right panel status">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Status</h2>
+                </div>
+              </div>
+              <div className="orders-status-axis-grid" aria-label="Right panel status axes">
+                <div className="orders-status-axis">
+                  <span>Status</span>
+                  <span className={`status-badge status-${operationalStatusClass}`}>
+                    {operationalStatusLabel}
+                  </span>
+                </div>
+                <div className="orders-status-axis">
+                  <span>Payment Status</span>
+                  <span className={`status-badge status-${getPaymentStatusClass(paymentStatusLabel)}`}>
+                    {paymentStatusLabel}
+                  </span>
                 </div>
               </div>
             </article>
-          ) : null}
+
+            {canShowOrderIssueActions ? (
+              <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
+                <div className="order-card-heading">
+                  <div>
+                    <h2>Order issue</h2>
+                  </div>
+                </div>
+                <div className="allocation-split-entry-card">
+                  <div>
+                    <strong>Unavailable items</strong>
+                    <span>Reject selected items or send the full order to admin review.</span>
+                  </div>
+                  <div className="orders-reject-action-stack">
+                    {canOpenSplitReject ? (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        onClick={() => setSplitRejectOpen(true)}
+                      >
+                        Reject selected items
+                      </button>
+                    ) : null}
+                    {canOpenFullReject ? (
+                      <button
+                        type="button"
+                        className={canOpenSplitReject ? 'button button-secondary' : 'button button-danger'}
+                        onClick={() => {
+                          setRejectReason('OUT_OF_STOCK');
+                          setRejectNote('');
+                          setFullRejectOpen(true);
+                        }}
+                      >
+                        Reject full order
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            ) : null}
+
+            <OperationalTimeline
+              title={isAdmin ? 'Timeline' : 'Order activity'}
+              subtitle="Order, shipment, return, and support activity."
+              events={groupOrderDetailTimelineEvents([
+                ...safeArray(order.timeline)
+                  .filter((entry) => !isRawProviderTimelineLabel(entry.label))
+                  .map((entry) => ({
+                    id: `order-native-${entry.label}-${entry.at}`,
+                    title: getVendorTimelineLabel(entry.label),
+                    at: entry.at,
+                    tone: 'neutral' as const,
+                    visibility: getNativeTimelineVisibility(entry.label),
+                  })),
+                ...orderTimelineEvents,
+              ]).sort(
+                (left, right) =>
+                  getSafeTimestamp(left.at ?? order.date, Number.POSITIVE_INFINITY) -
+                  getSafeTimestamp(right.at ?? order.date, Number.POSITIVE_INFINITY),
+              )}
+              audience={audience}
+              emptyMessage="No records available."
+            />
+
+            <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Support</h2>
+                  <p>{isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.'}</p>
+                </div>
+              </div>
+              <div className="order-support-compact-stack">
+                {isVendorAssignedOwner ? (
+                  <>
+                    <div className="order-support-action-row">
+                      {linkedSupportTicketHref ? (
+                        <Link className="button button-secondary button-compact order-support-contact-button" to={linkedSupportTicketHref}>
+                          Contact support
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact order-support-contact-button"
+                          onClick={() => setSupportOpen(true)}
+                          disabled={!canReportIssue}
+                        >
+                          Contact support
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        onClick={() => {
+                          if (openLinkedSupportTicket) {
+                            void escalateSupportTicketMutation(openLinkedSupportTicket.id);
+                          }
+                        }}
+                        disabled={!openLinkedSupportTicket || linkedSupportTicketEscalated || isEscalatingSupportTicket}
+                      >
+                        {isEscalatingSupportTicket ? 'Escalating…' : linkedSupportTicketEscalated ? 'Escalated' : 'Escalate'}
+                      </button>
+                    </div>
+                    {!canReportIssue ? (
+                      <span className="muted">Support is available for active or fulfilled assigned orders.</span>
+                    ) : openLinkedSupportTicket ? (
+                      <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
+                    ) : (
+                      <span className="muted">Order, shipment, and return context attached. Create a support ticket before escalating.</span>
+                    )}
+                  </>
+                ) : null}
+
+                {relatedSupportTickets.length ? (
+                  <div className="order-support-ticket-list" aria-label="Support ticket summary">
+                    <strong>Tickets · {relatedSupportTickets.length}</strong>
+                    {relatedSupportTickets.slice(0, 3).map((ticket) => (
+                      <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span className="order-support-ticket-status">{formatSupportTicketStatus(ticket.status)}</span>
+                        <strong>{ticket.subject}</strong>
+                        <span className="order-support-ticket-meta">
+                          <span>{formatSupportTicketPriority(ticket.priority)}</span>
+                          <span>Updated {formatOptionalDate(ticket.updatedAt)}</span>
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="muted">No support tickets linked to this order yet.</span>
+                )}
+
+                {isAdmin ? (
+                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
+                    <summary className="provider-response-heading">
+                      <strong>Admin support context</strong>
+                      <span>Copy utilities</span>
+                    </summary>
+                    {relatedSupportTickets[0] ? (
+                      <>
+                        <div className="summary-row">
+                          <span>Latest vendor note</span>
+                          <strong>{relatedSupportTickets[0].message || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Latest status</span>
+                          <strong>{formatSupportTicketStatus(relatedSupportTickets[0].status)}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="order-inline-actions">
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('diagnostics')}>
+                        Copy diagnostics
+                      </button>
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment-summary')}>
+                        Copy shipment summary
+                      </button>
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return-summary')}>
+                        Copy return summary
+                      </button>
+                    </div>
+                    {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics}.</span> : null}
+                  </details>
+                ) : null}
+              </div>
+            </article>
+
+            {order ? (
+              <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
+            ) : null}
+          </div>
+
+
         </aside>
       </div>
 

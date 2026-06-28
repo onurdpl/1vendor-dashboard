@@ -2336,8 +2336,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/^Guided Operations$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Items/ })).toBeInTheDocument();
+    const itemsSection = screen.getByRole('heading', { name: /Items/ }).closest('article') as HTMLElement;
     const financialSummary = screen.getByLabelText('Order financial summary');
     expect(within(financialSummary).getByRole('heading', { name: 'Order financial summary' })).toBeInTheDocument();
     expect(within(financialSummary).getByText('Gross Order Amount')).toBeInTheDocument();
@@ -2351,6 +2352,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
     expect(within(financialSummary).queryByText('Payment status')).not.toBeInTheDocument();
+    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article') as HTMLElement;
+    expect(Boolean(itemsSection.compareDocumentPosition(financialSummary) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(financialSummary.compareDocumentPosition(shipmentSection) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Gross order amount')).not.toBeInTheDocument();
     expect(screen.queryByText('Estimated settlement')).not.toBeInTheDocument();
@@ -2421,10 +2425,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(orderIssue).getByText('Reject selected items or send the full order to admin review.')).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject full order' })).toBeInTheDocument();
-    const shipmentSection = screen.getByRole('heading', { name: 'Shipment & delivery' }).closest('article') as HTMLElement;
+    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article') as HTMLElement;
     expect(within(shipmentSection).queryByRole('button', {
       name: 'Reject selected items',
     })).not.toBeInTheDocument();
+    const rail = screen.getByLabelText('Order timeline and support');
+    expect(rail).toContainElement(orderIssue);
     expect(
       shipmentSection.compareDocumentPosition(orderIssue) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -2520,7 +2526,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Vendor Blocked')).toBeInTheDocument();
+    expect((await screen.findAllByText('Vendor Blocked')).length).toBeGreaterThan(0);
     const axes = screen.getByLabelText('Order status axes');
     expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
     expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
@@ -2643,16 +2649,21 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const sidebarFlow = rail.querySelector('.order-detail-sidebar-flow');
     expect(sidebarFlow).toBeInstanceOf(HTMLElement);
 
+    const statusCard = within(sidebarFlow as HTMLElement).getByLabelText('Right panel status');
     const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Order activity' }).closest('article');
     const supportCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Support' }).closest('article');
 
+    expect(statusCard).toBeInTheDocument();
     expect(timelineCard).not.toBeNull();
     expect(supportCard).not.toBeNull();
+    expect(statusCard.parentElement).toBe(sidebarFlow);
     expect(timelineCard?.parentElement).toBe(sidebarFlow);
     expect(supportCard?.parentElement).toBe(sidebarFlow);
     expect(supportCard?.parentElement).not.toBe(rail);
+    expect(Boolean(statusCard.compareDocumentPosition(timelineCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(timelineCard!.compareDocumentPosition(supportCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Array.from(sidebarFlow!.children).map((child) => child.className)).toEqual([
+      expect.stringContaining('order-workspace-panel'),
       expect.stringContaining('operational-timeline-card'),
       expect.stringContaining('order-support-card'),
     ]);
@@ -3786,7 +3797,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(runtimeDiagnosticsMocks.navlungoCheckPostProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });
     expect(await screen.findByLabelText('Navlungo Check Post probe result')).toBeInTheDocument();
     expect(screen.getByText('Check Post HTTP').closest('.summary-row')).toHaveTextContent('200');
-    expect(screen.getByText('Status').closest('.summary-row')).toHaveTextContent('To be Picked Up');
+    expect(
+      within(screen.getByLabelText('Navlungo Check Post probe result')).getByText('Status').closest('.summary-row'),
+    ).toHaveTextContent('To be Picked Up');
 
     await user.click(screen.getByRole('button', { name: 'Run Navlungo Barcode probe' }));
     expect(runtimeDiagnosticsMocks.navlungoBarcodeProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });

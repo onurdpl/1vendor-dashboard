@@ -8410,6 +8410,13 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: 1fr;
 }
 
+.order-primary-action-card .order-shipment-action-form {
+  padding: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
 .order-primary-action-card .field,
 .order-primary-action-card .checkbox-field {
   margin: 0;
@@ -8429,6 +8436,16 @@ summary.provider-response-heading::-webkit-details-marker {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.order-shipment-primary-action {
+  padding-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.order-shipment-primary-action .button-primary {
+  width: 100%;
+  justify-content: center;
 }
 
 .order-primary-action-card .order-inline-actions .button,
