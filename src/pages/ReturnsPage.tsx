@@ -29,6 +29,7 @@ import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
 import { isActiveReturnReviewStatus, isTerminalRefundedReturn } from '../lib/returnOperationalState';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
+type ReturnWorkflowTabKey = 'all' | 'needs-action' | 'approved' | 'refunded' | 'closed';
 type ReturnRowItemCandidate = {
   name?: unknown;
   title?: unknown;
@@ -174,6 +175,19 @@ function isRefundedReturn(item: ReturnSummary) {
 function needsAttention(item: ReturnSummary) {
   const normalized = item.status?.toLowerCase() ?? '';
   return normalized === 'requested' || normalized === 'awaiting_review' || normalized === 'awaiting review' || normalized === 'pending' || normalized === 'in review';
+}
+
+function normalizeReturnStatus(value: string | null | undefined) {
+  return String(value ?? '').toLowerCase().replace(/[_-]+/g, ' ').trim();
+}
+
+function isApprovedReturn(item: ReturnSummary) {
+  return normalizeReturnStatus(item.status) === 'approved';
+}
+
+function isClosedReturn(item: ReturnSummary) {
+  const normalized = normalizeReturnStatus(item.status);
+  return ['closed', 'cancelled', 'declined', 'rejected'].includes(normalized) && !isRefundedReturn(item);
 }
 
 function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
@@ -527,13 +541,44 @@ function returnMatchesTarget(item: ReturnSummary, target: string | null) {
 }
 
 function getReturnsWorkflowFilter(workflow: string | null) {
-  if (workflow === 'pending-review') {
+  if (workflow === 'pending-review' || workflow === 'needs-action') {
     return {
-      label: 'Pending review',
+      key: 'needs-action' as ReturnWorkflowTabKey,
+      label: 'Needs Action',
       description: 'Showing Shopify return requests that need vendor review.',
       emptyTitle: 'No returns currently awaiting review',
       emptyDescription: 'The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.',
-      sourceFilter: 'pending' as ReturnSourceFilter,
+      matches: needsAttention,
+    };
+  }
+  if (workflow === 'approved') {
+    return {
+      key: 'approved' as ReturnWorkflowTabKey,
+      label: 'Approved',
+      description: 'Showing approved returns.',
+      emptyTitle: 'No approved returns',
+      emptyDescription: 'Approved returns will appear here when vendor review is complete.',
+      matches: isApprovedReturn,
+    };
+  }
+  if (workflow === 'refunded') {
+    return {
+      key: 'refunded' as ReturnWorkflowTabKey,
+      label: 'Refunded',
+      description: 'Showing refunded and completed return records.',
+      emptyTitle: 'No refunded returns',
+      emptyDescription: 'Refunded returns will appear here after refund evidence is recorded.',
+      matches: isRefundedReturn,
+    };
+  }
+  if (workflow === 'closed') {
+    return {
+      key: 'closed' as ReturnWorkflowTabKey,
+      label: 'Closed',
+      description: 'Showing closed, cancelled, declined, or rejected returns.',
+      emptyTitle: 'No closed returns',
+      emptyDescription: 'Closed return records will appear here when return work is complete without a refund.',
+      matches: isClosedReturn,
     };
   }
   return null;
@@ -590,6 +635,18 @@ export function ReturnsPage() {
     setSearchParams(nextParams, { replace: true });
   }
 
+  function setWorkflowTab(workflow: ReturnWorkflowTabKey) {
+    const nextParams = new URLSearchParams(searchParams);
+    if (workflow === 'all') {
+      nextParams.delete('workflow');
+    } else if (workflow === 'needs-action') {
+      nextParams.set('workflow', 'pending-review');
+    } else {
+      nextParams.set('workflow', workflow);
+    }
+    setSearchParams(nextParams, { replace: true });
+  }
+
   function handleResetFilters() {
     clearWorkflowFilter();
     setSearchTerm('');
@@ -601,7 +658,7 @@ export function ReturnsPage() {
   const vendorLookup = useMemo(() => {
     return new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
   }, []);
-  const effectiveSourceFilter = activeWorkflowFilter?.sourceFilter ?? sourceFilter;
+  const effectiveSourceFilter = sourceFilter;
 
   const filteredReturns = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -671,9 +728,10 @@ export function ReturnsPage() {
         effectiveSourceFilter === 'all' ||
         (effectiveSourceFilter === 'pending' && isPendingReturn(item)) ||
         (effectiveSourceFilter === 'refunded' && isRefundedReturn(item));
-      return matchesQuery && matchesStatus && matchesVendor && matchesSource;
+      const matchesWorkflow = activeWorkflowFilter?.matches(item) ?? true;
+      return matchesQuery && matchesStatus && matchesVendor && matchesSource && matchesWorkflow;
     });
-  }, [effectiveSourceFilter, returns, searchTerm, statusFilter, vendorFilter]);
+  }, [activeWorkflowFilter, effectiveSourceFilter, returns, searchTerm, statusFilter, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
     const returnList = safeArray(returns);
@@ -706,12 +764,50 @@ export function ReturnsPage() {
   const selectedDetail = detailQuery.data;
 
   const returnRows = safeArray(returns);
-  const pendingCount = returnRows.filter(isPendingReturn).length;
-  const approvedCount = returnRows.filter((item) => item.status === 'Approved').length;
+  const approvedCount = returnRows.filter(isApprovedReturn).length;
   const processedCount = returnRows.filter(isRefundedReturn).length;
   const attentionCount = returnRows.filter(needsAttention).length;
+  const closedCount = returnRows.filter(isClosedReturn).length;
   const statuses = Array.from(new Set(returnRows.map((item) => item.status)));
   const vendors = Array.from(new Set(returnRows.map((item) => item.assignedVendorId)));
+  const workflowTabs: Array<{
+    key: ReturnWorkflowTabKey;
+    label: string;
+    description: string;
+    count: number;
+  }> = [
+    {
+      key: 'all',
+      label: 'All',
+      description: 'Full return list',
+      count: returnRows.length,
+    },
+    {
+      key: 'needs-action',
+      label: 'Needs Action',
+      description: 'Review required',
+      count: attentionCount,
+    },
+    {
+      key: 'approved',
+      label: 'Approved',
+      description: 'Vendor reviewed',
+      count: approvedCount,
+    },
+    {
+      key: 'refunded',
+      label: 'Refunded',
+      description: 'Refund complete',
+      count: processedCount,
+    },
+    {
+      key: 'closed',
+      label: 'Closed',
+      description: 'No active review',
+      count: closedCount,
+    },
+  ];
+  const activeWorkflowKey = activeWorkflowFilter?.key ?? 'all';
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
   const selectedShipment = selectedReturn ? getReturnShipment(selectedReturn, selectedDetail ?? null) : null;
   const hasReturnShipment = Boolean(
@@ -728,13 +824,6 @@ export function ReturnsPage() {
         returnTrackingPresent: Boolean(selectedShipment?.trackingNumber || selectedShipment?.trackingUrl),
       }
     : null;
-  const kpis = [
-    { label: 'Pending review', value: pendingCount, helper: 'Open requests', tone: 'attention' },
-    { label: 'Awaiting shipment', value: approvedCount, helper: 'Approved returns', tone: 'info' },
-    { label: 'Refunded', value: processedCount, helper: 'Completed refunds', tone: 'success' },
-    { label: 'Needs action', value: attentionCount, helper: 'Operational queue', tone: attentionCount > 0 ? 'warning' : 'success' },
-  ] as const;
-
   return (
     <section className="op-page returns-control-center">
       <div className="op-page-heading returns-compact-heading">
@@ -745,16 +834,23 @@ export function ReturnsPage() {
         <StatusBadge tone="info">Phase 16A foundation</StatusBadge>
       </div>
 
-      <div className="returns-kpi-strip" aria-label="Returns summary">
-        {kpis.map((kpi) => (
-          <article key={kpi.label} className={`returns-mini-kpi returns-mini-kpi-${kpi.tone}`}>
-            <div>
-              <strong>{kpi.value}</strong>
-              <span>{kpi.label}</span>
-              <small>{kpi.helper}</small>
-            </div>
-          </article>
-        ))}
+      <div className="orders-workflow-tabs returns-workflow-tabs" aria-label="Returns workflow tabs">
+        {workflowTabs.map((tab) => {
+          const isActive = activeWorkflowKey === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className={isActive ? 'is-active' : ''}
+              aria-pressed={isActive}
+              onClick={() => setWorkflowTab(tab.key)}
+            >
+              <span>{tab.label}</span>
+              <strong>{tab.count}</strong>
+              <small>{tab.description}</small>
+            </button>
+          );
+        })}
       </div>
 
       <div className="returns-status-row" aria-label="Return workspace status">
@@ -825,53 +921,6 @@ export function ReturnsPage() {
               </button>
             </FilterBar>
           </OperationalToolbar>
-
-          {activeWorkflowFilter ? (
-            <div className="workflow-filter-banner" aria-label="Active workflow filter">
-              <div>
-                <span>Workflow filter</span>
-                <strong>{activeWorkflowFilter.label}</strong>
-                <small>{activeWorkflowFilter.description}</small>
-              </div>
-              <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
-                Clear workflow
-              </button>
-            </div>
-          ) : null}
-
-          <div className="returns-filter-summary">
-            <button
-              type="button"
-              className={effectiveSourceFilter === 'all' ? 'is-active' : ''}
-              onClick={() => {
-                clearWorkflowFilter();
-                setSourceFilter('all');
-              }}
-            >
-              All returns <strong>{returnRows.length}</strong>
-            </button>
-            <button
-              type="button"
-              className={effectiveSourceFilter === 'pending' ? 'is-active' : ''}
-              onClick={() => {
-                clearWorkflowFilter();
-                setSourceFilter('pending');
-              }}
-            >
-              Pending review <strong>{pendingCount}</strong>
-            </button>
-            <button
-              type="button"
-              className={effectiveSourceFilter === 'refunded' ? 'is-active' : ''}
-              onClick={() => {
-                clearWorkflowFilter();
-                setSourceFilter('refunded');
-              }}
-            >
-              Refunded <strong>{processedCount}</strong>
-            </button>
-            <span>Needs action <strong>{attentionCount}</strong></span>
-          </div>
 
           <OperationalTable
             columns={[

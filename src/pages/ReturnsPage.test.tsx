@@ -380,13 +380,13 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage(['/returns?workflow=pending-review']);
 
-    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
-    expect(screen.getByRole('button', { name: /Pending review/i })).toHaveClass('is-active');
+    const workflowTabs = await screen.findByLabelText('Returns workflow tabs');
+    expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Barcode gateway license')).not.toBeInTheDocument();
     expect(screen.queryByText('#1098')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /^All/i }));
 
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
     expect(await screen.findByText('#1098')).toBeInTheDocument();
@@ -400,7 +400,7 @@ describe('ReturnsPage control center', () => {
 
     expect(await screen.findByText('No returns currently awaiting review')).toBeInTheDocument();
     expect(screen.getByText('The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
+    expect(within(screen.getByLabelText('Returns workflow tabs')).getByRole('button', { name: /Needs Action/i })).toHaveClass('is-active');
     expect(screen.getByText('No return selected')).toBeInTheDocument();
     expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
   });
@@ -415,11 +415,12 @@ describe('ReturnsPage control center', () => {
 
     expect(await screen.findByText('#1098')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /Pending review/i }));
+    const workflowTabs = screen.getByLabelText('Returns workflow tabs');
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /Needs Action/i }));
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1098')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /Refunded/i }));
+    await userEvent.click(within(workflowTabs).getByRole('button', { name: /Refunded/i }));
     expect(await screen.findByText('#1098')).toBeInTheDocument();
     expect(screen.queryByText('#1001')).not.toBeInTheDocument();
   });
@@ -446,10 +447,10 @@ describe('ReturnsPage control center', () => {
     expect(within(timeline as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Closed')).toBeInTheDocument();
 
-    const summary = screen.getByLabelText('Returns summary');
-    expect(within(summary).getByText('Pending review').closest('article')).toHaveTextContent('0');
-    expect(within(summary).getByText('Refunded').closest('article')).toHaveTextContent('1');
-    expect(within(summary).getByText('Needs action').closest('article')).toHaveTextContent('0');
+    const workflowTabs = screen.getByLabelText('Returns workflow tabs');
+    expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveTextContent('0');
+    expect(within(workflowTabs).getByRole('button', { name: /Refunded/i })).toHaveTextContent('1');
+    expect(within(workflowTabs).getByRole('button', { name: /^All/i })).toHaveTextContent('1');
   });
 
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
@@ -619,8 +620,8 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage();
 
     expect((await screen.findAllByText('Awaiting Review')).length).toBeGreaterThan(0);
-    const summary = screen.getByLabelText('Returns summary');
-    expect(within(summary).getByText('Needs action').closest('article')).toHaveTextContent('1');
+    const workflowTabs = screen.getByLabelText('Returns workflow tabs');
+    expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveTextContent('1');
   });
 
   it('resolves table item names from nested row product data without selecting the row', async () => {
