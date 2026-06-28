@@ -44,6 +44,13 @@ type RecentOrderRow = {
   detailTo: string;
 };
 
+type DashboardRecentChange = {
+  id: string;
+  title: string;
+  detail: string;
+  meta: string;
+};
+
 function asDisplayValue(value: string | number | null | undefined, fallback = '0') {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? String(value) : fallback;
@@ -244,6 +251,30 @@ function buildRecentOrderRows(orders: OrderSummary[] | undefined): RecentOrderRo
     tone: getOrderStatusTone(order),
     date: formatOrderDate(order.date),
     detailTo: `/orders/${encodeURIComponent(order.id)}`,
+  }));
+}
+
+function buildRecentChanges(dashboard: DashboardOverview, recentOrders: RecentOrderRow[]): DashboardRecentChange[] {
+  const activityChanges = dashboard.recentActivity
+    .map((activity, index) => activity.trim())
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((activity, index) => ({
+      id: `activity-${index}-${activity}`,
+      title: activity,
+      detail: 'Store activity update',
+      meta: 'Recent',
+    }));
+
+  if (activityChanges.length > 0) {
+    return activityChanges;
+  }
+
+  return recentOrders.slice(0, 4).map((order) => ({
+    id: `order-${order.orderNumber}`,
+    title: `${order.orderNumber} is ${order.status}`,
+    detail: 'Order activity',
+    meta: order.date,
   }));
 }
 
@@ -459,6 +490,7 @@ export function DashboardPage() {
   const lastPayment = 'TRY 0';
   const lastPaymentDate = 'Not available';
   const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
+  const recentChanges = buildRecentChanges(dashboardView, recentOrders);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
 
   if (pageReadiness.status === 'missing_vendor_context') {
@@ -579,84 +611,96 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="dashboard-vendor-panel dashboard-vendor-recent-panel" aria-label="Recent orders">
+      <section className="dashboard-vendor-panel dashboard-vendor-recent-panel" aria-label="Recent changes">
         <div className="dashboard-vendor-panel-header">
           <div>
-            <h2>Recent Orders</h2>
+            <h2>Recent Changes</h2>
+            <p>Latest store updates from orders, returns, payments, and support.</p>
           </div>
           <Link className="dashboard-vendor-panel-link" to="/orders">
-            View all orders
+            Open orders
             <ArrowIcon />
           </Link>
         </div>
-        {isOrdersLoading ? (
-          <div className="dashboard-vendor-table-wrap">
-            <table className="dashboard-vendor-orders-table">
-              <thead>
-                <tr>
-                  <th>Order Number</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colSpan={4}>
-                    <SkeletonText width="14rem" />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        {isDashboardLoading || (isOrdersLoading && recentChanges.length === 0) ? (
+          <div className="dashboard-vendor-change-list">
+            <div className="dashboard-vendor-change-row">
+              <span className="dashboard-vendor-change-dot" aria-hidden="true" />
+              <div>
+                <SkeletonText width="16rem" />
+                <SkeletonText width="10rem" />
+              </div>
+            </div>
+          </div>
+        ) : recentChanges.length > 0 ? (
+          <div className="dashboard-vendor-change-list">
+            {recentChanges.map((change) => (
+              <div className="dashboard-vendor-change-row" key={change.id}>
+                <span className="dashboard-vendor-change-dot" aria-hidden="true" />
+                <div>
+                  <strong>{change.title}</strong>
+                  <small>{change.detail}</small>
+                </div>
+                <span>{change.meta}</span>
+              </div>
+            ))}
           </div>
         ) : isOrdersError ? (
           <div className="dashboard-vendor-empty-orders">
             <EmptyStatePanel
-              title="Recent orders could not be loaded."
+              title="Recent changes could not be loaded."
               description="Open Orders to review the vendor order list."
             />
-          </div>
-        ) : recentOrders.length > 0 ? (
-          <div className="dashboard-vendor-table-wrap">
-            <table className="dashboard-vendor-orders-table">
-              <thead>
-                <tr>
-                  <th>Order Number</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentOrders.map((order) => (
-                  <tr key={order.orderNumber}>
-                    <td>
-                      <strong>{order.orderNumber}</strong>
-                    </td>
-                    <td>
-                      <span className={`dashboard-vendor-status dashboard-vendor-status-${order.tone}`}>
-                        {order.status}
-                      </span>
-                    </td>
-                    <td>{order.date}</td>
-                    <td>
-                      <Link className="dashboard-vendor-open-link" to={order.detailTo}>
-                        Open
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         ) : (
           <div className="dashboard-vendor-empty-orders">
             <EmptyStatePanel
-              title="Recent orders will appear here."
-              description="Real order rows are not part of the current dashboard overview data."
+              title="No recent changes yet."
+              description="Order, return, payment, and support updates will appear here when they happen."
             />
           </div>
         )}
+
+        {recentOrders.length > 0 ? (
+          <details className="dashboard-vendor-orders-details">
+            <summary>
+              <span>Recent orders</span>
+              <small>{recentOrders.length} latest</small>
+            </summary>
+            <div className="dashboard-vendor-table-wrap">
+              <table className="dashboard-vendor-orders-table">
+                <thead>
+                  <tr>
+                    <th>Order Number</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentOrders.map((order) => (
+                    <tr key={order.orderNumber}>
+                      <td>
+                        <strong>{order.orderNumber}</strong>
+                      </td>
+                      <td>
+                        <span className={`dashboard-vendor-status dashboard-vendor-status-${order.tone}`}>
+                          {order.status}
+                        </span>
+                      </td>
+                      <td>{order.date}</td>
+                      <td>
+                        <Link className="dashboard-vendor-open-link" to={order.detailTo}>
+                          Open
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        ) : null}
       </section>
 
       <section className="dashboard-vendor-panel dashboard-vendor-payment-panel" aria-label="Payment summary">

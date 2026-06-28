@@ -15280,6 +15280,13 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 850;
 }
 
+.dashboard-vendor-panel-header p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
 .dashboard-vendor-panel-link,
 .dashboard-vendor-payment-link {
   display: inline-flex;
@@ -15303,6 +15310,93 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #1d4ed8;
   font-size: 0.68rem;
   font-weight: 850;
+}
+
+.dashboard-vendor-change-list {
+  display: grid;
+  gap: 0;
+  padding: 8px 24px;
+}
+
+.dashboard-vendor-change-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e6eaf2;
+}
+
+.dashboard-vendor-change-row:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-vendor-change-dot {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #bfdbfe;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 5px #eff6ff;
+}
+
+.dashboard-vendor-change-row div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dashboard-vendor-change-row strong {
+  color: #0f172a;
+  font-size: 0.94rem;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.dashboard-vendor-change-row small,
+.dashboard-vendor-change-row > span:last-child {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  font-weight: 650;
+}
+
+.dashboard-vendor-change-row > span:last-child {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.dashboard-vendor-orders-details {
+  border-top: 1px solid #e6eaf2;
+}
+
+.dashboard-vendor-orders-details summary {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  color: #334155;
+  cursor: pointer;
+  list-style: none;
+}
+
+.dashboard-vendor-orders-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.dashboard-vendor-orders-details summary span {
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 820;
+}
+
+.dashboard-vendor-orders-details summary small {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 720;
 }
 
 .dashboard-vendor-table-wrap {
@@ -15505,5 +15599,14 @@ summary.provider-response-heading::-webkit-details-marker {
   .dashboard-vendor-attention-hero,
   .dashboard-vendor-action-card {
     padding: 18px;
+  }
+
+  .dashboard-vendor-change-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .dashboard-vendor-change-row > span:last-child {
+    grid-column: 2;
+    justify-self: start;
   }
 }
