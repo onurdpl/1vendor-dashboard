@@ -342,12 +342,10 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByRole('searchbox')).toHaveLength(1);
-    const metricsStrip = screen.getByLabelText('Orders operational metrics');
-    expect(metricsStrip).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Total Orders')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Today Orders')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Awaiting Shipment')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Blocked Orders')).toBeInTheDocument();
+    const workflowTabs = screen.getByLabelText('Orders workflow tabs');
+    expect(workflowTabs).toBeInTheDocument();
+    expect(within(workflowTabs).getByRole('button', { name: /All orders/i })).toHaveClass('is-active');
+    expect(screen.queryByLabelText('Orders operational metrics')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();

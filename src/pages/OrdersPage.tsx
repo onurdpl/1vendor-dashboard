@@ -5,7 +5,6 @@ import {
   EmptyStatePanel,
   FilterBar,
   OperationalActionGroup,
-  OperationalSection,
   SectionErrorRetry,
   SectionSkeleton,
   TableSkeletonRows,
@@ -293,58 +292,6 @@ function parseOperationalAmount(amount: string) {
       : numeric;
   const value = Number.parseFloat(normalized);
   return Number.isFinite(value) ? value : 0;
-}
-
-function isTodayOrder(order: OrderSummary) {
-  const timestamp = getSafeTimestamp(order.date, Number.NaN);
-  if (!Number.isFinite(timestamp)) {
-    return false;
-  }
-
-  const orderDate = new Date(timestamp);
-  const today = new Date();
-  return (
-    orderDate.getFullYear() === today.getFullYear() &&
-    orderDate.getMonth() === today.getMonth() &&
-    orderDate.getDate() === today.getDate()
-  );
-}
-
-function MetricIcon({ tone }: { tone: string }) {
-  if (tone === 'today') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="4" y="5" width="16" height="15" rx="2" />
-        <path d="M8 3v4" />
-        <path d="M16 3v4" />
-        <path d="M4 10h16" />
-      </svg>
-    );
-  }
-  if (tone === 'awaiting') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v4l3 2" />
-      </svg>
-    );
-  }
-  if (tone === 'blocked') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 7v6" />
-        <path d="M12 17h.01" />
-        <circle cx="12" cy="12" r="8" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M6 7h12v10H6z" />
-      <path d="M9 7V5h6v2" />
-      <path d="M9 11h6" />
-    </svg>
-  );
 }
 
 function orderMatchesTarget(order: OrderSummary, target: string | null) {
@@ -675,26 +622,13 @@ export function OrdersPage() {
   const summary = useMemo(() => {
     const source = safeArray(orders);
     return {
-      total: source.length,
-      today: source.filter(isTodayOrder).length,
       awaitingShipment: source.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
     };
   }, [orders]);
 
-  const orderKpis = [
-    { label: 'Total Orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders' },
-    { label: 'Today Orders', value: summary.today, detail: 'Created today', tone: 'today' },
-    { label: 'Awaiting Shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting' },
-    { label: 'Blocked Orders', value: summary.blocked, detail: 'Needs operator review', tone: 'blocked' },
-  ];
-
-  const recentOrders = filteredOrders.slice(0, 3);
-
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
-    { key: 'blocked', label: 'Blocked', count: summary.blocked },
-    { key: 'awaiting', label: 'Awaiting shipment', count: summary.awaitingShipment },
     { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
     { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
@@ -926,21 +860,6 @@ export function OrdersPage() {
                   </button>
                 );
               })}
-            </div>
-
-            <div className="orders-enterprise-kpis" aria-label="Orders operational metrics">
-              {orderKpis.map((metric) => (
-                <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
-                  <span className="orders-kpi-icon" aria-hidden="true">
-                    <MetricIcon tone={metric.tone} />
-                  </span>
-                  <div className="orders-kpi-copy">
-                    <span>{metric.label}</span>
-                    <strong>{metric.value}</strong>
-                    <small>{metric.detail}</small>
-                  </div>
-                </article>
-              ))}
             </div>
 
             <div className="orders-filter-card">
@@ -1525,59 +1444,6 @@ export function OrdersPage() {
           </SideDetailPanel>
         </div>
 
-        <div className="orders-insights-grid">
-          <OperationalSection title="Operational insights" description="Current vendor-scoped order signals.">
-            <div className="orders-insight-list">
-              <div>
-                <span>Awaiting shipment</span>
-                <strong>{summary.awaitingShipment}</strong>
-              </div>
-              <div>
-                <span>Blocked / attention</span>
-                <strong>{summary.blocked}</strong>
-              </div>
-              <div>
-                <span>Tracking visible</span>
-                <strong>{safeArray(orders).filter((order) => order.trackingNumber || order.carrier).length}</strong>
-              </div>
-            </div>
-          </OperationalSection>
-
-          <OperationalSection title="Recent order activity" description="Latest orders in the current filtered view.">
-            {recentOrders.length ? (
-              <div className="orders-activity-list">
-                {recentOrders.map((order) => (
-                  <div key={order.id} className="orders-activity-row">
-                    <span className="orders-activity-dot" aria-hidden="true" />
-                    <div>
-                      <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
-                      <small>{order.shippingStatus} · {formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyStatePanel title="No records available" description="No records available." />
-            )}
-          </OperationalSection>
-
-          <OperationalSection title="Automation signals" description="Order conditions that may need operator attention.">
-            <div className="orders-insight-list">
-              <div>
-                <span>Reassignment or vendor block</span>
-                <strong>{summary.blocked}</strong>
-              </div>
-              <div>
-                <span>Awaiting shipment</span>
-                <strong>{summary.awaitingShipment}</strong>
-              </div>
-              <div>
-                <span>Current view</span>
-                <strong>{filteredOrders.length}</strong>
-              </div>
-            </div>
-          </OperationalSection>
-        </div>
       </div>
     </section>
 
