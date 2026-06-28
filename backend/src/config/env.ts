@@ -275,7 +275,7 @@ export function loadEnv(): AppEnv {
 
   const kargoCargoIntegration = parseKargoCargoIntegrationEnv();
   const shippingProvider = parseShippingProvider(process.env.SHIPPING_PROVIDER);
-  const kargoWebhookIngestEnabled = parseBoolean(process.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED, false);
+  const kargoWebhookIngestEnabled = false;
   const kargoWebhookSharedSecret = process.env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?.trim() || undefined;
   const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
@@ -311,16 +311,6 @@ export function loadEnv(): AppEnv {
     : 3;
   const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
-
-  if (nodeEnv === 'production' && kargoWebhookIngestEnabled) {
-    if (!kargoWebhookSharedSecret) {
-      throw new Error('KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET is required in production when KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true.');
-    }
-
-    if (kargoWebhookSharedSecret.length < 32) {
-      throw new Error('KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
-    }
-  }
 
   if (nodeEnv === 'production' && tryOtoWebhookIngestEnabled) {
     if (!tryOtoWebhookSharedSecret) {
