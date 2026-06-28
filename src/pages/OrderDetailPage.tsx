@@ -1291,8 +1291,10 @@ function buildDiagnosticsCopyText(title: string, entries: Array<[string, unknown
 }
 
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
+  const preferredProvider = config?.preferredProvider === 'kargo_entegrator' ? 'kargonomi' : config?.preferredProvider ?? 'kargonomi';
+
   return {
-    preferredProvider: config?.preferredProvider ?? 'kargo_entegrator',
+    preferredProvider,
     cargoIntegrationId: config?.cargoIntegrationId ?? '',
     defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
     defaultDesi: config?.defaultDesi ?? '3.00',
@@ -1373,17 +1375,6 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
         errors.push(`Navlungo ${label} is required.`);
       }
     });
-  }
-  if (draft.preferredProvider === 'kargo_entegrator') {
-    if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
-      errors.push('Cargo integration ID must be numeric.');
-    }
-    if (!/^\d+$/.test(draft.defaultWarehouseId.trim())) {
-      errors.push('Warehouse ID must be numeric.');
-    }
-    if (draft.packageType !== 'box' && draft.packageType !== 'document') {
-      errors.push('Package type must be box or document.');
-    }
   }
   if (draft.preferredProvider === 'try_oto' && !draft.tryOtoPickupLocationCode.trim()) {
     errors.push('Try OTO pickup location code is required.');
@@ -1769,7 +1760,7 @@ function getMissingShipmentCustomerFields(message: string, provider?: string | n
       normalizedMessage.includes('posts.0.recipient.district') ||
       normalizedMessage.includes('alıcı ilçe') ||
       normalizedMessage.includes('alici ilce'));
-  const isLegacyKargoDistrictMessage = provider === 'kargo_entegrator' || provider === 'hepsijet';
+  const isLegacyKargoDistrictMessage = provider === 'hepsijet';
   if (
     (isKargonomiLocationMessage || isLegacyKargoDistrictMessage || isNavlungoRecipientDistrictMessage) &&
     (/\bdistrict\b/.test(normalizedMessage) || normalizedMessage.includes('ilçe') || normalizedMessage.includes('ilce'))
@@ -5423,7 +5414,6 @@ export function OrderDetailPage() {
       : null,
   ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string; href: string | null; action: string | null }>;
 
-  const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
   const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
   const isNavlungoConfigDraft = shippingConfigDraft.preferredProvider === 'navlungo';
@@ -5463,7 +5453,6 @@ export function OrderDetailPage() {
           setShippingConfigDraftReady(true);
         }}
       >
-        <option value="kargo_entegrator">Kargo Entegratör</option>
         {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
         {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
         <option value="navlungo">Navlungo</option>
@@ -5507,40 +5496,8 @@ export function OrderDetailPage() {
       </div>
       <div className="shipping-config-editor-grid">
         {!isKargonomiConfigDraft ? shippingProviderSelectField : null}
-        {isKargoConfigDraft || isKargonomiConfigDraft ? (
+        {isKargonomiConfigDraft ? (
           <>
-            {isKargoConfigDraft ? (
-              <label className="field">
-                <span>Cargo integration ID</span>
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={shippingConfigDraft.cargoIntegrationId}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      cargoIntegrationId: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ) : null}
-            {!isKargonomiConfigDraft ? (
-              <label className="field">
-                <span>Warehouse ID</span>
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={shippingConfigDraft.defaultWarehouseId}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      defaultWarehouseId: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ) : null}
             {isKargonomiConfigDraft ? (
               <div className="shipping-config-kargonomi-layout field-full" aria-label="Kargonomi shipping configuration">
                 <section className="shipping-config-section-card" aria-label="Provider basics">
@@ -6050,23 +6007,6 @@ export function OrderDetailPage() {
           </>
         ) : null}
         {!isKargonomiConfigDraft ? shippingDefaultDesiField : null}
-        {isKargoConfigDraft ? (
-          <label className="field">
-            <span>Package type</span>
-            <select
-              value={shippingConfigDraft.packageType}
-              onChange={(event) =>
-                setShippingConfigDraft((current) => ({
-                  ...current,
-                  packageType: event.target.value as ShippingConfigDraft['packageType'],
-                }))
-              }
-            >
-              <option value="box">box</option>
-              <option value="document">document</option>
-            </select>
-          </label>
-        ) : null}
         {!isKargonomiConfigDraft ? (
           <>
             <div className="shipping-config-readonly">
@@ -7531,12 +7471,6 @@ export function OrderDetailPage() {
                           <span>Default desi configured</span>
                           <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
                         </div>
-                        {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
-                          <div className="summary-row">
-                            <span>Package type</span>
-                            <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
-                          </div>
-                        ) : null}
                       </details>
                     ) : null}
                     {shouldShowRealTrackingForm ? (
@@ -9353,12 +9287,6 @@ export function OrderDetailPage() {
                       <span>Default desi configured</span>
                       <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
                     </div>
-                    {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
-                      <div className="summary-row">
-                        <span>Package type</span>
-                        <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
-                      </div>
-                    ) : null}
                     <div className="summary-row">
                       <span>Notification URL configured</span>
                       <strong>{shippingProviderDiagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
@@ -9375,12 +9303,6 @@ export function OrderDetailPage() {
                           : 'unknown / required'}
                       </strong>
                     </div>
-                    {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
-                      <div className="summary-row">
-                        <span>Dummy Kargo support</span>
-                        <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'available' ? 'available' : 'not enabled'}</strong>
-                      </div>
-                    ) : null}
                     <div className="summary-row">
                       <span>Status sync support</span>
                       <strong>

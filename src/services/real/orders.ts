@@ -978,7 +978,7 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 }
 
 export async function getShippingProviderDiagnostics(
-  provider: ShippingProvider | 'navlungo' = 'kargo_entegrator',
+  provider: ShippingProvider | 'navlungo' = 'kargonomi',
   options: { vendorId?: string | null; signal?: AbortSignal } = {},
 ) {
   const params = new URLSearchParams({ provider });
