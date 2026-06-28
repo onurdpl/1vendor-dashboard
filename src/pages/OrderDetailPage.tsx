@@ -3405,11 +3405,11 @@ export function OrderDetailPage() {
           <span>Provider stage trace</span>
         </summary>
         <div className="summary-row">
-          <span>Provider API call attempted</span>
+          <span>{isAdmin ? 'Provider API call attempted' : 'Carrier update attempted'}</span>
           <strong>{formatDiagnosticPresence(summary.providerApiCallAttempted)}</strong>
         </div>
         <div className="summary-row">
-          <span>Last provider stage</span>
+          <span>{isAdmin ? 'Last provider stage' : 'Last carrier update'}</span>
           <strong>{formatKargonomiProviderStage(summary.lastProviderStage)}</strong>
         </div>
         <div className="summary-row">
@@ -4698,7 +4698,7 @@ export function OrderDetailPage() {
   const payoutCalculation = payoutFinanceRecord?.payoutCalculation ?? null;
 
   async function handleSplitRejectSuccess(_result: AllocationSplitExecutionResponse) {
-    showFeedback('Selected items rejected. A blocked allocation was created for admin review.', 'success');
+    showFeedback('Selected items rejected. Admin review was created for those items.', 'success');
     await Promise.all([
       refetch(),
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.list(currentVendor.vendorId) }),
@@ -5022,8 +5022,20 @@ export function OrderDetailPage() {
     operationalStory.timelineEvents.forEach((event) => {
       pushVendorBlockedEvent({
         id: `canonical-story-${normalizeTimelineTitle(event.label)}`,
-        title: event.label,
-        description: event.detail,
+        title:
+          !isAdmin && event.label === 'Vendor rejected allocation'
+            ? 'Vendor rejected selected items'
+            : !isAdmin && event.label === 'Vendor blocked'
+              ? 'Order blocked from shipment'
+              : !isAdmin && event.label === 'Finance hold activated'
+                ? 'Order review started'
+                : event.label,
+        description: !isAdmin
+          ? event.detail
+              ?.replace(/allocation/gi, 'order assignment')
+              .replace(/Shopify refund/gi, 'refund')
+              .replace(/finance hold/gi, 'order review')
+          : event.detail,
         at: event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt,
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
@@ -5068,7 +5080,7 @@ export function OrderDetailPage() {
       title: 'Shipment cancelled',
       description: getSafeProviderTimelineDescription(
         shipmentProviderSummary.navlungoCancelProviderMessage,
-        'Provider shipment cancelled',
+        isAdmin ? 'Provider shipment cancelled' : 'Carrier shipment cancelled',
       ),
       at: shipmentProviderSummary.navlungoCancelledAt ?? visibleShipmentExecution.updatedAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
       status: 'Cancelled',
@@ -5110,8 +5122,8 @@ export function OrderDetailPage() {
   if (visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.trackingAccepted) {
     orderTimelineEvents.push({
       id: 'shopify-return-tracking-synced',
-      title: 'Shopify return tracking synced',
-      description: 'Customer can track return shipment in Shopify.',
+      title: isAdmin ? 'Shopify return tracking synced' : 'Return tracking attached',
+      description: 'Customer can track return shipment.',
       at:
         visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.attemptedAt ??
         visibleShipmentExecution.returnShipment.createdAt ??
@@ -5196,6 +5208,7 @@ export function OrderDetailPage() {
       href: buildFinanceHref(record),
       status: record.status === 'Pending' ? 'Pending review' : record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      visibility: 'admin' as const,
     })),
     ...(supportActivitySummary
       ? [
@@ -5222,12 +5235,12 @@ export function OrderDetailPage() {
   const orderHealth = operationalStory.resolvedByRefund
     ? {
         label: operationalStory.financeLabel,
-        helper: 'Fulfillment is not required for this refunded allocation.',
+        helper: 'Fulfillment is not required for this refunded order.',
         tone: 'healthy',
       }
     : isActiveVendorBlockedOrder
     ? {
-        label: 'Vendor rejected allocation',
+        label: isAdmin ? 'Vendor rejected allocation' : 'Order needs admin review',
         helper: vendorBlockedReason ? `Admin action required. Reason: ${vendorBlockedReason}.` : 'Admin action required.',
         tone: 'attention',
       }
@@ -5249,7 +5262,11 @@ export function OrderDetailPage() {
       ? {
           id: 'vendor-blocked-refund-completed',
           label: 'Refund completed',
-          detail: isVendorBlockedOrder ? 'Vendor rejection was resolved by Shopify refund.' : 'Shopify refund completed for this allocation.',
+          detail: isAdmin
+            ? isVendorBlockedOrder
+              ? 'Vendor rejection was resolved by Shopify refund.'
+              : 'Shopify refund completed for this allocation.'
+            : 'Refund completed. No shipment action is required.',
           tone: 'success',
           href: null,
           action: null,
@@ -5258,7 +5275,7 @@ export function OrderDetailPage() {
     isActiveVendorBlockedOrder
       ? {
           id: 'vendor-blocked',
-          label: 'Vendor rejected allocation',
+          label: isAdmin ? 'Vendor rejected allocation' : 'Unavailable items rejected',
           detail: vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
           tone: 'attention',
           href: null,
@@ -5269,7 +5286,7 @@ export function OrderDetailPage() {
       ? {
           id: 'admin-resolution-required',
           label: 'Admin resolution required',
-          detail: 'Transfer allocation, refund review, or return to vendor.',
+          detail: isAdmin ? 'Transfer allocation, refund review, or return to vendor.' : 'Transfer, refund review, or return review is required.',
           tone: 'warning',
           href: null,
           action: null,
@@ -5280,8 +5297,8 @@ export function OrderDetailPage() {
           id: 'return-active',
           label: 'Return active',
           detail: activeReturn
-            ? `Customer return ${(activeReturn.status ?? 'unknown').toLowerCase()}. Review return tracking and Shopify sync before closing the loop.`
-            : 'Customer return is linked. Review return tracking and Shopify sync before closing the loop.',
+            ? `Customer return ${(activeReturn.status ?? 'unknown').toLowerCase()}. Review return tracking before closing the loop.`
+            : 'Customer return is linked. Review return tracking before closing the loop.',
           tone: 'return',
           href: activeReturn ? `/returns/${activeReturn.id}` : null,
           action: activeReturn ? 'Open return details' : null,
@@ -5999,29 +6016,39 @@ export function OrderDetailPage() {
           <div className="order-detail-title-stack">
             <div className="order-detail-heading-line">
               <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
-              <span className="order-source-pill">{order.channel || 'Unknown'}</span>
+              {isAdmin ? <span className="order-source-pill">{order.channel || 'Unknown'}</span> : null}
             </div>
             <div className="order-detail-meta-strip">
               <div>
                 <span>Created</span>
                 <strong>{formatDate(order.date)}</strong>
               </div>
-              <div>
-                <span>Vendor</span>
-                <strong>{order.assignedVendorId || 'Unknown'}</strong>
-              </div>
+              {isAdmin ? (
+                <div>
+                  <span>Vendor</span>
+                  <strong>{order.assignedVendorId || 'Unknown'}</strong>
+                </div>
+              ) : null}
               <div>
                 <span>Customer</span>
                 <strong>{customerLabel}</strong>
               </div>
-              <div>
-                <span>Shopify ID</span>
-                <strong>{order.sourceShopifyOrderId || '—'}</strong>
-              </div>
+              {isAdmin ? (
+                <div>
+                  <span>Shopify ID</span>
+                  <strong>{order.sourceShopifyOrderId || '—'}</strong>
+                </div>
+              ) : null}
             </div>
             <div className="order-ship-to-note" aria-label="Shipping address summary">
               <span>Ship to</span>
-              <strong>{order.shippingAddress && order.shippingAddress !== 'Unknown' ? order.shippingAddress : 'Shopify shipping address available in future detail sync.'}</strong>
+              <strong>
+                {order.shippingAddress && order.shippingAddress !== 'Unknown'
+                  ? order.shippingAddress
+                  : isAdmin
+                    ? 'Shopify shipping address available in future detail sync.'
+                    : 'Shipping address will appear when available.'}
+              </strong>
             </div>
           </div>
         </div>
@@ -6073,6 +6100,7 @@ export function OrderDetailPage() {
         ) : null}
       </header>
 
+      {isAdmin ? (
       <div className="order-status-summary-grid">
         {summaryCards.map((card) => (
           <article key={card.label} className={`order-status-summary-card order-status-${card.tone}`}>
@@ -6087,12 +6115,13 @@ export function OrderDetailPage() {
           </article>
         ))}
       </div>
+      ) : null}
 
       <div className="order-detail-main-grid">
         <main className="order-detail-main-column" aria-label="Order operations">
           <article className="order-detail-card-v2 order-line-items-card">
             <div className="order-card-heading">
-              <h2>Line items ({orderItems.length})</h2>
+              <h2>Items ({orderItems.length})</h2>
             </div>
             <div className="order-line-items-compact">
               {orderItems.length > 0 ? (
@@ -6110,15 +6139,17 @@ export function OrderDetailPage() {
                       <div className="order-item-primary">
                         <strong>{item.name || 'Unknown item'}</strong>
                         <span>{[item.variantTitle, item.sku].filter(Boolean).join(' · ') || 'SKU pending'}</span>
-                        <small>
-                          {[
-                            `VAT ${formatVatRate(item.vatRate)}`,
-                            item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
-                            `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
-                            `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
-                            item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
-                          ].filter(Boolean).join(' · ')}
-                        </small>
+                        {isAdmin ? (
+                          <small>
+                            {[
+                              `VAT ${formatVatRate(item.vatRate)}`,
+                              item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
+                              `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                              `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                              item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          </small>
+                        ) : null}
                       </div>
                       <div>
                         <span>Qty</span>
@@ -6137,6 +6168,7 @@ export function OrderDetailPage() {
             </div>
           </article>
 
+          {isAdmin ? (
           <article className="order-detail-card-v2 order-workspace-panel" aria-label="Shopify order snapshot">
             <div className="order-card-heading">
               <div>
@@ -6244,8 +6276,9 @@ export function OrderDetailPage() {
               ) : null}
             </div>
           </article>
+          ) : null}
 
-          {order.orderSnapshot?.vendorInvoiceNumber ? (
+          {isAdmin && order.orderSnapshot?.vendorInvoiceNumber ? (
             <article className="order-detail-card-v2 order-workspace-panel" aria-label="Vendor invoice">
               <div className="order-card-heading">
                 <div>
@@ -6286,6 +6319,7 @@ export function OrderDetailPage() {
             </article>
           ) : null}
 
+          {isAdmin ? (
           <article
             id="settlement-preview"
             ref={settlementPreviewRef}
@@ -6359,7 +6393,9 @@ export function OrderDetailPage() {
               </div>
             ) : null}
           </article>
+          ) : null}
 
+          {isAdmin ? (
           <article className="order-detail-card-v2 order-finance-timeline-card order-workspace-panel" aria-label="Finance timeline">
             <div className="order-card-heading">
               <div>
@@ -6390,6 +6426,7 @@ export function OrderDetailPage() {
               <p className="order-empty-copy">No finance events available yet.</p>
             )}
           </article>
+          ) : null}
 
           {isAdmin && order.financeLedgerPreview ? (
             <article className="order-detail-card-v2 order-finance-ledger-card order-workspace-panel" aria-label="Finance ledger preview">
@@ -6473,7 +6510,7 @@ export function OrderDetailPage() {
           <div className="order-linked-records-panel">
             <OperationalLinkCards
               title="Linked records"
-              subtitle="Returns, settlement activity, and grouped support context linked to this order."
+              subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
               links={orderCrossLinks}
               audience={audience}
             />
@@ -6570,7 +6607,7 @@ export function OrderDetailPage() {
                     ) : openLinkedSupportTicket ? (
                       <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
                     ) : (
-                      <span className="muted">Order, shipment, return, and sync context attached. Create a support ticket before escalating.</span>
+                      <span className="muted">Order, shipment, and return context attached. Create a support ticket before escalating.</span>
                     )}
                   </>
                 ) : null}
@@ -6637,14 +6674,14 @@ export function OrderDetailPage() {
             <div className="order-card-heading">
               <div>
                 <h2>Shipment & delivery</h2>
-                <p>{hasTrackingSync ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Add shipment details when the package is ready.'}</p>
+                <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
             {canOpenSplitReject ? (
               <div className="allocation-split-entry-card">
                 <div>
                   <strong>Reject selected items</strong>
-                  <span>Move unavailable items into a blocked allocation while keeping the remaining items fulfillable.</span>
+                  <span>Move unavailable items into admin review while keeping the remaining items fulfillable.</span>
                 </div>
                 <button
                   type="button"
@@ -6680,7 +6717,7 @@ export function OrderDetailPage() {
                           </div>
                           {navlungoProviderStatusBadge ? (
                             <div className="summary-row">
-                              <span>Provider lifecycle</span>
+                              <span>{isAdmin ? 'Provider lifecycle' : 'Shipment progress'}</span>
                               <strong>{navlungoProviderStatusBadge}</strong>
                             </div>
                           ) : null}
@@ -6716,7 +6753,7 @@ export function OrderDetailPage() {
                             )}
                           </div>
                           <div className="summary-row">
-                            <span>Label</span>
+                            <span>Shipping label</span>
                             {visibleShipmentExecution?.labelUrl ? (
                               <>
                                 <button
@@ -6735,10 +6772,10 @@ export function OrderDetailPage() {
                         </div>
                         {visibleShipmentExecution ? (
                           <details className="shipment-provider-details">
-                            <summary>Additional provider details</summary>
+                            <summary>{isAdmin ? 'Additional provider details' : 'Additional shipment details'}</summary>
                             <div className="order-shipping-state-grid">
                               <div className="summary-row">
-                                <span>Shipment provider</span>
+                                <span>{isAdmin ? 'Shipment provider' : 'Carrier'}</span>
                                 <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                               </div>
                               {visibleShipmentExecution.warehouseId ? (
@@ -6748,7 +6785,7 @@ export function OrderDetailPage() {
                                 </div>
                               ) : null}
                               <div className="summary-row">
-                                <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
+                                <span>{isAdmin ? getShipmentReferenceLabel(visibleShipmentExecution) : 'Shipment reference'}</span>
                                 <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
                                   {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
                                 </strong>
@@ -6766,7 +6803,7 @@ export function OrderDetailPage() {
                               {visibleShipmentExecution.provider === 'navlungo' ? (
                                 <>
                                   <div className="summary-row">
-                                    <span>Provider lifecycle</span>
+                                    <span>{isAdmin ? 'Provider lifecycle' : 'Shipment progress'}</span>
                                     <strong>
                                       {[
                                         shipmentProviderSummary?.navlungoProviderStatusCode ?? null,
@@ -6831,15 +6868,15 @@ export function OrderDetailPage() {
                               {visibleShipmentExecution.provider === 'kargonomi' ? (
                                 <>
                                   <div className="summary-row">
-                                    <span>Provider API call attempted</span>
+                                    <span>{isAdmin ? 'Provider API call attempted' : 'Carrier update attempted'}</span>
                                     <strong>{formatDiagnosticPresence(shipmentProviderSummary?.providerApiCallAttempted)}</strong>
                                   </div>
                                   <div className="summary-row">
-                                    <span>Last provider stage</span>
+                                    <span>{isAdmin ? 'Last provider stage' : 'Last carrier update'}</span>
                                     <strong>{formatKargonomiProviderStage(shipmentProviderSummary?.lastProviderStage)}</strong>
                                   </div>
                                   <div className="summary-row">
-                                    <span>Provider message</span>
+                                    <span>{isAdmin ? 'Provider message' : 'Carrier message'}</span>
                                     <strong>{shipmentProviderSummary?.providerError || '—'}</strong>
                                   </div>
                                   {kargonomiShipmentCancelled ? (
@@ -7318,7 +7355,7 @@ export function OrderDetailPage() {
                                   {isCreatingReturnShipmentLabel ? 'Creating return label...' : 'Create return label'}
                                 </button>
                                 {!canCreateTryOtoReturnLabel ? (
-                                  <span className="muted">Available after a Try OTO shipment is delivered and has a provider reference.</span>
+                                  <span className="muted">Available after a Try OTO shipment is delivered and has a shipment reference.</span>
                                 ) : null}
                               </>
                             )}
@@ -7342,7 +7379,7 @@ export function OrderDetailPage() {
                             ))}
                           </div>
                         ) : null}
-                        {shopifyFulfillmentSyncSummary ? (
+                        {isAdmin && shopifyFulfillmentSyncSummary ? (
                           <div className="shipment-recovery-actions" aria-label="Shopify fulfillment status">
                             <strong>Shopify fulfillment</strong>
                             <span>
@@ -7931,7 +7968,7 @@ export function OrderDetailPage() {
                     {visibleShipmentExecution ? (
                       <>
                         <div className="summary-row">
-                          <span>Shipment provider</span>
+                          <span>{isAdmin ? 'Shipment provider' : 'Carrier'}</span>
                           <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                         </div>
                         <div className="summary-row">
@@ -7940,7 +7977,7 @@ export function OrderDetailPage() {
                         </div>
                         {navlungoProviderStatusBadge ? (
                           <div className="summary-row">
-                            <span>Provider lifecycle</span>
+                            <span>{isAdmin ? 'Provider lifecycle' : 'Shipment progress'}</span>
                             <strong>{navlungoProviderStatusBadge}</strong>
                           </div>
                         ) : null}
@@ -7974,7 +8011,7 @@ export function OrderDetailPage() {
                     </div>
                     {visibleShipmentExecution?.labelUrl ? (
                       <div className="summary-row">
-                        <span>Label</span>
+                        <span>Shipping label</span>
                         <button
                           type="button"
                           className="inline-link inline-button-link"
@@ -8404,7 +8441,7 @@ export function OrderDetailPage() {
                         ) : null}
                       </details>
                     ) : null}
-                    {shopifyFulfillmentSyncSummary ? (
+                    {isAdmin && shopifyFulfillmentSyncSummary ? (
                       <div className="shipment-recovery-actions" aria-label="Shopify fulfillment status">
                         <strong>Shopify fulfillment</strong>
                         <span>
@@ -8552,7 +8589,7 @@ export function OrderDetailPage() {
                         </div>
                       </div>
                     ) : null}
-                    {canSyncShipmentTrackingToShopify ? (
+                    {isAdmin && canSyncShipmentTrackingToShopify ? (
                       <div className="shipment-recovery-actions" aria-label="Shopify tracking sync">
                         <strong>Shopify fulfillment sync</strong>
                         <span>Tracking is available locally. Sync it to Shopify fulfillment when ready.</span>

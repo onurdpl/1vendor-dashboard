@@ -2275,10 +2275,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /Line items/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Settlement preview' })).toBeInTheDocument();
-    expect(screen.getByText('Gross order amount')).toBeInTheDocument();
-    expect(screen.getByText('Estimated settlement')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Items/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Gross order amount')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated settlement')).not.toBeInTheDocument();
     expect(screen.queryByText('Estimated marketplace commission')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
@@ -2340,7 +2340,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
 
     expect(screen.getByRole('dialog', { name: 'Reject selected items' })).toBeInTheDocument();
-    expect(screen.getByText('Move unavailable items into a blocked allocation while keeping the remaining items fulfillable.')).toBeInTheDocument();
+    expect(screen.getByText('Move unavailable items into admin review while keeping the remaining items fulfillable.')).toBeInTheDocument();
   });
 
   it('frames vendor-blocked orders as admin-resolution work instead of shipment work', async () => {
@@ -2382,46 +2382,32 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     const primaryStatus = screen.getByLabelText('Primary operational status');
-    expect(within(primaryStatus).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(primaryStatus).getByText('Order needs admin review')).toBeInTheDocument();
     expect(within(primaryStatus).getByText('Admin action required. Reason: OUT_OF_STOCK.')).toBeInTheDocument();
 
     const alerts = screen.getByLabelText('Operational alerts');
-    expect(within(alerts).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(alerts).getByText('Unavailable items rejected')).toBeInTheDocument();
     expect(within(alerts).getByText('Reason: OUT_OF_STOCK')).toBeInTheDocument();
     expect(within(alerts).getByText('Admin resolution required')).toBeInTheDocument();
-    expect(within(alerts).getByText('Transfer allocation, refund review, or return to vendor.')).toBeInTheDocument();
+    expect(within(alerts).getByText('Transfer, refund review, or return review is required.')).toBeInTheDocument();
     expect(within(alerts).queryByText('Tracking missing')).not.toBeInTheDocument();
     expect(within(alerts).queryByText('Awaiting shipment')).not.toBeInTheDocument();
 
-    expect(screen.getByText('Current state')).toBeInTheDocument();
-    expect(screen.getByText('Fulfillment')).toBeInTheDocument();
-    expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
-    expect(screen.getByText('Finance')).toBeInTheDocument();
-    expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Next action').length).toBeGreaterThan(0);
-
-    const settlementPreview = screen.getByLabelText('Order finance preview');
-    expect(within(settlementPreview).getByRole('heading', { name: 'Settlement on hold' })).toBeInTheDocument();
-    expect(settlementPreview).toHaveTextContent('Vendor rejected allocation. Settlement is excluded until resolution.');
-    expect(within(settlementPreview).getByLabelText('Finance hold reason')).toHaveTextContent('Vendor blocked allocation.');
-    expect(within(settlementPreview).getByLabelText('Finance hold reason')).toHaveTextContent(
-      'Settlement eligibility returns only after transfer completed or refund resolved.',
-    );
-    expect(within(settlementPreview).getByText('Held settlement estimate')).toBeInTheDocument();
-    expect(within(settlementPreview).getAllByText('Held estimate').length).toBeGreaterThan(0);
-    expect(within(settlementPreview).queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Current state')).not.toBeInTheDocument();
+    expect(screen.queryByText('Finance')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
-    const rejectedEvent = timelineScope.getByText('Vendor rejected allocation');
-    const blockedEvent = timelineScope.getByText('Vendor blocked');
-    const financeHoldEvent = timelineScope.getByText('Finance hold activated');
+    const rejectedEvent = timelineScope.getByText('Vendor rejected selected items');
+    const blockedEvent = timelineScope.getByText('Order blocked from shipment');
+    const financeHoldEvent = timelineScope.getByText('Order review started');
     const adminResolutionEvent = timelineScope.getByText('Awaiting admin resolution');
     expect(timelineScope.getByText('Reason: OUT_OF_STOCK.')).toBeInTheDocument();
-    expect(timelineScope.getByText('Fulfillment is blocked for this allocation.')).toBeInTheDocument();
+    expect(timelineScope.getByText('Fulfillment is blocked for this order assignment.')).toBeInTheDocument();
     expect(timelineScope.getByText('Settlement and payout movement are held until admin resolution.')).toBeInTheDocument();
-    expect(timelineScope.getByText('Transfer allocation, refund review, or return to vendor.')).toBeInTheDocument();
+    expect(timelineScope.getByText('Transfer order assignment, refund review, or return to vendor.')).toBeInTheDocument();
     expect(Boolean(rejectedEvent.compareDocumentPosition(blockedEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(blockedEvent.compareDocumentPosition(financeHoldEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -2474,22 +2460,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const primaryStatus = screen.getByLabelText('Primary operational status');
     expect(within(primaryStatus).getByText('Refund completed')).toBeInTheDocument();
-    expect(within(primaryStatus).getByText('Fulfillment is not required for this refunded allocation.')).toBeInTheDocument();
+    expect(within(primaryStatus).getByText('Fulfillment is not required for this refunded order.')).toBeInTheDocument();
 
-    const settlementPreview = screen.getByLabelText('Order finance preview');
-    expect(within(settlementPreview).getByRole('heading', { name: 'Refund completed' })).toBeInTheDocument();
-    expect(settlementPreview).toHaveTextContent('Refund impact recorded.');
-    expect(within(settlementPreview).queryByLabelText('Finance hold reason')).not.toBeInTheDocument();
-    expect(within(settlementPreview).queryByRole('heading', { name: 'Settlement on hold' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
-    expect(timelineScope.getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(timelineScope.getByText('Vendor rejected selected items')).toBeInTheDocument();
     expect(timelineScope.getByText('Refund processed')).toBeInTheDocument();
     expect(timelineScope.getAllByText('Refund completed').length).toBeGreaterThan(0);
     expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    expect(timelineScope.queryByText('Finance hold activated')).not.toBeInTheDocument();
+    expect(timelineScope.queryByText('Order review started')).not.toBeInTheDocument();
     expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
   });
 
@@ -2949,14 +2931,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Contact support');
-    const vendorSettlementPreview = screen.getByLabelText('Order finance preview');
-    expect(vendorSettlementPreview).toHaveTextContent('Settlement preview');
-    expect(vendorSettlementPreview).toHaveTextContent('Gross order amount');
-    expect(vendorSettlementPreview).toHaveTextContent('Unknown');
-    expect(vendorSettlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
-    const vendorFinanceTimeline = screen.getByLabelText('Finance timeline');
-    expect(vendorFinanceTimeline).toHaveTextContent('No finance events available yet.');
-    expect(vendorFinanceTimeline).not.toHaveTextContent(/Admin diagnostics|shipping_cost|commission_rate/i);
+    expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Finance timeline')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance ledger preview')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance unknown indicators')).not.toBeInTheDocument();
   });
@@ -3972,7 +3948,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
-    expect(screen.getByText('Provider API call attempted')).toBeInTheDocument();
+    expect(screen.getByText('Carrier update attempted')).toBeInTheDocument();
     expect(screen.getAllByText('Confirm price').length).toBeGreaterThan(0);
     expect(screen.getByText('Kargonomi shipping price confirmation failed with HTTP 422.')).toBeInTheDocument();
   });
@@ -5446,7 +5422,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
     expect(screen.getByText('Shipment processing')).toBeInTheDocument();
     expect(screen.queryByText('SearchingDriver')).not.toBeInTheDocument();
-    expect(screen.getByText('Internal reference')).toBeInTheDocument();
+    expect(screen.getByText('Shipment reference')).toBeInTheDocument();
     expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();
     expect(screen.getByText('shopify-cmpce0fbh0003cf3...1783322961')).toBeInTheDocument();
@@ -6632,12 +6608,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
     });
     setCurrentUser({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
       vendorAccess: ['sporjinal'],
       vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: false,
+      canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
 
@@ -6715,12 +6691,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
     });
     setCurrentUser({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
       vendorAccess: ['sporjinal'],
       vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: false,
+      canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
 
@@ -6729,7 +6705,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(
       await screen.findByText('Pending · Tracking is stored locally, but Shopify fulfillment has not been confirmed.'),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Shopify fulfillment diagnostics')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Shopify fulfillment diagnostics')).toBeInTheDocument();
   });
 
   it('shows Shopify fulfillment sync status when no latest shipment execution is present', async () => {
@@ -6751,12 +6727,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
     });
     setCurrentUser({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
       vendorAccess: ['sporjinal'],
       vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: false,
+      canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
 
@@ -7915,11 +7891,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const financeTimeline = await screen.findByLabelText('Finance timeline');
-    await waitFor(() => expect(financeTimeline).toHaveTextContent('Settlement preview generated'));
-    expect(financeTimeline).toHaveTextContent('Settlement awaiting review');
-    expect(financeTimeline).not.toHaveTextContent('Payment evidence pending');
-    expect(financeTimeline).not.toHaveTextContent('Evidence pending');
+    await screen.findByText('Contact support');
+    expect(screen.queryByLabelText('Finance timeline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Settlement preview generated')).not.toBeInTheDocument();
+    expect(screen.queryByText('Settlement awaiting review')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
+    expect(screen.queryByText('Evidence pending')).not.toBeInTheDocument();
   });
 
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
@@ -7990,17 +7967,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(alertRegion).getByText(/Customer return requested/i)).toBeInTheDocument();
     expect(within(alertRegion).getByRole('link', { name: 'Open return details' })).toHaveAttribute('href', '/returns/return-1028');
     expect(screen.getByLabelText('Shipping address summary')).toHaveTextContent('Ship to');
-    expect(screen.getByText('Shopify shipping address available in future detail sync.')).toBeInTheDocument();
+    expect(screen.getByText('Shipping address will appear when available.')).toBeInTheDocument();
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
-    const financeLink = screen.getByRole('link', { name: /Settlement activity/i });
-    expect(financeLink.getAttribute('href')).toContain('/finance');
+    expect(screen.queryByRole('link', { name: /Settlement activity/i })).not.toBeInTheDocument();
     expect(screen.getAllByText('Return linked').length).toBeGreaterThan(0);
-    expect(screen.getByText('Pending review')).toBeInTheDocument();
-    expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
-    const financeTimeline = screen.getByLabelText('Finance timeline');
-    expect(within(financeTimeline).getByText('Refund impact pending')).toBeInTheDocument();
-    expect(financeTimeline).not.toHaveTextContent(/Payout scheduled|Payout paid|Confirmed settlement/i);
+    expect(screen.queryByText('Pending review')).not.toBeInTheDocument();
+    expect(screen.queryByText('TRY 4,999.00 · Pending')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Finance timeline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Refund impact pending')).not.toBeInTheDocument();
   });
 
   it('does not show provider response internals to vendors', async () => {
