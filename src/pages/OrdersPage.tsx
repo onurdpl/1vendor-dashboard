@@ -149,6 +149,27 @@ function getTrackingLabel(order: OrderSummary | OrderDetail) {
   return 'Tracking pending';
 }
 
+function getVendorSafeOrderPanelCopy(value: string | null | undefined) {
+  if (!value) {
+    return value;
+  }
+  return value
+    .replace(/Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work\./gi, 'Review the blocked order before shipment work continues.')
+    .replace(/Shopify refund webhook recorded refund finance\./gi, 'Refund details were recorded.')
+    .replace(/Shopify refund is complete/gi, 'Refund is complete')
+    .replace(/Shopify refund processed\./gi, 'Refund processed.')
+    .replace(/Shopify not fulfilled/gi, 'Fulfillment is not ready')
+    .replace(/refunded allocation/gi, 'refunded order')
+    .replace(/This allocation/g, 'This order')
+    .replace(/this allocation/g, 'this order')
+    .replace(/The allocation/g, 'The order')
+    .replace(/the allocation/g, 'the order')
+    .replace(/blocked allocation state/gi, 'blocked order state')
+    .replace(/blocked allocation/gi, 'blocked order')
+    .replace(/allocation/gi, 'order')
+    .replace(/vendor scope/gi, 'admin review');
+}
+
 function getCustomerLabel(customer?: string | null) {
   const value = customer?.trim();
   const normalized = value?.toLowerCase() ?? '';
@@ -1074,6 +1095,20 @@ export function OrdersPage() {
               const paymentStatusLabel = hasCanonicalTerminalStory
                 ? operationalStory.financeLabel
                 : formatSnapshotValue(orderSnapshot?.financialStatus);
+              const statusStripCopy = vendorBlockedStory?.adminActionCopy ?? (hasCanonicalTerminalStory ? operationalStory.secondaryLabel : shippingOperational.label);
+              const vendorStatusStripCopy = getVendorSafeOrderPanelCopy(statusStripCopy);
+              const railGuidanceDescription = isAdmin
+                ? railGuidance.description
+                : getVendorSafeOrderPanelCopy(railGuidance.description) ?? railGuidance.description;
+              const railGuidanceActionLabel = !isAdmin && railGuidance.actionLabel === 'Review allocation'
+                ? 'Review order'
+                : railGuidance.actionLabel;
+              const rejectUnavailableCopy = isAdmin
+                ? rejectUnavailableReason
+                : getVendorSafeOrderPanelCopy(rejectUnavailableReason);
+              const fulfillmentRailValue = hasCanonicalTerminalStory
+                ? operationalStory.fulfillmentLabel
+                : selectedOrder.fulfillmentStatus;
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
@@ -1081,7 +1116,8 @@ export function OrdersPage() {
                 const vendorBlockedHistory = safeArray((selectedOrder as OrderDetail).assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
                 operationalStory.timelineEvents.forEach((event) => {
                   timelineItems.push({
-                    ...event,
+                    label: isAdmin ? event.label : getVendorSafeOrderPanelCopy(event.label) ?? event.label,
+                    detail: isAdmin ? event.detail : getVendorSafeOrderPanelCopy(event.detail) ?? undefined,
                     at: vendorBlockedHistory?.createdAt ? formatDate(vendorBlockedHistory.createdAt) : undefined,
                   });
                 });
@@ -1117,13 +1153,13 @@ export function OrdersPage() {
 
               <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
                 <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
-                <span>{vendorBlockedStory?.adminActionCopy ?? (hasCanonicalTerminalStory ? operationalStory.secondaryLabel : shippingOperational.label)}</span>
-                {!hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
+                <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>
+                {isAdmin && !hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
               </div>
 
               <WorkflowActionGuidance
-                actionLabel={railGuidance.actionLabel}
-                description={railGuidance.description}
+                actionLabel={railGuidanceActionLabel}
+                description={railGuidanceDescription}
                 tone={railGuidance.tone}
               />
 
@@ -1168,8 +1204,8 @@ export function OrdersPage() {
                   <h4>Operational hold</h4>
                   <p className="page-description">
                     {splitRejectEligible
-                      ? 'Reject unavailable items or block the full allocation for Sporgym admin review.'
-                      : 'Rejecting this order blocks fulfillment and sends it to Sporgym admin review.'}
+                      ? 'Reject unavailable items or send the full order for Sporgym admin review.'
+                      : 'Rejecting this order pauses fulfillment and sends it to Sporgym admin review.'}
                   </p>
                   <div className="orders-reject-action-stack">
                     {splitRejectEligible && selectedOrderDetail ? (
@@ -1197,7 +1233,7 @@ export function OrdersPage() {
               ) : showRejectUnavailableReason ? (
                 <section className="orders-detail-card" aria-label="Reject unavailable">
                     <h4>{vendorBlockedStory?.rejectUnavailableTitle ?? 'Reject unavailable'}</h4>
-                  <p className="page-description">{rejectUnavailableReason}</p>
+                  <p className="page-description">{rejectUnavailableCopy}</p>
                   {shipmentExecution && shipmentExecution.shipmentStatus !== 'failed' && shipmentExecution.shipmentStatus !== 'cancelled' ? (
                     <small className="muted">Shipment status: {safeStatusLabel(shipmentExecution.shipmentStatus)}</small>
                   ) : null}
@@ -1216,8 +1252,8 @@ export function OrdersPage() {
                     <strong>{!hasCanonicalTerminalStory && trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
                   </div>
                   <div>
-                    <span>Shopify sync</span>
-                    <strong>{shopifyFulfillmentState}</strong>
+                    <span>{isAdmin ? 'Shopify sync' : 'Fulfillment'}</span>
+                    <strong>{isAdmin ? shopifyFulfillmentState : fulfillmentRailValue}</strong>
                   </div>
                   <div>
                     <span>Label</span>
@@ -1242,71 +1278,73 @@ export function OrdersPage() {
                 </div>
               </section>
 
-              <section className="orders-detail-card" aria-label="Shopify order snapshot">
-                <h4>Shopify order snapshot</h4>
-                <p className="page-description">
-                  Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.
-                </p>
-                {selectedOrder.splitSummary ? (
+              {isAdmin ? (
+                <section className="orders-detail-card" aria-label="Shopify order snapshot">
+                  <h4>Shopify order snapshot</h4>
                   <p className="page-description">
-                    This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.
+                    Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.
                   </p>
-                ) : null}
-                <div className="orders-rail-summary-list">
-                  <div>
-                    <span>Financial status</span>
-                    <strong>{hasCanonicalTerminalStory ? operationalStory.financeLabel : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
-                  </div>
-                  <div>
-                    <span>Payment gateway</span>
-                    <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
-                  </div>
-                  <div>
-                    <span>Vendor integration</span>
-                    <strong>{hasCanonicalTerminalStory ? '—' : formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
-                  </div>
-                  <div>
-                    <span>Currency</span>
-                    <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
-                  </div>
-                  {orderSnapshot?.orderTaxAmount ? (
-                    <div>
-                      <span>Tax total</span>
-                      <strong>{formatSnapshotAmount(orderSnapshot.orderTaxAmount, snapshotCurrency)}</strong>
-                    </div>
+                  {selectedOrder.splitSummary ? (
+                    <p className="page-description">
+                      This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.
+                    </p>
                   ) : null}
-                  <div>
-                    <span>Shipping</span>
-                    <strong>{formatSnapshotAmount(orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
-                  </div>
-                  <div>
-                    <span>Discount</span>
-                    <strong>{formatSnapshotAmount(orderSnapshot?.discountAmount, snapshotCurrency)}</strong>
-                  </div>
-                  <div>
-                    <span>Billing</span>
-                    <strong>{formatBillingAddress(orderSnapshot?.billingAddress)}</strong>
-                  </div>
-                  {orderSnapshot?.vendorIntegrationTrackingUrl ? (
+                  <div className="orders-rail-summary-list">
                     <div>
-                      <span>External shipment</span>
-                      <strong>
-                        <a className="inline-link" href={orderSnapshot.vendorIntegrationTrackingUrl} target="_blank" rel="noreferrer">
-                          Open external tracking
-                        </a>
-                      </strong>
+                      <span>Financial status</span>
+                      <strong>{hasCanonicalTerminalStory ? operationalStory.financeLabel : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
                     </div>
-                  ) : null}
-                  {orderSnapshot?.vendorIntegrationShippedAt ? (
                     <div>
-                      <span>External shipped at</span>
-                      <strong>{formatDate(orderSnapshot.vendorIntegrationShippedAt)}</strong>
+                      <span>Payment gateway</span>
+                      <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
                     </div>
-                  ) : null}
-                </div>
-              </section>
+                    <div>
+                      <span>Vendor integration</span>
+                      <strong>{hasCanonicalTerminalStory ? '—' : formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
+                    </div>
+                    <div>
+                      <span>Currency</span>
+                      <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
+                    </div>
+                    {orderSnapshot?.orderTaxAmount ? (
+                      <div>
+                        <span>Tax total</span>
+                        <strong>{formatSnapshotAmount(orderSnapshot.orderTaxAmount, snapshotCurrency)}</strong>
+                      </div>
+                    ) : null}
+                    <div>
+                      <span>Shipping</span>
+                      <strong>{formatSnapshotAmount(orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
+                    </div>
+                    <div>
+                      <span>Discount</span>
+                      <strong>{formatSnapshotAmount(orderSnapshot?.discountAmount, snapshotCurrency)}</strong>
+                    </div>
+                    <div>
+                      <span>Billing</span>
+                      <strong>{formatBillingAddress(orderSnapshot?.billingAddress)}</strong>
+                    </div>
+                    {orderSnapshot?.vendorIntegrationTrackingUrl ? (
+                      <div>
+                        <span>External shipment</span>
+                        <strong>
+                          <a className="inline-link" href={orderSnapshot.vendorIntegrationTrackingUrl} target="_blank" rel="noreferrer">
+                            Open external tracking
+                          </a>
+                        </strong>
+                      </div>
+                    ) : null}
+                    {orderSnapshot?.vendorIntegrationShippedAt ? (
+                      <div>
+                        <span>External shipped at</span>
+                        <strong>{formatDate(orderSnapshot.vendorIntegrationShippedAt)}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
 
-              {orderSnapshot?.vendorInvoiceNumber ? (
+              {isAdmin && orderSnapshot?.vendorInvoiceNumber ? (
                 <section className="orders-detail-card" aria-label="Vendor invoice">
                   <h4>Vendor Invoice</h4>
                   <div className="orders-rail-summary-list">
@@ -1357,15 +1395,17 @@ export function OrdersPage() {
                         <div className="order-detail-item-copy">
                           <strong>{item.name}</strong>
                           <small>{item.sku} · {item.variantTitle}</small>
-                          <small>
-                            {[
-                              `VAT ${formatVatRate(item.vatRate)}`,
-                              item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
-                              `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
-                              `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
-                              item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
-                            ].filter(Boolean).join(' · ')}
-                          </small>
+                          {isAdmin ? (
+                            <small>
+                              {[
+                                `VAT ${formatVatRate(item.vatRate)}`,
+                                item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
+                                `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                                `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                                item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
+                              ].filter(Boolean).join(' · ')}
+                            </small>
+                          ) : null}
                         </div>
                         <div className="return-detail-item-meta">
                           <span>Qty {item.quantity}</span>

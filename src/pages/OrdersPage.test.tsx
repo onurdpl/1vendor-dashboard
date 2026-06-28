@@ -560,6 +560,11 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('Internal metadata')).not.toBeInTheDocument();
     expect(screen.queryByText(orderDetail.sourceShopifyOrderId)).not.toBeInTheDocument();
     expect(screen.queryByText(orderDetail.id)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shopify order snapshot' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment gateway')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor integration')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vendor Invoice' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).not.toBeInTheDocument();
   });
 
   it('renders an explicit waiting state while auth and vendor readiness are unavailable', () => {
@@ -1169,25 +1174,25 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'Vendor rejection already submitted. This allocation is awaiting Sporgym admin review.',
+      'Vendor rejection already submitted. This order is awaiting Sporgym admin review.',
     );
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review order');
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work.',
+      'Review the blocked order before shipment work continues.',
     );
     expect(screen.getByText('Admin action required')).toBeInTheDocument();
-    expect(screen.getByText('Awaiting admin resolution. Shopify not fulfilled.')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();
     const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
     expect(fulfillmentCard).not.toBeNull();
-    expect(within(fulfillmentCard as HTMLElement).getByText('Blocked')).toBeInTheDocument();
-    expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getAllByText('Blocked').length).toBeGreaterThan(0);
+    expect(within(fulfillmentCard as HTMLElement).queryByText('Not fulfilled')).not.toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
-    const integrationSnapshot = screen.getByLabelText('Shopify order snapshot');
-    expect(within(integrationSnapshot).getByText('Held')).toBeInTheDocument();
-    expect(within(integrationSnapshot).getByText('Vendor integration')).toBeInTheDocument();
-    expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor integration')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shopify sync')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Vendor rejected order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
   });
 
@@ -1231,12 +1236,11 @@ describe('OrdersPage control center', () => {
     );
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Shopify refund is complete and fulfillment is no longer required for this allocation.',
+      'Refund is complete and fulfillment is no longer required for this order.',
     );
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
 
-    const integrationSnapshot = screen.getByLabelText('Shopify order snapshot');
-    expect(within(integrationSnapshot).getByText('Refund completed')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
     expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
   });
 
