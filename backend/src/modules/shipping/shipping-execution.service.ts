@@ -47,9 +47,6 @@ import type {
 } from './shipping-execution.types.js';
 
 const SHIPPING_VAT_PERCENT = 18;
-const DUMMY_KARGO_CARRIER_ID = 'dummy';
-const DEFAULT_KARGO_PACKAGE_TYPE = 'box';
-const ALLOWED_KARGO_PACKAGE_TYPES = new Set(['box', 'document']);
 const DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG = 1;
 type StoredShippingConfig = VendorShippingConfig & {
   warehouses?: VendorShippingWarehouse[];
@@ -140,9 +137,6 @@ function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
   const normalized = (provider ?? 'hepsijet').trim().toLowerCase();
   if (normalized === 'hepsijet') {
     return ShippingProvider.HEPSIJET;
-  }
-  if (normalized === 'kargo_entegrator') {
-    return ShippingProvider.KARGO_ENTEGRATOR;
   }
   if (normalized === 'try_oto') {
     return ShippingProvider.TRY_OTO;
@@ -1082,16 +1076,6 @@ function isInternalTryOtoOrderReference(value: string | null) {
   return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
 }
 
-function resolveKargoPackageType(providerMetadata: unknown) {
-  return (readString(providerMetadata, ['packageType', 'package_type']) ?? DEFAULT_KARGO_PACKAGE_TYPE).trim().toLowerCase();
-}
-
-function assertValidKargoPackageType(value: string): asserts value is 'box' | 'document' {
-  if (!ALLOWED_KARGO_PACKAGE_TYPES.has(value)) {
-    throw new Error('Invalid Kargo package_type. Allowed values: box, document.');
-  }
-}
-
 function readTimeline(snapshot: Record<string, unknown>) {
   const events = Array.isArray(snapshot.timeline) ? snapshot.timeline : [];
   return events
@@ -1212,65 +1196,6 @@ function appendNavlungoStatusLogTimelineEvents(snapshot: Record<string, unknown>
   }, snapshot as Record<string, unknown>);
 }
 
-function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) {
-  void env;
-  return input.carrierId === DUMMY_KARGO_CARRIER_ID;
-}
-
-function getKargoRequestTarget(baseUrl: string | undefined) {
-  if (!baseUrl) {
-    return {
-      selectedBaseUrl: null,
-      requestTargetHostname: null,
-      productionEndpointSelected: false,
-    };
-  }
-
-  const selectedBaseUrl = baseUrl.replace(/\/$/, '');
-  try {
-    const requestUrl = new URL(`${selectedBaseUrl}/shipments`);
-    return {
-      selectedBaseUrl,
-      requestTargetHostname: requestUrl.hostname,
-      productionEndpointSelected: requestUrl.hostname === 'app.kargoentegrator.com',
-    };
-  } catch {
-    return {
-      selectedBaseUrl,
-      requestTargetHostname: null,
-      productionEndpointSelected: false,
-    };
-  }
-}
-
-function logKargoExecutionModeSelection(input: CreateShipmentExecutionDto, preview: ShipmentExecutionPreviewDto, env?: AppEnv) {
-  if (preview.provider !== 'kargo_entegrator') {
-    return;
-  }
-
-  const target = getKargoRequestTarget(env?.KARGO_ENTEGRATOR_BASE_URL);
-  const explicitDummyCarrierRequested = input.carrierId === DUMMY_KARGO_CARRIER_ID;
-  const sandboxModeEnabled = Boolean(env?.SHIPPING_SANDBOX_MODE);
-  const dummyModeEnabled = isDummyKargoRequested(input, env);
-
-  console.info('[shipping:kargo:execution-mode]', {
-    provider: 'kargo_entegrator',
-    selectedEnvironment: sandboxModeEnabled ? 'sandbox' : 'production',
-    selectedBaseUrl: target.selectedBaseUrl,
-    requestTargetHostname: target.requestTargetHostname,
-    productionEndpointSelected: target.productionEndpointSelected,
-    providerMode: dummyModeEnabled ? 'dummy' : 'live',
-    dummyModeEnabled,
-    dummyModeSources: {
-      explicitCarrierIdDummy: explicitDummyCarrierRequested,
-      sandboxMode: sandboxModeEnabled,
-    },
-    shippingExecutionEnabled: Boolean(env?.SHIPPING_EXECUTION_ENABLED),
-    providerEnabled: Boolean(env?.KARGO_ENTEGRATOR_ENABLED),
-    packageType: isRecord(preview.payload) ? readString(preview.payload, ['package_type']) : null,
-  });
-}
-
 export function inferShipmentDesi(
   lineItems: Array<{ title?: string | null; sku?: string | null }>,
   fallbackDesi = 3,
@@ -1382,24 +1307,6 @@ function selectDefaultWarehouse(config: VendorShippingConfigDto, provider: Shipp
     config.warehouses.find((warehouse) => warehouse.provider === provider) ??
     null
   );
-}
-
-function resolveKargoCargoIntegrationId(config: VendorShippingConfigDto, env?: AppEnv) {
-  return config.cargoIntegrationId ?? env?.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID ?? null;
-}
-
-function requireWarehouseConfig(config: VendorShippingConfigDto, provider: ShippingProviderDto, env?: AppEnv) {
-  const warehouse = selectDefaultWarehouse(config, provider);
-  const warehouseId = warehouse?.warehouseId ?? config.defaultWarehouseId;
-  const cargoIntegrationId = resolveKargoCargoIntegrationId(config, env);
-  if (!cargoIntegrationId || !warehouseId) {
-    throw new Error('Vendor shipping warehouse is not configured.');
-  }
-
-  return {
-    cargoIntegrationId,
-    warehouseId,
-  };
 }
 
 function resolveTryOtoPickupLocationCode(providerMetadata: unknown) {
@@ -1837,63 +1744,6 @@ function readStoredOrderWebhookDistrict(orderRecord: Record<string, unknown>) {
   }
 
   return null;
-}
-
-function buildKargoCustomer(input: {
-  order: unknown;
-  customerName: string | null | undefined;
-  customerEmail: string | null | undefined;
-  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
-}) {
-  const orderRecord = isRecord(input.order) ? input.order : {};
-  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
-  const overrides = normalizeCustomerOverrides(input.customerOverrides);
-  const name = splitCustomerName(input.customerName);
-  const customer = {
-    name: overrides.name ?? name.name,
-    surname: overrides.surname ?? name.surname,
-    phone: overrides.phone ?? normalizeShipmentPhone(
-      readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone', 'billingPhone']) ??
-        webhookAddress?.customerPhone ??
-        readStoredOrderWebhookPhone(orderRecord),
-    ),
-    email: overrides.email ?? input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
-    country: overrides.country ?? readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? null,
-    postcode:
-      overrides.postcode ??
-      readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']) ??
-      webhookAddress?.shippingPostcode ??
-      null,
-    city: overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
-    district:
-      overrides.district ??
-      readString(orderRecord, [
-        'shippingDistrict',
-        'district',
-        'shippingCounty',
-        'county',
-        'shippingCityArea',
-        'cityArea',
-        'shippingProvince',
-        'province',
-        'billingDistrict',
-        'billingCounty',
-        'billingCityArea',
-        'billingProvince',
-      ]) ??
-      webhookAddress?.shippingDistrict ??
-      readStoredOrderWebhookDistrict(orderRecord) ??
-      null,
-    address: overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
-  };
-  const missingFields = Object.entries(customer)
-    .filter(([, value]) => !value)
-    .map(([key]) => `customer.${key}`);
-
-  return {
-    customer,
-    missingFields,
-  };
 }
 
 function buildTryOtoCustomer(input: {
@@ -2394,11 +2244,6 @@ function hasKargonomiOrderDestinationIds(order: unknown) {
   );
 }
 
-function resolveKargoPaymentType(orderRecord: Record<string, unknown>) {
-  void orderRecord;
-  return 'cash_money';
-}
-
 function resolveTryOtoPayment(orderRecord: Record<string, unknown>, amount: number) {
   const raw =
     readString(orderRecord, ['payment_method', 'paymentMethod', 'financialStatus', 'paymentStatus'])?.toLowerCase() ??
@@ -2408,60 +2253,6 @@ function resolveTryOtoPayment(orderRecord: Record<string, unknown>, amount: numb
     payment_method: isCod ? 'cod' : 'paid',
     amount_due: isCod ? amount : 0,
   };
-}
-
-function resolveKargoKg(orderRecord: Record<string, unknown>, desi: number) {
-  const rawKg = readString(orderRecord, ['shippingKg', 'kg']);
-  const parsedKg = rawKg === null ? Number.NaN : Number(rawKg);
-  return Number.isFinite(parsedKg) && parsedKg > 0 ? parsedKg : desi;
-}
-
-function readPath(value: unknown, path: string) {
-  return path.split('.').reduce<unknown>((current, key) => {
-    if (!isRecord(current)) {
-      return null;
-    }
-    return current[key] ?? null;
-  }, value);
-}
-
-function logMissingKargoPayloadFields(payload: Record<string, unknown>, provider: ShippingProvider) {
-  if (provider !== ShippingProvider.KARGO_ENTEGRATOR) {
-    return;
-  }
-
-  const requiredFields = [
-    'cargo_integration_id',
-    'warehouse_id',
-    'payment_type',
-    'package_type',
-    'payor_type',
-    'desi',
-    'kg',
-    'platform_id',
-    'platform_d_id',
-    'customer.name',
-    'customer.surname',
-    'customer.phone',
-    'customer.email',
-    'customer.country',
-    'customer.postcode',
-    'customer.city',
-    'customer.district',
-    'customer.address',
-  ];
-  const missingFields = requiredFields.filter((field) => {
-    const value = readPath(payload, field);
-    return value === null || value === undefined || value === '';
-  });
-
-  if (missingFields.length) {
-    console.warn('[shipping:kargo:missing-required-payload-fields]', {
-      provider: 'kargo_entegrator',
-      missingFields,
-      requestBlocked: false,
-    });
-  }
 }
 
 async function getStoredShippingConfig(vendorId: string) {
@@ -2523,10 +2314,6 @@ export async function upsertVendorShippingConfig(
   if (input.defaultWarehouseId !== undefined && input.defaultWarehouseId !== null && !/^\d+$/.test(input.defaultWarehouseId)) {
     throw new Error('defaultWarehouseId must be numeric.');
   }
-  if (providerMetadataForSave !== undefined) {
-    assertValidKargoPackageType(resolveKargoPackageType(providerMetadataForSave));
-  }
-
   const config = await prisma.$transaction(async (tx) => {
     const savedConfig = await tx.vendorShippingConfig.upsert({
       where: {
@@ -2832,12 +2619,10 @@ export function getShippingProviderGateDiagnostics(
   providerOverride?: ShippingProviderDto,
 ): ShippingProviderGateDiagnosticsDto {
   const provider = providerOverride ?? env.SHIPPING_PROVIDER;
-  const isKargo = provider === 'kargo_entegrator';
   const isTryOto = provider === 'try_oto';
   const isKargonomi = provider === 'kargonomi';
   const isNavlungo = provider === 'navlungo';
   const supportedProviders: ShippingProviderDto[] = [
-    'kargo_entegrator',
     'hepsijet',
     ...(env.TRY_OTO_ENABLED ? (['try_oto'] as ShippingProviderDto[]) : []),
     ...(env.SHIPPING_PROVIDER === 'kargonomi' || env.KARGONOMI_BASE_URL || env.KARGONOMI_API_TOKEN
@@ -2848,41 +2633,32 @@ export function getShippingProviderGateDiagnostics(
       : []),
   ];
   const providerSelected = env.SHIPPING_PROVIDER === provider;
-  const providerEnabled = isKargo
-    ? env.KARGO_ENTEGRATOR_ENABLED
-    : isTryOto
-      ? env.TRY_OTO_ENABLED
-      : isKargonomi
-        ? providerSelected
-        : isNavlungo
-          ? Boolean(env.NAVLUNGO_BASE_URL && env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
-          : false;
-  const baseUrlConfigured = isKargo
-    ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL)
-    : isTryOto
-      ? Boolean(env.TRY_OTO_BASE_URL)
-      : isKargonomi
-        ? Boolean(env.KARGONOMI_BASE_URL)
-        : isNavlungo
-          ? Boolean(env.NAVLUNGO_BASE_URL)
-          : false;
-  const apiKeyConfigured = isKargo
-    ? Boolean(env.KARGO_ENTEGRATOR_API_KEY)
-    : isTryOto
-      ? Boolean(env.TRY_OTO_REFRESH_TOKEN)
-      : isKargonomi
-        ? Boolean(env.KARGONOMI_API_TOKEN)
-        : isNavlungo
-          ? Boolean(env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
-          : false;
-  const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
+  const providerEnabled = isTryOto
+    ? env.TRY_OTO_ENABLED
+    : isKargonomi
+      ? providerSelected
+      : isNavlungo
+        ? Boolean(env.NAVLUNGO_BASE_URL && env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
+        : false;
+  const baseUrlConfigured = isTryOto
+    ? Boolean(env.TRY_OTO_BASE_URL)
+    : isKargonomi
+      ? Boolean(env.KARGONOMI_BASE_URL)
+      : isNavlungo
+        ? Boolean(env.NAVLUNGO_BASE_URL)
+        : false;
+  const apiKeyConfigured = isTryOto
+    ? Boolean(env.TRY_OTO_REFRESH_TOKEN)
+    : isKargonomi
+      ? Boolean(env.KARGONOMI_API_TOKEN)
+      : isNavlungo
+        ? Boolean(env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
+        : false;
+  const cargoIntegrationIdConfigured = false;
   const tryOtoWebhookDiagnostics = isTryOto ? getTryOtoWebhookReceiveDiagnostics() : null;
-  const packageTypeUsed = DEFAULT_KARGO_PACKAGE_TYPE;
+  const packageTypeUsed = '';
   const missing = [
     !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
-    isKargo && !env.KARGO_ENTEGRATOR_ENABLED ? 'KARGO_ENTEGRATOR_ENABLED' : null,
-    isKargo && !env.KARGO_ENTEGRATOR_BASE_URL ? 'KARGO_ENTEGRATOR_BASE_URL' : null,
-    isKargo && !env.KARGO_ENTEGRATOR_API_KEY ? 'KARGO_ENTEGRATOR_API_KEY' : null,
     isTryOto && !env.TRY_OTO_ENABLED ? 'TRY_OTO_ENABLED' : null,
     isTryOto && !env.TRY_OTO_SANDBOX_MODE ? 'TRY_OTO_SANDBOX_MODE' : null,
     isTryOto && !env.TRY_OTO_BASE_URL ? 'TRY_OTO_BASE_URL' : null,
@@ -2907,11 +2683,7 @@ export function getShippingProviderGateDiagnostics(
     shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
     providerSelected,
     providerEnabled,
-    webhookIngestEnabled: isKargo
-      ? env.SHIPPING_SANDBOX_MODE && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED
-      : isTryOto
-        ? env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
-        : false,
+    webhookIngestEnabled: isTryOto ? env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED : false,
     lastWebhookReceived: tryOtoWebhookDiagnostics?.received ?? false,
     lastWebhookReceivedAt: tryOtoWebhookDiagnostics?.receivedAt ?? null,
     lastWebhookHttpMethod: tryOtoWebhookDiagnostics?.httpMethod ?? null,
@@ -2937,43 +2709,33 @@ export function getShippingProviderGateDiagnostics(
     notificationUrlConfigured: false,
     webhookRouteImplemented: true,
     receiverAddressAvailability: 'confirmed_required',
-    dummyKargoSupport: isKargo && env.SHIPPING_SANDBOX_MODE ? 'available' : 'not_implemented',
+    dummyKargoSupport: 'not_implemented',
     statusSyncSupport:
       isTryOto && env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
         ? 'webhook_ingest'
         : 'not_implemented',
     missing,
-    deprecatedEnvFallbacks:
-      isKargo && env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE === 'deprecated'
-        ? ['ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID']
-        : [],
-    warnings: isKargo
+    deprecatedEnvFallbacks: [],
+    warnings: isTryOto
       ? [
-          'Kargo Entegratör webhook/status sync is not implemented.',
-          env.SHIPPING_SANDBOX_MODE
-            ? 'Dummy Kargo sandbox shipment creation is enabled.'
-            : 'Live carrier execution is not enabled or verified.',
+          'Try OTO is sandbox-only in this phase.',
+          TRY_OTO_WEBHOOK_SIGNATURE_WARNING,
+          'Try OTO returns and production rollout are not implemented.',
         ]
-      : isTryOto
+      : isKargonomi
         ? [
-            'Try OTO is sandbox-only in this phase.',
-            TRY_OTO_WEBHOOK_SIGNATURE_WARNING,
-            'Try OTO returns and production rollout are not implemented.',
+            'Kargonomi forward shipment execution is enabled only when explicitly selected.',
+            'Kargonomi return/reverse shipment is not implemented.',
           ]
-        : isKargonomi
+        : isNavlungo
           ? [
-              'Kargonomi forward shipment execution is enabled only when explicitly selected.',
-              'Kargonomi return/reverse shipment is not implemented.',
+              'Navlungo forward shipment execution is enabled only when explicitly selected.',
+              'Navlungo return/reverse shipment is not implemented.',
+              'Navlungo webhook/status callback ingest is not implemented.',
+              ...(usesDeprecatedNavlungoV2BaseUrl(env.NAVLUNGO_BASE_URL)
+                ? ['NAVLUNGO_BASE_URL uses deprecated /v2 path. Configure the documented v2.1 base URL.']
+                : []),
             ]
-          : isNavlungo
-            ? [
-                'Navlungo forward shipment execution is enabled only when explicitly selected.',
-                'Navlungo return/reverse shipment is not implemented.',
-                'Navlungo webhook/status callback ingest is not implemented.',
-                ...(usesDeprecatedNavlungoV2BaseUrl(env.NAVLUNGO_BASE_URL)
-                  ? ['NAVLUNGO_BASE_URL uses deprecated /v2 path. Configure the documented v2.1 base URL.']
-                  : []),
-              ]
           : [],
   };
 }
@@ -2997,8 +2759,7 @@ export async function getShippingProviderReadinessDiagnostics(
 ): Promise<ShippingProviderGateDiagnosticsDto> {
   const diagnostics = getShippingProviderGateDiagnostics(env, providerOverride);
   if (
-    (diagnostics.provider !== 'kargo_entegrator' &&
-      diagnostics.provider !== 'try_oto' &&
+    (diagnostics.provider !== 'try_oto' &&
       diagnostics.provider !== 'kargonomi' &&
       diagnostics.provider !== 'navlungo') ||
     !vendorId
@@ -3094,7 +2855,7 @@ export async function getShippingProviderReadinessDiagnostics(
   }
 
   const warehouse = selectDefaultWarehouse(config, diagnostics.provider);
-  const cargoIntegrationIdConfigured = Boolean(config.cargoIntegrationId ?? env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID);
+  const cargoIntegrationIdConfigured = Boolean(config.cargoIntegrationId);
   const warehouseIdConfigured = Boolean(warehouse?.warehouseId ?? config.defaultWarehouseId);
   const defaultDesiConfigured = Number(config.defaultDesi) > 0;
   const missing = [
@@ -3115,7 +2876,7 @@ export async function getShippingProviderReadinessDiagnostics(
     cargoIntegrationIdConfigured,
     warehouseIdConfigured,
     defaultDesiConfigured,
-    packageTypeUsed: resolveKargoPackageType(config.providerMetadata),
+    packageTypeUsed: '',
     missing,
   };
 }
@@ -3733,87 +3494,6 @@ function matchesTryOtoExecution(execution: ShipmentExecution, candidates: string
   ].filter((value): value is string => Boolean(value));
 
   return executionCandidates.some((value) => candidates.includes(value));
-}
-
-export async function ingestKargoEntegratorWebhook(
-  payload: unknown,
-  options: {
-    env: AppEnv;
-  },
-): Promise<{ ok: true; shipmentExecutionId: string; shipmentStatus: ShipmentExecutionDto['shipmentStatus'] } | { ok: false; message: string }> {
-  if (!options.env.SHIPPING_SANDBOX_MODE || !options.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED) {
-    return {
-      ok: false,
-      message: 'Kargo Entegratör webhook ingestion is not implemented yet.',
-    };
-  }
-
-  const data = getWebhookData(payload);
-  const providerShipmentId = readString(data, ['providerShipmentId', 'shipmentId', 'id', 'cargoId']);
-  const allocationId = readString(data, ['allocationId', 'allocation_id']);
-  const trackingNumber = readString(data, ['tracking_number', 'trackingNumber', 'trackingNo', 'cargoTrackingNo']);
-  const trackingUrl = readString(data, ['tracking_url', 'trackingUrl', 'trackingLink', 'cargoTrackingUrl']);
-  const barcode = readString(data, ['barcode', 'barcodeNumber', 'barcode_number']);
-  const providerStatus = readString(data, ['status', 'shipmentStatus', 'cargoStatus']) ?? (trackingNumber ? 'tracking_assigned' : null);
-  const normalizedStatus = normalizeProviderWebhookStatus(providerStatus);
-  if (!providerShipmentId && !allocationId) {
-    return {
-      ok: false,
-      message: 'Kargo Entegratör webhook did not include a shipment or allocation identifier.',
-    };
-  }
-
-  const execution = await prisma.shipmentExecution.findFirst({
-    where: {
-      provider: ShippingProvider.KARGO_ENTEGRATOR,
-      OR: [
-        providerShipmentId ? { providerShipmentId } : undefined,
-        allocationId ? { allocationId } : undefined,
-      ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
-    },
-  });
-
-  if (!execution) {
-    return {
-      ok: false,
-      message: 'Shipment execution could not be matched for the Kargo Entegratör webhook.',
-    };
-  }
-
-  const snapshot = appendTimelineEvent(
-    {
-      ...readSnapshot(execution),
-      webhookReceived: true,
-      dummyCarrierDetected: true,
-      providerStatus,
-      barcode: barcode ?? readString(readSnapshot(execution), ['barcode', 'barcodeNumber']),
-      lastProviderResponseAt: new Date().toISOString(),
-      responseKeys: Object.keys(data).sort(),
-    },
-    {
-      label: trackingNumber ? 'Tracking assigned' : barcode ? 'Barcode assigned' : 'Provider status update',
-      status: providerStatus,
-    },
-  );
-
-  const updated = await prisma.shipmentExecution.update({
-    where: {
-      id: execution.id,
-    },
-    data: {
-      providerShipmentId: execution.providerShipmentId ?? providerShipmentId,
-      trackingNumber: execution.trackingNumber ?? trackingNumber,
-      trackingUrl: execution.trackingUrl ?? trackingUrl,
-      shipmentStatus: normalizedStatus ?? execution.shipmentStatus,
-      responseSnapshot: snapshot as Prisma.InputJsonValue,
-    },
-  });
-
-  return {
-    ok: true,
-    shipmentExecutionId: updated.id,
-    shipmentStatus: mapStatus(updated.shipmentStatus),
-  };
 }
 
 export async function ingestTryOtoWebhook(
@@ -6671,15 +6351,12 @@ async function buildShipmentRequestPreview(
   const providerDto = mapProvider(provider);
   if (
     provider !== ShippingProvider.HEPSIJET &&
-    provider !== ShippingProvider.KARGO_ENTEGRATOR &&
     provider !== ShippingProvider.TRY_OTO &&
     provider !== ShippingProvider.KARGONOMI &&
     provider !== ShippingProvider.NAVLUNGO
   ) {
-    throw new Error('Only Hepsijet, Kargo Entegratör, Try OTO, Kargonomi, and Navlungo shipment execution are implemented.');
+    throw new Error('Only Hepsijet, Try OTO, Kargonomi, and Navlungo shipment execution are implemented.');
   }
-  const warehouseConfig =
-    provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto, options.env) : null;
   const kargonomiWarehouseId =
     provider === ShippingProvider.KARGONOMI ? resolveKargonomiWarehouseId(config, options.env) : null;
   if (provider === ShippingProvider.KARGONOMI && !kargonomiWarehouseId) {
@@ -6719,16 +6396,6 @@ async function buildShipmentRequestPreview(
   }));
   const desi = resolveShipmentDesi(lineItems, config.defaultDesi);
   const customer = splitCustomerName(allocation.order.customerName);
-  const dummyKargoRequested = provider === ShippingProvider.KARGO_ENTEGRATOR && isDummyKargoRequested(input, options.env);
-  if (input.carrierId === DUMMY_KARGO_CARRIER_ID && !options.env?.SHIPPING_SANDBOX_MODE) {
-    throw new Error('Dummy Kargo shipment creation is available only when shipping sandbox mode is enabled.');
-  }
-  const kargoCustomer = buildKargoCustomer({
-    order: allocation.order,
-    customerName: allocation.order.customerName,
-    customerEmail: allocation.order.customerEmail,
-    customerOverrides: input.customerOverrides,
-  });
   const tryOtoCustomer = buildTryOtoCustomer({
     order: allocation.order,
     customerName: allocation.order.customerName,
@@ -6869,9 +6536,7 @@ async function buildShipmentRequestPreview(
     ? buildNavlungoSender(config, { useFullSenderDetails: navlungoFullSenderRetryRequested })
     : null;
   const missingCustomerFields = [
-    ...(dummyKargoRequested
-      ? kargoCustomer.missingFields
-      : provider === ShippingProvider.TRY_OTO
+    ...(provider === ShippingProvider.TRY_OTO
         ? tryOtoCustomer.missingFields
         : provider === ShippingProvider.KARGONOMI
           ? kargonomiBuyer.missingFields
@@ -6883,8 +6548,7 @@ async function buildShipmentRequestPreview(
             ]),
   ].filter((field): field is string => Boolean(field));
   if (
-    (dummyKargoRequested ||
-      provider === ShippingProvider.TRY_OTO ||
+    (provider === ShippingProvider.TRY_OTO ||
       provider === ShippingProvider.KARGONOMI ||
       provider === ShippingProvider.NAVLUNGO) &&
     missingCustomerFields.length > 0
@@ -6899,22 +6563,12 @@ async function buildShipmentRequestPreview(
     );
   }
   const notificationUrl = buildNotificationUrl(input.notificationUrl);
-  const cargoIntegrationId = warehouseConfig?.cargoIntegrationId ?? null;
-  const warehouseId = warehouseConfig?.warehouseId ?? null;
-  const numericCargoIntegrationId = Number(cargoIntegrationId);
-  const numericWarehouseId = Number(warehouseId);
+  const cargoIntegrationId = null;
+  const warehouseId = null;
   const orderRecord = isRecord(allocation.order) ? allocation.order : {};
-  const kg = resolveKargoKg(orderRecord, desi);
-  const note = readString(orderRecord, ['shippingNote', 'shipmentNote']) ?? '';
-  const packageType = provider === ShippingProvider.KARGO_ENTEGRATOR
-    ? resolveKargoPackageType(config.providerMetadata)
-    : DEFAULT_KARGO_PACKAGE_TYPE;
-  if (provider === ShippingProvider.KARGO_ENTEGRATOR) {
-    assertValidKargoPackageType(packageType);
-  }
   const amount = lineItems.reduce((sum, lineItem) => sum + lineItem.lineAmount, 0);
   const tryOtoPayment = resolveTryOtoPayment(orderRecord, amount);
-  const tryOtoPackageWeight = resolveTryOtoPackageWeight(config.providerMetadata, kg);
+  const tryOtoPackageWeight = resolveTryOtoPackageWeight(config.providerMetadata, desi);
   const tryOtoDeliveryOptionId = provider === ShippingProvider.TRY_OTO
     ? resolveTryOtoDeliveryOptionId(config.providerMetadata)
     : null;
@@ -7014,25 +6668,15 @@ async function buildShipmentRequestPreview(
           ],
         }
     : {
-        cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
-        warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
-        ...(dummyKargoRequested ? { cargo_company: { id: DUMMY_KARGO_CARRIER_ID } } : {}),
         platform_id: allocation.sourceShopifyOrderId,
         platform_d_id: allocation.sourceShopifyOrderNumber,
         notification_url: notificationUrl,
-        customer: provider === ShippingProvider.KARGO_ENTEGRATOR
-          ? kargoCustomer.customer
-          : {
-              name: customer.name,
-              surname: customer.surname,
-              email: allocation.order.customerEmail,
-            },
-        payment_type: resolveKargoPaymentType(orderRecord),
-        ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { package_type: packageType } : {}),
-        ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { payor_type: 'sender' } : {}),
+        customer: {
+          name: customer.name,
+          surname: customer.surname,
+          email: allocation.order.customerEmail,
+        },
         desi,
-        ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { kg } : {}),
-        ...(dummyKargoRequested ? { note } : {}),
         lines: lineItems.map((lineItem) => ({
           title: lineItem.title,
           quantity: lineItem.quantity,
@@ -7045,7 +6689,6 @@ async function buildShipmentRequestPreview(
           vendor_id: allocation.assignedVendorId,
         },
       };
-  logMissingKargoPayloadFields(payload, provider);
 
   return {
     allocationId: allocation.id,
@@ -7066,14 +6709,7 @@ async function buildShipmentRequestPreview(
     customerFieldsValid: missingCustomerFields.length === 0,
     missingCustomerFields,
     warnings:
-      provider === ShippingProvider.KARGO_ENTEGRATOR
-        ? [
-            'Kargo Entegratör webhook/status sync is not implemented.',
-            dummyKargoRequested
-              ? 'Dummy Kargo sandbox shipment creation is enabled.'
-              : 'Live carrier execution is not enabled or verified.',
-          ]
-        : provider === ShippingProvider.TRY_OTO
+      provider === ShippingProvider.TRY_OTO
           ? [
               'Try OTO is sandbox-only in this phase.',
               'Try OTO webhooks, returns, and production rollout are not implemented.',
@@ -7202,7 +6838,6 @@ export async function createShipmentExecution(
 
       try {
         const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
-        logKargoExecutionModeSelection(input, preview, options.env);
         const result = await adapter.createShipment({
           allocationId: allocation.id,
           vendorId: allocation.assignedVendorId,
@@ -7268,7 +6903,6 @@ export async function createShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
-    logKargoExecutionModeSelection(input, preview, options.env);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
@@ -7404,15 +7038,6 @@ export async function retryDryRunShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
-    logKargoExecutionModeSelection(
-      {
-        allocationId: existing.allocationId,
-        provider: providerDto,
-        notificationUrl: options.notificationUrl ?? undefined,
-      },
-      preview,
-      options.env,
-    );
     const retryContext = buildTryOtoRetryContext(existing);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
@@ -7576,17 +7201,6 @@ export async function retryFailedShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
-    logKargoExecutionModeSelection(
-      {
-        allocationId: existing.allocationId,
-        provider: providerDto,
-        notificationUrl: options.notificationUrl ?? undefined,
-        customerOverrides: options.customerOverrides,
-        useFullSenderDetailsForThisRetry: options.useFullSenderDetailsForThisRetry === true,
-      },
-      preview,
-      options.env,
-    );
     const retryContext = buildTryOtoRetryContext(existing);
     const result = await adapter.createShipment({
       allocationId: allocation.id,

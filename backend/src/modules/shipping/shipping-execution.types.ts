@@ -1,6 +1,5 @@
 export type ShippingProviderDto =
   | 'hepsijet'
-  | 'kargo_entegrator'
   | 'try_oto'
   | 'kargonomi'
   | 'navlungo'

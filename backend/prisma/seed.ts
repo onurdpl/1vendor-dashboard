@@ -86,20 +86,20 @@ async function runSeed() {
       vendorId: 'sporjinal',
     },
     update: {
-      preferredProvider: 'KARGO_ENTEGRATOR',
+      preferredProvider: 'KARGONOMI',
       shippingEnabled: true,
       defaultDesi: '3.00',
-      cargoIntegrationId: '2547',
-      defaultWarehouseId: '1774',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
       shippingVatPercent: '18.00',
     },
     create: {
       vendorId: 'sporjinal',
-      preferredProvider: 'KARGO_ENTEGRATOR',
+      preferredProvider: 'KARGONOMI',
       shippingEnabled: true,
       defaultDesi: '3.00',
-      cargoIntegrationId: '2547',
-      defaultWarehouseId: '1774',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
       shippingVatPercent: '18.00',
     },
   });
@@ -108,8 +108,8 @@ async function runSeed() {
     where: {
       vendorId_provider_warehouseId: {
         vendorId: 'sporjinal',
-        provider: 'KARGO_ENTEGRATOR',
-        warehouseId: '1774',
+        provider: 'KARGONOMI',
+        warehouseId: '112668',
       },
     },
     update: {
@@ -120,8 +120,8 @@ async function runSeed() {
     create: {
       configId: sporjinalShippingConfig.id,
       vendorId: 'sporjinal',
-      provider: 'KARGO_ENTEGRATOR',
-      warehouseId: '1774',
+      provider: 'KARGONOMI',
+      warehouseId: '112668',
       name: 'Sporjinal default warehouse',
       isDefault: true,
     },

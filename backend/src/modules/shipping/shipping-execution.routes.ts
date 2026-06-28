@@ -11,7 +11,6 @@ import {
   getShipmentExecutionById,
   getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
-  ingestKargoEntegratorWebhook,
   ingestTryOtoWebhook,
   listShipmentExecutions,
   probeShopifyReturnLabelUpload,
@@ -35,7 +34,7 @@ function resolveNotificationUrl(request: { headers: Record<string, unknown>; pro
   const host = forwardedHost || String(request.headers.host ?? request.hostname);
   const protocol = forwardedProto || request.protocol || 'https';
 
-  return `${protocol}://${host}/webhooks/shipping/kargo-entegrator`;
+  return `${protocol}://${host}/webhooks/try-oto`;
 }
 
 function readHeaderValue(value: string | string[] | undefined) {
@@ -55,48 +54,6 @@ function buildTryOtoWebhookAuthenticityVerification(mode: 'shared_secret' | 'dis
     mode,
     providerNativeSignatureVerified: false,
     note: 'Provider-native Try OTO signature semantics remain unknown.',
-  };
-}
-
-function buildKargoWebhookAuthenticityVerification(mode: 'shared_secret' | 'disabled_dev_only') {
-  return {
-    mode,
-    providerNativeSignatureVerified: false,
-    note: 'Provider-native Kargo Entegratör signature semantics remain unknown.',
-  };
-}
-
-function verifyKargoWebhookAuthenticity(headers: Record<string, string | string[] | undefined>, env: AppEnv) {
-  const configuredSecret = env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?.trim();
-  if (!configuredSecret) {
-    if (env.NODE_ENV === 'production' && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED) {
-      return {
-        ok: false as const,
-        code: 401,
-        message: 'Kargo Entegratör webhook authenticity is not configured.',
-        authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
-      };
-    }
-
-    return {
-      ok: true as const,
-      authenticityVerification: buildKargoWebhookAuthenticityVerification('disabled_dev_only'),
-    };
-  }
-
-  const providedSecret = readHeaderValue(headers['x-kargo-entegrator-webhook-secret']).trim();
-  if (!providedSecret || !safeSharedSecretMatches(providedSecret, configuredSecret)) {
-    return {
-      ok: false as const,
-      code: 401,
-      message: 'Kargo Entegratör webhook authenticity verification failed.',
-      authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
-    };
-  }
-
-  return {
-    ok: true as const,
-    authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
   };
 }
 
@@ -137,25 +94,6 @@ function verifyTryOtoWebhookAuthenticity(headers: Record<string, string | string
 export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
-
-  app.post('/webhooks/shipping/kargo-entegrator', async (request, reply) => {
-    const authenticity = verifyKargoWebhookAuthenticity(request.headers, env);
-    if (!authenticity.ok) {
-      return reply.code(authenticity.code).send({
-        message: authenticity.message,
-        authenticityVerification: authenticity.authenticityVerification,
-      });
-    }
-
-    const result = await ingestKargoEntegratorWebhook(request.body, { env });
-    if (!result.ok) {
-      return reply.code(501).send({
-        message: result.message,
-      });
-    }
-
-    return result;
-  });
 
   app.post('/webhooks/try-oto', async (request, reply) => {
     const authenticity = verifyTryOtoWebhookAuthenticity(request.headers, env);
@@ -436,7 +374,6 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
 
       const query = request.query as { provider?: string; vendorId?: string };
       const provider =
-        query.provider === 'kargo_entegrator' ||
         query.provider === 'try_oto' ||
         query.provider === 'kargonomi' ||
         query.provider === 'navlungo'
