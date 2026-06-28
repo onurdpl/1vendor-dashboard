@@ -31,9 +31,13 @@ type DashboardHeroAction = {
   value: string;
   label: string;
   helperText: string;
-  actionLabel: string;
-  to: string;
+  actionLabel: string | null;
+  to: string | null;
   tone: 'attention' | 'calm';
+  actionItems: Array<{
+    label: string;
+    value: string;
+  }>;
 };
 
 type RecentOrderRow = {
@@ -86,6 +90,11 @@ function hasAttentionValue(value: string | null | undefined) {
   return Number.isFinite(normalized) && normalized > 0;
 }
 
+function readPositiveCount(value: string | number | null | undefined) {
+  const normalized = Number(String(value ?? '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : 0;
+}
+
 function hasMeaningfulMoneyValue(value: string | null | undefined) {
   if (!value) {
     return false;
@@ -129,26 +138,48 @@ function getHeroActionTarget(item: DashboardPriorityItem | null): Pick<Dashboard
 }
 
 function buildHeroAction(dashboard: DashboardOverview): DashboardHeroAction {
+  const shipmentItem = findPriorityItem(dashboard.priorityWork, ['awaiting', 'shipment']);
+  const returnsItem = findPriorityItem(dashboard.priorityWork, ['refund', 'attention'])
+    ?? findPriorityItem(dashboard.priorityWork, ['return']);
+  const supportCount = dashboard.normalizedOperationalCounts?.openSupportIssueCount ?? 0;
+  const financeReviewCount = dashboard.normalizedOperationalCounts?.financeReviewItemCount ?? 0;
+  const actionItems = [
+    shipmentItem && hasAttentionValue(shipmentItem.value)
+      ? { label: 'orders waiting shipment', value: asDisplayValue(shipmentItem.value) }
+      : null,
+    returnsItem && hasAttentionValue(returnsItem.value)
+      ? { label: 'returns waiting review', value: asDisplayValue(returnsItem.value) }
+      : null,
+    supportCount > 0
+      ? { label: `support message${supportCount === 1 ? '' : 's'} waiting`, value: String(supportCount) }
+      : null,
+    financeReviewCount > 0
+      ? { label: `payment review${financeReviewCount === 1 ? '' : 's'} waiting`, value: String(financeReviewCount) }
+      : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
+  const totalActionCount = actionItems.reduce((total, item) => total + readPositiveCount(item.value), 0);
   const primaryItem = dashboard.priorityWork.find((item) => hasAttentionValue(item.value)) ?? null;
   const target = getHeroActionTarget(primaryItem);
-  if (!primaryItem) {
+  if (totalActionCount === 0) {
     return {
       value: '0',
       label: 'Needs Attention Today',
-      helperText: 'No urgent store work is waiting right now.',
-      actionLabel: 'View orders',
-      to: '/orders',
+      helperText: 'No urgent work needs attention right now.',
+      actionLabel: null,
+      to: null,
       tone: 'calm',
+      actionItems: [],
     };
   }
 
   return {
-    value: asDisplayValue(primaryItem.value),
+    value: String(totalActionCount),
     label: 'Needs Attention Today',
-    helperText: primaryItem.description ?? primaryItem.label,
-    actionLabel: target.actionLabel,
+    helperText: `${totalActionCount} action${totalActionCount === 1 ? '' : 's'} need your attention today.`,
+    actionLabel: 'Review work',
     to: target.to,
     tone: 'attention',
+    actionItems,
   };
 }
 
@@ -678,11 +709,25 @@ export function DashboardPage() {
             <h2>{heroAction.label}</h2>
             <strong>{isDashboardLoading ? <SkeletonText width="5rem" /> : heroAction.value}</strong>
             <p>{heroAction.helperText}</p>
+            {heroAction.actionItems.length > 0 ? (
+              <ul className="dashboard-vendor-hero-action-list" aria-label="Today action summary">
+                {heroAction.actionItems.map((item) => (
+                  <li key={item.label}>
+                    <span>{item.value}</span>
+                    {item.label}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="dashboard-vendor-hero-calm-note">You're all caught up.</p>
+            )}
           </div>
-          <Link className="dashboard-vendor-hero-link" to={heroAction.to}>
-            {heroAction.actionLabel}
-            <ArrowIcon />
-          </Link>
+          {heroAction.to && heroAction.actionLabel ? (
+            <Link className="dashboard-vendor-hero-link" to={heroAction.to}>
+              {heroAction.actionLabel}
+              <ArrowIcon />
+            </Link>
+          ) : null}
         </article>
 
         <div className="dashboard-vendor-supporting-grid" aria-label="Dashboard supporting metrics">

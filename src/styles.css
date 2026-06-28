@@ -15071,6 +15071,43 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 650;
 }
 
+.dashboard-vendor-hero-action-list {
+  display: grid;
+  max-width: 540px;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-vendor-hero-action-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #334155;
+  font-size: 0.95rem;
+  font-weight: 760;
+}
+
+.dashboard-vendor-hero-action-list span {
+  display: inline-flex;
+  min-width: 34px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #0b53ff;
+  font-size: 0.88rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-vendor-hero-calm-note {
+  color: #087b2f;
+  font-weight: 780;
+}
+
 .dashboard-vendor-hero-link {
   display: inline-flex;
   width: fit-content;
