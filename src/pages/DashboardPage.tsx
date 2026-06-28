@@ -266,17 +266,101 @@ function buildRecentOrderRows(orders: OrderSummary[] | undefined): RecentOrderRo
   }));
 }
 
+function extractOrderNumberFromActivity(activity: string) {
+  const orderMatch = activity.match(/(?:Shopify order|order)\s+#*([A-Za-z0-9-]+)/i);
+  return orderMatch ? `#${orderMatch[1]}` : null;
+}
+
+function extractHourCount(activity: string) {
+  const hourMatch = activity.match(/(\d+(?:\.\d+)?)\s*hours?/i);
+  if (!hourMatch) {
+    return null;
+  }
+  const hours = Number(hourMatch[1]);
+  return Number.isFinite(hours) ? hours : null;
+}
+
+function formatDurationFromHours(hours: number) {
+  if (hours >= 48) {
+    const days = Math.floor(hours / 24);
+    return `over ${days} day${days === 1 ? '' : 's'}`;
+  }
+  return `over ${Math.floor(hours)} hour${Math.floor(hours) === 1 ? '' : 's'}`;
+}
+
+function formatDashboardActivity(activity: string, index: number): DashboardRecentChange {
+  const normalized = activity.trim();
+  const lower = normalized.toLowerCase();
+  const orderNumber = extractOrderNumberFromActivity(normalized);
+  const hours = extractHourCount(normalized);
+  const generic: DashboardRecentChange = {
+    id: `activity-${index}-${normalized}`,
+    title: 'Store activity updated',
+    detail: 'A store update was recorded.',
+    meta: '',
+  };
+
+  if (!normalized) {
+    return generic;
+  }
+
+  if (lower.includes('fulfillment is stale') || lower.includes('stale fulfillment')) {
+    return {
+      ...generic,
+      title: 'Shipment needs attention',
+      detail: hours ? `An order has been waiting for shipment for ${formatDurationFromHours(hours)}.` : 'An order has been waiting for shipment longer than expected.',
+    };
+  }
+
+  if (lower.includes('delivered')) {
+    return {
+      ...generic,
+      title: 'Order delivered',
+      detail: orderNumber ? `Order ${orderNumber} was marked as delivered.` : 'An order was marked as delivered.',
+    };
+  }
+
+  if (lower.includes('return') || lower.includes('refund')) {
+    return {
+      ...generic,
+      title: lower.includes('processed') ? 'Return processed' : 'Return updated',
+      detail: 'A return/refund was updated.',
+    };
+  }
+
+  if (lower.includes('shipment watcher') || lower.includes('shipment') && lower.includes('automation')) {
+    return {
+      ...generic,
+      title: 'Shipment review created',
+      detail: 'A shipment issue was added for review.',
+    };
+  }
+
+  if (lower.includes('payment') || lower.includes('payout')) {
+    return {
+      ...generic,
+      title: 'Payment estimate updated',
+      detail: 'Your payment information was updated.',
+    };
+  }
+
+  if (orderNumber) {
+    return {
+      ...generic,
+      title: 'Order updated',
+      detail: `Order ${orderNumber} was updated.`,
+    };
+  }
+
+  return generic;
+}
+
 function buildRecentChanges(dashboard: DashboardOverview, recentOrders: RecentOrderRow[]): DashboardRecentChange[] {
   const activityChanges = dashboard.recentActivity
     .map((activity, index) => activity.trim())
     .filter(Boolean)
     .slice(0, 5)
-    .map((activity, index) => ({
-      id: `activity-${index}-${activity}`,
-      title: activity,
-      detail: 'Store activity update',
-      meta: 'Recent',
-    }));
+    .map(formatDashboardActivity);
 
   if (activityChanges.length > 0) {
     return activityChanges;
@@ -653,7 +737,7 @@ export function DashboardPage() {
                   <strong>{change.title}</strong>
                   <small>{change.detail}</small>
                 </div>
-                <span>{change.meta}</span>
+                {change.meta ? <span>{change.meta}</span> : null}
               </div>
             ))}
           </div>

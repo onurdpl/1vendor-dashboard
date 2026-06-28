@@ -15367,6 +15367,10 @@ summary.provider-response-heading::-webkit-details-marker {
   white-space: nowrap;
 }
 
+.dashboard-vendor-change-row > div:last-child {
+  grid-column: 2 / -1;
+}
+
 .dashboard-vendor-orders-details {
   border-top: 1px solid #e6eaf2;
 }
