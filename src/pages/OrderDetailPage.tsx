@@ -2314,7 +2314,7 @@ export function OrderDetailPage() {
   );
   const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
   const canUseFullNavlungoSenderRetry =
-    canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
+    isAdmin && canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
   const shouldShowFailedShipmentRetryDiagnostics =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
@@ -6778,18 +6778,20 @@ export function OrderDetailPage() {
                                 <span>{isAdmin ? 'Shipment provider' : 'Carrier'}</span>
                                 <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                               </div>
-                              {visibleShipmentExecution.warehouseId ? (
+                              {isAdmin && visibleShipmentExecution.warehouseId ? (
                                 <div className="summary-row">
                                   <span>Warehouse</span>
                                   <strong>{visibleShipmentExecution.warehouseId}</strong>
                                 </div>
                               ) : null}
-                              <div className="summary-row">
-                                <span>{isAdmin ? getShipmentReferenceLabel(visibleShipmentExecution) : 'Shipment reference'}</span>
-                                <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
-                                  {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
-                                </strong>
-                              </div>
+                              {isAdmin ? (
+                                <div className="summary-row">
+                                  <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
+                                  <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
+                                    {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
+                                  </strong>
+                                </div>
+                              ) : null}
                               <div className="summary-row">
                                 <span>Barcode</span>
                                 <strong
@@ -7458,7 +7460,7 @@ export function OrderDetailPage() {
                         {canCancelNavlungoShipment ? (
                           <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                             <strong>Navlungo cancellation</strong>
-                            <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                            <span>{isAdmin ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.' : 'Cancel this shipment before delivery.'}</span>
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -7475,7 +7477,7 @@ export function OrderDetailPage() {
                         {canSyncNavlungoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
                             <strong>Navlungo status sync</strong>
-                            <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                            <span>{isAdmin ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.' : 'Refresh the latest carrier status for this shipment.'}</span>
                             {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                               <span className="warning-copy">Carrier reported address validation issue.</span>
                             ) : null}
@@ -7981,7 +7983,7 @@ export function OrderDetailPage() {
                             <strong>{navlungoProviderStatusBadge}</strong>
                           </div>
                         ) : null}
-                        {visibleShipmentExecution.warehouseId ? (
+                        {isAdmin && visibleShipmentExecution.warehouseId ? (
                           <div className="summary-row">
                             <span>Warehouse</span>
                             <strong>{visibleShipmentExecution.warehouseId}</strong>
@@ -8520,7 +8522,7 @@ export function OrderDetailPage() {
                     {canCancelNavlungoShipment ? (
                       <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                         <strong>Navlungo cancellation</strong>
-                        <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                        <span>{isAdmin ? 'Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.' : 'Cancel this shipment before delivery.'}</span>
                         <div className="order-inline-actions">
                           <button
                             type="button"
@@ -8537,7 +8539,7 @@ export function OrderDetailPage() {
                     {canSyncNavlungoShipmentStatus ? (
                       <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
                         <strong>Navlungo status sync</strong>
-                        <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                        <span>{isAdmin ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.' : 'Refresh the latest carrier status for this shipment.'}</span>
                         {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                           <span className="warning-copy">Carrier reported address validation issue.</span>
                         ) : null}

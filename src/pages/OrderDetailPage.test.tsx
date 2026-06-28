@@ -4905,7 +4905,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
-  it('lets vendors request full Navlungo sender details for one failed retry', async () => {
+  it('keeps full Navlungo sender retry diagnostics admin-only for vendors', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
@@ -4948,15 +4948,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const fullSenderToggle = await screen.findByLabelText('Use full Navlungo sender details for this retry');
-    await user.click(fullSenderToggle);
+    await screen.findByText('Order #1028');
+    expect(screen.queryByLabelText('Use full Navlungo sender details for this retry')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
 
     await waitFor(() =>
       expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
         vendorId: 'sporjinal',
         customerOverrides: undefined,
-        useFullSenderDetailsForThisRetry: true,
+        useFullSenderDetailsForThisRetry: undefined,
       }),
     );
   });
@@ -5422,10 +5422,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
     expect(screen.getByText('Shipment processing')).toBeInTheDocument();
     expect(screen.queryByText('SearchingDriver')).not.toBeInTheDocument();
-    expect(screen.getByText('Shipment reference')).toBeInTheDocument();
+    expect(screen.queryByText('Shipment reference')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();
-    expect(screen.getByText('shopify-cmpce0fbh0003cf3...1783322961')).toBeInTheDocument();
+    expect(screen.queryByText('shopify-cmpce0fbh0003cf3...1783322961')).not.toBeInTheDocument();
     expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('Same as tracking')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
@@ -7152,7 +7152,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText('Shipment action completed.')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Endpoint:\s*POST \/shipments\/create/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Provider id: yes · Barcode: yes/)).not.toBeInTheDocument();
-    expect(screen.getByText('ke-created-1028')).toBeInTheDocument();
+    expect(screen.queryByText('ke-created-1028')).not.toBeInTheDocument();
     expect(screen.getByText('barcode-1028')).toBeInTheDocument();
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
   });
