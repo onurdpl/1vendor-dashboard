@@ -27,6 +27,15 @@ type VendorActionCard = {
   to: string;
 };
 
+type DashboardHeroAction = {
+  value: string;
+  label: string;
+  helperText: string;
+  actionLabel: string;
+  to: string;
+  tone: 'attention' | 'calm';
+};
+
 type RecentOrderRow = {
   orderNumber: string;
   status: string;
@@ -61,6 +70,15 @@ function findPriorityValue(priorityWork: DashboardPriorityItem[] | undefined, fr
   return priorityWork?.find((item) => labelIncludes(item.label, fragments))?.value ?? null;
 }
 
+function findPriorityItem(priorityWork: DashboardPriorityItem[] | undefined, fragments: string[]) {
+  return priorityWork?.find((item) => labelIncludes(item.label, fragments)) ?? null;
+}
+
+function hasAttentionValue(value: string | null | undefined) {
+  const normalized = Number(String(value ?? '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(normalized) && normalized > 0;
+}
+
 function createFallbackDashboard(vendorId: string, vendorName: string): DashboardOverview {
   return {
     vendorId,
@@ -74,28 +92,60 @@ function createFallbackDashboard(vendorId: string, vendorName: string): Dashboar
   };
 }
 
-function buildActionCards(dashboard: DashboardOverview): VendorActionCard[] {
-  const newOrders = findStatValue(dashboard.stats, ['vendor', 'orders']);
+function getHeroActionTarget(item: DashboardPriorityItem | null): Pick<DashboardHeroAction, 'actionLabel' | 'to'> {
+  const label = item?.label.toLowerCase() ?? '';
+  if (label.includes('shipment')) {
+    return { actionLabel: 'Ship orders', to: '/orders' };
+  }
+  if (label.includes('refund') || label.includes('return')) {
+    return { actionLabel: 'Review returns', to: '/returns' };
+  }
+  if (label.includes('support')) {
+    return { actionLabel: 'Reply to support', to: '/support' };
+  }
+  if (label.includes('finance')) {
+    return { actionLabel: 'Review payments', to: '/finance' };
+  }
+  return { actionLabel: 'Review orders', to: '/orders' };
+}
+
+function buildHeroAction(dashboard: DashboardOverview): DashboardHeroAction {
+  const primaryItem = dashboard.priorityWork.find((item) => hasAttentionValue(item.value)) ?? null;
+  const target = getHeroActionTarget(primaryItem);
+  if (!primaryItem) {
+    return {
+      value: '0',
+      label: 'Needs Attention Today',
+      helperText: 'No urgent store work is waiting right now.',
+      actionLabel: 'View orders',
+      to: '/orders',
+      tone: 'calm',
+    };
+  }
+
+  return {
+    value: asDisplayValue(primaryItem.value),
+    label: 'Needs Attention Today',
+    helperText: primaryItem.description ?? primaryItem.label,
+    actionLabel: target.actionLabel,
+    to: target.to,
+    tone: 'attention',
+  };
+}
+
+function buildSupportingCards(dashboard: DashboardOverview): VendorActionCard[] {
   const readyToShip = findStatValue(dashboard.stats, ['awaiting', 'shipment'])
     ?? findPriorityValue(dashboard.priorityWork, ['awaiting', 'shipment']);
-  const returnsWaiting = findPriorityValue(dashboard.priorityWork, ['refund', 'attention'])
-    ?? findPriorityValue(dashboard.priorityWork, ['return'])
+  const returnsItem = findPriorityItem(dashboard.priorityWork, ['refund', 'attention'])
+    ?? findPriorityItem(dashboard.priorityWork, ['return']);
+  const returnsWaiting = returnsItem?.value
     ?? findStatValue(dashboard.stats, ['blocked']);
   const upcomingPayment = dashboard.financeSnapshot?.payoutEstimate
     ?? findStatValue(dashboard.stats, ['payout', 'estimate']);
 
   return [
     {
-      title: 'New Orders',
-      icon: 'orders',
-      accent: 'blue',
-      value: asDisplayValue(newOrders),
-      helperText: 'Awaiting confirmation',
-      actionLabel: 'View Orders',
-      to: '/orders',
-    },
-    {
-      title: 'Ready to Ship',
+      title: 'Orders to Ship',
       icon: 'shipping',
       accent: 'green',
       value: asDisplayValue(readyToShip),
@@ -104,11 +154,11 @@ function buildActionCards(dashboard: DashboardOverview): VendorActionCard[] {
       to: '/orders',
     },
     {
-      title: 'Returns Waiting',
+      title: 'Returns to Review',
       icon: 'returns',
       accent: 'orange',
       value: asDisplayValue(returnsWaiting),
-      helperText: 'Require review',
+      helperText: returnsItem?.description ?? 'Require review',
       actionLabel: 'Review Returns',
       to: '/returns',
     },
@@ -402,7 +452,8 @@ export function DashboardPage() {
   const dashboardView = deferredDashboard?.vendorId === vendorId
     ? deferredDashboard
     : initialDashboard ?? createFallbackDashboard(vendorId, currentVendor.vendorName);
-  const actionCards = buildActionCards(dashboardView);
+  const heroAction = buildHeroAction(dashboardView);
+  const actionCards = buildSupportingCards(dashboardView);
   const isDashboardLoading = pageReadiness.ready && isLoading && !initialDashboard;
   const upcomingPayment = asDisplayValue(dashboardView.financeSnapshot?.payoutEstimate, 'TRY 0');
   const lastPayment = 'TRY 0';
@@ -456,8 +507,8 @@ export function DashboardPage() {
     <section className="op-page dashboard-vendor-launchpad">
       <header className="dashboard-vendor-header">
         <div>
-          <h1>Good morning, {vendorName} 👋</h1>
-          <p>Here’s what’s happening with your store today.</p>
+          <h1>Today, {vendorName}</h1>
+          <p>Start with the work that needs attention, then check orders, returns, and payment timing.</p>
         </div>
         <div className="dashboard-vendor-topbar" aria-label="Dashboard shortcuts">
           <button
@@ -492,26 +543,41 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <div className="dashboard-vendor-action-grid" aria-label="Vendor dashboard actions">
-        {actionCards.map((card) => (
-          <article key={card.title} className={`dashboard-vendor-action-card dashboard-vendor-accent-${card.accent}`}>
-            <div className="dashboard-vendor-action-main">
-              <span className="dashboard-vendor-action-icon" aria-hidden="true">
-                <DashboardCardIcon name={card.icon} />
-              </span>
-              <div className="dashboard-vendor-action-body">
-                <span>{card.title}</span>
-                <strong>{isDashboardLoading ? <SkeletonText width="4rem" /> : card.value}</strong>
+      <section className="dashboard-vendor-hero-grid" aria-label="Today dashboard summary">
+        <article className={`dashboard-vendor-attention-hero dashboard-vendor-attention-${heroAction.tone}`}>
+          <div>
+            <span className="dashboard-vendor-hero-kicker">Most important today</span>
+            <h2>{heroAction.label}</h2>
+            <strong>{isDashboardLoading ? <SkeletonText width="5rem" /> : heroAction.value}</strong>
+            <p>{heroAction.helperText}</p>
+          </div>
+          <Link className="dashboard-vendor-hero-link" to={heroAction.to}>
+            {heroAction.actionLabel}
+            <ArrowIcon />
+          </Link>
+        </article>
+
+        <div className="dashboard-vendor-supporting-grid" aria-label="Dashboard supporting metrics">
+          {actionCards.map((card) => (
+            <article key={card.title} className={`dashboard-vendor-action-card dashboard-vendor-accent-${card.accent}`}>
+              <div className="dashboard-vendor-action-main">
+                <span className="dashboard-vendor-action-icon" aria-hidden="true">
+                  <DashboardCardIcon name={card.icon} />
+                </span>
+                <div className="dashboard-vendor-action-body">
+                  <span>{card.title}</span>
+                  <strong>{isDashboardLoading ? <SkeletonText width="4rem" /> : card.value}</strong>
+                </div>
               </div>
-            </div>
-            <p>{card.helperText}</p>
-            <Link className="dashboard-vendor-action-link" to={card.to}>
-              {card.actionLabel}
-              <ArrowIcon />
-            </Link>
-          </article>
-        ))}
-      </div>
+              <p>{card.helperText}</p>
+              <Link className="dashboard-vendor-action-link" to={card.to}>
+                {card.actionLabel}
+                <ArrowIcon />
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="dashboard-vendor-panel dashboard-vendor-recent-panel" aria-label="Recent orders">
         <div className="dashboard-vendor-panel-header">
