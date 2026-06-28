@@ -3537,8 +3537,8 @@ h3 {
 
 .finance-op-table-v2 .op-table-head,
 .finance-op-table-v2 .op-table-row {
-  min-width: 920px;
-  grid-template-columns: 0.82fr 1.18fr 0.68fr minmax(118px, 0.94fr) minmax(104px, 0.78fr) minmax(116px, 0.9fr) 0.78fr 58px;
+  min-width: 860px;
+  grid-template-columns: 0.82fr 1.18fr 0.68fr minmax(118px, 0.94fr) minmax(104px, 0.78fr) minmax(116px, 0.9fr) minmax(120px, 0.74fr);
   gap: 10px;
 }
 
@@ -4087,33 +4087,6 @@ h3 {
 
 .finance-control-center .op-toolbar .op-search-input {
   min-width: min(440px, 100%);
-}
-
-.finance-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: -6px;
-  padding: 0 12px 8px;
-}
-
-.finance-filter-chips span {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  padding: 5px 13px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #475569;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.finance-filter-chips span.is-active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #2563eb;
 }
 
 .finance-op-table-v2 {

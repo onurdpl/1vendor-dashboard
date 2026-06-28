@@ -1629,14 +1629,8 @@ export function FinancePage() {
             </div>
           ) : null}
 
-          <div className="finance-filter-chips" aria-label="Finance quick filters">
-            {['All', 'Sales', 'Refunds', 'Holds', 'Payment reviews'].map((chip) => (
-              <span key={chip} className={chip === 'All' ? 'is-active' : ''}>{chip}</span>
-            ))}
-          </div>
-
           <OperationalTable
-            columns={['Date', 'Type', 'Order', 'Finance State', 'Amount', 'Settlement impact', 'Updated', 'Action']}
+            columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payment impact', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
             {isError && !finance ? (
@@ -1666,7 +1660,7 @@ export function FinancePage() {
                 <EmptyStatePanel title="Sign in required" description="Sign in before loading finance activity." />
               </OperationalTableRow>
             ) : isLoading ? (
-              <TableSkeletonRows columns={8} rows={6} />
+              <TableSkeletonRows columns={7} rows={6} />
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
@@ -1717,18 +1711,14 @@ export function FinancePage() {
                   <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {getPayoutImpact(record)}
                   </strong>
-                  <span>
-                    <strong>{formatDateParts(record.date).date}</strong>
-                    <small>{formatDateParts(record.date).time}</small>
-                  </span>
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
                       <Link className="button button-secondary button-compact" to={orderSettlementHref}>
-                        {vendorBlockedHold ? 'Review allocation' : 'View order settlement'}
+                        {vendorBlockedHold ? 'Review assignment' : 'View order settlement'}
                       </Link>
                     ) : null}
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
-                      View
+                      View details
                     </button>
                   </OperationalActionGroup>
                 </OperationalTableRow>
@@ -1837,7 +1827,7 @@ export function FinancePage() {
                 </div>
                 <div className="finance-selected-summary-grid">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Current finance state" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Current status" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Settlement state" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Payment readiness" value={selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Blocker" value={selectedOperationalProjection?.blockerState ?? UNKNOWN_FINANCE_VALUE} />
@@ -1865,7 +1855,7 @@ export function FinancePage() {
               {selectedRecord.splitFinanceSummary ? (
                 <div className="finance-detail-card finance-split-detail-card">
                   <div className="finance-detail-card-heading">
-                    <h4>Split finance context</h4>
+                    <h4>Split order context</h4>
                     <StatusBadge tone={getSplitFinanceLedgerRole(selectedRecord) === 'child' ? 'warning' : 'info'}>
                       Split order assignment
                     </StatusBadge>
@@ -1913,18 +1903,18 @@ export function FinancePage() {
                     label="Refund impact"
                     value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
                   />
-	                  <MetadataRow
-	                    label="Settlement impact"
-	                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
-	                  />
-	                  {isSplitChildFinanceHold(selectedRecord) ? (
-	                    <>
-	                      <MetadataRow label="Reason" value="Split order assignment hold" />
-	                      <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
-	                    </>
-	                  ) : isVendorBlockedFinanceHold(selectedRecord) ? (
-	                    <MetadataRow label="Reason" value="Vendor blocked" />
-	                  ) : null}
+                  <MetadataRow
+                    label="Payment impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                  />
+                  {isSplitChildFinanceHold(selectedRecord) ? (
+                    <>
+                      <MetadataRow label="Reason" value="Split order assignment hold" />
+                      <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
+                    </>
+                  ) : isVendorBlockedFinanceHold(selectedRecord) ? (
+                    <MetadataRow label="Reason" value="Vendor blocked" />
+                  ) : null}
                   <MetadataRow
                     label={isVendorUser ? 'Settlement review' : 'Payment review'}
                     value={
@@ -1982,7 +1972,7 @@ export function FinancePage() {
               {selectedOperationalProjection?.shippingImpact.state === 'required' && isAdmin && selectedRecord.category === 'Invoice' ? (
                 <form className="finance-shipping-cost-form finance-shipping-action-card" aria-label="Attach shipping cost" onSubmit={handleAttachShippingCost}>
                   <div className="finance-detail-card-heading">
-                    <h4>Shipping reconciliation required</h4>
+                    <h4>Shipping cost review required</h4>
                     <StatusBadge tone="warning">Action</StatusBadge>
                   </div>
                   <p className="page-description">{selectedOperationalProjection.shippingImpact.detail}</p>
@@ -2025,7 +2015,7 @@ export function FinancePage() {
               ) : selectedOperationalProjection?.shippingImpact.state === 'completed' ? (
                 <div className="finance-detail-card">
                   <div className="finance-detail-card-heading">
-                    <h4>Shipping reconciliation</h4>
+                    <h4>Shipping cost review</h4>
                     <StatusBadge tone="success">Completed</StatusBadge>
                   </div>
                   <p className="page-description">{selectedOperationalProjection.shippingImpact.detail}</p>
@@ -2039,13 +2029,13 @@ export function FinancePage() {
                 <details className="finance-detail-card finance-shipping-collapsed">
                   <summary>
                     <span>
-                      <strong>Shipping reconciliation</strong>
+                      <strong>Shipping cost review</strong>
                       <small>{selectedOperationalProjection?.shippingImpact.label ?? 'Unknown'}</small>
                     </span>
                     <StatusBadge tone="neutral">Collapsed</StatusBadge>
                   </summary>
                   <p className="page-description">
-                    {selectedOperationalProjection?.shippingImpact.detail ?? 'Shipping reconciliation state is unavailable.'}
+                    {selectedOperationalProjection?.shippingImpact.detail ?? 'Shipping cost review state is unavailable.'}
                   </p>
                 </details>
               )}
