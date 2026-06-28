@@ -68,7 +68,7 @@ type FinanceTimelineItem = {
 
 const FINANCE_ESTIMATE_HELPER =
   'Values update as orders become eligible, refunds are processed, or reviews are completed.';
-const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement review is completed.';
+const FINANCE_TIMELINE_HELPER = 'Activity entries are previews until settlement review is completed.';
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
 
 function formatDate(value: string) {
@@ -274,34 +274,34 @@ function getSplitFinanceLedgerRole(record: FinanceTransaction): SplitFinanceLedg
 
 function getSplitFinanceLedgerLabel(record: FinanceTransaction) {
   if (isRefundedSplitChildSaleBasis(record)) {
-    return 'Offset by Shopify refund';
+    return 'Adjusted by Shopify refund';
   }
   const role = getSplitFinanceLedgerRole(record);
   if (role === 'child') {
-    return 'Blocked split allocation ledger';
+    return 'Blocked split order assignment transaction';
   }
   if (role === 'original_source') {
-    return 'Original split source ledger';
+    return 'Original split source transaction';
   }
   if (role === 'remaining_source') {
-    return 'Remaining allocation ledger';
+    return 'Remaining order assignment transaction';
   }
   return null;
 }
 
 function getSplitFinanceExplanation(record: FinanceTransaction) {
   if (isRefundedSplitChildSaleBasis(record)) {
-    return 'Refund completed. This split child sale basis is offset by the Shopify refund and awaits settlement offset review.';
+    return 'Refund completed. This split child sale basis is balanced by the Shopify refund and awaits settlement adjustment review.';
   }
   const role = getSplitFinanceLedgerRole(record);
   if (role === 'child') {
     return 'Created from line-item reject split. Held until transfer, refund, or return resolution.';
   }
   if (role === 'original_source') {
-    return 'Original source ledger was replaced when selected items were moved into a blocked allocation.';
+    return 'Original source transaction was replaced when selected items were moved into a blocked order assignment.';
   }
   if (role === 'remaining_source') {
-    return 'Original allocation was split. Selected items moved into a blocked allocation.';
+    return 'Original order assignment was split. Selected items moved into a blocked order assignment.';
   }
   return null;
 }
@@ -341,13 +341,13 @@ function getPayoutActivityType(record: FinanceTransaction) {
 
 function getPayoutActivityDetail(record: FinanceTransaction) {
   if (isRefundedSplitChildSaleBasis(record)) {
-    return 'Offset by Shopify refund';
+    return 'Adjusted by Shopify refund';
   }
   if (isRefundDeductionSettlementReviewPending(record)) {
-    return 'Refund recorded. Awaiting settlement offset review.';
+    return 'Refund recorded. Awaiting settlement adjustment review.';
   }
   if (isSplitChildFinanceHold(record)) {
-    return 'Split allocation hold';
+    return 'Split order assignment hold';
   }
   const splitLabel = getSplitFinanceLedgerLabel(record);
   if (splitLabel) {
@@ -405,7 +405,7 @@ function getSettlementReviewDisplay(record: FinanceTransaction) {
     detail: review.approvalId,
     guidance: {
       actionLabel: 'Review draft settlement',
-      description: 'This row is locked in a draft settlement approval and is excluded from new review candidates.',
+      description: 'This row is locked in a draft settlement review and is excluded from new review candidates.',
       tone: 'info' as const,
     },
   };
@@ -648,16 +648,16 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
         },
         splitRole === 'child'
           ? {
-              label: refundedSplitChildSaleBasis ? 'Child allocation operationally resolved' : 'Child held ledger created',
+              label: refundedSplitChildSaleBasis ? 'Child order assignment operationally resolved' : 'Child held transaction created',
               at: record.splitFinanceSummary.splitCreatedAt,
               status: refundedSplitChildSaleBasis ? 'Resolved' : 'Held',
             }
           : null,
         splitRole === 'remaining_source' || splitRole === 'original_source'
           ? {
-              label: 'Source ledger replaced',
+              label: 'Source transaction replaced',
               at: record.splitFinanceSummary.splitCreatedAt,
-              status: 'Ledger',
+              status: 'Transaction',
             }
           : null,
       ]
@@ -670,7 +670,7 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
     },
     ...splitItems,
     {
-      label: reviewDisplay?.timelineLabel ?? (settlementOffsetReviewPending ? 'Settlement offset awaiting review' : record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
+      label: reviewDisplay?.timelineLabel ?? (settlementOffsetReviewPending ? 'Settlement adjustment awaiting review' : record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated'),
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
       status: reviewDisplay?.timelineStatus ?? (record.settlement?.payoutReady ? 'Review' : 'Preview'),
       detail: settlementOffsetReviewPending ? 'Operational resolution completed. Only settlement accounting review remains.' : undefined,
@@ -814,50 +814,50 @@ function VendorDebtHistorySection({
   const remainingDebtMinor = history?.summary.remainingDebtMinor ?? outstandingDebtMinor;
 
   return (
-    <section className="finance-footer-card finance-debt-history-card" aria-label="Vendor debt history">
+    <section className="finance-footer-card finance-debt-history-card" aria-label="Balance adjustment history">
       <div>
-        <p className="eyebrow">Vendor debt</p>
-        <h3>Vendor Debt History</h3>
+        <p className="eyebrow">Balance adjustment</p>
+        <h3>Balance Adjustment History</h3>
         <p className="page-description">
-          Audit refund-after-payment debt and payout offsets without opening database records.
+          Review refund-after-payment balance adjustments and payment deductions without opening database records.
         </p>
       </div>
       <div className="op-kpi-row finance-debt-summary-row">
         <article className={`op-kpi ${outstandingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-neutral'}`}>
-          <span>Outstanding Debt</span>
+          <span>Outstanding Adjustment</span>
           <strong>{formatMinorCurrency(outstandingDebtMinor, currency)}</strong>
-          <small>{outstandingDebtMinor > 0 ? 'Vendor owes marketplace' : 'No open debt'}</small>
+          <small>{outstandingDebtMinor > 0 ? 'Will reduce a future payment' : 'No open adjustment'}</small>
         </article>
         <article className="op-kpi op-tone-danger">
-          <span>Total Debt Created</span>
+          <span>Total Adjustment Created</span>
           <strong>{formatMinorCurrency(history?.summary.totalDebtCreatedMinor ?? 0, currency)}</strong>
         </article>
         <article className="op-kpi op-tone-success">
-          <span>Total Debt Offset</span>
+          <span>Total Adjustment Applied</span>
           <strong>{formatMinorCurrency(history?.summary.totalDebtOffsetMinor ?? 0, currency)}</strong>
         </article>
         <article className={`op-kpi ${remainingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-success'}`}>
-          <span>Remaining Debt</span>
+          <span>Remaining Adjustment</span>
           <strong>{formatMinorCurrency(remainingDebtMinor, currency)}</strong>
           <small>{history?.summary.lastDebtActivityAt ? `Last activity ${formatDateParts(history.summary.lastDebtActivityAt).date}` : 'No activity'}</small>
         </article>
       </div>
       {error ? (
         <SectionErrorRetry
-          title="Vendor debt history unavailable"
+          title="Balance adjustment history unavailable"
           description={error}
         />
       ) : loading ? (
-        <p className="settlement-compact-empty">Loading vendor debt history...</p>
+        <p className="settlement-compact-empty">Loading balance adjustment history...</p>
       ) : events.length === 0 ? (
         <EmptyStatePanel
-          title="No vendor debt history"
-          description="Refund-after-payment debt and payout offsets will appear here when they exist."
+          title="No balance adjustment history"
+          description="Refund-after-payment adjustments and payment deductions will appear here when they exist."
         />
       ) : (
         <>
           <OperationalTable
-            columns={['Event Date', 'Event Type', 'Order', 'Vendor', 'Items', 'Debt Amount', 'Remaining Debt', 'Source Reference']}
+            columns={['Event Date', 'Event Type', 'Order', 'Vendor', 'Items', 'Adjustment Amount', 'Remaining Adjustment', 'Source Reference']}
             className="finance-debt-history-table"
             stickyHeader={false}
           >
@@ -898,10 +898,10 @@ function VendorDebtHistorySection({
 
 function VendorDebtDetailPanel({ event, currency }: { event: VendorDebtHistoryEvent; currency: string }) {
   return (
-    <div className="finance-debt-detail-panel" aria-label="Vendor debt detail">
+    <div className="finance-debt-detail-panel" aria-label="Balance adjustment detail">
       <div className="finance-debt-detail-heading">
         <div>
-          <p className="eyebrow">Debt audit detail</p>
+          <p className="eyebrow">Balance adjustment detail</p>
           <h4>{event.label}</h4>
         </div>
         <StatusBadge tone={event.remainingDebtAfterEventMinor > 0 ? 'danger' : 'success'}>
@@ -920,17 +920,17 @@ function VendorDebtDetailPanel({ event, currency }: { event: VendorDebtHistoryEv
           <MetadataRow label="Refund record" value={event.refundRecordId ?? 'Not applicable'} />
           <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
         </MetadataGroup>
-        <MetadataGroup title="Debt Calculation">
+        <MetadataGroup title="Balance Adjustment Calculation">
           <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
           <MetadataRow label="Commission reversal" value={event.calculation.commissionReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionReversalMinor, currency)} />
           <MetadataRow label="Commission VAT reversal" value={event.calculation.commissionVatReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionVatReversalMinor, currency)} />
-          <MetadataRow label="Vendor debt created" value={event.calculation.vendorDebtMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.vendorDebtMinor, currency)} />
-          <MetadataRow label="Debt offset" value={event.calculation.debtOffsetMinor === null ? 'Not applicable' : formatMinorCurrency(event.calculation.debtOffsetMinor, currency)} />
+          <MetadataRow label="Balance adjustment created" value={event.calculation.vendorDebtMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.vendorDebtMinor, currency)} />
+          <MetadataRow label="Balance adjustment applied" value={event.calculation.debtOffsetMinor === null ? 'Not applicable' : formatMinorCurrency(event.calculation.debtOffsetMinor, currency)} />
           <MetadataRow label="Formula" value={event.calculation.formula ?? 'Not available'} />
         </MetadataGroup>
-        <MetadataGroup title="Payout Offset">
-          <MetadataRow label="Payout batch" value={event.payoutBatchId ?? 'Not applicable'} />
-          <MetadataRow label="Payout batch status" value={event.payoutBatchStatus ? safeStatusLabel(event.payoutBatchStatus) : 'Not applicable'} />
+        <MetadataGroup title="Payment Adjustment">
+          <MetadataRow label="Payment preparation" value={event.payoutBatchId ?? 'Not applicable'} />
+          <MetadataRow label="Payment preparation status" value={event.payoutBatchStatus ? safeStatusLabel(event.payoutBatchStatus) : 'Not applicable'} />
           <MetadataRow label="Source reference" value={event.sourceReference} />
         </MetadataGroup>
       </div>
@@ -949,18 +949,18 @@ function VendorDebtDetailPanel({ event, currency }: { event: VendorDebtHistoryEv
           )}
         </section>
         <section className="finance-debt-detail-list">
-          <h5>Offset History</h5>
+          <h5>Adjustment History</h5>
           {event.offsetHistory.length ? (
             event.offsetHistory.map((offset) => (
               <p key={offset.id}>
                 <strong>{formatMinorCurrency(offset.offsetAmountMinor, currency)}</strong>
                 <span>
-                  {offset.payoutBatchId ?? 'No payout batch'} · Remaining {formatMinorCurrency(offset.remainingDebtAfterEventMinor, currency)}
+                  {offset.payoutBatchId ?? 'No payment preparation'} · Remaining {formatMinorCurrency(offset.remainingDebtAfterEventMinor, currency)}
                 </span>
               </p>
             ))
           ) : (
-            <p>No payout offsets have been applied yet.</p>
+            <p>No payment adjustments have been applied yet.</p>
           )}
         </section>
       </div>
@@ -1055,7 +1055,7 @@ export function FinancePage() {
       ],
       onSuccess: async (batch) => {
         await Promise.all([refetch(), refetchVendorDebtHistory()]);
-        showFeedback(`Draft settlement payout review ${batch.id} prepared.`, 'success');
+        showFeedback(`Draft settlement payment review ${batch.id} prepared.`, 'success');
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Draft review could not be prepared.', 'error'),
@@ -1187,7 +1187,7 @@ export function FinancePage() {
   const selectedSettlementOffsetReviewPending =
     selectedRecord ? selectedRefundedSplitChildSaleBasis || isRefundDeductionSettlementReviewPending(selectedRecord) : false;
   const selectedSettlementReviewStatusLabel =
-    selectedSettlementOffsetReviewPending ? 'Settlement offset review pending' : selectedRecord ? getPayoutActivityStatusLabel(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
+    selectedSettlementOffsetReviewPending ? 'Settlement adjustment review pending' : selectedRecord ? getPayoutActivityStatusLabel(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
   const selectedRefundOffsetValue = selectedRecord?.payoutCalculation?.refundImpact ?? null;
   const selectedRefundedSplitChildNetEffect =
     selectedRecord && selectedRefundedSplitChildSaleBasis
@@ -1216,7 +1216,7 @@ export function FinancePage() {
         title: `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`,
         description: orderHref
           ? 'Open the linked order record to review fulfillment context.'
-          : 'Order link unavailable for this finance row.',
+          : 'Order link unavailable for this transaction.',
         href: orderHref ?? undefined,
         status: orderHref ? 'Linked' : 'Unavailable',
         tone: orderHref ? 'info' : 'neutral',
@@ -1230,7 +1230,7 @@ export function FinancePage() {
         title: 'Related return',
         description: returnHref
           ? (selectedRecord.shopifyRefundId ? `Refund ${selectedRecord.shopifyRefundId}` : 'Customer return activity')
-          : 'Return link unavailable for this finance row.',
+          : 'Return link unavailable for this transaction.',
         href: returnHref ?? undefined,
         status: returnHref ? 'Refund' : 'Unavailable',
         tone: returnHref ? 'warning' : 'neutral',
@@ -1283,9 +1283,9 @@ export function FinancePage() {
         title: 'Review settlement issue',
         description: selectedRecord.shopifyOrderNumber
           ? `Settlement activity for ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)} needs operator review.`
-          : 'This finance row needs operator review.',
+          : 'This transaction needs operator review.',
         recommendedAction: 'Review settlement status before draft preparation',
-        relatedObjectType: 'Finance row',
+        relatedObjectType: 'Transaction',
         relatedObjectId: selectedRecord.id,
         vendor: {
           id: currentVendor.vendorId,
@@ -1412,9 +1412,6 @@ export function FinancePage() {
                 <strong>{overviewAvailableBalance}</strong>
                 <span>Money currently ready for payment review.</span>
               </div>
-              <button type="button" className="button button-secondary button-compact" onClick={() => setActiveFinanceTab('transactions')}>
-                View transactions
-              </button>
             </article>
 
             <aside className="finance-next-payment-card" aria-label="Next payment">
@@ -1473,9 +1470,6 @@ export function FinancePage() {
                 <p className="eyebrow">Recent changes</p>
                 <h3>What changed since your last check</h3>
               </div>
-              <button type="button" className="button button-secondary button-compact" onClick={() => setActiveFinanceTab('transactions')}>
-                See all
-              </button>
             </div>
             {isError && !finance ? (
               <SectionErrorRetry
@@ -1547,24 +1541,6 @@ export function FinancePage() {
             </ol>
           </section>
 
-          <section className="finance-quick-links" aria-label="Finance quick links">
-            {[
-              ['Transactions', 'Sales, refunds, deductions, and details'],
-              ['Settlements', 'Review status and payment readiness'],
-              ['Payments', 'Payment preparation and history'],
-              ['Reports', 'Statements and exports'],
-              ['Refunds', 'Refund activity and adjustments'],
-            ].map(([label, detail]) => (
-              <button
-                type="button"
-                key={label}
-                onClick={() => setActiveFinanceTab('transactions')}
-              >
-                <strong>{label}</strong>
-                <span>{detail}</span>
-              </button>
-            ))}
-          </section>
         </section>
       ) : (
         <>
@@ -1573,7 +1549,7 @@ export function FinancePage() {
           <span className="finance-compact-label">Action required</span>
           <strong>{needsReviewBreakdown.needsReviewTotal}</strong>
           <small aria-label="Needs review breakdown">
-            Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Debt {needsReviewBreakdown.debtReview}
+            Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Balance adjustment {needsReviewBreakdown.debtReview}
           </small>
         </div>
         <div className="finance-compact-metrics" aria-label="Financial Totals">
@@ -1622,7 +1598,7 @@ export function FinancePage() {
                 <option value="all">All types</option>
                 <option value="Invoice">Sale</option>
                 <option value="Refund">Refund</option>
-                <option value="Payout">Payout review</option>
+                <option value="Payout">Payment review</option>
                 <option value="Adjustment">Adjustment</option>
               </select>
               <select defaultValue="week" aria-label="Date range">
@@ -1654,7 +1630,7 @@ export function FinancePage() {
           ) : null}
 
           <div className="finance-filter-chips" aria-label="Finance quick filters">
-            {['All', 'Sales', 'Refunds', 'Holds', 'Payout reviews'].map((chip) => (
+            {['All', 'Sales', 'Refunds', 'Holds', 'Payment reviews'].map((chip) => (
               <span key={chip} className={chip === 'All' ? 'is-active' : ''}>{chip}</span>
             ))}
           </div>
@@ -1722,7 +1698,7 @@ export function FinancePage() {
                       <strong>{getPayoutActivityType(record)}</strong>
                       <small>{getPayoutActivityDetail(record)}</small>
                       {record.splitFinanceSummary ? (
-                        <span className="finance-split-badge">Split Allocation</span>
+                        <span className="finance-split-badge">Split order assignment</span>
                       ) : null}
                     </span>
                   </span>
@@ -1766,7 +1742,7 @@ export function FinancePage() {
                 <p className="eyebrow">Vendor profile</p>
                 <h3>{currentVendor.vendorName} marketplace terms</h3>
                 <p className="page-description">
-                  Finance policy is edited from Vendor Profile. New payout estimates use the saved policy snapshot.
+                  Finance policy is edited from Vendor Profile. New payment estimates use the saved policy snapshot.
                 </p>
               </div>
               <div className="finance-profile-summary">
@@ -1783,7 +1759,7 @@ export function FinancePage() {
             <section className="finance-footer-card">
               <div>
                 <p className="eyebrow">Settlement review</p>
-                <h3>{isVendorUser ? 'Settlement review' : 'Draft settlement payout review'}</h3>
+                <h3>{isVendorUser ? 'Settlement review' : 'Draft settlement payment review'}</h3>
                 <p className="page-description">
                   {isVendorUser
                     ? 'A read-only view of estimate rows currently eligible for settlement review.'
@@ -1792,16 +1768,16 @@ export function FinancePage() {
               </div>
               <div className="finance-profile-summary">
                 <MetadataRow label="Rows pending review" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
-                <MetadataRow label="Estimated payable before debt" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
+                <MetadataRow label="Estimated payment before adjustments" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
                 <MetadataRow
-                  label="Outstanding vendor debt"
+                  label="Outstanding balance adjustment"
                   value={<span className={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount) ? undefined : 'finance-deduction-value'}>
                     {financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)}
                   </span>}
                 />
-                <MetadataRow label="Debt offset preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
+                <MetadataRow label="Balance adjustment preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
                 <MetadataRow
-                  label="Net after debt preview"
+                  label="Net after balance adjustment"
                   value={<span className={getBalanceTone(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt) === 'danger' ? 'finance-deduction-value' : 'finance-payout-value'}>
                     {financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)}
                   </span>}
@@ -1847,14 +1823,14 @@ export function FinancePage() {
         </div>
 
         <SideDetailPanel
-          eyebrow="Selected finance item"
+          eyebrow="Selected transaction"
           title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : 'Settlement estimate'}
         >
           {selectedRecord ? (
             <>
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Selected Finance Item</h4>
+                  <h4>Selected Transaction</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
                     {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
                   </StatusBadge>
@@ -1863,7 +1839,7 @@ export function FinancePage() {
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Current finance state" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Settlement state" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Payout readiness" value={selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Payment readiness" value={selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Blocker" value={selectedOperationalProjection?.blockerState ?? UNKNOWN_FINANCE_VALUE} />
                 </div>
               </div>
@@ -1882,7 +1858,7 @@ export function FinancePage() {
               ) : null}
               <OperationalRecommendations
                 title="Suggested next steps"
-                subtitle="Admin-only guidance for this finance row."
+                subtitle="Admin-only guidance for this transaction."
                 recommendations={financeRecommendations}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
@@ -1891,19 +1867,19 @@ export function FinancePage() {
                   <div className="finance-detail-card-heading">
                     <h4>Split finance context</h4>
                     <StatusBadge tone={getSplitFinanceLedgerRole(selectedRecord) === 'child' ? 'warning' : 'info'}>
-                      Split Allocation
+                      Split order assignment
                     </StatusBadge>
                   </div>
-                  <p className="page-description">{selectedSplitExplanation ?? 'This ledger is linked to an allocation split event.'}</p>
+                  <p className="page-description">{selectedSplitExplanation ?? 'This transaction is linked to an order assignment split event.'}</p>
                   <div className="finance-detail-rows">
-                    <MetadataRow label="Ledger role" value={selectedSplitLedgerLabel ?? UNKNOWN_FINANCE_VALUE} />
-                    <MetadataRow label="Source allocation" value={selectedRecord.splitFinanceSummary.sourceAllocationId} />
-                    <MetadataRow label="Child allocation" value={selectedRecord.splitFinanceSummary.childAllocationId} />
+                    <MetadataRow label="Transaction role" value={selectedSplitLedgerLabel ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Source order assignment" value={selectedRecord.splitFinanceSummary.sourceAllocationId} />
+                    <MetadataRow label="Child order assignment" value={selectedRecord.splitFinanceSummary.childAllocationId} />
                     <MetadataRow label="Split reason" value={safeStatusLabel(selectedRecord.splitFinanceSummary.splitReason)} />
                     <MetadataRow label="Split created" value={formatOptionalDate(selectedRecord.splitFinanceSummary.splitCreatedAt)} />
-                    <MetadataRow label="Original source ledger" value={selectedRecord.splitFinanceSummary.sourceFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
-                    <MetadataRow label="Remaining source ledger" value={selectedRecord.splitFinanceSummary.remainingFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
-                    <MetadataRow label="Child held ledger" value={selectedRecord.splitFinanceSummary.childFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Original source transaction" value={selectedRecord.splitFinanceSummary.sourceFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Remaining source transaction" value={selectedRecord.splitFinanceSummary.remainingFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
+                    <MetadataRow label="Child held transaction" value={selectedRecord.splitFinanceSummary.childFinanceLedgerEntryId ?? UNKNOWN_FINANCE_VALUE} />
                   </div>
                 </div>
               ) : null}
@@ -1915,7 +1891,7 @@ export function FinancePage() {
                   </StatusBadge>
                 </div>
                 {selectedSettlementOffsetReviewPending ? (
-                  <p className="page-description">Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.</p>
+                  <p className="page-description">Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.</p>
                 ) : null}
                 <div className="finance-detail-rows">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
@@ -1925,12 +1901,12 @@ export function FinancePage() {
                       <MetadataRow label="Operational status" value="Resolved" />
                       <MetadataRow label="Settlement status" value="Review pending" />
                       <MetadataRow label="Sale basis" value={<span className="finance-payout-value">{selectedRecord.amount}</span>} />
-                      <MetadataRow label="Refund offset" value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRefundOffsetValue)}</span>} />
+                      <MetadataRow label="Refund adjustment" value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRefundOffsetValue)}</span>} />
                       <MetadataRow label="Net child effect" value={<span>{selectedRefundedSplitChildNetEffect ?? UNKNOWN_FINANCE_VALUE}</span>} />
                     </>
                   ) : null}
                   <MetadataRow
-                    label="Estimated payout"
+                    label="Estimated payment"
                     value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
                   />
                   <MetadataRow
@@ -1943,14 +1919,14 @@ export function FinancePage() {
 	                  />
 	                  {isSplitChildFinanceHold(selectedRecord) ? (
 	                    <>
-	                      <MetadataRow label="Reason" value="Split allocation hold" />
+	                      <MetadataRow label="Reason" value="Split order assignment hold" />
 	                      <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
 	                    </>
 	                  ) : isVendorBlockedFinanceHold(selectedRecord) ? (
 	                    <MetadataRow label="Reason" value="Vendor blocked" />
 	                  ) : null}
                   <MetadataRow
-                    label={isVendorUser ? 'Settlement review' : 'Payout review'}
+                    label={isVendorUser ? 'Settlement review' : 'Payment review'}
                     value={
                       selectedReviewDisplay
                         ? selectedReviewDisplay.label
@@ -1973,17 +1949,17 @@ export function FinancePage() {
 
               <div className="finance-detail-card finance-payout-readiness-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Payout readiness</h4>
+                  <h4>Payment readiness</h4>
                   <StatusBadge tone={selectedOperationalProjection?.blockerState === 'None' ? 'success' : 'warning'}>
                     {selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE}
                   </StatusBadge>
                 </div>
                 <p className="page-description">
-                  {selectedOperationalProjection?.payoutReadinessDetail ?? 'Payout readiness is unavailable for this row.'}
+                  {selectedOperationalProjection?.payoutReadinessDetail ?? 'Payment readiness is unavailable for this row.'}
                 </p>
                 <div className="finance-detail-rows">
                   <MetadataRow label="Settlement" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Payout" value={selectedOperationalProjection?.payoutState ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Payment" value={selectedOperationalProjection?.payoutState ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Hold / blocker" value={selectedOperationalProjection?.blockerState ?? UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Blocker detail" value={selectedOperationalProjection?.blockerDetail ?? UNKNOWN_FINANCE_VALUE} />
                 </div>
@@ -1991,15 +1967,15 @@ export function FinancePage() {
 
               <div className="finance-detail-card finance-debt-impact-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Debt impact on payout</h4>
+                  <h4>Balance adjustment impact on payment</h4>
                   <StatusBadge tone={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'neutral' : 'warning'}>
-                    {isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'No debt' : 'Debt impact'}
+                    {isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'No adjustment' : 'Adjustment impact'}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Outstanding debt" value={financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)} />
-                  <MetadataRow label="Offset preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
-                  <MetadataRow label="Net after debt preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)} />
+                  <MetadataRow label="Outstanding adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)} />
+                  <MetadataRow label="Adjustment preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
+                  <MetadataRow label="Net after adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)} />
                 </div>
               </div>
 
@@ -2121,7 +2097,7 @@ export function FinancePage() {
                               .join(', ')}
                           />
                         ) : null}
-                        <MetadataRow label="Diagnostics id" value={adjustment.id} />
+                        <MetadataRow label="Reference id" value={adjustment.id} />
                       </MetadataGroup>
                     ))}
                   </div>
@@ -2157,7 +2133,7 @@ export function FinancePage() {
               </div>
 
               <OperationalTimeline
-                title="Finance timeline"
+                title="Activity timeline"
                 subtitle={FINANCE_TIMELINE_HELPER}
                 events={financeTimelineEvents}
                 audience={financeAudience}
@@ -2165,7 +2141,7 @@ export function FinancePage() {
 
               <OperationalLinkCards
                 title="Related records"
-                subtitle="Grouped order, return, and support context for this finance row."
+                subtitle="Grouped order, return, and support context for this transaction."
                 links={financeCrossLinks}
                 audience={financeAudience}
               />
@@ -2203,11 +2179,11 @@ export function FinancePage() {
             </>
           ) : (
             <EmptyStatePanel
-              title={requestedFinanceTarget ? 'Linked finance record unavailable' : 'Select a finance record'}
+              title={requestedFinanceTarget ? 'Linked transaction unavailable' : 'Select a transaction'}
               description={
                 requestedFinanceTarget
-                  ? 'The linked finance record is not available in the current vendor scope.'
-                  : 'Choose a finance row to review settlement estimate and invoice details.'
+                  ? 'The linked transaction is not available in the current vendor scope.'
+                  : 'Choose a transaction to review settlement estimate and invoice details.'
               }
             />
           )}

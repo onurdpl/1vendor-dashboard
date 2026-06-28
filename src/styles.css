@@ -3673,8 +3673,7 @@ h3 {
 .finance-available-hero,
 .finance-next-payment-card,
 .finance-balance-secondary-grid article,
-.finance-overview-panel,
-.finance-quick-links button {
+.finance-overview-panel {
   border: 1px solid #e2e8f0;
   border-radius: 18px;
   background: #ffffff;
@@ -3716,8 +3715,7 @@ h3 {
 .finance-balance-secondary-grid small,
 .finance-balance-story-grid span,
 .finance-recent-change-timeline span,
-.finance-payment-progress-steps small,
-.finance-quick-links span {
+.finance-payment-progress-steps small {
   color: #64748b;
   font-size: 0.84rem;
   font-weight: 650;
@@ -3802,8 +3800,7 @@ h3 {
 
 .finance-balance-story-grid strong,
 .finance-recent-change-timeline strong,
-.finance-payment-progress-steps strong,
-.finance-quick-links strong {
+.finance-payment-progress-steps strong {
   display: block;
   color: #0f172a;
   font-size: 0.86rem;
@@ -3918,29 +3915,6 @@ h3 {
 
 .finance-payment-progress-steps li.is-current > span {
   box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.12);
-}
-
-.finance-quick-links {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.finance-quick-links button {
-  display: grid;
-  gap: 6px;
-  min-height: 96px;
-  padding: 16px;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.finance-quick-links button:hover,
-.finance-quick-links button:focus-visible {
-  border-color: #bfdbfe;
-  background: #f8fbff;
-  outline: none;
 }
 
 .finance-overview-activity-skeleton .op-table-row,
@@ -10504,8 +10478,7 @@ summary.provider-response-heading::-webkit-details-marker {
     min-height: 250px;
   }
 
-  .finance-balance-story-grid,
-  .finance-quick-links {
+  .finance-balance-story-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -10627,7 +10600,6 @@ summary.provider-response-heading::-webkit-details-marker {
   .finance-balance-secondary-grid,
   .finance-balance-story-grid,
   .finance-compact-metrics,
-  .finance-quick-links,
   .dashboard-workspace-status-grid {
     grid-template-columns: 1fr;
   }
