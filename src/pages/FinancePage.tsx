@@ -1410,15 +1410,16 @@ export function FinancePage() {
               <div>
                 <p className="eyebrow">Available balance</p>
                 <strong>{overviewAvailableBalance}</strong>
-                <span>Money currently ready for payment review.</span>
+                <span>Ready to be included in your next payment review.</span>
               </div>
             </article>
 
             <aside className="finance-next-payment-card" aria-label="Next payment">
               <div>
-                <p className="eyebrow">Next payment</p>
+                <p className="eyebrow">Estimated payment</p>
                 <strong>{overviewPaymentEstimate}</strong>
                 <span>{overviewPaymentDate}</span>
+                <span>Preparing your next payment.</span>
               </div>
               <StatusBadge tone={(financeView.payoutBatchSummary?.latestBatch || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) ? 'success' : 'neutral'}>
                 {overviewPaymentStatus}
@@ -1427,47 +1428,47 @@ export function FinancePage() {
 
             <div className="finance-balance-secondary-grid">
               <article>
-                <span>Pending balance</span>
+                <span>Waiting to become payable</span>
                 <strong>{overviewPendingBalance}</strong>
-                <small>Waiting for delivery, timing, or review.</small>
+                <small>Orders waiting for delivery, timing, or payment readiness.</small>
               </article>
               <article>
-                <span>Held balance</span>
+                <span>Waiting for review</span>
                 <strong>{overviewHoldBalance}</strong>
-                <small>Paused until a review is resolved.</small>
+                <small>Money paused until an operational or finance review is resolved.</small>
               </article>
             </div>
           </section>
 
           <section className="finance-overview-panel finance-balance-story" aria-label="Balance explanation">
             <div>
-              <p className="eyebrow">Why money is waiting</p>
-              <h3>Your balance moves in stages</h3>
+              <p className="eyebrow">How your balance moves</p>
+              <h3>Payment stages</h3>
             </div>
             <div className="finance-balance-story-grid">
               <p>
                 <strong>Available</strong>
-                <span>Completed sales that are ready for payment review.</span>
+                <span>Ready for payment review.</span>
               </p>
               <p>
                 <strong>Pending</strong>
-                <span>Sales still waiting for delivery evidence or payment timing.</span>
+                <span>Waiting to become payable.</span>
               </p>
               <p>
-                <strong>Held</strong>
-                <span>Items waiting for an operational or finance review before payment.</span>
+                <strong>Waiting for review</strong>
+                <span>Paused until a review is resolved.</span>
               </p>
               <p>
                 <strong>Changed recently</strong>
-                <span>Refunds, adjustments, and newly eligible orders appear below as activity.</span>
+                <span>Recent sales, refunds, and adjustments.</span>
               </p>
             </div>
           </section>
 
-          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent changes">
+          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent payment activity">
             <div className="finance-overview-panel-heading">
               <div>
-                <p className="eyebrow">Recent changes</p>
+                <p className="eyebrow">Recent payment activity</p>
                 <h3>What changed since your last check</h3>
               </div>
             </div>
