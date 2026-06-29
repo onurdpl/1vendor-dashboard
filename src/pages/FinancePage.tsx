@@ -329,19 +329,22 @@ function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
 
 function getPayoutActivityType(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   if (audience === 'vendor') {
+    if (record.description?.toLowerCase().includes('shipping')) {
+      return 'Kargo Ücreti';
+    }
     if (record.category === 'Refund') {
-      return isRefundDeductionSettlementReviewPending(record) ? 'Refund review' : 'Refund deduction';
+      return 'İade Kesintisi';
     }
     if (record.category === 'Invoice') {
-      return 'Sale';
+      return 'Sipariş Geliri';
     }
     if (record.category === 'Adjustment') {
-      return 'Balance adjustment';
+      return 'Bakiye Düzeltmesi';
     }
-    if (record.description?.toLowerCase().includes('shipping')) {
-      return 'Shipping cost';
+    if (record.category === 'Payout') {
+      return 'Tahmini Ödeme';
     }
-    return record.category;
+    return 'Diğer Kesintiler';
   }
   if (isRefundedSplitChildSaleBasis(record)) {
     return 'Refunded split sale basis';
@@ -518,17 +521,44 @@ function getOverviewPaymentValue(finance: NonNullable<Awaited<ReturnType<typeof 
   );
 }
 
-function getOverviewPaymentDate(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+function getTurkishWeekday(value: string) {
+  const normalized = value.trim().toUpperCase();
+  const labels: Record<string, string> = {
+    MONDAY: 'Pazartesi',
+    TUESDAY: 'Salı',
+    WEDNESDAY: 'Çarşamba',
+    THURSDAY: 'Perşembe',
+    FRIDAY: 'Cuma',
+    SATURDAY: 'Cumartesi',
+    SUNDAY: 'Pazar',
+  };
+  return labels[normalized] ?? safeStatusLabel(value);
+}
+
+function getOverviewPaymentDate(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor') {
   if (finance.payoutBatchSummary?.latestBatch?.createdAt) {
-    return `Preparation started ${formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date}`;
+    const date = formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date;
+    return audience === 'vendor' ? `Hazırlık başladı ${date}` : `Preparation started ${date}`;
   }
   if (finance.profile?.weeklySettlementDay) {
-    return `${safeStatusLabel(finance.profile.weeklySettlementDay)} after review`;
+    return audience === 'vendor'
+      ? `${getTurkishWeekday(finance.profile.weeklySettlementDay)} sonrası`
+      : `${safeStatusLabel(finance.profile.weeklySettlementDay)} after review`;
   }
-  return 'After settlement review';
+  return audience === 'vendor' ? 'İnceleme sonrası' : 'After settlement review';
 }
 
 function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor') {
+  if (audience === 'vendor') {
+    const status = finance.payoutBatchSummary?.latestBatch?.status;
+    if (status) {
+      return getVendorPayoutBatchStatusLabel(status);
+    }
+    if (finance.payoutBatchSummary?.latestBatch || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) {
+      return 'Ödeme Bekliyor';
+    }
+    return 'Ödeme Bekliyor';
+  }
   if (finance.payoutBatchSummary?.latestBatch) {
     return getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status, audience);
   }
@@ -538,10 +568,23 @@ function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof
   return 'Building balance';
 }
 
-function getRelativeActivityDay(value: string) {
+function getVendorPayoutBatchStatusLabel(status: string) {
+  if (status === 'approved') {
+    return 'Ödemeye Hazır';
+  }
+  if (status === 'cancelled') {
+    return 'Blokeli';
+  }
+  if (status === 'review' || status === 'paid_placeholder') {
+    return 'İncelemede';
+  }
+  return 'Ödeme Bekliyor';
+}
+
+function getRelativeActivityDay(value: string, audience: 'admin' | 'vendor' = 'admin') {
   const timestamp = getSafeTimestamp(value);
   if (!timestamp) {
-    return 'Recent';
+    return audience === 'vendor' ? 'Yakın zamanda' : 'Recent';
   }
   const today = new Date();
   const activity = new Date(timestamp);
@@ -549,15 +592,30 @@ function getRelativeActivityDay(value: string) {
   const activityStart = new Date(activity.getFullYear(), activity.getMonth(), activity.getDate()).getTime();
   const dayDifference = Math.round((todayStart - activityStart) / 86_400_000);
   if (dayDifference <= 0) {
-    return 'Today';
+    return audience === 'vendor' ? 'Bugün' : 'Today';
   }
   if (dayDifference === 1) {
-    return 'Yesterday';
+    return audience === 'vendor' ? 'Dün' : 'Yesterday';
   }
-  return `${dayDifference} days ago`;
+  return audience === 'vendor' ? `${dayDifference} gün önce` : `${dayDifference} days ago`;
 }
 
-function getRecentChangeTitle(record: FinanceTransaction) {
+function getRecentChangeTitle(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
+  if (audience === 'vendor') {
+    if (record.category === 'Refund') {
+      return 'İade kesildi';
+    }
+    if (record.category === 'Payout') {
+      return 'Ödeme hazırlığı güncellendi';
+    }
+    if (record.category === 'Adjustment') {
+      return 'Bakiye düzeltildi';
+    }
+    if (record.settlement?.payoutReady) {
+      return 'Sipariş ödemeye hazır';
+    }
+    return 'Sipariş geliri kaydedildi';
+  }
   if (record.category === 'Refund') {
     return 'Refund deducted';
   }
@@ -573,8 +631,25 @@ function getRecentChangeTitle(record: FinanceTransaction) {
   return 'Sale recorded';
 }
 
-function getRecentChangeDetail(record: FinanceTransaction) {
-  const orderLabel = record.shopifyOrderNumber ? `Order #${record.shopifyOrderNumber}` : 'Marketplace activity';
+function getRecentChangeDetail(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
+  const orderLabel = record.shopifyOrderNumber
+    ? audience === 'vendor' ? `Sipariş #${record.shopifyOrderNumber}` : `Order #${record.shopifyOrderNumber}`
+    : audience === 'vendor' ? 'Mağaza hareketi' : 'Marketplace activity';
+  if (audience === 'vendor') {
+    if (record.category === 'Refund') {
+      return `${orderLabel} mevcut bakiyeyi ${record.amount} azalttı.`;
+    }
+    if (record.category === 'Payout') {
+      return `${record.amount} ödeme hazırlığına geçti.`;
+    }
+    if (record.category === 'Adjustment') {
+      return `${record.amount} bakiyeyi değiştirdi.`;
+    }
+    if (record.settlement?.payoutReady) {
+      return `${orderLabel} ödemeye hazır.`;
+    }
+    return `${orderLabel} ödeme hareketlerine eklendi.`;
+  }
   if (record.category === 'Refund') {
     return `${orderLabel} reduced the current balance by ${record.amount}.`;
   }
@@ -590,10 +665,39 @@ function getRecentChangeDetail(record: FinanceTransaction) {
   return `${orderLabel} was added to finance activity.`;
 }
 
-function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor' = 'admin') {
   const hasActivity = safeArray(finance.transactions).length > 0;
   const hasEligibleRows = (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0;
   const hasPaymentPreparation = Boolean(finance.payoutBatchSummary?.latestBatch);
+  if (audience === 'vendor') {
+    return [
+      {
+        label: 'Satış',
+        detail: hasActivity ? 'Satış kaydedildi' : 'İlk satış bekleniyor',
+        state: hasActivity ? 'complete' : 'upcoming',
+      },
+      {
+        label: 'Teslimat',
+        detail: hasEligibleRows || hasPaymentPreparation ? 'Siparişler uygun' : 'Teslimat bekleniyor',
+        state: hasEligibleRows || hasPaymentPreparation ? 'complete' : hasActivity ? 'current' : 'upcoming',
+      },
+      {
+        label: 'İnceleme',
+        detail: hasEligibleRows || hasPaymentPreparation ? 'İncelemeye hazır' : 'Henüz hazır değil',
+        state: hasPaymentPreparation ? 'complete' : hasEligibleRows ? 'current' : 'upcoming',
+      },
+      {
+        label: 'Ödeme Hazırlığı',
+        detail: hasPaymentPreparation ? 'Devam ediyor' : 'Başlamadı',
+        state: hasPaymentPreparation ? 'current' : 'upcoming',
+      },
+      {
+        label: 'Ödendi',
+        detail: 'Ödeme kanıtı bekleniyor',
+        state: 'upcoming',
+      },
+    ] as const;
+  }
   return [
     {
       label: 'Sales',
@@ -623,9 +727,9 @@ function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof 
   ] as const;
 }
 
-function getPayoutImpact(record: FinanceTransaction) {
+function getPayoutImpact(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   if (isVendorBlockedFinanceHold(record)) {
-    return 'Held';
+    return audience === 'vendor' ? 'Beklemede' : 'Held';
   }
   if (isRefundRecord(record)) {
     return formatDeductionValue(record.payoutCalculation?.refundImpact ?? record.amount);
@@ -711,13 +815,14 @@ function hasFinanceReviewCopy(value: string | null | undefined) {
   return /\bsettlement\b|\boffset review\b|\bpayout accounting\b|\bledger\b|\breference id\b|\bapproval id\b|\bcommission invoice\b/i.test(value ?? '');
 }
 
-type VendorFinanceStatusLabel = 'Review' | 'Ready' | 'Preparing' | 'On hold' | 'Blocked' | 'Estimated' | 'Paid';
+type VendorFinanceStateKey = 'review' | 'ready' | 'preparing' | 'waiting' | 'hold' | 'blocked' | 'paid';
+type VendorFinanceStatusLabel = 'Ödemeye Hazır' | 'Ödeme Bekliyor' | 'Ödendi' | 'İncelemede' | 'Beklemede' | 'Blokeli';
 
-function getVendorFinanceStatusLabel(
+function getVendorFinanceStateKey(
   record: FinanceTransaction,
   projection: FinanceOperationalProjection | null,
   settlementOffsetReviewPending: boolean,
-): VendorFinanceStatusLabel {
+): VendorFinanceStateKey {
   const candidates = [
     projection?.payoutReadiness,
     projection?.legacyStatusLabel,
@@ -730,112 +835,152 @@ function getVendorFinanceStatusLabel(
   const combined = candidates.join(' ').toLowerCase();
 
   if (settlementOffsetReviewPending || combined.includes('refund offset') || combined.includes('offset review')) {
-    return 'Review';
+    return 'review';
   }
   if (combined.includes('draft') || combined.includes('locked') || combined.includes('batch')) {
-    return 'Preparing';
+    return 'preparing';
+  }
+  if (
+    !settlementOffsetReviewPending &&
+    !record.settlement?.review &&
+    !record.payoutBatch &&
+    (record.settlement?.payoutReady || record.settlement?.status === 'payable' || combined.includes('payable'))
+  ) {
+    return 'ready';
+  }
+  if (combined.includes('paid_placeholder') || combined.includes('pending review') || combined.includes('review pending')) {
+    return 'review';
+  }
+  if (combined.includes('not ready')) {
+    return 'waiting';
   }
   if (combined.includes('paid') || combined.includes('completed') || combined.includes('reconciled')) {
-    return 'Paid';
+    return 'paid';
   }
-  if (combined.includes('ready') || combined.includes('payable')) {
-    return 'Ready';
+  if (combined.includes('approved') || combined.includes('ready') || combined.includes('payable')) {
+    return 'ready';
   }
   if (combined.includes('held') || combined.includes('hold')) {
-    return 'On hold';
+    return 'hold';
   }
   if (combined.includes('blocked') || combined.includes('disputed')) {
-    return 'Blocked';
+    return 'blocked';
   }
   if (hasFinanceReviewCopy(projection?.legacyStatusLabel)) {
-    return 'Review';
+    return 'review';
   }
 
-  return 'Estimated';
+  return 'waiting';
 }
 
-function getVendorPaymentWaitingSummary(status: VendorFinanceStatusLabel) {
-  if (status === 'Review') {
-    return 'A review is in progress. Payment will continue after review.';
+function getVendorFinanceStatusLabel(state: VendorFinanceStateKey): VendorFinanceStatusLabel {
+  if (state === 'ready') {
+    return 'Ödemeye Hazır';
   }
-  if (status === 'Preparing') {
-    return 'Payment is being prepared. No action is needed right now.';
+  if (state === 'paid') {
+    return 'Ödendi';
   }
-  if (status === 'On hold') {
-    return 'This payment is on hold until the issue is resolved.';
+  if (state === 'review') {
+    return 'İncelemede';
   }
-  if (status === 'Blocked') {
-    return 'This payment is blocked until the issue is resolved.';
+  if (state === 'hold') {
+    return 'Beklemede';
+  }
+  if (state === 'blocked') {
+    return 'Blokeli';
+  }
+  return 'Ödeme Bekliyor';
+}
+
+function getVendorPaymentWaitingSummary(state: VendorFinanceStateKey) {
+  if (state === 'review') {
+    return 'Bu ödeme inceleniyor. İnceleme tamamlandığında süreç devam eder.';
+  }
+  if (state === 'preparing') {
+    return 'Ödeme hazırlığı devam ediyor. Şu anda işlem yapmanız gerekmiyor.';
+  }
+  if (state === 'hold') {
+    return 'Bu ödeme beklemede. Sorun çözüldüğünde süreç devam eder.';
+  }
+  if (state === 'blocked') {
+    return 'Bu ödeme blokeli. Sorun çözüldüğünde süreç devam eder.';
   }
   return null;
 }
 
-function getVendorNextActionCopy(status: VendorFinanceStatusLabel) {
-  if (status === 'On hold' || status === 'Blocked') {
+function getVendorNextActionCopy(state: VendorFinanceStateKey) {
+  if (state === 'hold' || state === 'blocked') {
     return {
-      title: 'Review required',
-      body: 'Open the related order or contact support.',
+      title: 'İlgili siparişi kontrol edin',
+      body: 'İlgili siparişi kontrol edin veya destek ile iletişime geçin.',
     };
   }
-  if (status === 'Review') {
+  if (state === 'review') {
     return {
-      title: 'No action needed',
-      body: 'We are reviewing this payment.',
+      title: 'İşlem gerekmiyor',
+      body: 'Bu ödeme inceleniyor.',
     };
   }
-  if (status === 'Preparing') {
+  if (state === 'preparing') {
     return {
-      title: 'No action needed',
-      body: 'Payment preparation is in progress.',
+      title: 'İşlem gerekmiyor',
+      body: 'Ödeme hazırlığı devam ediyor.',
     };
   }
-  if (status === 'Ready') {
+  if (state === 'ready') {
     return {
-      title: 'No action needed',
-      body: 'This amount is ready for payment.',
+      title: 'İşlem gerekmiyor',
+      body: 'Bu tutar ödemeye hazır.',
     };
   }
-  if (status === 'Paid') {
+  if (state === 'paid') {
     return {
-      title: 'No action needed',
-      body: 'This amount has already been paid.',
+      title: 'İşlem gerekmiyor',
+      body: 'Bu tutar ödendi.',
     };
   }
   return {
-    title: 'No action needed',
-    body: 'This amount is not ready for payment yet.',
+    title: 'İşlem gerekmiyor',
+    body: 'Bu tutar henüz ödemeye hazır değil.',
   };
 }
 
-function shouldShowVendorPaymentWaiting(status: VendorFinanceStatusLabel) {
-  return status === 'Review' || status === 'Preparing' || status === 'On hold' || status === 'Blocked';
+function shouldShowVendorPaymentWaiting(state: VendorFinanceStateKey) {
+  return state === 'review' || state === 'preparing' || state === 'hold' || state === 'blocked';
 }
 
-function getVendorFinanceTimelineEvents(events: OperationalEventInput[], status: VendorFinanceStatusLabel): OperationalEventInput[] {
+function getVendorFinanceTimelineEvents(events: OperationalEventInput[], state: VendorFinanceStateKey): OperationalEventInput[] {
   return events.filter((event) => !event.id.startsWith('support-group-')).map((event) => {
+    const normalizedTitle = event.title.toLowerCase();
     const title = event.title === 'Refund impact captured'
-      ? 'Refund recorded'
-      : hasFinanceReviewCopy(event.title)
-        ? status === 'Preparing'
-          ? 'Payment preparing'
-          : 'Review in progress'
-        : status === 'Ready'
-          ? 'Payment ready'
-          : status === 'Preparing'
-            ? 'Payment preparing'
-            : status === 'On hold'
-              ? 'Payment held'
-              : status === 'Blocked'
-                ? 'Payment blocked'
-                : status === 'Paid'
-                  ? 'Payment paid'
-                  : event.title;
+      ? 'İade kaydedildi'
+      : normalizedTitle.includes('order captured')
+        ? 'Sipariş kaydedildi'
+        : normalizedTitle.includes('allocation split') || normalizedTitle.includes('assignment')
+          ? 'Sipariş ataması güncellendi'
+          : normalizedTitle.includes('source transaction') || normalizedTitle.includes('held transaction')
+            ? 'İşlem güncellendi'
+            : hasFinanceReviewCopy(event.title)
+              ? state === 'preparing'
+                ? 'Ödeme hazırlanıyor'
+                : 'İnceleme devam ediyor'
+              : state === 'ready'
+                ? 'Ödemeye hazır'
+                : state === 'preparing'
+                  ? 'Ödeme hazırlanıyor'
+                  : state === 'hold'
+                    ? 'Ödeme beklemede'
+                    : state === 'blocked'
+                      ? 'Ödeme blokeli'
+                      : state === 'paid'
+                        ? 'Ödeme yapıldı'
+                        : event.title;
 
     return {
       ...event,
       title,
       description: undefined,
-      status,
+      status: getVendorFinanceStatusLabel(state),
     };
   });
 }
@@ -847,11 +992,36 @@ function shouldShowFinanceValue(value: string | null | undefined, paymentImpact:
   return parseCurrencyValue(value) !== parseCurrencyValue(paymentImpact);
 }
 
-function formatSupportStatus(status: SupportTicket['status']) {
+function formatSupportStatus(status: SupportTicket['status'], audience: 'admin' | 'vendor' = 'admin') {
+  if (audience === 'vendor') {
+    if (status === 'OPEN') {
+      return 'Açık';
+    }
+    if (status === 'IN_REVIEW') {
+      return 'İncelemede';
+    }
+    if (status === 'WAITING_FOR_VENDOR') {
+      return 'Yanıt bekliyor';
+    }
+    if (status === 'RESOLVED') {
+      return 'Çözüldü';
+    }
+    if (status === 'CLOSED') {
+      return 'Kapalı';
+    }
+  }
   return safeStatusLabel(status);
 }
 
-function formatSupportPriority(priority: SupportTicket['priority']) {
+function formatSupportPriority(priority: SupportTicket['priority'], audience: 'admin' | 'vendor' = 'admin') {
+  if (audience === 'vendor') {
+    const label = priority === 'high'
+        ? 'Yüksek'
+        : priority === 'low'
+          ? 'Düşük'
+          : 'Normal';
+    return `Öncelik: ${label}`;
+  }
   return `${safeStatusLabel(priority, 'Normal')} priority`;
 }
 
@@ -898,10 +1068,10 @@ function getFinanceWorkflowFilter(workflow: string | null, audience: 'admin' | '
   if (workflow === 'settlement-review') {
     if (audience === 'vendor') {
       return {
-        label: 'Payment review',
-        description: 'Showing payment rows waiting for review.',
-        emptyTitle: 'No payment review rows currently pending',
-        emptyDescription: 'This workflow queue has no payment rows waiting for review. Clear the workflow to inspect all finance activity.',
+        label: 'İncelemede',
+        description: 'İncelemede bekleyen ödeme hareketleri gösteriliyor.',
+        emptyTitle: 'İncelemede ödeme hareketi yok',
+        emptyDescription: 'Bu görünümde incelemede bekleyen ödeme hareketi yok. Tüm hareketleri görmek için görünümü temizleyin.',
       };
     }
     return {
@@ -962,69 +1132,95 @@ function getRefundAdjustmentStatusCopy(status: string | null | undefined) {
   return formatAdjustmentStatus(normalized || 'unknown');
 }
 
+function getVendorDebtEventLabel(event: VendorDebtHistoryEvent) {
+  if (event.type === 'VENDOR_DEBT_OFFSET') {
+    return 'Bakiye düzeltmesi uygulandı';
+  }
+  if (event.type === 'VENDOR_DEBT_CREATED') {
+    return 'Bakiye düzeltmesi oluştu';
+  }
+  if (event.type === 'MANUAL_ADJUSTMENT') {
+    return 'Manuel bakiye düzeltmesi';
+  }
+  if (event.type === 'DEBT_WAIVED') {
+    return 'Bakiye düzeltmesi kapatıldı';
+  }
+  if (event.type === 'PAYABLE_EARNED') {
+    return 'Ödeme hareketi';
+  }
+  return 'Bakiye Düzeltmesi';
+}
+
 function VendorDebtHistorySection({
   history,
   loading,
   error,
   selectedEvent,
   onSelectEvent,
+  audience = 'admin',
 }: {
   history: Awaited<ReturnType<typeof getVendorDebtHistory>> | null;
   loading: boolean;
   error: string | null;
   selectedEvent: VendorDebtHistoryEvent | null;
   onSelectEvent: (eventId: string) => void;
+  audience?: 'admin' | 'vendor';
 }) {
   const currency = history?.currency ?? 'TRY';
   const events = safeArray(history?.events);
   const outstandingDebtMinor = history?.summary.outstandingDebtMinor ?? 0;
   const remainingDebtMinor = history?.summary.remainingDebtMinor ?? outstandingDebtMinor;
+  const isVendorAudience = audience === 'vendor';
 
   return (
-    <section className="finance-footer-card finance-debt-history-card" aria-label="Balance adjustment history">
+    <section className="finance-footer-card finance-debt-history-card" aria-label={isVendorAudience ? 'Bakiye düzeltmesi geçmişi' : 'Balance adjustment history'}>
       <div>
-        <p className="eyebrow">Balance adjustment</p>
-        <h3>Balance Adjustment History</h3>
+        <p className="eyebrow">{isVendorAudience ? 'Bakiye Düzeltmesi' : 'Balance adjustment'}</p>
+        <h3>{isVendorAudience ? 'Bakiye Düzeltmesi Geçmişi' : 'Balance Adjustment History'}</h3>
         <p className="page-description">
-          Review refund-after-payment balance adjustments and payment deductions without opening database records.
+          {isVendorAudience
+            ? 'Ödeme sonrası iade kaynaklı bakiye düzeltmelerini ve kesintileri takip edin.'
+            : 'Review refund-after-payment balance adjustments and payment deductions without opening database records.'}
         </p>
       </div>
       <div className="op-kpi-row finance-debt-summary-row">
         <article className={`op-kpi ${outstandingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-neutral'}`}>
-          <span>Outstanding Adjustment</span>
+          <span>{isVendorAudience ? 'Açık Düzeltme' : 'Outstanding Adjustment'}</span>
           <strong>{formatMinorCurrency(outstandingDebtMinor, currency)}</strong>
-          <small>{outstandingDebtMinor > 0 ? 'Will reduce a future payment' : 'No open adjustment'}</small>
+          <small>{outstandingDebtMinor > 0 ? isVendorAudience ? 'Gelecek ödemeden düşülür' : 'Will reduce a future payment' : isVendorAudience ? 'Açık düzeltme yok' : 'No open adjustment'}</small>
         </article>
         <article className="op-kpi op-tone-danger">
-          <span>Total Adjustment Created</span>
+          <span>{isVendorAudience ? 'Oluşan Düzeltme' : 'Total Adjustment Created'}</span>
           <strong>{formatMinorCurrency(history?.summary.totalDebtCreatedMinor ?? 0, currency)}</strong>
         </article>
         <article className="op-kpi op-tone-success">
-          <span>Total Adjustment Applied</span>
+          <span>{isVendorAudience ? 'Uygulanan Düzeltme' : 'Total Adjustment Applied'}</span>
           <strong>{formatMinorCurrency(history?.summary.totalDebtOffsetMinor ?? 0, currency)}</strong>
         </article>
         <article className={`op-kpi ${remainingDebtMinor > 0 ? 'op-tone-danger' : 'op-tone-success'}`}>
-          <span>Remaining Adjustment</span>
+          <span>{isVendorAudience ? 'Kalan Düzeltme' : 'Remaining Adjustment'}</span>
           <strong>{formatMinorCurrency(remainingDebtMinor, currency)}</strong>
-          <small>{history?.summary.lastDebtActivityAt ? `Last activity ${formatDateParts(history.summary.lastDebtActivityAt).date}` : 'No activity'}</small>
+          <small>{history?.summary.lastDebtActivityAt ? `${isVendorAudience ? 'Son hareket' : 'Last activity'} ${formatDateParts(history.summary.lastDebtActivityAt).date}` : isVendorAudience ? 'Hareket yok' : 'No activity'}</small>
         </article>
       </div>
       {error ? (
         <SectionErrorRetry
-          title="Balance adjustment history unavailable"
+          title={isVendorAudience ? 'Bakiye düzeltmesi geçmişi yüklenemedi' : 'Balance adjustment history unavailable'}
           description={error}
         />
       ) : loading ? (
-        <p className="settlement-compact-empty">Loading balance adjustment history...</p>
+        <p className="settlement-compact-empty">{isVendorAudience ? 'Bakiye düzeltmesi geçmişi yükleniyor...' : 'Loading balance adjustment history...'}</p>
       ) : events.length === 0 ? (
         <EmptyStatePanel
-          title="No balance adjustment history"
-          description="Refund-after-payment adjustments and payment deductions will appear here when they exist."
+          title={isVendorAudience ? 'Bakiye düzeltmesi geçmişi yok' : 'No balance adjustment history'}
+          description={isVendorAudience ? 'Ödeme sonrası iade düzeltmeleri ve kesintiler oluştuğunda burada görünür.' : 'Refund-after-payment adjustments and payment deductions will appear here when they exist.'}
         />
       ) : (
         <>
           <OperationalTable
-            columns={['Event Date', 'Event Type', 'Order', 'Vendor', 'Items', 'Adjustment Amount', 'Remaining Adjustment', 'Source Reference']}
+            columns={isVendorAudience
+              ? ['Tarih', 'Hareket Tipi', 'Sipariş', 'Satıcı', 'Ürünler', 'Düzeltme Tutarı', 'Kalan Düzeltme', 'Kaynak']
+              : ['Event Date', 'Event Type', 'Order', 'Vendor', 'Items', 'Adjustment Amount', 'Remaining Adjustment', 'Source Reference']}
             className="finance-debt-history-table"
             stickyHeader={false}
           >
@@ -1038,15 +1234,15 @@ function VendorDebtHistorySection({
                   <strong>{formatDateParts(event.createdAt).date}</strong>
                   <small>{formatDateParts(event.createdAt).time}</small>
                 </span>
-                <StatusBadge tone={event.type === 'VENDOR_DEBT_OFFSET' ? 'success' : 'danger'}>{event.label}</StatusBadge>
+                <StatusBadge tone={event.type === 'VENDOR_DEBT_OFFSET' ? 'success' : 'danger'}>{isVendorAudience ? getVendorDebtEventLabel(event) : event.label}</StatusBadge>
                 <span>
-                  <strong>{event.orderNumber ?? 'No order'}</strong>
-                  <small>{event.shopifyOrderId ?? 'No Shopify id'}</small>
+                  <strong>{event.orderNumber ?? (isVendorAudience ? 'Sipariş yok' : 'No order')}</strong>
+                  <small>{event.shopifyOrderId ?? (isVendorAudience ? 'Kaynak yok' : 'No Shopify id')}</small>
                 </span>
                 <span>{event.vendorName ?? event.vendorId}</span>
                 <span>
                   <strong>{event.itemCount}</strong>
-                  <small>{event.productCount} products</small>
+                  <small>{event.productCount} {isVendorAudience ? 'ürün' : 'products'}</small>
                 </span>
                 <strong className={getDebtImpactClass(event)}>{formatDebtImpact(event, currency)}</strong>
                 <strong className={event.remainingDebtAfterEventMinor > 0 ? 'finance-deduction-value' : 'finance-payout-value'}>
@@ -1056,78 +1252,79 @@ function VendorDebtHistorySection({
               </OperationalTableRow>
             ))}
           </OperationalTable>
-          {selectedEvent ? <VendorDebtDetailPanel event={selectedEvent} currency={currency} /> : null}
+          {selectedEvent ? <VendorDebtDetailPanel event={selectedEvent} currency={currency} audience={audience} /> : null}
         </>
       )}
     </section>
   );
 }
 
-function VendorDebtDetailPanel({ event, currency }: { event: VendorDebtHistoryEvent; currency: string }) {
+function VendorDebtDetailPanel({ event, currency, audience = 'admin' }: { event: VendorDebtHistoryEvent; currency: string; audience?: 'admin' | 'vendor' }) {
+  const isVendorAudience = audience === 'vendor';
   return (
-    <div className="finance-debt-detail-panel" aria-label="Balance adjustment detail">
+    <div className="finance-debt-detail-panel" aria-label={isVendorAudience ? 'Bakiye düzeltmesi detayı' : 'Balance adjustment detail'}>
       <div className="finance-debt-detail-heading">
         <div>
-          <p className="eyebrow">Balance adjustment detail</p>
-          <h4>{event.label}</h4>
+          <p className="eyebrow">{isVendorAudience ? 'Bakiye düzeltmesi detayı' : 'Balance adjustment detail'}</p>
+          <h4>{isVendorAudience ? getVendorDebtEventLabel(event) : event.label}</h4>
         </div>
         <StatusBadge tone={event.remainingDebtAfterEventMinor > 0 ? 'danger' : 'success'}>
-          Remaining {formatMinorCurrency(event.remainingDebtAfterEventMinor, currency)}
+          {isVendorAudience ? 'Kalan' : 'Remaining'} {formatMinorCurrency(event.remainingDebtAfterEventMinor, currency)}
         </StatusBadge>
       </div>
       <div className="finance-debt-detail-grid">
-        <MetadataGroup title="Order">
-          <MetadataRow label="Order number" value={event.orderNumber ?? 'Unknown'} />
-          <MetadataRow label="Shopify order id" value={event.shopifyOrderId ?? 'Unknown'} />
-          <MetadataRow label="Vendor" value={event.vendorName ?? event.vendorId} />
-          <MetadataRow label="Created date" value={formatOptionalDate(event.orderCreatedAt)} />
+        <MetadataGroup title={isVendorAudience ? 'Sipariş' : 'Order'}>
+          <MetadataRow label={isVendorAudience ? 'Sipariş numarası' : 'Order number'} value={event.orderNumber ?? (isVendorAudience ? 'Bilinmiyor' : 'Unknown')} />
+          <MetadataRow label={isVendorAudience ? 'Kaynak sipariş' : 'Shopify order id'} value={event.shopifyOrderId ?? (isVendorAudience ? 'Bilinmiyor' : 'Unknown')} />
+          <MetadataRow label={isVendorAudience ? 'Satıcı' : 'Vendor'} value={event.vendorName ?? event.vendorId} />
+          <MetadataRow label={isVendorAudience ? 'Oluşturulma tarihi' : 'Created date'} value={formatOptionalDate(event.orderCreatedAt)} />
         </MetadataGroup>
-        <MetadataGroup title="Refund">
-          <MetadataRow label="Refund reference" value={event.refundReference ?? 'Not applicable'} />
-          <MetadataRow label="Refund record" value={event.refundRecordId ?? 'Not applicable'} />
-          <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
+        <MetadataGroup title={isVendorAudience ? 'İade' : 'Refund'}>
+          <MetadataRow label={isVendorAudience ? 'İade referansı' : 'Refund reference'} value={event.refundReference ?? (isVendorAudience ? 'Uygun değil' : 'Not applicable')} />
+          <MetadataRow label={isVendorAudience ? 'İade kaydı' : 'Refund record'} value={event.refundRecordId ?? (isVendorAudience ? 'Uygun değil' : 'Not applicable')} />
+          <MetadataRow label={isVendorAudience ? 'İade tutarı' : 'Refund amount'} value={event.calculation.refundMinor === null ? isVendorAudience ? 'Bilinmiyor' : 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
         </MetadataGroup>
-        <MetadataGroup title="Balance Adjustment Calculation">
-          <MetadataRow label="Refund amount" value={event.calculation.refundMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
-          <MetadataRow label="Commission reversal" value={event.calculation.commissionReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionReversalMinor, currency)} />
-          <MetadataRow label="Commission VAT reversal" value={event.calculation.commissionVatReversalMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.commissionVatReversalMinor, currency)} />
-          <MetadataRow label="Balance adjustment created" value={event.calculation.vendorDebtMinor === null ? 'Unknown' : formatMinorCurrency(event.calculation.vendorDebtMinor, currency)} />
-          <MetadataRow label="Balance adjustment applied" value={event.calculation.debtOffsetMinor === null ? 'Not applicable' : formatMinorCurrency(event.calculation.debtOffsetMinor, currency)} />
-          <MetadataRow label="Formula" value={event.calculation.formula ?? 'Not available'} />
+        <MetadataGroup title={isVendorAudience ? 'Bakiye Düzeltmesi' : 'Balance Adjustment Calculation'}>
+          <MetadataRow label={isVendorAudience ? 'İade tutarı' : 'Refund amount'} value={event.calculation.refundMinor === null ? isVendorAudience ? 'Bilinmiyor' : 'Unknown' : formatMinorCurrency(event.calculation.refundMinor, currency)} />
+          <MetadataRow label={isVendorAudience ? 'Komisyon iadesi' : 'Commission reversal'} value={event.calculation.commissionReversalMinor === null ? isVendorAudience ? 'Bilinmiyor' : 'Unknown' : formatMinorCurrency(event.calculation.commissionReversalMinor, currency)} />
+          <MetadataRow label={isVendorAudience ? 'Komisyon KDV iadesi' : 'Commission VAT reversal'} value={event.calculation.commissionVatReversalMinor === null ? isVendorAudience ? 'Bilinmiyor' : 'Unknown' : formatMinorCurrency(event.calculation.commissionVatReversalMinor, currency)} />
+          <MetadataRow label={isVendorAudience ? 'Oluşan düzeltme' : 'Balance adjustment created'} value={event.calculation.vendorDebtMinor === null ? isVendorAudience ? 'Bilinmiyor' : 'Unknown' : formatMinorCurrency(event.calculation.vendorDebtMinor, currency)} />
+          <MetadataRow label={isVendorAudience ? 'Uygulanan düzeltme' : 'Balance adjustment applied'} value={event.calculation.debtOffsetMinor === null ? isVendorAudience ? 'Uygun değil' : 'Not applicable' : formatMinorCurrency(event.calculation.debtOffsetMinor, currency)} />
+          <MetadataRow label={isVendorAudience ? 'Hesaplama' : 'Formula'} value={event.calculation.formula ?? (isVendorAudience ? 'Yok' : 'Not available')} />
         </MetadataGroup>
-        <MetadataGroup title="Payment Adjustment">
-          <MetadataRow label="Payment preparation" value={event.payoutBatchId ?? 'Not applicable'} />
-          <MetadataRow label="Payment preparation status" value={event.payoutBatchStatus ? safeStatusLabel(event.payoutBatchStatus) : 'Not applicable'} />
-          <MetadataRow label="Source reference" value={event.sourceReference} />
+        <MetadataGroup title={isVendorAudience ? 'Ödeme Düzeltmesi' : 'Payment Adjustment'}>
+          <MetadataRow label={isVendorAudience ? 'Ödeme hazırlığı' : 'Payment preparation'} value={event.payoutBatchId ?? (isVendorAudience ? 'Uygun değil' : 'Not applicable')} />
+          <MetadataRow label={isVendorAudience ? 'Ödeme hazırlığı durumu' : 'Payment preparation status'} value={event.payoutBatchStatus ? isVendorAudience ? getVendorPayoutBatchStatusLabel(event.payoutBatchStatus) : safeStatusLabel(event.payoutBatchStatus) : isVendorAudience ? 'Uygun değil' : 'Not applicable'} />
+          <MetadataRow label={isVendorAudience ? 'Kaynak' : 'Source reference'} value={event.sourceReference} />
         </MetadataGroup>
       </div>
       <div className="finance-debt-detail-grid">
         <section className="finance-debt-detail-list">
-          <h5>Products</h5>
+          <h5>{isVendorAudience ? 'Ürünler' : 'Products'}</h5>
           {event.products.length ? (
             event.products.map((product, index) => (
               <p key={`${product.sku ?? product.title ?? 'product'}-${index}`}>
-                <strong>{product.title ?? 'Unknown product'}</strong>
-                <span>{product.sku ?? 'No SKU'} · Qty {product.quantity}</span>
+                <strong>{product.title ?? (isVendorAudience ? 'Bilinmeyen ürün' : 'Unknown product')}</strong>
+                <span>{product.sku ?? (isVendorAudience ? 'SKU yok' : 'No SKU')} · {isVendorAudience ? 'Adet' : 'Qty'} {product.quantity}</span>
               </p>
             ))
           ) : (
-            <p>No product snapshot available.</p>
+            <p>{isVendorAudience ? 'Ürün bilgisi yok.' : 'No product snapshot available.'}</p>
           )}
         </section>
         <section className="finance-debt-detail-list">
-          <h5>Adjustment History</h5>
+          <h5>{isVendorAudience ? 'Düzeltme Geçmişi' : 'Adjustment History'}</h5>
           {event.offsetHistory.length ? (
             event.offsetHistory.map((offset) => (
               <p key={offset.id}>
                 <strong>{formatMinorCurrency(offset.offsetAmountMinor, currency)}</strong>
                 <span>
-                  {offset.payoutBatchId ?? 'No payment preparation'} · Remaining {formatMinorCurrency(offset.remainingDebtAfterEventMinor, currency)}
+                  {offset.payoutBatchId ?? (isVendorAudience ? 'Ödeme hazırlığı yok' : 'No payment preparation')} · {isVendorAudience ? 'Kalan' : 'Remaining'} {formatMinorCurrency(offset.remainingDebtAfterEventMinor, currency)}
                 </span>
               </p>
             ))
           ) : (
-            <p>No payment adjustments have been applied yet.</p>
+            <p>{isVendorAudience ? 'Henüz ödeme düzeltmesi uygulanmadı.' : 'No payment adjustments have been applied yet.'}</p>
           )}
         </section>
       </div>
@@ -1437,13 +1634,14 @@ export function FinancePage() {
       });
     }
   }
-  const selectedVendorFinanceStatusLabel = selectedRecord
-    ? getVendorFinanceStatusLabel(selectedRecord, selectedOperationalProjection, selectedSettlementOffsetReviewPending)
-    : 'Estimated';
-  const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceStatusLabel);
-  const selectedVendorNextAction = getVendorNextActionCopy(selectedVendorFinanceStatusLabel);
-  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceStatusLabel);
-  const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord) : UNKNOWN_FINANCE_VALUE;
+  const selectedVendorFinanceState = selectedRecord
+    ? getVendorFinanceStateKey(selectedRecord, selectedOperationalProjection, selectedSettlementOffsetReviewPending)
+    : 'waiting';
+  const selectedVendorFinanceStatusLabel = getVendorFinanceStatusLabel(selectedVendorFinanceState);
+  const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceState);
+  const selectedVendorNextAction = getVendorNextActionCopy(selectedVendorFinanceState);
+  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceState);
+  const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
   const selectedEstimatedPayment = selectedRecord?.payoutCalculation?.estimatedPayout ?? null;
   const selectedRefundImpact = selectedRecord?.payoutCalculation?.refundImpact
     ? optionalDeductionValue(selectedRecord.payoutCalculation.refundImpact)
@@ -1454,6 +1652,13 @@ export function FinancePage() {
     .filter((link) => link.eyebrow !== 'Support')
     .map((link) => ({
       ...link,
+      eyebrow: link.eyebrow === 'Order' ? 'İlgili Sipariş' : link.eyebrow === 'Return' ? 'İlgili İade' : link.eyebrow,
+      title: link.eyebrow === 'Order' && selectedRecord?.shopifyOrderNumber
+        ? `Sipariş ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`
+        : link.eyebrow === 'Return'
+          ? 'İlgili iade'
+          : link.title,
+      actionLabel: 'Aç',
       description: undefined,
       status: undefined,
     }));
@@ -1539,10 +1744,10 @@ export function FinancePage() {
   const overviewPendingBalance = getOverviewPendingValue(financeView);
   const overviewHoldBalance = getOverviewHoldValue(financeView);
   const overviewPaymentEstimate = getOverviewPaymentValue(financeView);
-  const overviewPaymentDate = getOverviewPaymentDate(financeView);
+  const overviewPaymentDate = getOverviewPaymentDate(financeView, financeAudience);
   const overviewPaymentStatus = getOverviewPaymentStatus(financeView, financeAudience);
   const overviewRecentActivity = safeArray(financeView.transactions).slice(0, 5);
-  const overviewProgressSteps = getPaymentProgressSteps(financeView);
+  const overviewProgressSteps = getPaymentProgressSteps(financeView, financeAudience);
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
@@ -1599,18 +1804,18 @@ export function FinancePage() {
           <section className="finance-money-home" aria-label="Finance money summary">
             <article className="finance-available-hero">
               <div>
-                <p className="eyebrow">Available balance</p>
+                <p className="eyebrow">{isVendorUser ? 'Kullanılabilir Bakiye' : 'Available balance'}</p>
                 <strong>{overviewAvailableBalance}</strong>
-                <span>Ready to be included in your next payment review.</span>
+                <span>{isVendorUser ? 'Sonraki ödeme değerlendirmesine dahil edilecek tutar.' : 'Ready to be included in your next payment review.'}</span>
               </div>
             </article>
 
-            <aside className="finance-next-payment-card" aria-label="Next payment">
+            <aside className="finance-next-payment-card" aria-label={isVendorUser ? 'Sonraki Ödeme' : 'Next payment'}>
               <div>
-                <p className="eyebrow">Estimated payment</p>
+                <p className="eyebrow">{isVendorUser ? 'Tahmini Ödeme' : 'Estimated payment'}</p>
                 <strong>{overviewPaymentEstimate}</strong>
                 <span>{overviewPaymentDate}</span>
-                <span>Preparing your next payment.</span>
+                <span>{isVendorUser ? 'Tahmini ödeme bilgisi.' : 'Preparing your next payment.'}</span>
               </div>
               <StatusBadge tone={(financeView.payoutBatchSummary?.latestBatch || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) ? 'success' : 'neutral'}>
                 {overviewPaymentStatus}
@@ -1619,48 +1824,48 @@ export function FinancePage() {
 
             <div className="finance-balance-secondary-grid">
               <article>
-                <span>Waiting to become payable</span>
+                <span>{isVendorUser ? 'Bekleyen Tutar' : 'Waiting to become payable'}</span>
                 <strong>{overviewPendingBalance}</strong>
-                <small>Orders waiting for delivery, timing, or payment readiness.</small>
+                <small>{isVendorUser ? 'Ödemeye hazır hale gelmeyi bekleyen tutar.' : 'Orders waiting for delivery, timing, or payment readiness.'}</small>
               </article>
               <article>
-                <span>Waiting for review</span>
+                <span>{isVendorUser ? 'İncelemede Bekleyen Tutar' : 'Waiting for review'}</span>
                 <strong>{overviewHoldBalance}</strong>
-                <small>Money paused until an operational or finance review is resolved.</small>
+                <small>{isVendorUser ? 'Operasyon veya finans incelemesi tamamlanınca çözülecek tutar.' : 'Money paused until an operational or finance review is resolved.'}</small>
               </article>
             </div>
           </section>
 
           <section className="finance-overview-panel finance-balance-story" aria-label="Balance explanation">
             <div>
-              <p className="eyebrow">How your balance moves</p>
-              <h3>Payment stages</h3>
+              <p className="eyebrow">{isVendorUser ? 'Bakiye Hareketleri' : 'How your balance moves'}</p>
+              <h3>{isVendorUser ? 'Ödeme Aşamaları' : 'Payment stages'}</h3>
             </div>
             <div className="finance-balance-story-grid">
               <p>
-                <strong>Available</strong>
-                <span>Ready for payment review.</span>
+                <strong>{isVendorUser ? 'Kullanılabilir' : 'Available'}</strong>
+                <span>{isVendorUser ? 'Ödeme değerlendirmesine hazır.' : 'Ready for payment review.'}</span>
               </p>
               <p>
-                <strong>Pending</strong>
-                <span>Waiting to become payable.</span>
+                <strong>{isVendorUser ? 'Bekleyen' : 'Pending'}</strong>
+                <span>{isVendorUser ? 'Ödemeye hazır hale gelmeyi bekliyor.' : 'Waiting to become payable.'}</span>
               </p>
               <p>
-                <strong>Waiting for review</strong>
-                <span>Paused until a review is resolved.</span>
+                <strong>{isVendorUser ? 'İncelemede' : 'Waiting for review'}</strong>
+                <span>{isVendorUser ? 'İnceleme tamamlanınca çözülür.' : 'Paused until a review is resolved.'}</span>
               </p>
               <p>
-                <strong>Changed recently</strong>
-                <span>Recent sales, refunds, and adjustments.</span>
+                <strong>{isVendorUser ? 'Son hareketler' : 'Changed recently'}</strong>
+                <span>{isVendorUser ? 'Son satış, iade ve düzeltmeler.' : 'Recent sales, refunds, and adjustments.'}</span>
               </p>
             </div>
           </section>
 
-          <section className="finance-overview-panel finance-recent-activity" aria-label="Recent payment activity">
+          <section className="finance-overview-panel finance-recent-activity" aria-label={isVendorUser ? 'Son Ödeme Hareketleri' : 'Recent payment activity'}>
             <div className="finance-overview-panel-heading">
               <div>
-                <p className="eyebrow">Recent payment activity</p>
-                <h3>What changed since your last check</h3>
+                <p className="eyebrow">{isVendorUser ? 'Son Ödeme Hareketleri' : 'Recent payment activity'}</p>
+                <h3>{isVendorUser ? 'Son kontrolünüzden bu yana değişen hareketler.' : 'What changed since your last check'}</h3>
               </div>
             </div>
             {isError && !finance ? (
@@ -1694,7 +1899,7 @@ export function FinancePage() {
               <ol className="finance-recent-change-timeline">
                 {overviewRecentActivity.map((record) => (
                   <li key={record.id}>
-                    <time>{getRelativeActivityDay(record.date)}</time>
+                    <time>{getRelativeActivityDay(record.date, financeAudience)}</time>
                     <button
                       type="button"
                       onClick={() => {
@@ -1702,8 +1907,8 @@ export function FinancePage() {
                         setActiveFinanceTab('transactions');
                       }}
                     >
-                      <strong>{getRecentChangeTitle(record)}</strong>
-                      <span>{getRecentChangeDetail(record)}</span>
+                      <strong>{getRecentChangeTitle(record, financeAudience)}</strong>
+                      <span>{getRecentChangeDetail(record, financeAudience)}</span>
                     </button>
                     <b className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'}>
                       {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
@@ -1715,11 +1920,11 @@ export function FinancePage() {
             )}
           </section>
 
-          <section className="finance-overview-panel finance-payment-progress" aria-label="Payment progress">
+          <section className="finance-overview-panel finance-payment-progress" aria-label={isVendorUser ? 'Ödeme Süreci' : 'Payment progress'}>
             <div className="finance-overview-panel-heading">
               <div>
-                <p className="eyebrow">Payment progress</p>
-                <h3>How sales become money paid out</h3>
+                <p className="eyebrow">{isVendorUser ? 'Ödeme Süreci' : 'Payment progress'}</p>
+                <h3>{isVendorUser ? 'Satışlar ödemeye nasıl dönüşür' : 'How sales become money paid out'}</h3>
               </div>
             </div>
             <ol className="finance-payment-progress-steps">
@@ -1774,13 +1979,13 @@ export function FinancePage() {
                   setStatusFilter(event.target.value);
                 }}
               >
-                <option value="all">All statuses</option>
-                <option value="Estimated">Estimated</option>
-                <option value="Pending review">Pending review</option>
-                <option value="Approved">Approved</option>
-                <option value="Scheduled">Scheduled</option>
-                <option value="Refund impact">Refund impact</option>
-                <option value="Blocked">Blocked</option>
+                <option value="all">{isVendorUser ? 'Tüm durumlar' : 'All statuses'}</option>
+                <option value="Estimated">{isVendorUser ? 'Ödeme Bekliyor' : 'Estimated'}</option>
+                <option value="Pending review">{isVendorUser ? 'İncelemede' : 'Pending review'}</option>
+                <option value="Approved">{isVendorUser ? 'Ödemeye Hazır' : 'Approved'}</option>
+                <option value="Scheduled">{isVendorUser ? 'Ödeme Bekliyor' : 'Scheduled'}</option>
+                <option value="Refund impact">{isVendorUser ? 'İade Kesintisi' : 'Refund impact'}</option>
+                <option value="Blocked">{isVendorUser ? 'Blokeli' : 'Blocked'}</option>
               </select>
               <select
                 value={categoryFilter}
@@ -1789,11 +1994,11 @@ export function FinancePage() {
                   setCategoryFilter(event.target.value);
                 }}
               >
-                <option value="all">All types</option>
-                <option value="Invoice">Sale</option>
-                <option value="Refund">Refund</option>
-                <option value="Payout">Payment review</option>
-                <option value="Adjustment">Adjustment</option>
+                <option value="all">{isVendorUser ? 'Tüm işlem tipleri' : 'All types'}</option>
+                <option value="Invoice">{isVendorUser ? 'Sipariş Geliri' : 'Sale'}</option>
+                <option value="Refund">{isVendorUser ? 'İade Kesintisi' : 'Refund'}</option>
+                <option value="Payout">{isVendorUser ? 'Tahmini Ödeme' : 'Payment review'}</option>
+                <option value="Adjustment">{isVendorUser ? 'Bakiye Düzeltmesi' : 'Adjustment'}</option>
               </select>
               <select defaultValue="week" aria-label="Date range">
                 <option value="week">This week</option>
@@ -1813,18 +2018,20 @@ export function FinancePage() {
           {activeWorkflowFilter ? (
             <div className="workflow-filter-banner" aria-label="Active workflow filter">
               <div>
-                <span>Workflow filter</span>
+                <span>{isVendorUser ? 'Görünüm' : 'Workflow filter'}</span>
                 <strong>{activeWorkflowFilter.label}</strong>
                 <small>{activeWorkflowFilter.description}</small>
               </div>
               <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
-                Clear workflow
+                {isVendorUser ? 'Temizle' : 'Clear workflow'}
               </button>
             </div>
           ) : null}
 
           <OperationalTable
-            columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payment impact', 'Action']}
+            columns={isVendorUser
+              ? ['Tarih', 'İşlem Tipi', 'Sipariş', 'Durum', 'Tutar', 'Ödeme Etkisi', 'İşlem']
+              : ['Date', 'Type', 'Order', 'Status', 'Amount', 'Payment impact', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
             {isError && !finance ? (
@@ -1869,8 +2076,9 @@ export function FinancePage() {
               const orderSettlementHref = vendorBlockedHold ? buildOrdersHref(record) : isVendorUser ? null : buildOrderSettlementHref(record);
               const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
               const rowSettlementOffsetReviewPending = isRefundedSplitChildSaleBasis(record) || isRefundDeductionSettlementReviewPending(record);
+              const rowVendorFinanceState = getVendorFinanceStateKey(record, projection, rowSettlementOffsetReviewPending);
               const rowStatusLabel = isVendorUser
-                ? getVendorFinanceStatusLabel(record, projection, rowSettlementOffsetReviewPending)
+                ? getVendorFinanceStatusLabel(rowVendorFinanceState)
                 : projection.legacyStatusLabel;
               const rowStatusDetail = isVendorUser
                 ? null
@@ -1913,16 +2121,16 @@ export function FinancePage() {
                     {record.amount}
                   </strong>
                   <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
-                    {getPayoutImpact(record)}
+                    {getPayoutImpact(record, financeAudience)}
                   </strong>
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
                       <Link className="button button-secondary button-compact" to={orderSettlementHref}>
-                        {isVendorUser ? 'Review order' : vendorBlockedHold ? 'Review assignment' : 'View order settlement'}
+                        {isVendorUser ? 'Siparişi kontrol et' : vendorBlockedHold ? 'Review assignment' : 'View order settlement'}
                       </Link>
                     ) : null}
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
-                      {isVendorUser ? 'Open' : 'View details'}
+                      {isVendorUser ? 'Aç' : 'View details'}
                     </button>
                   </OperationalActionGroup>
                 </OperationalTableRow>
@@ -1933,57 +2141,59 @@ export function FinancePage() {
           <div className="finance-info-footer">
             <section className="finance-footer-card">
               <div>
-                <p className="eyebrow">Vendor profile</p>
-                <h3>{currentVendor.vendorName} marketplace terms</h3>
+                <p className="eyebrow">{isVendorUser ? 'Satıcı Profili' : 'Vendor profile'}</p>
+                <h3>{isVendorUser ? `${currentVendor.vendorName} ödeme koşulları` : `${currentVendor.vendorName} marketplace terms`}</h3>
                 <p className="page-description">
-                  Finance policy is edited from Vendor Profile. New payment estimates use the saved policy snapshot.
+                  {isVendorUser
+                    ? 'Ödeme koşulları satıcı profilinden yönetilir. Yeni tahmini ödemeler kayıtlı koşullara göre hesaplanır.'
+                    : 'Finance policy is edited from Vendor Profile. New payment estimates use the saved policy snapshot.'}
                 </p>
               </div>
               <div className="finance-profile-summary">
-                <MetadataRow label="Commission" value={`${financeView.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Commission VAT" value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Shipping deduction mode" value={financeView.profile?.shippingMode ? safeStatusLabel(financeView.profile.shippingMode) : 'Disabled'} />
-                <MetadataRow label="Deduct shipping after fulfillment" value={financeView.profile?.deductShippingEnabled ? 'Yes' : 'No'} />
-                <MetadataRow label="Fixed shipping fee" value={financeView.profile?.fixedShippingFee ?? 'Not configured'} />
-                <MetadataRow label={isVendorUser ? 'Payment waiting period' : 'Settlement delay'} value={`${financeView.profile?.settlementDelayDays ?? 21} days`} />
+                <MetadataRow label={isVendorUser ? 'Komisyon' : 'Commission'} value={`${financeView.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label={isVendorUser ? 'Komisyon KDV' : 'Commission VAT'} value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label={isVendorUser ? 'Kargo ücreti modu' : 'Shipping deduction mode'} value={financeView.profile?.shippingMode ? safeStatusLabel(financeView.profile.shippingMode) : isVendorUser ? 'Kapalı' : 'Disabled'} />
+                <MetadataRow label={isVendorUser ? 'Teslimattan sonra kargo kesintisi' : 'Deduct shipping after fulfillment'} value={financeView.profile?.deductShippingEnabled ? isVendorUser ? 'Evet' : 'Yes' : isVendorUser ? 'Hayır' : 'No'} />
+                <MetadataRow label={isVendorUser ? 'Sabit kargo ücreti' : 'Fixed shipping fee'} value={financeView.profile?.fixedShippingFee ?? (isVendorUser ? 'Tanımlı değil' : 'Not configured')} />
+                <MetadataRow label={isVendorUser ? 'Ödeme bekleme süresi' : 'Settlement delay'} value={isVendorUser ? `${financeView.profile?.settlementDelayDays ?? 21} gün` : `${financeView.profile?.settlementDelayDays ?? 21} days`} />
               </div>
-              <StatusBadge tone="neutral">Read-only finance policy</StatusBadge>
+              <StatusBadge tone="neutral">{isVendorUser ? 'Salt okunur ödeme koşulları' : 'Read-only finance policy'}</StatusBadge>
             </section>
 
             <section className="finance-footer-card">
               <div>
-                <p className="eyebrow">{isVendorUser ? 'Payment review' : 'Settlement review'}</p>
-                <h3>{isVendorUser ? 'Payment review' : 'Draft settlement payment review'}</h3>
+                <p className="eyebrow">{isVendorUser ? 'İncelemede' : 'Settlement review'}</p>
+                <h3>{isVendorUser ? 'İncelemede Bekleyen Tutar' : 'Draft settlement payment review'}</h3>
                 <p className="page-description">
                   {isVendorUser
-                    ? 'A read-only view of payment rows currently waiting for review.'
+                    ? 'İncelemede bekleyen ödeme hareketlerinin salt okunur görünümü.'
                     : 'Prepare eligible estimate rows for review. No payment is executed here.'}
                 </p>
               </div>
               <div className="finance-profile-summary">
-                <MetadataRow label="Rows pending review" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
-                <MetadataRow label="Estimated payment before adjustments" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
+                <MetadataRow label={isVendorUser ? 'İncelemede bekleyen hareket' : 'Rows pending review'} value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
+                <MetadataRow label={isVendorUser ? 'Düzeltme öncesi tahmini ödeme' : 'Estimated payment before adjustments'} value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
                 <MetadataRow
-                  label="Outstanding balance adjustment"
+                  label={isVendorUser ? 'Açık bakiye düzeltmesi' : 'Outstanding balance adjustment'}
                   value={<span className={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount) ? undefined : 'finance-deduction-value'}>
                     {financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)}
                   </span>}
                 />
-                <MetadataRow label="Balance adjustment preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
+                <MetadataRow label={isVendorUser ? 'Bakiye düzeltmesi önizlemesi' : 'Balance adjustment preview'} value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
                 <MetadataRow
-                  label="Net after balance adjustment"
+                  label={isVendorUser ? 'Düzeltme sonrası net tutar' : 'Net after balance adjustment'}
                   value={<span className={getBalanceTone(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt) === 'danger' ? 'finance-deduction-value' : 'finance-payout-value'}>
                     {financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)}
                   </span>}
                 />
-                <MetadataRow label="Needs review" value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
+                <MetadataRow label={isVendorUser ? 'İnceleme bekleyen' : 'Needs review'} value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
                 <MetadataRow
-                  label={isVendorUser ? 'Latest review status' : 'Latest draft review'}
+                  label={isVendorUser ? 'Son inceleme durumu' : 'Latest draft review'}
                   value={
                     financeView.payoutBatchSummary?.latestBatch
-                      ? `${getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, financeAudience)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
+                      ? `${isVendorUser ? getVendorPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status) : getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, financeAudience)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
                       : isVendorUser
-                        ? 'No review scheduled'
+                        ? 'Planlanan inceleme yok'
                         : 'No draft prepared'
                   }
                 />
@@ -2003,7 +2213,7 @@ export function FinancePage() {
                   </StatusBadge>
                 </div>
               ) : (
-                <StatusBadge tone="neutral">Read-only payment preview</StatusBadge>
+                <StatusBadge tone="neutral">Salt okunur tahmini ödeme</StatusBadge>
               )}
             </section>
           </div>
@@ -2013,39 +2223,46 @@ export function FinancePage() {
             error={debtHistoryError ? debtHistoryErrorMessage : null}
             selectedEvent={selectedDebtEvent}
             onSelectEvent={setSelectedDebtEventId}
+            audience={financeAudience}
           />
         </div>
 
         <SideDetailPanel
-          eyebrow="Selected transaction"
-          title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : isVendorUser ? 'Selected transaction' : 'Settlement estimate'}
+          eyebrow={isVendorUser ? 'İşlem' : 'Selected transaction'}
+          title={isVendorUser
+            ? selectedRecord?.shopifyOrderNumber
+              ? `Sipariş ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`
+              : 'İşlem'
+            : selectedRecord?.shopifyOrderNumber
+              ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`
+              : 'Settlement estimate'}
         >
           {selectedRecord ? isVendorUser ? (
             <>
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Transaction Summary</h4>
+                  <h4>İşlem Özeti</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
                     {selectedVendorFinanceStatusLabel}
                   </StatusBadge>
                 </div>
                 <div className="finance-selected-summary-grid">
-                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  {isRefundRecord(selectedRecord) && selectedRecord.shopifyRefundId ? <MetadataRow label="Return" value="Related return" /> : null}
-                  <MetadataRow label="Type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
-                  <MetadataRow label="Status" value={selectedVendorFinanceStatusLabel} />
+                  <MetadataRow label="İlgili Sipariş" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
+                  {isRefundRecord(selectedRecord) && selectedRecord.shopifyRefundId ? <MetadataRow label="İlgili İade" value="İlgili iade" /> : null}
+                  <MetadataRow label="İşlem Tipi" value={getPayoutActivityType(selectedRecord, financeAudience)} />
+                  <MetadataRow label="Durum" value={selectedVendorFinanceStatusLabel} />
                   <MetadataRow
-                    label="Payment impact"
+                    label="Ödeme Etkisi"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
                   />
                 </div>
               </div>
 
-              {shouldShowVendorPaymentWaiting(selectedVendorFinanceStatusLabel) && selectedVendorPaymentWaitingSummary ? (
+              {shouldShowVendorPaymentWaiting(selectedVendorFinanceState) && selectedVendorPaymentWaitingSummary ? (
                 <div className="finance-detail-card finance-payout-readiness-card">
                   <div className="finance-detail-card-heading">
-                    <h4>Why is this payment waiting?</h4>
-                    <StatusBadge tone={selectedVendorFinanceStatusLabel === 'Blocked' ? 'danger' : 'warning'}>
+                    <h4>Bu ödeme neden bekliyor?</h4>
+                    <StatusBadge tone={selectedVendorFinanceState === 'blocked' ? 'danger' : 'warning'}>
                       {selectedVendorFinanceStatusLabel}
                     </StatusBadge>
                   </div>
@@ -2053,10 +2270,10 @@ export function FinancePage() {
                 </div>
               ) : null}
 
-              <div className="finance-detail-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Next Action</h4>
-                  <StatusBadge tone={selectedVendorNextAction.title === 'No action needed' ? 'success' : 'warning'}>
+                <div className="finance-detail-card">
+                  <div className="finance-detail-card-heading">
+                  <h4>Sonraki Adım</h4>
+                  <StatusBadge tone={selectedVendorNextAction.title === 'İşlem gerekmiyor' ? 'success' : 'warning'}>
                     {selectedVendorNextAction.title}
                   </StatusBadge>
                 </div>
@@ -2065,25 +2282,25 @@ export function FinancePage() {
 
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Payment Impact</h4>
+                  <h4>Ödeme Etkisi</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
                     {selectedVendorFinanceStatusLabel}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow
-                    label="Payment impact"
+                    label="Ödeme Etkisi"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
                   />
                   {showSelectedRefundImpact ? (
-                    <MetadataRow
-                      label="Refund impact"
+                      <MetadataRow
+                      label="İade Etkisi"
                       value={<span className="finance-deduction-value">{selectedRefundImpact}</span>}
                     />
                   ) : null}
                   {showSelectedEstimatedPayment ? (
-                    <MetadataRow
-                      label="Estimated payment"
+                      <MetadataRow
+                      label="Tahmini Ödeme"
                       value={<span className="finance-payout-value">{financeValueOrUnknown(selectedEstimatedPayment)}</span>}
                     />
                   ) : null}
@@ -2091,34 +2308,35 @@ export function FinancePage() {
               </div>
 
               <OperationalLinkCards
-                title="Related records"
+                title="İlgili Kayıtlar"
                 links={vendorFinanceCrossLinks}
                 audience={financeAudience}
                 eyebrow=""
               />
 
               <OperationalTimeline
-                title="Activity"
+                title="Hareket Geçmişi"
+                eyebrow="Hareket"
                 events={vendorFinanceTimelineEvents}
                 audience={financeAudience}
               />
 
               {relatedSupportTickets.length ? (
                 <details className="finance-support-history">
-                  <summary>
-                    <span>
-                      <strong>Support</strong>
-                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
-                    </span>
-                    <StatusBadge tone="neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked ticket${relatedSupportTickets.length === 1 ? '' : 's'}`}</StatusBadge>
-                  </summary>
+	                  <summary>
+	                    <span>
+	                      <strong>Destek</strong>
+	                      {supportActivitySummary ? <small>Son durum: {formatSupportStatus(supportActivitySummary.latestTicket.status, financeAudience)}</small> : null}
+	                    </span>
+	                    <StatusBadge tone="neutral">{supportActivitySummary ? `${supportActivitySummary.ticketCount} destek kaydı` : `${relatedSupportTickets.length} destek kaydı`}</StatusBadge>
+	                  </summary>
                   <div className="finance-support-history-list">
                     {relatedSupportTickets.map((ticket) => (
-                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                        <span>
-                          <strong>{ticket.subject}</strong>
-                          <small>{formatSupportStatus(ticket.status)} · {formatSupportPriority(ticket.priority)}</small>
-                        </span>
+	                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+	                        <span>
+	                          <strong>{ticket.subject}</strong>
+	                          <small>{formatSupportStatus(ticket.status, financeAudience)} · {formatSupportPriority(ticket.priority, financeAudience)}</small>
+	                        </span>
                         <small>{formatDate(getSupportLatestActivityAt(ticket))}</small>
                       </Link>
                     ))}

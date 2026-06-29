@@ -1312,10 +1312,10 @@ describe('FinancePage control center', () => {
     expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Finance workflow summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Payment review').length).toBeGreaterThan(0);
-    expect(await screen.findByText('Read-only finance policy')).toBeInTheDocument();
-    expect(screen.getByText('Read-only payment preview')).toBeInTheDocument();
-    expect(screen.getByText('Latest review status')).toBeInTheDocument();
+    expect(screen.getAllByText('İncelemede').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Salt okunur ödeme koşulları')).toBeInTheDocument();
+    expect(screen.getByText('Salt okunur tahmini ödeme')).toBeInTheDocument();
+    expect(screen.getByText('Son inceleme durumu')).toBeInTheDocument();
     expect(screen.queryByText('Latest review artifact')).not.toBeInTheDocument();
     expect(screen.queryByText('Draft payout review')).not.toBeInTheDocument();
     expect(screen.queryByText('Draft settlement payout review')).not.toBeInTheDocument();
@@ -1337,20 +1337,20 @@ describe('FinancePage control center', () => {
 
     const { container } = renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'Open' }))[0]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Aç' }))[0]);
     const panel = getSidePanel(container);
 
-    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Sipariş #1021' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
-    expect(panel.getByText('Transaction Summary')).toBeInTheDocument();
-    expect(panel.getByText('Why is this payment waiting?')).toBeInTheDocument();
-    expect(panel.getByText('Next Action')).toBeInTheDocument();
-    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
-    expect(panel.getByRole('heading', { name: 'Related records' })).toBeInTheDocument();
-    expect(panel.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
-    expect(panel.getAllByText('No action needed').length).toBeGreaterThan(0);
-    expect(panel.getByText('Type')).toBeInTheDocument();
-    expect(panel.getByText('Status')).toBeInTheDocument();
+    expect(panel.getByText('İşlem Özeti')).toBeInTheDocument();
+    expect(panel.getByText('Bu ödeme neden bekliyor?')).toBeInTheDocument();
+    expect(panel.getByText('Sonraki Adım')).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'İlgili Kayıtlar' })).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Hareket Geçmişi' })).toBeInTheDocument();
+    expect(panel.getAllByText('İşlem gerekmiyor').length).toBeGreaterThan(0);
+    expect(panel.getByText('İşlem Tipi')).toBeInTheDocument();
+    expect(panel.getByText('Durum')).toBeInTheDocument();
     expect(panel.queryByText('Transaction type')).not.toBeInTheDocument();
     expect(panel.queryByText('Current status')).not.toBeInTheDocument();
     expect(panel.queryByText('Settlement Preview')).not.toBeInTheDocument();
@@ -1364,9 +1364,9 @@ describe('FinancePage control center', () => {
     expect(panel.queryByText(/settlement/i)).not.toBeInTheDocument();
     expect(panel.queryByText(/reference id|approval id|commission invoice/i)).not.toBeInTheDocument();
     expect(panel.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    const paymentImpactCard = panel.getByText('Payment Impact').closest('.finance-detail-card');
+    const paymentImpactCard = panel.getByRole('heading', { name: 'Ödeme Etkisi' }).closest('.finance-detail-card');
     expect(paymentImpactCard).not.toBeNull();
-    expect(within(paymentImpactCard as HTMLElement).getAllByText('Payment impact')).toHaveLength(1);
+    expect(within(paymentImpactCard as HTMLElement).getAllByText('Ödeme Etkisi').length).toBeGreaterThan(0);
     expect(panel.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(panel.queryByText('Accounting sync')).not.toBeInTheDocument();
     expect(panel.queryByText('Payment evidence pending')).not.toBeInTheDocument();
@@ -1428,16 +1428,17 @@ describe('FinancePage control center', () => {
 
     const { container } = renderFinancePage();
 
-    expect((await screen.findAllByText('Ready')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Preparing').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Review').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund review')).toBeInTheDocument();
-    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
+    expect((await screen.findAllByRole('button', { name: 'Aç' })).length).toBe(3);
+    expect(screen.getAllByText('Ödemeye Hazır').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Ödeme Bekliyor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('İncelemede').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('İade Kesintisi').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Ödeme Etkisi').length).toBeGreaterThan(0);
     const table = within(container.querySelector('.finance-op-table') as HTMLElement);
-    expect(table.getAllByText('Ready')).toHaveLength(1);
-    expect(table.getAllByText('Preparing')).toHaveLength(1);
-    expect(table.getAllByText('Review')).toHaveLength(1);
-    expect(table.getAllByRole('button', { name: 'Open' })).toHaveLength(3);
+    expect(table.getAllByText('Ödemeye Hazır')).toHaveLength(1);
+    expect(table.getAllByText('Ödeme Bekliyor')).toHaveLength(1);
+    expect(table.getAllByText('İncelemede')).toHaveLength(1);
+    expect(table.getAllByRole('button', { name: 'Aç' })).toHaveLength(3);
     expect(table.queryByText('Order payment activity.')).not.toBeInTheDocument();
     expect(table.queryByText('Customer return')).not.toBeInTheDocument();
     expect(table.queryByText('Shopify order')).not.toBeInTheDocument();
@@ -1463,6 +1464,26 @@ describe('FinancePage control center', () => {
     expect(container).not.toHaveTextContent('View details');
     expect(container).not.toHaveTextContent('Review linked order');
     expect(container).not.toHaveTextContent('Review assignment');
+    expect(container).not.toHaveTextContent('Open');
+    expect(container).not.toHaveTextContent('Sale');
+    expect(container).not.toHaveTextContent('Refund review');
+    expect(container).not.toHaveTextContent('Refund deduction');
+    expect(container).not.toHaveTextContent('Balance adjustment');
+    expect(container).not.toHaveTextContent('Shipping cost');
+    expect(container).not.toHaveTextContent('Ready');
+    expect(container).not.toHaveTextContent('Review');
+    expect(container).not.toHaveTextContent('Preparing');
+    expect(container).not.toHaveTextContent('Estimated');
+    expect(container).not.toHaveTextContent('Paid');
+    expect(container).not.toHaveTextContent('On hold');
+    expect(container).not.toHaveTextContent('Blocked');
+    expect(container).not.toHaveTextContent('Transaction Summary');
+    expect(container).not.toHaveTextContent('Why is this payment waiting?');
+    expect(container).not.toHaveTextContent('Next Action');
+    expect(container).not.toHaveTextContent('Payment Impact');
+    expect(container).not.toHaveTextContent('Related records');
+    expect(container).not.toHaveTextContent('Activity');
+    expect(container).not.toHaveTextContent('Support');
     expect(container).not.toHaveTextContent('Linked order and return context for this transaction.');
     expect(container).not.toHaveTextContent('Recent payment activity for this transaction.');
     expect(container).not.toHaveTextContent('Transaction type');
@@ -1507,12 +1528,12 @@ describe('FinancePage control center', () => {
     });
 
     const { container } = renderFinancePage();
-    await userEvent.click((await screen.findAllByRole('button', { name: 'Open' }))[2]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Aç' }))[0]);
     const panel = getSidePanel(container);
 
-    expect(await panel.findByText('Why is this payment waiting?')).toBeInTheDocument();
-    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
-    expect(panel.getAllByText(/Payment will continue after review/)).toHaveLength(1);
+    expect(await panel.findByText('Bu ödeme neden bekliyor?')).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.getAllByText('Bu ödeme inceleniyor. İnceleme tamamlandığında süreç devam eder.')).toHaveLength(1);
     expect(panel.queryByText('Linked order and return context for this transaction.')).not.toBeInTheDocument();
     expect(panel.queryByText('Recent payment activity for this transaction.')).not.toBeInTheDocument();
     expect(panel.queryByText('Linked')).not.toBeInTheDocument();
@@ -1562,12 +1583,12 @@ describe('FinancePage control center', () => {
 
     const { container } = renderFinancePage();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Aç' }));
     const panel = getSidePanel(container);
 
-    expect(await panel.findByText('Transaction Summary')).toBeInTheDocument();
-    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
-    expect(panel.getAllByText('Review').length).toBeGreaterThan(0);
+    expect(await panel.findByText('İşlem Özeti')).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.getAllByText('İncelemede').length).toBeGreaterThan(0);
     expect(panel.queryByText('Settlement review pending')).not.toBeInTheDocument();
     expect(panel.queryByText('settlement accounting review')).not.toBeInTheDocument();
     expect(panel.queryByText('offset review pending')).not.toBeInTheDocument();
@@ -1617,10 +1638,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'Open' }))[0]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Aç' }))[0]);
 
-    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
-    expect(screen.getAllByText('Paid').length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: 'Sipariş #1021' })).toBeInTheDocument();
+    expect(screen.getAllByText('İncelemede').length).toBeGreaterThan(0);
     expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
     expect(screen.queryByText('Included in draft review')).not.toBeInTheDocument();
   });
@@ -1652,7 +1673,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Read-only payment preview')).toBeInTheDocument();
+    expect(screen.getByText('Salt okunur tahmini ödeme')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
 

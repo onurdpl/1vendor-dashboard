@@ -21,12 +21,14 @@ function formatTimelineDate(value?: string | null) {
 
 export function OperationalTimeline({
   title = 'Operational timeline',
+  eyebrow = 'Timeline',
   subtitle,
   events,
   audience = 'vendor',
   emptyMessage = 'No operational activity yet.',
 }: {
   title?: string;
+  eyebrow?: string;
   subtitle?: string;
   events: OperationalEventInput[];
   audience?: OperationalAudience;
@@ -38,7 +40,7 @@ export function OperationalTimeline({
     <article className="operational-card operational-timeline-card">
       <div className="operational-card-heading">
         <div>
-          <p className="eyebrow">Timeline</p>
+          {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h3>{title}</h3>
           {subtitle ? <span>{subtitle}</span> : null}
         </div>
@@ -109,7 +111,7 @@ export function OperationalLinkCards({
                 ) : null}
                 {link.href ? (
                   <span className="operational-link-action" aria-hidden="true">
-                    Open
+                    {link.actionLabel ?? 'Open'}
                   </span>
                 ) : null}
               </>
