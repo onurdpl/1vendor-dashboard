@@ -5302,6 +5302,26 @@ h3 {
   color: #2563eb;
 }
 
+.returns-workflow-tabs {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+}
+
+.returns-workflow-tabs button {
+  gap: 2px 6px;
+  min-height: 58px;
+  padding: 8px 8px;
+}
+
+.returns-workflow-tabs span {
+  font-size: 0.74rem;
+}
+
+.returns-workflow-tabs small {
+  font-size: 0.62rem;
+}
+
 .orders-table-shell {
   min-width: 0;
 }
