@@ -72,12 +72,14 @@ export function OperationalLinkCards({
   links,
   audience = 'vendor',
   emptyMessage = 'No related records.',
+  eyebrow = 'Linked records',
 }: {
   title: string;
   subtitle?: string;
   links: OperationalLinkInput[];
   audience?: OperationalAudience;
   emptyMessage?: string;
+  eyebrow?: string;
 }) {
   const visibleLinks = filterOperationalLinks(safeArray(links), audience);
 
@@ -85,7 +87,7 @@ export function OperationalLinkCards({
     <article className="operational-card operational-links-card">
       <div className="operational-card-heading">
         <div>
-          <p className="eyebrow">Linked records</p>
+          {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
           <h3>{title}</h3>
           {subtitle ? <span>{subtitle}</span> : null}
         </div>

@@ -328,8 +328,20 @@ function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
 }
 
 function getPayoutActivityType(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
-  if (audience === 'vendor' && (isRefundedSplitChildSaleBasis(record) || isRefundDeductionSettlementReviewPending(record))) {
-    return 'Refund review';
+  if (audience === 'vendor') {
+    if (record.category === 'Refund') {
+      return isRefundDeductionSettlementReviewPending(record) ? 'Refund review' : 'Refund deduction';
+    }
+    if (record.category === 'Invoice') {
+      return 'Sale';
+    }
+    if (record.category === 'Adjustment') {
+      return 'Balance adjustment';
+    }
+    if (record.description?.toLowerCase().includes('shipping')) {
+      return 'Shipping cost';
+    }
+    return record.category;
   }
   if (isRefundedSplitChildSaleBasis(record)) {
     return 'Refunded split sale basis';
@@ -345,15 +357,6 @@ function getPayoutActivityType(record: FinanceTransaction, audience: 'admin' | '
 
 function getPayoutActivityDetail(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   if (audience === 'vendor') {
-    if (isRefundedSplitChildSaleBasis(record) || isRefundDeductionSettlementReviewPending(record)) {
-      return 'Refund recorded. Waiting for review.';
-    }
-    if (isSplitChildFinanceHold(record) || isVendorBlockedFinanceHold(record)) {
-      return 'Waiting for review.';
-    }
-    if (record.category === 'Refund') {
-      return 'Customer refund impact';
-    }
     return null;
   }
   if (isRefundedSplitChildSaleBasis(record)) {
@@ -708,11 +711,13 @@ function hasFinanceReviewCopy(value: string | null | undefined) {
   return /\bsettlement\b|\boffset review\b|\bpayout accounting\b|\bledger\b|\breference id\b|\bapproval id\b|\bcommission invoice\b/i.test(value ?? '');
 }
 
+type VendorFinanceStatusLabel = 'Review' | 'Ready' | 'Preparing' | 'On hold' | 'Blocked' | 'Estimated' | 'Paid';
+
 function getVendorFinanceStatusLabel(
   record: FinanceTransaction,
   projection: FinanceOperationalProjection | null,
   settlementOffsetReviewPending: boolean,
-) {
+): VendorFinanceStatusLabel {
   const candidates = [
     projection?.payoutReadiness,
     projection?.legacyStatusLabel,
@@ -725,112 +730,121 @@ function getVendorFinanceStatusLabel(
   const combined = candidates.join(' ').toLowerCase();
 
   if (settlementOffsetReviewPending || combined.includes('refund offset') || combined.includes('offset review')) {
-    return 'Waiting for review';
+    return 'Review';
   }
   if (combined.includes('draft') || combined.includes('locked') || combined.includes('batch')) {
-    return 'Payment preparation in progress';
+    return 'Preparing';
+  }
+  if (combined.includes('paid') || combined.includes('completed') || combined.includes('reconciled')) {
+    return 'Paid';
   }
   if (combined.includes('ready') || combined.includes('payable')) {
-    return 'Ready for payment';
+    return 'Ready';
   }
-  if (combined.includes('held') || combined.includes('hold') || combined.includes('blocked') || combined.includes('disputed')) {
-    return 'Waiting for review';
+  if (combined.includes('held') || combined.includes('hold')) {
+    return 'On hold';
+  }
+  if (combined.includes('blocked') || combined.includes('disputed')) {
+    return 'Blocked';
   }
   if (hasFinanceReviewCopy(projection?.legacyStatusLabel)) {
-    return 'Waiting for review';
+    return 'Review';
   }
 
-  return projection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE;
+  return 'Estimated';
 }
 
-function getVendorFinanceStatusDetail(
-  record: FinanceTransaction,
-  projection: FinanceOperationalProjection | null,
-  settlementOffsetReviewPending: boolean,
-) {
-  const combined = [
-    projection?.payoutReadiness,
-    projection?.payoutState,
-    projection?.blockerState,
-    projection?.legacyStatusLabel,
-    record.settlement?.status,
-    record.payoutBatch?.status,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  if (settlementOffsetReviewPending || combined.includes('refund offset') || combined.includes('offset review')) {
-    return 'Refund review in progress';
+function getVendorPaymentWaitingSummary(status: VendorFinanceStatusLabel) {
+  if (status === 'Review') {
+    return 'A review is in progress. Payment will continue after review.';
   }
-  if (combined.includes('draft') || combined.includes('locked') || combined.includes('batch')) {
-    return null;
+  if (status === 'Preparing') {
+    return 'Payment is being prepared. No action is needed right now.';
   }
-  if (combined.includes('ready') || combined.includes('payable')) {
-    return null;
+  if (status === 'On hold') {
+    return 'This payment is on hold until the issue is resolved.';
   }
-  if (combined.includes('held') || combined.includes('hold') || combined.includes('blocked') || combined.includes('disputed')) {
-    return 'Waiting for review';
+  if (status === 'Blocked') {
+    return 'This payment is blocked until the issue is resolved.';
   }
-  if (hasFinanceReviewCopy(projection?.payoutReadiness) || hasFinanceReviewCopy(projection?.blockerState)) {
-    return 'Waiting for review';
-  }
-
-  return projection?.blockerState === 'None' ? null : 'Waiting for review';
+  return null;
 }
 
-function getVendorPaymentWaitingSummary(
-  record: FinanceTransaction,
-  projection: FinanceOperationalProjection | null,
-  settlementOffsetReviewPending: boolean,
-) {
-  const readiness = `${projection?.payoutReadiness ?? ''} ${projection?.payoutReadinessDetail ?? ''}`.toLowerCase();
-  if (settlementOffsetReviewPending || readiness.includes('refund offset')) {
-    return 'A refund review is in progress. Payment will continue after review.';
+function getVendorNextActionCopy(status: VendorFinanceStatusLabel) {
+  if (status === 'On hold' || status === 'Blocked') {
+    return {
+      title: 'Review required',
+      body: 'Open the related order or contact support.',
+    };
   }
-  if (projection?.blockerState && projection.blockerState !== 'None') {
-    return 'This payment is waiting for review. Payment will continue after review.';
+  if (status === 'Review') {
+    return {
+      title: 'No action needed',
+      body: 'We are reviewing this payment.',
+    };
   }
-  if (record.payoutBatch?.status === 'draft' || record.payoutBatch?.status === 'review') {
-    return 'Your payment is being prepared. No action is needed right now.';
+  if (status === 'Preparing') {
+    return {
+      title: 'No action needed',
+      body: 'Payment preparation is in progress.',
+    };
   }
-  return 'This transaction is ready for payment review.';
+  if (status === 'Ready') {
+    return {
+      title: 'No action needed',
+      body: 'This amount is ready for payment.',
+    };
+  }
+  if (status === 'Paid') {
+    return {
+      title: 'No action needed',
+      body: 'This amount has already been paid.',
+    };
+  }
+  return {
+    title: 'No action needed',
+    body: 'This amount is not ready for payment yet.',
+  };
 }
 
-function getVendorNextActionLabel(
-  projection: FinanceOperationalProjection | null,
-  settlementOffsetReviewPending: boolean,
-  hasSupportTicket: boolean,
-) {
-  if (hasSupportTicket) {
-    return 'Contact support';
-  }
-  if (settlementOffsetReviewPending || (projection?.blockerState && projection.blockerState !== 'None')) {
-    return 'Waiting for review';
-  }
-  return 'No action needed';
+function shouldShowVendorPaymentWaiting(status: VendorFinanceStatusLabel) {
+  return status === 'Review' || status === 'Preparing' || status === 'On hold' || status === 'Blocked';
 }
 
-function getVendorFinanceTimelineEvents(events: OperationalEventInput[]): OperationalEventInput[] {
-  return events.map((event) => {
+function getVendorFinanceTimelineEvents(events: OperationalEventInput[], status: VendorFinanceStatusLabel): OperationalEventInput[] {
+  return events.filter((event) => !event.id.startsWith('support-group-')).map((event) => {
     const title = event.title === 'Refund impact captured'
       ? 'Refund recorded'
       : hasFinanceReviewCopy(event.title)
-        ? 'Review in progress'
-        : event.title;
-    const description = hasFinanceReviewCopy(event.description)
-      ? 'No action is needed from you right now.'
-      : event.description;
-    const status = hasFinanceReviewCopy(event.status)
-      ? 'Waiting for review'
-      : event.status === 'Review'
-        ? 'Waiting for review'
-        : event.status;
+        ? status === 'Preparing'
+          ? 'Payment preparing'
+          : 'Review in progress'
+        : status === 'Ready'
+          ? 'Payment ready'
+          : status === 'Preparing'
+            ? 'Payment preparing'
+            : status === 'On hold'
+              ? 'Payment held'
+              : status === 'Blocked'
+                ? 'Payment blocked'
+                : status === 'Paid'
+                  ? 'Payment paid'
+                  : event.title;
 
     return {
       ...event,
       title,
-      description,
+      description: undefined,
       status,
     };
   });
+}
+
+function shouldShowFinanceValue(value: string | null | undefined, paymentImpact: string) {
+  if (!value || value === UNKNOWN_FINANCE_VALUE || isZeroCurrencyValue(value)) {
+    return false;
+  }
+  return parseCurrencyValue(value) !== parseCurrencyValue(paymentImpact);
 }
 
 function formatSupportStatus(status: SupportTicket['status']) {
@@ -1425,16 +1439,24 @@ export function FinancePage() {
   }
   const selectedVendorFinanceStatusLabel = selectedRecord
     ? getVendorFinanceStatusLabel(selectedRecord, selectedOperationalProjection, selectedSettlementOffsetReviewPending)
-    : UNKNOWN_FINANCE_VALUE;
-  const selectedVendorPaymentWaitingSummary = selectedRecord
-    ? getVendorPaymentWaitingSummary(selectedRecord, selectedOperationalProjection, selectedSettlementOffsetReviewPending)
-    : 'Payment status is unavailable for this transaction.';
-  const selectedVendorNextActionLabel = getVendorNextActionLabel(
-    selectedOperationalProjection,
-    selectedSettlementOffsetReviewPending,
-    relatedSupportTickets.length > 0,
-  );
-  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents);
+    : 'Estimated';
+  const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceStatusLabel);
+  const selectedVendorNextAction = getVendorNextActionCopy(selectedVendorFinanceStatusLabel);
+  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceStatusLabel);
+  const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord) : UNKNOWN_FINANCE_VALUE;
+  const selectedEstimatedPayment = selectedRecord?.payoutCalculation?.estimatedPayout ?? null;
+  const selectedRefundImpact = selectedRecord?.payoutCalculation?.refundImpact
+    ? optionalDeductionValue(selectedRecord.payoutCalculation.refundImpact)
+    : null;
+  const showSelectedEstimatedPayment = shouldShowFinanceValue(selectedEstimatedPayment, selectedPaymentImpact);
+  const showSelectedRefundImpact = shouldShowFinanceValue(selectedRefundImpact, selectedPaymentImpact);
+  const vendorFinanceCrossLinks = financeCrossLinks
+    .filter((link) => link.eyebrow !== 'Support')
+    .map((link) => ({
+      ...link,
+      description: undefined,
+      status: undefined,
+    }));
   const financeRecommendations: OperationsRecommendation[] = [];
   if (selectedRecord && isAdmin) {
     if (
@@ -1844,14 +1866,14 @@ export function FinancePage() {
               </OperationalTableRow>
             ) : filteredRecords.map((record) => {
               const vendorBlockedHold = isVendorBlockedFinanceHold(record);
-              const orderSettlementHref = vendorBlockedHold || isVendorUser ? buildOrdersHref(record) : buildOrderSettlementHref(record);
+              const orderSettlementHref = vendorBlockedHold ? buildOrdersHref(record) : isVendorUser ? null : buildOrderSettlementHref(record);
               const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
               const rowSettlementOffsetReviewPending = isRefundedSplitChildSaleBasis(record) || isRefundDeductionSettlementReviewPending(record);
               const rowStatusLabel = isVendorUser
                 ? getVendorFinanceStatusLabel(record, projection, rowSettlementOffsetReviewPending)
                 : projection.legacyStatusLabel;
               const rowStatusDetail = isVendorUser
-                ? getVendorFinanceStatusDetail(record, projection, rowSettlementOffsetReviewPending)
+                ? null
                 : projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState;
               const rowActivityDetail = getPayoutActivityDetail(record, financeAudience);
               return (
@@ -1880,7 +1902,7 @@ export function FinancePage() {
                   </span>
                   <span>
                     <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
-                    <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>
+                    {isVendorUser ? null : <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>}
                   </span>
                   <span className="finance-queue-state">
                     <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{rowStatusLabel}</StatusBadge>
@@ -1896,11 +1918,11 @@ export function FinancePage() {
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
                       <Link className="button button-secondary button-compact" to={orderSettlementHref}>
-                        {vendorBlockedHold ? 'Review assignment' : isVendorUser ? 'Review linked order' : 'View order settlement'}
+                        {isVendorUser ? 'Review order' : vendorBlockedHold ? 'Review assignment' : 'View order settlement'}
                       </Link>
                     ) : null}
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
-                      View details
+                      {isVendorUser ? 'Open' : 'View details'}
                     </button>
                   </OperationalActionGroup>
                 </OperationalTableRow>
@@ -2009,33 +2031,36 @@ export function FinancePage() {
                 </div>
                 <div className="finance-selected-summary-grid">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  {isRefundRecord(selectedRecord) ? <MetadataRow label="Return" value={selectedRecord.shopifyRefundId ? 'Related return' : 'Customer return'} /> : null}
-                  <MetadataRow label="Transaction type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
-                  <MetadataRow label="Current status" value={selectedVendorFinanceStatusLabel} />
+                  {isRefundRecord(selectedRecord) && selectedRecord.shopifyRefundId ? <MetadataRow label="Return" value="Related return" /> : null}
+                  <MetadataRow label="Type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
+                  <MetadataRow label="Status" value={selectedVendorFinanceStatusLabel} />
                   <MetadataRow
                     label="Payment impact"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
                   />
                 </div>
               </div>
 
-              <div className="finance-detail-card finance-payout-readiness-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Why is this payment waiting?</h4>
-                  <StatusBadge tone={selectedOperationalProjection?.blockerState === 'None' ? 'success' : 'warning'}>
-                    {selectedVendorFinanceStatusLabel}
-                  </StatusBadge>
+              {shouldShowVendorPaymentWaiting(selectedVendorFinanceStatusLabel) && selectedVendorPaymentWaitingSummary ? (
+                <div className="finance-detail-card finance-payout-readiness-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Why is this payment waiting?</h4>
+                    <StatusBadge tone={selectedVendorFinanceStatusLabel === 'Blocked' ? 'danger' : 'warning'}>
+                      {selectedVendorFinanceStatusLabel}
+                    </StatusBadge>
+                  </div>
+                  <p className="page-description">{selectedVendorPaymentWaitingSummary}</p>
                 </div>
-                <p className="page-description">{selectedVendorPaymentWaitingSummary}</p>
-              </div>
+              ) : null}
 
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Next Action</h4>
-                  <StatusBadge tone={selectedVendorNextActionLabel === 'No action needed' ? 'success' : 'warning'}>
-                    {selectedVendorNextActionLabel}
+                  <StatusBadge tone={selectedVendorNextAction.title === 'No action needed' ? 'success' : 'warning'}>
+                    {selectedVendorNextAction.title}
                   </StatusBadge>
                 </div>
+                <p className="page-description">{selectedVendorNextAction.body}</p>
               </div>
 
               <div className="finance-detail-card">
@@ -2047,32 +2072,33 @@ export function FinancePage() {
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow
-                    label="Estimated payment"
-                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
+                    label="Payment impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
                   />
-                  {isRefundRecord(selectedRecord) || selectedRecord.payoutCalculation?.refundImpact ? (
+                  {showSelectedRefundImpact ? (
                     <MetadataRow
                       label="Refund impact"
-                      value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
+                      value={<span className="finance-deduction-value">{selectedRefundImpact}</span>}
                     />
                   ) : null}
-                  <MetadataRow
-                    label="Payment impact"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
-                  />
+                  {showSelectedEstimatedPayment ? (
+                    <MetadataRow
+                      label="Estimated payment"
+                      value={<span className="finance-payout-value">{financeValueOrUnknown(selectedEstimatedPayment)}</span>}
+                    />
+                  ) : null}
                 </div>
               </div>
 
               <OperationalLinkCards
                 title="Related records"
-                subtitle="Linked order and return context for this transaction."
-                links={financeCrossLinks.filter((link) => link.eyebrow !== 'Support')}
+                links={vendorFinanceCrossLinks}
                 audience={financeAudience}
+                eyebrow=""
               />
 
               <OperationalTimeline
                 title="Activity"
-                subtitle="Recent payment activity for this transaction."
                 events={vendorFinanceTimelineEvents}
                 audience={financeAudience}
               />
