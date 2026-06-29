@@ -1819,7 +1819,121 @@ export function FinancePage() {
           eyebrow="Selected transaction"
           title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : 'Settlement estimate'}
         >
-          {selectedRecord ? (
+          {selectedRecord ? isVendorUser ? (
+            <>
+              <div className="finance-selected-summary-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Transaction Summary</h4>
+                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
+                    {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
+                  </StatusBadge>
+                </div>
+                <div className="finance-selected-summary-grid">
+                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
+                  {isRefundRecord(selectedRecord) ? <MetadataRow label="Return" value={selectedRecord.shopifyRefundId ? 'Related return' : 'Customer return'} /> : null}
+                  <MetadataRow label="Transaction type" value={getPayoutActivityType(selectedRecord)} />
+                  <MetadataRow label="Current status" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow
+                    label="Payment impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                  />
+                </div>
+              </div>
+
+              <div className="finance-detail-card finance-payout-readiness-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Why is this payment waiting?</h4>
+                  <StatusBadge tone={selectedOperationalProjection?.blockerState === 'None' ? 'success' : 'warning'}>
+                    {selectedOperationalProjection?.blockerState === 'None' ? 'Ready for payment' : 'Waiting for review'}
+                  </StatusBadge>
+                </div>
+                <p className="page-description">
+                  {selectedOperationalProjection?.blockerState === 'None'
+                    ? 'No review is blocking this payment.'
+                    : (selectedOperationalProjection?.payoutReadinessDetail ?? 'Payment will continue after review.')}
+                </p>
+              </div>
+
+              <div className="finance-detail-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Next Action</h4>
+                  <StatusBadge tone={selectedFinanceGuidance ? selectedFinanceGuidance.tone : 'success'}>
+                    {selectedFinanceGuidance ? 'Review' : 'No action needed'}
+                  </StatusBadge>
+                </div>
+                <p className="page-description">
+                  {selectedFinanceGuidance
+                    ? selectedFinanceGuidance.description
+                    : 'No action is needed from you right now.'}
+                </p>
+              </div>
+
+              <div className="finance-detail-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Payment Impact</h4>
+                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
+                    {selectedSettlementOffsetReviewPending ? 'Waiting for review' : selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
+                  </StatusBadge>
+                </div>
+                {selectedSettlementOffsetReviewPending ? (
+                  <p className="page-description">Payment will continue after review. No shipment, refund, or vendor action is required.</p>
+                ) : null}
+                <div className="finance-detail-rows">
+                  <MetadataRow
+                    label="Estimated payment"
+                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
+                  />
+                  {isRefundRecord(selectedRecord) || selectedRecord.payoutCalculation?.refundImpact ? (
+                    <MetadataRow
+                      label="Refund impact"
+                      value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
+                    />
+                  ) : null}
+                  <MetadataRow
+                    label="Payment impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                  />
+                </div>
+              </div>
+
+              <OperationalLinkCards
+                title="Related records"
+                subtitle="Linked order and return context for this transaction."
+                links={financeCrossLinks.filter((link) => link.eyebrow !== 'Support')}
+                audience={financeAudience}
+              />
+
+              <OperationalTimeline
+                title="Activity"
+                subtitle={FINANCE_TIMELINE_HELPER}
+                events={financeTimelineEvents}
+                audience={financeAudience}
+              />
+
+              {relatedSupportTickets.length ? (
+                <details className="finance-support-history">
+                  <summary>
+                    <span>
+                      <strong>Support</strong>
+                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
+                    </span>
+                    <StatusBadge tone="neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked ticket${relatedSupportTickets.length === 1 ? '' : 's'}`}</StatusBadge>
+                  </summary>
+                  <div className="finance-support-history-list">
+                    {relatedSupportTickets.map((ticket) => (
+                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span>
+                          <strong>{ticket.subject}</strong>
+                          <small>{formatSupportStatus(ticket.status)} · {formatSupportPriority(ticket.priority)}</small>
+                        </span>
+                        <small>{formatDate(getSupportLatestActivityAt(ticket))}</small>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </>
+          ) : (
             <>
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">

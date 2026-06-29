@@ -1335,6 +1335,19 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
+    expect(screen.getByText('Transaction Summary')).toBeInTheDocument();
+    expect(screen.getByText('Why is this payment waiting?')).toBeInTheDocument();
+    expect(screen.getByText('Next Action')).toBeInTheDocument();
+    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Related records' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.queryByText('Settlement preview')).not.toBeInTheDocument();
+    expect(screen.queryByText('Selected Transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Settlement state')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment readiness')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blocker')).not.toBeInTheDocument();
+    expect(screen.queryByText('Suggested next steps')).not.toBeInTheDocument();
+    expect(screen.queryByText('Finance investigation notes')).not.toBeInTheDocument();
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
@@ -1342,6 +1355,46 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
     expect(screen.queryByText(/Confirmed|Final payout/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
+  });
+
+  it('hides raw split and evidence identifiers from vendor finance detail', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-split-source-remaining',
+          shopifyOrderNumber: '1097',
+          shopifyOrderId: '7819000001097',
+          splitFinanceSummary: splitFinanceSummaryBase,
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'View details' }));
+
+    expect(await screen.findByText('Transaction Summary')).toBeInTheDocument();
+    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
+    expect(screen.queryByText('Split order context')).not.toBeInTheDocument();
+    expect(screen.queryByText('Source order assignment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Child order assignment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Original source transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remaining source transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Child held transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('alloc-source-1097')).not.toBeInTheDocument();
+    expect(screen.queryByText('alloc-child-1097')).not.toBeInTheDocument();
+    expect(screen.queryByText('ledger-split-source-remaining')).not.toBeInTheDocument();
   });
 
   it('hides payment evidence internals from vendor finance timeline and statuses', async () => {
