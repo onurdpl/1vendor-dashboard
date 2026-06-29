@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -366,13 +366,17 @@ function renderFinancePage(initialEntries = ['/finance']) {
     },
   });
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
         <FinancePage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Transactions' }));
+
+  return result;
 }
 
 function FinanceNavigationHarness({ target }: { target: string }) {
@@ -397,13 +401,17 @@ function renderFinanceNavigationHarness(target: string) {
     },
   });
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/finance']}>
         <FinanceNavigationHarness target={target} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Transactions' }));
+
+  return result;
 }
 
 describe('FinancePage control center', () => {
@@ -439,10 +447,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(screen.getByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search by order #, type, status, amount...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Payment impact' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Finance unavailable')).not.toBeInTheDocument();
   });
@@ -452,13 +460,13 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(await screen.findByLabelText('Finance workflow summary')).toHaveTextContent('Action required');
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('vendor balance');
-    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Breakdown: Refund 0 · Blocked 1 · Shipping 0 · Debt 0');
+    expect(screen.getByLabelText('Needs review breakdown')).toHaveTextContent('Breakdown: Refund 0 · Blocked 1 · Shipping 0 · Balance adjustment 0');
     expect(screen.queryByLabelText('Action Required')).not.toBeInTheDocument();
     expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
@@ -467,7 +475,7 @@ describe('FinancePage control center', () => {
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
     expect(screen.queryByText('This period')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
-    expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
+    expect(screen.getByText('Values update as orders become eligible, refunds are processed, or reviews are completed.')).toBeInTheDocument();
   });
 
   it('renders positive vendor balance in green', async () => {
@@ -517,11 +525,11 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Vendor Debt History' })).toBeInTheDocument();
-    expect(screen.getByText('Outstanding Debt')).toBeInTheDocument();
-    expect(screen.getByText('Total Debt Created')).toBeInTheDocument();
-    expect(screen.getByText('Total Debt Offset')).toBeInTheDocument();
-    expect(screen.getByText('Remaining Debt')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Balance Adjustment History' })).toBeInTheDocument();
+    expect(screen.getByText('Outstanding Adjustment')).toBeInTheDocument();
+    expect(screen.getByText('Total Adjustment Created')).toBeInTheDocument();
+    expect(screen.getByText('Total Adjustment Applied')).toBeInTheDocument();
+    expect(screen.getByText('Remaining Adjustment')).toBeInTheDocument();
     expect(await screen.findByText('Debt Created')).toBeInTheDocument();
     expect(screen.getAllByText('Debt Offset Applied').length).toBeGreaterThan(0);
     expect(screen.getByText('#1082')).toBeInTheDocument();
@@ -549,7 +557,7 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('NIKE-42 · Qty 2')).toBeInTheDocument();
     expect(screen.getByText('Commission reversal')).toBeInTheDocument();
     expect(screen.getByText('Commission VAT reversal')).toBeInTheDocument();
-    expect(screen.getByText('Vendor debt created')).toBeInTheDocument();
+    expect(screen.getByText('Balance adjustment created')).toBeInTheDocument();
     expect(screen.getByText('vendorDebtMinor = refundMinor - commissionReversalMinor - commissionVatReversalMinor')).toBeInTheDocument();
     expect(screen.getAllByText(/payout-batch-1/).length).toBeGreaterThan(0);
   });
@@ -560,7 +568,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByText('No vendor debt history')).toBeInTheDocument();
+    expect(await screen.findByText('No balance adjustment history')).toBeInTheDocument();
   });
 
   it('uses workflow query params to open settlement review rows and allows reset', async () => {
@@ -686,12 +694,12 @@ describe('FinancePage control center', () => {
     const { container } = renderFinancePage();
 
     await screen.findByText('#1002');
-    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'View details' })[2]);
 
-    expect(await screen.findByText('Selected Finance Item')).toBeInTheDocument();
-    expect(screen.getByText('Current finance state')).toBeInTheDocument();
-    expect(screen.getAllByText('Payout readiness').length).toBeGreaterThan(0);
-    expect(screen.getByText('Debt impact on payout')).toBeInTheDocument();
+    expect(await screen.findByText('Selected Transaction')).toBeInTheDocument();
+    expect(screen.getByText('Current status')).toBeInTheDocument();
+    expect(screen.getAllByText('Payment readiness').length).toBeGreaterThan(0);
+    expect(screen.getByText('Balance adjustment impact on payment')).toBeInTheDocument();
     expect(screen.getByText('Finance investigation notes')).toBeInTheDocument();
     expect(screen.getByText('No finance investigation notes.')).toBeInTheDocument();
     expect(await screen.findByText('Settlement preview')).toBeInTheDocument();
@@ -713,11 +721,11 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     await screen.findByText('#1002');
-    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'View details' })[2]);
 
     expect(await screen.findByText('Review status')).toBeInTheDocument();
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Settlement impact').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Payment impact').length).toBeGreaterThan(0);
   });
 
   it('renders a compact finance state column while detailed lifecycle states stay in the panel', async () => {
@@ -734,17 +742,17 @@ describe('FinancePage control center', () => {
 
     const { container } = renderFinancePage();
 
-    expect(await screen.findByRole('columnheader', { name: 'Finance State' })).toBeInTheDocument();
+    expect(await screen.findByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Settlement' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Payout' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Hold / Blocker' })).not.toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Amount' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Payment impact' })).toBeInTheDocument();
     await waitFor(() => expect(container.querySelectorAll('.finance-queue-state').length).toBeGreaterThan(0));
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'View details' })[0]);
 
-    expect((await screen.findAllByText('Payout readiness')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Payment readiness')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('Ready for review').length).toBeGreaterThan(0));
     expect(screen.getByText('Hold / blocker')).toBeInTheDocument();
   });
@@ -769,7 +777,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByText('Shipping reconciliation required')).toBeInTheDocument();
+    expect(await screen.findByText('Shipping cost review required')).toBeInTheDocument();
     expect(screen.getByText('Provider shipping cost is missing and may change settlement estimates.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save shipping cost' })).toBeInTheDocument();
   });
@@ -842,12 +850,12 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getAllByText('On hold').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Review assignment' })).toHaveAttribute(
       'href',
       '/orders?order=1095&shopifyOrderId=7819000001095',
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
     expect(await screen.findByText('Reason')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
@@ -869,18 +877,18 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect((await screen.findAllByText('Split Allocation')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Remaining allocation ledger').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Split order assignment')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Remaining order assignment transaction').length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
-    expect(await screen.findByText('Split finance context')).toBeInTheDocument();
-    expect(screen.getByText('Original allocation was split. Selected items moved into a blocked allocation.')).toBeInTheDocument();
+    expect(await screen.findByText('Split order context')).toBeInTheDocument();
+    expect(screen.getByText('Original order assignment was split. Selected items moved into a blocked order assignment.')).toBeInTheDocument();
     expect(screen.getByText('alloc-source-1097')).toBeInTheDocument();
     expect(screen.getByText('alloc-child-1097')).toBeInTheDocument();
     expect(screen.getByText('ledger-split-source-remaining')).toBeInTheDocument();
     expect(screen.getByText('Allocation split created')).toBeInTheDocument();
-    expect(screen.getByText('Source ledger replaced')).toBeInTheDocument();
+    expect(screen.getByText('Source transaction replaced')).toBeInTheDocument();
   });
 
   it('shows split allocation hold context for child finance ledgers', async () => {
@@ -915,17 +923,17 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect((await screen.findAllByText('Split allocation hold')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Split order assignment hold')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('On hold').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Held').length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
-    expect(await screen.findByText('Split finance context')).toBeInTheDocument();
-    expect(screen.getAllByText('Blocked split allocation ledger').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Split order context')).toBeInTheDocument();
+    expect(screen.getAllByText('Blocked split order assignment transaction').length).toBeGreaterThan(0);
     expect(screen.getByText('Created from line-item reject split. Held until transfer, refund, or return resolution.')).toBeInTheDocument();
     expect(screen.getByText('Vendor rejected selected line items.')).toBeInTheDocument();
-    expect(screen.getByText('Child held ledger created')).toBeInTheDocument();
+    expect(screen.getByText('Child held transaction created')).toBeInTheDocument();
   });
 
   it('clarifies refunded split child sale basis without changing finance values', async () => {
@@ -965,26 +973,26 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByText('Refunded split sale basis')).toBeInTheDocument();
-    expect(screen.getAllByText('Offset by Shopify refund').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Adjusted by Shopify refund').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Settlement review pending').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Blocked split allocation ledger')).not.toBeInTheDocument();
-    expect(screen.queryByText('Split allocation hold')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blocked split order assignment transaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Split order assignment hold')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
-    expect(await screen.findByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
+    expect(await screen.findByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
     expect(screen.getByText('Operational status')).toBeInTheDocument();
     expect(screen.getAllByText('Resolved').length).toBeGreaterThan(0);
     expect(screen.getByText('Settlement status')).toBeInTheDocument();
     expect(screen.getByText('Review pending')).toBeInTheDocument();
     expect(screen.getByText('Sale basis')).toBeInTheDocument();
-    expect(screen.getByText('Refund offset')).toBeInTheDocument();
+    expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
     expect(screen.getByText('Net child effect')).toBeInTheDocument();
     expect(screen.getAllByText('$4,213.50').length).toBeGreaterThan(0);
     expect(screen.getAllByText('-$4,213.50').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
-    expect(screen.getByText('Child allocation operationally resolved')).toBeInTheDocument();
-    expect(screen.getByText('Settlement offset awaiting review')).toBeInTheDocument();
+    expect(screen.getByText('Child order assignment operationally resolved')).toBeInTheDocument();
+    expect(screen.getByText('Settlement adjustment awaiting review')).toBeInTheDocument();
     expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
   });
 
@@ -1021,14 +1029,14 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByText('Refund deduction')).toBeInTheDocument();
-    expect(screen.getAllByText('Refund recorded. Awaiting settlement offset review.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund recorded. Awaiting settlement adjustment review.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Settlement review pending').length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getByRole('button', { name: 'View' }));
+    await userEvent.click(screen.getByRole('button', { name: 'View details' }));
 
-    expect((await screen.findAllByText('Settlement offset review pending')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund offset is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
-    expect(screen.getByText('Settlement offset awaiting review')).toBeInTheDocument();
+    expect((await screen.findAllByText('Settlement adjustment review pending')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.')).toBeInTheDocument();
+    expect(screen.getByText('Settlement adjustment awaiting review')).toBeInTheDocument();
     expect(screen.getByText('Operational resolution completed. Only settlement accounting review remains.')).toBeInTheDocument();
   });
 
@@ -1072,7 +1080,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage(['/finance?ledgerId=missing-ledger']);
 
-    expect(await screen.findByText('Linked finance record unavailable')).toBeInTheDocument();
+    expect(await screen.findByText('Linked transaction unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Order #1021' })).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
   });
@@ -1083,7 +1091,7 @@ describe('FinancePage control center', () => {
 
     renderFinanceNavigationHarness('/finance?ledgerId=ledger-refund-failed');
 
-    await user.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+    await user.click((await screen.findAllByRole('button', { name: 'View details' }))[1]);
     expect(await screen.findByRole('heading', { name: 'Order #1001' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Navigate to linked finance row' }));
@@ -1107,7 +1115,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[1]);
 
     const relatedReturn = await screen.findByText('Related return');
     expect(relatedReturn.closest('a')).toHaveAttribute(
@@ -1133,10 +1141,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Activity timeline' })).toBeInTheDocument();
     expect(screen.getByText('Order captured')).toBeInTheDocument();
     expect(screen.getByText('Settlement awaiting review')).toBeInTheDocument();
-    expect(screen.getByText('Finance events are previews until settlement review is completed.')).toBeInTheDocument();
+    expect(screen.getByText('Activity entries are previews until settlement review is completed.')).toBeInTheDocument();
     expect(screen.getAllByText('Support activity').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/3 linked tickets/i).length).toBeGreaterThan(0);
     expect(screen.queryByText('Support ticket opened')).not.toBeInTheDocument();
@@ -1156,7 +1164,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[1]);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Order #1001' })).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Actions' })).not.toBeInTheDocument();
@@ -1168,14 +1176,14 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[0]);
 
     expect((await screen.findAllByText(/Commission \(/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Tax \(/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shipping fee').length).toBeGreaterThan(0);
     expect(screen.queryByText('Snapshot at sale creation')).not.toBeInTheDocument();
     expect(screen.queryByText('Current vendor profile')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'View details' }).length).toBeGreaterThan(0);
   });
 
   it('does not render legacy invoice accounting diagnostics in the active finance workflow', async () => {
@@ -1183,7 +1191,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Finance control center' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance workspace' })).toBeInTheDocument();
     expect(screen.queryByText('Legacy invoice sync record')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Provider issue summary')).not.toBeInTheDocument();
@@ -1204,7 +1212,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Finance control center' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance workspace' })).toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility is reconciled from the merchant accounting workflow.')).not.toBeInTheDocument();
@@ -1235,7 +1243,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(screen.getByText('Demo Vendor A marketplace terms')).toBeInTheDocument();
-    expect(await screen.findByText('Finance policy is edited from Vendor Profile. New payout estimates use the saved policy snapshot.')).toBeInTheDocument();
+    expect(await screen.findByText('Finance policy is edited from Vendor Profile. New payment estimates use the saved policy snapshot.')).toBeInTheDocument();
     expect(screen.getByText('Commission VAT')).toBeInTheDocument();
     expect(screen.getByText('Shipping deduction mode')).toBeInTheDocument();
     expect(screen.getByText('Read-only finance policy')).toBeInTheDocument();
@@ -1271,10 +1279,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Draft settlement payout review' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Draft settlement payment review' })).toBeInTheDocument();
     expect(screen.getAllByText('Rows pending review').length).toBeGreaterThan(0);
-    expect(screen.getByText('Estimated payable before debt')).toBeInTheDocument();
-    expect(screen.getByText('Net after debt preview')).toBeInTheDocument();
+    expect(screen.getByText('Estimated payment before adjustments')).toBeInTheDocument();
+    expect(screen.getByText('Net after balance adjustment')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /prepare draft review/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /prepare draft review/i }));
 
@@ -1295,7 +1303,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
@@ -1323,7 +1331,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[0]);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
@@ -1369,7 +1377,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[0]);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     expect(screen.getAllByText('Pending review').length).toBeGreaterThan(0);
