@@ -414,6 +414,12 @@ function renderFinanceNavigationHarness(target: string) {
   return result;
 }
 
+function getSidePanel(container: HTMLElement) {
+  const panel = container.querySelector('.op-side-panel');
+  expect(panel).not.toBeNull();
+  return within(panel as HTMLElement);
+}
+
 describe('FinancePage control center', () => {
   beforeEach(() => {
     cleanup();
@@ -1329,32 +1335,36 @@ describe('FinancePage control center', () => {
     });
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
-    renderFinancePage();
+    const { container } = renderFinancePage();
 
     await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[0]);
+    const panel = getSidePanel(container);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
-    expect(screen.getByText('Transaction Summary')).toBeInTheDocument();
-    expect(screen.getByText('Why is this payment waiting?')).toBeInTheDocument();
-    expect(screen.getByText('Next Action')).toBeInTheDocument();
-    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Related records' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
-    expect(screen.queryByText('Settlement preview')).not.toBeInTheDocument();
-    expect(screen.queryByText('Selected Transaction')).not.toBeInTheDocument();
-    expect(screen.queryByText('Settlement state')).not.toBeInTheDocument();
-    expect(screen.queryByText('Payment readiness')).not.toBeInTheDocument();
-    expect(screen.queryByText('Blocker')).not.toBeInTheDocument();
-    expect(screen.queryByText('Suggested next steps')).not.toBeInTheDocument();
-    expect(screen.queryByText('Finance investigation notes')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
-    expect(screen.queryByText('Accounting sync')).not.toBeInTheDocument();
-    expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Confirmed|Final payout/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
+    expect(panel.getByText('Transaction Summary')).toBeInTheDocument();
+    expect(panel.getByText('Why is this payment waiting?')).toBeInTheDocument();
+    expect(panel.getByText('Next Action')).toBeInTheDocument();
+    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Related records' })).toBeInTheDocument();
+    expect(panel.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(panel.getAllByText('No action needed').length).toBeGreaterThan(0);
+    expect(panel.queryByText('Settlement Preview')).not.toBeInTheDocument();
+    expect(panel.queryByText('Settlement preview')).not.toBeInTheDocument();
+    expect(panel.queryByText('Selected Transaction')).not.toBeInTheDocument();
+    expect(panel.queryByText('Settlement state')).not.toBeInTheDocument();
+    expect(panel.queryByText('Payment readiness')).not.toBeInTheDocument();
+    expect(panel.queryByText('Blocker')).not.toBeInTheDocument();
+    expect(panel.queryByText('Suggested next steps')).not.toBeInTheDocument();
+    expect(panel.queryByText('Finance investigation notes')).not.toBeInTheDocument();
+    expect(panel.queryByText(/settlement/i)).not.toBeInTheDocument();
+    expect(panel.queryByText(/reference id|approval id|commission invoice/i)).not.toBeInTheDocument();
+    expect(panel.getAllByText('$3,059.10').length).toBeGreaterThan(0);
+    expect(panel.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(panel.queryByText('Accounting sync')).not.toBeInTheDocument();
+    expect(panel.queryByText('Payment evidence pending')).not.toBeInTheDocument();
+    expect(panel.queryByText(/Confirmed|Final payout/i)).not.toBeInTheDocument();
+    expect(panel.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
   });
 
   it('hides raw split and evidence identifiers from vendor finance detail', async () => {
@@ -1375,26 +1385,52 @@ describe('FinancePage control center', () => {
           id: 'ledger-split-source-remaining',
           shopifyOrderNumber: '1097',
           shopifyOrderId: '7819000001097',
-          splitFinanceSummary: splitFinanceSummaryBase,
+          amount: '$4,213.50',
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            grossAmount: '$4,213.50',
+            refundImpact: '$4,213.50',
+            estimatedPayout: '$0.00',
+          },
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'partially_refunded',
+            payoutReady: true,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+          splitFinanceSummary: {
+            ...splitFinanceSummaryBase,
+            lineageRole: 'child',
+            refundedChildSaleBasis: true,
+            refundOffsetStatus: 'settlement_review_pending',
+          },
         },
       ],
     });
 
-    renderFinancePage();
+    const { container } = renderFinancePage();
 
     await userEvent.click(await screen.findByRole('button', { name: 'View details' }));
+    const panel = getSidePanel(container);
 
-    expect(await screen.findByText('Transaction Summary')).toBeInTheDocument();
-    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
-    expect(screen.queryByText('Split order context')).not.toBeInTheDocument();
-    expect(screen.queryByText('Source order assignment')).not.toBeInTheDocument();
-    expect(screen.queryByText('Child order assignment')).not.toBeInTheDocument();
-    expect(screen.queryByText('Original source transaction')).not.toBeInTheDocument();
-    expect(screen.queryByText('Remaining source transaction')).not.toBeInTheDocument();
-    expect(screen.queryByText('Child held transaction')).not.toBeInTheDocument();
-    expect(screen.queryByText('alloc-source-1097')).not.toBeInTheDocument();
-    expect(screen.queryByText('alloc-child-1097')).not.toBeInTheDocument();
-    expect(screen.queryByText('ledger-split-source-remaining')).not.toBeInTheDocument();
+    expect(await panel.findByText('Transaction Summary')).toBeInTheDocument();
+    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
+    expect(panel.getAllByText('Waiting for review').length).toBeGreaterThan(0);
+    expect(panel.queryByText('Settlement review pending')).not.toBeInTheDocument();
+    expect(panel.queryByText('settlement accounting review')).not.toBeInTheDocument();
+    expect(panel.queryByText('offset review pending')).not.toBeInTheDocument();
+    expect(panel.queryByText(/settlement/i)).not.toBeInTheDocument();
+    expect(panel.queryByText(/reference id|approval id|commission invoice/i)).not.toBeInTheDocument();
+    expect(panel.queryByText('Split order context')).not.toBeInTheDocument();
+    expect(panel.queryByText('Source order assignment')).not.toBeInTheDocument();
+    expect(panel.queryByText('Child order assignment')).not.toBeInTheDocument();
+    expect(panel.queryByText('Original source transaction')).not.toBeInTheDocument();
+    expect(panel.queryByText('Remaining source transaction')).not.toBeInTheDocument();
+    expect(panel.queryByText('Child held transaction')).not.toBeInTheDocument();
+    expect(panel.queryByText('alloc-source-1097')).not.toBeInTheDocument();
+    expect(panel.queryByText('alloc-child-1097')).not.toBeInTheDocument();
+    expect(panel.queryByText('ledger-split-source-remaining')).not.toBeInTheDocument();
   });
 
   it('hides payment evidence internals from vendor finance timeline and statuses', async () => {
