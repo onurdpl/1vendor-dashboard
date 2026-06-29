@@ -1348,7 +1348,7 @@ describe('FinancePage control center', () => {
     expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
     expect(panel.getByRole('heading', { name: 'İlgili Kayıtlar' })).toBeInTheDocument();
     expect(panel.getByRole('heading', { name: 'Hareket Geçmişi' })).toBeInTheDocument();
-    expect(panel.getAllByText('İşlem gerekmiyor').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('İşlem Gerekmiyor').length).toBeGreaterThan(0);
     expect(panel.getByText('İşlem Tipi')).toBeInTheDocument();
     expect(panel.getByText('Durum')).toBeInTheDocument();
     expect(panel.queryByText('Transaction type')).not.toBeInTheDocument();
@@ -1429,16 +1429,20 @@ describe('FinancePage control center', () => {
     const { container } = renderFinancePage();
 
     expect((await screen.findAllByRole('button', { name: 'Aç' })).length).toBe(3);
-    expect(screen.getAllByText('Ödemeye Hazır').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Ödeme Bekliyor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Hazır').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Beklemede').length).toBeGreaterThan(0);
     expect(screen.getAllByText('İncelemede').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('İade Kesintisi').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('İade').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ödeme Etkisi').length).toBeGreaterThan(0);
     const table = within(container.querySelector('.finance-op-table') as HTMLElement);
-    expect(table.getAllByText('Ödemeye Hazır')).toHaveLength(1);
-    expect(table.getAllByText('Ödeme Bekliyor')).toHaveLength(1);
+    expect(table.getAllByText('Hazır')).toHaveLength(1);
+    expect(table.getAllByText('Beklemede')).toHaveLength(1);
     expect(table.getAllByText('İncelemede')).toHaveLength(1);
+    expect(table.getAllByText('İade')).toHaveLength(1);
     expect(table.getAllByRole('button', { name: 'Aç' })).toHaveLength(3);
+    const refundRow = table.getByText('#1001').closest('[role="button"]');
+    expect(refundRow?.querySelector('.finance-negative')).not.toBeNull();
+    expect(refundRow?.querySelector('.finance-deduction-value')).not.toBeNull();
     expect(table.queryByText('Order payment activity.')).not.toBeInTheDocument();
     expect(table.queryByText('Customer return')).not.toBeInTheDocument();
     expect(table.queryByText('Shopify order')).not.toBeInTheDocument();
@@ -1468,6 +1472,10 @@ describe('FinancePage control center', () => {
     expect(container).not.toHaveTextContent('Sale');
     expect(container).not.toHaveTextContent('Refund review');
     expect(container).not.toHaveTextContent('Refund deduction');
+    expect(container).not.toHaveTextContent('İade Kesintisi');
+    expect(container).not.toHaveTextContent('Ödeme Bekliyor');
+    expect(container).not.toHaveTextContent('Ödemeye Hazır');
+    expect(container).not.toHaveTextContent('Blokeli');
     expect(container).not.toHaveTextContent('Balance adjustment');
     expect(container).not.toHaveTextContent('Shipping cost');
     expect(container).not.toHaveTextContent('Ready');
@@ -1495,6 +1503,50 @@ describe('FinancePage control center', () => {
     expect(container).not.toHaveTextContent(/approval id/i);
     expect(container).not.toHaveTextContent(/commission invoice/i);
     expect(container).not.toHaveTextContent(/\bsettlement\b/i);
+  });
+
+  it('maps pending sale rows to calculating vendor payment state', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'vendor-sale-accruing',
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'accruing',
+            payoutReady: false,
+            payableAt: null,
+            settledAt: null,
+            holdReason: null,
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    await screen.findByRole('button', { name: 'Aç' });
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+
+    expect(table.getByText('Sipariş Geliri')).toBeInTheDocument();
+    expect(table.getByText('Hesaplanıyor')).toBeInTheDocument();
+    expect(table.queryByText('Ödeme Bekliyor')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Aç' }));
+    const panel = getSidePanel(container);
+    expect(panel.getAllByText('Hesaplanıyor').length).toBeGreaterThan(0);
+    expect(panel.getAllByText('İşlem Gerekmiyor').length).toBeGreaterThan(0);
+    expect(panel.queryByText('Bu ödeme neden bekliyor?')).not.toBeInTheDocument();
   });
 
   it('does not repeat vendor review explanations across the finance detail panel', async () => {
@@ -1533,7 +1585,7 @@ describe('FinancePage control center', () => {
 
     expect(await panel.findByText('Bu ödeme neden bekliyor?')).toBeInTheDocument();
     expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
-    expect(panel.getAllByText('Bu ödeme inceleniyor. İnceleme tamamlandığında süreç devam eder.')).toHaveLength(1);
+    expect(panel.getAllByText('Bu işlem inceleniyor.')).toHaveLength(1);
     expect(panel.queryByText('Linked order and return context for this transaction.')).not.toBeInTheDocument();
     expect(panel.queryByText('Recent payment activity for this transaction.')).not.toBeInTheDocument();
     expect(panel.queryByText('Linked')).not.toBeInTheDocument();

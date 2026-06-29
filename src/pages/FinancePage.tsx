@@ -329,22 +329,7 @@ function isRefundDeductionSettlementReviewPending(record: FinanceTransaction) {
 
 function getPayoutActivityType(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   if (audience === 'vendor') {
-    if (record.description?.toLowerCase().includes('shipping')) {
-      return 'Kargo Ücreti';
-    }
-    if (record.category === 'Refund') {
-      return 'İade Kesintisi';
-    }
-    if (record.category === 'Invoice') {
-      return 'Sipariş Geliri';
-    }
-    if (record.category === 'Adjustment') {
-      return 'Bakiye Düzeltmesi';
-    }
-    if (record.category === 'Payout') {
-      return 'Tahmini Ödeme';
-    }
-    return 'Diğer Kesintiler';
+    return getVendorFinanceScenario(record).typeLabel;
   }
   if (isRefundedSplitChildSaleBasis(record)) {
     return 'Refunded split sale basis';
@@ -555,9 +540,9 @@ function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof
       return getVendorPayoutBatchStatusLabel(status);
     }
     if (finance.payoutBatchSummary?.latestBatch || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) {
-      return 'Ödeme Bekliyor';
+      return 'Beklemede';
     }
-    return 'Ödeme Bekliyor';
+    return 'Hesaplanıyor';
   }
   if (finance.payoutBatchSummary?.latestBatch) {
     return getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status, audience);
@@ -570,15 +555,15 @@ function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof
 
 function getVendorPayoutBatchStatusLabel(status: string) {
   if (status === 'approved') {
-    return 'Ödemeye Hazır';
+    return 'Hazır';
   }
   if (status === 'cancelled') {
-    return 'Blokeli';
+    return 'Beklemede';
   }
-  if (status === 'review' || status === 'paid_placeholder') {
+  if (status === 'paid_placeholder') {
     return 'İncelemede';
   }
-  return 'Ödeme Bekliyor';
+  return 'Beklemede';
 }
 
 function getRelativeActivityDay(value: string, audience: 'admin' | 'vendor' = 'admin') {
@@ -728,13 +713,52 @@ function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof 
 }
 
 function getPayoutImpact(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
-  if (isVendorBlockedFinanceHold(record)) {
-    return audience === 'vendor' ? 'Beklemede' : 'Held';
+  if (audience !== 'vendor' && isVendorBlockedFinanceHold(record)) {
+    return 'Held';
   }
   if (isRefundRecord(record)) {
     return formatDeductionValue(record.payoutCalculation?.refundImpact ?? record.amount);
   }
   return record.payoutCalculation?.estimatedPayout ?? record.amount;
+}
+
+function formatVendorScenarioAmount(value: string, scenario: VendorFinanceScenario) {
+  if (scenario.kind === 'refund') {
+    return formatDeductionValue(value);
+  }
+  return value;
+}
+
+function getVendorScenarioAmountClass(value: string, scenario: VendorFinanceScenario) {
+  const numeric = parseCurrencyValue(value);
+  if (scenario.kind === 'refund' || numeric < 0) {
+    return 'finance-negative finance-amount-emphasis';
+  }
+  if (scenario.kind === 'sale' && numeric > 0) {
+    return 'finance-positive finance-amount-emphasis';
+  }
+  return 'finance-amount-emphasis';
+}
+
+function getVendorScenarioImpactClass(value: string, scenario: VendorFinanceScenario) {
+  const numeric = parseCurrencyValue(value);
+  if (scenario.kind === 'refund' || numeric < 0) {
+    return 'finance-deduction-value';
+  }
+  if (scenario.kind === 'sale' && numeric > 0) {
+    return 'finance-payout-value';
+  }
+  return undefined;
+}
+
+function getVendorScenarioTypeClass(scenario: VendorFinanceScenario) {
+  if (scenario.kind === 'refund') {
+    return 'finance-negative';
+  }
+  if (scenario.kind === 'sale') {
+    return 'finance-positive';
+  }
+  return undefined;
 }
 
 function getTotalDeductions(record: FinanceTransaction) {
@@ -815,172 +839,195 @@ function hasFinanceReviewCopy(value: string | null | undefined) {
   return /\bsettlement\b|\boffset review\b|\bpayout accounting\b|\bledger\b|\breference id\b|\bapproval id\b|\bcommission invoice\b/i.test(value ?? '');
 }
 
-type VendorFinanceStateKey = 'review' | 'ready' | 'preparing' | 'waiting' | 'hold' | 'blocked' | 'paid';
-type VendorFinanceStatusLabel = 'Ödemeye Hazır' | 'Ödeme Bekliyor' | 'Ödendi' | 'İncelemede' | 'Beklemede' | 'Blokeli';
+type VendorFinanceScenarioKind = 'sale' | 'refund' | 'adjustment' | 'shipping' | 'payout';
+type VendorFinanceTypeLabel = 'Sipariş Geliri' | 'İade' | 'Bakiye Düzeltmesi' | 'Kargo' | 'Ödeme';
+type VendorFinanceStatusLabel = 'Hesaplanıyor' | 'İncelemede' | 'Hazır' | 'Beklemede' | 'Askıda' | 'Ödendi';
+type VendorFinanceNextAction = 'İşlem Gerekmiyor' | 'İnceleme Bekleniyor' | 'Destek ile İletişime Geç';
 
-function getVendorFinanceStateKey(
-  record: FinanceTransaction,
-  projection: FinanceOperationalProjection | null,
-  settlementOffsetReviewPending: boolean,
-): VendorFinanceStateKey {
-  const candidates = [
-    projection?.payoutReadiness,
-    projection?.legacyStatusLabel,
-    projection?.settlementState,
-    projection?.payoutState,
-    projection?.blockerState,
-    record.settlement?.status,
-    record.payoutBatch?.status,
-  ].filter((value): value is string => Boolean(value));
-  const combined = candidates.join(' ').toLowerCase();
+type VendorFinanceScenario = {
+  kind: VendorFinanceScenarioKind;
+  typeLabel: VendorFinanceTypeLabel;
+  status: VendorFinanceStatusLabel;
+  nextAction: VendorFinanceNextAction;
+  tone: 'neutral' | 'info' | 'success' | 'warning' | 'attention' | 'danger';
+};
 
-  if (settlementOffsetReviewPending || combined.includes('refund offset') || combined.includes('offset review')) {
-    return 'review';
-  }
-  if (combined.includes('draft') || combined.includes('locked') || combined.includes('batch')) {
-    return 'preparing';
-  }
-  if (
-    !settlementOffsetReviewPending &&
-    !record.settlement?.review &&
-    !record.payoutBatch &&
-    (record.settlement?.payoutReady || record.settlement?.status === 'payable' || combined.includes('payable'))
-  ) {
-    return 'ready';
-  }
-  if (combined.includes('paid_placeholder') || combined.includes('pending review') || combined.includes('review pending')) {
-    return 'review';
-  }
-  if (combined.includes('not ready')) {
-    return 'waiting';
-  }
-  if (combined.includes('paid') || combined.includes('completed') || combined.includes('reconciled')) {
-    return 'paid';
-  }
-  if (combined.includes('approved') || combined.includes('ready') || combined.includes('payable')) {
-    return 'ready';
-  }
-  if (combined.includes('held') || combined.includes('hold')) {
-    return 'hold';
-  }
-  if (combined.includes('blocked') || combined.includes('disputed')) {
-    return 'blocked';
-  }
-  if (hasFinanceReviewCopy(projection?.legacyStatusLabel)) {
-    return 'review';
-  }
-
-  return 'waiting';
+function getAdjustmentStatuses(record: FinanceTransaction) {
+  return safeArray(record.settlementRefundAdjustments).map((adjustment) => adjustment.status);
 }
 
-function getVendorFinanceStatusLabel(state: VendorFinanceStateKey): VendorFinanceStatusLabel {
-  if (state === 'ready') {
-    return 'Ödemeye Hazır';
-  }
-  if (state === 'paid') {
-    return 'Ödendi';
-  }
-  if (state === 'review') {
-    return 'İncelemede';
-  }
-  if (state === 'hold') {
-    return 'Beklemede';
-  }
-  if (state === 'blocked') {
-    return 'Blokeli';
-  }
-  return 'Ödeme Bekliyor';
+function hasAdjustmentStatus(record: FinanceTransaction, statuses: Array<NonNullable<FinanceTransaction['settlementRefundAdjustments']>[number]['status']>) {
+  return getAdjustmentStatuses(record).some((status) => statuses.includes(status));
 }
 
-function getVendorPaymentWaitingSummary(state: VendorFinanceStateKey) {
-  if (state === 'review') {
-    return 'Bu ödeme inceleniyor. İnceleme tamamlandığında süreç devam eder.';
+function hasReliablePaidEvidence(record: FinanceTransaction) {
+  return Boolean(record.settlement?.status === 'settled' || record.settlement?.settledAt);
+}
+
+function isShippingFinanceScenario(record: FinanceTransaction) {
+  const calculation = record.payoutCalculation;
+  const shippingDeduction = parseCurrencyValue(calculation?.shippingDeduction);
+  return Boolean(
+    record.description?.toLowerCase().includes('shipping') ||
+      calculation?.shippingCostStatus === 'pending_provider_cost' ||
+      calculation?.shippingApplied ||
+      calculation?.shippingCostSnapshot ||
+      shippingDeduction !== 0,
+  );
+}
+
+function buildVendorFinanceScenario(
+  kind: VendorFinanceScenarioKind,
+  typeLabel: VendorFinanceTypeLabel,
+  status: VendorFinanceStatusLabel,
+  nextAction: VendorFinanceNextAction,
+): VendorFinanceScenario {
+  const tone =
+    status === 'Hazır' || status === 'Ödendi'
+      ? 'success'
+      : status === 'İncelemede'
+        ? 'attention'
+        : status === 'Askıda'
+          ? 'warning'
+          : status === 'Beklemede'
+            ? 'warning'
+            : 'info';
+
+  return {
+    kind,
+    typeLabel,
+    status,
+    nextAction,
+    tone,
+  };
+}
+
+function getVendorFinanceScenario(record: FinanceTransaction): VendorFinanceScenario {
+  const normalizedStatus = normalizeFinanceStatus(record.status);
+  const payoutBatchStatus = record.payoutBatch?.status;
+
+  if (isShippingFinanceScenario(record)) {
+    if (record.payoutCalculation?.shippingCostStatus === 'pending_provider_cost') {
+      return buildVendorFinanceScenario('shipping', 'Kargo', 'Beklemede', 'İnceleme Bekleniyor');
+    }
+    return buildVendorFinanceScenario('shipping', 'Kargo', 'Hazır', 'İşlem Gerekmiyor');
   }
-  if (state === 'preparing') {
-    return 'Ödeme hazırlığı devam ediyor. Şu anda işlem yapmanız gerekmiyor.';
+
+  if (record.category === 'Refund') {
+    if (hasReliablePaidEvidence(record)) {
+      return buildVendorFinanceScenario('refund', 'İade', 'Ödendi', 'İşlem Gerekmiyor');
+    }
+    if (hasAdjustmentStatus(record, ['blocked', 'cancelled']) || normalizedStatus === 'Failed') {
+      return buildVendorFinanceScenario('refund', 'İade', 'Beklemede', 'Destek ile İletişime Geç');
+    }
+    if (hasAdjustmentStatus(record, ['applied'])) {
+      return buildVendorFinanceScenario('refund', 'İade', 'Hazır', 'İşlem Gerekmiyor');
+    }
+    if (
+      hasAdjustmentStatus(record, ['pending', 'partially_applied']) ||
+      record.settlement?.status === 'partially_refunded' ||
+      isRefundDeductionSettlementReviewPending(record)
+    ) {
+      return buildVendorFinanceScenario('refund', 'İade', 'İncelemede', 'İnceleme Bekleniyor');
+    }
+    return buildVendorFinanceScenario('refund', 'İade', 'İncelemede', 'İnceleme Bekleniyor');
   }
-  if (state === 'hold') {
-    return 'Bu ödeme beklemede. Sorun çözüldüğünde süreç devam eder.';
+
+  if (record.category === 'Adjustment') {
+    if (hasAdjustmentStatus(record, ['blocked']) || normalizedStatus === 'Failed') {
+      return buildVendorFinanceScenario('adjustment', 'Bakiye Düzeltmesi', 'Beklemede', 'Destek ile İletişime Geç');
+    }
+    if (hasAdjustmentStatus(record, ['pending', 'partially_applied'])) {
+      return buildVendorFinanceScenario('adjustment', 'Bakiye Düzeltmesi', 'İncelemede', 'İnceleme Bekleniyor');
+    }
+    if (hasAdjustmentStatus(record, ['applied'])) {
+      return buildVendorFinanceScenario('adjustment', 'Bakiye Düzeltmesi', 'Hazır', 'İşlem Gerekmiyor');
+    }
+    return buildVendorFinanceScenario('adjustment', 'Bakiye Düzeltmesi', 'Beklemede', 'İşlem Gerekmiyor');
   }
-  if (state === 'blocked') {
-    return 'Bu ödeme blokeli. Sorun çözüldüğünde süreç devam eder.';
+
+  if (record.category === 'Payout') {
+    if (payoutBatchStatus === 'approved') {
+      return buildVendorFinanceScenario('payout', 'Ödeme', 'Hazır', 'İşlem Gerekmiyor');
+    }
+    if (payoutBatchStatus === 'paid_placeholder') {
+      return hasReliablePaidEvidence(record)
+        ? buildVendorFinanceScenario('payout', 'Ödeme', 'Ödendi', 'İşlem Gerekmiyor')
+        : buildVendorFinanceScenario('payout', 'Ödeme', 'İncelemede', 'İnceleme Bekleniyor');
+    }
+    return buildVendorFinanceScenario('payout', 'Ödeme', 'Beklemede', 'İşlem Gerekmiyor');
+  }
+
+  if (hasReliablePaidEvidence(record)) {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Ödendi', 'İşlem Gerekmiyor');
+  }
+  if (record.settlement?.status === 'disputed' || normalizedStatus === 'Failed') {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Beklemede', 'Destek ile İletişime Geç');
+  }
+  if (record.settlement?.status === 'held') {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Askıda', 'İnceleme Bekleniyor');
+  }
+  if (record.settlement?.status === 'partially_refunded' || isRefundDeductionSettlementReviewPending(record)) {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'İncelemede', 'İnceleme Bekleniyor');
+  }
+  if (payoutBatchStatus === 'approved') {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Hazır', 'İşlem Gerekmiyor');
+  }
+  if (payoutBatchStatus === 'paid_placeholder') {
+    return hasReliablePaidEvidence(record)
+      ? buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Ödendi', 'İşlem Gerekmiyor')
+      : buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'İncelemede', 'İnceleme Bekleniyor');
+  }
+  if (payoutBatchStatus === 'draft' || payoutBatchStatus === 'review' || payoutBatchStatus === 'execution_pending') {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Beklemede', 'İşlem Gerekmiyor');
+  }
+  if (record.settlement?.status === 'payable' || record.settlement?.payoutReady) {
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Hazır', 'İşlem Gerekmiyor');
+  }
+  return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Hesaplanıyor', 'İşlem Gerekmiyor');
+}
+
+function getVendorPaymentWaitingSummary(status: VendorFinanceStatusLabel) {
+  if (status === 'İncelemede') {
+    return 'Bu işlem inceleniyor.';
+  }
+  if (status === 'Beklemede') {
+    return 'Bu işlem beklemede.';
+  }
+  if (status === 'Askıda') {
+    return 'Bu işlem askıda.';
   }
   return null;
 }
 
-function getVendorNextActionCopy(state: VendorFinanceStateKey) {
-  if (state === 'hold' || state === 'blocked') {
-    return {
-      title: 'İlgili siparişi kontrol edin',
-      body: 'İlgili siparişi kontrol edin veya destek ile iletişime geçin.',
-    };
-  }
-  if (state === 'review') {
-    return {
-      title: 'İşlem gerekmiyor',
-      body: 'Bu ödeme inceleniyor.',
-    };
-  }
-  if (state === 'preparing') {
-    return {
-      title: 'İşlem gerekmiyor',
-      body: 'Ödeme hazırlığı devam ediyor.',
-    };
-  }
-  if (state === 'ready') {
-    return {
-      title: 'İşlem gerekmiyor',
-      body: 'Bu tutar ödemeye hazır.',
-    };
-  }
-  if (state === 'paid') {
-    return {
-      title: 'İşlem gerekmiyor',
-      body: 'Bu tutar ödendi.',
-    };
-  }
-  return {
-    title: 'İşlem gerekmiyor',
-    body: 'Bu tutar henüz ödemeye hazır değil.',
-  };
+function shouldShowVendorPaymentWaiting(status: VendorFinanceStatusLabel) {
+  return status === 'İncelemede' || status === 'Beklemede' || status === 'Askıda';
 }
 
-function shouldShowVendorPaymentWaiting(state: VendorFinanceStateKey) {
-  return state === 'review' || state === 'preparing' || state === 'hold' || state === 'blocked';
-}
-
-function getVendorFinanceTimelineEvents(events: OperationalEventInput[], state: VendorFinanceStateKey): OperationalEventInput[] {
+function getVendorFinanceTimelineEvents(events: OperationalEventInput[], scenario: VendorFinanceScenario): OperationalEventInput[] {
   return events.filter((event) => !event.id.startsWith('support-group-')).map((event) => {
     const normalizedTitle = event.title.toLowerCase();
-    const title = event.title === 'Refund impact captured'
-      ? 'İade kaydedildi'
-      : normalizedTitle.includes('order captured')
-        ? 'Sipariş kaydedildi'
-        : normalizedTitle.includes('allocation split') || normalizedTitle.includes('assignment')
-          ? 'Sipariş ataması güncellendi'
-          : normalizedTitle.includes('source transaction') || normalizedTitle.includes('held transaction')
-            ? 'İşlem güncellendi'
-            : hasFinanceReviewCopy(event.title)
-              ? state === 'preparing'
-                ? 'Ödeme hazırlanıyor'
-                : 'İnceleme devam ediyor'
-              : state === 'ready'
-                ? 'Ödemeye hazır'
-                : state === 'preparing'
-                  ? 'Ödeme hazırlanıyor'
-                  : state === 'hold'
-                    ? 'Ödeme beklemede'
-                    : state === 'blocked'
-                      ? 'Ödeme blokeli'
-                      : state === 'paid'
-                        ? 'Ödeme yapıldı'
-                        : event.title;
+    const title = event.title === 'Refund impact captured' || scenario.kind === 'refund'
+      ? 'İade'
+      : scenario.kind === 'adjustment'
+        ? 'Bakiye düzeltmesi'
+        : scenario.kind === 'shipping'
+          ? 'Kargo'
+          : scenario.kind === 'payout'
+            ? 'Ödeme'
+            : normalizedTitle.includes('order captured')
+              ? 'Sipariş geliri'
+              : normalizedTitle.includes('allocation split') || normalizedTitle.includes('assignment')
+                ? 'Sipariş güncellendi'
+                : normalizedTitle.includes('source transaction') || normalizedTitle.includes('held transaction') || hasFinanceReviewCopy(event.title)
+                  ? 'İşlem güncellendi'
+                  : 'Sipariş geliri';
 
     return {
       ...event,
       title,
       description: undefined,
-      status: getVendorFinanceStatusLabel(state),
+      status: scenario.status,
     };
   });
 }
@@ -1634,13 +1681,11 @@ export function FinancePage() {
       });
     }
   }
-  const selectedVendorFinanceState = selectedRecord
-    ? getVendorFinanceStateKey(selectedRecord, selectedOperationalProjection, selectedSettlementOffsetReviewPending)
-    : 'waiting';
-  const selectedVendorFinanceStatusLabel = getVendorFinanceStatusLabel(selectedVendorFinanceState);
-  const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceState);
-  const selectedVendorNextAction = getVendorNextActionCopy(selectedVendorFinanceState);
-  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceState);
+  const selectedVendorFinanceScenario = selectedRecord
+    ? getVendorFinanceScenario(selectedRecord)
+    : buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Hesaplanıyor', 'İşlem Gerekmiyor');
+  const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceScenario.status);
+  const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceScenario);
   const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
   const selectedEstimatedPayment = selectedRecord?.payoutCalculation?.estimatedPayout ?? null;
   const selectedRefundImpact = selectedRecord?.payoutCalculation?.refundImpact
@@ -1980,12 +2025,12 @@ export function FinancePage() {
                 }}
               >
                 <option value="all">{isVendorUser ? 'Tüm durumlar' : 'All statuses'}</option>
-                <option value="Estimated">{isVendorUser ? 'Ödeme Bekliyor' : 'Estimated'}</option>
+                <option value="Estimated">{isVendorUser ? 'Hesaplanıyor' : 'Estimated'}</option>
                 <option value="Pending review">{isVendorUser ? 'İncelemede' : 'Pending review'}</option>
-                <option value="Approved">{isVendorUser ? 'Ödemeye Hazır' : 'Approved'}</option>
-                <option value="Scheduled">{isVendorUser ? 'Ödeme Bekliyor' : 'Scheduled'}</option>
-                <option value="Refund impact">{isVendorUser ? 'İade Kesintisi' : 'Refund impact'}</option>
-                <option value="Blocked">{isVendorUser ? 'Blokeli' : 'Blocked'}</option>
+                <option value="Approved">{isVendorUser ? 'Hazır' : 'Approved'}</option>
+                <option value="Scheduled">{isVendorUser ? 'Beklemede' : 'Scheduled'}</option>
+                <option value="Refund impact">{isVendorUser ? 'İade' : 'Refund impact'}</option>
+                <option value="Blocked">{isVendorUser ? 'Beklemede' : 'Blocked'}</option>
               </select>
               <select
                 value={categoryFilter}
@@ -1996,8 +2041,8 @@ export function FinancePage() {
               >
                 <option value="all">{isVendorUser ? 'Tüm işlem tipleri' : 'All types'}</option>
                 <option value="Invoice">{isVendorUser ? 'Sipariş Geliri' : 'Sale'}</option>
-                <option value="Refund">{isVendorUser ? 'İade Kesintisi' : 'Refund'}</option>
-                <option value="Payout">{isVendorUser ? 'Tahmini Ödeme' : 'Payment review'}</option>
+                <option value="Refund">{isVendorUser ? 'İade' : 'Refund'}</option>
+                <option value="Payout">{isVendorUser ? 'Ödeme' : 'Payment review'}</option>
                 <option value="Adjustment">{isVendorUser ? 'Bakiye Düzeltmesi' : 'Adjustment'}</option>
               </select>
               <select defaultValue="week" aria-label="Date range">
@@ -2075,10 +2120,10 @@ export function FinancePage() {
               const vendorBlockedHold = isVendorBlockedFinanceHold(record);
               const orderSettlementHref = vendorBlockedHold ? buildOrdersHref(record) : isVendorUser ? null : buildOrderSettlementHref(record);
               const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
-              const rowSettlementOffsetReviewPending = isRefundedSplitChildSaleBasis(record) || isRefundDeductionSettlementReviewPending(record);
-              const rowVendorFinanceState = getVendorFinanceStateKey(record, projection, rowSettlementOffsetReviewPending);
+              const rowVendorFinanceScenario = getVendorFinanceScenario(record);
+              const rowPaymentImpact = getPayoutImpact(record, financeAudience);
               const rowStatusLabel = isVendorUser
-                ? getVendorFinanceStatusLabel(rowVendorFinanceState)
+                ? rowVendorFinanceScenario.status
                 : projection.legacyStatusLabel;
               const rowStatusDetail = isVendorUser
                 ? null
@@ -2101,7 +2146,9 @@ export function FinancePage() {
                   </span>
                   <span className="finance-type-cell">
                     <span>
-                      <strong>{getPayoutActivityType(record, financeAudience)}</strong>
+                      <strong className={isVendorUser ? getVendorScenarioTypeClass(rowVendorFinanceScenario) : undefined}>
+                        {isVendorUser ? rowVendorFinanceScenario.typeLabel : getPayoutActivityType(record, financeAudience)}
+                      </strong>
                       {rowActivityDetail ? <small>{rowActivityDetail}</small> : null}
                       {record.splitFinanceSummary ? (
                         <span className="finance-split-badge">Split order assignment</span>
@@ -2113,15 +2160,14 @@ export function FinancePage() {
                     {isVendorUser ? null : <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>}
                   </span>
                   <span className="finance-queue-state">
-                    <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{rowStatusLabel}</StatusBadge>
+                    <StatusBadge tone={isVendorUser ? rowVendorFinanceScenario.tone : getPayoutActivityTone(record, financeAudience)}>{rowStatusLabel}</StatusBadge>
                     {rowStatusDetail ? <small>{rowStatusDetail}</small> : null}
                   </span>
-                  <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
-                    {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
-                    {record.amount}
+                  <strong className={isVendorUser ? getVendorScenarioAmountClass(record.amount, rowVendorFinanceScenario) : isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
+                    {isVendorUser ? formatVendorScenarioAmount(record.amount, rowVendorFinanceScenario) : `${isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}${record.amount}`}
                   </strong>
-                  <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
-                    {getPayoutImpact(record, financeAudience)}
+                  <strong className={isVendorUser ? `${getVendorScenarioImpactClass(rowPaymentImpact, rowVendorFinanceScenario) ?? ''} finance-amount-emphasis`.trim() : isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
+                    {rowPaymentImpact}
                   </strong>
                   <OperationalActionGroup>
                     {orderSettlementHref ? (
@@ -2242,64 +2288,63 @@ export function FinancePage() {
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">
                   <h4>İşlem Özeti</h4>
-                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {selectedVendorFinanceStatusLabel}
+                  <StatusBadge tone={selectedVendorFinanceScenario.tone}>
+                    {selectedVendorFinanceScenario.status}
                   </StatusBadge>
                 </div>
                 <div className="finance-selected-summary-grid">
                   <MetadataRow label="İlgili Sipariş" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
                   {isRefundRecord(selectedRecord) && selectedRecord.shopifyRefundId ? <MetadataRow label="İlgili İade" value="İlgili iade" /> : null}
-                  <MetadataRow label="İşlem Tipi" value={getPayoutActivityType(selectedRecord, financeAudience)} />
-                  <MetadataRow label="Durum" value={selectedVendorFinanceStatusLabel} />
+                  <MetadataRow label="İşlem Tipi" value={selectedVendorFinanceScenario.typeLabel} />
+                  <MetadataRow label="Durum" value={selectedVendorFinanceScenario.status} />
                   <MetadataRow
                     label="Ödeme Etkisi"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
+                    value={<span className={getVendorScenarioImpactClass(selectedPaymentImpact, selectedVendorFinanceScenario)}>{selectedPaymentImpact}</span>}
                   />
                 </div>
               </div>
 
-              {shouldShowVendorPaymentWaiting(selectedVendorFinanceState) && selectedVendorPaymentWaitingSummary ? (
+              {shouldShowVendorPaymentWaiting(selectedVendorFinanceScenario.status) && selectedVendorPaymentWaitingSummary ? (
                 <div className="finance-detail-card finance-payout-readiness-card">
                   <div className="finance-detail-card-heading">
                     <h4>Bu ödeme neden bekliyor?</h4>
-                    <StatusBadge tone={selectedVendorFinanceState === 'blocked' ? 'danger' : 'warning'}>
-                      {selectedVendorFinanceStatusLabel}
+                    <StatusBadge tone={selectedVendorFinanceScenario.tone}>
+                      {selectedVendorFinanceScenario.status}
                     </StatusBadge>
                   </div>
                   <p className="page-description">{selectedVendorPaymentWaitingSummary}</p>
                 </div>
               ) : null}
 
-                <div className="finance-detail-card">
-                  <div className="finance-detail-card-heading">
+              <div className="finance-detail-card">
+                <div className="finance-detail-card-heading">
                   <h4>Sonraki Adım</h4>
-                  <StatusBadge tone={selectedVendorNextAction.title === 'İşlem gerekmiyor' ? 'success' : 'warning'}>
-                    {selectedVendorNextAction.title}
+                  <StatusBadge tone={selectedVendorFinanceScenario.nextAction === 'İşlem Gerekmiyor' ? 'success' : 'warning'}>
+                    {selectedVendorFinanceScenario.nextAction}
                   </StatusBadge>
                 </div>
-                <p className="page-description">{selectedVendorNextAction.body}</p>
               </div>
 
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Ödeme Etkisi</h4>
-                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {selectedVendorFinanceStatusLabel}
+                  <StatusBadge tone={selectedVendorFinanceScenario.tone}>
+                    {selectedVendorFinanceScenario.status}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow
                     label="Ödeme Etkisi"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>}
+                    value={<span className={getVendorScenarioImpactClass(selectedPaymentImpact, selectedVendorFinanceScenario)}>{selectedPaymentImpact}</span>}
                   />
                   {showSelectedRefundImpact ? (
-                      <MetadataRow
+                    <MetadataRow
                       label="İade Etkisi"
                       value={<span className="finance-deduction-value">{selectedRefundImpact}</span>}
                     />
                   ) : null}
                   {showSelectedEstimatedPayment ? (
-                      <MetadataRow
+                    <MetadataRow
                       label="Tahmini Ödeme"
                       value={<span className="finance-payout-value">{financeValueOrUnknown(selectedEstimatedPayment)}</span>}
                     />
