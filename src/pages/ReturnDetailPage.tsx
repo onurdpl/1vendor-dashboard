@@ -242,27 +242,42 @@ function getVendorReturnWorkflowDescription(description: string) {
   return description.replace('Shopify refund', 'Refund');
 }
 
+function getSupportTicketStatus(ticket: SupportTicket) {
+  return String(ticket.status ?? '').trim().toUpperCase();
+}
+
 function getVendorSupportTicketStatusLabel(ticket: SupportTicket) {
-  if (ticket.status === 'WAITING_FOR_VENDOR') {
+  const status = getSupportTicketStatus(ticket);
+  if (status === 'WAITING_FOR_VENDOR') {
     return 'Reply needed';
   }
-  if (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') {
-    return ticket.status === 'IN_REVIEW' ? 'Waiting for support' : 'Support ticket open';
+  if (status === 'OPEN' || status === 'IN_REVIEW') {
+    return status === 'IN_REVIEW' ? 'Waiting for support' : 'Support ticket open';
   }
   return safeStatusLabel(ticket.status);
 }
 
 function getSupportTicketTone(ticket: SupportTicket) {
-  if (ticket.status === 'WAITING_FOR_VENDOR') {
+  const status = getSupportTicketStatus(ticket);
+  if (status === 'WAITING_FOR_VENDOR') {
     return 'warning' as const;
   }
-  if (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') {
+  if (status === 'OPEN' || status === 'IN_REVIEW') {
     return 'info' as const;
   }
-  if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+  if (status === 'RESOLVED' || status === 'CLOSED') {
     return 'success' as const;
   }
   return 'neutral' as const;
+}
+
+function isOpenSupportReviewTicket(ticket: SupportTicket) {
+  const status = getSupportTicketStatus(ticket);
+  return status === 'OPEN' || status === 'IN_REVIEW';
+}
+
+function isWaitingForVendorSupportTicket(ticket: SupportTicket) {
+  return getSupportTicketStatus(ticket) === 'WAITING_FOR_VENDOR';
 }
 
 function readSnapshotString(snapshot: Record<string, unknown>, key: string) {
@@ -1299,8 +1314,8 @@ export function ReturnDetailPage() {
       currentVendorId: currentVendor.vendorId,
     }),
   );
-  const waitingReturnSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
-  const openLinkedSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW');
+  const waitingReturnSupportTicket = relatedSupportTickets.find(isWaitingForVendorSupportTicket);
+  const openLinkedSupportTicket = relatedSupportTickets.find(isOpenSupportReviewTicket);
   const vendorSupportGuidance = !isAdmin && waitingReturnSupportTicket
     ? {
         actionLabel: 'Reply to support request',
@@ -1413,7 +1428,7 @@ export function ReturnDetailPage() {
   const supportLifecycleEvents: OperationalEventInput[] = [
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
-      title: !isAdmin && (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') ? 'Waiting for support' : 'Support ticket opened',
+      title: !isAdmin && isOpenSupportReviewTicket(ticket) ? 'Waiting for support' : 'Support ticket opened',
       description: ticket.subject ?? 'Support ticket',
       at: ticket.createdAt,
       status: isAdmin ? safeStatusLabel(ticket.status) : getVendorSupportTicketStatusLabel(ticket),
@@ -2803,6 +2818,7 @@ export function ReturnDetailPage() {
         contextId={returnRequest.id}
         contextSnapshot={supportSnapshot}
         defaultSubject={`Help with return ${formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}`}
+        closeOnCreated
         onClose={() => setSupportOpen(false)}
         onCreated={() => {
           setSupportOpen(false);

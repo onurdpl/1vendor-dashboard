@@ -232,7 +232,7 @@ const closedRefundedReturnDetail: ReturnDetail = {
   },
 };
 
-function linkedReturnSupportTicket(status: SupportTicketStatus, overrides: Partial<SupportTicket> = {}): SupportTicket {
+function linkedReturnSupportTicket(status: SupportTicketStatus | string, overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
     id: `support-${status.toLowerCase()}`,
     createdAt: '2026-05-16T10:00:00Z',
@@ -244,7 +244,7 @@ function linkedReturnSupportTicket(status: SupportTicketStatus, overrides: Parti
     subject: 'Help with return #1023',
     message: 'Can you help with this return?',
     priority: 'normal',
-    status,
+    status: status as SupportTicketStatus,
     category: 'RETURN',
     assigneeUserId: null,
     assigneeName: null,
@@ -1734,7 +1734,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     getReturnMock.mockResolvedValue(returnDetail);
     listVendorSupportTicketsMock
       .mockResolvedValueOnce([])
-      .mockResolvedValue([linkedReturnSupportTicket('OPEN')]);
+      .mockResolvedValue([linkedReturnSupportTicket('open')]);
     createSupportTicketMock.mockResolvedValueOnce({
       id: 'ticket-1',
       createdAt: '2026-05-16T10:00:00Z',
@@ -1783,7 +1783,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
   it('shows support-review state for an open linked return support ticket', async () => {
     getReturnMock.mockResolvedValue(returnDetail);
-    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('OPEN')]);
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('open')]);
 
     renderPage();
 

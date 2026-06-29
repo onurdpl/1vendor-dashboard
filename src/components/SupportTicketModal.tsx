@@ -19,6 +19,7 @@ type SupportTicketModalProps = {
   defaultCategory?: SupportTicketCategory;
   onClose: () => void;
   onCreated?: () => void;
+  closeOnCreated?: boolean;
 };
 
 const SUPPORT_CATEGORIES: Array<{ value: SupportTicketCategory; label: string }> = [
@@ -47,6 +48,7 @@ export function SupportTicketModal({
   defaultCategory,
   onClose,
   onCreated,
+  closeOnCreated = false,
 }: SupportTicketModalProps) {
   const [subject, setSubject] = useState(defaultSubject);
   const [category, setCategory] = useState<SupportTicketCategory>(defaultCategory ?? 'SHIPMENT');
@@ -71,6 +73,9 @@ export function SupportTicketModal({
       void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(vendorId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() });
       onCreated?.();
+      if (closeOnCreated) {
+        onClose();
+      }
     },
   });
 
