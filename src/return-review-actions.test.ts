@@ -6,6 +6,9 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     update: vi.fn(),
   },
+  supportTicket: {
+    findFirst: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -75,6 +78,8 @@ describe('return vendor review actions', () => {
     prismaMock.returnRecord.findUnique.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.returnRecord.update.mockReset();
+    prismaMock.supportTicket.findFirst.mockReset();
+    prismaMock.supportTicket.findFirst.mockResolvedValue(null);
   });
 
   it('lets a vendor mark their own return received idempotently', async () => {
@@ -150,6 +155,62 @@ describe('return vendor review actions', () => {
       'Rejected returns require a reason.',
     );
     expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'])(
+    'blocks vendor review while linked support ticket is %s',
+    async (status) => {
+      prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+        accessRecord({ vendorReceivedAt: new Date('2026-05-14T10:00:00Z') }),
+      );
+      prismaMock.supportTicket.findFirst.mockResolvedValueOnce({ id: `ticket-${status.toLowerCase()}` });
+
+      await expect(reviewReturn('return-1', { role: 'vendor', vendorId: 'vendor-a' }, { decision: 'approved' })).rejects.toMatchObject({
+        message: 'Return decision is blocked while a support ticket is active.',
+        statusCode: 409,
+      });
+      expect(prismaMock.supportTicket.findFirst).toHaveBeenCalledWith({
+        where: {
+          vendorId: 'vendor-a',
+          contextType: 'return',
+          contextId: 'return-1',
+          status: { in: ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'] },
+        },
+        select: { id: true },
+      });
+      expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['RESOLVED', 'CLOSED'])('does not treat %s support tickets as review blockers', async (status) => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      accessRecord({ vendorReceivedAt: new Date('2026-05-14T10:00:00Z') }),
+    );
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(null);
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce({
+      ...detailRecord(),
+      vendorReviewedAt: new Date('2026-05-14T10:05:00Z'),
+      vendorDecision: 'approved',
+    });
+    prismaMock.returnRecord.update.mockResolvedValueOnce({});
+
+    const result = await reviewReturn('return-1', { role: 'vendor', vendorId: 'vendor-a' }, { decision: 'approved' });
+
+    expect(result.vendorDecision).toBe('approved');
+    expect(prismaMock.supportTicket.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { in: ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'] },
+      }),
+    }));
+    expect(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']).not.toContain(status);
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith({
+      where: { id: 'return-1' },
+      data: {
+        vendorReviewedAt: expect.any(Date),
+        vendorDecision: 'approved',
+        vendorDecisionReason: null,
+      },
+    });
   });
 
   it('saves vendor approval without touching refund state', async () => {

@@ -1817,7 +1817,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText('Waiting for Sporgym support review')).not.toBeInTheDocument();
   });
 
-  it('keeps approve and reject behavior unchanged when support ticket is open', async () => {
+  it('blocks approve and reject while an open support ticket is linked', async () => {
+    const user = userEvent.setup();
     getReturnMock.mockResolvedValue({
       ...returnDetail,
       vendorReceivedAt: '2026-05-14T10:00:00Z',
@@ -1827,10 +1828,62 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Waiting for Sporgym support review' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Approve return' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Need support review first.');
     expect(screen.getByRole('button', { name: 'Reject return' })).toBeDisabled();
     expect(markReturnReceivedMock).not.toHaveBeenCalled();
     expect(reviewReturnMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks approve and reject while an in-review support ticket is linked', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('IN_REVIEW')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for Sporgym support review' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Need support review first.');
+    expect(screen.getByRole('button', { name: 'Reject return' })).toBeDisabled();
+    expect(reviewReturnMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks approve and reject while support is waiting for vendor reply', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('WAITING_FOR_VENDOR')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Reply to support request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Reply pending.');
+    expect(screen.getByRole('button', { name: 'Reject return' })).toBeDisabled();
+    expect(reviewReturnMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['RESOLVED', 'CLOSED'] as const)('keeps normal review actions available for %s support tickets', async (status) => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket(status)]);
+
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Approve return' })).toBeEnabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Item damaged.');
+    expect(screen.getByRole('button', { name: 'Reject return' })).toBeEnabled();
+    expect(screen.queryByText('Waiting for Sporgym support review')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reply to support request')).not.toBeInTheDocument();
   });
 
   it('hides Kargonomi return readiness preview from vendors', async () => {

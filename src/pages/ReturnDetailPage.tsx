@@ -280,6 +280,10 @@ function isWaitingForVendorSupportTicket(ticket: SupportTicket) {
   return getSupportTicketStatus(ticket) === 'WAITING_FOR_VENDOR';
 }
 
+function isActiveSupportDecisionBlockingTicket(ticket: SupportTicket) {
+  return isOpenSupportReviewTicket(ticket) || isWaitingForVendorSupportTicket(ticket);
+}
+
 function readSnapshotString(snapshot: Record<string, unknown>, key: string) {
   const value = snapshot[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -1316,6 +1320,8 @@ export function ReturnDetailPage() {
   );
   const waitingReturnSupportTicket = relatedSupportTickets.find(isWaitingForVendorSupportTicket);
   const openLinkedSupportTicket = relatedSupportTickets.find(isOpenSupportReviewTicket);
+  const supportDecisionBlockingTicket = relatedSupportTickets.find(isActiveSupportDecisionBlockingTicket);
+  const supportDecisionBlocked = Boolean(supportDecisionBlockingTicket);
   const vendorSupportGuidance = !isAdmin && waitingReturnSupportTicket
     ? {
         actionLabel: 'Reply to support request',
@@ -1913,7 +1919,7 @@ export function ReturnDetailPage() {
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn}
+                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn || supportDecisionBlocked}
                   onClick={() => void reviewMutation.mutateAsync({ decision: 'approved' })}
                 >
                   Approve return
@@ -1936,7 +1942,7 @@ export function ReturnDetailPage() {
                 <button
                   type="button"
                   className="button button-secondary"
-                  disabled={reviewMutation.isPending || !rejectReason.trim()}
+                  disabled={reviewMutation.isPending || !rejectReason.trim() || supportDecisionBlocked}
                   onClick={() => void reviewMutation.mutateAsync({ decision: 'rejected', reason: rejectReason })}
                 >
                   Reject return

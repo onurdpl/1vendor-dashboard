@@ -47,6 +47,9 @@ export class ReturnReviewError extends Error {
   }
 }
 
+const ACTIVE_RETURN_SUPPORT_TICKET_STATUSES = ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'] as const;
+const ACTIVE_RETURN_SUPPORT_TICKET_BLOCK_MESSAGE = 'Return decision is blocked while a support ticket is active.';
+
 type TerminalRefundedReturnRecord = {
   status?: string | null;
   returnLifecycleStatus?: string | null;
@@ -1627,6 +1630,20 @@ export async function reviewReturn(
   const reason = input.reason?.trim() ?? '';
   if (input.decision === 'rejected' && !reason) {
     throw new ReturnReviewError('Rejected returns require a reason.', 400);
+  }
+
+  const activeSupportTicket = await prisma.supportTicket.findFirst({
+    where: {
+      vendorId: record.vendorAllocation.assignedVendorId,
+      contextType: 'return',
+      contextId: returnId,
+      status: { in: [...ACTIVE_RETURN_SUPPORT_TICKET_STATUSES] },
+    },
+    select: { id: true },
+  });
+
+  if (activeSupportTicket) {
+    throw new ReturnReviewError(ACTIVE_RETURN_SUPPORT_TICKET_BLOCK_MESSAGE, 409);
   }
 
   await prisma.returnRecord.update({
