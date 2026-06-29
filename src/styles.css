@@ -1379,36 +1379,23 @@ a:focus-visible {
   font-size: 0.76rem;
 }
 
-.support-action-buckets {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+.support-workflow-tabs {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
 }
 
-.support-action-bucket {
-  display: block;
-  padding: 0;
-  border: 0;
-  border-radius: 16px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
+.support-workflow-tabs button {
+  min-height: 56px;
+  padding: 8px 8px;
 }
 
-.support-action-bucket .op-kpi {
-  height: 100%;
-  border: 1px solid #e2e8f0;
+.support-workflow-tabs span {
+  font-size: 0.7rem;
 }
 
-.support-action-bucket.is-active .op-kpi {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
-}
-
-.support-action-bucket:focus-visible {
-  outline: 3px solid rgba(37, 99, 235, 0.24);
-  outline-offset: 3px;
+.support-workflow-tabs small {
+  font-size: 0.6rem;
 }
 
 .support-inline-error {

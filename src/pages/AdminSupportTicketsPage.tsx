@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
   FilterBar,
-  KPIStatCard,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -37,13 +36,14 @@ const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REV
 const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
 const ALL_PRIORITIES = ['all', 'low', 'normal', 'high'] as const;
 const ASSIGNEE_FILTERS = ['all', 'unassigned', 'me'] as const;
-const ACTION_BUCKETS: Array<{ key: SupportActionBucket; label: string; detail: string; tone: 'info' | 'warning' | 'danger' | 'success' | 'neutral' }> = [
-  { key: 'needs_assignment', label: 'Needs assignment', detail: 'No owner yet', tone: 'warning' },
-  { key: 'needs_response', label: 'Needs admin response', detail: 'Vendor update waiting', tone: 'warning' },
-  { key: 'escalated', label: 'Escalated', detail: 'Vendor raised urgency', tone: 'danger' },
-  { key: 'overdue', label: 'Overdue', detail: 'SLA breached', tone: 'danger' },
-  { key: 'waiting_vendor', label: 'Waiting on vendor', detail: 'Vendor owes next reply', tone: 'info' },
-  { key: 'resolved', label: 'Resolved today', detail: 'Recently closed work', tone: 'success' },
+const WORKFLOW_TABS: Array<{ key: SupportActionBucket; label: string; detail: string }> = [
+  { key: 'all', label: 'All', detail: 'Full queue' },
+  { key: 'needs_assignment', label: 'Needs Assignment', detail: 'No owner yet' },
+  { key: 'needs_response', label: 'Needs Admin Response', detail: 'Vendor update waiting' },
+  { key: 'escalated', label: 'Escalated', detail: 'Vendor raised urgency' },
+  { key: 'overdue', label: 'Overdue', detail: 'SLA breached' },
+  { key: 'waiting_vendor', label: 'Waiting on Vendor', detail: 'Vendor owes next reply' },
+  { key: 'resolved', label: 'Resolved', detail: 'Recently closed work' },
 ];
 
 function formatDate(value: string) {
@@ -155,10 +155,8 @@ export function AdminSupportTicketsPage() {
   const [priorityFilter, setPriorityFilter] = useState<(typeof ALL_PRIORITIES)[number]>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<(typeof ASSIGNEE_FILTERS)[number]>('all');
   const [unresolvedOnly, setUnresolvedOnly] = useState(initialBucket === 'resolved' ? false : true);
-  const [needsResponseOnly, setNeedsResponseOnly] = useState(false);
-  const [escalatedOnly, setEscalatedOnly] = useState(false);
   const [actionBucket, setActionBucket] = useState<SupportActionBucket>(
-    ACTION_BUCKETS.some((bucket) => bucket.key === initialBucket) ? initialBucket : 'all',
+    WORKFLOW_TABS.some((bucket) => bucket.key === initialBucket) ? initialBucket : 'all',
   );
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
@@ -177,11 +175,13 @@ export function AdminSupportTicketsPage() {
 
   const allTickets = safeArray(tickets);
   const bucketCounts = useMemo(() => {
-    return ACTION_BUCKETS.reduce<Record<SupportActionBucket, number>>((counts, bucket) => {
-      counts[bucket.key] = allTickets.filter((ticket) => ticketMatchesSupportActionBucket(ticket, bucket.key)).length;
+    return WORKFLOW_TABS.reduce<Record<SupportActionBucket, number>>((counts, bucket) => {
+      counts[bucket.key] = bucket.key === 'all'
+        ? allTickets.filter((ticket) => !unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')).length
+        : allTickets.filter((ticket) => ticketMatchesSupportActionBucket(ticket, bucket.key)).length;
       return counts;
     }, {
-      all: allTickets.length,
+      all: allTickets.filter((ticket) => !unresolvedOnly || (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED')).length,
       needs_assignment: 0,
       needs_response: 0,
       escalated: 0,
@@ -189,12 +189,10 @@ export function AdminSupportTicketsPage() {
       waiting_vendor: 0,
       resolved: 0,
     });
-  }, [allTickets]);
+  }, [allTickets, unresolvedOnly]);
 
   function selectActionBucket(bucket: SupportActionBucket) {
     setActionBucket(bucket);
-    setNeedsResponseOnly(false);
-    setEscalatedOnly(false);
     setUnresolvedOnly(bucket === 'resolved' ? false : true);
     const nextParams = new URLSearchParams(searchParams);
     if (bucket === 'all') {
@@ -231,14 +229,6 @@ export function AdminSupportTicketsPage() {
       if (assigneeFilter === 'me' && !currentUser?.name) {
         return false;
       }
-      if (needsResponseOnly) {
-        if (!isAdminSupportNeedsResponse(ticket)) {
-          return false;
-        }
-      }
-      if (escalatedOnly && !isAdminSupportEscalated(ticket)) {
-        return false;
-      }
       return ticketMatchesSearch(ticket, searchTerm);
     }).sort((left, right) => {
       const leftStory = getSupportOperationalStory(left);
@@ -250,7 +240,7 @@ export function AdminSupportTicketsPage() {
       }
       return getSafeTimestamp(right.updatedAt, 0) - getSafeTimestamp(left.updatedAt, 0);
     });
-  }, [actionBucket, allTickets, assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, unresolvedOnly]);
+  }, [actionBucket, allTickets, assigneeFilter, categoryFilter, currentUser?.name, priorityFilter, searchTerm, statusFilter, unresolvedOnly]);
 
   return (
     <section className="op-page support-ops-page">
@@ -265,20 +255,18 @@ export function AdminSupportTicketsPage() {
         </Link>
       </div>
 
-      <div className="support-action-buckets" aria-label="Support action buckets">
-        {ACTION_BUCKETS.map((bucket) => (
+      <div className="orders-workflow-tabs support-workflow-tabs" aria-label="Support workflow tabs">
+        {WORKFLOW_TABS.map((bucket) => (
           <button
             key={bucket.key}
             type="button"
-            className={`support-action-bucket ${actionBucket === bucket.key ? 'is-active' : ''}`}
+            className={actionBucket === bucket.key ? 'is-active' : ''}
+            aria-pressed={actionBucket === bucket.key}
             onClick={() => selectActionBucket(bucket.key)}
           >
-            <KPIStatCard
-              label={bucket.label}
-              value={bucketCounts[bucket.key] ?? 0}
-              detail={bucket.detail}
-              tone={bucket.tone}
-            />
+            <span>{bucket.label}</span>
+            <strong>{bucketCounts[bucket.key] ?? 0}</strong>
+            <small>{bucket.detail}</small>
           </button>
         ))}
       </div>
@@ -326,27 +314,10 @@ export function AdminSupportTicketsPage() {
               {currentUser?.name ? <option value="me">Assigned to me</option> : null}
             </select>
           </label>
-          <label className="support-filter-field" htmlFor="support-action-filter">
-            <span>Quick filter</span>
-            <select id="support-action-filter" value={actionBucket} onChange={(event) => selectActionBucket(event.target.value as SupportActionBucket)}>
-              <option value="all">All tickets</option>
-              {ACTION_BUCKETS.map((bucket) => (
-                <option key={bucket.key} value={bucket.key}>{bucket.label}</option>
-              ))}
-            </select>
-          </label>
           <div className="support-toggle-group" aria-label="Support ticket quick filters">
             <label className="support-toggle">
               <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
               <span>Unresolved only</span>
-            </label>
-            <label className="support-toggle">
-              <input type="checkbox" checked={needsResponseOnly} onChange={(event) => setNeedsResponseOnly(event.target.checked)} />
-              <span>Needs response</span>
-            </label>
-            <label className="support-toggle">
-              <input type="checkbox" checked={escalatedOnly} onChange={(event) => setEscalatedOnly(event.target.checked)} />
-              <span>Escalated</span>
             </label>
           </div>
         </FilterBar>
