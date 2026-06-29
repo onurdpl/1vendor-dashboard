@@ -351,13 +351,10 @@ function getPayoutActivityDetail(record: FinanceTransaction, audience: 'admin' |
     if (isSplitChildFinanceHold(record) || isVendorBlockedFinanceHold(record)) {
       return 'Waiting for review.';
     }
-    if (record.category === 'Invoice') {
-      return 'Order payment activity.';
-    }
     if (record.category === 'Refund') {
       return 'Customer refund impact';
     }
-    return 'Estimated payment';
+    return null;
   }
   if (isRefundedSplitChildSaleBasis(record)) {
     return 'Adjusted by Shopify refund';
@@ -764,10 +761,10 @@ function getVendorFinanceStatusDetail(
     return 'Refund review in progress';
   }
   if (combined.includes('draft') || combined.includes('locked') || combined.includes('batch')) {
-    return 'Payment preparation in progress';
+    return null;
   }
   if (combined.includes('ready') || combined.includes('payable')) {
-    return 'Ready for payment';
+    return null;
   }
   if (combined.includes('held') || combined.includes('hold') || combined.includes('blocked') || combined.includes('disputed')) {
     return 'Waiting for review';
@@ -776,7 +773,7 @@ function getVendorFinanceStatusDetail(
     return 'Waiting for review';
   }
 
-  return projection?.blockerState === 'None' ? 'Estimated payment' : 'Waiting for review';
+  return projection?.blockerState === 'None' ? null : 'Waiting for review';
 }
 
 function getVendorPaymentWaitingSummary(
@@ -809,16 +806,6 @@ function getVendorNextActionLabel(
     return 'Waiting for review';
   }
   return 'No action needed';
-}
-
-function getVendorNextActionDescription(label: string) {
-  if (label === 'Contact support') {
-    return 'A support conversation is linked to this transaction.';
-  }
-  if (label === 'Waiting for review') {
-    return 'No action is needed from you right now.';
-  }
-  return 'No action is needed from you right now.';
 }
 
 function getVendorFinanceTimelineEvents(events: OperationalEventInput[]): OperationalEventInput[] {
@@ -1447,7 +1434,6 @@ export function FinancePage() {
     selectedSettlementOffsetReviewPending,
     relatedSupportTickets.length > 0,
   );
-  const selectedVendorNextActionDescription = getVendorNextActionDescription(selectedVendorNextActionLabel);
   const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents);
   const financeRecommendations: OperationsRecommendation[] = [];
   if (selectedRecord && isAdmin) {
@@ -1867,6 +1853,7 @@ export function FinancePage() {
               const rowStatusDetail = isVendorUser
                 ? getVendorFinanceStatusDetail(record, projection, rowSettlementOffsetReviewPending)
                 : projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState;
+              const rowActivityDetail = getPayoutActivityDetail(record, financeAudience);
               return (
                 <OperationalTableRow
                   key={record.id}
@@ -1885,7 +1872,7 @@ export function FinancePage() {
                   <span className="finance-type-cell">
                     <span>
                       <strong>{getPayoutActivityType(record, financeAudience)}</strong>
-                      <small>{getPayoutActivityDetail(record, financeAudience)}</small>
+                      {rowActivityDetail ? <small>{rowActivityDetail}</small> : null}
                       {record.splitFinanceSummary ? (
                         <span className="finance-split-badge">Split order assignment</span>
                       ) : null}
@@ -1897,7 +1884,7 @@ export function FinancePage() {
                   </span>
                   <span className="finance-queue-state">
                     <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{rowStatusLabel}</StatusBadge>
-                    <small>{rowStatusDetail}</small>
+                    {rowStatusDetail ? <small>{rowStatusDetail}</small> : null}
                   </span>
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
@@ -2049,7 +2036,6 @@ export function FinancePage() {
                     {selectedVendorNextActionLabel}
                   </StatusBadge>
                 </div>
-                <p className="page-description">{selectedVendorNextActionDescription}</p>
               </div>
 
               <div className="finance-detail-card">
@@ -2059,9 +2045,6 @@ export function FinancePage() {
                     {selectedVendorFinanceStatusLabel}
                   </StatusBadge>
                 </div>
-                {selectedSettlementOffsetReviewPending ? (
-                  <p className="page-description">Payment will continue after review. No shipment, refund, or vendor action is required.</p>
-                ) : null}
                 <div className="finance-detail-rows">
                   <MetadataRow
                     label="Estimated payment"

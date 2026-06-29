@@ -1428,6 +1428,11 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('Waiting for review').length).toBeGreaterThan(0);
     expect(screen.getByText('Payment Impact')).toBeInTheDocument();
     expect(screen.getByText('Why is this payment waiting?')).toBeInTheDocument();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    expect(table.getAllByText('Ready for payment')).toHaveLength(1);
+    expect(table.getAllByText('Payment preparation in progress')).toHaveLength(1);
+    expect(table.getByText('Refund recorded. Waiting for review.')).toBeInTheDocument();
+    expect(table.queryByText('Order payment activity.')).not.toBeInTheDocument();
 
     expect(container).not.toHaveTextContent('Settlement review pending');
     expect(container).not.toHaveTextContent('Refund recorded. Awaiting settlement adjustment review.');
@@ -1445,6 +1450,44 @@ describe('FinancePage control center', () => {
     expect(container).not.toHaveTextContent(/approval id/i);
     expect(container).not.toHaveTextContent(/commission invoice/i);
     expect(container).not.toHaveTextContent(/\bsettlement\b/i);
+  });
+
+  it('does not repeat vendor review explanations across the finance detail panel', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[1],
+          id: 'vendor-refund-review',
+          settlement: {
+            status: 'partially_refunded',
+            payoutReady: true,
+            eligibleAt: '2026-05-11T10:30:00Z',
+            accruedAt: '2026-05-11T10:30:00Z',
+            payableAt: '2026-05-11T10:30:00Z',
+            settledAt: null,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const panel = getSidePanel(container);
+
+    expect(await panel.findByText('Why is this payment waiting?')).toBeInTheDocument();
+    expect(panel.getByText('Payment Impact')).toBeInTheDocument();
+    expect(panel.getAllByText(/Payment will continue after review/)).toHaveLength(1);
   });
 
   it('hides raw split and evidence identifiers from vendor finance detail', async () => {
