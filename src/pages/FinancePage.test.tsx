@@ -1218,7 +1218,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Finance workspace' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(screen.queryByText('Invoice visibility is reconciled from the merchant accounting workflow.')).not.toBeInTheDocument();
@@ -1309,12 +1309,12 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Finance workflow summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Payment review').length).toBeGreaterThan(0);
     expect(await screen.findByText('Read-only finance policy')).toBeInTheDocument();
-    expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
+    expect(screen.getByText('Read-only payment preview')).toBeInTheDocument();
     expect(screen.getByText('Latest review status')).toBeInTheDocument();
     expect(screen.queryByText('Latest review artifact')).not.toBeInTheDocument();
     expect(screen.queryByText('Draft payout review')).not.toBeInTheDocument();
@@ -1365,6 +1365,86 @@ describe('FinancePage control center', () => {
     expect(panel.queryByText('Payment evidence pending')).not.toBeInTheDocument();
     expect(panel.queryByText(/Confirmed|Final payout/i)).not.toBeInTheDocument();
     expect(panel.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
+  });
+
+  it('removes settlement and accounting language from the full vendor transactions screen', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'vendor-ready-payment',
+          payoutBatch: null,
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'payable',
+            payoutReady: true,
+            holdReason: null,
+          },
+        },
+        {
+          ...financeDashboard.transactions[0],
+          id: 'vendor-payment-prep',
+          shopifyOrderNumber: '1022',
+          payoutBatch: {
+            id: 'batch-demo-vendor-a',
+            status: 'draft',
+            netAmount: '$3,059.10',
+            createdAt: '2026-05-13T12:00:00Z',
+          },
+        },
+        {
+          ...financeDashboard.transactions[1],
+          id: 'vendor-refund-review',
+          settlement: {
+            status: 'partially_refunded',
+            payoutReady: true,
+            eligibleAt: '2026-05-11T10:30:00Z',
+            accruedAt: '2026-05-11T10:30:00Z',
+            payableAt: '2026-05-11T10:30:00Z',
+            settledAt: null,
+            holdReason: null,
+            note: 'Refund impact is reducing the vendor balance.',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+
+    expect((await screen.findAllByText('Ready for payment')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Payment preparation in progress').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund review')).toBeInTheDocument();
+    expect(screen.getByText('Refund recorded. Waiting for review.')).toBeInTheDocument();
+    expect(screen.getAllByText('Waiting for review').length).toBeGreaterThan(0);
+    expect(screen.getByText('Payment Impact')).toBeInTheDocument();
+    expect(screen.getByText('Why is this payment waiting?')).toBeInTheDocument();
+
+    expect(container).not.toHaveTextContent('Settlement review pending');
+    expect(container).not.toHaveTextContent('Refund recorded. Awaiting settlement adjustment review.');
+    expect(container).not.toHaveTextContent(/Ready for settlement/i);
+    expect(container).not.toHaveTextContent(/Waiting settlement/i);
+    expect(container).not.toHaveTextContent('Settlement draft locked');
+    expect(container).not.toHaveTextContent('Settlement adjustment awaiting review');
+    expect(container).not.toHaveTextContent('Refund offset review');
+    expect(container).not.toHaveTextContent('Blocked by refund offset');
+    expect(container).not.toHaveTextContent('Review settlement');
+    expect(container).not.toHaveTextContent(/settlement accounting/i);
+    expect(container).not.toHaveTextContent(/payout accounting/i);
+    expect(container).not.toHaveTextContent(/\bledger\b/i);
+    expect(container).not.toHaveTextContent(/reference id/i);
+    expect(container).not.toHaveTextContent(/approval id/i);
+    expect(container).not.toHaveTextContent(/commission invoice/i);
+    expect(container).not.toHaveTextContent(/\bsettlement\b/i);
   });
 
   it('hides raw split and evidence identifiers from vendor finance detail', async () => {
@@ -1501,7 +1581,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
+    expect(screen.getByText('Read-only payment preview')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
 
