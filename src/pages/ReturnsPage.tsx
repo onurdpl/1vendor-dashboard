@@ -438,6 +438,53 @@ function getTableItemDisplay(summary: ReturnSummary) {
   };
 }
 
+function getReturnedItemCount(summary: ReturnSummary) {
+  const explicitCount = (summary as ReturnSummary & { refundedItemCount?: unknown }).refundedItemCount;
+  if (typeof explicitCount === 'number' && explicitCount > 0) {
+    return explicitCount;
+  }
+  if (typeof explicitCount === 'string') {
+    const parsedCount = Number.parseInt(explicitCount, 10);
+    if (parsedCount > 0) {
+      return parsedCount;
+    }
+  }
+  if (summary.refundedItems?.length) {
+    return summary.refundedItems.length;
+  }
+  if (summary.refundedSkus?.length) {
+    return summary.refundedSkus.length;
+  }
+  return 1;
+}
+
+function formatReturnedItemCount(count: number) {
+  return `${count} item${count === 1 ? '' : 's'} returned`;
+}
+
+function getTableReturnedItems(summary: ReturnSummary) {
+  const summaryItems = summary.refundedItems ?? [];
+  if (summaryItems.length > 0) {
+    return summaryItems.map((item) => {
+      const candidate = item as ReturnRowItemCandidate;
+      const sku = getSkuText(item.sku);
+      const title = resolveCandidateTitle(candidate) || getItemTitleFallback(item.sku);
+      const variant = getVariantText(resolveCandidateVariant(candidate));
+      return {
+        title,
+        variant: variant === title ? '' : variant,
+        sku,
+      };
+    });
+  }
+
+  return [getTableItemDisplay(summary)];
+}
+
+function getReturnedItemSecondaryText(item: ReturnType<typeof getTableReturnedItems>[number]) {
+  return [item.sku !== '—' ? item.sku : null, item.variant].filter(Boolean).join(' · ');
+}
+
 function getVendorTimelineLabel(label: string) {
   const normalized = label.toLowerCase();
   if (normalized.includes('requested') || normalized.includes('return')) {
@@ -970,9 +1017,8 @@ export function ReturnsPage() {
 
           <OperationalTable
             columns={[
-              'Item',
-              'SKU',
-              'Order #',
+              'Order',
+              'Returned items',
               'Return status',
               'Requested',
               'Action',
@@ -1002,7 +1048,7 @@ export function ReturnsPage() {
                 />
               </OperationalTableRow>
             ) : isLoading ? (
-              <TableSkeletonRows columns={6} rows={5} />
+              <TableSkeletonRows columns={5} rows={5} />
             ) : filteredReturns.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
@@ -1012,7 +1058,10 @@ export function ReturnsPage() {
               </OperationalTableRow>
             ) : filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemDisplay = getTableItemDisplay(item);
+                const itemCount = getReturnedItemCount(item);
+                const tableItems = getTableReturnedItems(item);
+                const visibleItems = tableItems.slice(0, 2);
+                const hiddenItemCount = Math.max(itemCount - visibleItems.length, 0);
                 const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow
@@ -1020,20 +1069,25 @@ export function ReturnsPage() {
                     selected={isSelected}
                     onSelect={() => setSelectedReturnId(item.id)}
                   >
-                    <div className="return-item-preview">
-                      <span className="return-item-thumb" aria-hidden="true">
-                        ↩
-                      </span>
-                      <span>
-                        <strong>{itemDisplay.title}</strong>
-                        {itemDisplay.variant ? <small>{itemDisplay.variant}</small> : null}
-                      </span>
-                    </div>
-                    <span className="returns-sku-cell">{itemDisplay.sku}</span>
-                    <span>
+                    <span className="returns-order-cell">
                       <strong>{formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}</strong>
                       <small>{getVendorName(item.assignedVendorId, vendorLookup)}</small>
+                      <small>{formatReturnedItemCount(itemCount)}</small>
                     </span>
+                    <div className="return-items-preview">
+                      {visibleItems.map((returnedItem, index) => (
+                        <div key={`${returnedItem.sku}-${returnedItem.title}-${index}`} className="return-item-preview-line">
+                          <span className="return-item-thumb" aria-hidden="true">
+                            ↩
+                          </span>
+                          <span>
+                            <strong>{returnedItem.title}</strong>
+                            {getReturnedItemSecondaryText(returnedItem) ? <small>{getReturnedItemSecondaryText(returnedItem)}</small> : null}
+                          </span>
+                        </div>
+                      ))}
+                      {hiddenItemCount > 0 ? <small className="return-item-extra">+{hiddenItemCount} more items</small> : null}
+                    </div>
                     <span>
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
                       <small>{getRefundStatusLabel(item)}</small>

@@ -319,8 +319,10 @@ describe('ReturnsPage control center', () => {
 
     expect(screen.getByRole('heading', { name: /return requests/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...')).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Item' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Returned items' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Return status' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'SKU' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(container.querySelector('.op-skeleton-row')).not.toBeNull();
     expect(screen.queryByText('Returns unavailable')).not.toBeInTheDocument();
@@ -385,13 +387,111 @@ describe('ReturnsPage control center', () => {
       'src',
       'https://cdn.example.com/wireless-label-printer.png',
     );
-    expect(screen.getAllByText('SKU-A-1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/SKU-A-1/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1 item returned').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
     expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
     expect(screen.queryByText(/Return item1 item/)).not.toBeInTheDocument();
     expect(screen.queryByText('1 item')).not.toBeInTheDocument();
+  });
+
+  it('renders multiple returned items in the table row and keeps the full sidebar list', async () => {
+    const multiItemReturn: ReturnDetail = {
+      ...pendingReturn,
+      id: 'RET-A-MULTI-1097',
+      sourceShopifyOrderNumber: 1097,
+      refundedSkus: ['SKU-MULTI-1', 'SKU-MULTI-2'],
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          id: 'line-multi-1',
+          sku: 'SKU-MULTI-1',
+          name: 'Running shoe',
+          variantTitle: 'Black / 42',
+        },
+        {
+          ...pendingReturn.refundedItems[0],
+          id: 'line-multi-2',
+          sku: 'SKU-MULTI-2',
+          name: 'Training sock',
+          variantTitle: 'White / M',
+        },
+      ],
+    };
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(multiItemReturn),
+        refundedItemCount: 2,
+      } as ReturnSummary,
+    ]);
+    getReturnMock.mockResolvedValue(multiItemReturn);
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+
+    expect(await table.findByText('#1097')).toBeInTheDocument();
+    expect(table.getByText('2 items returned')).toBeInTheDocument();
+    expect(table.getByText('Running shoe')).toBeInTheDocument();
+    expect(table.getByText(/SKU-MULTI-1/)).toBeInTheDocument();
+    expect(table.getByText('Training sock')).toBeInTheDocument();
+    expect(table.getByText(/SKU-MULTI-2/)).toBeInTheDocument();
+
+    const returnedItemsSection = (await screen.findByRole('heading', { name: 'Returned items' })).closest('.op-panel-section');
+    expect(returnedItemsSection).not.toBeNull();
+    const sidebar = within(returnedItemsSection as HTMLElement);
+    expect(sidebar.getByText('Running shoe')).toBeInTheDocument();
+    expect(sidebar.getByText('Training sock')).toBeInTheDocument();
+  });
+
+  it('summarizes additional returned items after the first two table previews', async () => {
+    const threeItemReturn: ReturnDetail = {
+      ...pendingReturn,
+      id: 'RET-A-MULTI-1098',
+      sourceShopifyOrderNumber: 1098,
+      refundedSkus: ['SKU-MORE-1', 'SKU-MORE-2', 'SKU-MORE-3'],
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          id: 'line-more-1',
+          sku: 'SKU-MORE-1',
+          name: 'First returned item',
+          variantTitle: 'Black',
+        },
+        {
+          ...pendingReturn.refundedItems[0],
+          id: 'line-more-2',
+          sku: 'SKU-MORE-2',
+          name: 'Second returned item',
+          variantTitle: 'White',
+        },
+        {
+          ...pendingReturn.refundedItems[0],
+          id: 'line-more-3',
+          sku: 'SKU-MORE-3',
+          name: 'Third returned item',
+          variantTitle: 'Blue',
+        },
+      ],
+    };
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(threeItemReturn),
+        refundedItemCount: 3,
+      } as ReturnSummary,
+    ]);
+    getReturnMock.mockResolvedValue(threeItemReturn);
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+
+    expect(await table.findByText('#1098')).toBeInTheDocument();
+    expect(table.getByText('3 items returned')).toBeInTheDocument();
+    expect(table.getByText('First returned item')).toBeInTheDocument();
+    expect(table.getByText('Second returned item')).toBeInTheDocument();
+    expect(table.getByText('+1 more items')).toBeInTheDocument();
+    expect(table.queryByText('Third returned item')).not.toBeInTheDocument();
   });
 
   it('uses workflow query params to open pending return review and allows reset', async () => {
@@ -582,7 +682,7 @@ describe('ReturnsPage control center', () => {
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
     expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
-    expect(screen.getAllByText('Standard').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Standard/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
     expect(screen.queryByText(/webhook/i)).not.toBeInTheDocument();
@@ -814,6 +914,7 @@ describe('ReturnsPage control center', () => {
 
     expect(await screen.findByText('Nike Court Vision Kadın Krem Günlük Ayakkabı')).toBeInTheDocument();
     expect(screen.getAllByText('DJ1196-002-40,5').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 item returned')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
