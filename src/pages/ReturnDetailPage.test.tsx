@@ -7,7 +7,7 @@ import { ReturnDetailPage } from './ReturnDetailPage';
 import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/api';
 import { clearToken, setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
-import type { ReturnFinanceRecordsResponse } from '../lib/api/contracts';
+import type { ReturnFinanceRecordsResponse, SupportTicket, SupportTicketStatus } from '../lib/api/contracts';
 
 const appReadinessOverride = vi.hoisted(() => ({
   value: null as null | {
@@ -231,6 +231,40 @@ const closedRefundedReturnDetail: ReturnDetail = {
     },
   },
 };
+
+function linkedReturnSupportTicket(status: SupportTicketStatus, overrides: Partial<SupportTicket> = {}): SupportTicket {
+  return {
+    id: `support-${status.toLowerCase()}`,
+    createdAt: '2026-05-16T10:00:00Z',
+    updatedAt: '2026-05-16T10:00:00Z',
+    createdByUserId: 'user-1',
+    createdByRole: 'vendor',
+    vendorId: 'demo-vendor-a',
+    vendorName: 'Demo Vendor A',
+    subject: 'Help with return #1023',
+    message: 'Can you help with this return?',
+    priority: 'normal',
+    status,
+    category: 'RETURN',
+    assigneeUserId: null,
+    assigneeName: null,
+    vendorUnreadCount: 0,
+    adminUnreadCount: 1,
+    lastReplyAt: null,
+    lastReplyByRole: null,
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
+    sla: null,
+    contextType: 'return',
+    contextId: returnDetail.id,
+    contextSummary: null,
+    resolvedAt: null,
+    closedAt: null,
+    ...overrides,
+  };
+}
 
 function renderPage() {
   const queryClient = new QueryClient({
@@ -1698,6 +1732,9 @@ describe('ReturnDetailPage vendor review screen', () => {
   it('creates a context-aware support ticket from return detail', async () => {
     const user = userEvent.setup();
     getReturnMock.mockResolvedValue(returnDetail);
+    listVendorSupportTicketsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([linkedReturnSupportTicket('OPEN')]);
     createSupportTicketMock.mockResolvedValueOnce({
       id: 'ticket-1',
       createdAt: '2026-05-16T10:00:00Z',
@@ -1709,7 +1746,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       subject: 'Help with return #1023',
       message: 'Can you help with this return?',
       priority: 'normal',
-      status: 'open',
+      status: 'OPEN',
       contextType: 'return',
       contextId: returnDetail.id,
       contextSnapshot: {},
@@ -1736,6 +1773,64 @@ describe('ReturnDetailPage vendor review screen', () => {
       }),
     }));
     expect((await screen.findAllByText('Support ticket created.')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(listVendorSupportTicketsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect((await screen.findAllByText('Waiting for Sporgym support review')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Your support request was sent. Sporgym support will review it.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Support ticket open|Waiting for support/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('dialog', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(getReturnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows support-review state for an open linked return support ticket', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('OPEN')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for Sporgym support review' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Waiting for Sporgym support review');
+    expect(screen.getAllByText('Your support request was sent. Sporgym support will review it.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Support ticket open|Waiting for support/).length).toBeGreaterThan(0);
+  });
+
+  it('shows support-review state for an in-review linked return support ticket', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('IN_REVIEW')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for Sporgym support review' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Waiting for Sporgym support review');
+    expect(screen.getAllByText('Waiting for support').length).toBeGreaterThan(0);
+  });
+
+  it('keeps vendor-reply state distinct from support-review state', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('WAITING_FOR_VENDOR')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Reply to support request' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Reply to support request');
+    expect(screen.getAllByText('Sporgym support is waiting for your reply.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Reply needed').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Waiting for Sporgym support review')).not.toBeInTheDocument();
+  });
+
+  it('keeps approve and reject behavior unchanged when support ticket is open', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([linkedReturnSupportTicket('OPEN')]);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for Sporgym support review' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reject return' })).toBeDisabled();
+    expect(markReturnReceivedMock).not.toHaveBeenCalled();
+    expect(reviewReturnMock).not.toHaveBeenCalled();
   });
 
   it('hides Kargonomi return readiness preview from vendors', async () => {

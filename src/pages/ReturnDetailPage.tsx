@@ -30,7 +30,7 @@ import { listAdminSupportTickets, listVendorSupportTickets } from '../features/s
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
-import type { OperationsRecommendation } from '../lib/api/contracts';
+import type { OperationsRecommendation, SupportTicket } from '../lib/api/contracts';
 import {
   supportTicketMatchesReturn,
   type OperationalEventInput,
@@ -240,6 +240,29 @@ function getVendorReturnWorkflowDescription(description: string) {
   }
 
   return description.replace('Shopify refund', 'Refund');
+}
+
+function getVendorSupportTicketStatusLabel(ticket: SupportTicket) {
+  if (ticket.status === 'WAITING_FOR_VENDOR') {
+    return 'Reply needed';
+  }
+  if (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') {
+    return ticket.status === 'IN_REVIEW' ? 'Waiting for support' : 'Support ticket open';
+  }
+  return safeStatusLabel(ticket.status);
+}
+
+function getSupportTicketTone(ticket: SupportTicket) {
+  if (ticket.status === 'WAITING_FOR_VENDOR') {
+    return 'warning' as const;
+  }
+  if (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') {
+    return 'info' as const;
+  }
+  if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+    return 'success' as const;
+  }
+  return 'neutral' as const;
 }
 
 function readSnapshotString(snapshot: Record<string, unknown>, key: string) {
@@ -1276,6 +1299,21 @@ export function ReturnDetailPage() {
       currentVendorId: currentVendor.vendorId,
     }),
   );
+  const waitingReturnSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
+  const openLinkedSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW');
+  const vendorSupportGuidance = !isAdmin && waitingReturnSupportTicket
+    ? {
+        actionLabel: 'Reply to support request',
+        description: 'Sporgym support is waiting for your reply.',
+        tone: 'warning' as const,
+      }
+    : !isAdmin && openLinkedSupportTicket
+      ? {
+          actionLabel: 'Waiting for Sporgym support review',
+          description: 'Your support request was sent. Sporgym support will review it.',
+          tone: 'info' as const,
+        }
+      : null;
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const audience = isAdmin ? 'admin' : 'vendor';
   const returnTimelineTitle = isAdmin ? 'Return Lifecycle' : 'Return activity';
@@ -1307,8 +1345,8 @@ export function ReturnDetailPage() {
       title: ticket.subject ?? 'Support ticket',
       description: isAdmin ? (ticket.vendorName ?? ticket.vendorId) : 'Support conversation for this return.',
       href: `${supportBasePath}/${ticket.id}`,
-      status: safeStatusLabel(ticket.status),
-      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      status: isAdmin ? safeStatusLabel(ticket.status) : getVendorSupportTicketStatusLabel(ticket),
+      tone: getSupportTicketTone(ticket),
     })),
   ];
   const returnLifecycleEvents: OperationalEventInput[] = [
@@ -1375,11 +1413,11 @@ export function ReturnDetailPage() {
   const supportLifecycleEvents: OperationalEventInput[] = [
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
-      title: 'Support ticket opened',
+      title: !isAdmin && (ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW') ? 'Waiting for support' : 'Support ticket opened',
       description: ticket.subject ?? 'Support ticket',
       at: ticket.createdAt,
-      status: safeStatusLabel(ticket.status),
-      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      status: isAdmin ? safeStatusLabel(ticket.status) : getVendorSupportTicketStatusLabel(ticket),
+      tone: getSupportTicketTone(ticket),
       href: `${supportBasePath}/${ticket.id}`,
     })),
   ];
@@ -1445,7 +1483,6 @@ export function ReturnDetailPage() {
       createdAt: returnRequest.updatedAt ?? returnRequest.date,
     });
   }
-  const waitingReturnSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
   if (waitingReturnSupportTicket) {
     returnRecommendations.push({
       id: `return-rec-support-${waitingReturnSupportTicket.id}`,
@@ -1807,18 +1844,23 @@ export function ReturnDetailPage() {
 
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
-            <h3>{terminalRefundedReturn ? 'Return completed' : 'Vendor review'}</h3>
+            <h3>{terminalRefundedReturn ? 'Return completed' : vendorSupportGuidance?.actionLabel ?? 'Vendor review'}</h3>
             <p>
               {terminalRefundedReturn
                 ? 'Return is closed and refund is complete. No vendor action is required.'
+                : vendorSupportGuidance
+                  ? vendorSupportGuidance.description
                 : isAdmin
                   ? 'Vendor review only. Shopify refund is not issued here.'
                   : 'Vendor review only. Refund is not issued here.'}
             </p>
             <WorkflowActionGuidance
-              actionLabel={returnWorkflowGuidance.actionLabel}
-              description={isAdmin ? returnWorkflowGuidance.description : getVendorReturnWorkflowDescription(returnWorkflowGuidance.description)}
-              tone={returnWorkflowGuidance.tone}
+              actionLabel={vendorSupportGuidance?.actionLabel ?? returnWorkflowGuidance.actionLabel}
+              description={
+                vendorSupportGuidance?.description ??
+                (isAdmin ? returnWorkflowGuidance.description : getVendorReturnWorkflowDescription(returnWorkflowGuidance.description))
+              }
+              tone={vendorSupportGuidance?.tone ?? returnWorkflowGuidance.tone}
             />
             <div className="return-review-summary-list return-review-state-list">
               <div>
@@ -2762,7 +2804,11 @@ export function ReturnDetailPage() {
         contextSnapshot={supportSnapshot}
         defaultSubject={`Help with return ${formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}`}
         onClose={() => setSupportOpen(false)}
-        onCreated={() => showFeedback('Support ticket created.', 'success')}
+        onCreated={() => {
+          setSupportOpen(false);
+          void refetchRelatedSupportTickets();
+          showFeedback('Support ticket created.', 'success');
+        }}
       />
     </section>
   );
