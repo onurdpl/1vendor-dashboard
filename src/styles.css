@@ -372,6 +372,48 @@ a:focus-visible {
   font-weight: 650;
 }
 
+.admin-workspace-switcher {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.admin-workspace-select-label {
+  display: grid;
+  gap: 5px;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-workspace-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.admin-vendor-context {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .vendor-account-switcher {
   width: 28px;
   height: 28px;
@@ -534,8 +576,16 @@ a:focus-visible {
 }
 
 .vendor-shell-header .vendor-account-copy span,
-.vendor-shell-header .vendor-account-select {
+.vendor-shell-header .vendor-account-select,
+.vendor-shell-header .admin-workspace-select-label,
+.vendor-shell-header .admin-vendor-context {
   color: #46536a;
+}
+
+.vendor-shell-header .admin-workspace-select {
+  border-color: #e6eaf2;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 .vendor-shell-header .vendor-logout-button {
@@ -9735,8 +9785,16 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #46536a;
 }
 
-.dashboard-shell-active .vendor-account-select {
+.dashboard-shell-active .vendor-account-select,
+.dashboard-shell-active .admin-workspace-select-label,
+.dashboard-shell-active .admin-vendor-context {
   color: #46536a;
+}
+
+.dashboard-shell-active .admin-workspace-select {
+  border-color: #e6eaf2;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 .dashboard-shell-active .vendor-logout-button {
@@ -9923,8 +9981,16 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .vendor-app-shell .vendor-shell-header .vendor-account-copy span,
-.vendor-app-shell .vendor-shell-header .vendor-account-select {
+.vendor-app-shell .vendor-shell-header .vendor-account-select,
+.vendor-app-shell .vendor-shell-header .admin-workspace-select-label,
+.vendor-app-shell .vendor-shell-header .admin-vendor-context {
   color: #46536a;
+}
+
+.vendor-app-shell .vendor-shell-header .admin-workspace-select {
+  border-color: #e6eaf2;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 .vendor-app-shell .vendor-shell-header .vendor-logout-button {

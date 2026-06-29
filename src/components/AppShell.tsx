@@ -247,6 +247,15 @@ function useShellContext() {
 }
 
 type ShellContext = ReturnType<typeof useShellContext>;
+type WorkspaceMode = 'vendor' | 'admin';
+
+function getWorkspaceMode(pathname: string): WorkspaceMode {
+  return pathname.startsWith('/admin') ? 'admin' : 'vendor';
+}
+
+function getVendorContextLabel(context: ShellContext) {
+  return context.currentVendor.vendorId ? context.currentVendor.vendorName || 'unknown' : 'unknown';
+}
 
 function BrandLockup({ subtitle }: { subtitle: string }) {
   return (
@@ -290,10 +299,45 @@ function ShellAccountCard({ context, roleLabel }: { context: ShellContext; roleL
           </label>
         ) : null}
       </div>
+      <AdminWorkspaceSwitcher context={context} />
       <button type="button" className="vendor-logout-button" onClick={context.handleLogout}>
         <ShellIcon name="logout" />
         Log out
       </button>
+    </div>
+  );
+}
+
+function AdminWorkspaceSwitcher({ context }: { context: ShellContext }) {
+  const navigate = useNavigate();
+
+  if (context.currentUser?.role !== 'admin') {
+    return null;
+  }
+
+  const workspaceMode = getWorkspaceMode(context.location.pathname);
+
+  function handleWorkspaceChange(nextWorkspace: WorkspaceMode) {
+    navigate(nextWorkspace === 'admin' ? '/admin/operations' : '/');
+  }
+
+  return (
+    <div className="admin-workspace-switcher" aria-label="Admin workspace switcher">
+      <label className="admin-workspace-select-label">
+        <span>Workspace</span>
+        <select
+          className="admin-workspace-select"
+          aria-label="Workspace"
+          value={workspaceMode}
+          onChange={(event) => handleWorkspaceChange(event.target.value as WorkspaceMode)}
+        >
+          <option value="vendor">Vendor Workspace</option>
+          <option value="admin">Admin Workspace</option>
+        </select>
+      </label>
+      {workspaceMode === 'vendor' ? (
+        <span className="admin-vendor-context">Vendor context: {getVendorContextLabel(context)}</span>
+      ) : null}
     </div>
   );
 }
