@@ -1304,9 +1304,9 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
-    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
+    expect(screen.queryByLabelText('Finance workflow summary')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('refund deductions');
     expect(await screen.findByText('Read-only finance policy')).toBeInTheDocument();
     expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
     expect(screen.getByText('Latest review status')).toBeInTheDocument();
@@ -1334,7 +1334,7 @@ describe('FinancePage control center', () => {
     await userEvent.click((await screen.findAllByRole('button', { name: 'View details' }))[0]);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Financial Totals')).toHaveTextContent('settlement estimate');
+    expect(screen.queryByLabelText('Financial Totals')).not.toBeInTheDocument();
     expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();

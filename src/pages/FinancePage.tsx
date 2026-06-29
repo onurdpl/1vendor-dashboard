@@ -1545,22 +1545,24 @@ export function FinancePage() {
         </section>
       ) : (
         <>
-      <section className="finance-compact-summary" aria-label="Finance workflow summary">
-        <div className="finance-compact-primary">
-          <span className="finance-compact-label">Action required</span>
-          <strong>{needsReviewBreakdown.needsReviewTotal}</strong>
-          <small aria-label="Needs review breakdown">
-            Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Balance adjustment {needsReviewBreakdown.debtReview}
-          </small>
-        </div>
-        <div className="finance-compact-metrics" aria-label="Financial Totals">
-          <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> settlement review</span>
-          <span><strong>{settlementEstimate}</strong> settlement estimate</span>
-          <span><strong>{refundDeductions}</strong> refund deductions</span>
-          <span><strong>{vendorBalance}</strong> vendor balance</span>
-          <span><strong>{latestReview}</strong> latest draft</span>
-        </div>
-      </section>
+      {isAdmin ? (
+        <section className="finance-compact-summary" aria-label="Finance workflow summary">
+          <div className="finance-compact-primary">
+            <span className="finance-compact-label">Action required</span>
+            <strong>{needsReviewBreakdown.needsReviewTotal}</strong>
+            <small aria-label="Needs review breakdown">
+              Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Balance adjustment {needsReviewBreakdown.debtReview}
+            </small>
+          </div>
+          <div className="finance-compact-metrics" aria-label="Financial Totals">
+            <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> settlement review</span>
+            <span><strong>{settlementEstimate}</strong> settlement estimate</span>
+            <span><strong>{refundDeductions}</strong> refund deductions</span>
+            <span><strong>{vendorBalance}</strong> vendor balance</span>
+            <span><strong>{latestReview}</strong> latest draft</span>
+          </div>
+        </section>
+      ) : null}
 
       <div className="op-control-layout finance-layout">
         <div className="op-main-column finance-activity-column">
