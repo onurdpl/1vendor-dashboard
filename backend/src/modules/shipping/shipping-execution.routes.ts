@@ -1,32 +1,22 @@
 import type { FastifyInstance } from 'fastify';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
-  cancelNavlungoShipmentExecution,
   createShipmentExecution,
-  createTryOtoReturnShipmentLabel,
   getShipmentExecutionById,
   getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
-  ingestTryOtoWebhook,
   listShipmentExecutions,
-  probeShopifyReturnLabelUpload,
-  probeTryOtoReturnAwbPrint,
-  probeTryOtoReturnDetails,
-  probeTryOtoReturnLink,
   previewShipmentExecution,
   refreshKargonomiShipmentProviderData,
-  refreshShipmentExecutionStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
   syncKargonomiWarehouseDetails,
-  updateNavlungoShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
-import type { CreateShipmentExecutionDto, UpdateNavlungoShipmentDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
+import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
 
 function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
   const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
@@ -37,57 +27,13 @@ function resolveNotificationUrl(request: { headers: Record<string, unknown>; pro
   return `${protocol}://${host}/webhooks/try-oto`;
 }
 
-function readHeaderValue(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
-}
-
-function fixedLengthDigest(value: string) {
-  return createHash('sha256').update(value).digest();
-}
-
-function safeSharedSecretMatches(providedSecret: string, expectedSecret: string) {
-  return timingSafeEqual(fixedLengthDigest(providedSecret), fixedLengthDigest(expectedSecret));
-}
-
-function buildTryOtoWebhookAuthenticityVerification(mode: 'shared_secret' | 'disabled_dev_only') {
+function disabledProviderResponse(provider: 'try_oto' | 'navlungo') {
+  const label = provider === 'try_oto' ? 'Try OTO' : 'Navlungo';
   return {
-    mode,
-    providerNativeSignatureVerified: false,
-    note: 'Provider-native Try OTO signature semantics remain unknown.',
-  };
-}
-
-function verifyTryOtoWebhookAuthenticity(headers: Record<string, string | string[] | undefined>, env: AppEnv) {
-  const configuredSecret = env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim();
-  if (!configuredSecret) {
-    if (env.NODE_ENV === 'production' && env.TRY_OTO_WEBHOOK_INGEST_ENABLED) {
-      return {
-        ok: false as const,
-        code: 401,
-        message: 'Try OTO webhook authenticity is not configured.',
-        authenticityVerification: buildTryOtoWebhookAuthenticityVerification('shared_secret'),
-      };
-    }
-
-    return {
-      ok: true as const,
-      authenticityVerification: buildTryOtoWebhookAuthenticityVerification('disabled_dev_only'),
-    };
-  }
-
-  const providedSecret = readHeaderValue(headers['x-try-oto-webhook-secret']).trim();
-  if (!providedSecret || !safeSharedSecretMatches(providedSecret, configuredSecret)) {
-    return {
-      ok: false as const,
-      code: 401,
-      message: 'Try OTO webhook authenticity verification failed.',
-      authenticityVerification: buildTryOtoWebhookAuthenticityVerification('shared_secret'),
-    };
-  }
-
-  return {
-    ok: true as const,
-    authenticityVerification: buildTryOtoWebhookAuthenticityVerification('shared_secret'),
+    code: 'inactive_shipping_provider',
+    provider,
+    activeProvider: 'kargonomi',
+    message: `${label} is passive. Kargonomi is the only active shipping provider.`,
   };
 }
 
@@ -96,28 +42,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   const authMiddleware = createAuthMiddleware(authService);
 
   app.post('/webhooks/try-oto', async (request, reply) => {
-    const authenticity = verifyTryOtoWebhookAuthenticity(request.headers, env);
-    if (!authenticity.ok) {
-      return reply.code(authenticity.code).send({
-        message: authenticity.message,
-        authenticityVerification: authenticity.authenticityVerification,
-      });
-    }
-
-    const result = await ingestTryOtoWebhook(request.body, {
-      env,
-      httpMethod: request.method,
-      contentType: typeof request.headers['content-type'] === 'string' ? request.headers['content-type'] : null,
-      authenticityVerificationMode: authenticity.authenticityVerification.mode,
-    });
-    if (!result.ok) {
-      return reply.code(result.code ?? 501).send({
-        message: result.message,
-        authenticityVerification: result.authenticityVerification,
-      });
-    }
-
-    return result;
+    void request;
+    return reply.code(409).send(disabledProviderResponse('try_oto'));
   });
 
   app.get(
@@ -251,15 +177,10 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      try {
-        return await refreshShipmentExecutionStatus(request.params.id, {
-          env,
-          vendorId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Shipment status could not be refreshed.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void vendorId;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 
@@ -301,15 +222,10 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      try {
-        return await cancelNavlungoShipmentExecution(request.params.id, {
-          env,
-          vendorId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Shipment cancellation could not be completed.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void vendorId;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('navlungo'));
     },
   );
 
@@ -324,15 +240,10 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      try {
-        return await updateNavlungoShipmentExecution(request.params.id, (request.body ?? {}) as UpdateNavlungoShipmentDto, {
-          env,
-          vendorId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Shipment update could not be completed.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void vendorId;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('navlungo'));
     },
   );
 
@@ -347,18 +258,10 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      try {
-        const body = (request.body ?? {}) as { dryRun?: boolean; customerOverrides?: CreateShipmentExecutionDto['customerOverrides'] };
-        return await createTryOtoReturnShipmentLabel(request.params.id, {
-          env,
-          vendorId,
-          dryRun: body.dryRun === true,
-          customerOverrides: body.customerOverrides,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Return shipment could not be created.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void vendorId;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 
@@ -373,12 +276,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       const query = request.query as { provider?: string; vendorId?: string };
-      const provider =
-        query.provider === 'try_oto' ||
-        query.provider === 'kargonomi' ||
-        query.provider === 'navlungo'
-          ? query.provider
-          : undefined;
+      const provider = query.provider === 'kargonomi' ? query.provider : undefined;
       return getShippingProviderReadinessDiagnostics(env, provider, query.vendorId);
     },
   );
@@ -434,14 +332,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      try {
-        return await probeTryOtoReturnDetails(request.params.id, {
-          env,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Try OTO return details probe could not be run.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 
@@ -455,14 +348,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      try {
-        return await probeTryOtoReturnLink(request.params.id, {
-          env,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Try OTO return link probe could not be run.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 
@@ -476,14 +364,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      try {
-        return await probeTryOtoReturnAwbPrint(request.params.id, {
-          env,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Try OTO return AWB print probe could not be run.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 
@@ -497,14 +380,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      try {
-        return await probeShopifyReturnLabelUpload(request.params.id, {
-          env,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Shopify return label upload probe could not be run.';
-        return reply.code(400).send({ message });
-      }
+      void env;
+      void request;
+      return reply.code(409).send(disabledProviderResponse('try_oto'));
     },
   );
 

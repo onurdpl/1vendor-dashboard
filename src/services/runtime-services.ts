@@ -1795,7 +1795,7 @@ export const runtimeServices = {
       if (provider === 'navlungo') {
         return {
           provider: 'navlungo' as const,
-          supportedProviders: ['navlungo' as const],
+          supportedProviders: ['kargonomi' as const],
           executionReady: false,
           sandboxModeEnabled: false,
           shippingExecutionEnabled: false,
@@ -1813,9 +1813,9 @@ export const runtimeServices = {
           receiverAddressAvailability: 'unknown_required' as const,
           dummyKargoSupport: 'not_implemented' as const,
           statusSyncSupport: 'not_implemented' as const,
-          missing: ['NAVLUNGO_BASE_URL', 'NAVLUNGO_API_USERNAME', 'NAVLUNGO_API_PASSWORD'],
+          missing: ['inactive_shipping_provider'],
           deprecatedEnvFallbacks: [],
-          warnings: ['Navlungo forward shipment execution is enabled only when explicitly selected.'],
+          warnings: ['Navlungo is passive. Kargonomi is the only active shipping provider.'],
           navlungo: {
             usernameConfigured: false,
             passwordConfigured: false,
@@ -1831,7 +1831,7 @@ export const runtimeServices = {
 
       return {
         provider,
-        supportedProviders: ['hepsijet' as const, 'kargonomi' as const],
+        supportedProviders: ['kargonomi' as const],
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,

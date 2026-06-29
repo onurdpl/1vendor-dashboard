@@ -108,7 +108,7 @@ function buildLookupProbeAppEnv(env: LookupProbeEnv): AppEnv {
     EMAIL_ADMIN_RECIPIENTS: [],
     SHIPPING_EXECUTION_ENABLED: false,
     SHIPPING_SANDBOX_MODE: false,
-    SHIPPING_PROVIDER: 'hepsijet',
+    SHIPPING_PROVIDER: 'kargonomi',
     KARGO_ENTEGRATOR_ENABLED: false,
     KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
     TRY_OTO_ENABLED: false,

@@ -134,7 +134,7 @@ function mapProvider(provider: ShippingProvider | string): ShippingProviderDto {
 }
 
 function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
-  const normalized = (provider ?? 'hepsijet').trim().toLowerCase();
+  const normalized = (provider ?? 'kargonomi').trim().toLowerCase();
   if (normalized === 'hepsijet') {
     return ShippingProvider.HEPSIJET;
   }
@@ -158,6 +158,25 @@ function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
   }
 
   throw new Error('Unsupported shipping provider.');
+}
+
+function passiveShippingProviderLabel(provider: ShippingProvider | ShippingProviderDto) {
+  return mapProvider(provider) === 'try_oto' ? 'Try OTO' : 'Navlungo';
+}
+
+function isPassiveShippingProvider(provider: ShippingProvider | ShippingProviderDto) {
+  const providerDto = mapProvider(provider);
+  return providerDto === 'try_oto' || providerDto === 'navlungo';
+}
+
+function buildPassiveShippingProviderMessage(provider: ShippingProvider | ShippingProviderDto) {
+  return `${passiveShippingProviderLabel(provider)} is passive. Kargonomi is the only active shipping provider.`;
+}
+
+function assertActiveShippingProvider(provider: ShippingProvider | ShippingProviderDto) {
+  if (isPassiveShippingProvider(provider)) {
+    throw new Error(buildPassiveShippingProviderMessage(provider));
+  }
 }
 
 function mapStatus(status: ShipmentExecutionStatus | string): ShipmentExecutionDto['shipmentStatus'] {
@@ -2619,55 +2638,58 @@ export function getShippingProviderGateDiagnostics(
   providerOverride?: ShippingProviderDto,
 ): ShippingProviderGateDiagnosticsDto {
   const provider = providerOverride ?? env.SHIPPING_PROVIDER;
-  const isTryOto = provider === 'try_oto';
+  if (provider === 'try_oto' || provider === 'navlungo') {
+    return {
+      provider,
+      supportedProviders: ['kargonomi'],
+      executionReady: false,
+      sandboxModeEnabled: env.SHIPPING_SANDBOX_MODE,
+      shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
+      providerSelected: false,
+      providerEnabled: false,
+      webhookIngestEnabled: false,
+      lastWebhookReceived: false,
+      lastWebhookReceivedAt: null,
+      lastWebhookHttpMethod: null,
+      lastWebhookContentType: null,
+      lastWebhookPayloadKeys: [],
+      lastWebhookMatchedShipment: null,
+      lastWebhookMatchStatus: null,
+      lastWebhookMatchedByField: null,
+      lastWebhookStatusValue: null,
+      lastWebhookStatusMapped: null,
+      lastWebhookMappedLocalStatus: null,
+      lastWebhookParseError: null,
+      webhookSignatureVerificationImplemented: false,
+      webhookAuthenticityVerification: buildTryOtoWebhookAuthenticityVerification(),
+      baseUrlConfigured: false,
+      apiKeyConfigured: false,
+      cargoIntegrationIdConfigured: false,
+      warehouseIdConfigured: false,
+      defaultDesiConfigured: false,
+      packageTypeUsed: '',
+      notificationUrlConfigured: false,
+      webhookRouteImplemented: false,
+      receiverAddressAvailability: 'confirmed_required',
+      dummyKargoSupport: 'not_implemented',
+      statusSyncSupport: 'not_implemented',
+      missing: ['inactive_shipping_provider'],
+      deprecatedEnvFallbacks: [],
+      warnings: [buildPassiveShippingProviderMessage(provider)],
+    };
+  }
   const isKargonomi = provider === 'kargonomi';
-  const isNavlungo = provider === 'navlungo';
-  const supportedProviders: ShippingProviderDto[] = [
-    'hepsijet',
-    ...(env.TRY_OTO_ENABLED ? (['try_oto'] as ShippingProviderDto[]) : []),
-    ...(env.SHIPPING_PROVIDER === 'kargonomi' || env.KARGONOMI_BASE_URL || env.KARGONOMI_API_TOKEN
-      ? (['kargonomi'] as ShippingProviderDto[])
-      : []),
-    ...(env.SHIPPING_PROVIDER === 'navlungo' || env.NAVLUNGO_BASE_URL || env.NAVLUNGO_API_USERNAME || env.NAVLUNGO_API_PASSWORD
-      ? (['navlungo'] as ShippingProviderDto[])
-      : []),
-  ];
+  const supportedProviders: ShippingProviderDto[] = ['kargonomi'];
   const providerSelected = env.SHIPPING_PROVIDER === provider;
-  const providerEnabled = isTryOto
-    ? env.TRY_OTO_ENABLED
-    : isKargonomi
-      ? providerSelected
-      : isNavlungo
-        ? Boolean(env.NAVLUNGO_BASE_URL && env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
-        : false;
-  const baseUrlConfigured = isTryOto
-    ? Boolean(env.TRY_OTO_BASE_URL)
-    : isKargonomi
-      ? Boolean(env.KARGONOMI_BASE_URL)
-      : isNavlungo
-        ? Boolean(env.NAVLUNGO_BASE_URL)
-        : false;
-  const apiKeyConfigured = isTryOto
-    ? Boolean(env.TRY_OTO_REFRESH_TOKEN)
-    : isKargonomi
-      ? Boolean(env.KARGONOMI_API_TOKEN)
-      : isNavlungo
-        ? Boolean(env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
-        : false;
+  const providerEnabled = isKargonomi ? providerSelected : false;
+  const baseUrlConfigured = isKargonomi ? Boolean(env.KARGONOMI_BASE_URL) : false;
+  const apiKeyConfigured = isKargonomi ? Boolean(env.KARGONOMI_API_TOKEN) : false;
   const cargoIntegrationIdConfigured = false;
-  const tryOtoWebhookDiagnostics = isTryOto ? getTryOtoWebhookReceiveDiagnostics() : null;
   const packageTypeUsed = '';
   const missing = [
     !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
-    isTryOto && !env.TRY_OTO_ENABLED ? 'TRY_OTO_ENABLED' : null,
-    isTryOto && !env.TRY_OTO_SANDBOX_MODE ? 'TRY_OTO_SANDBOX_MODE' : null,
-    isTryOto && !env.TRY_OTO_BASE_URL ? 'TRY_OTO_BASE_URL' : null,
-    isTryOto && !env.TRY_OTO_REFRESH_TOKEN ? 'TRY_OTO_REFRESH_TOKEN' : null,
     isKargonomi && !env.KARGONOMI_BASE_URL ? 'KARGONOMI_BASE_URL' : null,
     isKargonomi && !env.KARGONOMI_API_TOKEN ? 'KARGONOMI_API_TOKEN' : null,
-    isNavlungo && !env.NAVLUNGO_BASE_URL ? 'NAVLUNGO_BASE_URL' : null,
-    isNavlungo && !env.NAVLUNGO_API_USERNAME ? 'NAVLUNGO_API_USERNAME' : null,
-    isNavlungo && !env.NAVLUNGO_API_PASSWORD ? 'NAVLUNGO_API_PASSWORD' : null,
   ].filter((value): value is string => Boolean(value));
 
   return {
@@ -2677,29 +2699,26 @@ export function getShippingProviderGateDiagnostics(
       env.SHIPPING_EXECUTION_ENABLED &&
       providerEnabled &&
       baseUrlConfigured &&
-      apiKeyConfigured &&
-      (!isTryOto || env.TRY_OTO_SANDBOX_MODE),
-    sandboxModeEnabled: isTryOto ? env.TRY_OTO_SANDBOX_MODE : env.SHIPPING_SANDBOX_MODE,
+      apiKeyConfigured,
+    sandboxModeEnabled: env.SHIPPING_SANDBOX_MODE,
     shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
     providerSelected,
     providerEnabled,
-    webhookIngestEnabled: isTryOto ? env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED : false,
-    lastWebhookReceived: tryOtoWebhookDiagnostics?.received ?? false,
-    lastWebhookReceivedAt: tryOtoWebhookDiagnostics?.receivedAt ?? null,
-    lastWebhookHttpMethod: tryOtoWebhookDiagnostics?.httpMethod ?? null,
-    lastWebhookContentType: tryOtoWebhookDiagnostics?.contentType ?? null,
-    lastWebhookPayloadKeys: tryOtoWebhookDiagnostics?.payloadKeys ?? [],
-    lastWebhookMatchedShipment: tryOtoWebhookDiagnostics?.matchedShipment ?? null,
-    lastWebhookMatchStatus: tryOtoWebhookDiagnostics?.matchStatus ?? null,
-    lastWebhookMatchedByField: tryOtoWebhookDiagnostics?.matchedByField ?? null,
-    lastWebhookStatusValue: tryOtoWebhookDiagnostics?.statusValue ?? null,
-    lastWebhookStatusMapped: tryOtoWebhookDiagnostics?.statusMapped ?? null,
-    lastWebhookMappedLocalStatus: tryOtoWebhookDiagnostics?.mappedLocalStatus ?? null,
-    lastWebhookParseError: tryOtoWebhookDiagnostics?.parseError ?? null,
-    webhookSignatureVerificationImplemented:
-      tryOtoWebhookDiagnostics?.authenticityVerification.providerNativeSignatureVerified ?? false,
-    webhookAuthenticityVerification:
-      tryOtoWebhookDiagnostics?.authenticityVerification ?? buildTryOtoWebhookAuthenticityVerification(),
+    webhookIngestEnabled: false,
+    lastWebhookReceived: false,
+    lastWebhookReceivedAt: null,
+    lastWebhookHttpMethod: null,
+    lastWebhookContentType: null,
+    lastWebhookPayloadKeys: [],
+    lastWebhookMatchedShipment: null,
+    lastWebhookMatchStatus: null,
+    lastWebhookMatchedByField: null,
+    lastWebhookStatusValue: null,
+    lastWebhookStatusMapped: null,
+    lastWebhookMappedLocalStatus: null,
+    lastWebhookParseError: null,
+    webhookSignatureVerificationImplemented: false,
+    webhookAuthenticityVerification: buildTryOtoWebhookAuthenticityVerification(),
     baseUrlConfigured,
     apiKeyConfigured,
     cargoIntegrationIdConfigured,
@@ -2710,46 +2729,16 @@ export function getShippingProviderGateDiagnostics(
     webhookRouteImplemented: true,
     receiverAddressAvailability: 'confirmed_required',
     dummyKargoSupport: 'not_implemented',
-    statusSyncSupport:
-      isTryOto && env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
-        ? 'webhook_ingest'
-        : 'not_implemented',
+    statusSyncSupport: 'not_implemented',
     missing,
     deprecatedEnvFallbacks: [],
-    warnings: isTryOto
+    warnings: isKargonomi
       ? [
-          'Try OTO is sandbox-only in this phase.',
-          TRY_OTO_WEBHOOK_SIGNATURE_WARNING,
-          'Try OTO returns and production rollout are not implemented.',
+          'Kargonomi forward shipment execution is enabled only when explicitly selected.',
+          'Kargonomi return/reverse shipment is not implemented.',
         ]
-      : isKargonomi
-        ? [
-            'Kargonomi forward shipment execution is enabled only when explicitly selected.',
-            'Kargonomi return/reverse shipment is not implemented.',
-          ]
-        : isNavlungo
-          ? [
-              'Navlungo forward shipment execution is enabled only when explicitly selected.',
-              'Navlungo return/reverse shipment is not implemented.',
-              'Navlungo webhook/status callback ingest is not implemented.',
-              ...(usesDeprecatedNavlungoV2BaseUrl(env.NAVLUNGO_BASE_URL)
-                ? ['NAVLUNGO_BASE_URL uses deprecated /v2 path. Configure the documented v2.1 base URL.']
-                : []),
-            ]
-          : [],
+      : [],
   };
-}
-
-function usesDeprecatedNavlungoV2BaseUrl(baseUrl: string | undefined) {
-  if (!baseUrl?.trim()) {
-    return false;
-  }
-  try {
-    const parsed = new URL(baseUrl);
-    return parsed.pathname.replace(/\/+$/, '') === '/v2';
-  } catch {
-    return false;
-  }
 }
 
 export async function getShippingProviderReadinessDiagnostics(
@@ -2759,9 +2748,7 @@ export async function getShippingProviderReadinessDiagnostics(
 ): Promise<ShippingProviderGateDiagnosticsDto> {
   const diagnostics = getShippingProviderGateDiagnostics(env, providerOverride);
   if (
-    (diagnostics.provider !== 'try_oto' &&
-      diagnostics.provider !== 'kargonomi' &&
-      diagnostics.provider !== 'navlungo') ||
+    diagnostics.provider !== 'kargonomi' ||
     !vendorId
   ) {
     return diagnostics;
@@ -2769,27 +2756,6 @@ export async function getShippingProviderReadinessDiagnostics(
 
   const config = mapShippingConfig(await getStoredShippingConfig(vendorId), vendorId);
   const configProviderSelected = mapProvider(config.preferredProvider) === diagnostics.provider;
-  if (diagnostics.provider === 'try_oto') {
-    const pickupLocationCodeConfigured = Boolean(resolveTryOtoPickupLocationCode(config.providerMetadata));
-    const originCityConfigured = Boolean(resolveTryOtoOriginCity(config.providerMetadata));
-    const defaultDesiConfigured = Number(config.defaultDesi) > 0;
-    const missing = [
-      ...diagnostics.missing,
-      !pickupLocationCodeConfigured ? 'VENDOR_TRY_OTO_PICKUP_LOCATION_CODE' : null,
-      !originCityConfigured ? 'VENDOR_TRY_OTO_ORIGIN_CITY' : null,
-      !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
-    ].filter((value): value is string => Boolean(value));
-
-    return {
-      ...diagnostics,
-      providerSelected: configProviderSelected,
-      executionReady: diagnostics.executionReady && pickupLocationCodeConfigured && originCityConfigured && defaultDesiConfigured,
-      warehouseIdConfigured: pickupLocationCodeConfigured,
-      defaultDesiConfigured,
-      missing,
-    };
-  }
-
   if (diagnostics.provider === 'kargonomi') {
     const warehouseIdConfigured = Boolean(resolveKargonomiWarehouseId(config, env));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
@@ -6348,15 +6314,8 @@ async function buildShipmentRequestPreview(
   }
 
   const provider = normalizeProvider(input.provider ?? config.preferredProvider);
+  assertActiveShippingProvider(provider);
   const providerDto = mapProvider(provider);
-  if (
-    provider !== ShippingProvider.HEPSIJET &&
-    provider !== ShippingProvider.TRY_OTO &&
-    provider !== ShippingProvider.KARGONOMI &&
-    provider !== ShippingProvider.NAVLUNGO
-  ) {
-    throw new Error('Only Hepsijet, Try OTO, Kargonomi, and Navlungo shipment execution are implemented.');
-  }
   const kargonomiWarehouseId =
     provider === ShippingProvider.KARGONOMI ? resolveKargonomiWarehouseId(config, options.env) : null;
   if (provider === ShippingProvider.KARGONOMI && !kargonomiWarehouseId) {
@@ -6977,6 +6936,7 @@ export async function retryDryRunShipmentExecution(
   assertDryRunRetryEligible(existing);
 
   const providerDto = mapProvider(existing.provider);
+  assertActiveShippingProvider(providerDto);
   const diagnostics =
     providerDto === 'navlungo'
       ? await getShippingProviderReadinessDiagnostics(options.env, providerDto, existing.vendorId)
@@ -7116,6 +7076,7 @@ export async function retryFailedShipmentExecution(
   }
 
   const providerDto = mapProvider(existing.provider);
+  assertActiveShippingProvider(providerDto);
   const diagnostics = await getShippingProviderReadinessDiagnostics(options.env, providerDto, existing.vendorId);
   if (!diagnostics.executionReady) {
     const missing = diagnostics.missing.length ? diagnostics.missing.join(', ') : 'provider configuration';

@@ -17,6 +17,9 @@ function resetEnv(overrides: Record<string, string | undefined>) {
     NODE_ENV: 'test',
     JWT_SECRET: 'test',
     SHOPIFY_WEBHOOK_SECRET: 'test',
+    SHIPPING_PROVIDER: 'kargonomi',
+    KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+    KARGONOMI_API_TOKEN: 'configured-token',
     LIDIO_ENABLED: undefined,
     LIDIO_BASE_URL: undefined,
     LIDIO_MERCHANT_CODE: undefined,
@@ -34,10 +37,12 @@ describe('backend env shipping provider gates', () => {
     process.env = { ...originalEnv };
   });
 
-  it('parses Try OTO sandbox provider gates without enabling production rollout', () => {
+  it('keeps Try OTO passive while preserving its stored env values', () => {
     resetEnv({
-      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_PROVIDER: 'kargonomi',
       SHIPPING_EXECUTION_ENABLED: 'true',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
       TRY_OTO_ENABLED: 'true',
       TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
       TRY_OTO_REFRESH_TOKEN: 'configured-refresh-token',
@@ -47,43 +52,54 @@ describe('backend env shipping provider gates', () => {
 
     const env = loadEnv();
 
-    expect(env.SHIPPING_PROVIDER).toBe('try_oto');
+    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
     expect(env.SHIPPING_EXECUTION_ENABLED).toBe(true);
     expect(env.TRY_OTO_ENABLED).toBe(true);
     expect(env.TRY_OTO_BASE_URL).toBe('https://staging-api.tryoto.com');
     expect(env.TRY_OTO_REFRESH_TOKEN).toBe('configured-refresh-token');
     expect(env.TRY_OTO_SANDBOX_MODE).toBe(true);
-    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(true);
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
   });
 
-  it('rejects production Try OTO webhook ingestion when shared secret is missing', () => {
+  it('does not require Try OTO webhook secret in production when legacy ingest env is set', () => {
     resetEnv({
       NODE_ENV: 'production',
       CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
       SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
       SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      SHIPPING_PROVIDER: 'kargonomi',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
       TRY_OTO_ENABLED: 'true',
       TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
       TRY_OTO_WEBHOOK_SHARED_SECRET: undefined,
     });
 
-    expect(() => loadEnv()).toThrow(
-      'TRY_OTO_WEBHOOK_SHARED_SECRET is required in production when TRY_OTO_WEBHOOK_INGEST_ENABLED=true.',
-    );
+    const env = loadEnv();
+
+    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
+    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBeUndefined();
   });
 
-  it('rejects production Try OTO webhook ingestion when shared secret is too short', () => {
+  it('ignores short Try OTO webhook secrets because ingest is passive', () => {
     resetEnv({
       NODE_ENV: 'production',
       CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
       SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
       SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      SHIPPING_PROVIDER: 'kargonomi',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
       TRY_OTO_ENABLED: 'true',
       TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
       TRY_OTO_WEBHOOK_SHARED_SECRET: 'short-secret',
     });
 
-    expect(() => loadEnv()).toThrow('TRY_OTO_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
+    const env = loadEnv();
+
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
+    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBe('short-secret');
   });
 
   it('parses Kargonomi env values without requiring X-App-Key', () => {
@@ -124,7 +140,9 @@ describe('backend env shipping provider gates', () => {
 
   it('parses Navlungo env values without switching provider by default', () => {
     resetEnv({
-      SHIPPING_PROVIDER: 'hepsijet',
+      SHIPPING_PROVIDER: 'kargonomi',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
       NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
       NAVLUNGO_API_USERNAME: 'api-user',
       NAVLUNGO_API_PASSWORD: 'secret-password',
@@ -136,7 +154,7 @@ describe('backend env shipping provider gates', () => {
 
     const env = loadEnv();
 
-    expect(env.SHIPPING_PROVIDER).toBe('hepsijet');
+    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
     expect(env.NAVLUNGO_BASE_URL).toBe('https://domestic-api.navlungo.com/v2');
     expect(env.NAVLUNGO_API_USERNAME).toBe('api-user');
     expect(env.NAVLUNGO_API_PASSWORD).toBe('secret-password');
@@ -146,7 +164,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.NAVLUNGO_DEFAULT_CARRIER_ID).toBe('9');
   });
 
-  it('allows Navlungo as a live SHIPPING_PROVIDER with required credentials', () => {
+  it('rejects Navlungo as a live SHIPPING_PROVIDER even with credentials', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'navlungo',
       NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
@@ -154,10 +172,21 @@ describe('backend env shipping provider gates', () => {
       NAVLUNGO_API_PASSWORD: 'secret-password',
     });
 
-    expect(loadEnv().SHIPPING_PROVIDER).toBe('navlungo');
+    expect(() => loadEnv()).toThrow('SHIPPING_PROVIDER=navlungo is inactive. Only kargonomi is active.');
   });
 
-  it('rejects Navlungo provider selection when credentials are missing', () => {
+  it('rejects Try OTO as a live SHIPPING_PROVIDER', () => {
+    resetEnv({
+      SHIPPING_PROVIDER: 'try_oto',
+      TRY_OTO_ENABLED: 'true',
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'configured-refresh-token',
+    });
+
+    expect(() => loadEnv()).toThrow('SHIPPING_PROVIDER=try_oto is inactive. Only kargonomi is active.');
+  });
+
+  it('rejects Navlungo provider selection before checking credentials', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'navlungo',
       NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
@@ -165,7 +194,7 @@ describe('backend env shipping provider gates', () => {
       NAVLUNGO_API_PASSWORD: undefined,
     });
 
-    expect(() => loadEnv()).toThrow('NAVLUNGO_API_PASSWORD is required when SHIPPING_PROVIDER=navlungo.');
+    expect(() => loadEnv()).toThrow('SHIPPING_PROVIDER=navlungo is inactive. Only kargonomi is active.');
   });
 
   it('rejects Kargonomi provider selection when the API token is missing', () => {

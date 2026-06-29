@@ -3052,7 +3052,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('reuses stale Navlungo execution row and persists successful provider fields on vendor create', async () => {
+  it.skip('reuses stale Navlungo execution row and persists successful provider fields on vendor create', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3175,7 +3175,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('lets vendor retry reach Navlungo stale recovery for pending rows without provider evidence', async () => {
+  it.skip('lets vendor retry reach Navlungo stale recovery for pending rows without provider evidence', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3328,7 +3328,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('uses full Navlungo sender details only for an admin flagged retry', async () => {
+  it.skip('uses full Navlungo sender details only for an admin flagged retry', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3437,7 +3437,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('blocks admin flagged Navlungo full sender retry when sender details are incomplete', async () => {
+  it.skip('blocks admin flagged Navlungo full sender retry when sender details are incomplete', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3495,7 +3495,7 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
-  it('uses full Navlungo sender details for a vendor flagged retry', async () => {
+  it.skip('uses full Navlungo sender details for a vendor flagged retry', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3576,7 +3576,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('syncs successful Navlungo create tracking to Shopify fulfillment automatically', async () => {
+  it.skip('syncs successful Navlungo create tracking to Shopify fulfillment automatically', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'NAVLUNGO',
@@ -3642,7 +3642,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('syncs successful Navlungo retry tracking to Shopify fulfillment automatically', async () => {
+  it.skip('syncs successful Navlungo retry tracking to Shopify fulfillment automatically', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -3706,7 +3706,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('does not duplicate Shopify fulfillment for an already synced Navlungo shipment', async () => {
+  it.skip('does not duplicate Shopify fulfillment for an already synced Navlungo shipment', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'NAVLUNGO',
@@ -3776,7 +3776,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('skips Shopify fulfillment sync when successful Navlungo response has no tracking number', async () => {
+  it.skip('skips Shopify fulfillment sync when successful Navlungo response has no tracking number', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'NAVLUNGO',
@@ -4089,7 +4089,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('copies the latest successful Navlungo request summary into a failed vendor retry snapshot', async () => {
+  it.skip('copies the latest successful Navlungo request summary into a failed vendor retry snapshot', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -4239,7 +4239,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(storedExecution.responseSnapshot)).not.toContain('Test Mahallesi');
   });
 
-  it('ignores incomplete Navlungo successful-looking summaries when building failed retry diagnostics', async () => {
+  it.skip('ignores incomplete Navlungo successful-looking summaries when building failed retry diagnostics', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -4360,7 +4360,7 @@ describe('shipping execution foundation', () => {
 
 
 
-  it('retries an existing pending Navlungo dry-run shipment through vendor-aware real path config', async () => {
+  it.skip('retries an existing pending Navlungo dry-run shipment through vendor-aware real path config', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
@@ -4510,7 +4510,7 @@ describe('shipping execution foundation', () => {
 
 
 
-  it('retries Try OTO shipments with the existing OTO order context', async () => {
+  it.skip('retries Try OTO shipments with the existing OTO order context', async () => {
     const existingOrderId = 'SPORJINAL-1027';
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
@@ -4753,7 +4753,30 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('reports Navlungo ready when selected with sender address and defaults', async () => {
+  it('reports passive provider diagnostics for Navlungo and Try OTO', () => {
+    const navlungoDiagnostics = getShippingProviderGateDiagnostics(env, 'navlungo');
+    const tryOtoDiagnostics = getShippingProviderGateDiagnostics(env, 'try_oto');
+
+    expect(navlungoDiagnostics).toMatchObject({
+      provider: 'navlungo',
+      supportedProviders: ['kargonomi'],
+      executionReady: false,
+      providerEnabled: false,
+      missing: ['inactive_shipping_provider'],
+      warnings: ['Navlungo is passive. Kargonomi is the only active shipping provider.'],
+    });
+    expect(tryOtoDiagnostics).toMatchObject({
+      provider: 'try_oto',
+      supportedProviders: ['kargonomi'],
+      executionReady: false,
+      providerEnabled: false,
+      webhookIngestEnabled: false,
+      missing: ['inactive_shipping_provider'],
+      warnings: ['Try OTO is passive. Kargonomi is the only active shipping provider.'],
+    });
+  });
+
+  it.skip('reports Navlungo ready when selected with sender address and defaults', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -4818,7 +4841,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
   });
 
-  it('warns when Navlungo base URL still uses deprecated v2 path', async () => {
+  it.skip('warns when Navlungo base URL still uses deprecated v2 path', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -4852,7 +4875,7 @@ describe('shipping execution foundation', () => {
     ]));
   });
 
-  it('reports Navlungo ready from vendor config even when the global provider differs', async () => {
+  it.skip('reports Navlungo ready from vendor config even when the global provider differs', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -4896,7 +4919,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('55574');
   });
 
-  it('requires a numeric Navlungo sender address id for readiness', async () => {
+  it.skip('requires a numeric Navlungo sender address id for readiness', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -4939,7 +4962,7 @@ describe('shipping execution foundation', () => {
   });
 
 
-  it('builds a Navlungo Create Post payload and blocks missing recipient fields before provider call', async () => {
+  it.skip('builds a Navlungo Create Post payload and blocks missing recipient fields before provider call', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -5137,7 +5160,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('blocks Navlungo shipment execution when sender address id is missing', async () => {
+  it.skip('blocks Navlungo shipment execution when sender address id is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -8312,7 +8335,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(prismaMock.shipmentExecution.update.mock.calls)).not.toContain('Authorization');
   });
 
-  it('registers a Try OTO webhook route that is disabled by default', async () => {
+  it.skip('registers a Try OTO webhook route that is disabled by default', async () => {
     const posts = new Map<
       string,
       (
@@ -8378,7 +8401,7 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
-  it('rejects Try OTO webhooks when a configured shared secret header is missing', async () => {
+  it.skip('rejects Try OTO webhooks when a configured shared secret header is missing', async () => {
     const posts = new Map<
       string,
       (
@@ -8429,7 +8452,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
-  it('rejects Try OTO webhooks when a configured shared secret header is invalid', async () => {
+  it.skip('rejects Try OTO webhooks when a configured shared secret header is invalid', async () => {
     const posts = new Map<
       string,
       (
@@ -8488,7 +8511,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
-  it('allows Try OTO webhook ingestion when the configured shared secret header is valid', async () => {
+  it.skip('allows Try OTO webhook ingestion when the configured shared secret header is valid', async () => {
     const posts = new Map<
       string,
       (
@@ -8544,7 +8567,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
-  it('handles unknown Try OTO webhook payloads without crashing or mutating data', async () => {
+  it.skip('handles unknown Try OTO webhook payloads without crashing or mutating data', async () => {
     const result = await ingestTryOtoWebhook(
       { unknown: true },
       {
@@ -8586,7 +8609,7 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
-  it('records Try OTO webhook parse diagnostics safely', async () => {
+  it.skip('records Try OTO webhook parse diagnostics safely', async () => {
     const result = await ingestTryOtoWebhook(null, {
       env: {
         ...env,
@@ -8621,7 +8644,7 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
-  it('ingests Try OTO webhook tracking updates into the matched shipment execution', async () => {
+  it.skip('ingests Try OTO webhook tracking updates into the matched shipment execution', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
       provider: 'TRY_OTO',
@@ -8769,7 +8792,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('maps observed Try OTO searchingDriver webhook status to an in-progress local shipment status', async () => {
+  it.skip('maps observed Try OTO searchingDriver webhook status to an in-progress local shipment status', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
       provider: 'TRY_OTO',
@@ -8849,7 +8872,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('maps confirmed Try OTO delivered webhook status to the local delivered shipment state', async () => {
+  it.skip('maps confirmed Try OTO delivered webhook status to the local delivered shipment state', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
       provider: 'TRY_OTO',
@@ -9095,7 +9118,7 @@ describe('shipping execution foundation', () => {
     expect(updatePayload.timeline?.filter((event) => event.label === 'Try OTO status updated')).toHaveLength(1);
   });
 
-  it('records unmatched Try OTO webhooks safely without mutating shipments', async () => {
+  it.skip('records unmatched Try OTO webhooks safely without mutating shipments', async () => {
     prismaMock.shipmentExecution.findFirst.mockResolvedValue(null);
     prismaMock.shipmentExecution.findMany.mockResolvedValue([]);
 
@@ -10081,7 +10104,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('builds Try OTO createOrder payload with required Turkey fields from allocation data', async () => {
+  it.skip('builds Try OTO createOrder payload with required Turkey fields from allocation data', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         order: {
@@ -10174,7 +10197,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('persists Try OTO shipment execution with allocation relation and finite desi', async () => {
+  it.skip('persists Try OTO shipment execution with allocation relation and finite desi', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         order: {
@@ -10279,7 +10302,7 @@ describe('shipping execution foundation', () => {
     expect(createData).not.toHaveProperty('allocationId');
   });
 
-  it('treats async Try OTO createShipment failures with existing order context as created', async () => {
+  it.skip('treats async Try OTO createShipment failures with existing order context as created', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         fulfillmentStatus: 'Pending',
@@ -10393,7 +10416,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('keeps non-recoverable Try OTO validation errors failed', async () => {
+  it.skip('keeps non-recoverable Try OTO validation errors failed', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         order: {
@@ -10480,7 +10503,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('blocks Try OTO shipment execution before provider lookup when origin city is missing', async () => {
+  it.skip('blocks Try OTO shipment execution before provider lookup when origin city is missing', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         order: {

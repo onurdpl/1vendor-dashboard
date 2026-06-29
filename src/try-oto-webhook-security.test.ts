@@ -26,6 +26,9 @@ function resetEnv(overrides: Record<string, string | undefined>) {
     NODE_ENV: 'test',
     JWT_SECRET: 'test',
     SHOPIFY_WEBHOOK_SECRET: 'test',
+    SHIPPING_PROVIDER: 'kargonomi',
+    KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+    KARGONOMI_API_TOKEN: 'configured-token',
     ...overrides,
   };
 }
@@ -51,14 +54,14 @@ function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     EMAIL_ADMIN_RECIPIENTS: [],
     SHIPPING_EXECUTION_ENABLED: true,
     SHIPPING_SANDBOX_MODE: false,
-    SHIPPING_PROVIDER: 'try_oto',
+    SHIPPING_PROVIDER: 'kargonomi',
     KARGO_ENTEGRATOR_ENABLED: false,
     KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
     TRY_OTO_ENABLED: true,
     TRY_OTO_SANDBOX_MODE: false,
     TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
-    KARGONOMI_BASE_URL: undefined,
-    KARGONOMI_API_TOKEN: undefined,
+    KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+    KARGONOMI_API_TOKEN: 'configured-token',
     KARGONOMI_APP_KEY: undefined,
     KARGONOMI_DEFAULT_WAREHOUSE_ID: undefined,
     NAVLUNGO_BASE_URL: undefined,
@@ -115,7 +118,7 @@ describe('Try OTO webhook security', () => {
     process.env = { ...originalEnv };
   });
 
-  it('fails production config validation when ingestion is enabled without a shared secret', () => {
+  it('does not require Try OTO webhook secret in production because ingest is passive', () => {
     resetEnv({
       NODE_ENV: 'production',
       CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
@@ -125,12 +128,14 @@ describe('Try OTO webhook security', () => {
       TRY_OTO_WEBHOOK_SHARED_SECRET: undefined,
     });
 
-    expect(() => loadEnv()).toThrow(
-      'TRY_OTO_WEBHOOK_SHARED_SECRET is required in production when TRY_OTO_WEBHOOK_INGEST_ENABLED=true.',
-    );
+    const env = loadEnv();
+
+    expect(env.SHIPPING_PROVIDER).toBe('kargonomi');
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
+    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBeUndefined();
   });
 
-  it('fails production config validation when the shared secret is too short', () => {
+  it('ignores short Try OTO webhook secret because ingest is passive', () => {
     resetEnv({
       NODE_ENV: 'production',
       CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
@@ -140,10 +145,13 @@ describe('Try OTO webhook security', () => {
       TRY_OTO_WEBHOOK_SHARED_SECRET: 'short-secret',
     });
 
-    expect(() => loadEnv()).toThrow('TRY_OTO_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
+    const env = loadEnv();
+
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(false);
+    expect(env.TRY_OTO_WEBHOOK_SHARED_SECRET).toBe('short-secret');
   });
 
-  it('returns 401 without mutating when the shared secret header is missing', async () => {
+  it('returns inactive-provider response without mutating when called without a shared secret header', async () => {
     const handler = createWebhookRoute(buildEnv({ TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345' }));
 
     const result = await handler?.(
@@ -152,20 +160,18 @@ describe('Try OTO webhook security', () => {
     );
 
     expect(result).toEqual({
-      status: 401,
+      status: 409,
       body: {
-        message: 'Try OTO webhook authenticity verification failed.',
-        authenticityVerification: {
-          mode: 'shared_secret',
-          providerNativeSignatureVerified: false,
-          note: 'Provider-native Try OTO signature semantics remain unknown.',
-        },
+        code: 'inactive_shipping_provider',
+        provider: 'try_oto',
+        activeProvider: 'kargonomi',
+        message: 'Try OTO is passive. Kargonomi is the only active shipping provider.',
       },
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
-  it('returns 401 without mutating when the shared secret header is invalid', async () => {
+  it('returns inactive-provider response without exposing secret values', async () => {
     const handler = createWebhookRoute(buildEnv({ TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345' }));
 
     const result = await handler?.(
@@ -181,14 +187,12 @@ describe('Try OTO webhook security', () => {
     );
 
     expect(result).toEqual({
-      status: 401,
+      status: 409,
       body: {
-        message: 'Try OTO webhook authenticity verification failed.',
-        authenticityVerification: {
-          mode: 'shared_secret',
-          providerNativeSignatureVerified: false,
-          note: 'Provider-native Try OTO signature semantics remain unknown.',
-        },
+        code: 'inactive_shipping_provider',
+        provider: 'try_oto',
+        activeProvider: 'kargonomi',
+        message: 'Try OTO is passive. Kargonomi is the only active shipping provider.',
       },
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
@@ -196,7 +200,7 @@ describe('Try OTO webhook security', () => {
     expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
-  it('allows ingestion when the shared secret header is valid', async () => {
+  it('does not ingest even when the legacy shared secret header is valid', async () => {
     const handler = createWebhookRoute(buildEnv({ TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345' }));
 
     const result = await handler?.(
@@ -212,19 +216,18 @@ describe('Try OTO webhook security', () => {
     );
 
     expect(result).toMatchObject({
-      ok: true,
-      matched: false,
-      authenticityVerification: {
-        mode: 'shared_secret',
-        providerNativeSignatureVerified: false,
-        note: 'Provider-native Try OTO signature semantics remain unknown.',
+      status: 409,
+      body: {
+        code: 'inactive_shipping_provider',
+        provider: 'try_oto',
+        activeProvider: 'kargonomi',
       },
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
-  it('preserves non-production local behavior when no shared secret is configured', async () => {
+  it('keeps non-production Try OTO webhook ingest passive without a shared secret', async () => {
     const handler = createWebhookRoute(buildEnv({ TRY_OTO_WEBHOOK_SHARED_SECRET: undefined }));
 
     const result = await handler?.(
@@ -233,12 +236,11 @@ describe('Try OTO webhook security', () => {
     );
 
     expect(result).toMatchObject({
-      ok: true,
-      matched: false,
-      authenticityVerification: {
-        mode: 'disabled_dev_only',
-        providerNativeSignatureVerified: false,
-        note: 'Provider-native Try OTO signature semantics remain unknown.',
+      status: 409,
+      body: {
+        code: 'inactive_shipping_provider',
+        provider: 'try_oto',
+        activeProvider: 'kargonomi',
       },
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();

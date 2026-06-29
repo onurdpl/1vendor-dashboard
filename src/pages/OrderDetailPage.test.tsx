@@ -3221,81 +3221,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
   }, 10000);
 
-  it('lets admins update Try OTO pickup location configuration', async () => {
-    const user = userEvent.setup();
-    setCurrentUser({
-      email: 'admin@demo.com',
-      name: 'Demo Admin',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-    getVendorShippingConfigMock.mockResolvedValueOnce({
-      vendorId: 'sporjinal',
-      preferredProvider: 'try_oto',
-      shippingEnabled: true,
-      defaultDesi: '3.00',
-      cargoIntegrationId: null,
-      defaultWarehouseId: null,
-      shippingVatPercent: '18.00',
-      warehouses: [],
-      providerMetadata: {
-        tryOtoPickupLocationCode: 'tr-test-store-001',
-        tryOtoOriginCity: 'Istanbul',
-      },
-      source: 'configured',
-      updatedAt: '2026-05-15T19:28:50.786Z',
-    });
-    updateVendorShippingConfigMock.mockResolvedValueOnce({
-      vendorId: 'sporjinal',
-      preferredProvider: 'try_oto',
-      shippingEnabled: true,
-      defaultDesi: '3.00',
-      cargoIntegrationId: null,
-      defaultWarehouseId: null,
-      shippingVatPercent: '18.00',
-      warehouses: [],
-      providerMetadata: {
-        tryOtoPickupLocationCode: 'tr-test-store-002',
-        tryOtoOriginCity: 'Ankara',
-      },
-      source: 'configured',
-      updatedAt: '2026-05-15T19:45:00.000Z',
-    });
-    renderOrderDetail();
-
-    const pickupInput = await screen.findByLabelText('Try OTO pickup location code');
-    const originCityInput = await screen.findByLabelText('Try OTO origin city');
-    expect(pickupInput).toHaveValue('tr-test-store-001');
-    expect(originCityInput).toHaveValue('Istanbul');
-    expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
-    await user.clear(pickupInput);
-    await user.type(pickupInput, 'tr-test-store-002');
-    await user.clear(originCityInput);
-    await user.type(originCityInput, 'Ankara');
-    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
-
-    await waitFor(() =>
-      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
-        'sporjinal',
-        expect.objectContaining({
-          preferredProvider: 'try_oto',
-          cargoIntegrationId: null,
-          defaultWarehouseId: null,
-          defaultDesi: 3,
-          warehouses: [],
-          providerMetadata: expect.objectContaining({
-            tryOtoPickupLocationCode: 'tr-test-store-002',
-            tryOtoOriginCity: 'Ankara',
-          }),
-        }),
-      ),
-    );
-  }, 20000);
-
-  it('shows Try OTO as selected in admin diagnostics when vendor config uses Try OTO', async () => {
+  it('normalizes saved Try OTO config to Kargonomi for active editing', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -3350,14 +3276,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Try OTO pickup location')).toBeInTheDocument();
-    expect(screen.getByText('tr-test-store-001')).toBeInTheDocument();
-    const selectedRow = screen.getByText('Provider selected').closest('.summary-row');
-    expect(selectedRow).toHaveTextContent('yes');
+    const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
+    expect(providerSelect).toHaveValue('kargonomi');
+    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Try OTO' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO origin city')).not.toBeInTheDocument();
   });
 
-  it('shows Try OTO provider option when backend diagnostics expose it as supported', async () => {
-    const user = userEvent.setup();
+  it('keeps passive provider options hidden even if stale diagnostics expose them', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -3398,13 +3325,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(providerSelect).toHaveValue('kargonomi');
-    expect(screen.getByRole('option', { name: 'Try OTO' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Try OTO' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Navlungo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Hepsijet' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Kargo Entegratör' })).not.toBeInTheDocument();
-    await user.selectOptions(providerSelect, 'try_oto');
-    expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
-    expect(screen.getByLabelText('Try OTO origin city')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
-  }, 20000);
+  });
 
   it('shows Kargonomi provider option and warehouse config when backend diagnostics expose it as supported', async () => {
     const user = userEvent.setup();
@@ -3698,8 +3626,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(savedPayload.providerMetadata).not.toHaveProperty('kargonomiShippingProviderId');
   }, 10000);
 
-  it('shows Navlungo diagnostics config and allows live provider save', async () => {
-    const user = userEvent.setup();
+  it('keeps Navlungo hidden from the active provider editor', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -3713,103 +3640,21 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
-    expect(screen.getByRole('option', { name: 'Navlungo' })).toBeInTheDocument();
+    expect(providerSelect).toHaveValue('kargonomi');
+    expect(screen.queryByRole('option', { name: 'Navlungo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
-    await user.selectOptions(providerSelect, 'navlungo');
-
-    expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
-    expect(screen.getByLabelText('Navlungo return recipient address ID')).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Navlungo carrier diagnostic' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Navlungo Create Post probe controls')).toBeInTheDocument();
-    expect(screen.getByText('Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.')).toBeInTheDocument();
-    expect(screen.getByLabelText('I understand this creates one Navlungo test post')).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Run Navlungo Create Post probe' })).toBeDisabled();
-    expect(screen.getByLabelText('Default barcode format')).toHaveValue('pdf-A6');
-    expect(screen.getByText('Username configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
-    expect(screen.getByText('Password configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
-    expect(screen.getByText('Runtime shipment execution enabled').closest('.shipping-config-readonly')).toHaveTextContent('yes');
-    expect(screen.getByText('Return/reverse implementation').closest('.shipping-config-readonly')).toHaveTextContent('NOT IMPLEMENTED');
-    expect(screen.getByRole('button', { name: 'Save shipping config' })).toBeEnabled();
+    expect(screen.queryByLabelText('Navlungo sender address ID')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
     expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));
-
-    expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
-    expect(screen.getByText('domestic-api.navlungo.com/v2')).toBeInTheDocument();
-    expect(screen.getByText('Auth result').closest('.summary-row')).toHaveTextContent('200');
-    expect(screen.getByText('Response shape').closest('.summary-row')).toHaveTextContent('status, message, data');
-    expect(screen.getByText('Data shape').closest('.summary-row')).toHaveTextContent('access_token');
-    expect(screen.getByText('Access token field').closest('.summary-row')).toHaveTextContent('data.access_token');
-    expect(screen.getByText('Refresh token field').closest('.summary-row')).toHaveTextContent('data.refresh_token');
-    expect(screen.getByText('token_type present').closest('.summary-row')).toHaveTextContent('yes');
-    expect(screen.getByText('expires_in present').closest('.summary-row')).toHaveTextContent('yes');
-    expect(screen.getByText('Token received').closest('.summary-row')).toHaveTextContent('yes');
-    expect(screen.getByText('Expires in').closest('.summary-row')).toHaveTextContent('86400');
-    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
-    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo carrier diagnostic' }));
-
-    expect(runtimeDiagnosticsMocks.navlungoCarriers).toHaveBeenCalled();
-    expect(await screen.findByLabelText('Navlungo carrier diagnostic result')).toBeInTheDocument();
-    expect(screen.getByText('Carrier endpoint paths known').closest('.summary-row')).toHaveTextContent('no');
-    expect(screen.getByText('Skipped reason').closest('.summary-row')).toHaveTextContent('carrier_endpoint_paths_unknown');
-    expect(screen.getByText('My Carriers HTTP').closest('.summary-row')).toHaveTextContent('—');
-    expect(screen.getByText('Configured carriers').closest('.summary-row')).toHaveTextContent('—');
-    expect(screen.getByText('List Carriers HTTP').closest('.summary-row')).toHaveTextContent('—');
-    expect(screen.getByText('Listed carriers').closest('.summary-row')).toHaveTextContent('—');
-    expect(screen.getByText('Configured carrier available').closest('.summary-row')).toHaveTextContent('no');
-    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
-    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
-
-    const createPostProbeButton = screen.getByRole('button', { name: 'Run Navlungo Create Post probe' });
-    expect(createPostProbeButton).toBeDisabled();
-    await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
-    expect(createPostProbeButton).toBeEnabled();
-    await user.click(createPostProbeButton);
-
-    expect(runtimeDiagnosticsMocks.navlungoCreatePostProbe).toHaveBeenCalledWith({ confirm: 'YES' });
-    expect(await screen.findByLabelText('Navlungo Create Post probe result')).toBeInTheDocument();
-    expect(screen.getByText('Create Post HTTP').closest('.summary-row')).toHaveTextContent('201');
-    expect(screen.getByText('Requested carrier id').closest('.summary-row')).toHaveTextContent('9');
-    expect(screen.getByText('Requested post type').closest('.summary-row')).toHaveTextContent('2');
-    expect(screen.getByText('Requested barcode format').closest('.summary-row')).toHaveTextContent('pdf-A6');
-    expect(screen.getByText('COD payment included').closest('.summary-row')).toHaveTextContent('no');
-    expect(screen.getByText('Price included').closest('.summary-row')).toHaveTextContent('no');
-    expect(screen.getByText('Post number').closest('.summary-row')).toHaveTextContent('NP12345');
-    expect(screen.getByText('Tracking URL').closest('.summary-row')).toHaveTextContent('present');
-    expect(screen.getByText('Barcode URL').closest('.summary-row')).toHaveTextContent('present');
-    expect(screen.getByText('Barcode field').closest('.summary-row')).toHaveTextContent('present');
-    expect(screen.getByText('Carrier fields').closest('.summary-row')).toHaveTextContent('carrier_id, carrier_name');
-    expect(screen.getByText('Last probe post_number: NP12345')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Navlungo Check Post probe' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run Navlungo Barcode probe' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo Check Post probe' }));
-    expect(runtimeDiagnosticsMocks.navlungoCheckPostProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });
-    expect(await screen.findByLabelText('Navlungo Check Post probe result')).toBeInTheDocument();
-    expect(screen.getByText('Check Post HTTP').closest('.summary-row')).toHaveTextContent('200');
-    expect(
-      within(screen.getByLabelText('Navlungo Check Post probe result')).getByText('Status').closest('.summary-row'),
-    ).toHaveTextContent('To be Picked Up');
-
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo Barcode probe' }));
-    expect(runtimeDiagnosticsMocks.navlungoBarcodeProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });
-    const barcodeProbeResult = await screen.findByLabelText('Navlungo Barcode probe result');
-    expect(within(barcodeProbeResult).getByText('Barcode endpoint path known').closest('.summary-row')).toHaveTextContent('no');
-    expect(within(barcodeProbeResult).getByText('Skipped reason').closest('.summary-row')).toHaveTextContent('barcode_endpoint_path_unknown');
+    expect(runtimeDiagnosticsMocks.navlungoAuth).not.toHaveBeenCalled();
+    expect(runtimeDiagnosticsMocks.navlungoCarriers).not.toHaveBeenCalled();
+    expect(runtimeDiagnosticsMocks.navlungoCreatePostProbe).not.toHaveBeenCalled();
     expect(createShipmentExecutionMock).not.toHaveBeenCalled();
     expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
-    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
-    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
+  });
 
-  }, 15000);
-
-  it('persists and restores Navlungo sender and return recipient config fields after save', async () => {
-    const user = userEvent.setup();
+  it('normalizes saved Navlungo config to Kargonomi for active editing', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -3841,173 +3686,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
     });
-    const savedConfig = {
-      vendorId: 'sporjinal',
-      preferredProvider: 'navlungo' as const,
-      shippingEnabled: true,
-      defaultDesi: '4.00',
-      cargoIntegrationId: null,
-      defaultWarehouseId: '55580',
-      shippingVatPercent: '18.00',
-      warehouses: [],
-      providerMetadata: {
-        navlungoSenderAddressId: '55580',
-        navlungoSenderName: 'Sporjinal Sender',
-        navlungoSenderPhone: '+90 532 123 45 67',
-        navlungoSenderEmail: 'sender@example.test',
-        navlungoSenderAddress: 'Sender Street 1',
-        navlungoSenderCountry: 'tr',
-        navlungoSenderCity: 'Istanbul',
-        navlungoSenderDistrict: 'Kadikoy',
-        navlungoSenderPostCode: '34710',
-        navlungoReturnRecipientAddressId: '77702',
-        navlungoReturnRecipientName: 'Return Warehouse',
-        navlungoReturnRecipientPhone: '+90 532 765 43 21',
-        navlungoReturnRecipientEmail: 'returns@example.test',
-        navlungoReturnRecipientAddress: 'Return Street 2',
-        navlungoReturnRecipientCountry: 'tr',
-        navlungoReturnRecipientCity: 'Istanbul',
-        navlungoReturnRecipientDistrict: 'Ataşehir',
-        navlungoReturnRecipientPostCode: '34750',
-        navlungoBarcodeFormat: 'pdf-A5',
-        navlungoCarrierId: '9',
-      },
-      source: 'configured' as const,
-      updatedAt: '2026-05-15T19:45:00.000Z',
-    };
-    updateVendorShippingConfigMock.mockResolvedValueOnce(savedConfig);
-    getVendorShippingConfigMock.mockResolvedValueOnce(savedConfig);
 
     renderOrderDetail();
 
-    expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
-    fireEvent.change(screen.getByLabelText('Navlungo sender address ID'), { target: { value: '55580' } });
-    fireEvent.change(screen.getByLabelText('Default desi'), { target: { value: '4' } });
-    fireEvent.change(screen.getByLabelText('Navlungo return recipient address ID'), { target: { value: '77702' } });
-    await user.click(screen.getByText('Full sender details for diagnostics'));
-    fireEvent.change(screen.getByLabelText('Sender name'), { target: { value: 'Sporjinal Sender' } });
-    fireEvent.change(screen.getByLabelText('Sender phone'), { target: { value: '+90 532 123 45 67' } });
-    fireEvent.change(screen.getByLabelText('Sender email'), { target: { value: 'sender@example.test' } });
-    fireEvent.change(screen.getByLabelText('Sender address'), { target: { value: 'Sender Street 1' } });
-    fireEvent.change(screen.getByLabelText('Sender city'), { target: { value: 'Istanbul' } });
-    fireEvent.change(screen.getByLabelText('Sender district'), { target: { value: 'Kadikoy' } });
-    fireEvent.change(screen.getByLabelText('Sender post code'), { target: { value: '34710' } });
-    await user.click(screen.getByText('Return recipient address book details'));
-    fireEvent.change(screen.getByLabelText('Return recipient name'), { target: { value: 'Return Warehouse' } });
-    fireEvent.change(screen.getByLabelText('Return recipient phone'), { target: { value: '+90 532 765 43 21' } });
-    fireEvent.change(screen.getByLabelText('Return recipient email'), { target: { value: 'returns@example.test' } });
-    fireEvent.change(screen.getByLabelText('Return recipient address'), { target: { value: 'Return Street 2' } });
-    fireEvent.change(screen.getByLabelText('Return recipient city'), { target: { value: 'Istanbul' } });
-    fireEvent.change(screen.getByLabelText('Return recipient district'), { target: { value: 'Ataşehir' } });
-    fireEvent.change(screen.getByLabelText('Return recipient post code'), { target: { value: '34750' } });
-    fireEvent.change(screen.getByLabelText('Default barcode format'), { target: { value: 'pdf-A5' } });
-    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
-
-    await waitFor(() =>
-      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
-        'sporjinal',
-        expect.objectContaining({
-          preferredProvider: 'navlungo',
-          defaultWarehouseId: '55580',
-          defaultDesi: 4,
-          providerMetadata: expect.objectContaining({
-            navlungoSenderAddressId: '55580',
-            navlungoSenderName: 'Sporjinal Sender',
-            navlungoSenderPhone: '+90 532 123 45 67',
-            navlungoSenderEmail: 'sender@example.test',
-            navlungoSenderAddress: 'Sender Street 1',
-            navlungoSenderCountry: 'tr',
-            navlungoSenderCity: 'Istanbul',
-            navlungoSenderDistrict: 'Kadikoy',
-            navlungoSenderPostCode: '34710',
-            navlungoReturnRecipientAddressId: '77702',
-            navlungoReturnRecipientName: 'Return Warehouse',
-            navlungoReturnRecipientPhone: '+90 532 765 43 21',
-            navlungoReturnRecipientEmail: 'returns@example.test',
-            navlungoReturnRecipientAddress: 'Return Street 2',
-            navlungoReturnRecipientCountry: 'tr',
-            navlungoReturnRecipientCity: 'Istanbul',
-            navlungoReturnRecipientDistrict: 'Ataşehir',
-            navlungoReturnRecipientPostCode: '34750',
-            navlungoBarcodeFormat: 'pdf-A5',
-            navlungoCarrierId: '9',
-          }),
-        }),
-      ),
-    );
-    expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Navlungo sender address ID')).toHaveValue('55580');
-    expect(screen.getByLabelText('Navlungo return recipient address ID')).toHaveValue('77702');
-    expect(screen.getByLabelText('Sender name')).toHaveValue('Sporjinal Sender');
-    expect(screen.getByLabelText('Return recipient city')).toHaveValue('Istanbul');
-    expect(screen.getByLabelText('Return recipient district')).toHaveValue('Ataşehir');
-  }, 15000);
-
-  it('renders Navlungo auth validation fields and messages safely', async () => {
-    const user = userEvent.setup();
-    runtimeDiagnosticsMocks.navlungoAuth.mockResolvedValueOnce({
-      provider: 'navlungo',
-      displayName: 'Navlungo',
-      dormant: true,
-      baseUrlHost: 'domestic-api.navlungo.com',
-      baseUrlPath: '/v2.1',
-      baseUrlParseError: null,
-      usernamePresent: true,
-      passwordPresent: true,
-      authRequestUrl: '/v2.1/auth/api',
-      authHttpStatus: 422,
-      authContentType: 'application/json',
-      responseShapeSummary: {
-        kind: 'json:object',
-        topLevelKeys: ['message', 'status', 'error'],
-      },
-      responseDataShapeSummary: null,
-      tokenKeyPresence: {
-        rootAccessToken: false,
-        dataAccessToken: false,
-        dataToken: false,
-        anyTokenLikeKey: false,
-      },
-      refreshTokenKeyPresence: {
-        rootRefreshToken: false,
-        dataRefreshToken: false,
-      },
-      expiresInPresent: false,
-      tokenTypePresent: false,
-      tokenReceived: false,
-      refreshTokenReceived: false,
-      expiresIn: null,
-      authValidationErrorKeys: ['username', 'password', 'another_field'],
-      authFailedFieldNames: ['username', 'password', 'another_field'],
-      authValidationErrorMessages: [
-        'username validation failed',
-        'password validation failed',
-        'Another field is invalid',
-      ],
-      fetchError: null,
-    });
-    setCurrentUser({
-      email: 'admin@example.com',
-      name: 'Admin',
-      role: 'admin',
-      vendorAccess: ['sporjinal'],
-      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
-      canSwitchVendors: true,
-      defaultVendorId: 'sporjinal',
-    });
-
-    renderOrderDetail();
-
-    await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'navlungo');
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));
-
-    expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
-    expect(screen.getByText('Auth result').closest('.summary-row')).toHaveTextContent('422');
-    expect(screen.getByText('Auth validation fields').closest('.summary-row')).toHaveTextContent('username, password, another_field');
-    expect(screen.getByText('Auth validation messages').closest('.summary-row')).toHaveTextContent(
-      'username validation failed · password validation failed · Another field is invalid',
-    );
-    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
+    const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
+    expect(providerSelect).toHaveValue('kargonomi');
+    expect(screen.queryByLabelText('Navlungo sender address ID')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Navlungo return recipient address ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('Full sender details for diagnostics')).not.toBeInTheDocument();
+    expect(screen.queryByText('Return recipient address book details')).not.toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {
@@ -7721,7 +7409,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
   });
 
   it('compares sanitized Navlungo probe and real retry request shapes without exposing PII', async () => {
-    const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
       shipmentExecution: {
@@ -7789,26 +7476,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'navlungo');
-    await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
-    await user.click(screen.getByRole('button', { name: 'Run Navlungo Create Post probe' }));
-
-    const diff = await screen.findByLabelText('Navlungo probe retry request diff');
-    expect(within(diff).getByText('Response summary').closest('.summary-row')).toHaveTextContent(
-      'probe HTTP 201 · real HTTP 500 · tracking ID #e41c3430fb2d4e9c98bd023a94d29a60',
-    );
-    expect(within(diff).getByText('sender keys').closest('.summary-row')).toHaveTextContent(
-      'different · probe: address, city, country, district, email, name, phone, post_code · real: addressId',
-    );
-    expect(within(diff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('different · probe: no · real: yes');
-    expect(within(diff).getByText('recipient phone format').closest('.summary-row')).toHaveTextContent('same · probe: yes · real: yes');
-    expect(within(diff).getByText('recipient address length').closest('.summary-row')).toHaveTextContent('different · probe: 38 · real: 42');
-    expect(within(diff).getByText('cod_payment_type').closest('.summary-row')).toHaveTextContent(
-      'different · probe: missing · — · real: present · string-empty',
-    );
-    expect(within(diff).getByText('post.price').closest('.summary-row')).toHaveTextContent(
-      'different · probe: missing · — · real: present · string-empty',
-    );
+    expect(await screen.findByLabelText('Navlungo retry diagnostics')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Navlungo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Navlungo probe retry request diff')).not.toBeInTheDocument();
     expect(screen.queryByText('+90 532 123 45 68')).not.toBeInTheDocument();
     expect(screen.queryByText('recipient.test@example.invalid')).not.toBeInTheDocument();
     expect(screen.queryByText('Navlungo Test Recipient')).not.toBeInTheDocument();

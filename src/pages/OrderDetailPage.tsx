@@ -1291,7 +1291,7 @@ function buildDiagnosticsCopyText(title: string, entries: Array<[string, unknown
 }
 
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
-  const preferredProvider = config?.preferredProvider === 'kargo_entegrator' ? 'kargonomi' : config?.preferredProvider ?? 'kargonomi';
+  const preferredProvider: ShippingConfigDraftProvider = 'kargonomi';
 
   return {
     preferredProvider,
@@ -5417,14 +5417,6 @@ export function OrderDetailPage() {
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
   const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
   const isNavlungoConfigDraft = shippingConfigDraft.preferredProvider === 'navlungo';
-  const shouldShowTryOtoProviderOption =
-    vendorShippingConfig?.preferredProvider === 'try_oto' ||
-    shippingProviderDiagnostics?.provider === 'try_oto' ||
-    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('try_oto'));
-  const shouldShowKargonomiProviderOption =
-    vendorShippingConfig?.preferredProvider === 'kargonomi' ||
-    shippingProviderDiagnostics?.provider === 'kargonomi' ||
-    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi'));
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
   const kargonomiShippingProviderId = readKargonomiShippingProviderId(vendorShippingConfig);
@@ -5453,10 +5445,7 @@ export function OrderDetailPage() {
           setShippingConfigDraftReady(true);
         }}
       >
-        {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
-        {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
-        <option value="navlungo">Navlungo</option>
-        <option value="hepsijet">Hepsijet</option>
+        <option value="kargonomi">Kargonomi</option>
       </select>
     </label>
   );

@@ -52,7 +52,7 @@ export type AppEnv = {
   EMAIL_ADMIN_RECIPIENTS: string[];
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
-  SHIPPING_PROVIDER: 'hepsijet' | 'try_oto' | 'kargonomi' | 'navlungo';
+  SHIPPING_PROVIDER: 'kargonomi';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?: string;
@@ -203,17 +203,16 @@ function parseEmailProvider(value: string | undefined): AppEnv['EMAIL_PROVIDER']
 }
 
 function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROVIDER'] {
-  const normalized = (value || 'hepsijet').trim().toLowerCase();
-  if (
-    normalized === 'hepsijet' ||
-    normalized === 'try_oto' ||
-    normalized === 'kargonomi' ||
-    normalized === 'navlungo'
-  ) {
+  const normalized = (value || 'kargonomi').trim().toLowerCase();
+  if (normalized === 'kargonomi') {
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, try_oto, kargonomi, or navlungo.');
+  if (normalized === 'try_oto' || normalized === 'navlungo') {
+    throw new Error(`SHIPPING_PROVIDER=${normalized} is inactive. Only kargonomi is active.`);
+  }
+
+  throw new Error('Invalid SHIPPING_PROVIDER value. Only kargonomi is active.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -281,18 +280,8 @@ export function loadEnv(): AppEnv {
   const lidioSubsellerProfileId = process.env.LIDIO_SUBSELLER_PROFILE_ID?.trim()
     ? parsePositiveInteger(process.env.LIDIO_SUBSELLER_PROFILE_ID, 3)
     : 3;
-  const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
+  const tryOtoWebhookIngestEnabled = false;
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
-
-  if (nodeEnv === 'production' && tryOtoWebhookIngestEnabled) {
-    if (!tryOtoWebhookSharedSecret) {
-      throw new Error('TRY_OTO_WEBHOOK_SHARED_SECRET is required in production when TRY_OTO_WEBHOOK_INGEST_ENABLED=true.');
-    }
-
-    if (tryOtoWebhookSharedSecret.length < 32) {
-      throw new Error('TRY_OTO_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
-    }
-  }
 
   if (shippingProvider === 'kargonomi') {
     if (!kargonomiBaseUrl) {
@@ -300,17 +289,6 @@ export function loadEnv(): AppEnv {
     }
     if (!kargonomiApiToken) {
       throw new Error('KARGONOMI_API_TOKEN is required when SHIPPING_PROVIDER=kargonomi.');
-    }
-  }
-  if (shippingProvider === 'navlungo') {
-    if (!navlungoBaseUrl) {
-      throw new Error('NAVLUNGO_BASE_URL is required when SHIPPING_PROVIDER=navlungo.');
-    }
-    if (!navlungoApiUsername) {
-      throw new Error('NAVLUNGO_API_USERNAME is required when SHIPPING_PROVIDER=navlungo.');
-    }
-    if (!navlungoApiPassword) {
-      throw new Error('NAVLUNGO_API_PASSWORD is required when SHIPPING_PROVIDER=navlungo.');
     }
   }
   if (lidioEnabled) {
