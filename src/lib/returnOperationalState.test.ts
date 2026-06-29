@@ -35,7 +35,28 @@ describe('return operational state', () => {
         refundStatus: 'Refunded',
         sourceShopifyRefundId: 'gid://shopify/Refund/1',
       }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('treats refunded or processed status with refund evidence as terminal without vendor review', () => {
+    expect(
+      isTerminalRefundedReturn({
+        status: 'Refunded',
+        sourceType: 'shopify_return_request',
+        refundStatus: 'Refunded',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+      }),
+    ).toBe(true);
+
+    expect(
+      isTerminalRefundedReturn({
+        status: 'Requested',
+        returnLifecycleStatus: 'Processed',
+        sourceType: 'shopify_return_request',
+        refundStatus: 'Refunded',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+      }),
+    ).toBe(true);
   });
 
   it('detects active return review statuses for pending filters', () => {

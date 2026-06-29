@@ -1380,6 +1380,7 @@ export type ReturnSummary = {
   sourceShopifyReturnId?: string | null;
   sourceType?: 'shopify_refund' | 'shopify_return_request';
   status: ReturnStatus;
+  returnLifecycleStatus?: string | null;
   relatedOrderId: string;
   date: string;
   updatedAt?: string;

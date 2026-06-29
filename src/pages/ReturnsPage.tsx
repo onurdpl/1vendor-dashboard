@@ -161,6 +161,7 @@ function isRefundedReturn(item: ReturnSummary) {
     item.sourceType !== 'shopify_return_request' ||
     isTerminalRefundedReturn({
       status: item.status,
+      returnLifecycleStatus: item.returnLifecycleStatus,
       sourceType: item.sourceType,
       refundStatus: getRefundStatusLabel(item),
       sourceShopifyRefundId: item.sourceShopifyRefundId,
@@ -463,6 +464,7 @@ function getVendorTimelineLabel(label: string) {
 function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
   const terminalRefundedReturn = isTerminalRefundedReturn({
     status: detail?.status ?? summary.status,
+    returnLifecycleStatus: detail?.returnLifecycleStatus ?? summary.returnLifecycleStatus,
     sourceType: detail?.sourceType ?? summary.sourceType,
     refundStatus: getRefundStatusLabel(detail ?? summary),
     sourceShopifyRefundId: detail?.sourceShopifyRefundId ?? summary.sourceShopifyRefundId,
@@ -1069,6 +1071,7 @@ export function ReturnsPage() {
             (() => {
               const terminalRefundedReturn = isTerminalRefundedReturn({
                 status: selectedDetail?.status ?? selectedReturn.status,
+                returnLifecycleStatus: selectedDetail?.returnLifecycleStatus ?? selectedReturn.returnLifecycleStatus,
                 sourceType: selectedDetail?.sourceType ?? selectedReturn.sourceType,
                 refundStatus: getRefundStatusLabel(selectedDetail ?? selectedReturn),
                 sourceShopifyRefundId: selectedDetail?.sourceShopifyRefundId ?? selectedReturn.sourceShopifyRefundId,
@@ -1079,6 +1082,7 @@ export function ReturnsPage() {
               });
               const workflowGuidance = getReturnWorkflowAction({
                 status: selectedDetail?.status ?? selectedReturn.status,
+                returnLifecycleStatus: selectedDetail?.returnLifecycleStatus ?? selectedReturn.returnLifecycleStatus,
                 sourceType: selectedDetail?.sourceType ?? selectedReturn.sourceType,
                 vendorReceivedAt: selectedDetail?.vendorReceivedAt ?? selectedReturn.vendorReceivedAt,
                 vendorReviewedAt: selectedDetail?.vendorReviewedAt ?? selectedReturn.vendorReviewedAt,

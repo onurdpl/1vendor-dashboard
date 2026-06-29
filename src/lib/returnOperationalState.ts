@@ -42,11 +42,15 @@ export function isActiveReturnReviewStatus(input: Pick<ReturnTerminalStateInput,
 
 export function isTerminalRefundedReturn(input: ReturnTerminalStateInput) {
   const status = normalize(input.returnLifecycleStatus) || normalize(input.status);
-  if (status !== 'closed') {
+  if (!hasRefundEvidence(input)) {
     return false;
   }
 
-  if (!hasRefundEvidence(input)) {
+  if (status === 'refunded' || status === 'processed') {
+    return true;
+  }
+
+  if (status !== 'closed') {
     return false;
   }
 
@@ -55,5 +59,5 @@ export function isTerminalRefundedReturn(input: ReturnTerminalStateInput) {
     return true;
   }
 
-  return hasText(input.vendorReviewedAt) && hasText(input.vendorDecision);
+  return true;
 }

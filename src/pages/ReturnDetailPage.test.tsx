@@ -232,6 +232,16 @@ const closedRefundedReturnDetail: ReturnDetail = {
   },
 };
 
+const refundedUnreviewedReturnDetail: ReturnDetail = {
+  ...closedRefundedReturnDetail,
+  status: 'Refunded',
+  returnLifecycleStatus: 'Refunded',
+  vendorReceivedAt: null,
+  vendorReviewedAt: null,
+  vendorDecision: null,
+  vendorDecisionReason: null,
+};
+
 function linkedReturnSupportTicket(status: SupportTicketStatus | string, overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
     id: `support-${status.toLowerCase()}`,
@@ -1620,6 +1630,20 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(
       screen.queryByText('Return is already closed/refunded; these fields are historical sync diagnostics.'),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders refunded returns without vendor review as complete with no active review actions', async () => {
+    getReturnMock.mockResolvedValue(refundedUnreviewedReturnDetail);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return completed' })).toBeInTheDocument();
+    expect(screen.getByText('Return is closed and refund is complete. No vendor action is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
+    expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
   });
 
     it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {

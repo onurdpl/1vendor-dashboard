@@ -148,6 +148,54 @@ describe('return vendor review actions', () => {
     expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
   });
 
+  it('blocks review mutation for refunded returns without vendor review', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      accessRecord({
+        status: 'refunded',
+        returnLifecycleStatus: 'refunded',
+        returnRequestSource: 'shopify_return_request',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+        vendorReceivedAt: null,
+        vendorReviewedAt: null,
+        vendorDecision: null,
+        vendorAllocation: {
+          assignedVendorId: 'vendor-a',
+          refundRecords: [{ id: 'refund-1', sourceShopifyRefundId: 'gid://shopify/Refund/1' }],
+        },
+      }),
+    );
+
+    await expect(reviewReturn('return-1', { role: 'vendor', vendorId: 'vendor-a' }, { decision: 'approved' })).rejects.toMatchObject({
+      message: 'Return is already closed and refunded.',
+      statusCode: 409,
+    });
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks mark received mutation for terminal refunded returns', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      accessRecord({
+        status: 'processed',
+        returnLifecycleStatus: 'processed',
+        returnRequestSource: 'shopify_return_request',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+        vendorReceivedAt: null,
+        vendorReviewedAt: null,
+        vendorDecision: null,
+        vendorAllocation: {
+          assignedVendorId: 'vendor-a',
+          refundRecords: [{ id: 'refund-1', sourceShopifyRefundId: 'gid://shopify/Refund/1' }],
+        },
+      }),
+    );
+
+    await expect(markReturnReceived('return-1', { role: 'vendor', vendorId: 'vendor-a' })).rejects.toMatchObject({
+      message: 'Return is already closed and refunded.',
+      statusCode: 409,
+    });
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+  });
+
   it('requires a reason for rejected reviews', async () => {
     prismaMock.returnRecord.findUnique.mockResolvedValueOnce(accessRecord({ vendorReceivedAt: new Date('2026-05-14T10:00:00Z') }));
 

@@ -43,6 +43,18 @@ describe('workflow action guidance', () => {
     expect(guidance.tone).toBe('success');
   });
 
+  it('maps refunded returns without vendor review to no-action guidance', () => {
+    const guidance = getReturnWorkflowAction({
+      status: 'Refunded',
+      sourceType: 'shopify_return_request',
+      refundStatus: 'Refunded',
+      sourceShopifyRefundId: 'gid://shopify/Refund/1',
+    });
+
+    expect(guidance.actionLabel).toBe('No action required');
+    expect(guidance.tone).toBe('success');
+  });
+
   it('keeps approved returns without refunds in the active return flow', () => {
     const guidance = getReturnWorkflowAction({
       status: 'Approved',

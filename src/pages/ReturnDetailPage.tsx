@@ -1282,6 +1282,7 @@ export function ReturnDetailPage() {
   const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
   const terminalRefundedReturn = isTerminalRefundedReturn({
     status: returnRequest.status,
+    returnLifecycleStatus: returnRequest.returnLifecycleStatus,
     sourceType: returnRequest.sourceType,
     vendorReceivedAt: returnRequest.vendorReceivedAt,
     vendorReviewedAt: returnRequest.vendorReviewedAt,
@@ -1293,6 +1294,7 @@ export function ReturnDetailPage() {
   const canMutateReturnReview = canReviewReturn && !terminalRefundedReturn;
   const returnWorkflowGuidance = getReturnWorkflowAction({
     status: returnRequest.status,
+    returnLifecycleStatus: returnRequest.returnLifecycleStatus,
     sourceType: returnRequest.sourceType,
     vendorReceivedAt: returnRequest.vendorReceivedAt,
     vendorReviewedAt: returnRequest.vendorReviewedAt,

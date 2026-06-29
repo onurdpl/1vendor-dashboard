@@ -175,6 +175,17 @@ const closedRefundedReturnRequest: ReturnDetail = {
   ],
 };
 
+const refundedUnreviewedReturnRequest: ReturnDetail = {
+  ...closedRefundedReturnRequest,
+  id: 'RET-A-REFUNDED-1096',
+  sourceShopifyOrderNumber: 1096,
+  status: 'Refunded',
+  returnLifecycleStatus: 'Refunded',
+  vendorReceivedAt: null,
+  vendorReviewedAt: null,
+  vendorDecision: null,
+};
+
 const otherVendorReturn: ReturnDetail = {
   ...processedRefund,
   id: 'RET-B-REFUND-1002',
@@ -499,6 +510,23 @@ describe('ReturnsPage control center', () => {
     expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveTextContent('0');
     expect(within(workflowTabs).getByRole('button', { name: /Refunded/i })).toHaveTextContent('1');
     expect(within(workflowTabs).getByRole('button', { name: /^All/i })).toHaveTextContent('1');
+  });
+
+  it('projects refunded returns without vendor review as completed in the right rail with no review action', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(refundedUnreviewedReturnRequest)]);
+    getReturnMock.mockResolvedValue(refundedUnreviewedReturnRequest);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('#1096')).toBeInTheDocument();
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Return completed');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Refund is complete. No vendor action is required.');
+    expect(screen.queryByRole('link', { name: 'Review return' })).not.toBeInTheDocument();
+
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('.op-panel-section');
+    expect(timeline).toBeTruthy();
+    expect(within(timeline as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
   });
 
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
