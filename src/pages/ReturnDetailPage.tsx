@@ -234,6 +234,14 @@ function getTimelineLabel(label: string | null | undefined) {
   return '';
 }
 
+function getVendorReturnWorkflowDescription(description: string) {
+  if (description.toLowerCase().includes('settlement accounting')) {
+    return 'Refund is complete. No vendor action is required.';
+  }
+
+  return description.replace('Shopify refund', 'Refund');
+}
+
 function readSnapshotString(snapshot: Record<string, unknown>, key: string) {
   const value = snapshot[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -635,7 +643,7 @@ export function ReturnDetailPage() {
         signal,
       }),
     {
-      enabled: authContextReady && Boolean(returnRequest),
+      enabled: isAdmin && authContextReady && Boolean(returnRequest),
       routeName: 'ReturnDetailPage.relatedFinance',
       endpoint: '/finance/return-records',
     },
@@ -1270,7 +1278,7 @@ export function ReturnDetailPage() {
   );
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const audience = isAdmin ? 'admin' : 'vendor';
-  const returnTimelineTitle = isAdmin ? 'Return Lifecycle' : 'Return timeline';
+  const returnTimelineTitle = isAdmin ? 'Return Lifecycle' : 'Return activity';
   const financeTimelineTitle = isAdmin ? 'Finance Lifecycle' : 'Finance timeline';
   const returnCrossLinks: OperationalLinkInput[] = [
     {
@@ -1282,20 +1290,22 @@ export function ReturnDetailPage() {
       status: 'Linked',
       tone: 'info',
     },
-    ...relatedFinanceRecords.map((record) => ({
-      id: `finance-${record.id}`,
-      eyebrow: 'Finance',
-      title: getLinkedFinanceTitle(record),
-      description: `${record.amount} · ${getLinkedFinanceStatusLabel(record)}`,
-      href: buildFinanceHref(record),
-      status: record.category,
-      tone: getLinkedFinanceTone(record),
-    })),
+    ...(isAdmin
+      ? relatedFinanceRecords.map((record) => ({
+          id: `finance-${record.id}`,
+          eyebrow: 'Finance',
+          title: getLinkedFinanceTitle(record),
+          description: `${record.amount} · ${getLinkedFinanceStatusLabel(record)}`,
+          href: buildFinanceHref(record),
+          status: record.category,
+          tone: getLinkedFinanceTone(record),
+        }))
+      : []),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
       eyebrow: 'Support',
       title: ticket.subject ?? 'Support ticket',
-      description: ticket.vendorName ?? ticket.vendorId,
+      description: isAdmin ? (ticket.vendorName ?? ticket.vendorId) : 'Support conversation for this return.',
       href: `${supportBasePath}/${ticket.id}`,
       status: safeStatusLabel(ticket.status),
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
@@ -1483,10 +1493,10 @@ export function ReturnDetailPage() {
                 <strong>Refund completed</strong>
               </div>
               <div>
-                <span>Ownership verified</span>
+                <span>{isAdmin ? 'Ownership verified' : 'Vendor action'}</span>
                 <strong>No vendor action required.</strong>
               </div>
-              {relatedFinanceRecords.length ? (
+              {isAdmin && relatedFinanceRecords.length ? (
                 <p>Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.</p>
               ) : null}
             </article>
@@ -1556,14 +1566,16 @@ export function ReturnDetailPage() {
           <OperationalLinkCards
             title="Related operational records"
             subtitle={
-              terminalRefundedReturn && relatedFinanceRecords.length
+              !isAdmin
+                ? 'Original order and support linked to this return.'
+                : terminalRefundedReturn && relatedFinanceRecords.length
                 ? 'Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.'
                 : 'Order, settlement offsets, payout accounting, and support linked to this return.'
             }
             links={returnCrossLinks}
             audience={audience}
           />
-          {returnRequest.settlementRefundAdjustments?.length ? (
+          {isAdmin && returnRequest.settlementRefundAdjustments?.length ? (
             <article className="return-review-card">
               <div className="return-review-card-header">
                 <div>
@@ -1607,7 +1619,7 @@ export function ReturnDetailPage() {
               </div>
             </article>
           ) : null}
-          {relatedFinanceError ? (
+          {isAdmin && relatedFinanceError ? (
             <SectionErrorRetry
               title="Finance records could not load"
               description={relatedFinanceErrorMessage ?? 'Retry the finance section.'}
@@ -1655,7 +1667,7 @@ export function ReturnDetailPage() {
               </div>
             </article>
 
-            {returnRequest.returnOwnershipSummary ? (
+            {isAdmin && returnRequest.returnOwnershipSummary ? (
               <article className="return-review-card return-review-summary-card" aria-label="Return ownership snapshot">
                 <div className="return-review-card-header">
                   <div>
@@ -1762,7 +1774,7 @@ export function ReturnDetailPage() {
             audience={audience}
           />
 
-          {financeLifecycleEvents.length ? (
+          {isAdmin && financeLifecycleEvents.length ? (
             <OperationalTimeline
               title={financeTimelineTitle}
               subtitle={
@@ -1777,17 +1789,19 @@ export function ReturnDetailPage() {
 
           {supportLifecycleEvents.length ? (
             <OperationalTimeline
-              title="Support Activity"
+              title={isAdmin ? 'Support Activity' : 'Support'}
               events={supportLifecycleEvents}
               audience={audience}
             />
           ) : null}
 
-          <OperationalRecommendations
-            title="Operations"
-            recommendations={returnRecommendations}
-            audience={audience}
-          />
+          {isAdmin ? (
+            <OperationalRecommendations
+              title="Operations"
+              recommendations={returnRecommendations}
+              audience={audience}
+            />
+          ) : null}
 
           <AdminCollaborationNotes contextType="return" contextId={returnRequest.id} currentUser={currentUser} />
 
@@ -1797,11 +1811,13 @@ export function ReturnDetailPage() {
             <p>
               {terminalRefundedReturn
                 ? 'Return is closed and refund is complete. No vendor action is required.'
-                : 'Vendor review only. Shopify refund is not issued here.'}
+                : isAdmin
+                  ? 'Vendor review only. Shopify refund is not issued here.'
+                  : 'Vendor review only. Refund is not issued here.'}
             </p>
             <WorkflowActionGuidance
               actionLabel={returnWorkflowGuidance.actionLabel}
-              description={returnWorkflowGuidance.description}
+              description={isAdmin ? returnWorkflowGuidance.description : getVendorReturnWorkflowDescription(returnWorkflowGuidance.description)}
               tone={returnWorkflowGuidance.tone}
             />
             <div className="return-review-summary-list return-review-state-list">
@@ -1872,7 +1888,7 @@ export function ReturnDetailPage() {
             ) : null}
           </article>
 
-          {hasReturnShipment ? (
+          {isAdmin && hasReturnShipment ? (
             <article className="return-review-card">
               <div className="return-review-card-header">
                 <div>
@@ -1966,7 +1982,7 @@ export function ReturnDetailPage() {
             </article>
           ) : null}
 
-          {!hasReturnShipment && navlungoReturnAutoCreateSkippedReason ? (
+          {isAdmin && !hasReturnShipment && navlungoReturnAutoCreateSkippedReason ? (
             <article className="return-review-card">
               <div className="return-review-card-header">
                 <div>
@@ -1993,7 +2009,7 @@ export function ReturnDetailPage() {
             </article>
           ) : null}
 
-          {shouldRenderNavlungoAutoCreateDiagnostics ? (
+          {isAdmin && shouldRenderNavlungoAutoCreateDiagnostics ? (
             <details className="return-review-card provider-response-summary admin-diagnostics-panel" aria-label="Navlungo return auto-create diagnostics">
               <summary className="return-review-card-header">
                 <div>
@@ -2278,7 +2294,7 @@ export function ReturnDetailPage() {
             </details>
           ) : null}
 
-          {returnRequest.sourceType === 'shopify_return_request' ? (
+          {isAdmin && returnRequest.sourceType === 'shopify_return_request' ? (
             <article className="return-review-card">
               <div className="return-review-card-header">
                 <div>

@@ -365,15 +365,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
     expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(getReturnFinanceRecordsMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          vendorId: 'demo-vendor-a',
-          shopifyRefundId: '',
-          shopifyOrderNumber: 1023,
-        }),
-      ),
-    );
+    expect(getReturnFinanceRecordsMock).not.toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(screen.getByRole('img', { name: 'Nike Air Force 1 07 product image' })).toHaveAttribute(
       'src',
@@ -386,6 +378,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Mark received')).toBeInTheDocument();
     expect(screen.getByText('Contact support')).toBeInTheDocument();
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Return activity' })).toBeInTheDocument();
 
     expect(screen.queryByText('RET-REQUEST-1023-LONG-SLUG')).not.toBeInTheDocument();
     expect(screen.queryByText(/backend/i)).not.toBeInTheDocument();
@@ -395,6 +388,13 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/sync source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/workflow summary/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/finance context/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/settlement offsets/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/payout accounting/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Ownership snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByText('Finance timeline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Operations')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('Kargonomi return preview')).not.toBeInTheDocument();
     expect(screen.queryByText(/Shopify order ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Shopify return ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
@@ -555,16 +555,16 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
-    const financeErrorHeading = await screen.findByRole('heading', { name: 'Finance records could not load' });
-    expect(financeErrorHeading).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Finance records could not load' })).not.toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Support tickets could not load' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Return unavailable' })).not.toBeInTheDocument();
 
-    const financeRetrySection = financeErrorHeading.closest('.op-empty-state');
-    expect(financeRetrySection).not.toBeNull();
-    await user.click(within(financeRetrySection as HTMLElement).getByRole('button', { name: 'Retry' }));
+    const supportRetrySection = screen.getByRole('heading', { name: 'Support tickets could not load' }).closest('.op-empty-state');
+    expect(supportRetrySection).not.toBeNull();
+    await user.click(within(supportRetrySection as HTMLElement).getByRole('button', { name: 'Retry' }));
 
-    await waitFor(() => expect(getReturnFinanceRecordsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listVendorSupportTicketsMock).toHaveBeenCalledTimes(2));
+    expect(getReturnFinanceRecordsMock).not.toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(getReturnMock).toHaveBeenCalledTimes(1);
   });
@@ -587,7 +587,16 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getAllByText('Sign in again to load this return request.').length).toBeGreaterThan(0);
   });
 
-  it('renders existing Navlungo return pickup evidence on Return Detail', async () => {
+  it('renders existing Navlungo return pickup evidence for admins on Return Detail', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
     getReturnMock.mockResolvedValue({
       ...returnDetail,
       returnProvider: 'navlungo',
@@ -740,7 +749,9 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Customer shipment')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(screen.queryByText('Customer shipment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider ID')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync Navlungo return status' })).not.toBeInTheDocument();
   });
 
@@ -1464,7 +1475,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Shopify return request lifecycle/i)).not.toBeInTheDocument();
   });
 
-  it('renders return shipment details and tracking-backed timeline stage when available', async () => {
+  it('hides vendor provider shipment details while preserving tracking-backed return activity', async () => {
     getReturnMock.mockResolvedValue({
       ...returnDetail,
       returnCarrierName: 'Yurtiçi Kargo',
@@ -1474,12 +1485,10 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Customer shipment')).toBeInTheDocument();
-    expect(screen.getByText('Yurtiçi Kargo')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'returnkargo-123' })).toHaveAttribute(
-      'href',
-      'https://tracking.example/returnkargo-123',
-    );
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
+    expect(screen.queryByText('Customer shipment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Yurtiçi Kargo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'returnkargo-123' })).not.toBeInTheDocument();
     expect(screen.getByText('Return shipment created')).toBeInTheDocument();
     expect(screen.queryByText(/in transit/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/delivered/i)).not.toBeInTheDocument();
@@ -1548,46 +1557,35 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Return is closed and refund is complete. No vendor action is required.')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Refund is complete. Settlement accounting review may remain in Finance.',
+      'Refund is complete. No vendor action is required.',
     );
     expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Refund processed').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Settlement review pending/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Payout accounting pending/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Settlement review pending/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Payout accounting pending/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('Refund completed');
-    expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('Ownership verified');
+    expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('Vendor action');
     expect(screen.getByLabelText('Return completion summary')).toHaveTextContent('No vendor action required.');
-    expect(screen.getAllByText('Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund offset')).toBeInTheDocument();
-    expect(screen.getByText('Sale payable impact')).toBeInTheDocument();
+    expect(screen.queryByText('Operational lifecycle completed. Remaining activity relates only to settlement/payout accounting.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Refund offset')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sale payable impact')).not.toBeInTheDocument();
     expect(screen.queryByText('Payout activity')).not.toBeInTheDocument();
     expect(screen.queryByText('Refund impact')).not.toBeInTheDocument();
-    const returnLifecycle = screen.getByRole('heading', { name: 'Return timeline' }).closest('article');
+    const returnLifecycle = screen.getByRole('heading', { name: 'Return activity' }).closest('article');
     expect(returnLifecycle).toBeTruthy();
     expect(within(returnLifecycle as HTMLElement).getByText('Return requested')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Return shipment created')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Received by vendor')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Approved by vendor')).toBeInTheDocument();
     expect(within(returnLifecycle as HTMLElement).getByText('Refund processed')).toBeInTheDocument();
-    const financeLifecycle = screen.getByRole('heading', { name: 'Finance timeline' }).closest('article');
-    expect(financeLifecycle).toBeTruthy();
-    expect(within(financeLifecycle as HTMLElement).getByText('Finance entry created')).toBeInTheDocument();
-    const payoutPendingBadge = within(financeLifecycle as HTMLElement).getByText('Payout accounting pending');
-    expect(payoutPendingBadge).toHaveClass('op-tone-warning');
-    const ownershipCard = screen.getByLabelText('Return ownership snapshot');
-    expect(within(ownershipCard).getAllByText('Yalı Spor (yalispor)').length).toBeGreaterThanOrEqual(2);
-    expect(within(ownershipCard).getAllByText('Sporjinal (sporjinal)').length).toBeGreaterThanOrEqual(4);
-    expect(within(ownershipCard).getByText('Return owner snapshot')).toBeInTheDocument();
-    const transferLineage = within(ownershipCard).getByLabelText('Return ownership transfer lineage');
-    expect(transferLineage).toHaveTextContent('Yalı Spor (yalispor)');
-    expect(transferLineage).toHaveTextContent('↓ Transfer');
-    expect(transferLineage).toHaveTextContent('Sporjinal (sporjinal)');
-    expect(screen.getAllByText('Provider sync diagnostics').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: 'Finance timeline' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Return ownership snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider sync diagnostics')).not.toBeInTheDocument();
     expect(
-      screen.getAllByText('Return is already closed/refunded; these fields are historical sync diagnostics.').length,
-    ).toBeGreaterThan(0);
+      screen.queryByText('Return is already closed/refunded; these fields are historical sync diagnostics.'),
+    ).not.toBeInTheDocument();
   });
 
     it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
@@ -1607,6 +1605,15 @@ describe('ReturnDetailPage vendor review screen', () => {
     });
 
     it('renders unknown ownership fields without guessing vendor ownership', async () => {
+      setCurrentUser({
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: true,
+        defaultVendorId: 'demo-vendor-a',
+      });
       getReturnMock.mockResolvedValue({
         ...closedRefundedReturnDetail,
         returnOwnershipSummary: {
@@ -1731,8 +1738,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect((await screen.findAllByText('Support ticket created.')).length).toBeGreaterThan(0);
   });
 
-  it('renders Kargonomi return readiness preview without exposing PII fields', async () => {
-    const user = userEvent.setup();
+  it('hides Kargonomi return readiness preview from vendors', async () => {
     getReturnMock.mockResolvedValue(returnDetail);
     getKargonomiReturnPreviewMock.mockResolvedValueOnce({
       ok: true,
@@ -1770,21 +1776,28 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: 'Kargonomi return preview' }));
-
-    expect(getKargonomiReturnPreviewMock).toHaveBeenCalledWith(returnDetail.id);
-    expect(await screen.findByText('Not ready')).toBeInTheDocument();
-    expect(screen.getByText('sender.phone, receiver.phone')).toBeInTheDocument();
-    expect(screen.getByText('city 828, state 34')).toBeInTheDocument();
-    expect(screen.getByText('ready, kargonomi account fallback')).toBeInTheDocument();
-    expect(screen.getByText('warehouse 112668, name ready, phone missing, address ready')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Kargonomi return preview' })).not.toBeInTheDocument();
+    expect(getKargonomiReturnPreviewMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('City / state IDs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Warehouse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Missing fields')).not.toBeInTheDocument();
     expect(screen.queryByText('+905551112233')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer full address')).not.toBeInTheDocument();
     expect(screen.queryByText('11111111111')).not.toBeInTheDocument();
   });
 
-  it('marks Kargonomi return receiver name invalid when it has only one word', async () => {
+  it('marks Kargonomi return receiver name invalid for admins when it has only one word', async () => {
     const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
     getReturnMock.mockResolvedValue(returnDetail);
     getKargonomiReturnPreviewMock.mockResolvedValueOnce({
       ok: true,
