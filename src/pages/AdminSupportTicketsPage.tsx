@@ -26,7 +26,6 @@ import {
 } from '../features/support/api';
 import {
   getSupportOperationalStory,
-  isResolvedToday,
   ticketMatchesSupportActionBucket,
   type SupportActionBucket,
 } from '../lib/supportOperationalStory';
@@ -46,29 +45,11 @@ const WORKFLOW_TABS: Array<{ key: SupportActionBucket; label: string; detail: st
   { key: 'resolved', label: 'Resolved', detail: 'Recently closed work' },
 ];
 
-function formatDate(value: string) {
+function formatShortDate(value: string) {
   return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   });
-}
-
-function formatLastReply(ticket: SupportTicket) {
-  if (!ticket.lastReplyAt || !ticket.lastReplyByRole) {
-    return 'No replies';
-  }
-  return `${formatSupportLabel(ticket.lastReplyByRole)} · ${formatDate(ticket.lastReplyAt)}`;
-}
-
-function getSlaTone(ticket: SupportTicket) {
-  return getSupportOperationalStory(ticket).slaTone;
-}
-
-function getSlaLabel(ticket: SupportTicket) {
-  return getSupportOperationalStory(ticket).slaLabel;
 }
 
 function getPriorityTone(priority: SupportTicket['priority']) {
@@ -103,6 +84,95 @@ export function formatSupportLabel(value: string) {
 
 function getContextLabel(ticket: SupportTicket) {
   return getSupportOperationalStory(ticket).contextLabel;
+}
+
+function getContextKind(ticket: SupportTicket) {
+  if (ticket.contextType === 'general') {
+    return 'Vendor Profile';
+  }
+  if (ticket.category === 'TRACKING') {
+    return 'Tracking';
+  }
+  if (ticket.category === 'SHIPMENT') {
+    return 'Shipment';
+  }
+  if (ticket.category === 'RETURN') {
+    return 'Return';
+  }
+  if (ticket.category === 'ORDER') {
+    return 'Order';
+  }
+  if (ticket.category === 'REFUND' || ticket.category === 'PAYOUT' || ticket.category === 'INVOICE') {
+    return 'Payment';
+  }
+  return formatSupportLabel(ticket.category);
+}
+
+function getContextTarget(ticket: SupportTicket) {
+  if (ticket.contextType === 'general') {
+    return 'Vendor Settings';
+  }
+  return getContextLabel(ticket);
+}
+
+function getOperationalContextLabel(ticket: SupportTicket) {
+  return `${getContextKind(ticket)} • ${getContextTarget(ticket)}`;
+}
+
+function getWaitingOnLabel(ticket: SupportTicket) {
+  const story = getSupportOperationalStory(ticket);
+  if (story.isResolved || story.isClosed) {
+    return 'Resolved';
+  }
+  if (story.isEscalated) {
+    return 'Escalated';
+  }
+  if (story.isWaitingOnVendor) {
+    return 'Waiting on Vendor';
+  }
+  if (story.needsAssignment || story.needsAdminResponse || story.isOverdue) {
+    return 'Waiting on Admin';
+  }
+  return 'Review Required';
+}
+
+function getWaitingOnTone(ticket: SupportTicket) {
+  const label = getWaitingOnLabel(ticket);
+  if (label === 'Resolved') {
+    return 'success' as const;
+  }
+  if (label === 'Escalated') {
+    return 'danger' as const;
+  }
+  if (label === 'Waiting on Vendor') {
+    return 'info' as const;
+  }
+  return 'warning' as const;
+}
+
+function getLastUpdateLabel(ticket: SupportTicket) {
+  if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && ticket.sla?.isOverdue) {
+    return typeof ticket.sla.overdueByHours === 'number'
+      ? `Overdue ${ticket.sla.overdueByHours}h`
+      : 'Overdue';
+  }
+  if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED' && ticket.sla?.dueLabel) {
+    return ticket.sla.dueLabel;
+  }
+  return `Updated ${formatShortDate(ticket.lastReplyAt ?? ticket.updatedAt)}`;
+}
+
+function getLastUpdateTone(ticket: SupportTicket) {
+  if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+    return 'success' as const;
+  }
+  if (ticket.sla?.isOverdue || ticket.sla?.escalationLevel === 'overdue' || ticket.sla?.escalationLevel === 'escalated') {
+    return 'danger' as const;
+  }
+  if (ticket.sla?.escalationLevel === 'due_soon') {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
 }
 
 function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
@@ -246,9 +316,8 @@ export function AdminSupportTicketsPage() {
     <section className="op-page support-ops-page">
       <div className="op-page-heading support-ops-header">
         <div>
-          <p className="eyebrow">Support operations</p>
-          <h1>Support Operations Workspace</h1>
-          <p className="support-ops-summary">Review vendor support requests, operational context, and internal investigation notes.</p>
+          <h1>Support Operations</h1>
+          <p className="support-ops-summary">Manage operational support tickets.</p>
         </div>
         <Link to="/admin/support/analytics" className="button button-secondary button-link support-analytics-link">
           View analytics
@@ -340,7 +409,7 @@ export function AdminSupportTicketsPage() {
         <SectionSkeleton title="Loading support tickets" description="Collecting vendor support requests in the background." />
       ) : filteredTickets.length ? (
         <OperationalTable
-          columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Workflow', 'SLA', 'Assignment', 'Next action', 'Last reply', 'Action']}
+          columns={['Ticket', 'Vendor', 'Context', 'Priority', 'Owner', 'Waiting On', 'Last Update', 'Open']}
           className="support-admin-table"
         >
           {filteredTickets.map((ticket) => {
@@ -350,31 +419,18 @@ export function AdminSupportTicketsPage() {
               <OperationalTableRow key={ticket.id}>
                 <span role="cell" className="support-ticket-cell">
                   <strong>{ticket.subject}</strong>
-                  <span title={ticket.id}>{ticket.id}</span>
                   {ticket.adminUnreadCount > 0 ? (
                     <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
                   ) : null}
                 </span>
-                <span role="cell" className="support-muted-cell">{ticket.vendorName ?? ticket.vendorId}</span>
-                <span role="cell" className="support-context-cell" title={story.contextDetail ?? ticket.contextId ?? story.contextLabel}>
-                  <strong>{getContextLabel(ticket)}</strong>
-                  {story.contextDetail ? <small>{story.contextDetail}</small> : null}
+                <span role="cell" className="support-muted-cell">{ticket.vendorName ?? 'Unknown vendor'}</span>
+                <span role="cell" className="support-context-cell" title={story.contextDetail ?? ticket.contextId ?? getOperationalContextLabel(ticket)}>
+                  {getOperationalContextLabel(ticket)}
                 </span>
-                <span role="cell">{formatSupportLabel(ticket.category)}</span>
                 <span role="cell">
                   <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
                 </span>
-                <span role="cell" className="support-axis-cell">
-                  <small>Workflow</small>
-                  <StatusBadge tone={getSupportStatusTone(ticket.status)}>{story.workflowLabel}</StatusBadge>
-                </span>
-                <span role="cell" className="support-sla-cell support-axis-cell">
-                  <small>SLA</small>
-                  <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
-                  <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
-                </span>
                 <span role="cell" className={`support-assignment-cell ${story.needsAssignment ? 'is-unassigned' : ''}`}>
-                  <strong>{story.assignmentLabel}</strong>
                   {canAssignInline ? (
                     <button
                       type="button"
@@ -384,16 +440,15 @@ export function AdminSupportTicketsPage() {
                     >
                       Assign to me
                     </button>
-                  ) : null}
+                  ) : (
+                    <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
+                  )}
                 </span>
-                <span role="cell" className="support-next-action-cell">
-                  <StatusBadge tone={story.nextActionTone}>{story.nextActionLabel}</StatusBadge>
-                  <small>{story.nextActionDetail}</small>
-                  {story.escalationReason ? <small>Escalated: {story.escalationReason}</small> : null}
+                <span role="cell" className="support-waiting-cell">
+                  <StatusBadge tone={getWaitingOnTone(ticket)}>{getWaitingOnLabel(ticket)}</StatusBadge>
                 </span>
-                <span role="cell" className="support-last-reply-cell">
-                  {formatLastReply(ticket)}
-                  <small>Updated {formatDate(ticket.updatedAt)}</small>
+                <span role="cell" className="support-update-cell">
+                  <StatusBadge tone={getLastUpdateTone(ticket)}>{getLastUpdateLabel(ticket)}</StatusBadge>
                 </span>
                 <span role="cell" className="support-action-cell">
                   <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">

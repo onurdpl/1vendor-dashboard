@@ -55,9 +55,9 @@ function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
       overdueByHours: null,
     },
     contextType: 'order',
-    contextId: 'alloc-1030',
-    contextSummary: { orderNumber: '#1030', status: 'Awaiting shipment' },
-    contextSnapshot: { orderNumber: '#1030' },
+    contextId: 'alloc-1061',
+    contextSummary: { orderNumber: '#1061', status: 'Awaiting shipment' },
+    contextSnapshot: { orderNumber: '#1061' },
     resolvedAt: null,
     closedAt: null,
     ...overrides,
@@ -100,31 +100,66 @@ describe('support ticket table layout', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    listAdminSupportTicketsMock.mockResolvedValue([supportTicket()]);
+    listAdminSupportTicketsMock.mockResolvedValue([
+      supportTicket(),
+      supportTicket({
+        id: 'ticket-2',
+        subject: 'Return review support',
+        status: 'IN_REVIEW',
+        category: 'RETURN',
+        assigneeUserId: 'admin-demo',
+        assigneeName: 'Demo Admin',
+        adminUnreadCount: 0,
+        lastReplyByRole: 'ADMIN',
+        contextId: 'return-1029',
+        contextSummary: { orderNumber: '#1029', status: 'Requested' },
+        contextSnapshot: { orderNumber: '#1029' },
+      }),
+    ]);
 
     renderPage(<AdminSupportTicketsPage />);
 
     const table = await screen.findByText('Shipment tracking help');
     const row = table.closest('.op-table-row');
+    const tableShell = row?.closest('.op-table');
+    const header = tableShell?.querySelector('.op-table-head') as HTMLElement | null;
 
     expect(row).toBeTruthy();
-    expect(row?.querySelectorAll(':scope > [role="cell"]')).toHaveLength(11);
+    expect(row?.querySelectorAll(':scope > [role="cell"]')).toHaveLength(8);
     expect(row?.querySelector('td')).toBeNull();
-    expect(screen.getByRole('button', { name: /All/i })).toHaveTextContent('1');
+    expect(header).toBeTruthy();
+    ['Ticket', 'Vendor', 'Context', 'Priority', 'Owner', 'Waiting On', 'Last Update', 'Open'].forEach((column) => {
+      expect(within(header as HTMLElement).getByRole('columnheader', { name: column })).toBeInTheDocument();
+    });
+    ['Workflow', 'SLA', 'Assignment', 'Next Action', 'Last Reply', 'Category'].forEach((column) => {
+      expect(within(header as HTMLElement).queryByRole('columnheader', { name: column })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /All/i })).toHaveTextContent('2');
     expect(screen.getByRole('button', { name: /Needs Assignment/i })).toHaveTextContent('1');
     expect(screen.getByRole('button', { name: /Needs Admin Response/i })).toHaveTextContent('1');
     expect(screen.getByRole('button', { name: /Escalated/i })).toHaveTextContent('0');
     expect(screen.getByRole('button', { name: /Overdue/i })).toHaveTextContent('0');
     expect(screen.getByRole('button', { name: /Waiting on Vendor/i })).toHaveTextContent('0');
     expect(screen.getByRole('button', { name: /Resolved/i })).toHaveTextContent('0');
-    expect(within(row as HTMLElement).getByText('Order #1030')).toBeInTheDocument();
-    expect(within(row as HTMLElement).getByText('Workflow')).toBeInTheDocument();
-    expect(within(row as HTMLElement).getByText('SLA')).toBeInTheDocument();
-    expect(within(row as HTMLElement).getAllByText('Needs assignment').length).toBeGreaterThan(0);
+    expect(within(row as HTMLElement).getByText('Shipment • Order #1061')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByRole('button', { name: 'Assign to me' })).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText('Waiting on Admin')).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText('Due tomorrow')).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('ticket-1')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('Workflow')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('SLA')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('Needs admin reply')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('Needs assignment')).not.toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText('In Review')).not.toBeInTheDocument();
     expect(within(row as HTMLElement).getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       '/admin/support/ticket-1',
     );
+
+    const assignedRow = screen.getByText('Return review support').closest('.op-table-row') as HTMLElement;
+    expect(within(assignedRow).getByText('Return • Order #1029')).toBeInTheDocument();
+    expect(within(assignedRow).getByText('Demo Admin')).toBeInTheDocument();
+    expect(within(assignedRow).getByText('Review Required')).toBeInTheDocument();
   });
 
   it('filters by support workflow tabs and assigns tickets inline', async () => {

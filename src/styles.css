@@ -1239,18 +1239,15 @@ a:focus-visible {
 
 .support-admin-table .op-table-head,
 .support-admin-table .op-table-row {
-  min-width: 1320px;
+  min-width: 980px;
   grid-template-columns:
-    minmax(178px, 1.34fr)
-    minmax(104px, 0.68fr)
-    minmax(142px, 0.92fr)
-    minmax(82px, 0.52fr)
-    minmax(82px, 0.52fr)
-    minmax(106px, 0.66fr)
-    minmax(102px, 0.68fr)
-    minmax(136px, 0.82fr)
-    minmax(190px, 1.1fr)
-    minmax(144px, 0.84fr)
+    minmax(190px, 1.3fr)
+    minmax(116px, 0.72fr)
+    minmax(178px, 1fr)
+    minmax(88px, 0.52fr)
+    minmax(122px, 0.72fr)
+    minmax(132px, 0.76fr)
+    minmax(118px, 0.68fr)
     minmax(64px, 0.36fr);
 }
 
@@ -1275,10 +1272,10 @@ a:focus-visible {
 }
 
 .support-ticket-cell,
-.support-sla-cell,
-.support-axis-cell,
 .support-assignment-cell,
-.support-next-action-cell {
+.support-context-cell,
+.support-waiting-cell,
+.support-update-cell {
   align-content: center;
 }
 
@@ -1306,8 +1303,6 @@ a:focus-visible {
 }
 
 .support-ticket-cell > span:not(.op-badge),
-.support-sla-cell > span:not(.op-badge),
-.support-next-action-cell small,
 .support-muted-cell,
 .support-last-reply-cell {
   min-width: 0;
@@ -1320,24 +1315,12 @@ a:focus-visible {
 }
 
 .support-context-cell {
-  display: grid;
-  min-width: 0;
-  overflow: hidden;
-  gap: 2px;
-}
-
-.support-context-cell strong,
-.support-context-cell small,
-.support-axis-cell small,
-.support-last-reply-cell small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.support-context-cell small,
-.support-axis-cell small,
 .support-last-reply-cell small {
   color: #64748b;
   font-size: 0.7rem;
@@ -1345,7 +1328,8 @@ a:focus-visible {
 }
 
 .support-assignment-cell,
-.support-next-action-cell {
+.support-waiting-cell,
+.support-update-cell {
   display: grid;
   min-width: 0;
   gap: 4px;
@@ -1356,11 +1340,12 @@ a:focus-visible {
 }
 
 .support-assignment-cell .button,
-.support-next-action-cell .op-badge {
+.support-waiting-cell .op-badge,
+.support-update-cell .op-badge {
   justify-self: start;
 }
 
-.support-admin-table .op-table-row > span:not(.support-ticket-cell):not(.support-sla-cell),
+.support-admin-table .op-table-row > span:not(.support-ticket-cell),
 .support-vendor-table .op-table-row > span:not(.support-ticket-cell) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -11413,13 +11398,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .support-ops-page,
 .support-detail-page {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .support-ops-header {
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
   margin-bottom: 0;
 }
 
@@ -11442,7 +11427,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .support-ops-header .support-ops-summary {
   max-width: 560px;
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   color: #64748b;
   font-size: 0.84rem;
   line-height: 1.35;
@@ -11463,9 +11448,9 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .support-ops-page .op-toolbar {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   align-items: stretch;
-  padding: 14px;
+  padding: 12px;
   border-color: #dbeafe;
   border-radius: 18px;
   background:
