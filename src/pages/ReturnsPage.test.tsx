@@ -402,12 +402,12 @@ describe('ReturnsPage control center', () => {
       ...pendingReturn,
       id: 'RET-A-MULTI-1097',
       sourceShopifyOrderNumber: 1097,
-      refundedSkus: ['SKU-MULTI-1', 'SKU-MULTI-2'],
+      refundedSkus: ['JX1275-L', 'SKU-MULTI-2'],
       refundedItems: [
         {
           ...pendingReturn.refundedItems[0],
           id: 'line-multi-1',
-          sku: 'SKU-MULTI-1',
+          sku: 'JX1275-L',
           name: 'Running shoe',
           variantTitle: 'Black / 42',
         },
@@ -433,10 +433,12 @@ describe('ReturnsPage control center', () => {
 
     expect(await table.findByText('#1097')).toBeInTheDocument();
     expect(table.getByText('2 items returned')).toBeInTheDocument();
-    expect(table.getByText('Running shoe')).toBeInTheDocument();
-    expect(table.getByText(/SKU-MULTI-1/)).toBeInTheDocument();
-    expect(table.getByText('Training sock')).toBeInTheDocument();
-    expect(table.getByText(/SKU-MULTI-2/)).toBeInTheDocument();
+    const firstTitleLine = table.getByText('Running shoe / Black / 42');
+    expect(firstTitleLine).toBeInTheDocument();
+    expect(firstTitleLine).not.toHaveTextContent('JX1275-L');
+    expect(table.getByText('SKU: JX1275-L')).toBeInTheDocument();
+    expect(table.getByText('Training sock / White / M')).toBeInTheDocument();
+    expect(table.getByText('SKU: SKU-MULTI-2')).toBeInTheDocument();
 
     const returnedItemsSection = (await screen.findByRole('heading', { name: 'Returned items' })).closest('.op-panel-section');
     expect(returnedItemsSection).not.toBeNull();
@@ -488,8 +490,8 @@ describe('ReturnsPage control center', () => {
 
     expect(await table.findByText('#1098')).toBeInTheDocument();
     expect(table.getByText('3 items returned')).toBeInTheDocument();
-    expect(table.getByText('First returned item')).toBeInTheDocument();
-    expect(table.getByText('Second returned item')).toBeInTheDocument();
+    expect(table.getByText('First returned item / Black')).toBeInTheDocument();
+    expect(table.getByText('Second returned item / White')).toBeInTheDocument();
     expect(table.getByText('+1 more items')).toBeInTheDocument();
     expect(table.queryByText('Third returned item')).not.toBeInTheDocument();
   });
@@ -520,7 +522,7 @@ describe('ReturnsPage control center', () => {
 
     await userEvent.click(within(workflowTabs).getByRole('button', { name: /^All/i }));
 
-    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(await screen.findByText(/Barcode gateway license/)).toBeInTheDocument();
     expect(await screen.findByText('#1098')).toBeInTheDocument();
   });
 
@@ -806,8 +808,8 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByText('Nested product trainer')).toBeInTheDocument();
-    expect(screen.getByText('SKU-NESTED')).toBeInTheDocument();
+    expect(await screen.findByText(/Nested product trainer/)).toBeInTheDocument();
+    expect(screen.getByText('SKU: SKU-NESTED')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
@@ -830,8 +832,8 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5')).toBeInTheDocument();
-    expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
+    expect(await screen.findByText(/Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı/)).toBeInTheDocument();
+    expect(screen.getByText('SKU: DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
@@ -882,8 +884,8 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5')).toBeInTheDocument();
-    expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
+    expect(await screen.findByText(/Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı/)).toBeInTheDocument();
+    expect(screen.getByText('SKU: DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
@@ -912,8 +914,8 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByText('Nike Court Vision Kadın Krem Günlük Ayakkabı')).toBeInTheDocument();
-    expect(screen.getAllByText('DJ1196-002-40,5').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Nike Court Vision Kadın Krem Günlük Ayakkabı / Krem / 36.5')).toBeInTheDocument();
+    expect(screen.getAllByText(/DJ1196-002-40,5/).length).toBeGreaterThan(0);
     expect(screen.getByText('1 item returned')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });

@@ -481,8 +481,12 @@ function getTableReturnedItems(summary: ReturnSummary) {
   return [getTableItemDisplay(summary)];
 }
 
-function getReturnedItemSecondaryText(item: ReturnType<typeof getTableReturnedItems>[number]) {
-  return [item.sku !== '—' ? item.sku : null, item.variant].filter(Boolean).join(' · ');
+function getReturnedItemTitleText(item: ReturnType<typeof getTableReturnedItems>[number]) {
+  return [item.title, item.variant].filter(Boolean).join(' / ');
+}
+
+function getReturnedItemSkuText(item: ReturnType<typeof getTableReturnedItems>[number]) {
+  return item.sku !== '—' ? `SKU: ${item.sku}` : '';
 }
 
 function getVendorTimelineLabel(label: string) {
@@ -1081,8 +1085,8 @@ export function ReturnsPage() {
                             ↩
                           </span>
                           <span>
-                            <strong>{returnedItem.title}</strong>
-                            {getReturnedItemSecondaryText(returnedItem) ? <small>{getReturnedItemSecondaryText(returnedItem)}</small> : null}
+                            <strong>{getReturnedItemTitleText(returnedItem)}</strong>
+                            {getReturnedItemSkuText(returnedItem) ? <small>{getReturnedItemSkuText(returnedItem)}</small> : null}
                           </span>
                         </div>
                       ))}

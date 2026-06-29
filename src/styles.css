@@ -3372,6 +3372,7 @@ h3 {
 }
 
 .return-item-preview-line strong {
+  display: block;
   color: #0f172a;
   font-size: 0.77rem;
   font-weight: 800;
@@ -3380,6 +3381,7 @@ h3 {
 
 .return-item-preview-line small,
 .return-item-extra {
+  display: block;
   margin-top: 1px;
   color: #64748b;
   font-size: 0.7rem;
