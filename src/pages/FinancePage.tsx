@@ -1032,13 +1032,6 @@ function getVendorFinanceTimelineEvents(events: OperationalEventInput[], scenari
   });
 }
 
-function shouldShowFinanceValue(value: string | null | undefined, paymentImpact: string) {
-  if (!value || value === UNKNOWN_FINANCE_VALUE || isZeroCurrencyValue(value)) {
-    return false;
-  }
-  return parseCurrencyValue(value) !== parseCurrencyValue(paymentImpact);
-}
-
 function formatSupportStatus(status: SupportTicket['status'], audience: 'admin' | 'vendor' = 'admin') {
   if (audience === 'vendor') {
     if (status === 'OPEN') {
@@ -1687,12 +1680,6 @@ export function FinancePage() {
   const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceScenario.status);
   const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceScenario);
   const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
-  const selectedEstimatedPayment = selectedRecord?.payoutCalculation?.estimatedPayout ?? null;
-  const selectedRefundImpact = selectedRecord?.payoutCalculation?.refundImpact
-    ? optionalDeductionValue(selectedRecord.payoutCalculation.refundImpact)
-    : null;
-  const showSelectedEstimatedPayment = shouldShowFinanceValue(selectedEstimatedPayment, selectedPaymentImpact);
-  const showSelectedRefundImpact = shouldShowFinanceValue(selectedRefundImpact, selectedPaymentImpact);
   const vendorFinanceCrossLinks = financeCrossLinks
     .filter((link) => link.eyebrow !== 'Support')
     .map((link) => ({
@@ -2322,33 +2309,6 @@ export function FinancePage() {
                   <StatusBadge tone={selectedVendorFinanceScenario.nextAction === 'İşlem Gerekmiyor' ? 'success' : 'warning'}>
                     {selectedVendorFinanceScenario.nextAction}
                   </StatusBadge>
-                </div>
-              </div>
-
-              <div className="finance-detail-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Ödeme Etkisi</h4>
-                  <StatusBadge tone={selectedVendorFinanceScenario.tone}>
-                    {selectedVendorFinanceScenario.status}
-                  </StatusBadge>
-                </div>
-                <div className="finance-detail-rows">
-                  <MetadataRow
-                    label="Ödeme Etkisi"
-                    value={<span className={getVendorScenarioImpactClass(selectedPaymentImpact, selectedVendorFinanceScenario)}>{selectedPaymentImpact}</span>}
-                  />
-                  {showSelectedRefundImpact ? (
-                    <MetadataRow
-                      label="İade Etkisi"
-                      value={<span className="finance-deduction-value">{selectedRefundImpact}</span>}
-                    />
-                  ) : null}
-                  {showSelectedEstimatedPayment ? (
-                    <MetadataRow
-                      label="Tahmini Ödeme"
-                      value={<span className="finance-payout-value">{financeValueOrUnknown(selectedEstimatedPayment)}</span>}
-                    />
-                  ) : null}
                 </div>
               </div>
 

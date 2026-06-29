@@ -1345,7 +1345,7 @@ describe('FinancePage control center', () => {
     expect(panel.getByText('İşlem Özeti')).toBeInTheDocument();
     expect(panel.getByText('Bu ödeme neden bekliyor?')).toBeInTheDocument();
     expect(panel.getByText('Sonraki Adım')).toBeInTheDocument();
-    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.queryByRole('heading', { name: 'Ödeme Etkisi' })).not.toBeInTheDocument();
     expect(panel.getByRole('heading', { name: 'İlgili Kayıtlar' })).toBeInTheDocument();
     expect(panel.getByRole('heading', { name: 'Hareket Geçmişi' })).toBeInTheDocument();
     expect(panel.getAllByText('İşlem Gerekmiyor').length).toBeGreaterThan(0);
@@ -1364,9 +1364,9 @@ describe('FinancePage control center', () => {
     expect(panel.queryByText(/settlement/i)).not.toBeInTheDocument();
     expect(panel.queryByText(/reference id|approval id|commission invoice/i)).not.toBeInTheDocument();
     expect(panel.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    const paymentImpactCard = panel.getByRole('heading', { name: 'Ödeme Etkisi' }).closest('.finance-detail-card');
-    expect(paymentImpactCard).not.toBeNull();
-    expect(within(paymentImpactCard as HTMLElement).getAllByText('Ödeme Etkisi').length).toBeGreaterThan(0);
+    const summaryCard = panel.getByText('İşlem Özeti').closest('.finance-selected-summary-card');
+    expect(summaryCard).not.toBeNull();
+    expect(within(summaryCard as HTMLElement).getAllByText('Ödeme Etkisi').length).toBeGreaterThan(0);
     expect(panel.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
     expect(panel.queryByText('Accounting sync')).not.toBeInTheDocument();
     expect(panel.queryByText('Payment evidence pending')).not.toBeInTheDocument();
@@ -1584,7 +1584,8 @@ describe('FinancePage control center', () => {
     const panel = getSidePanel(container);
 
     expect(await panel.findByText('Bu ödeme neden bekliyor?')).toBeInTheDocument();
-    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.queryByRole('heading', { name: 'Ödeme Etkisi' })).not.toBeInTheDocument();
+    expect(within(panel.getByText('İşlem Özeti').closest('.finance-selected-summary-card') as HTMLElement).getByText('Ödeme Etkisi')).toBeInTheDocument();
     expect(panel.getAllByText('Bu işlem inceleniyor.')).toHaveLength(1);
     expect(panel.queryByText('Linked order and return context for this transaction.')).not.toBeInTheDocument();
     expect(panel.queryByText('Recent payment activity for this transaction.')).not.toBeInTheDocument();
@@ -1639,7 +1640,8 @@ describe('FinancePage control center', () => {
     const panel = getSidePanel(container);
 
     expect(await panel.findByText('İşlem Özeti')).toBeInTheDocument();
-    expect(panel.getByRole('heading', { name: 'Ödeme Etkisi' })).toBeInTheDocument();
+    expect(panel.queryByRole('heading', { name: 'Ödeme Etkisi' })).not.toBeInTheDocument();
+    expect(within(panel.getByText('İşlem Özeti').closest('.finance-selected-summary-card') as HTMLElement).getByText('Ödeme Etkisi')).toBeInTheDocument();
     expect(panel.getAllByText('İncelemede').length).toBeGreaterThan(0);
     expect(panel.queryByText('Settlement review pending')).not.toBeInTheDocument();
     expect(panel.queryByText('settlement accounting review')).not.toBeInTheDocument();
