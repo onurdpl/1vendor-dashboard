@@ -41,6 +41,7 @@ import { formatOwnerLabel, formatOwnershipSource, hasOwnerLineageChange } from '
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
+import { isVendorContextRestricted, RESTRICTED_ACTION_MESSAGE } from '../lib/auth';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -1278,6 +1279,7 @@ export function ReturnDetailPage() {
   const canReviewReturn =
     currentUser?.role === 'admin' ||
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
+  const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const hasReceivedReturn = Boolean(returnRequest.vendorReceivedAt);
   const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
   const terminalRefundedReturn = isTerminalRefundedReturn({
@@ -1906,12 +1908,14 @@ export function ReturnDetailPage() {
               ) : null}
             </div>
             {message ? <p className={`action-feedback action-${tone}`}>{message}</p> : null}
+            {vendorRestricted ? <p className="restricted-action-message">{RESTRICTED_ACTION_MESSAGE}</p> : null}
             <div className="return-review-actions">
               {canMutateReturnReview ? (
                 <button
                   type="button"
                   className="button button-secondary"
-                  disabled={markReceivedMutation.isPending || hasReceivedReturn}
+                  disabled={markReceivedMutation.isPending || hasReceivedReturn || vendorRestricted}
+                  title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                   onClick={() => void markReceivedMutation.mutateAsync(undefined)}
                 >
                   {markReceivedMutation.isPending ? 'Marking...' : hasReceivedReturn ? 'Received' : 'Mark received'}
@@ -1921,7 +1925,8 @@ export function ReturnDetailPage() {
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn || supportDecisionBlocked}
+                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn || supportDecisionBlocked || vendorRestricted}
+                  title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                   onClick={() => void reviewMutation.mutateAsync({ decision: 'approved' })}
                 >
                   Approve return
@@ -1944,7 +1949,8 @@ export function ReturnDetailPage() {
                 <button
                   type="button"
                   className="button button-secondary"
-                  disabled={reviewMutation.isPending || !rejectReason.trim() || supportDecisionBlocked}
+                  disabled={reviewMutation.isPending || !rejectReason.trim() || supportDecisionBlocked || vendorRestricted}
+                  title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                   onClick={() => void reviewMutation.mutateAsync({ decision: 'rejected', reason: rejectReason })}
                 >
                   Reject return

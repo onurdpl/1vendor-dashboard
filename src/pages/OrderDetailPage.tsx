@@ -46,6 +46,7 @@ import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeAr
 import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness } from '../lib/appReadiness';
+import { isVendorContextRestricted, RESTRICTED_ACTION_MESSAGE } from '../lib/auth';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
@@ -2233,14 +2234,16 @@ export function OrderDetailPage() {
 
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
+  const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const canReportIssue =
     isVendorAssignedOwner && !!order && (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
-  const canUseFulfillmentActions =
+  const canUseFulfillmentActionsBeforeRestriction =
     isVendorAssignedOwner &&
     !!order &&
     order.fulfillmentActionAvailable &&
     order.allocationStatus !== 'pending_reassignment' &&
     order.allocationStatus !== 'vendor_blocked';
+  const canUseFulfillmentActions = canUseFulfillmentActionsBeforeRestriction && !vendorRestricted;
   const hasTrackingSync =
     !!order?.trackingNumber ||
     !!order?.carrier ||
@@ -2285,7 +2288,7 @@ export function OrderDetailPage() {
   );
   const shouldShowRealTrackingForm =
     isRealMode &&
-    canUseFulfillmentActions &&
+    canUseFulfillmentActionsBeforeRestriction &&
     !hasTrackingSync &&
     missingShipmentCustomerFields.length === 0 &&
     (!hasShipmentExecution || failedLikeShipmentExecution);
@@ -4674,12 +4677,12 @@ export function OrderDetailPage() {
   const orderItems = safeArray(order.lineItems).length ? safeArray(order.lineItems) : safeArray(order.items);
   const snapshotCurrency = getSnapshotCurrency(order);
   const customerLabel = getCompactCustomerLabel(order.customer);
-  const canOpenSplitReject =
+  const canOpenSplitRejectBeforeRestriction =
     currentUser?.role === 'vendor' &&
     orderItems.length > 1 &&
     canShowAllocationSplitRejectAction(order);
-  const canOpenFullReject = currentUser?.role === 'vendor' && canRejectOrder(order);
-  const canShowOrderIssueActions = canOpenSplitReject || canOpenFullReject;
+  const canOpenFullRejectBeforeRestriction = currentUser?.role === 'vendor' && canRejectOrder(order);
+  const canShowOrderIssueActions = canOpenSplitRejectBeforeRestriction || canOpenFullRejectBeforeRestriction;
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
   const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
@@ -6319,11 +6322,12 @@ export function OrderDetailPage() {
                 <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
-            {canUseFulfillmentActions ? (
+            {canUseFulfillmentActions || (vendorRestricted && canUseFulfillmentActionsBeforeRestriction) ? (
               <div className="action-row vendor-action-panel">
                 <div className="vendor-actions-heading">
                   <h3>Shipment details</h3>
                 </div>
+                {vendorRestricted ? <p className="restricted-action-message">{RESTRICTED_ACTION_MESSAGE}</p> : null}
                 {isRealMode ? (
                   <>
                     {hasTrackingSync || hasShipmentExecution || hasShopifyFulfillmentSyncAttempt ? (
@@ -7519,7 +7523,7 @@ export function OrderDetailPage() {
                             value={trackingNumber}
                             onChange={(event) => setTrackingNumber(event.target.value)}
                             placeholder="TRACK123"
-                            disabled={isSubmittingTracking}
+                            disabled={isSubmittingTracking || vendorRestricted}
                           />
                         </label>
                         <label className="field">
@@ -7528,7 +7532,7 @@ export function OrderDetailPage() {
                             value={trackingUrl}
                             onChange={(event) => setTrackingUrl(event.target.value)}
                             placeholder="https://tracking.example/TRACK123"
-                            disabled={isSubmittingTracking}
+                            disabled={isSubmittingTracking || vendorRestricted}
                           />
                         </label>
                         <label className="checkbox-field">
@@ -7536,14 +7540,15 @@ export function OrderDetailPage() {
                             type="checkbox"
                             checked={notifyCustomer}
                             onChange={(event) => setNotifyCustomer(event.target.checked)}
-                            disabled={isSubmittingTracking}
+                            disabled={isSubmittingTracking || vendorRestricted}
                           />
                           <span>Notify customer</span>
                         </label>
                         <button
                           type="submit"
                           className={`button ${shouldShowCreateShipmentAction ? 'button-secondary' : 'button-primary'}`}
-                          disabled={isSubmittingTracking}
+                          disabled={isSubmittingTracking || vendorRestricted}
+                          title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                         >
                           {isSubmittingTracking ? 'Submitting...' : 'Add tracking information'}
                         </button>
@@ -7554,7 +7559,8 @@ export function OrderDetailPage() {
                         <button
                           type="button"
                           className="button button-primary"
-                          disabled={isCreatingShipment}
+                          disabled={isCreatingShipment || vendorRestricted}
+                          title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                           onClick={() => handleCreateShipment()}
                         >
                           {isCreatingShipment ? 'Creating...' : 'Create shipment'}
@@ -7567,7 +7573,8 @@ export function OrderDetailPage() {
                     <button
                       type="button"
                       className="button button-primary"
-                      disabled={isRunningFulfillmentAction}
+                      disabled={isRunningFulfillmentAction || vendorRestricted}
+                      title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                       onClick={() => {
                         if (!order) {
                           return;
@@ -7583,7 +7590,8 @@ export function OrderDetailPage() {
                     <button
                       type="button"
                       className="button button-secondary"
-                      disabled={isRunningFulfillmentAction}
+                      disabled={isRunningFulfillmentAction || vendorRestricted}
+                      title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                       onClick={() => {
                         if (!order) {
                           return;
@@ -9627,20 +9635,25 @@ export function OrderDetailPage() {
                     <strong>Unavailable items</strong>
                     <span>Reject selected items or send the full order to admin review.</span>
                   </div>
+                  {vendorRestricted ? <p className="restricted-action-message">{RESTRICTED_ACTION_MESSAGE}</p> : null}
                   <div className="orders-reject-action-stack">
-                    {canOpenSplitReject ? (
+                    {canOpenSplitRejectBeforeRestriction ? (
                       <button
                         type="button"
                         className="button button-danger"
+                        disabled={vendorRestricted}
+                        title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                         onClick={() => setSplitRejectOpen(true)}
                       >
                         Reject selected items
                       </button>
                     ) : null}
-                    {canOpenFullReject ? (
+                    {canOpenFullRejectBeforeRestriction ? (
                       <button
                         type="button"
-                        className={canOpenSplitReject ? 'button button-secondary' : 'button button-danger'}
+                        className={canOpenSplitRejectBeforeRestriction ? 'button button-secondary' : 'button button-danger'}
+                        disabled={vendorRestricted}
+                        title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
                         onClick={() => {
                           setRejectReason('OUT_OF_STOCK');
                           setRejectNote('');

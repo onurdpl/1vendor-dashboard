@@ -16,12 +16,13 @@ type UserRecordWithVendorLinks = {
   role: UserRole;
   status: string;
   passwordHash?: string;
-  vendorLinks: Array<{
-    vendor: {
-      id: string;
-      name: string;
-    };
-  }>;
+    vendorLinks: Array<{
+      vendor: {
+        id: string;
+        name: string;
+        status: string;
+      };
+    }>;
 };
 
 type AuthLoginFailureReason = 'user_not_found' | 'invalid_password' | 'inactive_user' | 'unknown';
@@ -76,6 +77,7 @@ function mapUserRecordToAuthResponse(user: UserRecordWithVendorLinks): AuthUserR
     vendorAccess: user.vendorLinks.map((link) => ({
       vendorId: link.vendor.id,
       vendorName: link.vendor.name,
+      status: link.vendor.status,
     })),
   };
 }

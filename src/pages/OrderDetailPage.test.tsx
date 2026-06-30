@@ -6988,6 +6988,32 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
   });
 
+  it('disables shipment actions for restricted vendors', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal', status: 'inactive' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect((await screen.findAllByText('Unavailable while your account is restricted.')).length).toBeGreaterThan(0);
+    const createShipmentButton = screen.getByRole('button', { name: 'Create shipment' });
+    expect(createShipmentButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeDisabled();
+
+    await user.click(createShipmentButton);
+
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+  });
+
   it('does not show a successful completion message for Kargonomi needs-review shipment without provider evidence', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue(orderWithoutShipment);

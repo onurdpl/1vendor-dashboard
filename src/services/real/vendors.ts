@@ -15,6 +15,8 @@ import type {
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorProfileAuditLog,
+  VendorStatus,
+  VendorStatusInput,
 } from '../../lib/api/contracts';
 
 export function getVendorBillingProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
@@ -29,6 +31,22 @@ export function getVendorBillingProfile(vendorId: string, options: { signal?: Ab
 export function updateVendorBillingProfile(vendorId: string, input: VendorBillingProfileInput) {
   return apiClient.put<VendorBillingProfile>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/billing-profile`,
+    input,
+  );
+}
+
+export function getVendorStatus(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<VendorStatus>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/status`,
+    {
+      signal: options.signal,
+    },
+  );
+}
+
+export function updateVendorStatus(vendorId: string, input: VendorStatusInput) {
+  return apiClient.put<VendorStatus>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/status`,
     input,
   );
 }

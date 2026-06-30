@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken } from '../lib/auth';
-import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
+import {
+  getAvailableVendors,
+  getCurrentVendorContext,
+  isVendorContextRestricted,
+  RESTRICTED_ACCOUNT_BODY,
+  RESTRICTED_ACCOUNT_TITLE,
+  setCurrentVendorId,
+} from '../lib/auth';
 import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
 import { queryClient } from '../lib/api/queryClient';
@@ -241,6 +248,7 @@ function useShellContext() {
     selectedVendorId,
     sessionRestoreNeedsAttention,
     showSessionRestoreBanner,
+    showRestrictedBanner: currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor),
     tone,
     visibleVendors,
   };
@@ -381,6 +389,24 @@ function SessionRestoreBanner({ context }: { context: ShellContext }) {
   );
 }
 
+function RestrictedAccountBanner({ context }: { context: ShellContext }) {
+  if (!context.showRestrictedBanner) {
+    return null;
+  }
+
+  return (
+    <section className="restricted-account-banner" role="alert">
+      <div>
+        <p className="eyebrow">{RESTRICTED_ACCOUNT_TITLE}</p>
+        <h2>{RESTRICTED_ACCOUNT_TITLE}</h2>
+        {RESTRICTED_ACCOUNT_BODY.split('\n\n').map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function getVendorShellClasses(pathname: string) {
   const isDashboardRoute = pathname === '/';
   const isOrdersRoute = pathname === '/orders';
@@ -426,6 +452,7 @@ export function VendorShell() {
 
       <div className="app-content vendor-shell-content">
         <SessionRestoreBanner context={context} />
+        <RestrictedAccountBanner context={context} />
         <main className="page-frame">
           <Outlet />
         </main>

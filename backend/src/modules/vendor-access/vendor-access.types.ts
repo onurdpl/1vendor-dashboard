@@ -5,6 +5,7 @@ export type VendorAccessScope = 'admin' | 'vendor';
 export type RequestVendorContext = {
   vendorId: string;
   vendorName: string;
+  vendorStatus: string;
   role: AuthUserContext['role'];
   accessScope: VendorAccessScope;
 };
@@ -25,4 +26,3 @@ declare module 'fastify' {
     vendorContext?: RequestVendorContext;
   }
 }
-

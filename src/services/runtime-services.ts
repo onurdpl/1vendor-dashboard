@@ -48,6 +48,7 @@ import type {
   ShipmentCustomerOverrides,
   ShippingProvider,
   VendorBillingProfileInput,
+  VendorStatusInput,
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
@@ -325,6 +326,19 @@ export const runtimeServices = {
           }),
   },
   vendors: {
+    status: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.getVendorStatus(vendorId, { signal: options.signal })
+        : Promise.resolve({
+            vendorId,
+            vendorName: getCurrentVendorContext().vendorName || vendorId,
+            status: getCurrentVendorContext().status ?? 'active',
+            restricted: String(getCurrentVendorContext().status ?? 'active').toLowerCase() !== 'active',
+            restrictionReason: getCurrentVendorContext().restrictionReason ?? null,
+            changedByUserId: null,
+            changedByEmail: getCurrentVendorContext().restrictionChangedByEmail ?? null,
+            changedAt: getCurrentVendorContext().restrictionChangedAt ?? null,
+          }),
     billingProfile: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.getVendorBillingProfile(vendorId, { signal: options.signal })
@@ -360,6 +374,19 @@ export const runtimeServices = {
             logoIsbasiLastCheckedAt: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+          }),
+    updateStatus: (vendorId: string, input: VendorStatusInput) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.updateVendorStatus(vendorId, input)
+        : Promise.resolve({
+            vendorId,
+            vendorName: getCurrentVendorContext().vendorName || vendorId,
+            status: input.status,
+            restricted: input.status !== 'active',
+            restrictionReason: input.reason,
+            changedByUserId: null,
+            changedByEmail: getCurrentUser()?.email ?? null,
+            changedAt: new Date().toISOString(),
           }),
     probeLogoIsbasiLogin: () =>
       runtimeConfig.apiMode === 'real'

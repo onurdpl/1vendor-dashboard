@@ -9,6 +9,10 @@ export type VendorContext = {
   vendorId: VendorId;
   vendorName: string;
   scope: string;
+  status?: string;
+  restrictionReason?: string | null;
+  restrictionChangedByEmail?: string | null;
+  restrictionChangedAt?: string | null;
 };
 
 const defaultVendors = [
@@ -54,6 +58,10 @@ function getResolvedAvailableVendors(): readonly VendorContext[] {
     vendorId: vendor.vendorId,
     vendorName: vendor.vendorName,
     scope: 'runtime-vendor-context',
+    status: vendor.status ?? 'active',
+    restrictionReason: vendor.restrictionReason ?? null,
+    restrictionChangedByEmail: vendor.restrictionChangedByEmail ?? null,
+    restrictionChangedAt: vendor.restrictionChangedAt ?? null,
   }));
 }
 

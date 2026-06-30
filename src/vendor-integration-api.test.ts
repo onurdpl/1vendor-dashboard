@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  vendor: {
+    findUnique: vi.fn(),
+  },
   vendorIntegrationClient: {
     create: vi.fn(),
     findMany: vi.fn(),
@@ -347,6 +350,7 @@ describe('vendor integration API foundation', () => {
     vi.clearAllMocks();
     resetVendorIntegrationRateLimitForTests();
     delete process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE;
+    prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal', status: 'active' });
     prismaMock.vendorIntegrationClient.findMany.mockResolvedValue([]);
     prismaMock.vendorIntegrationClient.update.mockResolvedValue({ id: 'client-1' });
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
@@ -740,6 +744,26 @@ describe('vendor integration API foundation', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks vendor integration writes for restricted vendors', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+    prismaMock.vendor.findUnique.mockResolvedValueOnce({ id: 'sporjinal', status: 'inactive' });
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'acknowledged', message: 'Order imported into Entegra' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({
+      message: 'Your account is temporarily restricted. Please contact support if you believe this is incorrect.',
+    });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 

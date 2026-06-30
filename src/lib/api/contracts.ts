@@ -1981,6 +1981,22 @@ export type VendorBillingProfileInput = {
   logoIsbasiCustomerCode?: string | null;
 };
 
+export type VendorStatus = {
+  vendorId: VendorId | string;
+  vendorName: string;
+  status: string;
+  restricted: boolean;
+  restrictionReason: string | null;
+  changedByUserId: string | null;
+  changedByEmail: string | null;
+  changedAt: string | null;
+};
+
+export type VendorStatusInput = {
+  status: 'active' | 'inactive';
+  reason: string;
+};
+
 export type VendorProfileSnapshotImpact =
   | 'FUTURE_LEDGER_ROWS_ONLY'
   | 'FUTURE_SETTLEMENT_APPROVALS_ONLY'

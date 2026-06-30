@@ -38,7 +38,13 @@ export async function resolveRequestVendorContext(
     };
   }
 
-  const allowedVendorMap = new Map(vendorLinks.map((link) => [link.vendorId, link.vendor.name]));
+  const allowedVendorMap = new Map(vendorLinks.map((link) => [
+    link.vendorId,
+    {
+      name: link.vendor.name,
+      status: link.vendor.status,
+    },
+  ]));
 
   if (user.role === 'admin') {
     if (!requestedVendorId) {
@@ -56,14 +62,15 @@ export async function resolveRequestVendorContext(
         context: {
           vendorId: first.vendorId,
           vendorName: first.vendor.name,
+          vendorStatus: first.vendor.status,
           role: user.role,
           accessScope: 'admin',
         },
       };
     }
 
-    const vendorName = allowedVendorMap.get(requestedVendorId);
-    if (!vendorName) {
+    const vendor = allowedVendorMap.get(requestedVendorId);
+    if (!vendor) {
       return {
         ok: false,
         code: 403,
@@ -75,7 +82,8 @@ export async function resolveRequestVendorContext(
       ok: true,
       context: {
         vendorId: requestedVendorId,
-        vendorName,
+        vendorName: vendor.name,
+        vendorStatus: vendor.status,
         role: user.role,
         accessScope: 'admin',
       },
@@ -90,6 +98,7 @@ export async function resolveRequestVendorContext(
         context: {
           vendorId: only.vendorId,
           vendorName: only.vendor.name,
+          vendorStatus: only.vendor.status,
           role: user.role,
           accessScope: 'vendor',
         },
@@ -103,8 +112,8 @@ export async function resolveRequestVendorContext(
     };
   }
 
-  const vendorName = allowedVendorMap.get(requestedVendorId);
-  if (!vendorName) {
+  const vendor = allowedVendorMap.get(requestedVendorId);
+  if (!vendor) {
     return {
       ok: false,
       code: 403,
@@ -116,10 +125,10 @@ export async function resolveRequestVendorContext(
     ok: true,
     context: {
       vendorId: requestedVendorId,
-      vendorName,
+      vendorName: vendor.name,
+      vendorStatus: vendor.status,
       role: user.role,
       accessScope: 'vendor',
     },
   };
 }
-

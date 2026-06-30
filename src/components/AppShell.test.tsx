@@ -27,6 +27,11 @@ const vendorUser: CurrentUser = {
   defaultVendorId: 'yalispor',
 };
 
+const restrictedVendorUser: CurrentUser = {
+  ...vendorUser,
+  vendorDetails: [{ vendorId: 'yalispor', vendorName: 'Yalı Spor', status: 'inactive' }],
+};
+
 function seedSession(user: CurrentUser) {
   setSession('test-session', user);
   setCurrentVendorId(user.defaultVendorId);
@@ -69,6 +74,20 @@ describe('AppShell workspace navigation', () => {
     expect(screen.queryByLabelText('Admin workspace switcher')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText(/Admin Workspace/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the restricted account banner for restricted vendors', () => {
+    seedSession(restrictedVendorUser);
+
+    renderShell('/orders');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Account Restricted');
+    expect(screen.getByRole('alert')).toHaveTextContent('Your account is temporarily restricted.');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'You can continue viewing orders, returns, payments, and contact support.',
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('Operational actions are temporarily unavailable.');
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
   });
 
   it('shows vendor workspace context for admins on vendor-scoped routes and switches to admin workspace', async () => {

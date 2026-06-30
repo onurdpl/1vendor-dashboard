@@ -16,6 +16,10 @@ export type ExpiredSessionNotice = {
 export type UserVendorAccess = {
   vendorId: VendorId;
   vendorName: string;
+  status?: string;
+  restrictionReason?: string | null;
+  restrictionChangedByEmail?: string | null;
+  restrictionChangedAt?: string | null;
 };
 
 export type DemoUser = {
@@ -104,7 +108,17 @@ function isCurrentUser(value: unknown): value is CurrentUser {
             Boolean(vendor) &&
             typeof vendor === 'object' &&
             typeof vendor.vendorId === 'string' &&
-            typeof vendor.vendorName === 'string',
+            typeof vendor.vendorName === 'string' &&
+            (vendor.status === undefined || typeof vendor.status === 'string') &&
+            (vendor.restrictionReason === undefined ||
+              vendor.restrictionReason === null ||
+              typeof vendor.restrictionReason === 'string') &&
+            (vendor.restrictionChangedByEmail === undefined ||
+              vendor.restrictionChangedByEmail === null ||
+              typeof vendor.restrictionChangedByEmail === 'string') &&
+            (vendor.restrictionChangedAt === undefined ||
+              vendor.restrictionChangedAt === null ||
+              typeof vendor.restrictionChangedAt === 'string'),
         )))
   );
 }
@@ -273,6 +287,7 @@ export function getCurrentUserVendorDetails(): readonly UserVendorAccess[] {
   return currentUser?.vendorAccess.map((vendorId) => ({
     vendorId,
     vendorName: vendorId,
+    status: 'active',
   })) ?? defaultVendorDirectory;
 }
 

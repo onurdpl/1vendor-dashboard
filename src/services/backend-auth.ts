@@ -5,6 +5,7 @@ import { runtimeConfig } from '../config/runtime';
 export type BackendAuthVendorAccess = {
   vendorId: string;
   vendorName: string;
+  status?: string;
 };
 
 export type BackendAuthUser = {

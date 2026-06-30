@@ -56,3 +56,12 @@ export {
   type VendorContext,
   type VendorId,
 } from './auth/vendorContext';
+
+export {
+  isCurrentVendorRestricted,
+  isRestrictedVendorStatus,
+  isVendorContextRestricted,
+  RESTRICTED_ACCOUNT_BODY,
+  RESTRICTED_ACCOUNT_TITLE,
+  RESTRICTED_ACTION_MESSAGE,
+} from './auth/restrictedMode';

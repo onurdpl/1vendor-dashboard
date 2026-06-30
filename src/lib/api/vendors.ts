@@ -1,5 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { LogoIsbasiCommissionInvoicePreviewInput, VendorBillingProfileInput } from './contracts';
+import type { LogoIsbasiCommissionInvoicePreviewInput, VendorBillingProfileInput, VendorStatusInput } from './contracts';
 
 export function getVendorBillingProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
   return runtimeServices.vendors.billingProfile(vendorId, { signal: options.signal });
@@ -7,6 +7,14 @@ export function getVendorBillingProfile(vendorId: string, options: { signal?: Ab
 
 export function updateVendorBillingProfile(vendorId: string, input: VendorBillingProfileInput) {
   return runtimeServices.vendors.updateBillingProfile(vendorId, input);
+}
+
+export function getVendorStatus(vendorId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.vendors.status(vendorId, options);
+}
+
+export function updateVendorStatus(vendorId: string, input: VendorStatusInput) {
+  return runtimeServices.vendors.updateStatus(vendorId, input);
 }
 
 export function listVendorProfileAuditLogs(

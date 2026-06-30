@@ -6,6 +6,10 @@ import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { resolveRequestVendorContext } from '../vendor-access/vendor-access.service.js';
 import {
+  assertVendorOperationalAccess,
+  sendRestrictedVendorError,
+} from '../vendor-access/restricted-vendor.js';
+import {
   getVendorReturnById,
   createKargonomiReturnShipmentForReturn,
   createNavlungoReturnPickupForReturn,
@@ -152,6 +156,22 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
     return { ok: true, actor: { role: authUser.role, vendorId: result.context.vendorId } };
   }
 
+  async function ensureReturnActorCanMutate(
+    actor: ReturnActorScope,
+    reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+  ) {
+    if (actor.role === 'admin') {
+      return null;
+    }
+
+    try {
+      await assertVendorOperationalAccess(actor.vendorId);
+      return null;
+    } catch (error) {
+      return sendRestrictedVendorError(error, reply as never);
+    }
+  }
+
   app.get(
     '/returns',
     {
@@ -291,6 +311,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       if (!actor.ok) {
         return actor.response;
       }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
+      }
 
       try {
         return await markReturnReceived(request.params.returnId, actor.actor);
@@ -309,6 +333,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
       }
 
       const decision = request.body?.decision;
@@ -336,6 +364,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
       }
 
       try {
@@ -384,6 +416,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       if (!actor.ok) {
         return actor.response;
       }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
+      }
 
       try {
         return await createKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor, env);
@@ -402,6 +438,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
       }
 
       try {
@@ -422,6 +462,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       if (!actor.ok) {
         return actor.response;
       }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
+      }
 
       try {
         return await syncKargonomiReturnToShopify(request.params.returnId, actor.actor, env);
@@ -440,6 +484,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
       }
 
       try {
@@ -464,6 +512,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       const actor = await resolveReturnActor(request, reply);
       if (!actor.ok) {
         return actor.response;
+      }
+      const restriction = await ensureReturnActorCanMutate(actor.actor, reply);
+      if (restriction) {
+        return restriction;
       }
 
       try {

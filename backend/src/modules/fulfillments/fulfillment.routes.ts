@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { requireUnrestrictedVendorMutation } from '../vendor-access/restricted-vendor.js';
 import { createFulfillmentService } from './fulfillment.service.js';
 import type { UpdateAllocationTrackingBody } from './fulfillment.types.js';
 
@@ -14,7 +15,7 @@ export function registerFulfillmentRoutes(app: FastifyInstance, env: AppEnv) {
   app.post<{ Params: { allocationId: string }; Body: UpdateAllocationTrackingBody }>(
     '/fulfillments/:allocationId/tracking',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       if (!request.authUser || !request.vendorContext) {

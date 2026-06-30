@@ -4099,6 +4099,7 @@ async function maybeSyncProviderShipmentToShopify(input: {
       vendorContext: {
         vendorId: input.allocation.assignedVendorId,
         vendorName: input.allocation.assignedVendorId,
+        vendorStatus: 'active',
         role: 'vendor',
         accessScope: 'vendor',
       },

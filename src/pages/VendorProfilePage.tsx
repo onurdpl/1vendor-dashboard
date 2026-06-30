@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -23,6 +23,7 @@ import {
   discoverLogoIsbasiInvoices,
   discoverLogoIsbasiServices,
   fetchLogoIsbasiInvoicePdf,
+  getVendorStatus,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
   listVendorProfileAuditLogs,
@@ -30,6 +31,7 @@ import {
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
   updateVendorBillingProfile,
+  updateVendorStatus,
 } from '../features/vendors/api';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -53,6 +55,8 @@ import type {
   VendorBillingProfileInput,
   VendorFinancialProfile,
   VendorProfileAuditLog,
+  VendorStatus,
+  VendorStatusInput,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -64,6 +68,13 @@ import { safeArray, safeStatusLabel } from '../services/real/formatting';
 const VENDOR_PROFILE_CONTEXT_ROUTE = 'vendor_profile_settings';
 const VENDOR_PROFILE_PATH = '/vendor/profile';
 const OPEN_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+const VENDOR_STATUS_REASONS = [
+  'Missing documentation',
+  'Operational review',
+  'Finance review',
+  'Compliance review',
+  'Other',
+] as const;
 type ReadinessStatus = 'ready' | 'review' | 'unknown' | 'not_modeled';
 type ReadinessItem = {
   label: string;
@@ -201,6 +212,11 @@ type LogoCommissionPreviewFormState = {
   sourcePeriod: string;
 };
 
+type VendorStatusFormState = {
+  status: VendorStatusInput['status'];
+  reason: string;
+};
+
 const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
   legalCompanyName: '',
   taxNumber: '',
@@ -236,6 +252,11 @@ const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
   currency: 'TL',
   description: 'Pazaryeri komisyon hizmet bedeli',
   sourcePeriod: '',
+};
+
+const DEFAULT_VENDOR_STATUS_FORM: VendorStatusFormState = {
+  status: 'active',
+  reason: '',
 };
 
 const billingRequiredFields: Array<{ field: keyof BillingProfileFormState; label: string }> = [
@@ -991,6 +1012,9 @@ export function VendorProfilePage() {
   const [financePolicyForm, setFinancePolicyForm] = useState<FinancePolicyFormState>(EMPTY_FINANCE_POLICY_FORM);
   const [financePolicyFormError, setFinancePolicyFormError] = useState<string | null>(null);
   const [savedFinanceProfile, setSavedFinanceProfile] = useState<VendorFinancialProfile | null>(null);
+  const [vendorStatusForm, setVendorStatusForm] = useState<VendorStatusFormState>(DEFAULT_VENDOR_STATUS_FORM);
+  const [vendorStatusFormError, setVendorStatusFormError] = useState<string | null>(null);
+  const [savedVendorStatus, setSavedVendorStatus] = useState<VendorStatus | null>(null);
   const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
   const [logoFirmsResult, setLogoFirmsResult] = useState<LogoIsbasiFirmsDiscoveryResult | null>(null);
   const [logoInvoicesResult, setLogoInvoicesResult] = useState<LogoIsbasiInvoiceListProbeResult | null>(null);
@@ -1023,6 +1047,11 @@ export function VendorProfilePage() {
     ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
     { enabled: pageReadiness.ready && isAdmin },
   );
+  const vendorStatusQuery = useQueryResource(
+    queryKeys.vendorProfile.status(currentVendor.vendorId),
+    ({ signal }) => getVendorStatus(currentVendor.vendorId, { signal }),
+    { enabled: pageReadiness.ready && isAdmin },
+  );
   const auditLogQuery = useQueryResource(
     queryKeys.vendorProfile.auditLogs(currentVendor.vendorId),
     ({ signal }) => listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 }),
@@ -1037,6 +1066,18 @@ export function VendorProfilePage() {
   const shippingConfig = shippingQuery.data;
   const financeProfile = savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
+  const vendorStatus = savedVendorStatus?.vendorId === currentVendor.vendorId
+    ? savedVendorStatus
+    : vendorStatusQuery.data ?? {
+        vendorId: currentVendor.vendorId,
+        vendorName: currentVendor.vendorName,
+        status: currentVendor.status ?? 'active',
+        restricted: String(currentVendor.status ?? 'active').toLowerCase() !== 'active',
+        restrictionReason: currentVendor.restrictionReason ?? null,
+        changedByUserId: null,
+        changedByEmail: currentVendor.restrictionChangedByEmail ?? null,
+        changedAt: currentVendor.restrictionChangedAt ?? null,
+      };
   const logoBindingPresent = Boolean(billingProfile?.logoIsbasiCustomerCode || billingProfile?.logoIsbasiCustomerId);
   const logoBindingNeedsMatch = Boolean(billingProfile?.logoIsbasiCustomerCode?.trim() && !billingProfile?.logoIsbasiCustomerId?.trim());
   const supportTickets = useMemo(
@@ -1053,6 +1094,14 @@ export function VendorProfilePage() {
     }
     return bySection;
   }, [profileAuditLogs]);
+
+  useEffect(() => {
+    setVendorStatusForm({
+      status: String(vendorStatus.status ?? 'active').toLowerCase() === 'active' ? 'active' : 'inactive',
+      reason: '',
+    });
+    setVendorStatusFormError(null);
+  }, [currentVendor.vendorId, vendorStatus.status]);
   const latestBillingAudit = latestAuditBySection.get('billing_legal_profile') ?? null;
   const latestLogoBindingAudit = latestAuditBySection.get('logo_binding') ?? null;
   const latestFinanceAudit = latestAuditBySection.get('finance_policy') ?? null;
@@ -1297,6 +1346,32 @@ export function VendorProfilePage() {
       },
       onError: (error) => {
         setFinancePolicyFormError(error instanceof Error ? error.message : 'Unable to save finance policy.');
+      },
+    },
+  );
+
+  const vendorStatusMutation = useMutationAction(
+    (input: VendorStatusInput) => updateVendorStatus(currentVendor.vendorId, input),
+    {
+      onSuccess: async (savedStatus) => {
+        queryClient.setQueryData(queryKeys.vendorProfile.status(currentVendor.vendorId), savedStatus);
+        setSavedVendorStatus(savedStatus);
+        setVendorStatusForm({
+          status: savedStatus.restricted ? 'inactive' : 'active',
+          reason: '',
+        });
+        setVendorStatusFormError(null);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.auditLogs(currentVendor.vendorId) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.status(currentVendor.vendorId) }),
+        ]);
+        showFeedback(
+          savedStatus.restricted ? 'Vendor account restricted.' : 'Vendor account activated.',
+          'success',
+        );
+      },
+      onError: (error) => {
+        setVendorStatusFormError(error instanceof Error ? error.message : 'Unable to save vendor status.');
       },
     },
   );
@@ -1700,6 +1775,30 @@ export function VendorProfilePage() {
     void financePolicyMutation.mutateAsync(buildFinancePolicyInput(financePolicyForm));
   }
 
+  function handleVendorStatusFormChange<Field extends keyof VendorStatusFormState>(
+    field: Field,
+    value: VendorStatusFormState[Field],
+  ) {
+    setVendorStatusForm((current) => ({ ...current, [field]: value }));
+    if (vendorStatusFormError) {
+      setVendorStatusFormError(null);
+    }
+  }
+
+  function handleVendorStatusSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reason = vendorStatusForm.reason.trim();
+    if (!reason) {
+      setVendorStatusFormError('Status reason is required.');
+      return;
+    }
+
+    void vendorStatusMutation.mutateAsync({
+      status: vendorStatusForm.status,
+      reason,
+    });
+  }
+
   function handleLogoPreviewFormChange(field: keyof LogoCommissionPreviewFormState, value: string) {
     setLogoPreviewForm((current) => ({ ...current, [field]: value }));
     if (logoPreviewFormError) {
@@ -1821,6 +1920,77 @@ export function VendorProfilePage() {
             <MetadataRow label="Seller of record" value="Not configured" />
           </MetadataGroup>
         </OperationalSection>
+
+        {isAdmin ? (
+          <OperationalSection
+            title="Vendor account status"
+            description="Control whether this vendor can perform operational actions. Restricted vendors can still sign in, view their data, and contact support."
+          >
+            {vendorStatusQuery.isError ? (
+              <SectionErrorRetry
+                title="Vendor status unavailable"
+                description={vendorStatusQuery.error ?? 'Unable to load the vendor account status.'}
+                onRetry={() => void vendorStatusQuery.refetch()}
+              />
+            ) : vendorStatusQuery.isInitialLoading ? (
+              <SectionSkeleton title="Loading vendor status" description="Fetching account restriction state." />
+            ) : (
+              <>
+                <MetadataGroup>
+                  <MetadataRow label="Status" value={vendorStatus.restricted ? 'Restricted' : 'Active'} />
+                  <MetadataRow label="Restriction reason" value={formatValue(vendorStatus.restrictionReason, 'Not restricted')} />
+                  <MetadataRow label="Changed by" value={formatValue(vendorStatus.changedByEmail, 'No recorded change')} />
+                  <MetadataRow label="Changed at" value={formatAuditDate(vendorStatus.changedAt)} />
+                </MetadataGroup>
+                <form className="op-form-grid" onSubmit={handleVendorStatusSubmit}>
+                  <label>
+                    <span>Status</span>
+                    <select
+                      value={vendorStatusForm.status}
+                      onChange={(event) =>
+                        handleVendorStatusFormChange(
+                          'status',
+                          event.target.value === 'active' ? 'active' : 'inactive',
+                        )
+                      }
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Restricted</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Status reason</span>
+                    <select
+                      value={vendorStatusForm.reason}
+                      onChange={(event) => handleVendorStatusFormChange('reason', event.target.value)}
+                    >
+                      <option value="">Select a reason</option>
+                      {VENDOR_STATUS_REASONS.map((reason) => (
+                        <option key={reason} value={reason}>
+                          {reason}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {vendorStatusFormError ? (
+                    <p className="action-feedback action-error" role="alert">
+                      {vendorStatusFormError}
+                    </p>
+                  ) : null}
+                  <OperationalActionGroup>
+                    <button
+                      type="submit"
+                      className="button button-primary"
+                      disabled={vendorStatusMutation.isPending}
+                    >
+                      {vendorStatusMutation.isPending ? 'Saving vendor status...' : 'Save vendor status'}
+                    </button>
+                  </OperationalActionGroup>
+                </form>
+              </>
+            )}
+          </OperationalSection>
+        ) : null}
 
         <OperationalSection
           title="Billing / Legal Profile"

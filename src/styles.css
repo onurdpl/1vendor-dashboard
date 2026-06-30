@@ -2026,6 +2026,41 @@ h3 {
   color: #b45309;
 }
 
+.restricted-account-banner {
+  margin-bottom: 14px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 251, 235, 0.94);
+  padding: 14px 16px;
+  color: #78350f;
+}
+
+.restricted-account-banner h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.restricted-account-banner p {
+  margin: 0;
+}
+
+.restricted-account-banner p + p {
+  margin-top: 4px;
+}
+
+.restricted-account-banner .eyebrow {
+  margin-bottom: 4px;
+  color: #b45309;
+}
+
+.restricted-action-message {
+  margin: 8px 0 0;
+  color: #92400e;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .auth-restore-meta,
 .auth-restore-actions {
   display: flex;

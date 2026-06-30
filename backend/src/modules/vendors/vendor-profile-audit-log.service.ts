@@ -7,12 +7,14 @@ export type VendorProfileAuditActor = {
 };
 
 export type VendorProfileAuditSection =
+  | 'vendor_status'
   | 'finance_policy'
   | 'billing_legal_profile'
   | 'logo_binding'
   | 'shipping_operations';
 
 export type VendorProfileAuditSource =
+  | 'admin_vendor_status_update'
   | 'admin_finance_policy_update'
   | 'admin_billing_profile_update'
   | 'logo_isbasi_firm_bind'
@@ -210,6 +212,10 @@ function toPrismaJson(value: Prisma.InputJsonValue | null) {
 }
 
 function fieldImpact(section: VendorProfileAuditSection, fieldName: string): VendorProfileSnapshotImpact {
+  if (section === 'vendor_status') {
+    return VendorProfileSnapshotImpact.UNKNOWN;
+  }
+
   if (SETTLEMENT_SCHEDULE_FIELDS.has(fieldName)) {
     return VendorProfileSnapshotImpact.FUTURE_SETTLEMENT_APPROVALS_ONLY;
   }

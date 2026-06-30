@@ -19,6 +19,7 @@ export type LoginBody = {
 export type AuthVendorAccess = {
   vendorId: string;
   vendorName: string;
+  status: string;
 };
 
 export type AuthUserResponse = AuthUserContext & {

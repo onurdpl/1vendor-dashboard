@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { requireUnrestrictedVendorMutation } from '../vendor-access/restricted-vendor.js';
 import {
   addBlockedAllocationResolutionNote,
   executeShopifyRefundForAdminOrder,
@@ -119,7 +120,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   }>(
     '/orders/:orderId/reject',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       if (request.authUser?.role !== 'vendor') {
@@ -156,7 +157,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   }>(
     '/orders/:allocationId/split-plan',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       if (request.authUser?.role !== 'vendor') {
@@ -197,7 +198,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   }>(
     '/orders/:allocationId/split',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       if (request.authUser?.role !== 'vendor') {

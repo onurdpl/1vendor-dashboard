@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { requireUnrestrictedVendorMutation } from '../vendor-access/restricted-vendor.js';
 import {
   createShipmentExecution,
   getShipmentExecutionById,
@@ -64,7 +65,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post(
     '/shipments/preview',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -94,7 +95,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post(
     '/shipments/create',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -141,7 +142,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/retry',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -169,7 +170,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/refresh',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -214,7 +215,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/cancel',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -232,7 +233,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/update-navlungo',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
@@ -250,7 +251,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   app.post<{ Params: { id: string } }>(
     '/shipments/:id/create-return',
     {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess, requireUnrestrictedVendorMutation],
     },
     async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;

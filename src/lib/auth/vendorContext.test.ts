@@ -76,8 +76,43 @@ describe('vendor context', () => {
       vendorId: 'demo-vendor-b',
       vendorName: 'Demo Vendor B',
       scope: 'runtime-vendor-context',
+      status: 'active',
+      restrictionReason: null,
+      restrictionChangedByEmail: null,
+      restrictionChangedAt: null,
     });
     expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
+  });
+
+  it('preserves restricted vendor metadata from the authenticated session', () => {
+    setCurrentUser({
+      email: 'vendor-a@demo.com',
+      name: 'Vendor A User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [
+        {
+          vendorId: 'demo-vendor-a',
+          vendorName: 'Demo Vendor A',
+          status: 'inactive',
+          restrictionReason: 'Operational review',
+          restrictionChangedByEmail: 'admin@example.com',
+          restrictionChangedAt: '2026-06-30T12:00:00Z',
+        },
+      ],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    expect(getCurrentVendorContext()).toEqual({
+      vendorId: 'demo-vendor-a',
+      vendorName: 'Demo Vendor A',
+      scope: 'runtime-vendor-context',
+      status: 'inactive',
+      restrictionReason: 'Operational review',
+      restrictionChangedByEmail: 'admin@example.com',
+      restrictionChangedAt: '2026-06-30T12:00:00Z',
+    });
   });
 
   it('does not invent a demo vendor for an authenticated user with no vendor access', () => {

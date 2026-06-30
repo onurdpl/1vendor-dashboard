@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../../db/prisma.js';
+import { getVendorOperationalRestriction, RESTRICTED_VENDOR_MESSAGE } from '../vendor-access/restricted-vendor.js';
 import { rateLimitInvalidVendorIntegrationAttempt } from './vendor-integration.rate-limit.js';
 import { hashVendorIntegrationToken } from './vendor-integration.tokens.js';
 import './vendor-integration.types.js';
@@ -72,6 +73,13 @@ export function requireVendorIntegrationScope(scope: string) {
       return reply.code(403).send({ message: `Missing required scope: ${scope}` });
     }
   };
+}
+
+export async function requireUnrestrictedVendorIntegration(request: FastifyRequest, reply: FastifyReply) {
+  const restriction = await getVendorOperationalRestriction(request.vendorIntegration?.vendorIdentifier);
+  if (restriction) {
+    return reply.code(403).send({ message: RESTRICTED_VENDOR_MESSAGE });
+  }
 }
 
 export async function writeVendorIntegrationAuditLog(request: FastifyRequest, reply: FastifyReply) {

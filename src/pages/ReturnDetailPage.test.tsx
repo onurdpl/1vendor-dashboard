@@ -1696,7 +1696,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       expect(within(ownershipCard).getAllByText('Unknown').length).toBeGreaterThanOrEqual(6);
     });
 
-    it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
+  it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
     const user = userEvent.setup();
     getReturnMock
       .mockResolvedValueOnce(returnDetail)
@@ -1725,6 +1725,34 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(reviewReturnMock).toHaveBeenCalledWith(returnDetail.id, { decision: 'approved' });
     expect(await screen.findByText('Approved by vendor')).toBeInTheDocument();
     expect(screen.queryByText(/refund issued/i)).not.toBeInTheDocument();
+  });
+
+  it('disables return review actions for restricted vendors while keeping support available', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', status: 'inactive' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Unavailable while your account is restricted.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Received' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Approve return' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Need review.');
+    expect(screen.getByRole('button', { name: 'Reject return' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Contact support' })).toBeEnabled();
+    expect(markReturnReceivedMock).not.toHaveBeenCalled();
+    expect(reviewReturnMock).not.toHaveBeenCalled();
   });
 
   it('requires a reason before rejecting a received return', async () => {

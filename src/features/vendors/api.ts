@@ -6,6 +6,7 @@ export {
   discoverLogoIsbasiInvoices,
   discoverLogoIsbasiServices,
   fetchLogoIsbasiInvoicePdf,
+  getVendorStatus,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
   listVendorProfileAuditLogs,
@@ -13,6 +14,7 @@ export {
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
   updateVendorBillingProfile,
+  updateVendorStatus,
 } from '../../lib/api/vendors';
 export type {
   LogoIsbasiCommissionInvoicePreviewInput,
@@ -33,4 +35,6 @@ export type {
   VendorBillingProfileInput,
   VendorProfileAuditLog,
   VendorProfileSnapshotImpact,
+  VendorStatus,
+  VendorStatusInput,
 } from '../../lib/api/contracts';

@@ -40,6 +40,7 @@ function buildUser(passwordHash: string) {
         vendor: {
           id: 'vendor-a',
           name: 'Vendor A',
+          status: 'active',
         },
       },
     ],
@@ -54,7 +55,7 @@ function expectLoginResponseShape(result: Awaited<ReturnType<ReturnType<typeof c
         id: 'user-1',
         email: 'vendor@example.com',
         role: 'vendor',
-        vendorAccess: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+        vendorAccess: [{ vendorId: 'vendor-a', vendorName: 'Vendor A', status: 'active' }],
       }),
       timing: expect.any(Object),
     }),
@@ -78,6 +79,31 @@ describe('auth password hashing', () => {
 
     expectLoginResponseShape(result);
     expect(result?.timing.passwordHashMode).toBe('argon2id');
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('lets a user with a restricted vendor account login', async () => {
+    const passwordHash = await hashPasswordArgon2id('demo123');
+    findUniqueMock.mockResolvedValueOnce({
+      ...buildUser(passwordHash),
+      vendorLinks: [
+        {
+          vendor: {
+            id: 'vendor-a',
+            name: 'Vendor A',
+            status: 'inactive',
+          },
+        },
+      ],
+    });
+
+    const result = await createAuthService(authEnv).login({
+      email: 'vendor@example.com',
+      password: 'demo123',
+    });
+
+    expect(result?.user.vendorAccess).toEqual([{ vendorId: 'vendor-a', vendorName: 'Vendor A', status: 'inactive' }]);
+    expect(result?.token).toEqual(expect.any(String));
     expect(updateMock).not.toHaveBeenCalled();
   });
 

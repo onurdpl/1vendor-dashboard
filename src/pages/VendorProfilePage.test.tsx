@@ -19,6 +19,7 @@ import type {
   VendorBillingProfileInput,
   VendorFinancialProfile,
   VendorProfileAuditLog,
+  VendorStatus,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
@@ -46,6 +47,10 @@ const updateVendorFinancialProfileMock = vi.fn<
 const getFinanceDashboardMock = vi.fn();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
+const getVendorStatusMock = vi.fn<() => Promise<VendorStatus>>();
+const updateVendorStatusMock = vi.fn<
+  (vendorId: string, input: { status: 'active' | 'inactive'; reason: string }) => Promise<VendorStatus>
+>();
 const listVendorProfileAuditLogsMock = vi.fn<() => Promise<VendorProfileAuditLog[]>>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
@@ -93,9 +98,12 @@ vi.mock('../features/vendors/api', async () => {
   return {
     ...actual,
     getVendorBillingProfile: () => getVendorBillingProfileMock(),
+    getVendorStatus: () => getVendorStatusMock(),
     listVendorProfileAuditLogs: () => listVendorProfileAuditLogsMock(),
     updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       updateVendorBillingProfileMock(vendorId, input),
+    updateVendorStatus: (vendorId: string, input: { status: 'active' | 'inactive'; reason: string }) =>
+      updateVendorStatusMock(vendorId, input),
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
     discoverLogoIsbasiFirms: () => discoverLogoIsbasiFirmsMock(),
     discoverLogoIsbasiIncomingEinvoices: () => discoverLogoIsbasiIncomingEinvoicesMock(),
@@ -185,6 +193,17 @@ const billingProfile: VendorBillingProfile = {
   logoIsbasiLastCheckedAt: '2026-06-07T10:00:00Z',
   createdAt: '2026-06-05T10:00:00Z',
   updatedAt: '2026-06-05T10:00:00Z',
+};
+
+const activeVendorStatus: VendorStatus = {
+  vendorId: 'demo-vendor-a',
+  vendorName: 'Demo Vendor A',
+  status: 'active',
+  restricted: false,
+  restrictionReason: null,
+  changedByUserId: null,
+  changedByEmail: null,
+  changedAt: null,
 };
 
 const profileAuditLogs: VendorProfileAuditLog[] = [
@@ -356,6 +375,21 @@ describe('VendorProfilePage', () => {
     );
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
+    getVendorStatusMock.mockReset();
+    getVendorStatusMock.mockResolvedValue(activeVendorStatus);
+    updateVendorStatusMock.mockReset();
+    updateVendorStatusMock.mockImplementation((vendorId, input) =>
+      Promise.resolve({
+        ...activeVendorStatus,
+        vendorId,
+        status: input.status,
+        restricted: input.status !== 'active',
+        restrictionReason: input.reason,
+        changedByUserId: 'admin-user-1',
+        changedByEmail: 'admin@demo.com',
+        changedAt: '2026-06-30T12:00:00Z',
+      }),
+    );
     listVendorProfileAuditLogsMock.mockReset();
     listVendorProfileAuditLogsMock.mockResolvedValue(profileAuditLogs);
     updateVendorBillingProfileMock.mockReset();
@@ -787,13 +821,47 @@ describe('VendorProfilePage', () => {
     expect(await screen.findByText('Admin view')).toBeInTheDocument();
     expect(screen.getByText('Admin-owned configuration')).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save billing profile' })).not.toBeInTheDocument();
 
     const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(supportButtons[0]).not.toBeDisabled());
     await userEvent.click(supportButtons[0]);
     expect(await screen.findByText('Admin support detail route')).toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('lets admins restrict a vendor with a persisted status reason', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    renderVendorProfilePage();
+
+    const statusHeading = await screen.findByRole('heading', { name: 'Vendor account status' });
+    const statusSection = statusHeading.closest('section');
+    expect(statusSection).not.toBeNull();
+    expect((await within(statusSection!).findAllByText('Active')).length).toBeGreaterThan(0);
+
+    await user.selectOptions(within(statusSection!).getByLabelText('Status'), 'inactive');
+    await user.selectOptions(within(statusSection!).getByLabelText('Status reason'), 'Operational review');
+    await user.click(within(statusSection!).getByRole('button', { name: 'Save vendor status' }));
+
+    await waitFor(() =>
+      expect(updateVendorStatusMock).toHaveBeenCalledWith('demo-vendor-a', {
+        status: 'inactive',
+        reason: 'Operational review',
+      }),
+    );
+    expect((await within(statusSection!).findAllByText('Restricted')).length).toBeGreaterThan(0);
+    expect(within(statusSection!).getAllByText('Operational review').length).toBeGreaterThan(0);
+    expect(within(statusSection!).getByText('admin@demo.com')).toBeInTheDocument();
   });
 
   it('renders admin billing profile values read-only with an edit action when configured', async () => {
