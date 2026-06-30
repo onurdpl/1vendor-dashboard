@@ -150,6 +150,9 @@ function createRegisteredRoutes() {
     handler?: (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>;
   }>();
   const app = {
+    log: {
+      info: vi.fn(),
+    },
     addHook: vi.fn((name: string, handler: (request: Record<string, unknown>, reply: { statusCode: number }) => Promise<void>) => {
       hooks.set(name, handler);
     }),
@@ -163,7 +166,7 @@ function createRegisteredRoutes() {
 
   registerVendorIntegrationRoutes(app as never);
 
-  return { gets, posts, hooks };
+  return { gets, posts, hooks, app };
 }
 
 function createReply() {
@@ -184,6 +187,12 @@ function createReply() {
 
   return reply;
 }
+
+const adminUser = {
+  id: 'admin-1',
+  email: 'admin@example.test',
+  role: 'admin',
+};
 
 async function injectVendorIntegrationOrders(
   headers: Record<string, string>,
@@ -324,8 +333,8 @@ async function injectAdminRoute(
     authUser?: Record<string, unknown>;
   } = {},
 ) {
-  const { gets, posts } = createRegisteredRoutes();
-  const route = method === 'GET' ? gets.get(path) : posts.get(path);
+  const registered = createRegisteredRoutes();
+  const route = method === 'GET' ? registered.gets.get(path) : registered.posts.get(path);
   const reply = createReply();
   const request: Record<string, unknown> = {
     headers: options.headers ?? {},
@@ -338,10 +347,22 @@ async function injectAdminRoute(
     authUser: options.authUser,
   };
 
+  for (const preHandler of route?.options?.preHandler ?? []) {
+    await preHandler(request, reply);
+    if (reply.sent) {
+      return {
+        statusCode: reply.statusCode,
+        payload: reply.payload,
+        app: registered.app,
+      };
+    }
+  }
+
   const result = await route?.handler?.(request, reply);
   return {
     statusCode: reply.statusCode,
     payload: reply.sent ? reply.payload : result,
+    app: registered.app,
   };
 }
 
@@ -1325,6 +1346,50 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).not.toHaveProperty('token');
   });
 
+  it('rejects unauthenticated admin token creation requests', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor users for admin token creation', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      authUser: { id: 'vendor-user-1', email: 'vendor@example.test', role: 'vendor' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects static probe token alone for admin token creation', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
   it('admin token creation returns plaintext once and stores only the hash', async () => {
     prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
       id: 'client-created',
@@ -1334,7 +1399,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1354,6 +1419,18 @@ describe('vendor integration API foundation', () => {
       }),
     );
     const token = (response.payload as { token: string }).token;
+    expect(response.app.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'VENDOR_INTEGRATION_TOKEN_CREATED',
+        adminUserId: 'admin-1',
+        adminEmail: 'admin@example.test',
+        clientId: 'client-created',
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+      }),
+      'vendor integration admin action',
+    );
+    expect(JSON.stringify(response.app.log.info.mock.calls)).not.toContain(token);
     expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).toEqual(
       expect.objectContaining({
         tokenHash: hashVendorIntegrationToken(token),
@@ -1371,7 +1448,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1395,7 +1472,7 @@ describe('vendor integration API foundation', () => {
 
   it('admin token creation rejects unknown scopes', async () => {
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1410,7 +1487,7 @@ describe('vendor integration API foundation', () => {
 
   it('admin token creation rejects empty scope lists', async () => {
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1425,7 +1502,7 @@ describe('vendor integration API foundation', () => {
 
   it('admin token creation rejects non-string scopes', async () => {
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1447,7 +1524,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1477,7 +1554,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const created = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       body: {
         vendorIdentifier: 'sporjinal',
         providerName: 'ayensoftware-test',
@@ -1495,7 +1572,7 @@ describe('vendor integration API foundation', () => {
     expect(response.payload).toEqual(expect.objectContaining({ data: [expect.objectContaining({ vendorIdentifier: 'sporjinal' })] }));
   });
 
-  it('revokes admin-managed tokens and rejects the token after revocation', async () => {
+  it('admin revokes admin-managed tokens and rejects the token after revocation', async () => {
     prismaMock.vendorIntegrationClient.update.mockResolvedValueOnce({
       id: 'client-1',
       vendorIdentifier: 'sporjinal',
@@ -1505,7 +1582,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const revokeResponse = await injectAdminRoute('POST', '/admin/vendor-integration/tokens/:id/revoke', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       params: { id: 'client-1' },
     });
 
@@ -1529,6 +1606,17 @@ describe('vendor integration API foundation', () => {
     expect(response.statusCode).toBe(403);
   });
 
+  it('rejects static probe token alone for admin token revocation', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens/:id/revoke', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      params: { id: 'client-1' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.update).not.toHaveBeenCalled();
+  });
+
   it('allows authenticated admin users to revoke provider tokens without exposing token material', async () => {
     prismaMock.vendorIntegrationClient.update.mockResolvedValueOnce({
       id: 'client-1',
@@ -1539,7 +1627,7 @@ describe('vendor integration API foundation', () => {
     });
 
     const revokeResponse = await injectAdminRoute('POST', '/admin/vendor-integration/tokens/:id/revoke', {
-      authUser: { role: 'admin' },
+      authUser: adminUser,
       params: { id: 'client-1' },
     });
 
@@ -1570,7 +1658,7 @@ describe('vendor integration API foundation', () => {
     ]);
 
     const response = await injectAdminRoute('GET', '/admin/vendor-integration/audit-logs', {
-      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      authUser: adminUser,
       query: { vendorIdentifier: 'sporjinal' },
     });
 
@@ -1596,6 +1684,38 @@ describe('vendor integration API foundation', () => {
       ],
     });
     expect(JSON.stringify(response.payload)).not.toContain('body');
+  });
+
+  it('rejects unauthenticated admin audit log requests', async () => {
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/audit-logs', {
+      query: { vendorIdentifier: 'sporjinal' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationAuditLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor users for admin audit logs', async () => {
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/audit-logs', {
+      authUser: { id: 'vendor-user-1', email: 'vendor@example.test', role: 'vendor' },
+      query: { vendorIdentifier: 'sporjinal' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationAuditLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects static probe token alone for admin audit logs', async () => {
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/audit-logs', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      query: { vendorIdentifier: 'sporjinal' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationAuditLog.findMany).not.toHaveBeenCalled();
   });
 
   it('returns read-only admin provider summaries without token material', async () => {

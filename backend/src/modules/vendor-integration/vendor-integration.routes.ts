@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { timingSafeEqual } from 'node:crypto';
 import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
@@ -63,67 +62,30 @@ function readHeaderValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
-function readBearerToken(value: string | string[] | undefined) {
-  const header = readHeaderValue(value).trim();
-  if (!header) {
-    return null;
+function requireAdminRole(request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
+  if (request.authUser?.role !== 'admin') {
+    return reply.code(403).send({ message: 'Forbidden' });
   }
 
-  const [scheme, token] = header.split(' ');
-  if (scheme?.toLowerCase() !== 'bearer' || !token) {
-    return null;
-  }
-
-  return token.trim();
+  return null;
 }
 
-function safeTokenMatches(providedToken: string, expectedToken: string) {
-  const provided = Buffer.from(providedToken);
-  const expected = Buffer.from(expectedToken);
-  if (provided.length !== expected.length) {
-    return false;
-  }
-
-  return timingSafeEqual(provided, expected);
-}
-
-function assertAdminTokenAuthorized(headers: Record<string, string | string[] | undefined>) {
-  const expectedToken = process.env.ADMIN_PROBE_TOKEN?.trim();
-  if (!expectedToken) {
-    return { ok: false as const, statusCode: 503, message: 'Admin token management is not configured.' };
-  }
-
-  const providedToken = readHeaderValue(headers['x-admin-probe-token']).trim();
-  if (!providedToken || !safeTokenMatches(providedToken, expectedToken)) {
-    return { ok: false as const, statusCode: 403, message: 'Forbidden' };
-  }
-
-  return { ok: true as const };
-}
-
-async function assertAdminRevokeAuthorized(
-  request: { headers: Record<string, string | string[] | undefined>; authUser?: { role?: string } },
-  authService: ReturnType<typeof createAuthService> | null,
+function logAdminVendorIntegrationAction(
+  app: FastifyInstance,
+  event: string,
+  request: { authUser?: { id?: string | null; email?: string | null; role?: string } },
+  details: Record<string, unknown>,
 ) {
-  const providedAdminToken = readHeaderValue(request.headers['x-admin-probe-token']).trim();
-  if (providedAdminToken) {
-    return assertAdminTokenAuthorized(request.headers);
-  }
-
-  if (request.authUser?.role === 'admin') {
-    return { ok: true as const };
-  }
-
-  const bearerToken = readBearerToken(request.headers.authorization);
-  if (authService && bearerToken) {
-    const authUser = await authService.requestContextFromToken(bearerToken);
-    if (authUser?.role === 'admin') {
-      request.authUser = authUser;
-      return { ok: true as const };
-    }
-  }
-
-  return { ok: false as const, statusCode: 403, message: 'Forbidden' };
+  app.log?.info?.(
+    {
+      event,
+      adminUserId: request.authUser?.id ?? null,
+      adminEmail: request.authUser?.email ?? null,
+      adminRole: request.authUser?.role ?? null,
+      ...details,
+    },
+    'vendor integration admin action',
+  );
 }
 
 function resolveAuditLogLimit(value: AuditLogsQuery['limit']) {
@@ -155,105 +117,141 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
     ? [createAuthMiddleware(authService).authenticateRequest]
     : [];
 
-  app.post<{ Body: TokenCreateBody }>('/admin/vendor-integration/tokens', async (request, reply) => {
-    const auth = assertAdminTokenAuthorized(request.headers);
-    if (!auth.ok) {
-      return reply.code(auth.statusCode).send({ message: auth.message });
-    }
-
-    const vendorIdentifier = request.body?.vendorIdentifier?.trim() ?? '';
-    const providerName = request.body?.providerName?.trim() ?? '';
-    const scopes = Array.isArray(request.body?.scopes) ? request.body.scopes : [];
-
-    try {
-      const restriction = await getVendorOperationalRestriction(vendorIdentifier);
-      if (restriction) {
-        return reply.code(403).send({ message: RESTRICTED_VENDOR_MESSAGE });
+  app.post<{ Body: TokenCreateBody }>(
+    '/admin/vendor-integration/tokens',
+    {
+      preHandler: adminAuthPreHandlers,
+    },
+    async (request, reply) => {
+      const forbidden = requireAdminRole(request, reply);
+      if (forbidden) {
+        return forbidden;
       }
 
-      const created = await createVendorIntegrationClientToken({
-        vendorIdentifier,
-        providerName,
-        scopes,
+      const vendorIdentifier = request.body?.vendorIdentifier?.trim() ?? '';
+      const providerName = request.body?.providerName?.trim() ?? '';
+      const scopes = Array.isArray(request.body?.scopes) ? request.body.scopes : [];
+
+      try {
+        const restriction = await getVendorOperationalRestriction(vendorIdentifier);
+        if (restriction) {
+          return reply.code(403).send({ message: RESTRICTED_VENDOR_MESSAGE });
+        }
+
+        const created = await createVendorIntegrationClientToken({
+          vendorIdentifier,
+          providerName,
+          scopes,
+        });
+
+        logAdminVendorIntegrationAction(app, 'VENDOR_INTEGRATION_TOKEN_CREATED', request, {
+          clientId: created.clientId,
+          vendorIdentifier: created.vendorIdentifier,
+          providerName: created.providerName,
+          scopes: created.scopes,
+        });
+
+        return reply.code(201).send({
+          clientId: created.clientId,
+          vendorIdentifier: created.vendorIdentifier,
+          providerName: created.providerName,
+          scopes: created.scopes,
+          token: created.token,
+          tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
+        });
+      } catch (error) {
+        return reply.code(400).send({
+          message: error instanceof Error ? error.message : 'Vendor integration token could not be created.',
+        });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admin/vendor-integration/tokens/:id/revoke',
+    {
+      preHandler: adminAuthPreHandlers,
+    },
+    async (request, reply) => {
+      const forbidden = requireAdminRole(request, reply);
+      if (forbidden) {
+        return forbidden;
+      }
+
+      const revoked = await prisma.vendorIntegrationClient.update({
+        where: { id: request.params.id },
+        data: {
+          enabled: false,
+          revokedAt: new Date(),
+        },
+        select: {
+          id: true,
+          vendorIdentifier: true,
+          providerName: true,
+          enabled: true,
+          revokedAt: true,
+        },
       });
 
-      return reply.code(201).send({
-        clientId: created.clientId,
-        vendorIdentifier: created.vendorIdentifier,
-        providerName: created.providerName,
-        scopes: created.scopes,
-        token: created.token,
-        tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
+      logAdminVendorIntegrationAction(app, 'VENDOR_INTEGRATION_TOKEN_REVOKED', request, {
+        clientId: revoked.id,
+        vendorIdentifier: revoked.vendorIdentifier,
+        providerName: revoked.providerName,
       });
-    } catch (error) {
-      return reply.code(400).send({
-        message: error instanceof Error ? error.message : 'Vendor integration token could not be created.',
+
+      return {
+        clientId: revoked.id,
+        vendorIdentifier: revoked.vendorIdentifier,
+        providerName: revoked.providerName,
+        enabled: revoked.enabled,
+        revokedAt: revoked.revokedAt?.toISOString() ?? null,
+      };
+    },
+  );
+
+  app.get<{ Querystring: AuditLogsQuery }>(
+    '/admin/vendor-integration/audit-logs',
+    {
+      preHandler: adminAuthPreHandlers,
+    },
+    async (request, reply) => {
+      const forbidden = requireAdminRole(request, reply);
+      if (forbidden) {
+        return forbidden;
+      }
+
+      const vendorIdentifier = request.query.vendorIdentifier?.trim();
+      const logs = await prisma.vendorIntegrationAuditLog.findMany({
+        where: vendorIdentifier ? { vendorIdentifier } : {},
+        select: {
+          id: true,
+          clientId: true,
+          vendorIdentifier: true,
+          method: true,
+          path: true,
+          statusCode: true,
+          requestId: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: resolveAuditLogLimit(request.query.limit),
       });
-    }
-  });
 
-  app.post<{ Params: { id: string } }>('/admin/vendor-integration/tokens/:id/revoke', async (request, reply) => {
-    const auth = await assertAdminRevokeAuthorized(request, authService);
-    if (!auth.ok) {
-      return reply.code(auth.statusCode).send({ message: auth.message });
-    }
+      logAdminVendorIntegrationAction(app, 'VENDOR_INTEGRATION_AUDIT_LOGS_READ', request, {
+        vendorIdentifier: vendorIdentifier ?? null,
+        resultCount: logs.length,
+      });
 
-    const revoked = await prisma.vendorIntegrationClient.update({
-      where: { id: request.params.id },
-      data: {
-        enabled: false,
-        revokedAt: new Date(),
-      },
-      select: {
-        id: true,
-        vendorIdentifier: true,
-        providerName: true,
-        enabled: true,
-        revokedAt: true,
-      },
-    });
-
-    return {
-      clientId: revoked.id,
-      vendorIdentifier: revoked.vendorIdentifier,
-      providerName: revoked.providerName,
-      enabled: revoked.enabled,
-      revokedAt: revoked.revokedAt?.toISOString() ?? null,
-    };
-  });
-
-  app.get<{ Querystring: AuditLogsQuery }>('/admin/vendor-integration/audit-logs', async (request, reply) => {
-    const auth = assertAdminTokenAuthorized(request.headers);
-    if (!auth.ok) {
-      return reply.code(auth.statusCode).send({ message: auth.message });
-    }
-
-    const vendorIdentifier = request.query.vendorIdentifier?.trim();
-    const logs = await prisma.vendorIntegrationAuditLog.findMany({
-      where: vendorIdentifier ? { vendorIdentifier } : {},
-      select: {
-        id: true,
-        clientId: true,
-        vendorIdentifier: true,
-        method: true,
-        path: true,
-        statusCode: true,
-        requestId: true,
-        createdAt: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: resolveAuditLogLimit(request.query.limit),
-    });
-
-    return {
-      data: logs.map((log) => ({
-        ...log,
-        createdAt: log.createdAt.toISOString(),
-      })),
-    };
-  });
+      return {
+        data: logs.map((log) => ({
+          ...log,
+          createdAt: log.createdAt.toISOString(),
+        })),
+      };
+    },
+  );
 
   app.get(
     '/admin/vendor-integration/providers',
