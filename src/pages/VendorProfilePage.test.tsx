@@ -703,6 +703,37 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
   });
 
+  it('shows restricted vendor workspace state without an active workspace badge', async () => {
+    setCurrentUser({
+      email: 'vendor-a@demo.com',
+      name: 'Vendor A User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [
+        {
+          vendorId: 'demo-vendor-a',
+          vendorName: 'Demo Vendor A',
+          status: 'inactive',
+          restrictionReason: 'Operational review',
+          restrictionChangedByUserId: 'admin-user-1',
+          restrictionChangedAt: '2026-07-02T10:00:00Z',
+        },
+      ],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    renderVendorProfilePage();
+
+    expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
+    expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
+    expect(screen.getByText('Restricted account')).toBeInTheDocument();
+    expect(screen.queryByText('Active workspace')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support and correction workflow' })).toBeInTheDocument();
+    expect(screen.getByText('Open a correction ticket')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Open correction ticket' }).length).toBeGreaterThan(0);
+  });
+
   it('renders readiness states from missing config truth without fake ready states', async () => {
     getVendorShippingConfigMock.mockResolvedValue({
       ...shippingConfig,
@@ -793,6 +824,7 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
+    await waitFor(() => expect(screen.getAllByText('Correction ticket open').length).toBeGreaterThan(0));
     const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(supportButtons[0]).not.toBeDisabled());
     await userEvent.click(supportButtons[0]);
@@ -964,9 +996,16 @@ describe('VendorProfilePage', () => {
     const statusHeading = await screen.findByRole('heading', { name: 'Vendor account status' });
     const statusSection = statusHeading.closest('section');
     expect(statusSection).not.toBeNull();
-    expect(await within(statusSection!).findByText('Finance review')).toBeInTheDocument();
-    expect(within(statusSection!).getByText('admin-user-current')).toBeInTheDocument();
+    await waitFor(() => expect(statusSection!.querySelector('.op-meta-group')).not.toBeNull());
+    const statusSummary = statusSection!.querySelector('.op-meta-group');
+    expect(await within(statusSummary as HTMLElement).findByText('Restricted')).toBeInTheDocument();
+    expect(within(statusSummary as HTMLElement).getByText('Reason')).toBeInTheDocument();
+    expect(await within(statusSummary as HTMLElement).findByText('Finance review')).toBeInTheDocument();
+    expect(within(statusSummary as HTMLElement).getByText('admin-user-current')).toBeInTheDocument();
+    expect(within(statusSummary as HTMLElement).getByText('Changed at')).toBeInTheDocument();
+    expect(statusSummary).toHaveTextContent('2026');
     expect(within(statusSection!).getByLabelText('Status reason')).toHaveValue('Finance review');
+    expect(within(statusSummary as HTMLElement).queryByText('No recorded change')).not.toBeInTheDocument();
 
     expect(screen.getByRole('heading', { name: 'Vendor Configuration History' })).toBeInTheDocument();
     expect(screen.getByText('vendor_status · status')).toBeInTheDocument();

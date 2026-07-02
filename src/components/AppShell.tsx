@@ -6,8 +6,6 @@ import {
   getAvailableVendors,
   getCurrentVendorContext,
   isVendorContextRestricted,
-  RESTRICTED_ACCOUNT_BODY,
-  RESTRICTED_ACCOUNT_TITLE,
   setCurrentVendorId,
 } from '../lib/auth';
 import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
@@ -399,15 +397,31 @@ function RestrictedAccountBanner({ context }: { context: ShellContext }) {
     return null;
   }
 
+  const reason = context.currentVendor.restrictionReason?.trim() || 'Unknown';
+
   return (
     <section className="restricted-account-banner" role="alert">
       <div>
-        <p className="eyebrow">{RESTRICTED_ACCOUNT_TITLE}</p>
-        <h2>{RESTRICTED_ACCOUNT_TITLE}</h2>
-        {RESTRICTED_ACCOUNT_BODY.split('\n\n').map((line) => (
-          <p key={line}>{line}</p>
-        ))}
+        <h2><span aria-hidden="true">⚠</span> Account Restricted</h2>
+        <dl className="restricted-account-reason">
+          <dt>Reason</dt>
+          <dd>{reason}</dd>
+        </dl>
+        <p>Your account is currently in read-only mode.</p>
+        <div className="restricted-account-access">
+          <span>You can continue viewing:</span>
+          <ul>
+            <li>Orders</li>
+            <li>Returns</li>
+            <li>Finance</li>
+            <li>Support</li>
+          </ul>
+        </div>
+        <p>Operational actions are temporarily unavailable.</p>
       </div>
+      <NavLink to="/vendor/profile" className="button button-primary">
+        Open correction ticket
+      </NavLink>
     </section>
   );
 }

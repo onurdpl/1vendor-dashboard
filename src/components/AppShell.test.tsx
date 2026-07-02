@@ -29,7 +29,14 @@ const vendorUser: CurrentUser = {
 
 const restrictedVendorUser: CurrentUser = {
   ...vendorUser,
-  vendorDetails: [{ vendorId: 'yalispor', vendorName: 'Yalı Spor', status: 'inactive' }],
+  vendorDetails: [
+    {
+      vendorId: 'yalispor',
+      vendorName: 'Yalı Spor',
+      status: 'inactive',
+      restrictionReason: 'Operational review',
+    },
+  ],
 };
 
 function seedSession(user: CurrentUser) {
@@ -82,12 +89,18 @@ describe('AppShell workspace navigation', () => {
 
     renderShell('/orders');
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Account Restricted');
-    expect(screen.getByRole('alert')).toHaveTextContent('Your account is temporarily restricted.');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'You can continue viewing orders, returns, payments, and contact support.',
-    );
-    expect(screen.getByRole('alert')).toHaveTextContent('Operational actions are temporarily unavailable.');
+    const banner = screen.getByRole('alert');
+    expect(banner).toHaveTextContent('Account Restricted');
+    expect(banner).toHaveTextContent('Reason');
+    expect(banner).toHaveTextContent('Operational review');
+    expect(banner).toHaveTextContent('Your account is currently in read-only mode.');
+    expect(within(banner).getByText('Orders')).toBeInTheDocument();
+    expect(within(banner).getByText('Returns')).toBeInTheDocument();
+    expect(within(banner).getByText('Finance')).toBeInTheDocument();
+    expect(within(banner).getByText('Support')).toBeInTheDocument();
+    expect(banner).toHaveTextContent('Operational actions are temporarily unavailable.');
+    expect(within(banner).getByRole('link', { name: 'Open correction ticket' })).toHaveAttribute('href', '/vendor/profile');
+    expect(banner).not.toHaveTextContent('Your account is temporarily restricted.');
     expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
   });
 

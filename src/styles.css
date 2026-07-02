@@ -2027,16 +2027,23 @@ h3 {
 }
 
 .restricted-account-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 14px;
   border: 1px solid rgba(217, 119, 6, 0.28);
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(255, 251, 235, 0.94);
   padding: 14px 16px;
   color: #78350f;
 }
 
 .restricted-account-banner h2 {
-  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
   font-size: 1rem;
   line-height: 1.25;
 }
@@ -2045,13 +2052,47 @@ h3 {
   margin: 0;
 }
 
-.restricted-account-banner p + p {
-  margin-top: 4px;
+.restricted-account-banner p + p,
+.restricted-account-banner .restricted-account-access + p {
+  margin-top: 6px;
 }
 
-.restricted-account-banner .eyebrow {
-  margin-bottom: 4px;
-  color: #b45309;
+.restricted-account-reason {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.restricted-account-reason dt {
+  font-weight: 800;
+}
+
+.restricted-account-reason dd {
+  margin: 0;
+}
+
+.restricted-account-access {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.restricted-account-access ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.restricted-account-access li::before {
+  content: "• ";
+}
+
+.restricted-account-banner .button {
+  flex: 0 0 auto;
 }
 
 .restricted-action-message {

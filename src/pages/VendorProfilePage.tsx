@@ -1885,11 +1885,13 @@ export function VendorProfilePage() {
         </div>
         <div className="vendor-profile-actions">
           <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
-          <StatusBadge tone={appReadiness.ready ? 'success' : 'warning'}>{appReadiness.ready ? 'Active workspace' : 'Context loading'}</StatusBadge>
-          {existingProfileTicket ? <StatusBadge tone="attention">Support ticket open</StatusBadge> : null}
+          <StatusBadge tone={!appReadiness.ready ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
+            {!appReadiness.ready ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
+          </StatusBadge>
+          {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
           <button
             type="button"
-            className="button"
+            className="button button-secondary"
             onClick={handleContactSupport}
             disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
           >
@@ -1897,7 +1899,9 @@ export function VendorProfilePage() {
               ? 'Open correction ticket'
               : supportMutation.isPending
                 ? 'Requesting correction...'
-                : 'Request profile correction'}
+                : vendorStatus.restricted
+                  ? 'Open correction ticket'
+                  : 'Request profile correction'}
           </button>
         </div>
       </div>
@@ -1946,11 +1950,18 @@ export function VendorProfilePage() {
                 <MetadataGroup>
                   <MetadataRow label="Status" value={vendorStatus.restricted ? 'Restricted' : 'Active'} />
                   <MetadataRow
-                    label="Restriction reason"
-                    value={vendorStatusForm.status === 'active' ? 'Not restricted' : formatValue(vendorStatus.restrictionReason, 'Not restricted')}
+                    label="Reason"
+                    value={vendorStatus.restricted ? formatValue(vendorStatus.restrictionReason, 'Unknown') : 'Not restricted'}
                   />
-                  <MetadataRow label="Changed by" value={formatValue(vendorStatus.changedByEmail ?? vendorStatus.changedByUserId, 'No recorded change')} />
-                  <MetadataRow label="Changed at" value={formatAuditDate(vendorStatus.changedAt)} />
+                  <MetadataRow
+                    label="Changed by"
+                    value={
+                      vendorStatus.restricted
+                        ? formatValue(vendorStatus.changedByEmail ?? vendorStatus.changedByUserId, 'Unknown')
+                        : formatValue(vendorStatus.changedByEmail ?? vendorStatus.changedByUserId, 'No recorded change')
+                    }
+                  />
+                  <MetadataRow label="Changed at" value={vendorStatus.restricted ? vendorStatus.changedAt ? formatAuditDate(vendorStatus.changedAt) : 'Unknown' : formatAuditDate(vendorStatus.changedAt)} />
                 </MetadataGroup>
                 <form className="op-form-grid" onSubmit={handleVendorStatusSubmit}>
                   <label>
@@ -3584,11 +3595,13 @@ export function VendorProfilePage() {
       >
         <div className="vendor-profile-support-panel">
           <div>
-            <strong>{existingProfileTicket ? 'A correction ticket is already open.' : 'Need a correction?'}</strong>
+            <strong>{existingProfileTicket ? 'Correction ticket open' : vendorStatus.restricted ? 'Open a correction ticket' : 'Need a correction?'}</strong>
             <p>
               {existingProfileTicket
                 ? `${existingProfileTicket.subject} is ${safeStatusLabel(existingProfileTicket.status).toLowerCase()}.`
-                : 'Report a marketplace profile or configuration issue so operations can review the admin-owned data.'}
+                : vendorStatus.restricted
+                  ? 'Contact support if you believe this account restriction needs review.'
+                  : 'Report a marketplace profile or configuration issue so operations can review the admin-owned data.'}
             </p>
           </div>
           <OperationalActionGroup>
@@ -3598,7 +3611,7 @@ export function VendorProfilePage() {
               onClick={handleContactSupport}
               disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
             >
-              {existingProfileTicket ? 'Open correction ticket' : 'Report configuration issue'}
+              {existingProfileTicket ? 'Open correction ticket' : vendorStatus.restricted ? 'Open correction ticket' : 'Report configuration issue'}
             </button>
           </OperationalActionGroup>
         </div>
