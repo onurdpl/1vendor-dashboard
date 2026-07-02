@@ -40,6 +40,7 @@ import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/or
 import { getRejectUnavailableReason } from '../lib/rejectEligibility';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
+import { isVendorContextRestricted } from '../lib/auth';
 
 type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type OrderWorkflowTabKey = 'all' | 'awaiting-shipment' | 'blocked-allocation' | 'stale-fulfillment' | 'tracking-missing';
@@ -50,6 +51,8 @@ type LabelActionFeedback = {
   vendorId: string;
   contextKey: string;
 };
+
+const RESTRICTED_SMART_LABEL_MESSAGE = 'Vendor account is restricted. Operational actions are disabled.';
 
 function formatDate(value?: string | null) {
   return formatDateTime(value, {
@@ -391,6 +394,7 @@ export function OrdersPage() {
   const currentUser = appReadiness.currentUser;
   const authContextReady = appReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
+  const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const { message, tone, showFeedback } = useActionFeedback();
   const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
@@ -978,7 +982,10 @@ export function OrdersPage() {
                     tone: operationalStory.resolvedByRefund ? 'success' as const : 'warning' as const,
                   }
                 : workflowGuidance;
-              const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
+              const smartLabelDisabled =
+                vendorRestricted ||
+                isLabelActionPending ||
+                Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const rejectUnavailableReason = getRejectUnavailableReason(selectedOrder);
               const showRejectUnavailableReason = currentUser?.role === 'vendor' && rejectUnavailableReason !== null;
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
@@ -1066,6 +1073,7 @@ export function OrdersPage() {
                     type="button"
                     className="orders-smart-label-button"
                     disabled={smartLabelDisabled}
+                    title={vendorRestricted ? RESTRICTED_SMART_LABEL_MESSAGE : undefined}
                     onClick={() => void handleSmartLabelAction(selectedOrder)}
                   >
                     <span className="orders-smart-label-icon" aria-hidden="true">
@@ -1080,10 +1088,16 @@ export function OrdersPage() {
                       <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
                       <small>
                         {labelUrl
-                          ? 'Open existing label without creating a duplicate.'
+                          ? vendorRestricted
+                            ? RESTRICTED_SMART_LABEL_MESSAGE
+                            : 'Open existing label without creating a duplicate.'
                           : shipmentExecution
-                            ? 'Shipment exists. Label availability is controlled by the provider.'
-                            : 'Create shipment and open label when available.'}
+                            ? vendorRestricted
+                              ? RESTRICTED_SMART_LABEL_MESSAGE
+                              : 'Shipment exists. Label availability is controlled by the provider.'
+                            : vendorRestricted
+                              ? RESTRICTED_SMART_LABEL_MESSAGE
+                              : 'Create shipment and open label when available.'}
                       </small>
                     </span>
                     <span className="orders-smart-label-arrow" aria-hidden="true">›</span>

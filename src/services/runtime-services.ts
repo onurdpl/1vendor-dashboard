@@ -383,7 +383,7 @@ export const runtimeServices = {
             vendorName: getCurrentVendorContext().vendorName || vendorId,
             status: input.status,
             restricted: input.status !== 'active',
-            restrictionReason: input.reason,
+            restrictionReason: input.reason ?? null,
             changedByUserId: null,
             changedByEmail: getCurrentUser()?.email ?? null,
             changedAt: new Date().toISOString(),

@@ -905,6 +905,38 @@ describe('OrdersPage control center', () => {
     openMock.mockRestore();
   });
 
+  it('disables the smart label shipment action for restricted vendors while keeping order details visible', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [
+        {
+          vendorId: 'demo-vendor-a',
+          vendorName: 'Demo Vendor A',
+          status: 'inactive',
+          restrictionReason: 'Operational review',
+        },
+      ],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    const awaitingShipmentOrder = buildAwaitingRejectableOrder();
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
+    getOrderMock.mockResolvedValue(awaitingShipmentOrder);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    const smartLabelAction = await screen.findByLabelText('Smart label action');
+    const labelButton = within(smartLabelAction).getByRole('button');
+    expect(labelButton).toBeDisabled();
+    expect(labelButton).toHaveAttribute('title', 'Vendor account is restricted. Operational actions are disabled.');
+    expect(smartLabelAction).toHaveTextContent('Vendor account is restricted. Operational actions are disabled.');
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+  });
+
   it('does not show reject actions in the orders detail rail', async () => {
     setVendorUser();
     const awaitingShipmentOrder = buildAwaitingRejectableOrder();

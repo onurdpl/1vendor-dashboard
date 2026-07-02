@@ -1,3 +1,4 @@
+import { VendorProfileSnapshotImpact } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import {
   auditVendorProfileChanges,
@@ -38,7 +39,11 @@ function normalizeVendorStatus(value: unknown) {
   return normalized;
 }
 
-function normalizeStatusReason(value: unknown) {
+function normalizeStatusReason(value: unknown, status: string) {
+  if (!isVendorRestrictedStatus(status)) {
+    return null;
+  }
+
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error('status reason is required.');
   }
@@ -87,16 +92,41 @@ function mapVendorStatus(
   vendor: { id: string; name: string; status: string },
   statusAudit: VendorProfileAuditLogDto | null,
 ): VendorStatusDto {
+  const restricted = isVendorRestrictedStatus(vendor.status);
   return {
     vendorId: vendor.id,
     vendorName: vendor.name,
     status: vendor.status,
-    restricted: isVendorRestrictedStatus(vendor.status),
-    restrictionReason: statusAudit?.reason ?? null,
+    restricted,
+    restrictionReason: restricted ? statusAudit?.reason ?? null : null,
     changedByUserId: statusAudit?.changedByUserId ?? null,
     changedByEmail: statusAudit?.changedByEmail ?? null,
     changedAt: statusAudit?.changedAt ?? null,
   };
+}
+
+async function createReasonOnlyStatusAudit(input: {
+  vendorId: string;
+  status: string;
+  reason: string;
+  actor?: VendorProfileAuditActor | null;
+}) {
+  await prisma.vendorProfileAuditLog.createMany({
+    data: [
+      {
+        vendorId: input.vendorId,
+        section: 'vendor_status',
+        fieldName: 'status',
+        oldValue: input.status,
+        newValue: input.status,
+        changedByUserId: input.actor?.userId ?? null,
+        changedByEmail: input.actor?.email ?? null,
+        reason: input.reason,
+        snapshotImpact: VendorProfileSnapshotImpact.UNKNOWN,
+        source: 'admin_vendor_status_update',
+      },
+    ],
+  });
 }
 
 export async function getVendorStatus(vendorId: string): Promise<VendorStatusDto> {
@@ -126,7 +156,7 @@ export async function updateVendorStatus(
   } = {},
 ): Promise<VendorStatusDto> {
   const status = normalizeVendorStatus(input.status);
-  const reason = normalizeStatusReason(input.reason);
+  const reason = normalizeStatusReason(input.reason, status);
   const existing = await prisma.vendor.findUnique({
     where: {
       id: vendorId,
@@ -141,6 +171,10 @@ export async function updateVendorStatus(
   if (!existing) {
     throw new Error('Vendor could not be found.');
   }
+
+  const latestStatusAudit = await findLatestStatusAudit(vendorId);
+  const statusChanged = existing.status !== status;
+  const reasonChanged = reason !== null && latestStatusAudit?.reason !== reason;
 
   const updated = await prisma.vendor.update({
     where: {
@@ -166,6 +200,15 @@ export async function updateVendorStatus(
     reason,
     source: 'admin_vendor_status_update',
   });
+
+  if (!statusChanged && reasonChanged) {
+    await createReasonOnlyStatusAudit({
+      vendorId,
+      status,
+      reason,
+      actor: auditContext.actor,
+    });
+  }
 
   return getVendorStatus(vendorId);
 }

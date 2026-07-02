@@ -49,7 +49,7 @@ const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | n
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
 const getVendorStatusMock = vi.fn<() => Promise<VendorStatus>>();
 const updateVendorStatusMock = vi.fn<
-  (vendorId: string, input: { status: 'active' | 'inactive'; reason: string }) => Promise<VendorStatus>
+  (vendorId: string, input: { status: 'active' | 'inactive'; reason?: string }) => Promise<VendorStatus>
 >();
 const listVendorProfileAuditLogsMock = vi.fn<() => Promise<VendorProfileAuditLog[]>>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
@@ -102,7 +102,7 @@ vi.mock('../features/vendors/api', async () => {
     listVendorProfileAuditLogs: () => listVendorProfileAuditLogsMock(),
     updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       updateVendorBillingProfileMock(vendorId, input),
-    updateVendorStatus: (vendorId: string, input: { status: 'active' | 'inactive'; reason: string }) =>
+    updateVendorStatus: (vendorId: string, input: { status: 'active' | 'inactive'; reason?: string }) =>
       updateVendorStatusMock(vendorId, input),
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
     discoverLogoIsbasiFirms: () => discoverLogoIsbasiFirmsMock(),
@@ -384,7 +384,7 @@ describe('VendorProfilePage', () => {
         vendorId,
         status: input.status,
         restricted: input.status !== 'active',
-        restrictionReason: input.reason,
+        restrictionReason: input.reason ?? null,
         changedByUserId: 'admin-user-1',
         changedByEmail: 'admin@demo.com',
         changedAt: '2026-06-30T12:00:00Z',
@@ -828,6 +828,64 @@ describe('VendorProfilePage', () => {
     await userEvent.click(supportButtons[0]);
     expect(await screen.findByText('Admin support detail route')).toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('lets admins save active vendor status without a restriction reason', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    renderVendorProfilePage();
+
+    const statusHeading = await screen.findByRole('heading', { name: 'Vendor account status' });
+    const statusSection = statusHeading.closest('section');
+    expect(statusSection).not.toBeNull();
+    const reasonSelect = await within(statusSection!).findByLabelText('Status reason');
+    expect(reasonSelect).toBeDisabled();
+    expect(within(statusSection!).getAllByText('Not restricted').length).toBeGreaterThan(0);
+
+    await user.click(within(statusSection!).getByRole('button', { name: 'Save vendor status' }));
+
+    await waitFor(() =>
+      expect(updateVendorStatusMock).toHaveBeenCalledWith('demo-vendor-a', {
+        status: 'active',
+      }),
+    );
+    expect(within(statusSection!).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('requires a status reason when admins restrict a vendor', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    renderVendorProfilePage();
+
+    const statusHeading = await screen.findByRole('heading', { name: 'Vendor account status' });
+    const statusSection = statusHeading.closest('section');
+    expect(statusSection).not.toBeNull();
+
+    await user.selectOptions(await within(statusSection!).findByLabelText('Status'), 'inactive');
+    const reasonSelect = within(statusSection!).getByLabelText('Status reason');
+    expect(reasonSelect).not.toBeDisabled();
+    await user.click(within(statusSection!).getByRole('button', { name: 'Save vendor status' }));
+
+    expect(await within(statusSection!).findByRole('alert')).toHaveTextContent('Status reason is required.');
+    expect(updateVendorStatusMock).not.toHaveBeenCalled();
   });
 
   it('lets admins restrict a vendor with a persisted status reason', async () => {

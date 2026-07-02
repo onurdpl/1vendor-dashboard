@@ -1994,7 +1994,7 @@ export type VendorStatus = {
 
 export type VendorStatusInput = {
   status: 'active' | 'inactive';
-  reason: string;
+  reason?: string;
 };
 
 export type VendorProfileSnapshotImpact =

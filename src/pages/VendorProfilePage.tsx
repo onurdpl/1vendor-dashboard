@@ -1779,7 +1779,13 @@ export function VendorProfilePage() {
     field: Field,
     value: VendorStatusFormState[Field],
   ) {
-    setVendorStatusForm((current) => ({ ...current, [field]: value }));
+    setVendorStatusForm((current) => {
+      if (field === 'status' && value === 'active') {
+        return { ...current, status: 'active', reason: '' };
+      }
+
+      return { ...current, [field]: value };
+    });
     if (vendorStatusFormError) {
       setVendorStatusFormError(null);
     }
@@ -1788,15 +1794,16 @@ export function VendorProfilePage() {
   function handleVendorStatusSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const reason = vendorStatusForm.reason.trim();
-    if (!reason) {
+    if (vendorStatusForm.status !== 'active' && !reason) {
       setVendorStatusFormError('Status reason is required.');
       return;
     }
 
-    void vendorStatusMutation.mutateAsync({
-      status: vendorStatusForm.status,
-      reason,
-    });
+    void vendorStatusMutation.mutateAsync(
+      vendorStatusForm.status === 'active'
+        ? { status: 'active' }
+        : { status: vendorStatusForm.status, reason },
+    );
   }
 
   function handleLogoPreviewFormChange(field: keyof LogoCommissionPreviewFormState, value: string) {
@@ -1938,7 +1945,10 @@ export function VendorProfilePage() {
               <>
                 <MetadataGroup>
                   <MetadataRow label="Status" value={vendorStatus.restricted ? 'Restricted' : 'Active'} />
-                  <MetadataRow label="Restriction reason" value={formatValue(vendorStatus.restrictionReason, 'Not restricted')} />
+                  <MetadataRow
+                    label="Restriction reason"
+                    value={vendorStatusForm.status === 'active' ? 'Not restricted' : formatValue(vendorStatus.restrictionReason, 'Not restricted')}
+                  />
                   <MetadataRow label="Changed by" value={formatValue(vendorStatus.changedByEmail, 'No recorded change')} />
                   <MetadataRow label="Changed at" value={formatAuditDate(vendorStatus.changedAt)} />
                 </MetadataGroup>
@@ -1963,6 +1973,7 @@ export function VendorProfilePage() {
                     <select
                       value={vendorStatusForm.reason}
                       onChange={(event) => handleVendorStatusFormChange('reason', event.target.value)}
+                      disabled={vendorStatusForm.status === 'active'}
                     >
                       <option value="">Select a reason</option>
                       {VENDOR_STATUS_REASONS.map((reason) => (
