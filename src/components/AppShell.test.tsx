@@ -1,9 +1,9 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AdminShell, VendorShell } from './AppShell';
-import { setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
+import { getCurrentUser, getToken, setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -52,6 +52,7 @@ function renderShell(initialEntry: string) {
         <Route element={<AdminShell />}>
           <Route path="/admin/operations" element={<div>Admin operations content</div>} />
         </Route>
+        <Route path="/login" element={<div>Login screen</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -133,5 +134,23 @@ describe('AppShell workspace navigation', () => {
     expect(within(primaryNav).getByRole('link', { name: /Finance/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Inbox/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Settings/i })).toBeInTheDocument();
+  });
+
+  it('clears the cached user and replaces the route with login on logout', async () => {
+    const user = userEvent.setup();
+    seedSession(vendorUser);
+
+    renderShell('/orders');
+
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
+    expect(getCurrentUser()?.email).toBe('vendor@example.com');
+    expect(getToken()).toBe('test-session');
+
+    await user.click(screen.getByRole('button', { name: /Log out/i }));
+
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(getCurrentUser()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
   });
 });

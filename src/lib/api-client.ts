@@ -218,6 +218,10 @@ function getDiagnosticEndpoint(path: string) {
   }
 }
 
+function isSessionRestoreEndpoint(path: string) {
+  return getDiagnosticEndpoint(path) === '/auth/me';
+}
+
 function getPayloadRequestId(payload: unknown) {
   if (!payload || typeof payload !== 'object' || !('requestId' in payload)) {
     return null;
@@ -293,7 +297,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     if (!response.ok) {
       const diagnostics = createApiDiagnostics(path, headers, response, payload);
 
-      if (response.status === 401) {
+      if (response.status === 401 && !isSessionRestoreEndpoint(path)) {
         clearCsrfToken();
         clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
       }
@@ -320,7 +324,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     return payload as T;
   } catch (error) {
     if (error instanceof ApiError) {
-      if (error.kind === 'unauthorized') {
+      if (error.kind === 'unauthorized' && !isSessionRestoreEndpoint(path)) {
         clearCsrfToken();
         clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
       }

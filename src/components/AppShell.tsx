@@ -204,12 +204,17 @@ function useShellContext() {
   }, [appReadiness.currentVendor.vendorId]);
 
   function handleLogout() {
-    void runtimeServices.auth.logout().catch(() => undefined);
-    clearToken();
-    showFeedback('Signed out successfully.', 'success');
-    globalThis.setTimeout(() => {
-      navigate('/login', { replace: true });
-    }, 180);
+    void (async () => {
+      try {
+        await runtimeServices.auth.logout();
+      } catch {
+        // Local sign-out must complete even when the backend logout request fails.
+      } finally {
+        clearToken();
+        showFeedback('Signed out successfully.', 'success');
+        navigate('/login', { replace: true });
+      }
+    })();
   }
 
   function handleSignInAgain() {

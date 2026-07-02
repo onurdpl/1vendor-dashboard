@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -300,6 +300,48 @@ describe('RequireAuth', () => {
     expect(screen.getByText('Orders workspace')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(meMock).toHaveBeenCalledTimes(1);
+    expect(auth.getCurrentUser()).toBeNull();
+    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
+  });
+
+  it('redirects real-mode sessions to login when /auth/me returns forbidden for a stale local user', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi.fn().mockRejectedValue(new ApiError('Forbidden.', 'server', { status: 403 }));
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
+    auth.setCurrentUser(buildTestUser());
+    window.history.replaceState({}, '', '/orders');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(meMock).toHaveBeenCalledTimes(1);
+    expect(auth.getCurrentUser()).toBeNull();
+    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
   });
 
   it('recovers when the first real-mode session restore has a network failure and retry succeeds', async () => {
@@ -455,6 +497,56 @@ describe('RequireAuth', () => {
     expect(meMock).toHaveBeenCalledTimes(2);
     expect(auth.peekExpiredSessionNotice()).toBeNull();
     expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry sign in' })).toBeEnabled();
+  });
+
+  it('clears auth state and navigates to login when retry sign in is selected after restore failure', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+        appVersion: '0.1.0',
+        buildTimestamp: null,
+        gitCommit: null,
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError('Unable to reach backend.', 'network'))
+      .mockRejectedValueOnce(new ApiError('Backend request failed.', 'server', { status: 500 }));
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<RouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
+    expect(meMock).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry sign in' }));
+
+    await waitFor(() => expect(screen.getByTestId('current-route')).toHaveTextContent('/login'));
+    expect(auth.getCurrentUser()).toBeNull();
+    expect(auth.getToken()).toBeNull();
+    expect(meMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
   });
 
   it('does not hang forever or mark the session expired when real-mode session restore and one recovery retry time out', async () => {
@@ -498,8 +590,7 @@ describe('RequireAuth', () => {
     vi.useRealTimers();
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Retry sign in' })).toBeEnabled();
     expect(auth.peekExpiredSessionNotice()).toBeNull();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(meMock).toHaveBeenCalledTimes(2);

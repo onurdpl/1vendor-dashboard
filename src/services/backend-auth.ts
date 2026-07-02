@@ -214,8 +214,11 @@ export async function me(options: { authAttemptId?: string; signal?: AbortSignal
 }
 
 export async function logout() {
-  await apiClient.post<{ ok: true }>('/auth/logout', undefined, {
-    skipVendorContext: true,
-  });
-  clearCsrfToken();
+  try {
+    await apiClient.post<{ ok: true }>('/auth/logout', undefined, {
+      skipVendorContext: true,
+    });
+  } finally {
+    clearCsrfToken();
+  }
 }

@@ -1,4 +1,4 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import {
   clearToken,
@@ -83,7 +83,7 @@ function logAuthRestoreWarn(event: string, details: Record<string, unknown> = {}
 
 function isUnauthorizedRestoreFailure(error: unknown) {
   if (error instanceof ApiError) {
-    return error.kind === 'unauthorized';
+    return error.kind === 'unauthorized' || error.status === 401 || error.status === 403;
   }
 
   if (!error || typeof error !== 'object') {
@@ -91,7 +91,7 @@ function isUnauthorizedRestoreFailure(error: unknown) {
   }
 
   const candidate = error as { kind?: unknown; status?: unknown };
-  return candidate.kind === 'unauthorized' || candidate.status === 401;
+  return candidate.kind === 'unauthorized' || candidate.status === 401 || candidate.status === 403;
 }
 
 function createRestoreAttemptId() {
@@ -171,11 +171,21 @@ function didRestoreTimeout(error: unknown) {
 
 export function RequireAuth() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [authGateStatus, setAuthGateStatus] = useState<AuthGateStatus>(getInitialAuthGateStatus);
   const [restoreErrorMessage, setRestoreErrorMessage] = useState<string | null>(null);
   const [restoreRetryCount, setRestoreRetryCount] = useState(0);
   const latestRestoreAttemptIdRef = useRef<string | null>(null);
   const activeRestoreControllerRef = useRef<AbortController | null>(null);
+
+  function clearSessionAndNavigateToLogin() {
+    activeRestoreControllerRef.current?.abort();
+    activeRestoreControllerRef.current = null;
+    setRestoreErrorMessage(null);
+    clearToken();
+    setAuthGateStatus('unauthenticated');
+    navigate('/login', { replace: true });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -278,6 +288,7 @@ export function RequireAuth() {
           if (isUnauthorized) {
             clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
             setAuthGateStatus('unauthenticated');
+            navigate('/login', { replace: true });
           } else {
             for (let attempt = 1; attempt <= AUTH_RESTORE_RECOVERY_RETRY_LIMIT; attempt += 1) {
               try {
@@ -321,6 +332,7 @@ export function RequireAuth() {
                 if (retryIsUnauthorized) {
                   clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
                   setAuthGateStatus('unauthenticated');
+                  navigate('/login', { replace: true });
                   return;
                 }
               }
@@ -359,6 +371,13 @@ export function RequireAuth() {
         suppressNextSessionReset = false;
         return;
       }
+      if (!getCurrentUser()) {
+        abortActiveRestore();
+        clearDelayedUiTimer();
+        setRestoreErrorMessage(null);
+        setAuthGateStatus('unauthenticated');
+        return;
+      }
       void restoreSession();
     });
 
@@ -370,7 +389,7 @@ export function RequireAuth() {
       unsubscribeSession();
       unsubscribeRetry();
     };
-  }, [restoreRetryCount]);
+  }, [navigate, restoreRetryCount]);
 
   if (authGateStatus === 'authenticated_unconfirmed') {
     return <Outlet />;
@@ -406,16 +425,9 @@ export function RequireAuth() {
             <button
               type="button"
               className="button button-primary"
-              onClick={() => setRestoreRetryCount((count) => count + 1)}
+              onClick={clearSessionAndNavigateToLogin}
             >
-              Retry
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => setAuthGateStatus('unauthenticated')}
-            >
-              Sign in again
+              Retry sign in
             </button>
           </div>
         </section>
