@@ -69,6 +69,10 @@ function buildUser() {
         vendor: {
           id: 'vendor-a',
           name: 'Vendor A',
+          status: 'active',
+          restrictionReason: null,
+          restrictedByUserId: null,
+          restrictedAt: null,
         },
       },
     ],
@@ -667,7 +671,16 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         user: expect.objectContaining({
           email: 'vendor@example.com',
-          vendorAccess: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+          vendorAccess: [
+            {
+              vendorId: 'vendor-a',
+              vendorName: 'Vendor A',
+              status: 'active',
+              restrictionReason: null,
+              restrictionChangedByUserId: null,
+              restrictionChangedAt: null,
+            },
+          ],
         }),
       }),
     );

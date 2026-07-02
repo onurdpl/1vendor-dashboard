@@ -18,6 +18,7 @@ export type UserVendorAccess = {
   vendorName: string;
   status?: string;
   restrictionReason?: string | null;
+  restrictionChangedByUserId?: string | null;
   restrictionChangedByEmail?: string | null;
   restrictionChangedAt?: string | null;
 };
@@ -113,6 +114,9 @@ function isCurrentUser(value: unknown): value is CurrentUser {
             (vendor.restrictionReason === undefined ||
               vendor.restrictionReason === null ||
               typeof vendor.restrictionReason === 'string') &&
+            (vendor.restrictionChangedByUserId === undefined ||
+              vendor.restrictionChangedByUserId === null ||
+              typeof vendor.restrictionChangedByUserId === 'string') &&
             (vendor.restrictionChangedByEmail === undefined ||
               vendor.restrictionChangedByEmail === null ||
               typeof vendor.restrictionChangedByEmail === 'string') &&

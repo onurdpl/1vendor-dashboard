@@ -21,6 +21,9 @@ type UserRecordWithVendorLinks = {
         id: string;
         name: string;
         status: string;
+        restrictionReason: string | null;
+        restrictedByUserId: string | null;
+        restrictedAt: Date | null;
       };
     }>;
 };
@@ -74,11 +77,18 @@ function mapUserRecordToAuthResponse(user: UserRecordWithVendorLinks): AuthUserR
     name: user.name,
     role: mapRole(user.role),
     status: user.status,
-    vendorAccess: user.vendorLinks.map((link) => ({
-      vendorId: link.vendor.id,
-      vendorName: link.vendor.name,
-      status: link.vendor.status,
-    })),
+    vendorAccess: user.vendorLinks.map((link) => {
+      const status = link.vendor.status ?? 'active';
+      const restricted = status.trim().toLowerCase() !== 'active';
+      return {
+        vendorId: link.vendor.id,
+        vendorName: link.vendor.name,
+        status,
+        restrictionReason: restricted ? link.vendor.restrictionReason ?? null : null,
+        restrictionChangedByUserId: restricted ? link.vendor.restrictedByUserId ?? null : null,
+        restrictionChangedAt: restricted ? link.vendor.restrictedAt?.toISOString() ?? null : null,
+      };
+    }),
   };
 }
 

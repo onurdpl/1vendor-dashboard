@@ -335,7 +335,7 @@ export const runtimeServices = {
             status: getCurrentVendorContext().status ?? 'active',
             restricted: String(getCurrentVendorContext().status ?? 'active').toLowerCase() !== 'active',
             restrictionReason: getCurrentVendorContext().restrictionReason ?? null,
-            changedByUserId: null,
+            changedByUserId: getCurrentVendorContext().restrictionChangedByUserId ?? null,
             changedByEmail: getCurrentVendorContext().restrictionChangedByEmail ?? null,
             changedAt: getCurrentVendorContext().restrictionChangedAt ?? null,
           }),

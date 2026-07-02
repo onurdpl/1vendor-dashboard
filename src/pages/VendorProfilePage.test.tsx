@@ -922,6 +922,58 @@ describe('VendorProfilePage', () => {
     expect(within(statusSection!).getByText('admin@demo.com')).toBeInTheDocument();
   });
 
+  it('reads current restriction state from vendor status while keeping audit history separate', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      status: 'inactive',
+      restricted: true,
+      restrictionReason: 'Finance review',
+      changedByUserId: 'admin-user-current',
+      changedByEmail: null,
+      changedAt: '2026-07-01T10:00:00Z',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([
+      {
+        id: 'audit-status-old',
+        vendorId: 'demo-vendor-a',
+        section: 'vendor_status',
+        fieldName: 'status',
+        oldValue: 'active',
+        newValue: 'inactive',
+        changedByUserId: 'admin-user-history',
+        changedByEmail: 'admin-history@example.test',
+        changedAt: '2026-06-01T10:00:00Z',
+        reason: 'Operational review',
+        snapshotImpact: 'UNKNOWN',
+        source: 'admin_vendor_status_update',
+      },
+      ...profileAuditLogs,
+    ]);
+
+    renderVendorProfilePage();
+
+    const statusHeading = await screen.findByRole('heading', { name: 'Vendor account status' });
+    const statusSection = statusHeading.closest('section');
+    expect(statusSection).not.toBeNull();
+    expect(await within(statusSection!).findByText('Finance review')).toBeInTheDocument();
+    expect(within(statusSection!).getByText('admin-user-current')).toBeInTheDocument();
+    expect(within(statusSection!).getByLabelText('Status reason')).toHaveValue('Finance review');
+
+    expect(screen.getByRole('heading', { name: 'Vendor Configuration History' })).toBeInTheDocument();
+    expect(screen.getByText('vendor_status · status')).toBeInTheDocument();
+    expect(screen.getByText(/Reason: Operational review/)).toBeInTheDocument();
+    expect(listVendorProfileAuditLogsMock).toHaveBeenCalled();
+  });
+
   it('renders admin billing profile values read-only with an edit action when configured', async () => {
     setCurrentUser({
       email: 'admin@demo.com',

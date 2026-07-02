@@ -20,6 +20,9 @@ export type AuthVendorAccess = {
   vendorId: string;
   vendorName: string;
   status: string;
+  restrictionReason: string | null;
+  restrictionChangedByUserId: string | null;
+  restrictionChangedAt: string | null;
 };
 
 export type AuthUserResponse = AuthUserContext & {

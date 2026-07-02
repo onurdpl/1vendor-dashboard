@@ -6,6 +6,9 @@ export type BackendAuthVendorAccess = {
   vendorId: string;
   vendorName: string;
   status?: string;
+  restrictionReason?: string | null;
+  restrictionChangedByUserId?: string | null;
+  restrictionChangedAt?: string | null;
 };
 
 export type BackendAuthUser = {

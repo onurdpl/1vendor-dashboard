@@ -3,7 +3,6 @@ import { prisma } from '../../db/prisma.js';
 import {
   auditVendorProfileChanges,
   type VendorProfileAuditActor,
-  type VendorProfileAuditLogDto,
 } from './vendor-profile-audit-log.service.js';
 import { isVendorRestrictedStatus } from '../vendor-access/restricted-vendor.js';
 
@@ -24,6 +23,15 @@ export type VendorStatusDto = {
 export type VendorStatusUpdateInputDto = {
   status?: unknown;
   reason?: unknown;
+};
+
+type VendorRestrictionStateRecord = {
+  id: string;
+  name: string;
+  status: string;
+  restrictionReason: string | null;
+  restrictedByUserId: string | null;
+  restrictedAt: Date | null;
 };
 
 function normalizeVendorStatus(value: unknown) {
@@ -56,52 +64,17 @@ function normalizeStatusReason(value: unknown, status: string) {
   return reason;
 }
 
-async function findLatestStatusAudit(vendorId: string): Promise<VendorProfileAuditLogDto | null> {
-  const log = await prisma.vendorProfileAuditLog.findFirst({
-    where: {
-      vendorId,
-      section: 'vendor_status',
-      fieldName: 'status',
-    },
-    orderBy: {
-      changedAt: 'desc',
-    },
-  });
-
-  if (!log) {
-    return null;
-  }
-
-  return {
-    id: log.id,
-    vendorId: log.vendorId,
-    section: log.section,
-    fieldName: log.fieldName,
-    oldValue: log.oldValue,
-    newValue: log.newValue,
-    changedByUserId: log.changedByUserId,
-    changedByEmail: log.changedByEmail,
-    changedAt: log.changedAt.toISOString(),
-    reason: log.reason,
-    snapshotImpact: log.snapshotImpact,
-    source: log.source,
-  };
-}
-
-function mapVendorStatus(
-  vendor: { id: string; name: string; status: string },
-  statusAudit: VendorProfileAuditLogDto | null,
-): VendorStatusDto {
+function mapVendorStatus(vendor: VendorRestrictionStateRecord): VendorStatusDto {
   const restricted = isVendorRestrictedStatus(vendor.status);
   return {
     vendorId: vendor.id,
     vendorName: vendor.name,
     status: vendor.status,
     restricted,
-    restrictionReason: restricted ? statusAudit?.reason ?? null : null,
-    changedByUserId: statusAudit?.changedByUserId ?? null,
-    changedByEmail: statusAudit?.changedByEmail ?? null,
-    changedAt: statusAudit?.changedAt ?? null,
+    restrictionReason: restricted ? vendor.restrictionReason ?? null : null,
+    changedByUserId: restricted ? vendor.restrictedByUserId ?? null : null,
+    changedByEmail: null,
+    changedAt: restricted ? vendor.restrictedAt?.toISOString() ?? null : null,
   };
 }
 
@@ -138,6 +111,9 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusDto
       id: true,
       name: true,
       status: true,
+      restrictionReason: true,
+      restrictedByUserId: true,
+      restrictedAt: true,
     },
   });
 
@@ -145,7 +121,7 @@ export async function getVendorStatus(vendorId: string): Promise<VendorStatusDto
     throw new Error('Vendor could not be found.');
   }
 
-  return mapVendorStatus(vendor, await findLatestStatusAudit(vendorId));
+  return mapVendorStatus(vendor);
 }
 
 export async function updateVendorStatus(
@@ -165,6 +141,9 @@ export async function updateVendorStatus(
       id: true,
       name: true,
       status: true,
+      restrictionReason: true,
+      restrictedByUserId: true,
+      restrictedAt: true,
     },
   });
 
@@ -172,9 +151,10 @@ export async function updateVendorStatus(
     throw new Error('Vendor could not be found.');
   }
 
-  const latestStatusAudit = await findLatestStatusAudit(vendorId);
   const statusChanged = existing.status !== status;
-  const reasonChanged = reason !== null && latestStatusAudit?.reason !== reason;
+  const reasonChanged = reason !== null && existing.restrictionReason !== reason;
+  const restricted = isVendorRestrictedStatus(status);
+  const restrictedAt = statusChanged || reasonChanged ? new Date() : existing.restrictedAt;
 
   const updated = await prisma.vendor.update({
     where: {
@@ -182,11 +162,17 @@ export async function updateVendorStatus(
     },
     data: {
       status,
+      restrictionReason: restricted ? reason : null,
+      restrictedByUserId: restricted ? auditContext.actor?.userId ?? existing.restrictedByUserId : null,
+      restrictedAt: restricted ? restrictedAt : null,
     },
     select: {
       id: true,
       name: true,
       status: true,
+      restrictionReason: true,
+      restrictedByUserId: true,
+      restrictedAt: true,
     },
   });
 
@@ -210,7 +196,7 @@ export async function updateVendorStatus(
     });
   }
 
-  return getVendorStatus(vendorId);
+  return mapVendorStatus(updated);
 }
 
 export const __vendorStatusTesting = {

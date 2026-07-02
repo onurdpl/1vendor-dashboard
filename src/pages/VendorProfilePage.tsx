@@ -1074,7 +1074,7 @@ export function VendorProfilePage() {
         status: currentVendor.status ?? 'active',
         restricted: String(currentVendor.status ?? 'active').toLowerCase() !== 'active',
         restrictionReason: currentVendor.restrictionReason ?? null,
-        changedByUserId: null,
+        changedByUserId: currentVendor.restrictionChangedByUserId ?? null,
         changedByEmail: currentVendor.restrictionChangedByEmail ?? null,
         changedAt: currentVendor.restrictionChangedAt ?? null,
       };
@@ -1098,10 +1098,10 @@ export function VendorProfilePage() {
   useEffect(() => {
     setVendorStatusForm({
       status: String(vendorStatus.status ?? 'active').toLowerCase() === 'active' ? 'active' : 'inactive',
-      reason: '',
+      reason: vendorStatus.restricted ? vendorStatus.restrictionReason ?? '' : '',
     });
     setVendorStatusFormError(null);
-  }, [currentVendor.vendorId, vendorStatus.status]);
+  }, [currentVendor.vendorId, vendorStatus.restricted, vendorStatus.restrictionReason, vendorStatus.status]);
   const latestBillingAudit = latestAuditBySection.get('billing_legal_profile') ?? null;
   const latestLogoBindingAudit = latestAuditBySection.get('logo_binding') ?? null;
   const latestFinanceAudit = latestAuditBySection.get('finance_policy') ?? null;
@@ -1358,7 +1358,7 @@ export function VendorProfilePage() {
         setSavedVendorStatus(savedStatus);
         setVendorStatusForm({
           status: savedStatus.restricted ? 'inactive' : 'active',
-          reason: '',
+          reason: savedStatus.restricted ? savedStatus.restrictionReason ?? '' : '',
         });
         setVendorStatusFormError(null);
         await Promise.all([
@@ -1949,7 +1949,7 @@ export function VendorProfilePage() {
                     label="Restriction reason"
                     value={vendorStatusForm.status === 'active' ? 'Not restricted' : formatValue(vendorStatus.restrictionReason, 'Not restricted')}
                   />
-                  <MetadataRow label="Changed by" value={formatValue(vendorStatus.changedByEmail, 'No recorded change')} />
+                  <MetadataRow label="Changed by" value={formatValue(vendorStatus.changedByEmail ?? vendorStatus.changedByUserId, 'No recorded change')} />
                   <MetadataRow label="Changed at" value={formatAuditDate(vendorStatus.changedAt)} />
                 </MetadataGroup>
                 <form className="op-form-grid" onSubmit={handleVendorStatusSubmit}>

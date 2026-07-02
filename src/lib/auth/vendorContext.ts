@@ -11,6 +11,7 @@ export type VendorContext = {
   scope: string;
   status?: string;
   restrictionReason?: string | null;
+  restrictionChangedByUserId?: string | null;
   restrictionChangedByEmail?: string | null;
   restrictionChangedAt?: string | null;
 };
@@ -60,6 +61,7 @@ function getResolvedAvailableVendors(): readonly VendorContext[] {
     scope: 'runtime-vendor-context',
     status: vendor.status ?? 'active',
     restrictionReason: vendor.restrictionReason ?? null,
+    restrictionChangedByUserId: vendor.restrictionChangedByUserId ?? null,
     restrictionChangedByEmail: vendor.restrictionChangedByEmail ?? null,
     restrictionChangedAt: vendor.restrictionChangedAt ?? null,
   }));

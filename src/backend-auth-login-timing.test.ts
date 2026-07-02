@@ -47,6 +47,10 @@ describe('backend auth login timing', () => {
           vendor: {
             id: 'vendor-a',
             name: 'Vendor A',
+            status: 'active',
+            restrictionReason: null,
+            restrictedByUserId: null,
+            restrictedAt: null,
           },
         },
       ],
@@ -58,7 +62,16 @@ describe('backend auth login timing', () => {
     });
 
     expect(result?.token).toEqual(expect.any(String));
-    expect(result?.user.vendorAccess).toEqual([{ vendorId: 'vendor-a', vendorName: 'Vendor A' }]);
+    expect(result?.user.vendorAccess).toEqual([
+      {
+        vendorId: 'vendor-a',
+        vendorName: 'Vendor A',
+        status: 'active',
+        restrictionReason: null,
+        restrictionChangedByUserId: null,
+        restrictionChangedAt: null,
+      },
+    ]);
     expect(findUniqueMock).toHaveBeenCalledTimes(1);
     expect(findUniqueMock).toHaveBeenCalledWith(
       expect.objectContaining({

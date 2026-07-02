@@ -328,6 +328,9 @@ model Vendor {
   id                           String                        @id
   name                         String
   status                       String                        @default("active")
+  restrictionReason            String?
+  restrictedByUserId           String?
+  restrictedAt                 DateTime?
   createdAt                    DateTime                      @default(now())
   updatedAt                    DateTime                      @updatedAt
   users                        UserVendorAccess[]

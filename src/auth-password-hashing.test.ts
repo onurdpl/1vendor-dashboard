@@ -41,6 +41,9 @@ function buildUser(passwordHash: string) {
           id: 'vendor-a',
           name: 'Vendor A',
           status: 'active',
+          restrictionReason: null,
+          restrictedByUserId: null,
+          restrictedAt: null,
         },
       },
     ],
@@ -55,7 +58,16 @@ function expectLoginResponseShape(result: Awaited<ReturnType<ReturnType<typeof c
         id: 'user-1',
         email: 'vendor@example.com',
         role: 'vendor',
-        vendorAccess: [{ vendorId: 'vendor-a', vendorName: 'Vendor A', status: 'active' }],
+        vendorAccess: [
+          {
+            vendorId: 'vendor-a',
+            vendorName: 'Vendor A',
+            status: 'active',
+            restrictionReason: null,
+            restrictionChangedByUserId: null,
+            restrictionChangedAt: null,
+          },
+        ],
       }),
       timing: expect.any(Object),
     }),
@@ -92,6 +104,9 @@ describe('auth password hashing', () => {
             id: 'vendor-a',
             name: 'Vendor A',
             status: 'inactive',
+            restrictionReason: 'Operational review',
+            restrictedByUserId: 'admin-user-1',
+            restrictedAt: new Date('2026-07-01T10:00:00.000Z'),
           },
         },
       ],
@@ -102,7 +117,16 @@ describe('auth password hashing', () => {
       password: 'demo123',
     });
 
-    expect(result?.user.vendorAccess).toEqual([{ vendorId: 'vendor-a', vendorName: 'Vendor A', status: 'inactive' }]);
+    expect(result?.user.vendorAccess).toEqual([
+      {
+        vendorId: 'vendor-a',
+        vendorName: 'Vendor A',
+        status: 'inactive',
+        restrictionReason: 'Operational review',
+        restrictionChangedByUserId: 'admin-user-1',
+        restrictionChangedAt: '2026-07-01T10:00:00.000Z',
+      },
+    ]);
     expect(result?.token).toEqual(expect.any(String));
     expect(updateMock).not.toHaveBeenCalled();
   });
