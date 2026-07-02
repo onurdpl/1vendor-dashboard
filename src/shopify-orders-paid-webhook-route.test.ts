@@ -43,7 +43,16 @@ vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
   })),
 }));
 
-vi.mock('../backend/src/modules/shopify/webhook.service.js', () => webhookServiceMock);
+vi.mock('../backend/src/modules/shopify/webhook.service.js', async () => {
+  const actual = await vi.importActual<typeof import('../backend/src/modules/shopify/webhook.service.js')>(
+    '../backend/src/modules/shopify/webhook.service.js',
+  );
+
+  return {
+    ...actual,
+    verifyShopifyWebhookHmac: webhookServiceMock.verifyShopifyWebhookHmac,
+  };
+});
 
 vi.mock('../backend/src/modules/operational-jobs/operational-jobs.service.js', () => operationalJobsMock);
 
@@ -65,7 +74,7 @@ function buildReply() {
   return reply;
 }
 
-function registerRoutes() {
+function registerRoutes(envOverrides: Record<string, unknown> = {}) {
   const routes = new Map<string, (request: unknown, reply: ReturnType<typeof buildReply>) => Promise<unknown>>();
   const app = {
     post: vi.fn((path: string, handler: (request: unknown, reply: ReturnType<typeof buildReply>) => Promise<unknown>) => {
@@ -78,13 +87,36 @@ function registerRoutes() {
   };
 
   registerShopifyWebhookRoutes(app as never, {
+    NODE_ENV: 'test',
     DATABASE_URL: 'postgres://example',
     SHOPIFY_WEBHOOK_SECRET: 'webhook-secret',
+    SHOPIFY_SHOP_DOMAIN: 'sporgym.myshopify.com',
+    ...envOverrides,
   } as never);
 
   return {
     routes,
     app,
+  };
+}
+
+function buildOrdersPaidRequest(input: {
+  rawBodyBuffer: Buffer;
+  payload: Record<string, unknown>;
+  shopDomain?: string;
+  hmac?: string;
+}) {
+  return {
+    rawBodyBuffer: input.rawBodyBuffer,
+    rawBody: input.rawBodyBuffer.toString('utf8'),
+    body: input.payload,
+    headers: {
+      'x-shopify-hmac-sha256': input.hmac ?? 'valid-hmac',
+      'x-shopify-topic': 'orders/paid',
+      ...(input.shopDomain === undefined ? {} : { 'x-shopify-shop-domain': input.shopDomain }),
+      'x-shopify-webhook-id': 'orders-paid-webhook-id',
+      'content-type': 'application/json',
+    },
   };
 }
 
@@ -122,18 +154,11 @@ describe('Shopify orders/paid webhook route', () => {
     };
     const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
 
-    const result = await handler?.({
+    const result = await handler?.(buildOrdersPaidRequest({
       rawBodyBuffer,
-      rawBody: rawBodyBuffer.toString('utf8'),
-      body: payload,
-      headers: {
-        'x-shopify-hmac-sha256': 'valid-hmac',
-        'x-shopify-topic': 'orders/paid',
-        'x-shopify-shop-domain': 'sporgym.myshopify.com',
-        'x-shopify-webhook-id': 'orders-paid-webhook-id',
-        'content-type': 'application/json',
-      },
-    }, buildReply());
+      payload,
+      shopDomain: 'sporgym.myshopify.com',
+    }), buildReply());
 
     expect(webhookServiceMock.verifyShopifyWebhookHmac).toHaveBeenCalledWith(
       rawBodyBuffer,
@@ -199,17 +224,11 @@ describe('Shopify orders/paid webhook route', () => {
     };
     const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
 
-    const result = await handler?.({
+    const result = await handler?.(buildOrdersPaidRequest({
       rawBodyBuffer,
-      rawBody: rawBodyBuffer.toString('utf8'),
-      body: payload,
-      headers: {
-        'x-shopify-hmac-sha256': 'valid-hmac',
-        'x-shopify-topic': 'orders/paid',
-        'x-shopify-shop-domain': 'sporgym.myshopify.com',
-        'x-shopify-webhook-id': 'orders-paid-webhook-id',
-      },
-    }, buildReply());
+      payload,
+      shopDomain: 'sporgym.myshopify.com',
+    }), buildReply());
 
     expect(orderIngestionMock.syncShopifyOrderPaidSnapshotFromWebhook).not.toHaveBeenCalled();
     expect(prismaMock.webhookEvent.update).not.toHaveBeenCalled();
@@ -220,6 +239,152 @@ describe('Shopify orders/paid webhook route', () => {
         duplicate: true,
         action: 'duplicate_ignored',
       },
+    });
+  });
+
+  it('rejects an invalid HMAC before shop domain enforcement', async () => {
+    webhookServiceMock.verifyShopifyWebhookHmac.mockReturnValueOnce(false);
+    const { routes, app } = registerRoutes({ NODE_ENV: 'production' });
+    const handler = routes.get('/webhooks/shopify/orders-paid');
+    const payload = {
+      id: 2005,
+      name: '#2005',
+      financial_status: 'paid',
+    };
+    const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+
+    const result = await handler?.(buildOrdersPaidRequest({
+      rawBodyBuffer,
+      payload,
+      shopDomain: 'sporgym.myshopify.com',
+      hmac: 'invalid-hmac',
+    }), buildReply());
+
+    expect(result).toEqual({
+      status: 401,
+      body: {
+        message: 'Invalid Shopify webhook signature.',
+      },
+    });
+    expect(app.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookPath: '/webhooks/shopify/orders-paid',
+        webhookTopic: 'orders/paid',
+        hasHmacHeader: true,
+      }),
+      'Shopify webhook signature verification failed.',
+    );
+    expect(webhookIdempotencyMock.getOrCreateWebhookEvent).not.toHaveBeenCalled();
+    expect(orderIngestionMock.syncShopifyOrderPaidSnapshotFromWebhook).not.toHaveBeenCalled();
+  });
+
+  it('rejects a production webhook with valid HMAC but missing shop domain', async () => {
+    const { routes, app } = registerRoutes({ NODE_ENV: 'production' });
+    const handler = routes.get('/webhooks/shopify/orders-paid');
+    const payload = {
+      id: 2005,
+      name: '#2005',
+      financial_status: 'paid',
+    };
+    const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+
+    const result = await handler?.(buildOrdersPaidRequest({
+      rawBodyBuffer,
+      payload,
+    }), buildReply());
+
+    expect(result).toEqual({
+      status: 403,
+      body: {
+        message: 'Invalid Shopify webhook shop domain.',
+      },
+    });
+    expect(app.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookPath: '/webhooks/shopify/orders-paid',
+        webhookTopic: 'orders/paid',
+        reason: 'missing_header_shop_domain',
+        headerShopDomain: null,
+        configuredShopDomain: 'sporgym.myshopify.com',
+      }),
+      'Shopify webhook shop domain verification failed.',
+    );
+    expect(webhookIdempotencyMock.getOrCreateWebhookEvent).not.toHaveBeenCalled();
+    expect(orderIngestionMock.syncShopifyOrderPaidSnapshotFromWebhook).not.toHaveBeenCalled();
+  });
+
+  it('rejects a production webhook with valid HMAC but mismatched shop domain', async () => {
+    const { routes, app } = registerRoutes({ NODE_ENV: 'production' });
+    const handler = routes.get('/webhooks/shopify/orders-paid');
+    const payload = {
+      id: 2005,
+      name: '#2005',
+      financial_status: 'paid',
+    };
+    const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+
+    const result = await handler?.(buildOrdersPaidRequest({
+      rawBodyBuffer,
+      payload,
+      shopDomain: 'attacker.myshopify.com',
+    }), buildReply());
+
+    expect(result).toEqual({
+      status: 403,
+      body: {
+        message: 'Invalid Shopify webhook shop domain.',
+      },
+    });
+    expect(app.log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookPath: '/webhooks/shopify/orders-paid',
+        webhookTopic: 'orders/paid',
+        reason: 'shop_domain_mismatch',
+        headerShopDomain: 'attacker.myshopify.com',
+        configuredShopDomain: 'sporgym.myshopify.com',
+      }),
+      'Shopify webhook shop domain verification failed.',
+    );
+    expect(webhookIdempotencyMock.getOrCreateWebhookEvent).not.toHaveBeenCalled();
+    expect(orderIngestionMock.syncShopifyOrderPaidSnapshotFromWebhook).not.toHaveBeenCalled();
+  });
+
+  it('accepts normalized matching shop domains after valid HMAC', async () => {
+    const { routes } = registerRoutes({
+      SHOPIFY_SHOP_DOMAIN: 'https://sporgym.myshopify.com/',
+    });
+    const handler = routes.get('/webhooks/shopify/orders-paid');
+    const payload = {
+      id: 2005,
+      name: '#2005',
+      financial_status: 'paid',
+    };
+    const rawBodyBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+
+    const result = await handler?.(buildOrdersPaidRequest({
+      rawBodyBuffer,
+      payload,
+      shopDomain: 'SPORGYM.MYSHOPIFY.COM/',
+    }), buildReply());
+
+    expect(result).toEqual({
+      status: 202,
+      body: {
+        ok: true,
+        duplicate: false,
+        action: 'paid_snapshot_synced',
+        processingStatus: 'processed',
+        shopifyOrderId: '2005',
+        orderMatched: true,
+        snapshotUpdated: true,
+        changedFields: ['financialStatus'],
+      },
+    });
+    expect(webhookIdempotencyMock.getOrCreateWebhookEvent).toHaveBeenCalledWith({
+      topic: 'orders/paid',
+      shopDomain: 'SPORGYM.MYSHOPIFY.COM/',
+      webhookId: 'orders-paid-webhook-id',
+      rawBody: rawBodyBuffer.toString('utf8'),
     });
   });
 });

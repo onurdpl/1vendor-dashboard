@@ -3,7 +3,7 @@ import type { FastifyRequest } from 'fastify';
 export type ShopifyWebhookHeaders = {
   hmac: string | null;
   topic: string;
-  shopDomain: string;
+  shopDomain: string | null;
   webhookId: string | null;
 };
 
@@ -23,7 +23,7 @@ export function getShopifyWebhookHeaders(request: FastifyRequest): ShopifyWebhoo
   return {
     hmac: typeof hmac === 'string' ? hmac : null,
     topic: typeof topic === 'string' && topic ? topic : 'orders/create',
-    shopDomain: typeof shopDomain === 'string' && shopDomain ? shopDomain : 'unknown.myshopify.com',
+    shopDomain: typeof shopDomain === 'string' && shopDomain.trim() ? shopDomain : null,
     webhookId: typeof webhookId === 'string' && webhookId ? webhookId : null,
   };
 }

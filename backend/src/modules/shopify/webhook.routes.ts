@@ -11,7 +11,10 @@ import {
 import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
 import { fetchSellerInfoWithRetry } from './seller-info-retry.service.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
-import { verifyShopifyWebhookHmac } from './webhook.service.js';
+import {
+  verifyShopifyWebhookHmac,
+  verifyShopifyWebhookShopDomain,
+} from './webhook.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from './order-ingestion.types.js';
 import type { ShopifyRefundsCreateWebhookPayload } from './refund-ingestion.types.js';
 import {
@@ -82,6 +85,81 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       'Shopify webhook signature verification failed.',
     );
   };
+
+  const logWebhookShopDomainFailure = (input: {
+    path: string;
+    topic: string;
+    reason: string;
+    headerShopDomain: string | null;
+    configuredShopDomain: string | null;
+  }) => {
+    app.log.warn(
+      {
+        webhookPath: input.path,
+        webhookTopic: input.topic,
+        reason: input.reason,
+        headerShopDomain: input.headerShopDomain,
+        configuredShopDomain: input.configuredShopDomain,
+      },
+      'Shopify webhook shop domain verification failed.',
+    );
+  };
+
+  const verifyShopifyWebhookRequest = (input: {
+    path: string;
+    topic: string;
+    rawBodyBuffer: Buffer;
+    headers: ReturnType<typeof getShopifyWebhookHeaders>;
+    contentType: string | undefined;
+  }) => {
+    const isHmacValid = verifyShopifyWebhookHmac(
+      input.rawBodyBuffer,
+      input.headers.hmac,
+      resolveWebhookSecret(input.topic),
+    );
+
+    if (!isHmacValid) {
+      logWebhookVerificationFailure({
+        path: input.path,
+        topic: input.topic,
+        contentType: input.contentType,
+        rawBodyBuffer: input.rawBodyBuffer,
+        hasHmacHeader: !!input.headers.hmac,
+      });
+
+      return {
+        ok: false as const,
+        statusCode: 401,
+        message: 'Invalid Shopify webhook signature.',
+      };
+    }
+
+    const shopDomainCheck = verifyShopifyWebhookShopDomain({
+      headerShopDomain: input.headers.shopDomain,
+      configuredShopDomain: env.SHOPIFY_SHOP_DOMAIN,
+      nodeEnv: env.NODE_ENV,
+    });
+
+    if (!shopDomainCheck.ok) {
+      logWebhookShopDomainFailure({
+        path: input.path,
+        topic: input.topic,
+        reason: shopDomainCheck.reason,
+        headerShopDomain: shopDomainCheck.headerShopDomain,
+        configuredShopDomain: shopDomainCheck.configuredShopDomain,
+      });
+
+      return {
+        ok: false as const,
+        statusCode: 403,
+        message: 'Invalid Shopify webhook shop domain.',
+      };
+    }
+
+    return { ok: true as const };
+  };
+
+  const getPersistedShopDomain = (shopDomain: string | null) => shopDomain ?? 'unknown.myshopify.com';
 
   const markWebhookProcessing = async (eventId: string) => {
     await prisma.webhookEvent.update({
@@ -156,22 +234,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
       const rawBody = rawBodyBuffer.toString('utf8');
       const headers = getShopifyWebhookHeaders(request);
-      const isValid = verifyShopifyWebhookHmac(
+      const verification = verifyShopifyWebhookRequest({
+        path,
+        topic,
+        contentType: request.headers['content-type'] as string | undefined,
         rawBodyBuffer,
-        headers.hmac,
-        resolveWebhookSecret(topic),
-      );
+        headers,
+      });
 
-      if (!isValid) {
-        logWebhookVerificationFailure({
-          path,
-          topic,
-          contentType: request.headers['content-type'] as string | undefined,
-          rawBodyBuffer,
-          hasHmacHeader: !!headers.hmac,
-        });
-
-        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      if (!verification.ok) {
+        return reply.code(verification.statusCode).send({ message: verification.message });
       }
 
       if (!env.DATABASE_URL) {
@@ -185,7 +257,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
       const idempotencyResult = await getOrCreateWebhookEvent({
         topic,
-        shopDomain: headers.shopDomain,
+        shopDomain: getPersistedShopDomain(headers.shopDomain),
         webhookId: headers.webhookId,
         rawBody,
       });
@@ -271,22 +343,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
       const rawBody = rawBodyBuffer.toString('utf8');
       const headers = getShopifyWebhookHeaders(request);
-      const isValid = verifyShopifyWebhookHmac(
+      const verification = verifyShopifyWebhookRequest({
+        path,
+        topic,
+        contentType: request.headers['content-type'] as string | undefined,
         rawBodyBuffer,
-        headers.hmac,
-        resolveWebhookSecret(topic),
-      );
+        headers,
+      });
 
-      if (!isValid) {
-        logWebhookVerificationFailure({
-          path,
-          topic,
-          contentType: request.headers['content-type'] as string | undefined,
-          rawBodyBuffer,
-          hasHmacHeader: !!headers.hmac,
-        });
-
-        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      if (!verification.ok) {
+        return reply.code(verification.statusCode).send({ message: verification.message });
       }
 
       if (!env.DATABASE_URL) {
@@ -300,7 +366,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
       const idempotencyResult = await getOrCreateWebhookEvent({
         topic,
-        shopDomain: headers.shopDomain,
+        shopDomain: getPersistedShopDomain(headers.shopDomain),
         webhookId: headers.webhookId,
         rawBody,
       });
@@ -367,22 +433,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
       const rawBody = rawBodyBuffer.toString('utf8');
       const headers = getShopifyWebhookHeaders(request);
-      const isValid = verifyShopifyWebhookHmac(
+      const verification = verifyShopifyWebhookRequest({
+        path,
+        topic,
+        contentType: request.headers['content-type'] as string | undefined,
         rawBodyBuffer,
-        headers.hmac,
-        resolveWebhookSecret(topic),
-      );
+        headers,
+      });
 
-      if (!isValid) {
-        logWebhookVerificationFailure({
-          path,
-          topic,
-          contentType: request.headers['content-type'] as string | undefined,
-          rawBodyBuffer,
-          hasHmacHeader: !!headers.hmac,
-        });
-
-        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      if (!verification.ok) {
+        return reply.code(verification.statusCode).send({ message: verification.message });
       }
 
       if (!env.DATABASE_URL) {
@@ -397,7 +457,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
       const idempotencyResult = await getOrCreateWebhookEvent({
         topic,
-        shopDomain: headers.shopDomain,
+        shopDomain: getPersistedShopDomain(headers.shopDomain),
         webhookId: headers.webhookId,
         rawBody,
       });
@@ -468,22 +528,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
     const rawBody = rawBodyBuffer.toString('utf8');
     const headers = getShopifyWebhookHeaders(request);
-    const isValid = verifyShopifyWebhookHmac(
+    const verification = verifyShopifyWebhookRequest({
+      path: '/webhooks/shopify/orders-create',
+      topic: headers.topic,
+      contentType: request.headers['content-type'] as string | undefined,
       rawBodyBuffer,
-      headers.hmac,
-      resolveWebhookSecret(headers.topic),
-    );
+      headers,
+    });
 
-    if (!isValid) {
-      logWebhookVerificationFailure({
-        path: '/webhooks/shopify/orders-create',
-        topic: headers.topic,
-        contentType: request.headers['content-type'] as string | undefined,
-        rawBodyBuffer,
-        hasHmacHeader: !!headers.hmac,
-      });
-
-      return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+    if (!verification.ok) {
+      return reply.code(verification.statusCode).send({ message: verification.message });
     }
 
     const payload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
@@ -499,7 +553,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
     const idempotencyResult = await getOrCreateWebhookEvent({
       topic: headers.topic,
-      shopDomain: headers.shopDomain,
+      shopDomain: getPersistedShopDomain(headers.shopDomain),
       webhookId: headers.webhookId,
       rawBody,
     });
@@ -630,22 +684,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     const rawBody = rawBodyBuffer.toString('utf8');
     const headers = getShopifyWebhookHeaders(request);
     const topic = 'orders/paid';
-    const isValid = verifyShopifyWebhookHmac(
+    const verification = verifyShopifyWebhookRequest({
+      path: '/webhooks/shopify/orders-paid',
+      topic,
+      contentType: request.headers['content-type'] as string | undefined,
       rawBodyBuffer,
-      headers.hmac,
-      resolveWebhookSecret(topic),
-    );
+      headers,
+    });
 
-    if (!isValid) {
-      logWebhookVerificationFailure({
-        path: '/webhooks/shopify/orders-paid',
-        topic,
-        contentType: request.headers['content-type'] as string | undefined,
-        rawBodyBuffer,
-        hasHmacHeader: !!headers.hmac,
-      });
-
-      return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+    if (!verification.ok) {
+      return reply.code(verification.statusCode).send({ message: verification.message });
     }
 
     const payload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
@@ -663,7 +711,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
     const idempotencyResult = await getOrCreateWebhookEvent({
       topic,
-      shopDomain: headers.shopDomain,
+      shopDomain: getPersistedShopDomain(headers.shopDomain),
       webhookId: headers.webhookId,
       rawBody,
     });
@@ -728,22 +776,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
     const rawBody = rawBodyBuffer.toString('utf8');
     const headers = getShopifyWebhookHeaders(request);
-    const isValid = verifyShopifyWebhookHmac(
+    const verification = verifyShopifyWebhookRequest({
+      path: '/webhooks/shopify/refunds-create',
+      topic: headers.topic,
+      contentType: request.headers['content-type'] as string | undefined,
       rawBodyBuffer,
-      headers.hmac,
-      resolveWebhookSecret(headers.topic),
-    );
+      headers,
+    });
 
-    if (!isValid) {
-      logWebhookVerificationFailure({
-        path: '/webhooks/shopify/refunds-create',
-        topic: headers.topic,
-        contentType: request.headers['content-type'] as string | undefined,
-        rawBodyBuffer,
-        hasHmacHeader: !!headers.hmac,
-      });
-
-      return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+    if (!verification.ok) {
+      return reply.code(verification.statusCode).send({ message: verification.message });
     }
 
     const payload = (request.body ?? {}) as ShopifyRefundsCreateWebhookPayload;
@@ -759,7 +801,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
     const idempotencyResult = await getOrCreateWebhookEvent({
       topic: headers.topic,
-      shopDomain: headers.shopDomain,
+      shopDomain: getPersistedShopDomain(headers.shopDomain),
       webhookId: headers.webhookId,
       rawBody,
     });

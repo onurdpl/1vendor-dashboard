@@ -27,3 +27,61 @@ export function verifyShopifyWebhookHmac(
 
   return timingSafeEqual(expectedBuffer, actualBuffer);
 }
+
+export function normalizeShopifyShopDomain(value: string | null | undefined) {
+  const normalized = value
+    ?.trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/g, '')
+    .toLowerCase();
+
+  return normalized || null;
+}
+
+export function verifyShopifyWebhookShopDomain(input: {
+  headerShopDomain: string | null | undefined;
+  configuredShopDomain: string | null | undefined;
+  nodeEnv: string;
+}) {
+  const headerShopDomain = normalizeShopifyShopDomain(input.headerShopDomain);
+  const configuredShopDomain = normalizeShopifyShopDomain(input.configuredShopDomain);
+
+  if (!configuredShopDomain) {
+    return input.nodeEnv === 'production'
+      ? {
+          ok: false as const,
+          reason: 'missing_configured_shop_domain' as const,
+          headerShopDomain,
+          configuredShopDomain,
+        }
+      : {
+          ok: true as const,
+          headerShopDomain,
+          configuredShopDomain,
+        };
+  }
+
+  if (!headerShopDomain) {
+    return {
+      ok: false as const,
+      reason: 'missing_header_shop_domain' as const,
+      headerShopDomain,
+      configuredShopDomain,
+    };
+  }
+
+  if (headerShopDomain !== configuredShopDomain) {
+    return {
+      ok: false as const,
+      reason: 'shop_domain_mismatch' as const,
+      headerShopDomain,
+      configuredShopDomain,
+    };
+  }
+
+  return {
+    ok: true as const,
+    headerShopDomain,
+    configuredShopDomain,
+  };
+}
