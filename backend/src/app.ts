@@ -91,6 +91,14 @@ function getBackendBuildInfo(env: ReturnType<typeof loadEnv>) {
   };
 }
 
+function getPublicProductionHealthResponse(status = 'ok') {
+  return {
+    ok: true,
+    status,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 const REQUIRED_SCHEMA_COLUMNS = [
   {
     tableName: 'ShopifyOrder',
@@ -339,6 +347,10 @@ export function createApp() {
   });
 
   app.get('/health', async () => {
+    if (env.NODE_ENV === 'production') {
+      return getPublicProductionHealthResponse();
+    }
+
     const database = await getDatabaseHealth(env);
     const status = database.dbReachable && database.schemaReady ? 'ok' : 'degraded';
     const databaseSource = buildDatabaseSourceDiagnostics({
@@ -375,6 +387,10 @@ export function createApp() {
   });
 
   app.get('/health/db', async () => {
+    if (env.NODE_ENV === 'production') {
+      return getPublicProductionHealthResponse();
+    }
+
     const databaseSource = buildDatabaseSourceDiagnostics({
       databaseUrl: env.DATABASE_URL,
     });

@@ -92,19 +92,7 @@ describe('LoginPage expired session flow', () => {
       elapsedMs: 12,
       response: {
         ok: true,
-        serverTime: '2026-06-14T00:00:00.000Z',
-        envMode: 'production',
-        cookieConfig: {
-          secure: true,
-          sameSite: 'None',
-          cookieNamePresent: true,
-        },
-        cors: {
-          originConfigured: true,
-        },
-        jwt: {
-          expiresConfigPresent: true,
-        },
+        status: 'ready',
       },
     });
   });

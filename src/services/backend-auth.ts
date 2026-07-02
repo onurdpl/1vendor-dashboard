@@ -22,22 +22,27 @@ export type BackendLoginResponse = {
   csrfToken?: string | null;
 };
 
-export type PublicLoginReadinessResponse = {
-  ok: boolean;
-  serverTime: string;
-  envMode: string;
-  cookieConfig: {
-    secure: boolean;
-    sameSite: string;
-    cookieNamePresent: boolean;
-  };
-  cors: {
-    originConfigured: boolean;
-  };
-  jwt: {
-    expiresConfigPresent: boolean;
-  };
-};
+export type PublicLoginReadinessResponse =
+  | {
+      ok: true;
+      status: 'ready';
+    }
+  | {
+      ok: boolean;
+      serverTime: string;
+      envMode: string;
+      cookieConfig: {
+        secure: boolean;
+        sameSite: string;
+        cookieNamePresent: boolean;
+      };
+      cors: {
+        originConfigured: boolean;
+      };
+      jwt: {
+        expiresConfigPresent: boolean;
+      };
+    };
 
 export type PublicLoginReadinessResult =
   | {

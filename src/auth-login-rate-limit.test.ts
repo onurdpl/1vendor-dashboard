@@ -389,7 +389,7 @@ describe('auth login rate limiting', () => {
     expect(serializedLogs).not.toContain('wrong-password');
   });
 
-  it('returns public login readiness without exposing auth secrets', async () => {
+  it('returns minimal public login readiness in production without exposing config diagnostics', async () => {
     const handlers = createAuthRouteHandlers(buildEnv({
       NODE_ENV: 'production',
       JWT_SECRET: 'super-secret-jwt-value',
@@ -411,8 +411,41 @@ describe('auth login rate limiting', () => {
 
     expect(result).toMatchObject({
       ok: true,
+      status: 'ready',
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('cookieConfig');
+    expect(serialized).not.toContain('cors');
+    expect(serialized).not.toContain('jwt');
+    expect(serialized).not.toContain('super-secret-jwt-value');
+    expect(serialized).not.toContain('sporgym_session=');
+    expect(serialized).not.toContain('csrf');
+  });
+
+  it('keeps detailed public login readiness available outside production', async () => {
+    const handlers = createAuthRouteHandlers(buildEnv({
+      NODE_ENV: 'test',
+      JWT_SECRET: 'test-secret-jwt-value',
+      JWT_EXPIRES_IN: '12h',
+      CORS_ORIGIN: ['https://app.example.com'],
+    }));
+    const reply = createReply();
+
+    const result = await handlers.get['/auth/diagnostics/public-login-readiness']?.handler(
+      {
+        requestId: 'readiness-request',
+        method: 'GET',
+        routeOptions: { url: '/auth/diagnostics/public-login-readiness' },
+        headers: { 'x-forwarded-proto': 'https' },
+        protocol: 'https',
+      },
+      reply,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
       serverTime: expect.any(String),
-      envMode: 'production',
+      envMode: 'test',
       cookieConfig: {
         secure: true,
         sameSite: 'None',
@@ -426,7 +459,7 @@ describe('auth login rate limiting', () => {
       },
     });
     const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain('super-secret-jwt-value');
+    expect(serialized).not.toContain('test-secret-jwt-value');
     expect(serialized).not.toContain('sporgym_session=');
     expect(serialized).not.toContain('csrf');
   });
@@ -746,6 +779,43 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
         requestId: 'missing-cookie-test',
+        cookiePresent: false,
+        authFailureStage: 'missing_token',
+        authFailureReason: 'missing_cookie',
+        responseStatus: 401,
+      }),
+      'auth me restore diagnostics',
+    );
+  });
+
+  it('does not expose auth diagnostics in production 401 responses', async () => {
+    const handlers = createAuthRouteHandlers(buildEnv({ NODE_ENV: 'production' }));
+    const reply = createReply();
+    const log = {
+      info: vi.fn(),
+    };
+
+    await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        routeOptions: { url: '/auth/me' },
+        requestId: 'missing-cookie-production-test',
+        log,
+        headers: {},
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual({
+      message: 'Unauthorized',
+    });
+    expect(JSON.stringify(reply.payload)).not.toContain('authDiagnostics');
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+        requestId: 'missing-cookie-production-test',
         cookiePresent: false,
         authFailureStage: 'missing_token',
         authFailureReason: 'missing_cookie',

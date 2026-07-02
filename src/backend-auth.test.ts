@@ -68,19 +68,7 @@ describe('backend auth client diagnostics', () => {
       new Response(
         JSON.stringify({
           ok: true,
-          serverTime: '2026-06-14T00:00:00.000Z',
-          envMode: 'production',
-          cookieConfig: {
-            secure: true,
-            sameSite: 'None',
-            cookieNamePresent: true,
-          },
-          cors: {
-            originConfigured: true,
-          },
-          jwt: {
-            expiresConfigPresent: true,
-          },
+          status: 'ready',
         }),
         {
           status: 200,
@@ -98,9 +86,8 @@ describe('backend auth client diagnostics', () => {
       ok: true,
       status: 200,
       response: {
-        cookieConfig: {
-          cookieNamePresent: true,
-        },
+        ok: true,
+        status: 'ready',
       },
     });
     const [, init] = fetchMock.mock.calls.at(-1) ?? [];

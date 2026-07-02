@@ -30,7 +30,9 @@ type LoginRateLimitResetBody = {
 
 export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
-  const authMiddleware = createAuthMiddleware(authService);
+  const authMiddleware = createAuthMiddleware(authService, {
+    exposeAuthDiagnostics: env.NODE_ENV !== 'production',
+  });
 
   app.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
     const routeStartedAt = process.hrtime.bigint();
@@ -242,10 +244,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
     const secure = shouldUseSecureSessionCookie(request, env);
-    const response = {
-      ok: true,
-      serverTime: new Date().toISOString(),
-      envMode: env.NODE_ENV,
+    const diagnostics = {
       cookieConfig: {
         secure,
         sameSite: secure ? 'None' : 'Lax',
@@ -258,6 +257,36 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         expiresConfigPresent: Boolean(env.JWT_EXPIRES_IN?.trim()),
       },
     };
+    if (env.NODE_ENV === 'production') {
+      app.log.info(
+        {
+          event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
+          requestId: request.requestId ?? request.id ?? null,
+          authAttemptId,
+          method: request.method ?? 'GET',
+          path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-readiness',
+          responseStatus: 200,
+          cookieSecure: diagnostics.cookieConfig.secure,
+          cookieSameSite: diagnostics.cookieConfig.sameSite,
+          cookieNamePresent: diagnostics.cookieConfig.cookieNamePresent,
+          corsOriginConfigured: diagnostics.cors.originConfigured,
+          jwtExpiresConfigPresent: diagnostics.jwt.expiresConfigPresent,
+        },
+        'auth login readiness diagnostics',
+      );
+
+      return {
+        ok: true,
+        status: 'ready',
+      };
+    }
+
+    const response = {
+      ok: true,
+      serverTime: new Date().toISOString(),
+      envMode: env.NODE_ENV,
+      ...diagnostics,
+    };
 
     app.log.info(
       {
@@ -267,11 +296,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         method: request.method ?? 'GET',
         path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-readiness',
         responseStatus: 200,
-        cookieSecure: response.cookieConfig.secure,
-        cookieSameSite: response.cookieConfig.sameSite,
-        cookieNamePresent: response.cookieConfig.cookieNamePresent,
-        corsOriginConfigured: response.cors.originConfigured,
-        jwtExpiresConfigPresent: response.jwt.expiresConfigPresent,
+        cookieSecure: diagnostics.cookieConfig.secure,
+        cookieSameSite: diagnostics.cookieConfig.sameSite,
+        cookieNamePresent: diagnostics.cookieConfig.cookieNamePresent,
+        corsOriginConfigured: diagnostics.cors.originConfigured,
+        jwtExpiresConfigPresent: diagnostics.jwt.expiresConfigPresent,
       },
       'auth login readiness diagnostics',
     );
@@ -328,7 +357,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   app.get('/auth/csrf', { preHandler: authMiddleware.authenticateRequest }, async (request, reply) => {
     const token = request.authSessionToken ?? getSessionCookieToken(request);
     if (!token) {
-      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
+      return reply.code(401).send(authMiddleware.buildUnauthorizedPayload(request.authDiagnostics));
     }
 
     return {
@@ -347,7 +376,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         routeHandlerDurationMs: elapsedMs(routeStartedAt),
         userLookupDurationMs: null,
       });
-      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
+      return reply.code(401).send(authMiddleware.buildUnauthorizedPayload(request.authDiagnostics));
     }
 
     let user = request.authUserResponse ?? null;
@@ -364,7 +393,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         routeHandlerDurationMs: elapsedMs(routeStartedAt),
         userLookupDurationMs,
       });
-      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
+      return reply.code(401).send(authMiddleware.buildUnauthorizedPayload(request.authDiagnostics));
     }
 
     const responseBody = {

@@ -5,6 +5,10 @@ import { CSRF_HEADER_NAME, getSessionCookieToken } from './session-cookie.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { normalizeAuthAttemptId } from '../../lib/request-timing.js';
 
+type AuthMiddlewareOptions = {
+  exposeAuthDiagnostics?: boolean;
+};
+
 function startTimer() {
   return process.hrtime.bigint();
 }
@@ -63,13 +67,13 @@ function logAuthMeRestoreDiagnostics(
     return;
   }
 
-      const diagnostics = request.authDiagnostics;
-      request.log.info(
-        {
-          event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
-          requestId: request.requestId ?? null,
-          authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
-          cookiePresent: diagnostics?.cookiePresent ?? false,
+  const diagnostics = request.authDiagnostics;
+  request.log.info(
+    {
+      event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+      requestId: request.requestId ?? null,
+      authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
+      cookiePresent: diagnostics?.cookiePresent ?? false,
       authFailureStage: diagnostics?.authFailureStage ?? null,
       authFailureReason: request.authFailureReason ?? (diagnostics ? getAuthFailureReason(diagnostics) : 'unknown'),
       middlewareValidationDurationMs: request.authSessionValidationDurationMs ?? null,
@@ -82,7 +86,18 @@ function logAuthMeRestoreDiagnostics(
   );
 }
 
-export function createAuthMiddleware(authService: ReturnType<typeof createAuthService>) {
+export function createAuthMiddleware(
+  authService: ReturnType<typeof createAuthService>,
+  options: AuthMiddlewareOptions = {},
+) {
+  const exposeAuthDiagnostics = options.exposeAuthDiagnostics ?? process.env.NODE_ENV !== 'production';
+
+  function buildUnauthorizedPayload(diagnostics?: AuthRestoreDiagnostics) {
+    return exposeAuthDiagnostics && diagnostics
+      ? { message: 'Unauthorized', authDiagnostics: diagnostics }
+      : { message: 'Unauthorized' };
+  }
+
   async function authenticateRequest(request: FastifyRequest, reply: FastifyReply) {
     const validationStartedAt = startTimer();
     return withDashboardTiming('auth.session_validation', async () => {
@@ -108,7 +123,7 @@ export function createAuthMiddleware(authService: ReturnType<typeof createAuthSe
       if (!candidates.length) {
         request.authSessionValidationDurationMs = elapsedMs(validationStartedAt);
         logAuthMeRestoreDiagnostics(request, { statusCode: 401 });
-        return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: diagnostics });
+        return reply.code(401).send(buildUnauthorizedPayload(diagnostics));
       }
 
       let authUser: Awaited<ReturnType<typeof authService.requestContextFromToken>> = null;
@@ -128,12 +143,12 @@ export function createAuthMiddleware(authService: ReturnType<typeof createAuthSe
 
         if (inspection.user) {
           authUser = {
-          id: inspection.user.id,
-          email: inspection.user.email,
-          name: inspection.user.name,
-          role: inspection.user.role,
-          status: inspection.user.status,
-        };
+            id: inspection.user.id,
+            email: inspection.user.email,
+            name: inspection.user.name,
+            role: inspection.user.role,
+            status: inspection.user.status,
+          };
           token = candidate.token;
           source = candidate.source;
           diagnostics.selectedSessionSource = candidate.source;
@@ -145,7 +160,7 @@ export function createAuthMiddleware(authService: ReturnType<typeof createAuthSe
       if (!authUser || !token || !source) {
         request.authSessionValidationDurationMs = elapsedMs(validationStartedAt);
         logAuthMeRestoreDiagnostics(request, { statusCode: 401 });
-        return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: diagnostics });
+        return reply.code(401).send(buildUnauthorizedPayload(diagnostics));
       }
 
       request.authUser = authUser;
@@ -166,6 +181,7 @@ export function createAuthMiddleware(authService: ReturnType<typeof createAuthSe
 
   return {
     authenticateRequest,
+    buildUnauthorizedPayload,
     logAuthMeRestoreDiagnostics,
   };
 }
