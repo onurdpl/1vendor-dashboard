@@ -41,7 +41,6 @@ import {
   buildDatabaseSourceDiagnostics,
   buildFinanceAuditRuntimeMetadata,
 } from './config/database-source-diagnostics.js';
-import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { normalizeAuthAttemptId, registerRequestTimingHooks } from './lib/request-timing.js';
 import { registerBackendSentryFastifyHooks } from './lib/sentry.js';
 import { DASHBOARD_DEFERRED_LOAD_HEADER, DASHBOARD_INITIAL_LOAD_HEADER, registerDashboardTimingHooks } from './lib/dashboard-timing.js';
@@ -446,7 +445,6 @@ export function createApp() {
   registerLogoIsbasiRoutes(app, env);
   registerIyzicoMarketplaceDiagnosticsRoutes(app, env);
   registerReconciliationRoutes(app, env);
-  registerOdooDiscoveryProbeRoutes(app);
   registerShopifyOrderWebhookRegistrationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
   registerCanonicalReconciliationScheduler(app, env);

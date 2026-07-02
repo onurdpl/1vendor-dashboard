@@ -33,7 +33,6 @@
     "kargonomi:lookup-probe": "npm --prefix backend run kargonomi:lookup-probe",
     "navlungo:create-post-probe": "npm --prefix backend run navlungo:create-post-probe",
     "lidio:sandbox-probe": "npm --prefix backend run lidio:sandbox-probe",
-    "probe:odoo:order": "tsx backend/scripts/probe-odoo-order.ts",
     "vendor-integration:create-token": "npm --prefix backend run vendor-integration:create-token",
     "auth:hash-report": "npm --prefix backend run auth:hash-report",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"

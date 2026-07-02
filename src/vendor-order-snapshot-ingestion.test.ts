@@ -28,7 +28,6 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const upsertSaleLedgerForAllocationMock = vi.hoisted(() => vi.fn());
-const syncOdooSaleOrdersForAllocationsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
@@ -36,10 +35,6 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 vi.mock('../backend/src/modules/finance/sale-ledger.service.js', () => ({
   upsertSaleLedgerForAllocation: upsertSaleLedgerForAllocationMock,
-}));
-
-vi.mock('../backend/src/integrations/odoo/odooAllocationOrderSync.service.js', () => ({
-  syncOdooSaleOrdersForAllocations: syncOdooSaleOrdersForAllocationsMock,
 }));
 
 const {
@@ -77,7 +72,6 @@ function mockSuccessfulDbWrites() {
   prismaMock.allocationAssignmentHistory.upsert.mockResolvedValue({});
   prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock));
   upsertSaleLedgerForAllocationMock.mockResolvedValue({});
-  syncOdooSaleOrdersForAllocationsMock.mockResolvedValue([]);
 }
 
 describe('vendor order snapshot ingestion', () => {
