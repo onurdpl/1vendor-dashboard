@@ -647,57 +647,69 @@ describe('VendorProfilePage', () => {
     createSupportTicketMock.mockReset();
   });
 
-  it('renders a read-only marketplace vendor profile summary from existing config', async () => {
+  it('renders a simplified vendor settings workspace from existing config', async () => {
     renderVendorProfilePage();
 
     expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
-    expect(screen.getByText('Marketplace seller workspace')).toBeInTheDocument();
+    expect(screen.getByText('Marketplace Seller Workspace')).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
     expect(screen.getByText('Active workspace')).toBeInTheDocument();
-    expect(screen.getByText('Legal name')).toBeInTheDocument();
-    expect(screen.getAllByText('Not modeled yet').length).toBeGreaterThan(0);
-    expect(await screen.findByText('12.50%')).toBeInTheDocument();
-    expect(screen.getByText('External provider cost')).toBeInTheDocument();
-    expect(screen.getAllByText('Navlungo').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('55574').length).toBeGreaterThan(0);
-    expect(screen.getByText('55578')).toBeInTheDocument();
-    expect(screen.getByText('Mugla / Fethiye')).toBeInTheDocument();
-    expect(screen.getByText('Konya / Selcuklu')).toBeInTheDocument();
-    expect(screen.getByText('Forward warehouse')).toBeInTheDocument();
-    expect(screen.getByText('Return destination')).toBeInTheDocument();
-    expect(screen.getByLabelText('Vendor operational readiness')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Shipping ready' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Returns ready' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Finance visibility ready' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Support channel active' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Workflow access ready' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Automation visibility ready' })).toBeInTheDocument();
-    expect(screen.getAllByText('Shipping enabled').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Provider configured').length).toBeGreaterThan(0);
-    expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
-    expect(screen.getByText('Finance readiness means estimate visibility only, not payout or accounting execution.')).toBeInTheDocument();
-    expect(screen.getByText('Integration status')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Finance Policy' })).toBeInTheDocument();
-    expect(screen.getByText('Finance policy applies to future ledger rows only. Existing ledger rows and approved settlements keep their saved snapshots.')).toBeInTheDocument();
-    expect(screen.getByText('Commission %')).toBeInTheDocument();
-    expect(screen.getByText('Commission VAT %')).toBeInTheDocument();
-    expect(screen.getByText('Deduct shipping after fulfillment')).toBeInTheDocument();
-    expect(screen.getAllByText('Finance policy configured').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Billing source configured').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Logo binding configured').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Shipping configured').length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();
-    expect(screen.getByText('Seller legal billing identity used later as the billing source for Sporgym commission invoices.')).toBeInTheDocument();
-    expect(screen.getAllByText('Admin-managed').length).toBeGreaterThan(0);
-    expect(screen.getByText('Not available in vendor view')).toBeInTheDocument();
+
+    const accountHeading = screen.getByRole('heading', { name: 'My Account' });
+    const accountSection = accountHeading.closest('section');
+    expect(accountSection).not.toBeNull();
+    expect(within(accountSection!).getByText('Display name')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Demo Vendor A')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Signed-in email')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('vendor-a@demo.com')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Vendor ID')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('demo-vendor-a')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Account Status')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Active')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Correction Ticket Status')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('No correction ticket open')).toBeInTheDocument();
+
+    const managedHeading = screen.getByRole('heading', { name: 'Marketplace Managed Settings' });
+    const managedSection = managedHeading.closest('section');
+    expect(managedSection).not.toBeNull();
+    expect(within(managedSection!).getByText('These settings are managed by the Marketplace. If something needs to change, open a correction ticket.')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Shipping')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Returns')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Finance Policy')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Warehouse')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Billing')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Integrations')).toBeInTheDocument();
+    expect(within(managedSection!).getAllByText('Managed by Marketplace').length).toBe(6);
+    await waitFor(() => expect(within(managedSection!).getAllByText('Configured').length).toBeGreaterThanOrEqual(4));
+
+    expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Open correction ticket' })).toHaveLength(1);
+
+    expect(screen.queryByText('Review the seller identity, finance policy, shipping operations, and return destination currently managed for this store. Marketplace-owned fields are read-only here.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipping ready' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Returns ready' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Finance visibility ready' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Support channel active' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Workflow access ready' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Automation visibility ready' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Billing / Legal Profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Finance Policy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipping operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Warehouse and returns' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Integration status' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Additional seller profile fields' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission %')).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission VAT %')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deduct shipping after fulfillment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider configuration status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Default warehouse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Forward warehouse')).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
     expect(getFinanceProfileMock).toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
-    expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
-    expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
-    expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
     expect(screen.queryByText('Legal entity name, tax office, and tax identity')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
@@ -729,12 +741,15 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
     expect(screen.getByText('Restricted account')).toBeInTheDocument();
     expect(screen.queryByText('Active workspace')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Support and correction workflow' })).toBeInTheDocument();
-    expect(screen.getByText('Open a correction ticket')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Open correction ticket' }).length).toBeGreaterThan(0);
+    const accountSection = screen.getByRole('heading', { name: 'My Account' }).closest('section');
+    expect(accountSection).not.toBeNull();
+    expect(within(accountSection!).getByText('Restriction Status')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('Operational review')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Open correction ticket' })).toHaveLength(1);
   });
 
-  it('renders readiness states from missing config truth without fake ready states', async () => {
+  it('shows marketplace-managed settings status without rendering readiness cards', async () => {
     getVendorShippingConfigMock.mockResolvedValue({
       ...shippingConfig,
       shippingEnabled: false,
@@ -752,42 +767,15 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    const shippingHeading = await screen.findByRole('heading', { name: 'Shipping ready' });
-    const shippingCard = shippingHeading.closest('article');
-    expect(shippingCard).not.toBeNull();
-    await waitFor(() =>
-      expect(within(shippingCard!).getAllByText('Requires configuration review').length).toBeGreaterThan(0),
-    );
-    expect(within(shippingCard!).queryByText('Ready')).not.toBeInTheDocument();
-    expect(within(shippingCard!).getByText('Enable shipping before shipment workflows can rely on this vendor setup.')).toBeInTheDocument();
-    expect(within(shippingCard!).getByText('Review the provider metadata before treating shipping as ready.')).toBeInTheDocument();
-    expect(within(shippingCard!).getByText('Configure a warehouse or sender address for shipment work.')).toBeInTheDocument();
-
-    const returnsHeading = screen.getByRole('heading', { name: 'Returns ready' });
-    const returnsCard = returnsHeading.closest('article');
-    expect(returnsCard).not.toBeNull();
-    expect(within(returnsCard!).getByText('Review the return recipient destination before return workflows rely on it.')).toBeInTheDocument();
-
-    const financeHeading = screen.getByRole('heading', { name: 'Finance visibility ready' });
-    const financeCard = financeHeading.closest('article');
-    expect(financeCard).not.toBeNull();
-    expect(within(financeCard!).getByText('Finance policy requires verification before treating finance visibility as ready.')).toBeInTheDocument();
-  });
-
-  it('renders readiness guidance links to existing workflow routes', async () => {
-    renderVendorProfilePage();
-
-    await screen.findByRole('heading', { name: 'Operational readiness' });
-    expect(screen.getByRole('button', { name: 'Open shipping workflow' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open returns review' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open settlement preview' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open support workspace' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open orders queue' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open automation queue' })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Open settlement preview' }));
-
-    expect(await screen.findByText('Finance route')).toBeInTheDocument();
+    const managedHeading = await screen.findByRole('heading', { name: 'Marketplace Managed Settings' });
+    const managedSection = managedHeading.closest('section');
+    expect(managedSection).not.toBeNull();
+    expect(within(managedSection!).getByText('Shipping')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Returns')).toBeInTheDocument();
+    expect(within(managedSection!).getByText('Finance Policy')).toBeInTheDocument();
+    await waitFor(() => expect(within(managedSection!).getAllByText('Needs review').length).toBeGreaterThanOrEqual(3));
+    expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipping ready' })).not.toBeInTheDocument();
   });
 
   it('creates a vendor profile correction support ticket with safe context', async () => {
@@ -796,7 +784,7 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    const contactButtons = await screen.findAllByRole('button', { name: 'Request profile correction' });
+    const contactButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(contactButtons[0]).not.toBeDisabled());
     await userEvent.click(contactButtons[0]);
 

@@ -1867,20 +1867,66 @@ export function VendorProfilePage() {
     );
   }
 
+  const accountStatusLabel = vendorStatus.restricted ? 'Restricted' : 'Active';
+  const restrictionStatusLabel = vendorStatus.restricted
+    ? formatValue(vendorStatus.restrictionReason, 'Unknown')
+    : null;
+  const correctionTicketStatusLabel = existingProfileTicket ? 'Correction ticket open' : 'No correction ticket open';
+  const managedSettings = [
+    {
+      title: 'Shipping',
+      description: 'Managed by Marketplace',
+      status: !shippingDataLoaded ? 'Loading' : shippingConfigured ? 'Configured' : 'Needs review',
+      tone: shippingDataLoaded && shippingConfigured ? 'success' : 'warning',
+    },
+    {
+      title: 'Returns',
+      description: 'Managed by Marketplace',
+      status: !shippingDataLoaded ? 'Loading' : returnsConfigured ? 'Configured' : 'Needs review',
+      tone: shippingDataLoaded && returnsConfigured ? 'success' : 'warning',
+    },
+    {
+      title: 'Finance Policy',
+      description: 'Managed by Marketplace',
+      status: !financeDataLoaded ? 'Loading' : marketplaceTermsActive ? 'Configured' : 'Needs review',
+      tone: financeDataLoaded && marketplaceTermsActive ? 'success' : 'warning',
+    },
+    {
+      title: 'Warehouse',
+      description: 'Managed by Marketplace',
+      status: !shippingDataLoaded ? 'Loading' : warehouseConfigured ? 'Configured' : 'Needs review',
+      tone: shippingDataLoaded && warehouseConfigured ? 'success' : 'warning',
+    },
+    {
+      title: 'Billing',
+      description: 'Managed by Marketplace',
+      status: 'Managed',
+      tone: 'info',
+    },
+    {
+      title: 'Integrations',
+      description: 'Managed by Marketplace',
+      status: appReadiness.ready ? 'Available' : 'Loading',
+      tone: appReadiness.ready ? 'success' : 'warning',
+    },
+  ] as const;
+
   return (
     <section className="op-page vendor-profile-page">
-      <div className="vendor-profile-hero operational-card">
+      <div className={`vendor-profile-hero operational-card ${isAdmin ? '' : 'vendor-profile-hero-compact'}`}>
         <div className="vendor-profile-identity">
           <div className="vendor-profile-avatar" aria-hidden="true">
             {getVendorInitials(currentVendor.vendorName)}
           </div>
           <div>
-            <p className="eyebrow">Marketplace seller workspace</p>
+            <p className="eyebrow">Marketplace Seller Workspace</p>
             <h1>{currentVendor.vendorName || 'Vendor profile'}</h1>
-            <p>
-              Review the seller identity, finance policy, shipping operations, and return destination currently managed
-              for this store. Marketplace-owned fields are read-only here.
-            </p>
+            {isAdmin ? (
+              <p>
+                Review the seller identity, finance policy, shipping operations, and return destination currently managed
+                for this store. Marketplace-owned fields are read-only here.
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="vendor-profile-actions">
@@ -1889,23 +1935,80 @@ export function VendorProfilePage() {
             {!appReadiness.ready ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
           </StatusBadge>
           {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={handleContactSupport}
-            disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
-          >
-            {existingProfileTicket
-              ? 'Open correction ticket'
-              : supportMutation.isPending
-                ? 'Requesting correction...'
-                : vendorStatus.restricted
-                  ? 'Open correction ticket'
+          {isAdmin ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={handleContactSupport}
+              disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
+            >
+              {existingProfileTicket
+                ? 'Open correction ticket'
+                : supportMutation.isPending
+                  ? 'Requesting correction...'
                   : 'Request profile correction'}
-          </button>
+            </button>
+          ) : null}
         </div>
       </div>
 
+      {!isAdmin ? (
+        <>
+          <OperationalSection title="My Account">
+            <MetadataGroup>
+              <MetadataRow label="Display name" value={formatValue(currentVendor.vendorName, 'Vendor unavailable')} />
+              <MetadataRow label="Signed-in email" value={currentUser?.email ?? 'Unknown'} />
+              <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
+              <MetadataRow label="Account Status" value={accountStatusLabel} />
+              {restrictionStatusLabel ? <MetadataRow label="Restriction Status" value={restrictionStatusLabel} /> : null}
+              <MetadataRow label="Correction Ticket Status" value={correctionTicketStatusLabel} />
+            </MetadataGroup>
+          </OperationalSection>
+
+          <OperationalSection title="Marketplace Managed Settings">
+            <div className="vendor-managed-settings">
+              <p className="vendor-managed-settings-notice">
+                These settings are managed by the Marketplace. If something needs to change, open a correction ticket.
+              </p>
+              <div className="vendor-managed-settings-list">
+                {managedSettings.map((setting) => (
+                  <div className="vendor-managed-settings-row" key={setting.title}>
+                    <div>
+                      <strong>{setting.title}</strong>
+                      <span>{setting.description}</span>
+                    </div>
+                    <StatusBadge tone={setting.tone}>{setting.status}</StatusBadge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </OperationalSection>
+
+          <OperationalSection title="Request Changes">
+            <div className="vendor-profile-support-panel">
+              <div>
+                <strong>{existingProfileTicket ? 'Correction ticket open' : 'Open correction ticket'}</strong>
+                <p>
+                  {existingProfileTicket
+                    ? `${existingProfileTicket.subject} is ${safeStatusLabel(existingProfileTicket.status).toLowerCase()}.`
+                    : 'Request Marketplace support to review account or managed setting changes.'}
+                </p>
+              </div>
+              <OperationalActionGroup>
+                <button
+                  type="button"
+                  className={existingProfileTicket ? 'button button-secondary' : 'button button-primary'}
+                  onClick={handleContactSupport}
+                  disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
+                >
+                  {supportMutation.isPending ? 'Opening correction ticket...' : 'Open correction ticket'}
+                </button>
+              </OperationalActionGroup>
+            </div>
+          </OperationalSection>
+        </>
+      ) : (
+        <>
       <OperationalSection
         title="Operational readiness"
         description="A checklist view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility."
@@ -3643,6 +3746,8 @@ export function VendorProfilePage() {
           <StatusBadge tone="info">Admin-owned configuration</StatusBadge>
         </OperationalSection>
       ) : null}
+        </>
+      )}
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>

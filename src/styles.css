@@ -13518,6 +13518,11 @@ summary.provider-response-heading::-webkit-details-marker {
   padding: 22px;
 }
 
+.vendor-profile-hero-compact {
+  align-items: center;
+  padding: 16px 18px;
+}
+
 .vendor-profile-identity {
   display: flex;
   align-items: flex-start;
@@ -13561,6 +13566,47 @@ summary.provider-response-heading::-webkit-details-marker {
   flex-wrap: wrap;
   gap: 8px;
   min-width: 220px;
+}
+
+.vendor-managed-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-managed-settings-notice {
+  margin: 0;
+  color: #475569;
+}
+
+.vendor-managed-settings-list {
+  display: grid;
+  gap: 8px;
+}
+
+.vendor-managed-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.vendor-managed-settings-row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.vendor-managed-settings-row strong {
+  color: #0f172a;
+  font-size: 0.94rem;
+}
+
+.vendor-managed-settings-row span:not(.op-badge) {
+  color: #64748b;
+  font-size: 0.86rem;
 }
 
 .vendor-profile-readiness-grid {
