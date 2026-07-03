@@ -5,8 +5,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminPaymentPreparationPage } from './AdminPaymentPreparationPage';
 import {
+  cancelPayoutBatch,
   getPaymentPreparationReadiness,
   listPayoutBatches,
+  markPayoutBatchReview,
+  preparePayoutBatch,
   type FinanceDashboard,
   type PayoutBatch,
 } from '../features/finance/paymentPreparationApi';
@@ -16,13 +19,19 @@ vi.mock('../features/finance/paymentPreparationApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/finance/paymentPreparationApi')>();
   return {
     ...actual,
+    cancelPayoutBatch: vi.fn(),
     getPaymentPreparationReadiness: vi.fn(),
     listPayoutBatches: vi.fn(),
+    markPayoutBatchReview: vi.fn(),
+    preparePayoutBatch: vi.fn(),
   };
 });
 
 const listPayoutBatchesMock = vi.mocked(listPayoutBatches);
 const getPaymentPreparationReadinessMock = vi.mocked(getPaymentPreparationReadiness);
+const preparePayoutBatchMock = vi.mocked(preparePayoutBatch);
+const markPayoutBatchReviewMock = vi.mocked(markPayoutBatchReview);
+const cancelPayoutBatchMock = vi.mocked(cancelPayoutBatch);
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -163,6 +172,9 @@ beforeEach(() => {
   setCurrentVendorId('yalispor');
   listPayoutBatchesMock.mockResolvedValue(payoutBatches);
   getPaymentPreparationReadinessMock.mockResolvedValue(financeDashboard);
+  preparePayoutBatchMock.mockResolvedValue(makeBatch({ id: 'batch-prepared-raw-66666666', status: 'draft' }));
+  markPayoutBatchReviewMock.mockResolvedValue(makeBatch({ id: 'batch-draft-raw-11111111', status: 'review' }));
+  cancelPayoutBatchMock.mockResolvedValue(makeBatch({ id: 'batch-draft-raw-11111111', status: 'cancelled' }));
 });
 
 afterEach(() => {
@@ -235,7 +247,7 @@ describe('AdminPaymentPreparationPage', () => {
       expect(within(panel).getByText(section)).toBeInTheDocument();
     }
     expect(within(panel).getByText('Missing payment evidence')).toBeInTheDocument();
-    expect(within(panel).getByText('Investigate')).toBeInTheDocument();
+    expect(within(panel).getAllByText('Prepare Batch').length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('TRY 99,500.00').length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('No refund adjustment').length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('No linked support').length).toBeGreaterThan(0);
@@ -285,8 +297,120 @@ describe('AdminPaymentPreparationPage', () => {
     const tableRows = screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
     const readyIssueRow = tableRows.find((row) => within(row).queryByText('Ready') && within(row).queryByText('Approved'));
     expect(readyIssueRow).toBeTruthy();
-    expect(within(readyIssueRow!).getByText('Mark Paid')).toBeInTheDocument();
+    expect(within(readyIssueRow!).getByText('No action available')).toBeInTheDocument();
     expect(within(readyIssueRow!).queryByText('Waiting')).not.toBeInTheDocument();
     expect(screen.queryByText('None / Ready')).not.toBeInTheDocument();
+  });
+
+  it('renders only supported payment actions and hides future payment actions', async () => {
+    renderPage();
+
+    await screen.findByText('Ready payment preparation');
+
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByRole('button', { name: 'Prepare Batch' })).toBeInTheDocument();
+
+    for (const unsupportedAction of ['Approve Payment', 'Mark Paid', 'Execute Payment', 'Reopen Payment']) {
+      expect(screen.queryByRole('button', { name: unsupportedAction })).not.toBeInTheDocument();
+      expect(screen.queryByText(unsupportedAction)).not.toBeInTheDocument();
+    }
+  });
+
+  it('prepares a payout batch with confirmation and refetches the queue', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Ready payment preparation');
+    const initialBatchCalls = listPayoutBatchesMock.mock.calls.length;
+    const initialReadinessCalls = getPaymentPreparationReadinessMock.mock.calls.length;
+
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    await user.click(within(panel).getByRole('button', { name: 'Prepare Batch' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('This will prepare a payout batch for the selected payment period.');
+    await user.click(within(dialog).getByRole('button', { name: 'Prepare Batch' }));
+
+    await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('yalispor'));
+    expect(await screen.findByText('Payment batch prepared.')).toBeInTheDocument();
+    await waitFor(() => expect(listPayoutBatchesMock.mock.calls.length).toBeGreaterThan(initialBatchCalls));
+    await waitFor(() => expect(getPaymentPreparationReadinessMock.mock.calls.length).toBeGreaterThan(initialReadinessCalls));
+  });
+
+  it('marks a draft payment batch for review with confirmation', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
+    const draftRow = screen.getAllByRole('button')
+      .filter((element) => element.classList.contains('op-table-row'))
+      .find((row) => row.textContent?.includes('Needs Review'));
+    expect(draftRow).toBeTruthy();
+    await user.click(draftRow!);
+
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByRole('button', { name: 'Mark for Review' })).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Mark for Review' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('This payment batch will move into Finance review.');
+    await user.click(within(dialog).getByRole('button', { name: 'Mark for Review' }));
+
+    await waitFor(() => expect(markPayoutBatchReviewMock).toHaveBeenCalledWith('batch-draft-raw-11111111'));
+    expect(await screen.findByText('Payment batch moved to review.')).toBeInTheDocument();
+  });
+
+  it('cancels a draft payment batch with confirmation', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
+    const draftRow = screen.getAllByRole('button')
+      .filter((element) => element.classList.contains('op-table-row'))
+      .find((row) => row.textContent?.includes('Needs Review'));
+    expect(draftRow).toBeTruthy();
+    await user.click(draftRow!);
+
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByRole('button', { name: 'Cancel Batch' })).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Cancel Batch' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('This will cancel the selected payment batch.');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel Batch' }));
+
+    await waitFor(() => expect(cancelPayoutBatchMock).toHaveBeenCalledWith('batch-draft-raw-11111111'));
+    expect(await screen.findByText('Payment batch cancelled.')).toBeInTheDocument();
+  });
+
+  it('does not render batch actions when the selected batch state is unsupported', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Payment Preparation' });
+    await user.click(screen.getByRole('button', { name: /In Review/i }));
+
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getByText('No action available')).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Mark for Review' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Cancel Batch' })).not.toBeInTheDocument();
+  });
+
+  it('disables payment action confirmation while pending', async () => {
+    const user = userEvent.setup();
+    let resolvePrepare: (batch: PayoutBatch) => void = () => undefined;
+    preparePayoutBatchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePrepare = resolve;
+    }));
+    renderPage();
+
+    await screen.findByText('Ready payment preparation');
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    await user.click(within(panel).getByRole('button', { name: 'Prepare Batch' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Prepare Batch' }));
+
+    expect(screen.getByRole('button', { name: 'Preparing...' })).toBeDisabled();
+    resolvePrepare(makeBatch({ id: 'batch-prepared-raw-77777777', status: 'draft' }));
+    expect(await screen.findByText('Payment batch prepared.')).toBeInTheDocument();
   });
 });

@@ -9,8 +9,11 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import {
+  cancelPayoutBatch,
   getPaymentPreparationReadiness,
   listPayoutBatches,
+  markPayoutBatchReview,
+  preparePayoutBatch,
   type FinanceDashboard,
   type PayoutBatch,
   type PayoutBatchStatus,
@@ -22,8 +25,9 @@ import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/
 type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
 type QueueStatus = 'Ready' | 'Needs Review' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
-type NextAction = 'Prepare' | 'Approve' | 'Mark Paid' | 'Investigate' | 'View';
+type NextAction = 'Prepare Batch' | 'Mark for Review' | 'No action available';
 type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Ready';
+type PaymentAction = 'prepare' | 'mark_review' | 'cancel';
 
 type PaymentQueueItem =
   | {
@@ -277,26 +281,23 @@ function getWaitingReason(item: PaymentQueueItem) {
 }
 
 function getNextAction(item: PaymentQueueItem): NextAction {
-  const waitingReason = getWaitingReason(item);
-  if (waitingReason && item.source === 'batch' && (item.batch.status === 'draft' || item.batch.status === 'review')) {
-    return 'Investigate';
-  }
   if (item.source === 'ready') {
-    return waitingReason ? 'Investigate' : 'Prepare';
+    return 'Prepare Batch';
   }
   if (item.batch.status === 'draft') {
-    return 'Approve';
+    return 'Mark for Review';
   }
-  if (item.batch.status === 'review') {
-    return 'Approve';
+  return 'No action available';
+}
+
+function getSupportedPaymentActions(item: PaymentQueueItem): PaymentAction[] {
+  if (item.source === 'ready') {
+    return ['prepare'];
   }
-  if (item.batch.status === 'approved') {
-    return 'Mark Paid';
+  if (item.batch.status === 'draft') {
+    return ['mark_review', 'cancel'];
   }
-  if (item.batch.status === 'execution_pending') {
-    return 'View';
-  }
-  return 'View';
+  return [];
 }
 
 function matchesWorkflow(item: PaymentQueueItem, workflow: WorkflowTab) {
@@ -369,6 +370,58 @@ function buildQueueItems(vendorId: string, dashboard: FinanceDashboard | null, b
   return items;
 }
 
+function PaymentActionConfirmationModal({
+  action,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  action: PaymentAction;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const actionConfig: Record<PaymentAction, { title: string; body: string; confirmLabel: string; pendingLabel: string }> = {
+    prepare: {
+      title: 'Prepare payout batch?',
+      body: 'This will prepare a payout batch for the selected payment period.',
+      confirmLabel: 'Prepare Batch',
+      pendingLabel: 'Preparing...',
+    },
+    mark_review: {
+      title: 'Mark payment batch for review?',
+      body: 'This payment batch will move into Finance review.',
+      confirmLabel: 'Mark for Review',
+      pendingLabel: 'Moving...',
+    },
+    cancel: {
+      title: 'Cancel payment batch?',
+      body: 'This will cancel the selected payment batch.',
+      confirmLabel: 'Cancel Batch',
+      pendingLabel: 'Cancelling...',
+    },
+  };
+  const config = actionConfig[action];
+
+  return (
+    <div className="scheduled-settlements-modal" role="dialog" aria-modal="true" aria-labelledby="payment-action-confirmation-title">
+      <div className="scheduled-settlements-modal-card">
+        <p className="eyebrow">Payment preparation</p>
+        <h3 id="payment-action-confirmation-title">{config.title}</h3>
+        <p className="page-description">{config.body}</p>
+        <div className="scheduled-settlements-modal-actions">
+          <button type="button" className="button button-secondary" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </button>
+          <button type="button" className="button button-primary" onClick={onConfirm} disabled={submitting}>
+            {submitting ? config.pendingLabel : config.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminPaymentPreparationPage() {
   const appReadiness = useAppReadiness();
   const currentVendorId = appReadiness.currentVendor.vendorId;
@@ -380,6 +433,10 @@ export function AdminPaymentPreparationPage() {
   const [periodFilter, setPeriodFilter] = useState('all');
   const [highValueOnly, setHighValueOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PaymentAction | null>(null);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const batchesQuery = useQueryResource(
     ['admin', 'finance', 'payment-preparation', 'batches', vendorFilter],
@@ -444,10 +501,51 @@ export function AdminPaymentPreparationPage() {
   const visibleItems = advancedFilteredItems.filter((item) => matchesWorkflow(item, workflowTab));
   const selectedItem = visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
   const selectedWaitingReason = selectedItem ? getWaitingReason(selectedItem) : null;
+  const supportedActions = selectedItem ? getSupportedPaymentActions(selectedItem) : [];
   const loading = batchesQuery.isLoading || readinessQuery.isLoading;
   const blockingError = batchesQuery.isError || readinessQuery.isError;
   const errorDescription =
     batchesQuery.error ?? readinessQuery.error ?? 'Unable to load payment preparation data.';
+
+  async function refetchQueue() {
+    await Promise.all([
+      batchesQuery.refetch(),
+      readinessQuery.refetch(),
+    ]);
+  }
+
+  function openAction(action: PaymentAction) {
+    setActionError(null);
+    setActionSuccess(null);
+    setPendingAction(action);
+  }
+
+  async function handleConfirmAction() {
+    if (!pendingAction || !selectedItem) {
+      return;
+    }
+    setActionSubmitting(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      if (pendingAction === 'prepare') {
+        await preparePayoutBatch(selectedItem.vendorId);
+        setActionSuccess('Payment batch prepared.');
+      } else if (pendingAction === 'mark_review' && selectedItem.source === 'batch') {
+        await markPayoutBatchReview(selectedItem.batch.id);
+        setActionSuccess('Payment batch moved to review.');
+      } else if (pendingAction === 'cancel' && selectedItem.source === 'batch') {
+        await cancelPayoutBatch(selectedItem.batch.id);
+        setActionSuccess('Payment batch cancelled.');
+      }
+      setPendingAction(null);
+      await refetchQueue();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Payment preparation action failed.');
+    } finally {
+      setActionSubmitting(false);
+    }
+  }
 
   return (
     <section className="op-page payment-preparation-page">
@@ -458,6 +556,9 @@ export function AdminPaymentPreparationPage() {
           <p className="page-description">Prepare approved vendor payments before payout execution.</p>
         </div>
       </div>
+
+      {actionSuccess ? <p className="action-feedback action-success" role="status">{actionSuccess}</p> : null}
+      {actionError ? <p className="action-feedback action-error" role="alert">{actionError}</p> : null}
 
       <section className="settlement-review-queue payment-preparation-queue" aria-label="Payment preparation queue">
         <div className="orders-workflow-tabs settlement-review-tabs payment-preparation-tabs" aria-label="Payment preparation workflow tabs">
@@ -594,6 +695,40 @@ export function AdminPaymentPreparationPage() {
 
                   <MetadataGroup title="Next Action">
                     <MetadataRow label="Action" value={getNextAction(selectedItem)} />
+                    {supportedActions.length ? (
+                      <div className="scheduled-panel-actions">
+                        {supportedActions.includes('prepare') ? (
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            onClick={() => openAction('prepare')}
+                            disabled={actionSubmitting}
+                          >
+                            Prepare Batch
+                          </button>
+                        ) : null}
+                        {supportedActions.includes('mark_review') ? (
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            onClick={() => openAction('mark_review')}
+                            disabled={actionSubmitting}
+                          >
+                            Mark for Review
+                          </button>
+                        ) : null}
+                        {supportedActions.includes('cancel') ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => openAction('cancel')}
+                            disabled={actionSubmitting}
+                          >
+                            Cancel Batch
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </MetadataGroup>
 
                   <MetadataGroup title="Payment Impact">
@@ -677,6 +812,14 @@ export function AdminPaymentPreparationPage() {
           </div>
         ) : null}
       </section>
+      {pendingAction ? (
+        <PaymentActionConfirmationModal
+          action={pendingAction}
+          submitting={actionSubmitting}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => void handleConfirmAction()}
+        />
+      ) : null}
     </section>
   );
 }
