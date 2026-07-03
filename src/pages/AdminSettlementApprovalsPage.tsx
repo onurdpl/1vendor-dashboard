@@ -2117,11 +2117,11 @@ export function AdminSettlementApprovalsPage() {
       title: 'Preview Reviewed',
       status: preview ? 'Completed' : vendorId.trim() ? 'Ready' : 'Waiting',
       details: [
-        { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'Not loaded' },
-        { label: 'Excluded rows', value: preview ? formatNumber(preview.summary.excludedActiveApprovalRowCount) : 'Not loaded' },
-        { label: 'Net payable', value: preview ? formatMinor(preview.summary.netPayableMinor, preview.summary.currency) : 'Not loaded' },
-        { label: 'Debt offset', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.debtOffsetPreviewMinor, preview.summary.currency) : 'Not loaded' },
-        { label: 'Net after debt', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.netPayableAfterDebtOffsetMinor, preview.summary.currency) : 'Not loaded' },
+        { label: 'Eligible rows', value: preview ? formatNumber(preview.summary.eligibleRowCount) : 'No eligible rows' },
+        { label: 'Excluded rows', value: preview ? formatNumber(preview.summary.excludedActiveApprovalRowCount) : 'No eligible rows' },
+        { label: 'Net payable', value: preview ? formatMinor(preview.summary.netPayableMinor, preview.summary.currency) : 'No payment evidence yet' },
+        { label: 'Debt offset', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.debtOffsetPreviewMinor, preview.summary.currency) : 'No debt adjustment' },
+        { label: 'Net after debt', value: preview && previewDebtProjection ? formatMinor(previewDebtProjection.netPayableAfterDebtOffsetMinor, preview.summary.currency) : 'No payment evidence yet' },
       ],
     },
     {
@@ -2150,8 +2150,8 @@ export function AdminSettlementApprovalsPage() {
       status: auditStepStatus,
       details: [
         { label: 'Audit loaded', value: Boolean(audit) },
-        { label: 'Line count', value: audit ? formatNumber(audit.lines.length) : 'Not loaded' },
-        { label: 'Eligibility reasons', value: audit ? (auditReasonsAvailable ? 'Available' : 'Missing') : 'Not loaded' },
+        { label: 'Line count', value: audit ? formatNumber(audit.lines.length) : 'No timeline event yet' },
+        { label: 'Eligibility reasons', value: audit ? (auditReasonsAvailable ? 'Available' : 'Missing') : 'No payment evidence yet' },
       ],
     },
     {
@@ -2174,7 +2174,7 @@ export function AdminSettlementApprovalsPage() {
       details: [
         { label: 'Record count', value: formatNumber(invoiceRecords.length) },
         { label: 'Active record exists', value: activeInvoiceRecords.length > 0 },
-        { label: 'Latest status', value: latestInvoiceRecord?.status ?? 'None loaded' },
+        { label: 'Latest status', value: latestInvoiceRecord?.status ?? 'No payment evidence yet' },
         { label: 'Immutable request snapshot', value: storedImmutableRequestSnapshot ? 'Stored' : 'Missing' },
       ],
     },
@@ -2703,7 +2703,7 @@ export function AdminSettlementApprovalsPage() {
       } else if (result.status === 'failed') {
         setError(result.record?.failureMessage || result.record?.failureCode || 'Logo invoice create failed.');
       } else if (result.status === 'unknown') {
-        setError(result.blockers.join(' ') || 'Logo invoice create outcome is UNKNOWN. Reconciliation is required.');
+        setError(result.blockers.join(' ') || 'Logo invoice create outcome needs review. Reconciliation is required.');
       } else {
         setError(result.blockers.join(' ') || 'Logo invoice create was blocked.');
       }
@@ -3354,8 +3354,8 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Request built at" value={formatDate(item.record.snapshots.request.requestBuiltAt)} />
                       <MetadataRow label="Snapshot source" value={valueOrDash(item.record.snapshots.request.snapshotSource)} />
                       <MetadataRow label="Response snapshot" value={`${item.record.snapshots.response.present ? 'Present' : 'Missing'} · ${item.record.snapshots.response.type}`} />
-                      <MetadataRow label="UNKNOWN reason" value={valueOrDash(item.record.unknown.reason)} />
-                      <MetadataRow label="UNKNOWN at" value={formatDate(item.record.unknown.unknownAt)} />
+                      <MetadataRow label="Review reason" value={valueOrDash(item.record.unknown.reason)} />
+                      <MetadataRow label="Review started" value={formatDate(item.record.unknown.unknownAt)} />
 	                      <MetadataRow label="Reconciliation state" value={valueOrDash(item.record.unknown.reconciliationState)} />
 	                      <MetadataRow label="Reconciled at" value={formatDate(item.record.unknown.reconciledAt)} />
 	                      <MetadataRow label="Reconciliation evidence" value={`${item.record.unknown.reconciliationEvidence.present ? 'Present' : 'Missing'} · ${item.record.unknown.reconciliationEvidence.type}`} />
@@ -3401,14 +3401,14 @@ export function AdminSettlementApprovalsPage() {
                       <MetadataRow label="Provider count" value={formatNumber(item.search.totalProviderCount)} />
                       <MetadataRow label="Provider UUID" value={valueOrDash(item.mappedFields.providerUuid ?? item.record?.providerUuid)} />
                       <MetadataRow label="Provider invoice id" value={valueOrDash(item.mappedFields.providerInvoiceId)} />
-	                      <MetadataRow label="GIB status" value={item.mappedFields.gibStatus ?? 'UNKNOWN'} />
+	                      <MetadataRow label="GIB status" value={item.mappedFields.gibStatus ?? 'No payment evidence yet'} />
                       <MetadataRow label="GIB status code" value={valueOrDash(item.mappedFields.gibStatusCode)} />
                       <MetadataRow label="Document status" value={valueOrDash(item.mappedFields.documentStatus)} />
                       <MetadataRow label="Document status code" value={valueOrDash(item.mappedFields.documentStatusCode)} />
                       <MetadataRow label="Invoice date" value={formatDate(item.mappedFields.invoiceDate)} />
                       <MetadataRow label="Invoice total" value={item.mappedFields.invoiceTotalMinor === null ? '—' : formatMinor(item.mappedFields.invoiceTotalMinor, item.mappedFields.invoiceCurrency ?? 'TRY')} />
                       <MetadataRow label="Invoice currency" value={valueOrDash(item.mappedFields.invoiceCurrency)} />
-                      <MetadataRow label="Invoice no" value={item.mappedFields.invoiceNumberAvailable ? valueOrDash(item.mappedFields.invoiceNoCandidate) : 'UNKNOWN'} />
+                      <MetadataRow label="Invoice no" value={item.mappedFields.invoiceNumberAvailable ? valueOrDash(item.mappedFields.invoiceNoCandidate) : 'No payment evidence yet'} />
                       <MetadataRow label="Invoice number source" value={valueOrDash(item.mappedFields.invoiceNumberSource)} />
                       <MetadataRow label="Invoice number recovery possible" value={valueOrDash(item.mappedFields.invoiceNumberRecoveryPossible)} />
                       <MetadataRow label="Fields observed" value={item.providerFieldsObserved.length ? item.providerFieldsObserved.join(', ') : '—'} />
@@ -3417,7 +3417,7 @@ export function AdminSettlementApprovalsPage() {
                     <ReadinessList title="Sync preview warnings" items={item.warnings} tone="warning" />
 	                    {!item.mappedFields.invoiceNumberAvailable ? (
 	                      <div className="settlement-alert op-tone-warning">
-	                        <strong>Invoice number is UNKNOWN.</strong>
+	                        <strong>Invoice number needs review.</strong>
 	                        <p>Logo sales invoice list did not return invoiceNumber, invoiceNo, documentNumber, or number for this match.</p>
 	                      </div>
 	                    ) : null}

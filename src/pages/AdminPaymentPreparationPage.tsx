@@ -17,13 +17,13 @@ import {
 } from '../features/finance/paymentPreparationApi';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
-import { formatDateTime, parseSafeDate } from '../services/real/formatting';
+import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/formatting';
 
 type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
-type QueueStatus = 'Ready to Prepare' | 'Draft' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled' | 'Waiting';
+type QueueStatus = 'Ready' | 'Draft' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled' | 'Waiting';
 type NextAction = 'Prepare' | 'Review' | 'Approve' | 'Mark Paid' | 'Investigate' | 'Waiting' | 'No Action Required';
-type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Missing Evidence' | 'Export Needed' | 'None / Ready';
+type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Missing Evidence' | 'Export Needed' | 'Ready';
 
 type PaymentQueueItem =
   | {
@@ -43,7 +43,7 @@ const HIGH_VALUE_AMOUNT = 100000;
 
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
-  { id: 'ready_to_prepare', label: 'Ready to Prepare' },
+  { id: 'ready_to_prepare', label: 'Ready' },
   { id: 'draft', label: 'Draft' },
   { id: 'review', label: 'In Review' },
   { id: 'approved', label: 'Approved' },
@@ -53,7 +53,7 @@ const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
 
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All statuses' },
-  { value: 'ready_to_prepare', label: 'Ready to Prepare' },
+  { value: 'ready_to_prepare', label: 'Ready' },
   { value: 'draft', label: 'Draft' },
   { value: 'review', label: 'In Review' },
   { value: 'approved', label: 'Approved' },
@@ -100,6 +100,24 @@ function getAmountValue(value: string | null | undefined) {
     .replace(decimalSeparator, '.');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatPaymentAmount(value: string | null | undefined, currency = 'TRY') {
+  if (!value) {
+    return 'No payment evidence yet';
+  }
+  if (!/\d/.test(value)) {
+    return value;
+  }
+  const amount = getAmountValue(value);
+  if (!Number.isFinite(amount)) {
+    return 'No payment evidence yet';
+  }
+  return formatCurrency(amount.toFixed(2), currency);
+}
+
+function formatOptionalPaymentAmount(value: string | null | undefined, emptyLabel: string) {
+  return value ? formatPaymentAmount(value) : emptyLabel;
 }
 
 function hasAmount(value: string | null | undefined) {
@@ -175,7 +193,7 @@ function getNetPayable(item: PaymentQueueItem) {
 
 function getQueueStatus(item: PaymentQueueItem): QueueStatus {
   if (item.source === 'ready') {
-    return 'Ready to Prepare';
+    return 'Ready';
   }
   if (item.batch.status === 'draft') {
     return 'Draft';
@@ -199,7 +217,7 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
 }
 
 function getStatusTone(status: QueueStatus) {
-  if (status === 'Ready to Prepare' || status === 'Approved' || status === 'Paid') return 'success' as const;
+  if (status === 'Ready' || status === 'Approved' || status === 'Paid') return 'success' as const;
   if (status === 'Draft') return 'info' as const;
   if (status === 'In Review' || status === 'Waiting') return 'attention' as const;
   if (status === 'Cancelled') return 'neutral' as const;
@@ -216,7 +234,7 @@ function getIssues(item: PaymentQueueItem): IssueLabel[] {
     if (hasAmount(summary?.outstandingDebtAmount) || hasAmount(summary?.debtOffsetPreviewAmount)) {
       issues.push('Debt');
     }
-    return issues.length > 0 ? issues : ['None / Ready'];
+    return issues.length > 0 ? issues : ['Ready'];
   }
 
   if (hasAmount(item.batch.refundAmount)) {
@@ -231,7 +249,7 @@ function getIssues(item: PaymentQueueItem): IssueLabel[] {
   if (item.batch.status === 'execution_pending') {
     issues.push('Export Needed');
   }
-  return issues.length > 0 ? issues : ['None / Ready'];
+  return issues.length > 0 ? issues : ['Ready'];
 }
 
 function getWaitingReason(item: PaymentQueueItem) {
@@ -534,15 +552,15 @@ export function AdminPaymentPreparationPage() {
                       <small>{payment.secondary}</small>
                     </span>
                     <span>
-                      <strong>{getGrossAmount(item)}</strong>
-                      <small>Net payable {getNetPayable(item)}</small>
+                      <strong>{formatPaymentAmount(getGrossAmount(item))}</strong>
+                      <small>Net payable {formatPaymentAmount(getNetPayable(item))}</small>
                     </span>
                     <span>
                       <StatusBadge tone={getStatusTone(status)}>{status}</StatusBadge>
                     </span>
                     <span className="settlement-review-issue-list payment-preparation-issues">
                       {issues.map((issue) => (
-                        <StatusBadge key={issue} tone={issue === 'None / Ready' ? 'success' : 'warning'}>{issue}</StatusBadge>
+                        <StatusBadge key={issue} tone={issue === 'Ready' ? 'success' : 'warning'}>{issue}</StatusBadge>
                       ))}
                     </span>
                     <span><strong>{getNextAction(item)}</strong></span>
@@ -567,8 +585,8 @@ export function AdminPaymentPreparationPage() {
                   <MetadataGroup title="Payment Summary">
                     <MetadataRow label="Vendor" value={getSafeVendorLabel(selectedItem.vendorId, currentVendorId, currentVendorName)} />
                     <MetadataRow label="Payment Period" value={getPaymentPeriodLabel(getPaymentPeriodKey(selectedItem))} />
-                    <MetadataRow label="Gross Amount" value={getGrossAmount(selectedItem)} />
-                    <MetadataRow label="Net Payable" value={getNetPayable(selectedItem)} />
+                    <MetadataRow label="Gross Amount" value={formatPaymentAmount(getGrossAmount(selectedItem))} />
+                    <MetadataRow label="Net Payable" value={formatPaymentAmount(getNetPayable(selectedItem))} />
                     <MetadataRow label="Current Status" value={getQueueStatus(selectedItem)} />
                   </MetadataGroup>
 
@@ -584,13 +602,13 @@ export function AdminPaymentPreparationPage() {
                   </MetadataGroup>
 
                   <MetadataGroup title="Payment Impact">
-                    <MetadataRow label="Net payment" value={getNetPayable(selectedItem)} />
+                    <MetadataRow label="Net payment" value={formatPaymentAmount(getNetPayable(selectedItem))} />
                     <MetadataRow
                       label="Refund deductions"
                       value={
                         selectedItem.source === 'batch'
                           ? hasAmount(selectedItem.batch.refundAmount)
-                            ? selectedItem.batch.refundAmount
+                            ? formatPaymentAmount(selectedItem.batch.refundAmount)
                             : 'No refund adjustment'
                           : 'No refund adjustment'
                       }
@@ -599,17 +617,19 @@ export function AdminPaymentPreparationPage() {
                       label="Debt deductions"
                       value={
                         selectedItem.source === 'batch'
-                          ? selectedItem.batch.debtOffsetAmount ?? selectedItem.batch.outstandingDebtAmount ?? 'No debt adjustment'
-                          : selectedItem.dashboard.payoutBatchSummary?.debtOffsetPreviewAmount ??
-                            selectedItem.dashboard.payoutBatchSummary?.outstandingDebtAmount ??
-                            'No debt adjustment'
+                          ? formatOptionalPaymentAmount(selectedItem.batch.debtOffsetAmount ?? selectedItem.batch.outstandingDebtAmount, 'No debt adjustment')
+                          : formatOptionalPaymentAmount(
+                            selectedItem.dashboard.payoutBatchSummary?.debtOffsetPreviewAmount ??
+                              selectedItem.dashboard.payoutBatchSummary?.outstandingDebtAmount,
+                            'No debt adjustment',
+                          )
                       }
                     />
                     <MetadataRow
                       label="Other adjustments"
                       value={
                         selectedItem.source === 'batch'
-                          ? `Commission ${selectedItem.batch.commissionAmount} · Shipping ${selectedItem.batch.shippingDeductionAmount}`
+                          ? `Commission ${formatPaymentAmount(selectedItem.batch.commissionAmount)} · Shipping ${formatPaymentAmount(selectedItem.batch.shippingDeductionAmount)}`
                           : 'No payment evidence yet'
                       }
                     />

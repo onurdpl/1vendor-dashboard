@@ -179,9 +179,10 @@ describe('AdminPaymentPreparationPage', () => {
     expect(screen.getByText('Prepare approved vendor payments before payout execution.')).toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Payment preparation workflow tabs');
-    for (const label of ['All', 'Ready to Prepare', 'Draft', 'In Review', 'Approved', 'Paid', 'Cancelled']) {
+    for (const label of ['All', 'Ready', 'Draft', 'In Review', 'Approved', 'Paid', 'Cancelled']) {
       expect(within(tabs).getByText(label)).toBeInTheDocument();
     }
+    expect(within(tabs).queryByText('Ready to Prepare')).not.toBeInTheDocument();
   });
 
   it('renders the exact operational table columns', async () => {
@@ -194,6 +195,8 @@ describe('AdminPaymentPreparationPage', () => {
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getByText('Ready payment preparation')).toBeInTheDocument();
     expect(screen.getAllByText('3 eligible settlement rows').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('TRY 99,500.00').length).toBeGreaterThan(0);
+    expect(screen.queryByText('99500.00')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
   });
 
@@ -215,6 +218,7 @@ describe('AdminPaymentPreparationPage', () => {
     }
     expect(within(panel).getByText('Missing payment evidence')).toBeInTheDocument();
     expect(within(panel).getByText('Investigate')).toBeInTheDocument();
+    expect(within(panel).getAllByText('TRY 99,500.00').length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('No refund adjustment').length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('No linked support').length).toBeGreaterThan(0);
     expect(within(panel).queryByText('UNKNOWN')).not.toBeInTheDocument();
@@ -261,9 +265,10 @@ describe('AdminPaymentPreparationPage', () => {
     await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
 
     const tableRows = screen.getAllByRole('row');
-    const readyIssueRow = tableRows.find((row) => within(row).queryByText('None / Ready') && within(row).queryByText('Approved'));
+    const readyIssueRow = tableRows.find((row) => within(row).queryByText('Ready') && within(row).queryByText('Approved'));
     expect(readyIssueRow).toBeTruthy();
     expect(within(readyIssueRow!).getByText('Mark Paid')).toBeInTheDocument();
     expect(within(readyIssueRow!).queryByText('Waiting')).not.toBeInTheDocument();
+    expect(screen.queryByText('None / Ready')).not.toBeInTheDocument();
   });
 });

@@ -58,6 +58,7 @@ function renderShell(initialEntry: string) {
         </Route>
         <Route element={<AdminShell />}>
           <Route path="/admin/operations" element={<div>Admin operations content</div>} />
+          <Route path="/admin/finance/settlement-schedules" element={<div>Scheduled settlements queue content</div>} />
         </Route>
         <Route path="/login" element={<div>Login screen</div>} />
       </Routes>
@@ -149,6 +150,17 @@ describe('AppShell workspace navigation', () => {
     expect(within(primaryNav).getByRole('link', { name: /Finance/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Inbox/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Settings/i })).toBeInTheDocument();
+  });
+
+  it('does not render the generic admin page heading on finance queue routes', () => {
+    seedSession(adminUser);
+
+    renderShell('/admin/finance/settlement-schedules');
+
+    expect(screen.getByText('Scheduled settlements queue content')).toBeInTheDocument();
+    expect(screen.queryByText('Operational control center')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shopify operations, finance, diagnostics, and recovery.')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Admin tools' })).toBeInTheDocument();
   });
 
   it('clears the cached user and replaces the route with login on logout', async () => {

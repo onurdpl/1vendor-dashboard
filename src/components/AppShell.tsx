@@ -484,6 +484,13 @@ export function VendorShell() {
 
 export function AdminShell() {
   const context = useShellContext();
+  const location = useLocation();
+  const hideGenericAdminHeader = [
+    '/admin/finance/settlement-approvals',
+    '/admin/finance/settlement-schedules',
+    '/admin/finance/refund-adjustments',
+    '/admin/finance/payment-preparation',
+  ].some((path) => location.pathname.startsWith(path));
 
   return (
     <div className="app-shell admin-app-shell">
@@ -516,7 +523,9 @@ export function AdminShell() {
       </aside>
 
       <div className="app-content">
-        <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
+        {hideGenericAdminHeader ? null : (
+          <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
+        )}
         <div className="shell-context-bar">
           <span className="severity-chip severity-normal">User {context.currentUser?.name ?? 'Unknown user'}</span>
           <span className="severity-chip severity-attention">Role {context.currentUser?.role ?? 'Unauthenticated'}</span>
