@@ -168,11 +168,28 @@ describe('AdminRefundAdjustmentsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
 
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
-    expect(headers).toEqual(['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Review']);
+    expect(headers).toEqual(['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated']);
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund reference RF-1097').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
+  });
+
+  it('selects refund adjustment rows and updates the right panel', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
+    const rows = screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const partialRow = rows.find((row) => row.textContent?.includes('Order #1098'));
+    expect(partialRow).toBeTruthy();
+
+    await user.click(partialRow!);
+
+    expect(partialRow).toHaveClass('op-row-selected');
+    const panel = screen.getByLabelText('Refund adjustment detail panel');
+    expect(within(panel).getAllByText(/Order #1098/).length).toBeGreaterThan(0);
+    expect(within(panel).getByText('Balance offset pending')).toBeInTheDocument();
   });
 
   it('renders the right panel hierarchy from queue-safe fields', async () => {

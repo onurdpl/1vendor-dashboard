@@ -191,13 +191,30 @@ describe('AdminPaymentPreparationPage', () => {
     await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
 
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
-    expect(headers).toEqual(['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']);
+    expect(headers).toEqual(['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated']);
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getByText('Ready payment preparation')).toBeInTheDocument();
     expect(screen.getAllByText('3 eligible settlement rows').length).toBeGreaterThan(0);
     expect(screen.getAllByText('TRY 99,500.00').length).toBeGreaterThan(0);
     expect(screen.queryByText('99500.00')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
+  });
+
+  it('selects payment preparation rows and updates the right panel', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
+    const rows = screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const draftRow = rows.find((row) => row.textContent?.includes('Payment draft'));
+    expect(draftRow).toBeTruthy();
+
+    await user.click(draftRow!);
+
+    expect(draftRow).toHaveClass('op-row-selected');
+    const panel = screen.getByLabelText('Payment preparation detail panel');
+    expect(within(panel).getAllByText('TRY 48,000.00').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('Draft').length).toBeGreaterThan(0);
   });
 
   it('renders the right panel hierarchy from queue-safe fields', async () => {
@@ -264,7 +281,7 @@ describe('AdminPaymentPreparationPage', () => {
     await screen.findByRole('heading', { name: 'Payment Preparation' });
     await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
 
-    const tableRows = screen.getAllByRole('row');
+    const tableRows = screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
     const readyIssueRow = tableRows.find((row) => within(row).queryByText('Ready') && within(row).queryByText('Approved'));
     expect(readyIssueRow).toBeTruthy();
     expect(within(readyIssueRow!).getByText('Mark Paid')).toBeInTheDocument();

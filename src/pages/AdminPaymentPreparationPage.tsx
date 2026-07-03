@@ -535,7 +535,7 @@ export function AdminPaymentPreparationPage() {
         {!loading && !blockingError && visibleItems.length > 0 ? (
           <div className="settlement-review-layout payment-preparation-layout">
             <OperationalTable
-              columns={['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']}
+              columns={['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated']}
               className="settlement-review-table payment-preparation-table"
               stickyHeader={false}
             >
@@ -545,7 +545,11 @@ export function AdminPaymentPreparationPage() {
                 const issues = getIssues(item);
                 const status = getQueueStatus(item);
                 return (
-                  <OperationalTableRow key={item.id} selected={item.id === selectedItem?.id}>
+                  <OperationalTableRow
+                    key={item.id}
+                    selected={item.id === selectedItem?.id}
+                    onSelect={() => setSelectedId(item.id)}
+                  >
                     <span><strong>{vendorLabel}</strong></span>
                     <span>
                       <strong>{payment.primary}</strong>
@@ -565,15 +569,6 @@ export function AdminPaymentPreparationPage() {
                     </span>
                     <span><strong>{getNextAction(item)}</strong></span>
                     <span>{formatDate(getItemUpdatedAt(item))}</span>
-                    <span>
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => setSelectedId(item.id)}
-                      >
-                        Review
-                      </button>
-                    </span>
                   </OperationalTableRow>
                 );
               })}

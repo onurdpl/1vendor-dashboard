@@ -182,9 +182,11 @@ describe('Settlement Review queue cleanup', () => {
     ['All', 'Needs Review', 'Ready for Approval', 'Refund Review', 'Vendor Hold', 'Approved', 'Paid'].forEach((label) => {
       expect(within(workflowTabs).getByText(label)).toBeInTheDocument();
     });
-    ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Review'].forEach((column) => {
+    ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated'].forEach((column) => {
       expect(within(queue).getByRole('columnheader', { name: column })).toBeInTheDocument();
     });
+    expect(within(queue).queryByRole('columnheader', { name: 'Review' })).not.toBeInTheDocument();
+    expect(within(queue).queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
     ['Settlement Summary', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline'].forEach((section) => {
       expect(within(queue).getByRole('heading', { name: section })).toBeInTheDocument();
     });
@@ -225,16 +227,20 @@ describe('Settlement Review queue cleanup', () => {
     expect(previewSettlementApprovalMock).not.toHaveBeenCalled();
   });
 
-  it('keeps queue open behavior and right panel context intact', async () => {
+  it('selects settlement rows and updates the right panel context', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
+    const rows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const settlementRow = rows[0];
+    expect(settlementRow).toBeTruthy();
 
-    await user.click(within(queue).getAllByRole('button', { name: 'Review' })[0]);
+    await user.click(settlementRow);
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith(rawSettlementApprovalId));
+    expect(settlementRow).toHaveClass('op-row-selected');
     expect(within(queue).getByRole('heading', { name: 'Settlement Summary' })).toBeInTheDocument();
     expect(within(queue).getAllByText('Yalispor').length).toBeGreaterThan(0);
     expect(within(queue).getAllByText('TRY 1,800.00').length).toBeGreaterThan(0);

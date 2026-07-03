@@ -341,14 +341,18 @@ export function AdminRefundAdjustmentsPage() {
         {!query.isLoading && !query.isError && visibleRecords.length > 0 ? (
           <div className="settlement-review-layout refund-adjustments-layout">
             <OperationalTable
-              columns={['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Review']}
+              columns={['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated']}
               className="settlement-review-table refund-adjustments-table"
               stickyHeader={false}
             >
               {visibleRecords.map((adjustment) => {
                 const vendorLabel = getVendorLabel(adjustment, currentVendorId, currentVendorName);
                 return (
-                  <OperationalTableRow key={adjustment.id} selected={adjustment.id === selectedAdjustment?.id}>
+                  <OperationalTableRow
+                    key={adjustment.id}
+                    selected={adjustment.id === selectedAdjustment?.id}
+                    onSelect={() => setSelectedId(adjustment.id)}
+                  >
                     <span>
                       <strong>{vendorLabel}</strong>
                     </span>
@@ -369,15 +373,6 @@ export function AdminRefundAdjustmentsPage() {
                     </span>
                     <span><strong>{getNextAction(adjustment)}</strong></span>
                     <span>{formatDate(adjustment.updatedAt)}</span>
-                    <span>
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => setSelectedId(adjustment.id)}
-                      >
-                        Review
-                      </button>
-                    </span>
                   </OperationalTableRow>
                 );
               })}

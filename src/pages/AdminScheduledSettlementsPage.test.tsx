@@ -315,7 +315,9 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getByRole('columnheader', { name: 'Issues' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Next Action' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Updated' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Action' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Review' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Action' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
 
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ready for Draft').length).toBeGreaterThan(0);
@@ -347,7 +349,7 @@ describe('AdminScheduledSettlementsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /Not Due1/i }));
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument();
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
     expect(within(panel).getByText('Why is this waiting?')).toBeInTheDocument();
     expect(within(panel).getByText('This vendor is not scheduled for the selected settlement run.')).toBeInTheDocument();
@@ -367,8 +369,26 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(queueText.indexOf('Yalı Spor')).toBeLessThan(queueText.indexOf('Sporjinal'));
 
     await user.click(screen.getByRole('button', { name: /Not Due1/i }));
-    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument();
     expect(screen.queryByText('Waiting')).not.toBeInTheDocument();
+  });
+
+  it('selects scheduled settlement rows and updates the schedule detail panel', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    await user.click(screen.getByRole('button', { name: /Blocked2/i }));
+    const rows = screen.getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const disabledVendorRow = rows.find((row) => row.textContent?.includes('Disabled Vendor'));
+    expect(disabledVendorRow).toBeTruthy();
+
+    await user.click(disabledVendorRow!);
+
+    expect(disabledVendorRow).toHaveClass('op-row-selected');
+    const panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByRole('heading', { name: 'Disabled Vendor' })).toBeInTheDocument();
+    expect(within(panel).getByText('Auto settlement draft is disabled for this vendor.')).toBeInTheDocument();
   });
 
   it('shows only one highest-priority issue badge per vendor row', async () => {

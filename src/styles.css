@@ -14296,8 +14296,7 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(118px, 0.72fr)
     minmax(134px, 0.86fr)
     minmax(126px, 0.78fr)
-    minmax(126px, 0.78fr)
-    minmax(74px, 0.42fr);
+    minmax(126px, 0.78fr);
 }
 
 .scheduled-table-empty {
@@ -14741,7 +14740,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-review-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   gap: var(--space-3);
   align-items: start;
 }
@@ -14753,13 +14752,12 @@ summary.provider-response-heading::-webkit-details-marker {
 .settlement-review-table .op-table-head,
 .settlement-review-table .op-table-row {
   grid-template-columns:
-    minmax(144px, 1fr)
-    minmax(180px, 1.16fr)
-    minmax(150px, 1fr)
-    minmax(128px, 0.88fr)
-    minmax(106px, 0.72fr)
-    minmax(132px, 0.88fr)
-    minmax(72px, 0.42fr);
+    minmax(132px, 0.98fr)
+    minmax(156px, 1.16fr)
+    minmax(132px, 0.92fr)
+    minmax(112px, 0.78fr)
+    minmax(118px, 0.82fr)
+    minmax(108px, 0.74fr);
 }
 
 .refund-adjustments-tabs {
@@ -14779,8 +14777,7 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(132px, 0.8fr)
     minmax(126px, 0.74fr)
     minmax(112px, 0.68fr)
-    minmax(116px, 0.72fr)
-    minmax(68px, 0.4fr);
+    minmax(116px, 0.72fr);
 }
 
 .payment-preparation-tabs {
@@ -14800,8 +14797,7 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(110px, 0.68fr)
     minmax(132px, 0.8fr)
     minmax(112px, 0.66fr)
-    minmax(116px, 0.7fr)
-    minmax(68px, 0.38fr);
+    minmax(116px, 0.7fr);
 }
 
 .settlement-review-table .op-table-row small,

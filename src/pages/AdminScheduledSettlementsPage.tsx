@@ -38,7 +38,6 @@ type WorkflowTab = 'all' | 'due_today' | 'ready_for_draft' | 'blocked' | 'alread
 type StatusFilter = 'all' | WorkflowTab;
 type ScheduleIssue = 'Blocker' | 'Schedule mismatch' | 'Refund Adjustment' | 'No eligible rows' | 'Ready';
 type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'No Action Required';
-type RowActionLabel = 'Review' | 'Investigate' | 'View';
 
 const HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR = 100000;
 const TIMELINE_EMPTY_COPY = 'No activity recorded yet.';
@@ -193,12 +192,6 @@ function getScheduleNextAction(vendor: SettlementScheduleDryRunVendor): Schedule
   if (isAlreadyDraftedState(vendor.state)) return 'No Action Required';
   if (isBlockedScheduleState(vendor.state)) return 'Investigate';
   return 'No Action Required';
-}
-
-function getRowActionLabel(vendor: SettlementScheduleDryRunVendor): RowActionLabel {
-  if (vendor.state === 'READY') return 'Review';
-  if (isBlockedScheduleState(vendor.state)) return 'Investigate';
-  return 'View';
 }
 
 function getPanelNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
@@ -576,7 +569,7 @@ export function AdminScheduledSettlementsPage() {
                 </div>
               ) : (
                 <OperationalTable
-                  columns={['Vendor', 'Schedule', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Action']}
+                  columns={['Vendor', 'Schedule', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated']}
                   className="settlement-review-table scheduled-settlements-table"
                 >
                   {filteredVendors.length ? (
@@ -584,7 +577,11 @@ export function AdminScheduledSettlementsPage() {
                       const schedule = getScheduleSummary(vendor);
                       const issue = getScheduleIssue(vendor);
                       return (
-                        <OperationalTableRow key={vendor.vendorId} selected={vendor.vendorId === selectedVendor?.vendorId}>
+                        <OperationalTableRow
+                          key={vendor.vendorId}
+                          selected={vendor.vendorId === selectedVendor?.vendorId}
+                          onSelect={() => setSelectedVendorId(vendor.vendorId)}
+                        >
                           <span>
                             <strong>{getVendorName(vendor)}</strong>
                             <small>{vendor.due ? 'Due for this run date' : 'Not due for this run date'}</small>
@@ -606,9 +603,6 @@ export function AdminScheduledSettlementsPage() {
                             <strong>{dryRun.runDate}</strong>
                             <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : TIMELINE_EMPTY_COPY}</small>
                           </span>
-                          <button type="button" className="button button-secondary button-small" onClick={() => setSelectedVendorId(vendor.vendorId)}>
-                            {getRowActionLabel(vendor)}
-                          </button>
                         </OperationalTableRow>
                       );
                     })

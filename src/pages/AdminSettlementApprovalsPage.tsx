@@ -1454,7 +1454,7 @@ function SettlementReviewQueue({
       {filteredApprovals.length ? (
         <div className="settlement-review-layout">
           <OperationalTable
-            columns={['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Review']}
+            columns={['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated']}
             className="settlement-review-table"
             stickyHeader={false}
           >
@@ -1463,7 +1463,11 @@ function SettlementReviewQueue({
               const vendorDisplayName = item.vendorId === vendorId && vendorName ? vendorName : item.vendorId;
               const settlementReference = getShortQueueReference(item.id);
               return (
-                <OperationalTableRow key={item.id} selected={item.id === selectedQueueApproval?.id}>
+                <OperationalTableRow
+                  key={item.id}
+                  selected={item.id === selectedQueueApproval?.id}
+                  onSelect={() => onOpenApproval(item.id)}
+                >
                   <span>
                     <strong>{vendorDisplayName}</strong>
                     <small>{item.vendorId === vendorDisplayName ? 'Vendor context' : item.vendorId}</small>
@@ -1483,11 +1487,6 @@ function SettlementReviewQueue({
                   </span>
                   <span><strong>{getSettlementReviewNextAction(item, activeApproval)}</strong></span>
                   <span>{formatDate(item.approvedAt ?? item.createdAt)}</span>
-                  <span>
-                    <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                      Review
-                    </button>
-                  </span>
                 </OperationalTableRow>
               );
             })}
