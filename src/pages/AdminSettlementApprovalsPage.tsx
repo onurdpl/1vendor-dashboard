@@ -78,6 +78,7 @@ type SettlementReviewNextAction = 'Approve' | 'Investigate' | 'View';
 type SettlementReviewPanelAction = 'Approve' | 'Investigate' | 'View';
 type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
 type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
+type SettlementQueueAction = 'approve' | 'cancel';
 
 type RecommendedAction = {
   label: string;
@@ -1300,8 +1301,10 @@ function SettlementReviewQueue({
   approvals,
   loading,
   onOpenApproval,
+  onRequestSettlementAction,
   activeApprovalId,
   selectedApprovalDetail,
+  pendingSettlementAction,
   vendorId,
   vendorName,
   onVendorIdChange,
@@ -1319,8 +1322,10 @@ function SettlementReviewQueue({
   approvals: SettlementApprovalSummary[];
   loading: boolean;
   onOpenApproval: (id: string) => void;
+  onRequestSettlementAction: (action: SettlementQueueAction, id: string) => void;
   activeApprovalId: string;
   selectedApprovalDetail: SettlementApproval | null;
+  pendingSettlementAction: SettlementQueueAction | null;
   vendorId: string;
   vendorName: string;
   onVendorIdChange: (value: string) => void;
@@ -1378,6 +1383,18 @@ function SettlementReviewQueue({
   const selectedMetrics = selectedQueueDetail
     ? getSettlementDecisionMetrics(safeArray(selectedQueueDetail.lines), selectedQueueDetail.netPayableMinor)
     : null;
+  const selectedPanelAction = selectedQueueApproval
+    ? getSettlementReviewPanelAction(selectedQueueApproval, selectedQueueDetail)
+    : 'View';
+  const canApproveSelectedSettlement = Boolean(
+    selectedQueueApproval &&
+    selectedQueueApproval.status === 'draft' &&
+    getSettlementReviewNextAction(selectedQueueApproval) === 'Approve',
+  );
+  const canCancelSelectedSettlement = Boolean(
+    selectedQueueApproval &&
+    selectedQueueApproval.status !== 'cancelled',
+  );
   const workflowCounts = SETTLEMENT_REVIEW_WORKFLOW_TABS.reduce<Record<SettlementReviewWorkflowTab, number>>((counts, tab) => {
     counts[tab.id] = visibleApprovals.filter((item) => matchesSettlementWorkflowTab(item, tab.id)).length;
     return counts;
@@ -1506,7 +1523,33 @@ function SettlementReviewQueue({
                   </section>
                 ) : null}
                 <MetadataGroup title="Next Action">
-                  <MetadataRow label="Action" value={getSettlementReviewPanelAction(selectedQueueApproval, selectedQueueDetail)} />
+                  <MetadataRow label="Action" value={selectedPanelAction} />
+                  {canApproveSelectedSettlement || canCancelSelectedSettlement ? (
+                    <div className="settlement-panel-actions">
+                      {canApproveSelectedSettlement ? (
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          onClick={() => onRequestSettlementAction('approve', selectedQueueApproval.id)}
+                          disabled={pendingSettlementAction !== null}
+                        >
+                          Approve Settlement
+                        </button>
+                      ) : null}
+                      {canCancelSelectedSettlement ? (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          onClick={() => onRequestSettlementAction('cancel', selectedQueueApproval.id)}
+                          disabled={pendingSettlementAction !== null}
+                        >
+                          Cancel Settlement
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <MetadataRow label="Available action" value="No action available" />
+                  )}
                 </MetadataGroup>
                 <MetadataGroup title="Payment Impact">
                   <MetadataRow
@@ -1541,6 +1584,60 @@ function SettlementReviewQueue({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function SettlementActionConfirmationDialog({
+  action,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  action: { type: SettlementQueueAction; approvalId: string };
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isApprove = action.type === 'approve';
+  const title = isApprove ? 'Approve Settlement' : 'Cancel Settlement';
+  const description = isApprove
+    ? 'This will approve the settlement for vendor payment review.'
+    : 'This will cancel the settlement approval. Active refund adjustment applications may be reversed by the backend.';
+
+  return (
+    <div className="support-modal-backdrop" role="presentation">
+      <section className="support-modal" role="dialog" aria-modal="true" aria-labelledby="settlement-action-confirmation-title">
+        <div className="support-modal-header">
+          <div>
+            <p className="eyebrow">Settlement Review</p>
+            <h2 id="settlement-action-confirmation-title">{title}</h2>
+            <p>{description}</p>
+          </div>
+          <button
+            type="button"
+            className="support-modal-close"
+            onClick={onCancel}
+            aria-label="Close settlement action confirmation"
+            disabled={busy}
+          >
+            x
+          </button>
+        </div>
+        <div className="support-modal-actions">
+          <button type="button" className="button button-secondary" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={isApprove ? 'button button-primary' : 'button button-danger'}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {title}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1799,6 +1896,10 @@ export function AdminSettlementApprovalsPage() {
   const [settlementQueueStatusFilter, setSettlementQueueStatusFilter] = useState<SettlementStatusFilter>('all');
   const [settlementQueuePeriodFilter, setSettlementQueuePeriodFilter] = useState('all');
   const [settlementHighValueOnly, setSettlementHighValueOnly] = useState(false);
+  const [settlementActionConfirmation, setSettlementActionConfirmation] = useState<{
+    type: SettlementQueueAction;
+    approvalId: string;
+  } | null>(null);
   const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
   const [salesInvoiceSyncConfirmations, setSalesInvoiceSyncConfirmations] = useState<Record<string, boolean>>({});
 
@@ -2381,6 +2482,60 @@ export function AdminSettlementApprovalsPage() {
     }
   }
 
+  async function refetchSettlementApprovalState(nextApproval: SettlementApproval) {
+    const nextVendorId = nextApproval.vendorId || vendorId.trim();
+    if (nextVendorId) {
+      setRecentApprovalsLoading(true);
+      try {
+        const response = await listSettlementApprovals(nextVendorId);
+        setRecentApprovals(safeArray(response?.approvals));
+      } catch (requestError) {
+        setError(getErrorMessage(requestError));
+      } finally {
+        setRecentApprovalsLoading(false);
+      }
+    }
+
+    try {
+      const refreshedApproval = await getSettlementApproval(nextApproval.id);
+      setApproval(refreshedApproval);
+      rememberApprovalSummary(refreshedApproval);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    }
+  }
+
+  function handleRequestSettlementAction(action: SettlementQueueAction, approvalIdToActOn: string) {
+    setApprovalId(approvalIdToActOn);
+    setSettlementActionConfirmation({
+      type: action,
+      approvalId: approvalIdToActOn,
+    });
+  }
+
+  async function handleConfirmSettlementAction() {
+    if (!settlementActionConfirmation) {
+      return;
+    }
+
+    const { type, approvalId: approvalIdToActOn } = settlementActionConfirmation;
+    const result = await runAction(
+      type,
+      () => type === 'approve'
+        ? approveSettlementApproval(approvalIdToActOn)
+        : cancelSettlementApproval(approvalIdToActOn),
+      type === 'approve' ? 'Settlement approved.' : 'Settlement cancelled.',
+    );
+
+    if (result) {
+      setApprovalId(result.id);
+      setApproval(result);
+      rememberApprovalSummary(result);
+      await refetchSettlementApprovalState(result);
+      setSettlementActionConfirmation(null);
+    }
+  }
+
   async function loadCommissionInvoiceRecordsForApproval(
     id: string,
     options: {
@@ -2731,6 +2886,11 @@ export function AdminSettlementApprovalsPage() {
         loading={recentApprovalsLoading}
         activeApprovalId={selectedApprovalId}
         selectedApprovalDetail={approval}
+        pendingSettlementAction={
+          busyAction === 'approve' || busyAction === 'cancel'
+            ? busyAction
+            : null
+        }
         vendorId={vendorId}
         vendorName={appReadiness.currentVendor.vendorName}
         onVendorIdChange={setVendorId}
@@ -2745,7 +2905,17 @@ export function AdminSettlementApprovalsPage() {
         highValueOnly={settlementHighValueOnly}
         onHighValueOnlyChange={setSettlementHighValueOnly}
         onOpenApproval={(id) => void handleOpenRecentApproval(id)}
+        onRequestSettlementAction={handleRequestSettlementAction}
       />
+
+      {settlementActionConfirmation ? (
+        <SettlementActionConfirmationDialog
+          action={settlementActionConfirmation}
+          busy={busyAction === 'approve' || busyAction === 'cancel'}
+          onCancel={() => setSettlementActionConfirmation(null)}
+          onConfirm={() => void handleConfirmSettlementAction()}
+        />
+      ) : null}
 
       {showSettlementDetailTools ? (
         <>

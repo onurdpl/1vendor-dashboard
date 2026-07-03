@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import { AdminSettlementApprovalsPage } from './AdminSettlementApprovalsPage';
 import {
+  approveSettlementApproval,
+  cancelSettlementApproval,
   getDatabaseHealth,
   getSettlementApproval,
   listSettlementApprovals,
@@ -43,6 +45,8 @@ const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
+const approveSettlementApprovalMock = vi.mocked(approveSettlementApproval);
+const cancelSettlementApprovalMock = vi.mocked(cancelSettlementApproval);
 const rawSettlementApprovalId = '11111111-1111-1111-1111-111111111111';
 
 const settlementLine: SettlementApprovalLine = {
@@ -129,6 +133,20 @@ const selectedDraftRefundApproval: SettlementApproval = {
   lines: [settlementLine, refundSettlementLine],
 };
 
+const approvedDraftRefundApproval: SettlementApproval = {
+  ...selectedDraftRefundApproval,
+  status: 'approved',
+  approvedBy: 'admin-user',
+  approvedAt: '2026-06-10T13:00:00.000Z',
+};
+
+const cancelledDraftRefundApproval: SettlementApproval = {
+  ...selectedDraftRefundApproval,
+  status: 'cancelled',
+  cancelledBy: 'admin-user',
+  cancelledAt: '2026-06-10T13:30:00.000Z',
+};
+
 const recentApprovalsResponse: SettlementApprovalListResponse = {
   ok: true,
   writesPerformed: false,
@@ -159,6 +177,31 @@ const recentApprovalsResponse: SettlementApprovalListResponse = {
   ],
 };
 
+const approvalsAfterApproveResponse: SettlementApprovalListResponse = {
+  ...recentApprovalsResponse,
+  approvals: recentApprovalsResponse.approvals.map((approval) =>
+    approval.id === selectedDraftRefundApproval.id
+      ? {
+          ...approval,
+          status: 'approved',
+          approvedAt: approvedDraftRefundApproval.approvedAt,
+        }
+      : approval,
+  ),
+};
+
+const approvalsAfterCancelResponse: SettlementApprovalListResponse = {
+  ...recentApprovalsResponse,
+  approvals: recentApprovalsResponse.approvals.map((approval) =>
+    approval.id === selectedDraftRefundApproval.id
+      ? {
+          ...approval,
+          status: 'cancelled',
+        }
+      : approval,
+  ),
+};
+
 function getStyleBlock(styles: string, selector: string) {
   const start = styles.indexOf(selector);
   const end = styles.indexOf('}', start);
@@ -171,6 +214,18 @@ function renderPage() {
       <AdminSettlementApprovalsPage />
     </MemoryRouter>,
   );
+}
+
+function getQueueRows(queue: HTMLElement) {
+  return within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+}
+
+function getDraftSettlementRow(queue: HTMLElement) {
+  const row = getQueueRows(queue).find((element) => within(element).queryByText('Gross TRY 7,598.00'));
+  if (!row) {
+    throw new Error('Draft settlement row was not found.');
+  }
+  return row;
 }
 
 describe('Settlement Review queue cleanup', () => {
@@ -382,6 +437,154 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(panel).getByText('Refund review')).toBeInTheDocument();
     expect(within(panel).getByText('Linked refund activity')).toBeInTheDocument();
     expect(within(panel).getByText('Investigate')).toBeInTheDocument();
+  });
+
+  it('shows only backend-supported settlement actions in the right panel', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(within(queue).queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeInTheDocument();
+
+    await user.click(getDraftSettlementRow(queue));
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(within(queue).getByRole('button', { name: 'Approve Settlement' })).toBeInTheDocument();
+    expect(within(queue).getByRole('button', { name: 'Cancel Settlement' })).toBeInTheDocument();
+    expect(within(queue).queryByText('Reject')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Return to Review')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Mark Paid')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Apply Refund')).not.toBeInTheDocument();
+  });
+
+  it('confirms and executes approve settlement with list and detail refetch', async () => {
+    const user = userEvent.setup();
+    listSettlementApprovalsMock
+      .mockResolvedValueOnce(recentApprovalsResponse)
+      .mockResolvedValueOnce(approvalsAfterApproveResponse);
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockResolvedValueOnce(approvedDraftRefundApproval);
+    approveSettlementApprovalMock.mockResolvedValue(approvedDraftRefundApproval);
+
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Approve Settlement' });
+    expect(dialog).toHaveTextContent('This will approve the settlement for vendor payment review.');
+    await user.click(within(dialog).getByRole('button', { name: 'Approve Settlement' }));
+
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Settlement approved.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).queryByRole('button', { name: 'Approve Settlement' })).not.toBeInTheDocument();
+  });
+
+  it('shows approve failures safely without closing the confirmation', async () => {
+    const user = userEvent.setup();
+    approveSettlementApprovalMock.mockRejectedValue(new Error('Settlement approval could not be approved.'));
+
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await user.click(getDraftSettlementRow(queue));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Approve Settlement' });
+    await user.click(within(dialog).getByRole('button', { name: 'Approve Settlement' }));
+
+    await waitFor(() => expect(approveSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    expect(screen.getByText('Settlement approval could not be approved.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Approve Settlement' })).toBeInTheDocument();
+  });
+
+  it('confirms and executes cancel settlement with list and detail refetch', async () => {
+    const user = userEvent.setup();
+    listSettlementApprovalsMock
+      .mockResolvedValueOnce(recentApprovalsResponse)
+      .mockResolvedValueOnce(approvalsAfterCancelResponse);
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockResolvedValueOnce(cancelledDraftRefundApproval);
+    cancelSettlementApprovalMock.mockResolvedValue(cancelledDraftRefundApproval);
+
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Cancel Settlement' });
+    expect(dialog).toHaveTextContent('This will cancel the settlement approval. Active refund adjustment applications may be reversed by the backend.');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel Settlement' }));
+
+    await waitFor(() => expect(cancelSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Settlement cancelled.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Cancel Settlement' })).not.toBeInTheDocument();
+    expect(within(queue).getByText('No action available')).toBeInTheDocument();
+  });
+
+  it('shows cancel failures safely without closing the confirmation', async () => {
+    const user = userEvent.setup();
+    cancelSettlementApprovalMock.mockRejectedValue(new Error('Settlement approval cannot be cancelled because an active commission invoice record exists.'));
+
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await user.click(within(queue).getByRole('button', { name: 'Cancel Settlement' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Cancel Settlement' });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel Settlement' }));
+
+    await waitFor(() => expect(cancelSettlementApprovalMock).toHaveBeenCalledWith(rawSettlementApprovalId));
+    expect(screen.getByText('Settlement approval cannot be cancelled because an active commission invoice record exists.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Cancel Settlement' })).toBeInTheDocument();
+  });
+
+  it('disables settlement action buttons while a mutation is pending', async () => {
+    const user = userEvent.setup();
+    let resolveApprove: (value: SettlementApproval) => void = () => undefined;
+    approveSettlementApprovalMock.mockReturnValue(new Promise<SettlementApproval>((resolve) => {
+      resolveApprove = resolve;
+    }));
+    listSettlementApprovalsMock
+      .mockResolvedValueOnce(recentApprovalsResponse)
+      .mockResolvedValueOnce(approvalsAfterApproveResponse);
+    getSettlementApprovalMock
+      .mockResolvedValueOnce(selectedDraftRefundApproval)
+      .mockResolvedValueOnce(approvedDraftRefundApproval);
+
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    await user.click(getDraftSettlementRow(queue));
+    await user.click(within(queue).getByRole('button', { name: 'Approve Settlement' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Approve Settlement' });
+    const confirmButton = within(dialog).getByRole('button', { name: 'Approve Settlement' });
+    const cancelButton = within(dialog).getByRole('button', { name: 'Cancel' });
+    await user.click(confirmButton);
+
+    await waitFor(() => expect(confirmButton).toBeDisabled());
+    expect(cancelButton).toBeDisabled();
+
+    resolveApprove(approvedDraftRefundApproval);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Approve Settlement' })).not.toBeInTheDocument());
   });
 
   it('uses stable settlement ids for queue row keys', () => {
