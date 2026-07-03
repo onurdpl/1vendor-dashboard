@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
-  KPIStatCard,
   MetadataGroup,
   MetadataRow,
+  OperationalTable,
+  OperationalTableRow,
   SectionErrorRetry,
-  SideDetailPanel,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import {
@@ -24,15 +24,39 @@ import {
 import { formatCurrency, formatDateTime, safeStatusLabel } from '../services/real/formatting';
 
 const STATE_LABELS: Record<SettlementScheduleState, string> = {
-  READY: 'Ready',
-  NOT_DUE: 'Not due',
-  AUTO_DRAFT_DISABLED: 'Auto draft off',
-  NO_ELIGIBLE_ROWS: 'No eligible rows',
-  CONFIG_MISSING: 'Missing config',
+  READY: 'Ready for Draft',
+  NOT_DUE: 'Not Due',
+  AUTO_DRAFT_DISABLED: 'Blocked',
+  NO_ELIGIBLE_ROWS: 'Blocked',
+  CONFIG_MISSING: 'Blocked',
   BLOCKED: 'Blocked',
-  DRAFT_EXISTS: 'Draft exists',
-  SETTLEMENT_EXISTS: 'Settlement already processed',
+  DRAFT_EXISTS: 'Already Drafted',
+  SETTLEMENT_EXISTS: 'Already Drafted',
 };
+
+type WorkflowTab = 'all' | 'due_today' | 'ready_for_draft' | 'blocked' | 'already_drafted' | 'not_due';
+type StatusFilter = 'all' | WorkflowTab;
+type ScheduleIssue = 'Refund' | 'Blocker' | 'No rows' | 'Schedule mismatch' | 'Ready';
+type ScheduleNextAction = 'Preview' | 'Create Draft' | 'Investigate' | 'Waiting' | 'No Action Required';
+
+const HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR = 100000;
+const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'due_today', label: 'Due Today' },
+  { id: 'ready_for_draft', label: 'Ready for Draft' },
+  { id: 'blocked', label: 'Blocked' },
+  { id: 'already_drafted', label: 'Already Drafted' },
+  { id: 'not_due', label: 'Not Due' },
+];
+
+const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'due_today', label: 'Due Today' },
+  { value: 'ready_for_draft', label: 'Ready for Draft' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'already_drafted', label: 'Already Drafted' },
+  { value: 'not_due', label: 'Not Due' },
+];
 
 const WEEKDAY_LABELS: Record<string, string> = {
   MONDAY: 'Monday',
@@ -62,6 +86,27 @@ function getStateTone(state: SettlementScheduleState): 'success' | 'attention' |
   return 'warning';
 }
 
+function isBlockedScheduleState(state: SettlementScheduleState) {
+  return ['AUTO_DRAFT_DISABLED', 'NO_ELIGIBLE_ROWS', 'BLOCKED', 'CONFIG_MISSING'].includes(state);
+}
+
+function isAlreadyDraftedState(state: SettlementScheduleState) {
+  return state === 'DRAFT_EXISTS' || state === 'SETTLEMENT_EXISTS';
+}
+
+function matchesWorkflow(vendor: SettlementScheduleDryRunVendor, workflow: WorkflowTab) {
+  if (workflow === 'all') return true;
+  if (workflow === 'due_today') return vendor.due;
+  if (workflow === 'ready_for_draft') return vendor.state === 'READY';
+  if (workflow === 'blocked') return isBlockedScheduleState(vendor.state);
+  if (workflow === 'already_drafted') return isAlreadyDraftedState(vendor.state);
+  return vendor.state === 'NOT_DUE';
+}
+
+function matchesStatusFilter(vendor: SettlementScheduleDryRunVendor, statusFilter: StatusFilter) {
+  return statusFilter === 'all' || matchesWorkflow(vendor, statusFilter);
+}
+
 function getOpenSettlementHref(approvalId: string) {
   return `/admin/finance/settlement-approvals?approvalId=${encodeURIComponent(approvalId)}`;
 }
@@ -78,6 +123,71 @@ function getScheduleSummary(vendor: SettlementScheduleDryRunVendor) {
 
 function getVendorBlockers(vendor: SettlementScheduleDryRunVendor) {
   return [vendor.blockedReason, ...vendor.warnings].filter((item): item is string => Boolean(item));
+}
+
+function getScheduleIssues(vendor: SettlementScheduleDryRunVendor): ScheduleIssue[] {
+  const issues: ScheduleIssue[] = [];
+  const blockers = getVendorBlockers(vendor);
+  if (vendor.pendingRefundAdjustmentCount > 0) {
+    issues.push('Refund');
+  }
+  if (blockers.length || isBlockedScheduleState(vendor.state)) {
+    issues.push('Blocker');
+  }
+  if (vendor.state === 'NO_ELIGIBLE_ROWS' || vendor.eligibleLineCount === 0) {
+    issues.push('No rows');
+  }
+  if (vendor.state === 'NOT_DUE') {
+    issues.push('Schedule mismatch');
+  }
+  return issues.length ? Array.from(new Set(issues)) : ['Ready'];
+}
+
+function getScheduleIssueTone(issue: ScheduleIssue) {
+  if (issue === 'Ready') return 'success' as const;
+  if (issue === 'Refund') return 'attention' as const;
+  if (issue === 'Blocker' || issue === 'No rows') return 'warning' as const;
+  return 'neutral' as const;
+}
+
+function getScheduleNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
+  if (vendor.state === 'READY') return 'Create Draft';
+  if (isAlreadyDraftedState(vendor.state)) return 'No Action Required';
+  if (vendor.state === 'NOT_DUE') return 'Waiting';
+  if (isBlockedScheduleState(vendor.state)) return 'Investigate';
+  return 'Preview';
+}
+
+function getPanelNextAction(vendor: SettlementScheduleDryRunVendor) {
+  if (vendor.state === 'NOT_DUE') {
+    return 'Preview Schedule';
+  }
+  return getScheduleNextAction(vendor);
+}
+
+function getWaitingReason(vendor: SettlementScheduleDryRunVendor) {
+  if (vendor.state === 'NOT_DUE') {
+    return 'Not due for this run date';
+  }
+  if (vendor.state === 'DRAFT_EXISTS') {
+    return 'Existing draft already exists';
+  }
+  if (vendor.state === 'SETTLEMENT_EXISTS') {
+    return 'Existing settlement already exists';
+  }
+  if (vendor.state === 'NO_ELIGIBLE_ROWS') {
+    return 'No eligible rows';
+  }
+  if (vendor.pendingRefundAdjustmentCount > 0 && !vendor.canCreateDraft) {
+    return 'Refund adjustment pending';
+  }
+  if (getVendorBlockers(vendor).length) {
+    return getVendorBlockers(vendor)[0];
+  }
+  if (isBlockedScheduleState(vendor.state)) {
+    return 'Schedule mismatch';
+  }
+  return null;
 }
 
 function getAutomationStatusCopy(jobStatus: SettlementScheduleAutoDraftJobStatusResponse | null) {
@@ -190,6 +300,9 @@ export function AdminScheduledSettlementsPage() {
   const [jobRunOpen, setJobRunOpen] = useState(false);
   const [jobRunError, setJobRunError] = useState<string | null>(null);
   const [jobResult, setJobResult] = useState<SettlementScheduleAutoDraftJobResponse | null>(null);
+  const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [highValueOnly, setHighValueOnly] = useState(false);
 
   async function loadDryRun(nextRunDate = runDate, nextVendorFilter = vendorFilter) {
     setLoading(true);
@@ -229,13 +342,20 @@ export function AdminScheduledSettlementsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const filteredVendors = useMemo(() => {
+    const vendors = dryRun?.vendors ?? [];
+    return vendors.filter((vendor) =>
+      matchesWorkflow(vendor, workflowTab) &&
+      matchesStatusFilter(vendor, statusFilter) &&
+      (!highValueOnly || Math.abs(vendor.netPayableMinor ?? 0) >= HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR),
+    );
+  }, [dryRun?.vendors, highValueOnly, statusFilter, workflowTab]);
+
   const selectedVendor = useMemo(
-    () => dryRun?.vendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? null,
-    [dryRun?.vendors, selectedVendorId],
+    () => filteredVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? filteredVendors[0] ?? null,
+    [filteredVendors, selectedVendorId],
   );
   const readyCount = dryRun?.vendors.filter((vendor) => vendor.state === 'READY').length ?? 0;
-  const draftExistsCount = dryRun?.vendors.filter((vendor) => vendor.state === 'DRAFT_EXISTS').length ?? 0;
-  const settlementExistsCount = dryRun?.vendors.filter((vendor) => vendor.state === 'SETTLEMENT_EXISTS').length ?? 0;
 
   async function handleCreateDrafts() {
     setCreating(true);
@@ -287,8 +407,29 @@ export function AdminScheduledSettlementsPage() {
 
   const jobModeLabel = jobStatus?.mode === 'WRITE' ? 'Write mode' : 'Dry-run mode';
   const jobEnabled = jobStatus?.enabled === true;
+  const workflowCounts = useMemo(() => {
+    const vendors = dryRun?.vendors ?? [];
+    return WORKFLOW_TABS.reduce<Record<WorkflowTab, number>>((counts, tab) => {
+      counts[tab.id] = vendors.filter((vendor) => matchesWorkflow(vendor, tab.id)).length;
+      return counts;
+    }, {
+      all: vendors.length,
+      due_today: 0,
+      ready_for_draft: 0,
+      blocked: 0,
+      already_drafted: 0,
+      not_due: 0,
+    });
+  }, [dryRun?.vendors]);
   const selectedState = selectedVendor?.state ?? null;
   const selectedBlockers = selectedVendor ? getVendorBlockers(selectedVendor) : [];
+  const selectedWaitingReason = selectedVendor ? getWaitingReason(selectedVendor) : null;
+  const selectedCreatedDraft = selectedVendor
+    ? createResult?.createdDrafts.find((draft) => draft.vendorId === selectedVendor.vendorId) ?? null
+    : null;
+  const lastRunLabel = jobStatus?.lastRun
+    ? `${formatDateTime(jobStatus.lastRun.finishedAt ?? jobStatus.lastRun.startedAt)} · ${safeStatusLabel(jobStatus.lastRun.status)}`
+    : 'No timeline event yet';
 
   return (
     <section className="op-page scheduled-settlements-page">
@@ -296,171 +437,255 @@ export function AdminScheduledSettlementsPage() {
         <div>
           <p className="eyebrow">Finance operations</p>
           <h2>Scheduled Settlements</h2>
-          <p className="page-description">
-            Review due vendors, blockers, refund adjustment visibility, and create scheduled draft settlements from the existing schedule engine.
-          </p>
+          <p className="page-description">Review vendors due for scheduled settlement draft preparation.</p>
         </div>
         <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || readyCount === 0}>
           Create Scheduled Drafts
         </button>
       </div>
 
-      <section className="scheduled-settlements-controls" aria-label="Scheduled settlement filters">
-        <label>
-          <span>Run date</span>
-          <input type="date" value={runDate} onChange={(event) => setRunDate(event.target.value)} />
-        </label>
-        <label>
-          <span>Vendor filter</span>
-          <input
-            type="text"
-            placeholder="Optional vendor id"
-            value={vendorFilter}
-            onChange={(event) => setVendorFilter(event.target.value)}
-          />
-        </label>
-        <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
-          {loading ? 'Running dry run...' : 'Run Dry Run'}
-        </button>
-      </section>
-
       {error ? <SectionErrorRetry title="Scheduled settlement dry run failed" description={error} onRetry={() => void loadDryRun()} /> : null}
       {createError ? <SectionErrorRetry title="Scheduled draft creation failed" description={createError} /> : null}
       {jobStatusError ? <SectionErrorRetry title="Scheduled auto draft job status failed" description={jobStatusError} onRetry={() => void loadJobStatus()} /> : null}
       {jobRunError ? <SectionErrorRetry title="Scheduled auto draft job failed" description={jobRunError} /> : null}
 
-      <section className="scheduled-settlements-card scheduled-auto-draft-job scheduled-command-card" aria-label="Scheduled auto draft job">
-        <div className="settlement-state-heading">
-          <div>
-            <p className="eyebrow">Automation</p>
-            <h3>Scheduled Auto Draft Job</h3>
-            <p className="page-description">
-              Daily draft creation guardrail for vendors that are due and ready.
-            </p>
-          </div>
-          <div className="scheduled-job-badges">
-            <StatusBadge tone={jobEnabled ? 'success' : 'attention'}>{jobEnabled ? 'Enabled' : 'Disabled'}</StatusBadge>
-            <StatusBadge tone={jobStatus?.mode === 'WRITE' ? 'warning' : 'info'}>{jobModeLabel}</StatusBadge>
-          </div>
+      <section className="settlement-review-queue scheduled-settlements-queue" aria-label="Scheduled settlement queue">
+        <div className="orders-workflow-tabs settlement-review-tabs scheduled-settlements-tabs" aria-label="Scheduled settlement workflow tabs">
+          {WORKFLOW_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={workflowTab === tab.id ? 'is-active' : undefined}
+              onClick={() => setWorkflowTab(tab.id)}
+            >
+              <span>{tab.label}</span>
+              <strong>{workflowCounts[tab.id]}</strong>
+            </button>
+          ))}
         </div>
-        <div className="scheduled-job-grid">
-          <MetadataRow label="Run date" value={runDate} />
-          <MetadataRow label="Writes" value={jobStatus?.dryRun === false ? 'Allowed after confirmation' : 'Disabled by dry-run mode'} />
-          <MetadataRow
-            label="Last run"
-            value={jobStatus?.lastRun ? `${jobStatus.lastRun.runDate} · ${safeStatusLabel(jobStatus.lastRun.status)}` : 'No run recorded'}
-          />
-          <MetadataRow label="Last created" value={jobStatus?.lastRun ? jobStatus.lastRun.createdDraftCount : 0} />
-        </div>
-        <p className="scheduled-job-copy">{getAutomationStatusCopy(jobStatus)}</p>
-        <div className="scheduled-job-actions">
-          <button type="button" className="button button-primary" onClick={handleAutoDraftJobClick} disabled={!jobEnabled || jobRunning}>
-            {jobRunning ? 'Running job...' : 'Run Auto Draft Job'}
+
+        <div className="op-toolbar settlement-review-filters scheduled-settlements-controls" aria-label="Scheduled settlement filters">
+          <label>
+            <span>Run date</span>
+            <input type="date" value={runDate} onChange={(event) => setRunDate(event.target.value)} />
+          </label>
+          <label>
+            <span>Vendor</span>
+            <input
+              type="text"
+              placeholder="Optional vendor id"
+              value={vendorFilter}
+              onChange={(event) => setVendorFilter(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Status</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="op-checkbox-row settlement-review-high-value">
+            <input type="checkbox" checked={highValueOnly} onChange={(event) => setHighValueOnly(event.target.checked)} />
+            <span>High Value only</span>
+          </label>
+          <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
+            {loading ? 'Previewing...' : 'Preview Schedule'}
           </button>
         </div>
-      </section>
 
-      {dryRun ? (
-        <>
-          <div className="op-kpi-row scheduled-settlements-summary" aria-label="Scheduled settlement summary">
-            <KPIStatCard label="Vendors checked" value={dryRun.summary.vendorsChecked} detail="Schedule profiles inspected" />
-            <KPIStatCard label="Due vendors" value={dryRun.summary.dueVendors} detail="Run date matches schedule" tone="info" />
-            <KPIStatCard label="Ready for draft" value={readyCount} detail="Can create draft now" tone="success" />
-            <KPIStatCard label="Draft exists" value={draftExistsCount} detail="No duplicate draft" tone="info" />
-            <KPIStatCard label="Already processed" value={settlementExistsCount} detail="Approved scheduled cycles" tone="info" />
-            <KPIStatCard label="Eligible rows" value={dryRun.summary.totalEligibleLineCount} detail="Preview eligible rows" />
-            <KPIStatCard label="Estimated net payable" value={formatMinor(dryRun.summary.totalNetPayableMinor)} detail="Before scheduled draft creation" tone="attention" />
-          </div>
+        {dryRun ? (
+          <>
+            <div className="settlement-review-layout scheduled-settlements-workspace">
+              <OperationalTable
+                columns={['Vendor', 'Schedule', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']}
+                className="settlement-review-table scheduled-settlements-table"
+              >
+                {filteredVendors.length ? (
+                  filteredVendors.map((vendor) => {
+                    const schedule = getScheduleSummary(vendor);
+                    const issues = getScheduleIssues(vendor);
+                    return (
+                      <OperationalTableRow key={vendor.vendorId} selected={vendor.vendorId === selectedVendor?.vendorId}>
+                        <span>
+                          <strong>{getVendorName(vendor)}</strong>
+                          <small>{vendor.due ? 'Due for this run date' : 'Not due for this run date'}</small>
+                        </span>
+                        <span>
+                          <strong>{schedule.primary}</strong>
+                          <small>{schedule.secondary}</small>
+                        </span>
+                        <span>
+                          <strong>{formatMinor(vendor.netPayableMinor)}</strong>
+                          <small>{vendor.eligibleLineCount} eligible row{vendor.eligibleLineCount === 1 ? '' : 's'}</small>
+                        </span>
+                        <StatusBadge tone={getStateTone(vendor.state)}>{STATE_LABELS[vendor.state]}</StatusBadge>
+                        <span className="settlement-review-issue-list">
+                          {issues.map((issue) => (
+                            <StatusBadge key={issue} tone={getScheduleIssueTone(issue)}>{issue}</StatusBadge>
+                          ))}
+                        </span>
+                        <strong>{getScheduleNextAction(vendor)}</strong>
+                        <span>
+                          <strong>{dryRun.runDate}</strong>
+                          <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : 'No timeline event yet'}</small>
+                        </span>
+                        <button type="button" className="button button-secondary button-small" onClick={() => setSelectedVendorId(vendor.vendorId)}>
+                          Review
+                        </button>
+                      </OperationalTableRow>
+                    );
+                  })
+                ) : (
+                  <OperationalTableRow>
+                    <span className="scheduled-table-empty">
+                      <strong>No scheduled drafts ready for this run date.</strong>
+                      <small>Try another run date or review vendor schedule settings.</small>
+                    </span>
+                  </OperationalTableRow>
+                )}
+              </OperationalTable>
 
-          <section className="scheduled-settlements-workspace">
-            <div className="scheduled-settlements-main">
-              <div className="scheduled-settlements-card">
+              <aside className="op-side-panel settlement-review-panel scheduled-settlements-panel" aria-label="Scheduled settlement detail panel">
+                {selectedVendor ? (
+                  <>
+                    <div className="op-side-panel-header">
+                      <div>
+                        <p className="eyebrow">Schedule detail</p>
+                        <h3>{getVendorName(selectedVendor)}</h3>
+                      </div>
+                      <StatusBadge tone={selectedState ? getStateTone(selectedState) : 'neutral'}>
+                        {selectedState ? STATE_LABELS[selectedState] : 'Not Due'}
+                      </StatusBadge>
+                    </div>
+                    <MetadataGroup title="Schedule Summary">
+                      <MetadataRow label="Vendor" value={getVendorName(selectedVendor)} />
+                      <MetadataRow label="Frequency" value={getScheduleSummary(selectedVendor).secondary} />
+                      <MetadataRow label="Run Date" value={dryRun.runDate} />
+                      <MetadataRow
+                        label="Eligible Before"
+                        value={formatDateTime(dryRun.periodEnd, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      />
+                      <MetadataRow label="Estimated Net Payable" value={formatMinor(selectedVendor.netPayableMinor)} />
+                      <MetadataRow label="Current Status" value={selectedState ? STATE_LABELS[selectedState] : 'Not Due'} />
+                    </MetadataGroup>
+                    {selectedWaitingReason ? (
+                      <MetadataGroup title="Why is this waiting?">
+                        <MetadataRow label="Reason" value={selectedWaitingReason} />
+                      </MetadataGroup>
+                    ) : null}
+                    <MetadataGroup title="Next Action">
+                      <MetadataRow label="Action" value={getPanelNextAction(selectedVendor)} />
+                    </MetadataGroup>
+                    <MetadataGroup title="Payment Impact">
+                      <MetadataRow label="Estimated net payable" value={formatMinor(selectedVendor.netPayableMinor)} />
+                      <MetadataRow
+                        label="Refund adjustments"
+                        value={
+                          selectedVendor.pendingRefundAdjustmentCount > 0
+                            ? `${selectedVendor.pendingRefundAdjustmentCount} · ${formatMinor(selectedVendor.pendingRefundAdjustmentTotalMinor)}`
+                            : 'No refund adjustment'
+                        }
+                      />
+                      <MetadataRow label="Eligible rows" value={selectedVendor.eligibleLineCount} />
+                    </MetadataGroup>
+                    <MetadataGroup title="Related Records">
+                      <MetadataRow
+                        label="Existing Settlement"
+                        value={
+                          selectedVendor.existingSettlementApprovalId ? (
+                            <Link to={getOpenSettlementHref(selectedVendor.existingSettlementApprovalId)}>Open Settlement</Link>
+                          ) : (
+                            'No existing settlement'
+                          )
+                        }
+                      />
+                      <MetadataRow
+                        label="Refund Adjustments"
+                        value={selectedVendor.pendingRefundAdjustmentCount > 0 ? 'Refund adjustment pending' : 'No refund adjustment'}
+                      />
+                      <MetadataRow label="Vendor" value={getVendorName(selectedVendor)} />
+                    </MetadataGroup>
+                    <section className="op-panel-section">
+                      <h4>Timeline</h4>
+                      <ul className="settlement-review-timeline">
+                        <li><span>Last run</span><strong>{lastRunLabel}</strong></li>
+                        <li>
+                          <span>Last draft created</span>
+                          <strong>{selectedVendor.existingSettlementApprovalId ? 'Existing settlement available' : 'No timeline event yet'}</strong>
+                        </li>
+                        <li><span>Current preview</span><strong>{dryRun.runDate}</strong></li>
+                        <li>
+                          <span>Draft created</span>
+                          <strong>{selectedCreatedDraft ? `Draft created · ${formatMinor(selectedCreatedDraft.netPayableMinor)}` : 'No timeline event yet'}</strong>
+                        </li>
+                      </ul>
+                    </section>
+                  </>
+                ) : (
+                  <EmptyStatePanel title="No scheduled vendor selected" description="Preview a schedule and select a vendor to review the schedule state." />
+                )}
+              </aside>
+            </div>
+
+            <details className="scheduled-settlements-card scheduled-advanced-details" aria-label="Advanced run details">
+              <summary>Advanced run details</summary>
+              <section className="scheduled-advanced-section" aria-label="Scheduled auto draft job">
                 <div className="settlement-state-heading">
                   <div>
-                    <h3>Vendor Schedule</h3>
-                    <p className="page-description">Scan due vendors and open a row for full blocker details.</p>
+                    <p className="eyebrow">Automation</p>
+                    <h3>Scheduled Auto Draft Job</h3>
                   </div>
-                  <StatusBadge tone={readyCount > 0 ? 'success' : 'attention'}>{readyCount} ready</StatusBadge>
+                  <div className="scheduled-job-badges">
+                    <StatusBadge tone={jobEnabled ? 'success' : 'attention'}>{jobEnabled ? 'Enabled' : 'Disabled'}</StatusBadge>
+                    <StatusBadge tone={jobStatus?.mode === 'WRITE' ? 'warning' : 'info'}>{jobModeLabel}</StatusBadge>
+                  </div>
                 </div>
-                {readyCount === 0 ? (
-                  <div className="scheduled-ready-empty" role="status">
-                    <strong>No scheduled drafts ready for this run date.</strong>
-                    <span>Try the next settlement day or review vendor schedule settings.</span>
-                  </div>
-                ) : null}
-                {dryRun.vendors.length ? (
-                  <div className="scheduled-vendor-list" aria-label="Scheduled vendor list">
-                    {dryRun.vendors.map((vendor) => {
-                      const state = vendor.state;
-                      const schedule = getScheduleSummary(vendor);
-                      const blockers = getVendorBlockers(vendor);
-                      return (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          className={`scheduled-vendor-card${selectedVendorId === vendor.vendorId ? ' is-selected' : ''}`}
-                          key={vendor.vendorId}
-                          onClick={() => setSelectedVendorId(vendor.vendorId)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              setSelectedVendorId(vendor.vendorId);
-                            }
-                          }}
-                        >
-                          <span className="scheduled-vendor-card-top">
-                            <span className="scheduled-vendor-identity">
-                              <strong>{getVendorName(vendor)}</strong>
-                              <small>{vendor.vendorId}</small>
-                            </span>
-                            <span className="scheduled-vendor-status">
-                              <StatusBadge tone={getStateTone(state)}>{STATE_LABELS[state]}</StatusBadge>
-                              {blockers.length ? (
-                                <span className="scheduled-blocker-chip">
-                                  {blockers.length} blocker{blockers.length === 1 ? '' : 's'}
-                                </span>
-                              ) : null}
-                              <strong className="scheduled-vendor-net">{formatMinor(vendor.netPayableMinor)}</strong>
-                            </span>
-                          </span>
-                          <span className="scheduled-vendor-card-meta">
-                            <span>{schedule.primary} · {schedule.secondary}</span>
-                            <span>{vendor.schedule.autoSettlementDraftEnabled ? 'Auto draft on' : 'Auto draft off'}</span>
-                            <span>Rows {vendor.eligibleLineCount}</span>
-                            <span>
-                              Refund adjustments {vendor.pendingRefundAdjustmentCount > 0 ? `${vendor.pendingRefundAdjustmentCount} (${formatMinor(vendor.pendingRefundAdjustmentTotalMinor)})` : 'none'}
-                            </span>
-                            <span>{blockers.length ? `${blockers.length} blocker${blockers.length === 1 ? '' : 's'}` : 'No blockers'}</span>
-                          </span>
-                          <span className="scheduled-vendor-card-draft">
-                            {vendor.existingSettlementApprovalId ? (
-                              <Link to={getOpenSettlementHref(vendor.existingSettlementApprovalId)}>Open Settlement</Link>
-                            ) : (
-                              <span>No draft</span>
-                            )}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <EmptyStatePanel title="No vendors returned" description="The dry run did not return any vendor schedule profiles for this filter." />
-                )}
-              </div>
+                <div className="scheduled-job-grid">
+                  <MetadataRow label="Run date" value={runDate} />
+                  <MetadataRow label="Writes" value={jobStatus?.dryRun === false ? 'Allowed after confirmation' : 'Disabled by dry-run mode'} />
+                  <MetadataRow label="Last run" value={lastRunLabel} />
+                  <MetadataRow label="Last created" value={jobStatus?.lastRun ? jobStatus.lastRun.createdDraftCount : 0} />
+                </div>
+                <p className="scheduled-job-copy">{getAutomationStatusCopy(jobStatus)}</p>
+                <div className="scheduled-job-actions">
+                  <button type="button" className="button button-secondary" onClick={handleAutoDraftJobClick} disabled={!jobEnabled || jobRunning}>
+                    {jobRunning ? 'Running job...' : 'Run Auto Draft Job'}
+                  </button>
+                </div>
+              </section>
 
-              <div className="scheduled-settlements-card">
+              <section className="scheduled-advanced-section">
                 <h3>Run Notes</h3>
                 <ul className="scheduled-notes">
                   {dryRun.notes.map((note) => (
                     <li key={note}>{note}</li>
                   ))}
-                  <li>Dry run is read-only: no drafts are created from this view until confirmation.</li>
-                  <li>No approvals, provider invoices, payout execution, or external provider writes are performed by dry run.</li>
+                  <li>Preview Schedule does not create scheduled settlement drafts.</li>
                 </ul>
-              </div>
+              </section>
+
+              {selectedVendor ? (
+                <section className="scheduled-advanced-section">
+                  <h3>Technical blockers</h3>
+                  <MetadataGroup>
+                    <MetadataRow label="Cycle key" value={selectedVendor.scheduledCycleKey} />
+                    <MetadataRow label="Auto draft" value={selectedVendor.schedule.autoSettlementDraftEnabled ? 'Enabled' : 'Disabled'} />
+                    <MetadataRow label="Excluded rows" value={selectedVendor.excludedActiveApprovalRowCount} />
+                  </MetadataGroup>
+                  {selectedBlockers.length ? (
+                    <ul className="scheduled-detail-blockers">
+                      {selectedBlockers.map((blocker) => (
+                        <li key={blocker}>{blocker}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </section>
+              ) : null}
 
               {createResult ? (
-                <div className="scheduled-settlements-card" aria-label="Scheduled draft creation result">
+                <section className="scheduled-advanced-section" aria-label="Scheduled draft creation result">
                   <h3>Draft Creation Result</h3>
                   <div className="scheduled-result-grid">
                     <MetadataRow label="Created" value={createResult.summary.created} />
@@ -486,11 +711,11 @@ export function AdminScheduledSettlementsPage() {
                       ))}
                     </ul>
                   ) : null}
-                </div>
+                </section>
               ) : null}
 
               {jobResult ? (
-                <div className="scheduled-settlements-card" aria-label="Scheduled auto draft job result">
+                <section className="scheduled-advanced-section" aria-label="Scheduled auto draft job result">
                   <h3>Auto Draft Job Result</h3>
                   <div className="scheduled-result-grid">
                     <MetadataRow label="Mode" value={jobResult.mode === 'WRITE' ? 'Write' : 'Dry run'} />
@@ -522,67 +747,14 @@ export function AdminScheduledSettlementsPage() {
                       ))}
                     </ul>
                   ) : null}
-                </div>
+                </section>
               ) : null}
-            </div>
-
-            <SideDetailPanel title={selectedVendor ? getVendorName(selectedVendor) : 'Vendor detail'} eyebrow="Schedule detail">
-              {selectedVendor ? (
-                <>
-                  <div className="scheduled-detail-hero">
-                    <StatusBadge tone={selectedState ? getStateTone(selectedState) : 'neutral'}>
-                      {selectedState ? STATE_LABELS[selectedState] : 'Not selected'}
-                    </StatusBadge>
-                    <strong>{getScheduleSummary(selectedVendor).detail}</strong>
-                    <span>{selectedVendor.schedule.autoSettlementDraftEnabled ? 'Auto draft enabled' : 'Auto draft off'}</span>
-                  </div>
-                  <MetadataGroup title="Eligibility">
-                    <MetadataRow label="Eligible before" value={formatDateTime(dryRun.periodEnd, { month: 'short', day: 'numeric', year: 'numeric' })} />
-                    <MetadataRow label="Eligible rows" value={selectedVendor.eligibleLineCount} />
-                    <MetadataRow label="Estimated net payable" value={formatMinor(selectedVendor.netPayableMinor)} />
-                    <MetadataRow label="Run status" value={selectedState ? STATE_LABELS[selectedState] : 'Unknown'} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Timing">
-                    <MetadataRow label="Run date" value={dryRun.runDate} />
-                    <MetadataRow label="Explanation" value={selectedVendor.dueReason} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Refund adjustments">
-                    <MetadataRow label="Count" value={selectedVendor.pendingRefundAdjustmentCount} />
-                    <MetadataRow label="Amount" value={formatMinor(selectedVendor.pendingRefundAdjustmentTotalMinor)} />
-                    <MetadataRow label="Net after pending adjustments" value={formatMinor(selectedVendor.netAfterPendingRefundAdjustmentsMinor)} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Blockers">
-                    {selectedBlockers.length ? (
-                      <ul className="scheduled-detail-blockers">
-                        {selectedBlockers.map((blocker) => (
-                          <li key={blocker}>{blocker}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <MetadataRow label="Status" value="No blockers" />
-                    )}
-                  </MetadataGroup>
-                  <MetadataGroup title="Existing settlement">
-                    {selectedVendor.existingSettlementApprovalId ? (
-                      <MetadataRow
-                        label="Settlement"
-                        value={<Link to={getOpenSettlementHref(selectedVendor.existingSettlementApprovalId)}>Open Settlement</Link>}
-                      />
-                    ) : (
-                      <MetadataRow label="Settlement" value="None" />
-                    )}
-                    <MetadataRow label="Cycle key" value={selectedVendor.scheduledCycleKey} />
-                  </MetadataGroup>
-                </>
-              ) : (
-                <EmptyStatePanel title="No vendor selected" description="Run a dry run and select a vendor to inspect schedule details." />
-              )}
-            </SideDetailPanel>
-          </section>
-        </>
-      ) : !loading && !error ? (
-        <EmptyStatePanel title="Dry run not loaded" description="Run a dry run to inspect scheduled settlement candidates." />
-      ) : null}
+            </details>
+          </>
+        ) : !loading && !error ? (
+          <EmptyStatePanel title="No schedule preview yet" description="Preview Schedule to review vendors due for scheduled draft preparation." />
+        ) : null}
+      </section>
 
       {createOpen ? (
         <CreateDraftsModal

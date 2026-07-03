@@ -246,12 +246,6 @@ function renderPage() {
   );
 }
 
-function getSummaryCard(summary: HTMLElement, label: string) {
-  const card = within(summary).getByText(label).closest('article');
-  expect(card).not.toBeNull();
-  return card as HTMLElement;
-}
-
 describe('AdminScheduledSettlementsPage', () => {
   afterEach(() => {
     cleanup();
@@ -292,191 +286,101 @@ describe('AdminScheduledSettlementsPage', () => {
     });
   });
 
-  it('loads dry run data and renders summary cards, state labels, blockers, draft links, and refund badges', async () => {
+  it('renders scheduled settlements as an operational queue with workflow tabs, filters, table, and right panel', async () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Scheduled Settlements' })).toBeInTheDocument();
-    const summary = screen.getByLabelText('Scheduled settlement summary');
-    expect(within(summary).getByText('Vendors checked')).toBeInTheDocument();
-    expect(within(summary).getByText('Due vendors')).toBeInTheDocument();
-    expect(within(summary).getByText('Ready for draft')).toBeInTheDocument();
-    expect(within(summary).getByText('Draft exists')).toBeInTheDocument();
-    expect(within(summary).getByText('Already processed')).toBeInTheDocument();
-    expect(within(summary).getByText('Estimated net payable')).toBeInTheDocument();
-    expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('1');
-    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('1');
-    expect(getSummaryCard(summary, 'Already processed')).toHaveTextContent('0');
-    expect(screen.getAllByText('Ready')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('Not due')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('Auto draft off')[0]).toBeInTheDocument();
-    expect(screen.getByText('No eligible rows')).toBeInTheDocument();
+    expect(screen.getByText('Review vendors due for scheduled settlement draft preparation.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Scheduled settlement summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Builder')).not.toBeInTheDocument();
+    expect(screen.queryByText('Current Candidate Preview')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Dry Run' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview Schedule' })).toBeInTheDocument();
 
-    await waitFor(() => expect(screen.getAllByText('Draft exists').length).toBeGreaterThan(1));
-    const vendorList = screen.getByLabelText('Scheduled vendor list');
-    expect(within(vendorList).getAllByText('21 days delay · Weekly · Wednesday')[0]).toBeInTheDocument();
-    expect(within(vendorList).getByText((_, element) =>
-      element?.textContent === 'Refund adjustments 2 (TRY\u00a09,726.54)',
-    )).toBeInTheDocument();
-    expect(screen.getAllByText('1 blocker')[0]).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open Settlement' })).toHaveAttribute(
-      'href',
-      '/admin/finance/settlement-approvals?approvalId=approval-existing-draft',
-    );
+    const tabs = screen.getByLabelText('Scheduled settlement workflow tabs');
+    expect(within(tabs).getByRole('button', { name: /All5/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Due Today4/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Ready for Draft1/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Blocked2/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Already Drafted1/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Not Due1/i })).toBeInTheDocument();
+
+    expect(screen.getByRole('columnheader', { name: 'Vendor' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Schedule' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Amount' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Issues' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Next Action' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Updated' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Review' })).toBeInTheDocument();
+
+    expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Ready for Draft').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Create Draft').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund')).toBeInTheDocument();
+
+    const panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByText('Schedule Summary')).toBeInTheDocument();
+    expect(within(panel).getByText('Next Action')).toBeInTheDocument();
+    expect(within(panel).getByText('Payment Impact')).toBeInTheDocument();
+    expect(within(panel).getByText('Related Records')).toBeInTheDocument();
+    expect(within(panel).getByText('Timeline')).toBeInTheDocument();
   });
 
-  it('keeps ready summary and header count aligned while excluding existing scheduled cycles', async () => {
-    getSettlementScheduleDryRunMock.mockResolvedValue({
-      ...dryRunResponse,
-      summary: {
-        ...dryRunResponse.summary,
-        autoDraftEligibleVendors: 0,
-      },
-      vendors: dryRunResponse.vendors.map((vendor) =>
-        vendor.vendorId === 'yalispor'
-          ? {
-              ...vendor,
-              state: 'SETTLEMENT_EXISTS',
-              canCreateDraft: false,
-              existingSettlementApprovalId: 'approval-yalispor-approved',
-              existingSettlementApprovalStatus: 'approved',
-              blockedReason: 'Scheduled settlement cycle already has an approval.',
-            }
-          : vendor,
-      ),
-    });
-
-    renderPage();
-
-    await waitFor(() => expect(screen.getAllByText('Settlement already processed').length).toBeGreaterThan(0));
-    const summary = screen.getByLabelText('Scheduled settlement summary');
-    expect(getSummaryCard(summary, 'Ready for draft')).toHaveTextContent('0');
-    expect(getSummaryCard(summary, 'Draft exists')).toHaveTextContent('1');
-    expect(getSummaryCard(summary, 'Already processed')).toHaveTextContent('1');
-    expect(screen.getByText('0 ready')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
-    expect(screen.getAllByRole('link', { name: 'Open Settlement' }).some((link) =>
-      link.getAttribute('href') === '/admin/finance/settlement-approvals?approvalId=approval-yalispor-approved',
-    )).toBe(true);
-  });
-
-  it('shows compact blocker chips in the vendor list and full blocker details in the drawer', async () => {
+  it('filters the queue with workflow tabs using existing loaded schedule data', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText('Draft Vendor');
-    const vendorList = screen.getByLabelText('Scheduled vendor list');
-    expect(screen.getAllByText('1 blocker')[0]).toBeInTheDocument();
-    expect(within(vendorList).queryByText('Settlement rows are already locked in an active approval.')).not.toBeInTheDocument();
+    await screen.findAllByText('Yalı Spor');
+    await user.click(screen.getByRole('button', { name: /Blocked2/i }));
+    expect(screen.getAllByText('Disabled Vendor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Empty Vendor').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Yalı Spor')).not.toBeInTheDocument();
 
-    await user.click(screen.getByText('Draft Vendor'));
-    const drawer = screen.getByRole('complementary');
-    expect(within(drawer).getByText('Settlement rows are already locked in an active approval.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Already Drafted1/i }));
+    expect(screen.getAllByText('Draft Vendor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('No Action Required').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: /Not Due1/i }));
+    expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
+    const panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByText('Why is this waiting?')).toBeInTheDocument();
+    expect(within(panel).getAllByText('Not due for this run date')[0]).toBeInTheDocument();
   });
 
-  it('renders scheduled auto draft job status and last run metadata', async () => {
+  it('moves run notes and scheduler diagnostics into a collapsed advanced details area', async () => {
     renderPage();
 
-    const panel = await screen.findByLabelText('Scheduled auto draft job');
-    expect(within(panel).getByText('Enabled')).toBeInTheDocument();
-    expect(within(panel).getByText('Dry-run mode')).toBeInTheDocument();
-    expect(within(panel).getByText('2026-06-17 · Completed')).toBeInTheDocument();
-    expect(within(panel).getByText('Auto draft job is running in dry-run mode. It will preview results but will not create drafts.')).toBeInTheDocument();
+    await screen.findAllByText('Yalı Spor');
+    const advancedDetails = screen.getByLabelText('Advanced run details');
+    expect(advancedDetails).not.toHaveAttribute('open');
+    expect(screen.getByText('Advanced run details')).toBeInTheDocument();
+    expect(within(advancedDetails).getByText('Run Notes')).not.toBeVisible();
+    expect(within(advancedDetails).getByText('Cycle key')).not.toBeVisible();
+    expect(screen.getByText('Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.')).not.toBeVisible();
   });
 
-  it('shows disabled scheduled auto draft job state without exposing a write action', async () => {
-    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
-      ...autoDraftJobStatus,
-      enabled: false,
-      lastRun: null,
-    });
-
-    renderPage();
-
-    const panel = await screen.findByLabelText('Scheduled auto draft job');
-    expect(within(panel).getByText('Disabled')).toBeInTheDocument();
-    expect(within(panel).getByText('Auto draft job is disabled in this environment. Drafts will not be created automatically until the environment gate is enabled.')).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'Run Auto Draft Job' })).toBeDisabled();
-  });
-
-  it('runs scheduled auto draft job in dry-run mode without confirmation modal', async () => {
+  it('keeps scheduled auto draft job behavior reachable from advanced run details', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    const panel = await screen.findByLabelText('Scheduled auto draft job');
-    await user.click(within(panel).getByRole('button', { name: 'Run Auto Draft Job' }));
+    await screen.findAllByText('Yalı Spor');
+    await user.click(screen.getByText('Advanced run details'));
+
+    const advancedDetails = screen.getByLabelText('Advanced run details');
+    const jobPanel = within(advancedDetails).getByLabelText('Scheduled auto draft job');
+    expect(within(jobPanel).getByText('Enabled')).toBeInTheDocument();
+    expect(within(jobPanel).getByText('Dry-run mode')).toBeInTheDocument();
+    await user.click(within(jobPanel).getByRole('button', { name: 'Run Auto Draft Job' }));
 
     await waitFor(() => expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(
       expect.objectContaining({ confirmScheduledSettlementAutoDraftJob: true }),
     ));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(await screen.findByLabelText('Scheduled auto draft job result')).toHaveTextContent('Writes performed');
-    expect(screen.getByText('SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN is true; this response is preview-only.')).toBeInTheDocument();
+    expect(await within(advancedDetails).findByLabelText('Scheduled auto draft job result')).toHaveTextContent('Writes performed');
   });
 
-  it('requires confirmation before running write-mode scheduled auto draft job', async () => {
-    const user = userEvent.setup();
-    getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue({
-      ...autoDraftJobStatus,
-      dryRun: false,
-      mode: 'WRITE',
-      notes: ['Write mode is enabled; confirmation is required before drafts can be created.'],
-    });
-    runSettlementScheduleAutoDraftJobMock.mockResolvedValue({
-      ...autoDraftJobResult,
-      writesPerformed: true,
-      mode: 'WRITE',
-      dryRun: false,
-      summary: {
-        ...autoDraftJobResult.summary,
-        createdDrafts: 1,
-      },
-      vendors: [
-        {
-          ...autoDraftJobResult.vendors[0],
-          state: 'CREATED',
-          createdSettlementApprovalId: 'approval-yalispor-auto',
-        },
-      ],
-      notes: ['Scheduled settlement auto-draft job completed using existing settlement draft creation logic.'],
-    });
-
-    renderPage();
-
-    const panel = await screen.findByLabelText('Scheduled auto draft job');
-    expect(within(panel).getByText('Write mode')).toBeInTheDocument();
-    await user.click(within(panel).getByRole('button', { name: 'Run Auto Draft Job' }));
-
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveTextContent('Create settlement drafts for all READY vendors?');
-    await user.click(within(dialog).getByLabelText('I understand this will create settlement drafts for all READY vendors.'));
-    await user.click(within(dialog).getByRole('button', { name: 'Run Auto Draft Job' }));
-
-    await waitFor(() => expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({ confirmScheduledSettlementAutoDraftJob: true }),
-    ));
-    const resultPanel = await screen.findByLabelText('Scheduled auto draft job result');
-    expect(resultPanel).toHaveTextContent('Created drafts');
-    expect(within(resultPanel).getByRole('link', { name: 'Open Settlement' })).toHaveAttribute(
-      'href',
-      '/admin/finance/settlement-approvals?approvalId=approval-yalispor-auto',
-    );
-  });
-
-  it('renders vendor detail drawer for the selected schedule row', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    const row = await screen.findByText('Sporjinal');
-    await user.click(row);
-
-    const drawer = screen.getByRole('complementary');
-    expect(within(drawer).getByText('Sporjinal')).toBeInTheDocument();
-    expect(within(drawer).getByText('14 days delay · Biweekly on Friday')).toBeInTheDocument();
-    expect(within(drawer).getAllByText('Not due')[0]).toBeInTheDocument();
-    expect(within(drawer).getAllByText('Configured settlement weekday is FRIDAY; run date is WEDNESDAY.')[0]).toBeInTheDocument();
-  });
-
-  it('shows a clean empty state when no vendors are ready for the selected run date', async () => {
+  it('disables draft creation when no vendors are ready for draft', async () => {
     getSettlementScheduleDryRunMock.mockResolvedValue({
       ...dryRunResponse,
       summary: {
@@ -493,15 +397,15 @@ describe('AdminScheduledSettlementsPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('No scheduled drafts ready for this run date.')).toBeInTheDocument();
-    expect(screen.getByText('Try the next settlement day or review vendor schedule settings.')).toBeInTheDocument();
+    await screen.findByText('Empty Vendor');
+    expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
   });
 
   it('requires confirmation before creating drafts and posts to the existing scheduled drafts endpoint client', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findAllByText('Ready');
+    await screen.findAllByText('Ready for Draft');
     await user.click(screen.getByRole('button', { name: 'Create Scheduled Drafts' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Create settlement drafts for all READY vendors?');
 
@@ -511,13 +415,18 @@ describe('AdminScheduledSettlementsPage', () => {
     await waitFor(() => expect(createSettlementScheduleDraftsMock).toHaveBeenCalledWith(
       expect.objectContaining({ confirmAutoSettlementDrafts: true }),
     ));
+    await user.click(screen.getByText('Advanced run details'));
     expect(await screen.findByLabelText('Scheduled draft creation result')).toHaveTextContent('Created');
   });
 
-  it('does not expose Logo interactions from the scheduled settlement workspace', async () => {
+  it('does not expose old queue-builder or accounting evidence controls in the primary queue', async () => {
     renderPage();
 
-    expect((await screen.findAllByText('Vendor Schedule'))[0]).toBeInTheDocument();
+    expect((await screen.findAllByText('Yalı Spor')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Run Notes')).not.toBeVisible();
+    expect(screen.queryByText('Logo Readiness')).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission Invoice Records')).not.toBeInTheDocument();
+    expect(screen.queryByText('Candidate Selected')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /logo/i })).not.toBeInTheDocument();
   });
 });
