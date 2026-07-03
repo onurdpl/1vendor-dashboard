@@ -18,6 +18,60 @@ Its primary purpose is helping finance operators make daily financial decisions.
 
 Accounting evidence exists only to support those decisions.
 
+## Permanent Finance Release Architecture
+
+The permanent Admin Finance release workflow is:
+
+```text
+Shopify Financial Event
+↓
+Automatic Finance Ledger
+↓
+Automatic Refund Adjustment
+↓
+Settlement Review
+↓
+Approve Settlement Snapshot
+↓
+Payment Preparation
+↓
+Final Payment Release Gate
+↓
+Payment Execution
+↓
+Payment History
+```
+
+Rules:
+
+1. Shopify is the financial source of truth.
+2. Refund Adjustments are automatic and read-only operational evidence.
+3. Finance operators do not manually apply, block, cancel, or reopen refund adjustments during normal operations.
+4. Settlement Review approves or cancels settlement snapshots.
+5. Settlement Review is not the final payment release gate.
+6. Payment Preparation is the intended final financial release gate.
+7. Every vendor payment must pass Payment Preparation before money can leave the marketplace.
+
+### Current Backend Status
+
+Already implemented:
+
+- Automatic refund adjustments
+- Settlement approve/cancel
+- Scheduled draft creation
+- Payment batch preparation
+- Payment review transition
+- Payment batch cancellation
+
+Not yet implemented:
+
+- Approved-settlement guard before payout batching
+- Final payment approve lifecycle
+- Payment execution lifecycle
+- Mark-paid lifecycle
+- Detailed payment blocker aggregation
+- Audit/idempotency/rollback policy for final payment actions
+
 ## Primary Question
 
 Every Admin Finance screen must answer:
@@ -86,9 +140,10 @@ Contains:
 
 - Preview
 - Approve
-- Reject
 - Cancel
 - Evidence only when a settlement is selected
+
+Settlement Approvals approves or cancels settlement snapshots only. It is not the final payment release decision.
 
 Settlement Approvals is a secondary workflow and detail workspace. It is not the primary Admin Finance home.
 
@@ -106,7 +161,7 @@ It supports finance operations by identifying vendors that are due for draft set
 
 Purpose:
 
-Payment lifecycle.
+Payment lifecycle and Payment Preparation.
 
 Contains:
 
@@ -115,7 +170,9 @@ Contains:
 - Paid
 - Future payout execution
 
-Future payout execution behavior is UNKNOWN.
+Payment Preparation is the target final financial release gate. Every vendor payment must pass Payment Preparation before money can leave the marketplace.
+
+Final payment approval, execution, mark-paid behavior, and rollback policy are not implemented yet.
 
 ### Evidence & Invoices
 
@@ -173,6 +230,8 @@ The supported decision types are:
 - Ready For Payment
 - Scheduled Draft
 - Commission Invoice Readiness
+
+Refund Review represents read-only operational evidence for automatic Refund Adjustments. It must not imply manual refund adjustment apply, block, cancel, or reopen work during normal operations.
 
 Each decision item must contain:
 
