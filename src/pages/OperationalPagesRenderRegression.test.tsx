@@ -249,7 +249,7 @@ describe('operational route render stability', () => {
   it.each([
     ['/orders/order-unstable-date', /Order #1001|Order detail/],
     ['/returns/return-unstable-date', 'Return request'],
-    ['/finance', 'Finance control center'],
+    ['/finance', 'Track balances, upcoming payments, and recent payment activity.'],
     ['/vendor/profile', 'Demo Vendor A'],
   ])('renders %s with partial records without a route recovery boundary', async (route, heading) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
