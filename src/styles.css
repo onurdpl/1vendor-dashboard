@@ -14290,13 +14290,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .scheduled-settlements-table .op-table-head,
 .scheduled-settlements-table .op-table-row {
   grid-template-columns:
-    minmax(132px, 0.9fr)
-    minmax(128px, 0.86fr)
-    minmax(118px, 0.74fr)
-    minmax(118px, 0.72fr)
-    minmax(134px, 0.86fr)
-    minmax(126px, 0.78fr)
-    minmax(126px, 0.78fr);
+    minmax(0, 0.94fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.78fr)
+    minmax(0, 0.76fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.82fr)
+    minmax(0, 0.82fr);
 }
 
 .scheduled-table-empty {
@@ -14740,24 +14740,27 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .settlement-review-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   gap: var(--space-3);
   align-items: start;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .settlement-review-table {
   min-width: 0;
+  max-width: 100%;
 }
 
 .settlement-review-table .op-table-head,
 .settlement-review-table .op-table-row {
   grid-template-columns:
-    minmax(132px, 0.98fr)
-    minmax(156px, 1.16fr)
-    minmax(132px, 0.92fr)
-    minmax(112px, 0.78fr)
-    minmax(118px, 0.82fr)
-    minmax(108px, 0.74fr);
+    minmax(0, 1fr)
+    minmax(0, 1.12fr)
+    minmax(0, 0.88fr)
+    minmax(0, 0.78fr)
+    minmax(0, 0.82fr)
+    minmax(0, 0.74fr);
 }
 
 .refund-adjustments-tabs {
@@ -14771,13 +14774,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .refund-adjustments-table .op-table-head,
 .refund-adjustments-table .op-table-row {
   grid-template-columns:
-    minmax(124px, 0.82fr)
-    minmax(172px, 1.05fr)
-    minmax(170px, 1fr)
-    minmax(132px, 0.8fr)
-    minmax(126px, 0.74fr)
-    minmax(112px, 0.68fr)
-    minmax(116px, 0.72fr);
+    minmax(0, 0.82fr)
+    minmax(0, 1.06fr)
+    minmax(0, 1fr)
+    minmax(0, 0.8fr)
+    minmax(0, 0.74fr)
+    minmax(0, 0.68fr)
+    minmax(0, 0.72fr);
 }
 
 .payment-preparation-tabs {
@@ -14791,13 +14794,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .payment-preparation-table .op-table-head,
 .payment-preparation-table .op-table-row {
   grid-template-columns:
-    minmax(124px, 0.78fr)
-    minmax(172px, 1.02fr)
-    minmax(152px, 0.9fr)
-    minmax(110px, 0.68fr)
-    minmax(132px, 0.8fr)
-    minmax(112px, 0.66fr)
-    minmax(116px, 0.7fr);
+    minmax(0, 0.78fr)
+    minmax(0, 1.02fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.68fr)
+    minmax(0, 0.8fr)
+    minmax(0, 0.66fr)
+    minmax(0, 0.7fr);
 }
 
 .settlement-review-table .op-table-row small,
@@ -14813,10 +14816,39 @@ summary.provider-response-heading::-webkit-details-marker {
   overflow-wrap: anywhere;
 }
 
+.settlement-review-table .op-table-head > span,
+.settlement-review-table .op-table-row > span,
+.settlement-review-table .op-table-row > .op-badge {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settlement-review-table .op-table-row > span {
+  align-content: center;
+  row-gap: 4px;
+}
+
+.settlement-review-table .op-table-row > .op-badge {
+  justify-self: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .settlement-review-issue-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 5px 6px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settlement-review-issue-list .op-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .settlement-review-panel {

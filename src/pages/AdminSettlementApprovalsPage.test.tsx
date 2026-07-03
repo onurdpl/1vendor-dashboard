@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -115,6 +116,12 @@ const recentApprovalsResponse: SettlementApprovalListResponse = {
   ],
 };
 
+function getStyleBlock(styles: string, selector: string) {
+  const start = styles.indexOf(selector);
+  const end = styles.indexOf('}', start);
+  return start >= 0 && end > start ? styles.slice(start, end + 1) : '';
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/admin/finance/settlement-approvals']}>
@@ -200,6 +207,36 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(queue).queryByText('Approval detail loaded.')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Waiting')).not.toBeInTheDocument();
     expect(within(queue).getAllByText('No Action Required').length).toBeGreaterThan(0);
+  });
+
+  it('keeps admin finance queue cells and badges wrap-safe', () => {
+    const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+    const tableGridSelectors = [
+      '.settlement-review-table .op-table-head',
+      '.scheduled-settlements-table .op-table-head',
+      '.refund-adjustments-table .op-table-head',
+      '.payment-preparation-table .op-table-head',
+    ];
+
+    tableGridSelectors.forEach((selector) => {
+      const block = getStyleBlock(styles, selector);
+      expect(block).toContain('minmax(0,');
+      expect(block).not.toMatch(/minmax\(\d+px/);
+    });
+
+    const layoutBlock = getStyleBlock(styles, '.settlement-review-layout');
+    expect(layoutBlock).toContain('min-width: 0;');
+    expect(layoutBlock).toContain('overflow: hidden;');
+
+    const issueListBlock = getStyleBlock(styles, '.settlement-review-issue-list');
+    expect(issueListBlock).toContain('flex-wrap: wrap;');
+    expect(issueListBlock).toContain('gap: 5px 6px;');
+    expect(issueListBlock).toContain('min-width: 0;');
+
+    const issueBadgeBlock = getStyleBlock(styles, '.settlement-review-issue-list .op-badge');
+    expect(issueBadgeBlock).toContain('white-space: normal;');
+    expect(issueBadgeBlock).toContain('overflow-wrap: anywhere;');
+    expect(issueBadgeBlock).not.toContain('white-space: nowrap;');
   });
 
   it('removes builder, preview, stepper, audit, invoice, history, and advanced details from the queue page', async () => {
