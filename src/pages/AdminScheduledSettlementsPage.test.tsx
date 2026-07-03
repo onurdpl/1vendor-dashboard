@@ -4,25 +4,22 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminScheduledSettlementsPage } from './AdminScheduledSettlementsPage';
 import type {
-  SettlementScheduleAutoDraftJobResponse,
   SettlementScheduleAutoDraftJobStatusResponse,
   SettlementScheduleCreateDraftsResponse,
   SettlementScheduleDryRunResponse,
 } from '../lib/api/contracts';
 
-const getSettlementScheduleDryRunMock = vi.fn<() => Promise<SettlementScheduleDryRunResponse>>();
-const createSettlementScheduleDraftsMock = vi.fn<() => Promise<SettlementScheduleCreateDraftsResponse>>();
+const getSettlementScheduleDryRunMock = vi.fn<(input?: unknown) => Promise<SettlementScheduleDryRunResponse>>();
+const createSettlementScheduleDraftsMock = vi.fn<(input?: unknown) => Promise<SettlementScheduleCreateDraftsResponse>>();
 const getSettlementScheduleAutoDraftJobStatusMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobStatusResponse>>();
-const runSettlementScheduleAutoDraftJobMock = vi.fn<() => Promise<SettlementScheduleAutoDraftJobResponse>>();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
   return {
     ...actual,
-    getSettlementScheduleDryRun: () => getSettlementScheduleDryRunMock(),
+    getSettlementScheduleDryRun: (input: unknown) => getSettlementScheduleDryRunMock(input),
     createSettlementScheduleDrafts: (input: unknown) => createSettlementScheduleDraftsMock(input as never),
     getSettlementScheduleAutoDraftJobStatus: () => getSettlementScheduleAutoDraftJobStatusMock(),
-    runSettlementScheduleAutoDraftJob: (input: unknown) => runSettlementScheduleAutoDraftJobMock(input as never),
   };
 });
 
@@ -204,40 +201,6 @@ const autoDraftJobStatus: SettlementScheduleAutoDraftJobStatusResponse = {
   ],
 };
 
-const autoDraftJobResult: SettlementScheduleAutoDraftJobResponse = {
-  ok: true,
-  writesPerformed: false,
-  runDate: '2026-06-24',
-  mode: 'DRY_RUN',
-  enabled: true,
-  dryRun: true,
-  summary: {
-    vendorsChecked: 5,
-    dueVendors: 4,
-    readyVendors: 1,
-    createdDrafts: 0,
-    skipped: 0,
-    blocked: 0,
-    existingDrafts: 0,
-  },
-  vendors: [
-    {
-      vendorId: 'yalispor',
-      state: 'READY',
-      due: true,
-      autoDraftEnabled: true,
-      eligibleLineCount: 2,
-      pendingRefundAdjustmentCount: 2,
-      estimatedNetPayableMinor: 623036,
-      createdSettlementApprovalId: null,
-      skippedReason: null,
-      blockers: [],
-    },
-  ],
-  notes: ['SETTLEMENT_AUTO_DRAFT_JOB_DRY_RUN is true; this response is preview-only.'],
-  jobRun: null,
-};
-
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -255,10 +218,8 @@ describe('AdminScheduledSettlementsPage', () => {
     getSettlementScheduleDryRunMock.mockReset();
     createSettlementScheduleDraftsMock.mockReset();
     getSettlementScheduleAutoDraftJobStatusMock.mockReset();
-    runSettlementScheduleAutoDraftJobMock.mockReset();
     getSettlementScheduleDryRunMock.mockResolvedValue(dryRunResponse);
     getSettlementScheduleAutoDraftJobStatusMock.mockResolvedValue(autoDraftJobStatus);
-    runSettlementScheduleAutoDraftJobMock.mockResolvedValue(autoDraftJobResult);
     createSettlementScheduleDraftsMock.mockResolvedValue({
       ok: true,
       writesPerformed: true,
@@ -354,7 +315,8 @@ describe('AdminScheduledSettlementsPage', () => {
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
     expect(within(panel).getByText('Current Blocker')).toBeInTheDocument();
     expect(within(panel).getByText('This vendor is not scheduled for the selected settlement run.')).toBeInTheDocument();
-    expect(within(panel).queryByText('Preview Schedule')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Preview Schedule' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Create Scheduled Drafts' })).not.toBeInTheDocument();
   });
 
   it('orders all schedules by operational priority and keeps not due rows informational', async () => {
@@ -458,7 +420,45 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getByText('Phase 4A creates drafts only; approval, Logo invoicing, and payout execution are not automated.')).not.toBeVisible();
   });
 
-  it('keeps scheduled auto draft job behavior reachable from advanced run details', async () => {
+  it('previews the schedule with the dry-run service and shows success feedback', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    getSettlementScheduleDryRunMock.mockClear();
+
+    const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
+    await user.click(within(filterActions).getByRole('button', { name: 'Preview Schedule' }));
+
+    await waitFor(() => expect(getSettlementScheduleDryRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runDate: '2026-07-03', vendorId: null }),
+    ));
+    expect(await screen.findByText('Schedule preview updated.')).toBeInTheDocument();
+  });
+
+  it('disables Preview Schedule while dry-run preview is pending', async () => {
+    const user = userEvent.setup();
+    let resolvePreview: (response: SettlementScheduleDryRunResponse) => void = () => undefined;
+    getSettlementScheduleDryRunMock
+      .mockReset()
+      .mockResolvedValueOnce(dryRunResponse)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolvePreview = resolve;
+      }));
+
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
+    await user.click(within(filterActions).getByRole('button', { name: 'Preview Schedule' }));
+
+    expect(within(filterActions).getByRole('button', { name: 'Previewing...' })).toBeDisabled();
+
+    resolvePreview(dryRunResponse);
+    expect(await screen.findByText('Schedule preview updated.')).toBeInTheDocument();
+  });
+
+  it('does not expose the scheduled auto draft job action in this phase', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -466,16 +466,9 @@ describe('AdminScheduledSettlementsPage', () => {
     await user.click(screen.getByText('Advanced run details'));
 
     const advancedDetails = screen.getByLabelText('Advanced run details');
-    const jobPanel = within(advancedDetails).getByLabelText('Scheduled auto draft job');
-    expect(within(jobPanel).getByText('Enabled')).toBeInTheDocument();
-    expect(within(jobPanel).getByText('Dry-run mode')).toBeInTheDocument();
-    await user.click(within(jobPanel).getByRole('button', { name: 'Run Auto Draft Job' }));
-
-    await waitFor(() => expect(runSettlementScheduleAutoDraftJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({ confirmScheduledSettlementAutoDraftJob: true }),
-    ));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(await within(advancedDetails).findByLabelText('Scheduled auto draft job result')).toHaveTextContent('Writes performed');
+    expect(within(advancedDetails).queryByLabelText('Scheduled auto draft job')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Auto Draft Job' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Scheduled Auto Draft Job')).not.toBeInTheDocument();
   });
 
   it('disables draft creation when no vendors are ready for draft', async () => {
@@ -499,22 +492,58 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getByRole('button', { name: 'Create Scheduled Drafts' })).toBeDisabled();
   });
 
+  it('shows state-based scheduled actions in the right panel', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    let panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByRole('button', { name: 'Create Scheduled Drafts' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Not Due1/i }));
+    panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByRole('button', { name: 'Preview Schedule' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Create Scheduled Drafts' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /In Review1/i }));
+    panel = screen.getByLabelText('Scheduled settlement detail panel');
+    expect(within(panel).getByText('No action available')).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Create Scheduled Drafts' })).not.toBeInTheDocument();
+  });
+
   it('requires confirmation before creating drafts and posts to the existing scheduled drafts endpoint client', async () => {
     const user = userEvent.setup();
     renderPage();
 
     await screen.findAllByText('Ready');
-    await user.click(screen.getByRole('button', { name: 'Create Scheduled Drafts' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Create settlement drafts for all Ready vendors?');
+    const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
+    await user.click(within(filterActions).getByRole('button', { name: 'Create Scheduled Drafts' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Create scheduled drafts for eligible vendors?');
+    expect(screen.getByRole('dialog')).toHaveTextContent('This will create settlement drafts for all eligible vendors in the selected run date.');
 
-    await user.click(screen.getByLabelText('I understand this will create settlement drafts.'));
+    await user.click(screen.getByLabelText('I understand this creates drafts for all eligible vendors in the selected run date.'));
     await user.click(screen.getByRole('button', { name: 'Create drafts' }));
 
     await waitFor(() => expect(createSettlementScheduleDraftsMock).toHaveBeenCalledWith(
       expect.objectContaining({ confirmAutoSettlementDrafts: true }),
     ));
+    expect(await screen.findByText('Scheduled settlement drafts created.')).toBeInTheDocument();
     await user.click(screen.getByText('Advanced run details'));
     expect(await screen.findByLabelText('Scheduled draft creation result')).toHaveTextContent('Created');
+  });
+
+  it('shows backend errors when scheduled draft creation fails', async () => {
+    const user = userEvent.setup();
+    createSettlementScheduleDraftsMock.mockRejectedValueOnce(new Error('Backend refused scheduled draft creation.'));
+    renderPage();
+
+    await screen.findAllByText('Ready');
+    const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
+    await user.click(within(filterActions).getByRole('button', { name: 'Create Scheduled Drafts' }));
+    await user.click(screen.getByLabelText('I understand this creates drafts for all eligible vendors in the selected run date.'));
+    await user.click(screen.getByRole('button', { name: 'Create drafts' }));
+
+    expect(await screen.findByText('Backend refused scheduled draft creation.')).toBeInTheDocument();
   });
 
   it('does not expose old queue-builder or accounting evidence controls in the primary queue', async () => {
