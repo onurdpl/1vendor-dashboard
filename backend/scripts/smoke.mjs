@@ -45,6 +45,7 @@ const backendEnv = {
   ...loadEnvFile(path.join(process.cwd(), '.env')),
   ...process.env,
 };
+const shopifyShopDomain = backendEnv.SHOPIFY_SHOP_DOMAIN || 'demo-shop.myshopify.com';
 const prisma = backendEnv.DATABASE_URL
   ? new PrismaClient({
       datasources: {
@@ -337,6 +338,10 @@ async function runSmoke() {
       SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
       SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
       SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,
+      SHOPIFY_SHOP_DOMAIN: shopifyShopDomain,
+      SHIPPING_PROVIDER: process.env.SHIPPING_PROVIDER || 'kargonomi',
+      KARGONOMI_BASE_URL: process.env.KARGONOMI_BASE_URL || 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: process.env.KARGONOMI_API_TOKEN || 'test-token',
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
       SHOPIFY_MOCK_RETURN_DETAILS: mockReturnDetails,
       SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE: mockOrderFulfillmentState,
@@ -534,7 +539,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': validWebhookHmac,
       'x-shopify-topic': 'orders/create',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
     };
     const uniqueWebhookId = `smoke-valid-${runId}`;
 
@@ -666,7 +671,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': payloadHashWebhookHmac,
       'x-shopify-topic': 'orders/create',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
     };
 
     const noWebhookIdFirstResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
@@ -729,7 +734,7 @@ async function runSmoke() {
         'content-type': 'application/json',
         'x-shopify-hmac-sha256': failingWebhookHmac,
         'x-shopify-topic': 'orders/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-shop-domain': shopifyShopDomain,
         'x-shopify-webhook-id': `smoke-fail-${runId}`,
       },
       body: failingWebhookPayload,
@@ -781,7 +786,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': returnLifecycleHmac,
       'x-shopify-topic': 'returns/request',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
       'x-shopify-webhook-id': `smoke-returns-request-${runId}`,
     };
 
@@ -842,7 +847,7 @@ async function runSmoke() {
         'content-type': 'application/json',
         'x-shopify-hmac-sha256': returnApproveSignature,
         'x-shopify-topic': 'returns/approve',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-shop-domain': shopifyShopDomain,
         'x-shopify-webhook-id': `smoke-returns-approve-${runId}`,
       },
       body: returnApprovePayload,
@@ -923,7 +928,7 @@ async function runSmoke() {
       await prisma.webhookEvent.create({
         data: {
           id: legacyMissingPayloadEventId,
-          sourceShopDomain: 'demo-shop.myshopify.com',
+          sourceShopDomain: shopifyShopDomain,
           topic: 'orders/create',
           idempotencyKey: `legacy:orders/create:${runId}`,
           payloadHash: `legacy-payload-hash-${runId}`,
@@ -936,7 +941,7 @@ async function runSmoke() {
       await prisma.webhookEvent.create({
         data: {
           id: recoverableReceivedEventId,
-          sourceShopDomain: 'demo-shop.myshopify.com',
+          sourceShopDomain: shopifyShopDomain,
           topic: 'orders/create',
           idempotencyKey: `recoverable:orders/create:${runId}`,
           payloadHash: `recoverable-payload-hash-${runId}`,
@@ -1064,7 +1069,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': refundWebhookHmac,
       'x-shopify-topic': 'refunds/create',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
     };
     const refundWebhookId = `smoke-refund-${runId}`;
 
@@ -1135,7 +1140,7 @@ async function runSmoke() {
         'content-type': 'application/json',
         'x-shopify-hmac-sha256': unresolvedRefundWebhookHmac,
         'x-shopify-topic': 'refunds/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-shop-domain': shopifyShopDomain,
         'x-shopify-webhook-id': `smoke-refund-fail-${runId}`,
       },
       body: unresolvedRefundWebhookPayload,
@@ -1183,7 +1188,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': fulfillmentWebhookHmac,
       'x-shopify-topic': 'fulfillments/create',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
       'x-shopify-webhook-id': `smoke-fulfillment-${runId}`,
     };
     const validFulfillmentWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillments-create`, {
@@ -1290,7 +1295,7 @@ async function runSmoke() {
         'content-type': 'application/json',
         'x-shopify-hmac-sha256': fulfillmentEventHmac,
         'x-shopify-topic': 'fulfillment_events/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-shop-domain': shopifyShopDomain,
         'x-shopify-webhook-id': `smoke-fulfillment-event-${runId}`,
       },
       body: fulfillmentEventPayload,
@@ -1377,7 +1382,7 @@ async function runSmoke() {
         'content-type': 'application/json',
         'x-shopify-hmac-sha256': cancellationOrderHmac,
         'x-shopify-topic': 'orders/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-shop-domain': shopifyShopDomain,
         'x-shopify-webhook-id': `smoke-cancel-order-${runId}`,
       },
       body: cancellationOrderPayload,
@@ -1400,7 +1405,7 @@ async function runSmoke() {
       'content-type': 'application/json',
       'x-shopify-hmac-sha256': cancellationHmac,
       'x-shopify-topic': 'fulfillment_orders/cancelled',
-      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-shop-domain': shopifyShopDomain,
       'x-shopify-webhook-id': `smoke-fulfillment-cancelled-${runId}`,
     };
     const cancellationResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillment-orders-cancelled`, {

@@ -46,3 +46,7 @@ jobs:
 
       - name: Backend smoke
         run: npm run backend:smoke
+        env:
+          SHIPPING_PROVIDER: kargonomi
+          KARGONOMI_BASE_URL: https://app.kargonomi.com.tr/api/v1
+          KARGONOMI_API_TOKEN: test-token
