@@ -180,36 +180,44 @@ describe('DashboardPage vendor launchpad', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByRole('heading', { name: /good morning, demo vendor a/i })).toBeInTheDocument();
-    expect(screen.getByText("Here’s what’s happening with your store today.")).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
+    expect(screen.getByText('Start with the work that needs attention, then check orders, returns, and payment timing.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open support tickets' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open inbox' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open vendor profile' })).toBeInTheDocument();
   });
 
-  it('renders exactly four primary launchpad action cards with current dashboard values', async () => {
+  it('renders the dashboard summary and supporting metrics with current dashboard values', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
     getDashboardDeferredOverviewMock.mockReturnValue(new Promise<DashboardOverview>(() => undefined));
 
     renderDashboardPage();
 
-    const actionRegion = await screen.findByLabelText('Vendor dashboard actions');
-    await within(actionRegion).findByText('8');
-    const cards = within(actionRegion).getAllByRole('article');
-    expect(cards).toHaveLength(4);
+    const summaryRegion = await screen.findByLabelText('Today dashboard summary');
+    expect(within(summaryRegion).getByText('Most important today')).toBeInTheDocument();
+    expect(within(summaryRegion).getByRole('heading', { name: 'Needs Attention Today' })).toBeInTheDocument();
+    const actionSummary = await within(summaryRegion).findByLabelText('Today action summary');
+    expect(within(actionSummary).getByText('5')).toBeInTheDocument();
+    expect(within(summaryRegion).getByText('5 actions need your attention today.')).toBeInTheDocument();
+    expect(within(summaryRegion).getByText('returns waiting review')).toBeInTheDocument();
+    expect(within(summaryRegion).getByRole('link', { name: /review work/i })).toHaveAttribute('href', '/returns');
 
-    expect(within(actionRegion).getByText('New Orders')).toBeInTheDocument();
-    expect(within(actionRegion).getByText('8')).toBeInTheDocument();
-    expect(within(actionRegion).getByRole('link', { name: /view orders/i })).toHaveAttribute('href', '/orders');
-    expect(within(actionRegion).getByText('Ready to Ship')).toBeInTheDocument();
-    expect(within(actionRegion).getByText('13')).toBeInTheDocument();
-    expect(within(actionRegion).getByRole('link', { name: /ship orders/i })).toHaveAttribute('href', '/orders');
-    expect(within(actionRegion).getByText('Returns Waiting')).toBeInTheDocument();
-    expect(within(actionRegion).getByText('5')).toBeInTheDocument();
-    expect(within(actionRegion).getByRole('link', { name: /review returns/i })).toHaveAttribute('href', '/returns');
-    expect(within(actionRegion).getByText('Upcoming Payment')).toBeInTheDocument();
-    expect(within(actionRegion).getByText('TRY 24,580')).toBeInTheDocument();
-    expect(within(actionRegion).getByRole('link', { name: /view payment/i })).toHaveAttribute('href', '/finance');
+    const metricsRegion = within(summaryRegion).getByLabelText('Dashboard supporting metrics');
+    const cards = within(metricsRegion).getAllByRole('article');
+    expect(cards).toHaveLength(3);
+
+    expect(within(metricsRegion).getByText('Orders to Ship')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('13')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(within(metricsRegion).getByRole('link', { name: /ship orders/i })).toHaveAttribute('href', '/orders');
+    expect(within(metricsRegion).getByText('Returns to Review')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('5')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('Returns requiring review.')).toBeInTheDocument();
+    expect(within(metricsRegion).getByRole('link', { name: /review returns/i })).toHaveAttribute('href', '/returns');
+    expect(within(metricsRegion).getByText('Upcoming Payment')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('TRY 24,580')).toBeInTheDocument();
+    expect(within(metricsRegion).getByText('Expected payment')).toBeInTheDocument();
+    expect(within(metricsRegion).getByRole('link', { name: /view payment/i })).toHaveAttribute('href', '/finance');
   });
 
   it('loads dashboard and order data for the selected vendor', async () => {
@@ -217,7 +225,7 @@ describe('DashboardPage vendor launchpad', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByRole('heading', { name: /good morning, demo vendor a/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-a');
     await waitFor(() => expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' })));
   });
@@ -253,11 +261,12 @@ describe('DashboardPage vendor launchpad', () => {
     renderDashboardPage();
 
     expect(getDashboardDeferredOverviewMock).not.toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: /good morning, demo vendor a/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
     await waitFor(() => expect(getDashboardDeferredOverviewMock).toHaveBeenCalledWith('demo-vendor-a'));
 
     deferredDashboard.resolve(deferredDashboardOverview);
-    expect(await screen.findByText('6')).toBeInTheDocument();
+    const actionSummary = await screen.findByLabelText('Today action summary');
+    expect(within(actionSummary).getByText('6')).toBeInTheDocument();
   });
 
   it('renders recent orders from the existing order client, sorted to the latest five', async () => {
@@ -265,37 +274,38 @@ describe('DashboardPage vendor launchpad', () => {
 
     renderDashboardPage();
 
-    const recentOrdersRegion = await screen.findByLabelText('Recent orders');
-    await within(recentOrdersRegion).findByText('#1088');
-    expect(within(recentOrdersRegion).getByRole('heading', { name: 'Recent Orders' })).toBeInTheDocument();
-    expect(within(recentOrdersRegion).getByRole('link', { name: /view all orders/i })).toHaveAttribute('href', '/orders');
+    const recentChangesRegion = await screen.findByLabelText('Recent changes');
+    await within(recentChangesRegion).findByText('#1088');
+    expect(within(recentChangesRegion).getByRole('heading', { name: 'Recent Changes' })).toBeInTheDocument();
+    expect(within(recentChangesRegion).getByRole('link', { name: /open orders/i })).toHaveAttribute('href', '/orders');
+    expect(within(recentChangesRegion).getByText('Recent orders')).toBeInTheDocument();
 
-    const rows = within(recentOrdersRegion).getAllByRole('row');
+    const rows = within(recentChangesRegion).getAllByRole('row');
     expect(rows).toHaveLength(6);
     expect(within(rows[1]).getByText('#1088')).toBeInTheDocument();
     expect(within(rows[1]).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/orders/order-1088');
-    expect(within(recentOrdersRegion).getByText('#1084')).toBeInTheDocument();
-    expect(within(recentOrdersRegion).queryByText('#1083')).not.toBeInTheDocument();
+    expect(within(recentChangesRegion).getByText('#1084')).toBeInTheDocument();
+    expect(within(recentChangesRegion).queryByText('#1083')).not.toBeInTheDocument();
   });
 
   it('renders a polished empty recent orders state when no orders are available', async () => {
-    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    getDashboardOverviewMock.mockResolvedValue({ ...dashboardOverview, recentActivity: [] });
     listOrdersMock.mockResolvedValue([]);
 
     renderDashboardPage();
 
-    expect(await screen.findByText('Recent orders will appear here.')).toBeInTheDocument();
-    expect(screen.getByText('Real order rows are not part of the current dashboard overview data.')).toBeInTheDocument();
+    expect(await screen.findByText('No recent changes yet.')).toBeInTheDocument();
+    expect(screen.getByText('Order, return, payment, and support updates will appear here when they happen.')).toBeInTheDocument();
   });
 
   it('renders an order-list error state without breaking the rest of the launchpad', async () => {
-    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    getDashboardOverviewMock.mockResolvedValue({ ...dashboardOverview, recentActivity: [] });
     listOrdersMock.mockRejectedValue(new Error('Orders unavailable'));
 
     renderDashboardPage();
 
-    expect(await screen.findByRole('heading', { name: /good morning, demo vendor a/i })).toBeInTheDocument();
-    expect(await screen.findByText('Recent orders could not be loaded.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
+    expect(await screen.findByText('Recent changes could not be loaded.')).toBeInTheDocument();
     expect(screen.getByText('Open Orders to review the vendor order list.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Payment Summary' })).toBeInTheDocument();
   });
@@ -310,8 +320,9 @@ describe('DashboardPage vendor launchpad', () => {
     expect(within(paymentRegion).getByRole('heading', { name: 'Payment Summary' })).toBeInTheDocument();
     expect(within(paymentRegion).getByText('Upcoming Payment')).toBeInTheDocument();
     expect(within(paymentRegion).getByText('TRY 24,580')).toBeInTheDocument();
-    expect(within(paymentRegion).getByText('Last Payment')).toBeInTheDocument();
-    expect(within(paymentRegion).getByText('TRY 0')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('Estimated from current payment preparation.')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('No payment history available yet.')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('Completed payments will appear in Finance after payment records exist.')).toBeInTheDocument();
     expect(within(paymentRegion).getByRole('link', { name: /payment history/i })).toHaveAttribute('href', '/finance');
   });
 
@@ -320,7 +331,7 @@ describe('DashboardPage vendor launchpad', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByRole('heading', { name: /good morning, demo vendor a/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /today, demo vendor a/i })).toBeInTheDocument();
     expect(screen.queryByText(/demo vendor a command center/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
     expect(screen.queryByText('Operational queues')).not.toBeInTheDocument();
