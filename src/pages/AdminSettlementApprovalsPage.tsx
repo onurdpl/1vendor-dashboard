@@ -442,11 +442,7 @@ function getApprovalDetailForSummary(summary: SettlementApprovalSummary, activeA
   return activeApproval?.id === summary.id ? activeApproval : null;
 }
 
-function getSettlementPeriodLabel(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
-  const detail = getApprovalDetailForSummary(summary, activeApproval);
-  if (detail?.periodStart || detail?.periodEnd) {
-    return `${formatDate(detail.periodStart)} - ${formatDate(detail.periodEnd)}`;
-  }
+function getSettlementSummaryPeriodLabel(summary: SettlementApprovalSummary) {
   if (summary.scheduledCycleKey) {
     return safeStatusLabel(summary.scheduledCycleKey);
   }
@@ -459,6 +455,13 @@ function getSettlementPeriodLabel(summary: SettlementApprovalSummary, activeAppr
   return `Created ${formatDate(summary.createdAt)}`;
 }
 
+function getSettlementPeriodLabel(summary: SettlementApprovalSummary, detail: SettlementApproval | null) {
+  if (detail?.periodStart || detail?.periodEnd) {
+    return `${formatDate(detail.periodStart)} - ${formatDate(detail.periodEnd)}`;
+  }
+  return getSettlementSummaryPeriodLabel(summary);
+}
+
 function getSettlementPeriodFilterValue(summary: SettlementApprovalSummary) {
   return (
     summary.scheduledCycleKey ||
@@ -468,9 +471,16 @@ function getSettlementPeriodFilterValue(summary: SettlementApprovalSummary) {
   );
 }
 
-function getSettlementReviewIssues(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewIssue[] {
-  const detail = getApprovalDetailForSummary(summary, activeApproval);
+function getSettlementReviewIssues(summary: SettlementApprovalSummary): SettlementReviewIssue[] {
   const issues: SettlementReviewIssue[] = [];
+  if (summary.status === 'cancelled' || (summary.netPayableMinor <= 0 && summary.lineCount > 0)) {
+    issues.push('Hold');
+  }
+  return issues.length ? Array.from(new Set(issues)) : ['Ready'];
+}
+
+function getSettlementDetailIssues(summary: SettlementApprovalSummary, detail: SettlementApproval | null): SettlementReviewIssue[] {
+  const issues = getSettlementReviewIssues(summary).filter((issue) => issue !== 'Ready');
   if (detail) {
     const metrics = getSettlementDecisionMetrics(safeArray(detail.lines), detail.netPayableMinor);
     if (metrics.offsetPackages.length || metrics.refundAdjustments.length || metrics.refundOffsetImpactMinor < 0 || metrics.refundAdjustmentImpactMinor < 0) {
@@ -480,81 +490,81 @@ function getSettlementReviewIssues(summary: SettlementApprovalSummary, activeApp
       issues.push('Shipping');
     }
   }
-  if (summary.status === 'cancelled' || (summary.netPayableMinor <= 0 && summary.lineCount > 0)) {
-    issues.push('Hold');
-  }
   return issues.length ? Array.from(new Set(issues)) : ['Ready'];
 }
 
-function hasSettlementIssue(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null, issue: SettlementReviewIssue) {
-  return getSettlementReviewIssues(summary, activeApproval).includes(issue);
+function hasSettlementIssue(summary: SettlementApprovalSummary, issue: SettlementReviewIssue) {
+  return getSettlementReviewIssues(summary).includes(issue);
 }
 
-function isReadyForSettlementApproval(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
-  return summary.status === 'draft' && getSettlementReviewIssues(summary, activeApproval).every((issue) => issue === 'Ready');
+function isReadyForSettlementApproval(summary: SettlementApprovalSummary) {
+  return summary.status === 'draft' && getSettlementReviewIssues(summary).every((issue) => issue === 'Ready');
 }
 
-function isSettlementNeedsReview(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
-  return summary.status === 'draft' && !isReadyForSettlementApproval(summary, activeApproval);
+function isSettlementNeedsReview(summary: SettlementApprovalSummary) {
+  return summary.status === 'draft' && !isReadyForSettlementApproval(summary);
 }
 
 function matchesSettlementWorkflowTab(
   summary: SettlementApprovalSummary,
-  activeApproval: SettlementApproval | null,
   tab: SettlementReviewWorkflowTab,
 ) {
   if (tab === 'all') {
     return true;
   }
   if (tab === 'needs_review') {
-    return isSettlementNeedsReview(summary, activeApproval);
+    return isSettlementNeedsReview(summary);
   }
   if (tab === 'ready_for_approval') {
-    return isReadyForSettlementApproval(summary, activeApproval);
+    return isReadyForSettlementApproval(summary);
   }
   if (tab === 'refund_review') {
-    return hasSettlementIssue(summary, activeApproval, 'Refund');
+    return hasSettlementIssue(summary, 'Refund');
   }
   if (tab === 'vendor_hold') {
-    return hasSettlementIssue(summary, activeApproval, 'Hold');
+    return hasSettlementIssue(summary, 'Hold');
   }
   if (tab === 'approved') {
     return summary.status === 'approved';
   }
+  if (tab === 'paid') {
+    // SettlementApprovalSummary has no paid status in the current contract.
+    return false;
+  }
   return false;
 }
 
-function getSettlementReviewNextAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewNextAction {
+function getSettlementReviewNextAction(summary: SettlementApprovalSummary): SettlementReviewNextAction {
   if (summary.status === 'approved') {
     return 'View';
   }
   if (summary.status === 'cancelled') {
     return 'View';
   }
-  if (isReadyForSettlementApproval(summary, activeApproval)) {
+  if (isReadyForSettlementApproval(summary)) {
     return 'Approve';
   }
-  if (hasSettlementIssue(summary, activeApproval, 'Refund') || hasSettlementIssue(summary, activeApproval, 'Shipping')) {
+  if (hasSettlementIssue(summary, 'Refund') || hasSettlementIssue(summary, 'Shipping')) {
     return 'Investigate';
   }
   return 'Investigate';
 }
 
-function getSettlementReviewPanelAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewPanelAction {
+function getSettlementReviewPanelAction(summary: SettlementApprovalSummary, detail: SettlementApproval | null): SettlementReviewPanelAction {
   if (summary.status === 'approved') {
     return 'View';
   }
   if (summary.status === 'cancelled') {
     return 'View';
   }
-  if (isReadyForSettlementApproval(summary, activeApproval)) {
+  if (summary.status === 'draft' && getSettlementDetailIssues(summary, detail).every((issue) => issue === 'Ready')) {
     return 'Approve';
   }
   return 'Investigate';
 }
 
-function getSettlementWaitingReason(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
-  const issues = getSettlementReviewIssues(summary, activeApproval);
+function getSettlementWaitingReason(summary: SettlementApprovalSummary, detail: SettlementApproval | null) {
+  const issues = getSettlementDetailIssues(summary, detail);
   if (issues.includes('Refund')) {
     return 'Refund review';
   }
@@ -1291,7 +1301,7 @@ function SettlementReviewQueue({
   loading,
   onOpenApproval,
   activeApprovalId,
-  activeApproval,
+  selectedApprovalDetail,
   vendorId,
   vendorName,
   onVendorIdChange,
@@ -1310,7 +1320,7 @@ function SettlementReviewQueue({
   loading: boolean;
   onOpenApproval: (id: string) => void;
   activeApprovalId: string;
-  activeApproval: SettlementApproval | null;
+  selectedApprovalDetail: SettlementApproval | null;
   vendorId: string;
   vendorName: string;
   onVendorIdChange: (value: string) => void;
@@ -1328,10 +1338,10 @@ function SettlementReviewQueue({
   const visibleApprovals = safeArray(approvals);
   const periodOptions = Array.from(new Map(visibleApprovals.map((item) => [
     getSettlementPeriodFilterValue(item),
-    getSettlementPeriodLabel(item, activeApproval),
+    getSettlementSummaryPeriodLabel(item),
   ])).entries());
   const filteredApprovals = visibleApprovals.filter((item) => {
-    if (!matchesSettlementWorkflowTab(item, activeApproval, workflowTab)) {
+    if (!matchesSettlementWorkflowTab(item, workflowTab)) {
       return false;
     }
     if (statusFilter !== 'all' && item.status !== statusFilter) {
@@ -1347,7 +1357,7 @@ function SettlementReviewQueue({
     if (!searchTerm) {
       return true;
     }
-    const periodLabel = getSettlementPeriodLabel(item, activeApproval);
+    const periodLabel = getSettlementSummaryPeriodLabel(item);
     return [
       item.id,
       item.vendorId,
@@ -1358,18 +1368,18 @@ function SettlementReviewQueue({
     ].some((value) => value.toLowerCase().includes(searchTerm));
   });
   const selectedQueueApproval = filteredApprovals.find((item) => item.id === activeApprovalId) ?? filteredApprovals[0] ?? null;
-  const selectedQueueDetail = selectedQueueApproval ? getApprovalDetailForSummary(selectedQueueApproval, activeApproval) : null;
+  const selectedQueueDetail = selectedQueueApproval ? getApprovalDetailForSummary(selectedQueueApproval, selectedApprovalDetail) : null;
   const selectedQueueIssues = selectedQueueApproval
-    ? getSettlementReviewIssues(selectedQueueApproval, activeApproval)
+    ? getSettlementDetailIssues(selectedQueueApproval, selectedQueueDetail)
     : [];
   const selectedWaitingReason = selectedQueueApproval
-    ? getSettlementWaitingReason(selectedQueueApproval, activeApproval)
+    ? getSettlementWaitingReason(selectedQueueApproval, selectedQueueDetail)
     : null;
   const selectedMetrics = selectedQueueDetail
     ? getSettlementDecisionMetrics(safeArray(selectedQueueDetail.lines), selectedQueueDetail.netPayableMinor)
     : null;
   const workflowCounts = SETTLEMENT_REVIEW_WORKFLOW_TABS.reduce<Record<SettlementReviewWorkflowTab, number>>((counts, tab) => {
-    counts[tab.id] = visibleApprovals.filter((item) => matchesSettlementWorkflowTab(item, activeApproval, tab.id)).length;
+    counts[tab.id] = visibleApprovals.filter((item) => matchesSettlementWorkflowTab(item, tab.id)).length;
     return counts;
   }, {
     all: 0,
@@ -1445,7 +1455,7 @@ function SettlementReviewQueue({
             stickyHeader={false}
           >
             {filteredApprovals.map((item) => {
-              const itemIssues = getSettlementReviewIssues(item, activeApproval);
+              const itemIssues = getSettlementReviewIssues(item);
               const vendorDisplayName = item.vendorId === vendorId && vendorName ? vendorName : item.vendorId;
               return (
                 <OperationalTableRow
@@ -1459,7 +1469,7 @@ function SettlementReviewQueue({
                   </span>
                   <span>
                     <strong>Settlement</strong>
-                    <small>{getSettlementPeriodLabel(item, activeApproval)}</small>
+                    <small>{getSettlementSummaryPeriodLabel(item)}</small>
                   </span>
                   <span>
                     <strong>Gross {formatMinor(item.grossSalesMinor, item.currency)}</strong>
@@ -1470,7 +1480,7 @@ function SettlementReviewQueue({
                       <StatusBadge key={issue} tone={getSettlementReviewIssueTone(issue)}>{issue}</StatusBadge>
                     ))}
                   </span>
-                  <span><strong>{getSettlementReviewNextAction(item, activeApproval)}</strong></span>
+                  <span><strong>{getSettlementReviewNextAction(item)}</strong></span>
                   <span>{formatDate(item.approvedAt ?? item.createdAt)}</span>
                 </OperationalTableRow>
               );
@@ -1485,7 +1495,7 @@ function SettlementReviewQueue({
                     label="Vendor"
                     value={selectedQueueApproval.vendorId === vendorId && vendorName ? vendorName : selectedQueueApproval.vendorId}
                   />
-                  <MetadataRow label="Settlement Period" value={getSettlementPeriodLabel(selectedQueueApproval, activeApproval)} />
+                  <MetadataRow label="Settlement Period" value={getSettlementPeriodLabel(selectedQueueApproval, selectedQueueDetail)} />
                   <MetadataRow label="Gross Amount" value={formatMinor(selectedQueueApproval.grossSalesMinor, selectedQueueApproval.currency)} />
                   <MetadataRow label="Net Amount" value={formatMinor(selectedQueueApproval.netPayableMinor, selectedQueueApproval.currency)} />
                 </MetadataGroup>
@@ -1496,7 +1506,7 @@ function SettlementReviewQueue({
                   </section>
                 ) : null}
                 <MetadataGroup title="Next Action">
-                  <MetadataRow label="Action" value={getSettlementReviewPanelAction(selectedQueueApproval, activeApproval)} />
+                  <MetadataRow label="Action" value={getSettlementReviewPanelAction(selectedQueueApproval, selectedQueueDetail)} />
                 </MetadataGroup>
                 <MetadataGroup title="Payment Impact">
                   <MetadataRow
@@ -2325,20 +2335,26 @@ export function AdminSettlementApprovalsPage() {
   }
 
   function rememberApprovalSummary(nextApproval: SettlementApproval) {
-    const summary: SettlementApprovalSummary = {
-      id: nextApproval.id,
-      createdAt: nextApproval.createdAt,
-      vendorId: nextApproval.vendorId,
-      status: nextApproval.status,
-      currency: nextApproval.currency,
-      grossSalesMinor: nextApproval.grossSalesMinor,
-      netPayableMinor: nextApproval.netPayableMinor,
-      approvedAt: nextApproval.approvedAt,
-      lineCount: nextApproval.lines.length,
-    };
-    setRecentApprovals((current) => [summary, ...current.filter((item) => item.id !== summary.id)]
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .slice(0, 20));
+    setRecentApprovals((current) => {
+      const existingSummary = current.find((item) => item.id === nextApproval.id);
+      const summary: SettlementApprovalSummary = {
+        id: nextApproval.id,
+        createdAt: nextApproval.createdAt,
+        vendorId: nextApproval.vendorId,
+        status: nextApproval.status,
+        currency: nextApproval.currency,
+        grossSalesMinor: nextApproval.grossSalesMinor,
+        netPayableMinor: nextApproval.netPayableMinor,
+        approvedAt: nextApproval.approvedAt,
+        scheduledRunDate: nextApproval.scheduledRunDate ?? existingSummary?.scheduledRunDate,
+        scheduledPeriodEnd: nextApproval.scheduledPeriodEnd ?? existingSummary?.scheduledPeriodEnd,
+        scheduledCycleKey: nextApproval.scheduledCycleKey ?? existingSummary?.scheduledCycleKey,
+        lineCount: existingSummary?.lineCount ?? nextApproval.lines.length,
+      };
+      return [summary, ...current.filter((item) => item.id !== summary.id)]
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+        .slice(0, 20);
+    });
   }
 
   async function runAction<T>(action: ActionName, callback: () => Promise<T>, successMessage?: string) {
@@ -2461,7 +2477,6 @@ export function AdminSettlementApprovalsPage() {
       setVendorId(result.vendorId);
       setPreview(null);
       setMixedVatAcknowledged(false);
-      rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
       setInvoiceRecords([]);
@@ -2480,7 +2495,6 @@ export function AdminSettlementApprovalsPage() {
       setVendorId(result.vendorId);
       setPreview(null);
       setMixedVatAcknowledged(false);
-      rememberApprovalSummary(result);
       setAudit(null);
       setLogoPreview(null);
       setInvoiceRecords([]);
@@ -2716,7 +2730,7 @@ export function AdminSettlementApprovalsPage() {
         approvals={recentApprovals}
         loading={recentApprovalsLoading}
         activeApprovalId={selectedApprovalId}
-        activeApproval={approval}
+        selectedApprovalDetail={approval}
         vendorId={vendorId}
         vendorName={appReadiness.currentVendor.vendorName}
         onVendorIdChange={setVendorId}

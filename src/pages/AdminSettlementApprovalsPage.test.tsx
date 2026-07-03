@@ -62,6 +62,25 @@ const settlementLine: SettlementApprovalLine = {
   refundDetected: false,
 };
 
+const refundSettlementLine: SettlementApprovalLine = {
+  id: 'line-refund-1',
+  financeLedgerEntryId: 'fle-refund-1',
+  lineType: 'REFUND',
+  amountMinor: -54000,
+  commissionMinor: 0,
+  commissionVatMinor: 0,
+  payableImpactMinor: -54000,
+  sourceSnapshotJson: {},
+  storedSettlementStatus: 'REFUNDED',
+  derivedSettlementStatus: 'REFUNDED',
+  payoutStatus: 'pending',
+  eligibilityDecision: 'included',
+  eligibilityReason: 'Refund offset captured for settlement review.',
+  refundDetected: true,
+  refundCount: 1,
+  shippingEvidencePresent: false,
+};
+
 const selectedRecentApproval: SettlementApproval = {
   ok: true,
   writesPerformed: false,
@@ -84,6 +103,30 @@ const selectedRecentApproval: SettlementApproval = {
   notes: 'Approved settlement review',
   sourceSnapshotJson: {},
   lines: [settlementLine],
+};
+
+const selectedDraftRefundApproval: SettlementApproval = {
+  ok: true,
+  writesPerformed: false,
+  id: 'approval-1',
+  createdAt: '2026-06-10T09:00:00.000Z',
+  vendorId: 'yalispor',
+  status: 'draft',
+  periodStart: '2026-06-01T00:00:00.000Z',
+  periodEnd: '2026-06-10T00:00:00.000Z',
+  currency: 'TRY',
+  grossSalesMinor: 759800,
+  refundTotalMinor: 54000,
+  commissionMinor: 98000,
+  commissionVatMinor: 19600,
+  netPayableMinor: 623036,
+  approvedBy: null,
+  approvedAt: null,
+  cancelledBy: null,
+  cancelledAt: null,
+  notes: 'Draft settlement review',
+  sourceSnapshotJson: {},
+  lines: [settlementLine, refundSettlementLine],
 };
 
 const recentApprovalsResponse: SettlementApprovalListResponse = {
@@ -162,7 +205,9 @@ describe('Settlement Review queue cleanup', () => {
         warnings: [],
       },
     });
-    getSettlementApprovalMock.mockResolvedValue(selectedRecentApproval);
+    getSettlementApprovalMock.mockImplementation(async (id: string) =>
+      id === selectedDraftRefundApproval.id ? selectedDraftRefundApproval : selectedRecentApproval,
+    );
     listSettlementApprovalsMock.mockResolvedValue(recentApprovalsResponse);
     previewSettlementApprovalMock.mockRejectedValue(new Error('Preview should not run on the queue page.'));
   });
@@ -285,5 +330,62 @@ describe('Settlement Review queue cleanup', () => {
     expect(screen.queryByRole('heading', { name: 'Loaded Approval Snapshot' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load Audit' })).not.toBeInTheDocument();
     expect(screen.queryByText('Approval detail loaded.')).not.toBeInTheDocument();
+  });
+
+  it('keeps queue classification stable when selected detail contains refund evidence', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    const queue = screen.getByLabelText('Settlement review queue');
+    const tabs = within(queue).getByLabelText('Settlement review workflow tabs');
+    expect(within(tabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Needs Review0/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Ready1/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
+
+    const rows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const draftRow = rows.find((row) => within(row).queryByText('Gross TRY 7,598.00')) as HTMLElement | undefined;
+    const approvedRow = rows.find((row) => within(row).queryByText('Gross TRY 2,200.00')) as HTMLElement | undefined;
+    expect(draftRow).toBeTruthy();
+    expect(approvedRow).toBeTruthy();
+    expect(within(draftRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(draftRow as HTMLElement).getByText('Approve')).toBeInTheDocument();
+    expect(within(draftRow as HTMLElement).queryByText('Refund')).not.toBeInTheDocument();
+    expect(within(draftRow as HTMLElement).queryByText('Shipping')).not.toBeInTheDocument();
+    expect(within(approvedRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(approvedRow as HTMLElement).getByText('View')).toBeInTheDocument();
+
+    await user.click(draftRow as HTMLElement);
+
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
+    const updatedRows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+    const updatedDraftRow = updatedRows.find((row) => within(row).queryByText('Gross TRY 7,598.00')) as HTMLElement | undefined;
+    const updatedApprovedRow = updatedRows.find((row) => within(row).queryByText('Gross TRY 2,200.00')) as HTMLElement | undefined;
+    expect(updatedDraftRow).toHaveClass('op-row-selected');
+    expect(within(updatedDraftRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(updatedDraftRow as HTMLElement).getByText('Approve')).toBeInTheDocument();
+    expect(within(updatedDraftRow as HTMLElement).queryByText('Refund')).not.toBeInTheDocument();
+    expect(within(updatedDraftRow as HTMLElement).queryByText('Shipping')).not.toBeInTheDocument();
+    expect(within(updatedApprovedRow as HTMLElement).getByText('Ready')).toBeInTheDocument();
+    expect(within(updatedApprovedRow as HTMLElement).getByText('View')).toBeInTheDocument();
+
+    const updatedTabs = within(queue).getByLabelText('Settlement review workflow tabs');
+    expect(within(updatedTabs).getByRole('button', { name: /All2/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /Needs Review0/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /Ready1/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /Refund0/i })).toBeInTheDocument();
+    expect(within(updatedTabs).getByRole('button', { name: /Paid0/i })).toBeInTheDocument();
+
+    const panel = within(queue).getByLabelText('Settlement review detail panel');
+    expect(within(panel).getByText('Refund review')).toBeInTheDocument();
+    expect(within(panel).getByText('Linked refund activity')).toBeInTheDocument();
+    expect(within(panel).getByText('Investigate')).toBeInTheDocument();
+  });
+
+  it('uses stable settlement ids for queue row keys', () => {
+    const source = readFileSync(`${process.cwd()}/src/pages/AdminSettlementApprovalsPage.tsx`, 'utf8');
+    expect(source).toMatch(/<OperationalTableRow[\s\S]{0,160}key=\{item\.id\}[\s\S]{0,160}selected=\{item\.id === selectedQueueApproval\?\.id\}/);
   });
 });
