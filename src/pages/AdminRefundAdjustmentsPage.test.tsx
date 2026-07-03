@@ -168,10 +168,11 @@ describe('AdminRefundAdjustmentsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
 
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
-    expect(headers).toEqual(['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Open']);
+    expect(headers).toEqual(['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Review']);
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Refund #RF-1097').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund reference RF-1097').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
   });
 
   it('renders the right panel hierarchy from queue-safe fields', async () => {
@@ -185,6 +186,11 @@ describe('AdminRefundAdjustmentsPage', () => {
     }
     expect(within(panel).getByText('Refund review required')).toBeInTheDocument();
     expect(within(panel).getByText('Review')).toBeInTheDocument();
+    expect(within(panel).getByText('No debt adjustment')).toBeInTheDocument();
+    expect(within(panel).getByText('No linked support')).toBeInTheDocument();
+    expect(within(panel).queryByText('UNKNOWN')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('None loaded')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Not loaded')).not.toBeInTheDocument();
   });
 
   it('does not expose raw ledger or reference IDs in the queue layer', async () => {

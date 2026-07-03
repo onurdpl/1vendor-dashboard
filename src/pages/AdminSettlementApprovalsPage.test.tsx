@@ -42,6 +42,7 @@ const getDatabaseHealthMock = vi.mocked(getDatabaseHealth);
 const getSettlementApprovalMock = vi.mocked(getSettlementApproval);
 const listSettlementApprovalsMock = vi.mocked(listSettlementApprovals);
 const previewSettlementApprovalMock = vi.mocked(previewSettlementApproval);
+const rawSettlementApprovalId = '11111111-1111-1111-1111-111111111111';
 
 const settlementLine: SettlementApprovalLine = {
   id: 'line-1',
@@ -63,7 +64,7 @@ const settlementLine: SettlementApprovalLine = {
 const selectedRecentApproval: SettlementApproval = {
   ok: true,
   writesPerformed: false,
-  id: 'approval-2',
+  id: rawSettlementApprovalId,
   createdAt: '2026-06-10T11:00:00.000Z',
   vendorId: 'yalispor',
   status: 'approved',
@@ -90,7 +91,7 @@ const recentApprovalsResponse: SettlementApprovalListResponse = {
   vendorId: 'yalispor',
   approvals: [
     {
-      id: 'approval-2',
+      id: rawSettlementApprovalId,
       createdAt: '2026-06-10T11:00:00.000Z',
       vendorId: 'yalispor',
       status: 'approved',
@@ -181,13 +182,22 @@ describe('Settlement Review queue cleanup', () => {
     ['All', 'Needs Review', 'Ready for Approval', 'Refund Review', 'Vendor Hold', 'Approved', 'Paid'].forEach((label) => {
       expect(within(workflowTabs).getByText(label)).toBeInTheDocument();
     });
-    ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Open'].forEach((column) => {
+    ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Review'].forEach((column) => {
       expect(within(queue).getByRole('columnheader', { name: column })).toBeInTheDocument();
     });
     ['Settlement Summary', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline'].forEach((section) => {
       expect(within(queue).getByRole('heading', { name: section })).toBeInTheDocument();
     });
     expect(within(queue).queryByText('fle-sale-1')).not.toBeInTheDocument();
+    expect(within(queue).queryByText(rawSettlementApprovalId)).not.toBeInTheDocument();
+    expect(within(queue).getAllByText('Settlement').length).toBeGreaterThan(0);
+    expect(within(queue).getAllByText(/Ref: 11111111/i).length).toBeGreaterThan(0);
+    expect(within(queue).queryByText('UNKNOWN')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('None loaded')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Not loaded')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Approval detail loaded.')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('Waiting')).not.toBeInTheDocument();
+    expect(within(queue).getAllByText('No Action Required').length).toBeGreaterThan(0);
   });
 
   it('removes builder, preview, stepper, audit, invoice, history, and advanced details from the queue page', async () => {
@@ -222,13 +232,14 @@ describe('Settlement Review queue cleanup', () => {
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
 
-    await user.click(within(queue).getAllByRole('button', { name: 'Open' })[0]);
+    await user.click(within(queue).getAllByRole('button', { name: 'Review' })[0]);
 
-    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
+    await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith(rawSettlementApprovalId));
     expect(within(queue).getByRole('heading', { name: 'Settlement Summary' })).toBeInTheDocument();
     expect(within(queue).getAllByText('Yalispor').length).toBeGreaterThan(0);
     expect(within(queue).getAllByText('TRY 1,800.00').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: 'Loaded Approval Snapshot' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load Audit' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Approval detail loaded.')).not.toBeInTheDocument();
   });
 });

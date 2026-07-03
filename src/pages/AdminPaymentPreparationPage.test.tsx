@@ -102,13 +102,29 @@ const payoutBatches: PayoutBatch[] = [
     id: 'batch-approved-raw-33333333',
     status: 'approved',
     refundAmount: 'TRY 0.00',
+    outstandingDebtAmount: 'TRY 0.00',
+    debtOffsetAmount: 'TRY 0.00',
+    remainingDebtAmount: 'TRY 0.00',
     warning: null,
     updatedAt: '2026-07-03T10:00:00.000Z',
+  }),
+  makeBatch({
+    id: 'batch-execution-raw-33333334',
+    status: 'execution_pending',
+    refundAmount: 'TRY 0.00',
+    outstandingDebtAmount: 'TRY 0.00',
+    debtOffsetAmount: 'TRY 0.00',
+    remainingDebtAmount: 'TRY 0.00',
+    warning: null,
+    updatedAt: '2026-07-03T12:00:00.000Z',
   }),
   makeBatch({
     id: 'batch-paid-raw-44444444',
     status: 'paid_placeholder',
     refundAmount: 'TRY 0.00',
+    outstandingDebtAmount: 'TRY 0.00',
+    debtOffsetAmount: 'TRY 0.00',
+    remainingDebtAmount: 'TRY 0.00',
     warning: null,
     updatedAt: '2026-07-04T10:00:00.000Z',
   }),
@@ -174,10 +190,11 @@ describe('AdminPaymentPreparationPage', () => {
     await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
 
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
-    expect(headers).toEqual(['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Open']);
+    expect(headers).toEqual(['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']);
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getByText('Ready payment preparation')).toBeInTheDocument();
     expect(screen.getAllByText('3 eligible settlement rows').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Review' }).length).toBeGreaterThan(0);
   });
 
   it('renders the right panel hierarchy from queue-safe fields', async () => {
@@ -198,6 +215,11 @@ describe('AdminPaymentPreparationPage', () => {
     }
     expect(within(panel).getByText('Missing payment evidence')).toBeInTheDocument();
     expect(within(panel).getByText('Investigate')).toBeInTheDocument();
+    expect(within(panel).getAllByText('No refund adjustment').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('No linked support').length).toBeGreaterThan(0);
+    expect(within(panel).queryByText('UNKNOWN')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('None loaded')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Not loaded')).not.toBeInTheDocument();
   });
 
   it('does not expose raw IDs in the queue layer', async () => {
@@ -212,6 +234,7 @@ describe('AdminPaymentPreparationPage', () => {
       'batch-draft-raw-11111111',
       'batch-review-raw-22222222',
       'batch-approved-raw-33333333',
+      'batch-execution-raw-33333334',
       'batch-paid-raw-44444444',
       'batch-cancelled-raw-55555555',
     ]) {
@@ -229,5 +252,18 @@ describe('AdminPaymentPreparationPage', () => {
 
     expect(screen.getAllByText('Paid').length).toBeGreaterThan(0);
     expect(screen.queryByText('Ready payment preparation')).not.toBeInTheDocument();
+  });
+
+  it('does not show Waiting as the next action when issues are ready', async () => {
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Payment Preparation' });
+    await waitFor(() => expect(screen.getAllByText('Payment draft').length).toBeGreaterThan(0));
+
+    const tableRows = screen.getAllByRole('row');
+    const readyIssueRow = tableRows.find((row) => within(row).queryByText('None / Ready') && within(row).queryByText('Approved'));
+    expect(readyIssueRow).toBeTruthy();
+    expect(within(readyIssueRow!).getByText('Mark Paid')).toBeInTheDocument();
+    expect(within(readyIssueRow!).queryByText('Waiting')).not.toBeInTheDocument();
   });
 });

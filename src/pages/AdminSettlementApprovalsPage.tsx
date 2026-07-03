@@ -74,7 +74,7 @@ type SettlementReviewWorkflowTab =
   | 'vendor_hold'
   | 'approved'
   | 'paid';
-type SettlementReviewNextAction = 'Review' | 'Approve' | 'Investigate' | 'Waiting';
+type SettlementReviewNextAction = 'Review' | 'Approve' | 'Investigate' | 'Waiting' | 'No Action Required';
 type SettlementReviewPanelAction = 'Approve' | 'Reject' | 'Investigate' | 'No Action Required';
 type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
 type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
@@ -218,6 +218,18 @@ function formatNumber(value: number | null | undefined) {
 
 function formatDate(value: string | null | undefined) {
   return formatDateTime(value, undefined, 'Not set');
+}
+
+function formatQueueTimelineDate(value: string | null | undefined) {
+  return formatDateTime(value, undefined, 'No timeline event yet');
+}
+
+function getShortQueueReference(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.length > 10 ? trimmed.slice(0, 8) : trimmed;
 }
 
 function valueOrDash(value: unknown) {
@@ -522,7 +534,7 @@ function matchesSettlementWorkflowTab(
 
 function getSettlementReviewNextAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewNextAction {
   if (summary.status === 'approved') {
-    return 'Waiting';
+    return 'No Action Required';
   }
   if (summary.status === 'cancelled') {
     return 'Investigate';
@@ -1442,22 +1454,23 @@ function SettlementReviewQueue({
       {filteredApprovals.length ? (
         <div className="settlement-review-layout">
           <OperationalTable
-            columns={['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Open']}
+            columns={['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Review']}
             className="settlement-review-table"
             stickyHeader={false}
           >
             {filteredApprovals.map((item) => {
               const itemIssues = getSettlementReviewIssues(item, activeApproval);
               const vendorDisplayName = item.vendorId === vendorId && vendorName ? vendorName : item.vendorId;
+              const settlementReference = getShortQueueReference(item.id);
               return (
                 <OperationalTableRow key={item.id} selected={item.id === selectedQueueApproval?.id}>
                   <span>
                     <strong>{vendorDisplayName}</strong>
-                    <small>{item.vendorId}</small>
+                    <small>{item.vendorId === vendorDisplayName ? 'Vendor context' : item.vendorId}</small>
                   </span>
                   <span>
-                    <strong>{item.id}</strong>
-                    <small>{getSettlementPeriodLabel(item, activeApproval)}</small>
+                    <strong>Settlement</strong>
+                    <small>{getSettlementPeriodLabel(item, activeApproval)}{settlementReference ? ` · Ref: ${settlementReference}` : ''}</small>
                   </span>
                   <span>
                     <strong>Gross {formatMinor(item.grossSalesMinor, item.currency)}</strong>
@@ -1472,7 +1485,7 @@ function SettlementReviewQueue({
                   <span>{formatDate(item.approvedAt ?? item.createdAt)}</span>
                   <span>
                     <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                      Open
+                      Review
                     </button>
                   </span>
                 </OperationalTableRow>
@@ -1505,23 +1518,27 @@ function SettlementReviewQueue({
                   <MetadataRow label="Net payment" value={formatMinor(selectedQueueApproval.netPayableMinor, selectedQueueApproval.currency)} />
                   <MetadataRow
                     label="Refund adjustment"
-                    value={selectedMetrics ? formatMinor(Math.abs(selectedMetrics.refundAdjustmentImpactMinor), selectedQueueApproval.currency) : 'Not loaded'}
+                    value={
+                      selectedMetrics && selectedMetrics.refundAdjustmentImpactMinor !== 0
+                        ? formatMinor(Math.abs(selectedMetrics.refundAdjustmentImpactMinor), selectedQueueApproval.currency)
+                        : 'No refund adjustment'
+                    }
                   />
-                  <MetadataRow label="Debt adjustment" value="Not loaded" />
+                  <MetadataRow label="Debt adjustment" value="No debt adjustment" />
                 </MetadataGroup>
                 <MetadataGroup title="Related Records">
                   <MetadataRow label="Orders" value={formatNumber(selectedQueueApproval.lineCount)} />
-                  <MetadataRow label="Returns" value={selectedQueueIssues.includes('Refund') ? 'Linked refund activity' : 'None loaded'} />
-                  <MetadataRow label="Support" value={selectedQueueIssues.includes('Support') ? 'Support investigation' : 'None loaded'} />
+                  <MetadataRow label="Returns" value={selectedQueueIssues.includes('Refund') ? 'Linked refund activity' : 'No linked returns'} />
+                  <MetadataRow label="Support" value={selectedQueueIssues.includes('Support') ? 'Support investigation' : 'No linked support'} />
                 </MetadataGroup>
                 <section className="op-panel-section">
                   <h4>Timeline</h4>
                   <ul className="settlement-review-timeline">
                     <li><strong>Settlement created</strong><span>{formatDate(selectedQueueApproval.createdAt)}</span></li>
-                    <li><strong>Refund recorded</strong><span>{selectedQueueIssues.includes('Refund') ? formatDate(selectedQueueApproval.createdAt) : 'Not recorded'}</span></li>
-                    <li><strong>Review started</strong><span>{selectedQueueApproval.status === 'draft' ? formatDate(selectedQueueApproval.createdAt) : 'Not active'}</span></li>
-                    <li><strong>Approved</strong><span>{formatDate(selectedQueueApproval.approvedAt)}</span></li>
-                    <li><strong>Paid</strong><span>Not recorded</span></li>
+                    <li><strong>Refund recorded</strong><span>{selectedQueueIssues.includes('Refund') ? formatDate(selectedQueueApproval.createdAt) : 'No timeline event yet'}</span></li>
+                    <li><strong>Review started</strong><span>{selectedQueueApproval.status === 'draft' ? formatDate(selectedQueueApproval.createdAt) : 'No timeline event yet'}</span></li>
+                    <li><strong>Approved</strong><span>{formatQueueTimelineDate(selectedQueueApproval.approvedAt)}</span></li>
+                    <li><strong>Paid</strong><span>No payment evidence yet</span></li>
                   </ul>
                 </section>
               </>
@@ -2456,7 +2473,7 @@ export function AdminSettlementApprovalsPage() {
       setError('Settlement approval id is required.');
       return;
     }
-    const result = await runAction('fetchApproval', () => getSettlementApproval(id), 'Approval detail loaded.');
+    const result = await runAction('fetchApproval', () => getSettlementApproval(id));
     if (result) {
       setApproval(result);
       setVendorId(result.vendorId);
@@ -2475,7 +2492,7 @@ export function AdminSettlementApprovalsPage() {
 
   async function handleOpenRecentApproval(id: string) {
     setApprovalId(id);
-    const result = await runAction('fetchApproval', () => getSettlementApproval(id), 'Approval detail loaded.');
+    const result = await runAction('fetchApproval', () => getSettlementApproval(id));
     if (result) {
       setApproval(result);
       setVendorId(result.vendorId);

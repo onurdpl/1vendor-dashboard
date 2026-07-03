@@ -69,7 +69,7 @@ function formatDate(value: string | null | undefined) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }, 'Not recorded');
+  }, 'No timeline event yet');
 }
 
 function formatShortDate(value: string | null | undefined) {
@@ -77,7 +77,7 @@ function formatShortDate(value: string | null | undefined) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  }, 'Not recorded');
+  }, 'No payment period');
 }
 
 function getAmountValue(value: string | null | undefined) {
@@ -111,10 +111,10 @@ function getSafeVendorLabel(vendorId: string, currentVendorId: string, currentVe
     return currentVendorName;
   }
   if (!vendorId) {
-    return 'UNKNOWN';
+    return 'Vendor unavailable';
   }
   if (/^[0-9a-f]{8}-[0-9a-f-]{18,}$/i.test(vendorId)) {
-    return 'UNKNOWN';
+    return 'Vendor unavailable';
   }
   return vendorId;
 }
@@ -136,13 +136,13 @@ function getPaymentPeriodLabel(key: string) {
     return 'Current readiness';
   }
   if (key === 'unknown') {
-    return 'UNKNOWN';
+    return 'No payment period';
   }
   const [year, month] = key.split('-').map(Number);
   if (!year || !month) {
-    return 'UNKNOWN';
+    return 'No payment period';
   }
-  return formatDateTime(Date.UTC(year, month - 1, 1), { month: 'short', year: 'numeric' }, 'UNKNOWN');
+  return formatDateTime(Date.UTC(year, month - 1, 1), { month: 'short', year: 'numeric' }, 'No payment period');
 }
 
 function getPaymentLabel(item: PaymentQueueItem) {
@@ -160,7 +160,7 @@ function getPaymentLabel(item: PaymentQueueItem) {
 
 function getGrossAmount(item: PaymentQueueItem) {
   if (item.source === 'ready') {
-    return item.dashboard.summary?.grossSales ?? 'UNKNOWN';
+    return item.dashboard.summary?.grossSales ?? 'No payment evidence yet';
   }
   return item.batch.grossAmount;
 }
@@ -168,7 +168,7 @@ function getGrossAmount(item: PaymentQueueItem) {
 function getNetPayable(item: PaymentQueueItem) {
   if (item.source === 'ready') {
     const summary = item.dashboard.payoutBatchSummary;
-    return summary?.netEligibleAfterDebtOffset ?? summary?.eligibleNetAmount ?? item.dashboard.summary?.payableBalance ?? 'UNKNOWN';
+    return summary?.netEligibleAfterDebtOffset ?? summary?.eligibleNetAmount ?? item.dashboard.summary?.payableBalance ?? 'No payment evidence yet';
   }
   return item.batch.netAmount;
 }
@@ -227,6 +227,9 @@ function getIssues(item: PaymentQueueItem): IssueLabel[] {
   }
   if (item.batch.warning) {
     issues.push('Hold');
+  }
+  if (item.batch.status === 'execution_pending') {
+    issues.push('Export Needed');
   }
   return issues.length > 0 ? issues : ['None / Ready'];
 }
@@ -514,7 +517,7 @@ export function AdminPaymentPreparationPage() {
         {!loading && !blockingError && visibleItems.length > 0 ? (
           <div className="settlement-review-layout payment-preparation-layout">
             <OperationalTable
-              columns={['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Open']}
+              columns={['Vendor', 'Payment', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']}
               className="settlement-review-table payment-preparation-table"
               stickyHeader={false}
             >
@@ -550,7 +553,7 @@ export function AdminPaymentPreparationPage() {
                         className="button button-secondary button-compact"
                         onClick={() => setSelectedId(item.id)}
                       >
-                        Open
+                        Review
                       </button>
                     </span>
                   </OperationalTableRow>
@@ -584,16 +587,22 @@ export function AdminPaymentPreparationPage() {
                     <MetadataRow label="Net payment" value={getNetPayable(selectedItem)} />
                     <MetadataRow
                       label="Refund deductions"
-                      value={selectedItem.source === 'batch' ? selectedItem.batch.refundAmount : 'UNKNOWN'}
+                      value={
+                        selectedItem.source === 'batch'
+                          ? hasAmount(selectedItem.batch.refundAmount)
+                            ? selectedItem.batch.refundAmount
+                            : 'No refund adjustment'
+                          : 'No refund adjustment'
+                      }
                     />
                     <MetadataRow
                       label="Debt deductions"
                       value={
                         selectedItem.source === 'batch'
-                          ? selectedItem.batch.debtOffsetAmount ?? selectedItem.batch.outstandingDebtAmount ?? 'UNKNOWN'
+                          ? selectedItem.batch.debtOffsetAmount ?? selectedItem.batch.outstandingDebtAmount ?? 'No debt adjustment'
                           : selectedItem.dashboard.payoutBatchSummary?.debtOffsetPreviewAmount ??
                             selectedItem.dashboard.payoutBatchSummary?.outstandingDebtAmount ??
-                            'UNKNOWN'
+                            'No debt adjustment'
                       }
                     />
                     <MetadataRow
@@ -601,7 +610,7 @@ export function AdminPaymentPreparationPage() {
                       value={
                         selectedItem.source === 'batch'
                           ? `Commission ${selectedItem.batch.commissionAmount} · Shipping ${selectedItem.batch.shippingDeductionAmount}`
-                          : 'UNKNOWN'
+                          : 'No payment evidence yet'
                       }
                     />
                   </MetadataGroup>
@@ -620,22 +629,22 @@ export function AdminPaymentPreparationPage() {
                       value={
                         selectedItem.source === 'batch' && hasAmount(selectedItem.batch.refundAmount)
                           ? 'Refund deductions present'
-                          : 'None / Ready'
+                          : 'No refund adjustment'
                       }
                     />
                     <MetadataRow label="Vendor" value={getSafeVendorLabel(selectedItem.vendorId, currentVendorId, currentVendorName)} />
-                    <MetadataRow label="Support" value="UNKNOWN" />
+                    <MetadataRow label="Support" value="No linked support" />
                   </MetadataGroup>
 
                   <section className="op-panel-section">
                     <h4>Timeline</h4>
                     <ul className="settlement-review-timeline">
                       <li><strong>Settlement approved</strong><span>{selectedItem.source === 'ready' ? 'Loaded from readiness' : formatDate(selectedItem.batch.createdAt)}</span></li>
-                      <li><strong>Payment draft created</strong><span>{selectedItem.source === 'batch' ? formatDate(selectedItem.batch.createdAt) : 'Not created'}</span></li>
-                      <li><strong>Review started</strong><span>{selectedItem.source === 'batch' && ['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'Not started'}</span></li>
-                      <li><strong>Approved</strong><span>{selectedItem.source === 'batch' && ['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'Not approved'}</span></li>
-                      <li><strong>Marked paid</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'paid_placeholder' ? formatDate(selectedItem.batch.updatedAt) : 'Not paid'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'cancelled' ? formatDate(selectedItem.batch.updatedAt) : 'Not cancelled'}</span></li>
+                      <li><strong>Payment draft created</strong><span>{selectedItem.source === 'batch' ? formatDate(selectedItem.batch.createdAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Review started</strong><span>{selectedItem.source === 'batch' && ['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Approved</strong><span>{selectedItem.source === 'batch' && ['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Marked paid</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'paid_placeholder' ? formatDate(selectedItem.batch.updatedAt) : 'No payment evidence yet'}</span></li>
+                      <li><strong>Cancelled</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'cancelled' ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
                     </ul>
                   </section>
                 </>

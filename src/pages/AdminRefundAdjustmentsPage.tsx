@@ -52,7 +52,7 @@ function formatSignedMinor(amountMinor: number | null | undefined, currency = 'T
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'Not recorded';
+    return 'No timeline event yet';
   }
   return formatDateTime(value, {
     month: 'short',
@@ -76,7 +76,7 @@ function getNextAction(adjustment: RefundAdjustmentRecord): NextAction {
     return 'Review';
   }
   if (adjustment.status === 'partially_applied') {
-    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'Waiting';
+    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'No Action Required';
   }
   if (adjustment.status === 'blocked') {
     return 'Investigate';
@@ -136,16 +136,27 @@ function getRefundLabel(adjustment: RefundAdjustmentRecord) {
   return safeReferenceLabel(adjustment.references?.refundLabel, 'Refund reference unavailable');
 }
 
+function getRefundReferenceLabel(adjustment: RefundAdjustmentRecord) {
+  const label = getRefundLabel(adjustment);
+  if (label === 'Refund reference unavailable') {
+    const shortReference = adjustment.refundRecordId && isLikelyRawIdentifier(adjustment.refundRecordId)
+      ? adjustment.refundRecordId.slice(0, 8)
+      : null;
+    return shortReference ? `Refund reference ${shortReference}` : 'No refund reference';
+  }
+  return `Refund reference ${label.replace(/^Refund\s*#?/i, '').trim() || label}`;
+}
+
 function getSettlementLabel(adjustment: RefundAdjustmentRecord) {
   const label = safeReferenceLabel(adjustment.references?.originalSettlementLabel, '');
-  return label || (adjustment.originalSettlementApprovalId ? 'Linked settlement' : 'UNKNOWN');
+  return label || (adjustment.originalSettlementApprovalId ? 'Linked settlement' : 'No linked settlement');
 }
 
 function getVendorLabel(adjustment: RefundAdjustmentRecord, currentVendorId: string, currentVendorName: string) {
   if (adjustment.vendorId === currentVendorId && currentVendorName) {
     return currentVendorName;
   }
-  return adjustment.vendorId || 'UNKNOWN';
+  return adjustment.vendorId || 'Vendor unavailable';
 }
 
 function matchesWorkflow(adjustment: RefundAdjustmentRecord, workflow: WorkflowTab) {
@@ -330,7 +341,7 @@ export function AdminRefundAdjustmentsPage() {
         {!query.isLoading && !query.isError && visibleRecords.length > 0 ? (
           <div className="settlement-review-layout refund-adjustments-layout">
             <OperationalTable
-              columns={['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Open']}
+              columns={['Vendor', 'Refund', 'Adjustment', 'Amount', 'Status', 'Next Action', 'Updated', 'Review']}
               className="settlement-review-table refund-adjustments-table"
               stickyHeader={false}
             >
@@ -343,7 +354,7 @@ export function AdminRefundAdjustmentsPage() {
                     </span>
                     <span>
                       <strong>{getOrderLabel(adjustment)}</strong>
-                      <small>{getRefundLabel(adjustment)}</small>
+                      <small>{getRefundReferenceLabel(adjustment)}</small>
                     </span>
                     <span>
                       <strong>{getAdjustmentType(adjustment)}</strong>
@@ -364,7 +375,7 @@ export function AdminRefundAdjustmentsPage() {
                         className="button button-secondary button-compact"
                         onClick={() => setSelectedId(adjustment.id)}
                       >
-                        Open
+                        Review
                       </button>
                     </span>
                   </OperationalTableRow>
@@ -377,7 +388,7 @@ export function AdminRefundAdjustmentsPage() {
                 <>
                   <MetadataGroup title="Adjustment Summary">
                     <MetadataRow label="Vendor" value={getVendorLabel(selectedAdjustment, currentVendorId, currentVendorName)} />
-                    <MetadataRow label="Order / Return" value={`${getOrderLabel(selectedAdjustment)} · ${getRefundLabel(selectedAdjustment)}`} />
+                    <MetadataRow label="Order / Return" value={`${getOrderLabel(selectedAdjustment)} · ${getRefundReferenceLabel(selectedAdjustment)}`} />
                     <MetadataRow label="Refund Amount" value={formatMinor(selectedAdjustment.originalAmountMinor, selectedAdjustment.currencyCode)} />
                     <MetadataRow label="Adjustment Amount" value={formatSignedMinor(-Math.abs(selectedAdjustment.amountMinor), selectedAdjustment.currencyCode)} />
                     <MetadataRow label="Current Status" value={STATUS_LABELS[selectedAdjustment.status]} />
@@ -402,15 +413,15 @@ export function AdminRefundAdjustmentsPage() {
                     <MetadataRow label="Refund deduction" value={formatMinor(selectedAdjustment.originalAmountMinor, selectedAdjustment.currencyCode)} />
                     <MetadataRow
                       label="Debt adjustment"
-                      value={selectedAdjustment.appliedAmountMinor > 0 ? formatMinor(selectedAdjustment.appliedAmountMinor, selectedAdjustment.currencyCode) : 'UNKNOWN'}
+                      value={selectedAdjustment.appliedAmountMinor > 0 ? formatMinor(selectedAdjustment.appliedAmountMinor, selectedAdjustment.currencyCode) : 'No debt adjustment'}
                     />
                   </MetadataGroup>
 
                   <MetadataGroup title="Related Records">
                     <MetadataRow label="Order" value={getOrderLabel(selectedAdjustment)} />
-                    <MetadataRow label="Return" value={getRefundLabel(selectedAdjustment)} />
+                    <MetadataRow label="Return" value={getRefundReferenceLabel(selectedAdjustment)} />
                     <MetadataRow label="Settlement" value={getSettlementLabel(selectedAdjustment)} />
-                    <MetadataRow label="Support" value="UNKNOWN" />
+                    <MetadataRow label="Support" value="No linked support" />
                   </MetadataGroup>
 
                   <section className="op-panel-section">
@@ -418,10 +429,10 @@ export function AdminRefundAdjustmentsPage() {
                     <ul className="settlement-review-timeline">
                       <li><strong>Refund recorded</strong><span>{formatDate(selectedAdjustment.createdAt)}</span></li>
                       <li><strong>Adjustment created</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'created') ?? selectedAdjustment.createdAt)}</span></li>
-                      <li><strong>Review started</strong><span>{selectedAdjustment.status === 'pending' ? formatDate(selectedAdjustment.createdAt) : 'Not active'}</span></li>
+                      <li><strong>Review started</strong><span>{selectedAdjustment.status === 'pending' ? formatDate(selectedAdjustment.createdAt) : 'No timeline event yet'}</span></li>
                       <li><strong>Applied</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'applied') ?? (selectedAdjustment.status === 'applied' ? selectedAdjustment.updatedAt : null))}</span></li>
-                      <li><strong>Blocked</strong><span>{selectedAdjustment.status === 'blocked' ? formatDate(selectedAdjustment.updatedAt) : 'Not blocked'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedAdjustment.status === 'cancelled' ? formatDate(selectedAdjustment.updatedAt) : 'Not cancelled'}</span></li>
+                      <li><strong>Blocked</strong><span>{selectedAdjustment.status === 'blocked' ? formatDate(selectedAdjustment.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Cancelled</strong><span>{selectedAdjustment.status === 'cancelled' ? formatDate(selectedAdjustment.updatedAt) : 'No timeline event yet'}</span></li>
                     </ul>
                   </section>
                 </>
