@@ -14694,6 +14694,27 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(72px, 0.42fr);
 }
 
+.refund-adjustments-tabs {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.refund-adjustments-filters .op-search-input {
+  flex-basis: 220px;
+}
+
+.refund-adjustments-table .op-table-head,
+.refund-adjustments-table .op-table-row {
+  grid-template-columns:
+    minmax(124px, 0.82fr)
+    minmax(172px, 1.05fr)
+    minmax(170px, 1fr)
+    minmax(132px, 0.8fr)
+    minmax(126px, 0.74fr)
+    minmax(112px, 0.68fr)
+    minmax(116px, 0.72fr)
+    minmax(68px, 0.4fr);
+}
+
 .settlement-review-table .op-table-row small,
 .settlement-review-panel .op-meta-row span,
 .settlement-review-timeline span {
