@@ -74,8 +74,8 @@ type SettlementReviewWorkflowTab =
   | 'vendor_hold'
   | 'approved'
   | 'paid';
-type SettlementReviewNextAction = 'Review' | 'Approve' | 'Investigate' | 'No action required';
-type SettlementReviewPanelAction = 'Approve' | 'Reject' | 'Investigate' | 'No action required';
+type SettlementReviewNextAction = 'Approve' | 'Investigate' | 'View';
+type SettlementReviewPanelAction = 'Approve' | 'Investigate' | 'View';
 type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
 type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
 
@@ -110,9 +110,9 @@ const HIGH_VALUE_SETTLEMENT_MINOR = 100000;
 const SETTLEMENT_REVIEW_WORKFLOW_TABS: SettlementReviewWorkflowConfig[] = [
   { id: 'all', label: 'All' },
   { id: 'needs_review', label: 'Needs Review' },
-  { id: 'ready_for_approval', label: 'Ready for Approval' },
-  { id: 'refund_review', label: 'Refund Review' },
-  { id: 'vendor_hold', label: 'Vendor Hold' },
+  { id: 'ready_for_approval', label: 'Ready' },
+  { id: 'refund_review', label: 'Refund' },
+  { id: 'vendor_hold', label: 'Hold' },
   { id: 'approved', label: 'Approved' },
   { id: 'paid', label: 'Paid' },
 ];
@@ -221,15 +221,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 function formatQueueTimelineDate(value: string | null | undefined) {
-  return formatDateTime(value, undefined, 'No activity recorded yet.');
-}
-
-function getShortQueueReference(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return trimmed.length > 10 ? trimmed.slice(0, 8) : trimmed;
+  return formatDateTime(value, undefined, 'No finance activity recorded yet.');
 }
 
 function valueOrDash(value: unknown) {
@@ -534,26 +526,26 @@ function matchesSettlementWorkflowTab(
 
 function getSettlementReviewNextAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewNextAction {
   if (summary.status === 'approved') {
-    return 'No action required';
+    return 'View';
   }
   if (summary.status === 'cancelled') {
-    return 'Investigate';
+    return 'View';
   }
   if (isReadyForSettlementApproval(summary, activeApproval)) {
     return 'Approve';
   }
   if (hasSettlementIssue(summary, activeApproval, 'Refund') || hasSettlementIssue(summary, activeApproval, 'Shipping')) {
-    return 'Review';
+    return 'Investigate';
   }
   return 'Investigate';
 }
 
 function getSettlementReviewPanelAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewPanelAction {
   if (summary.status === 'approved') {
-    return 'No action required';
+    return 'View';
   }
   if (summary.status === 'cancelled') {
-    return 'Reject';
+    return 'View';
   }
   if (isReadyForSettlementApproval(summary, activeApproval)) {
     return 'Approve';
@@ -1455,7 +1447,6 @@ function SettlementReviewQueue({
             {filteredApprovals.map((item) => {
               const itemIssues = getSettlementReviewIssues(item, activeApproval);
               const vendorDisplayName = item.vendorId === vendorId && vendorName ? vendorName : item.vendorId;
-              const settlementReference = getShortQueueReference(item.id);
               return (
                 <OperationalTableRow
                   key={item.id}
@@ -1468,7 +1459,7 @@ function SettlementReviewQueue({
                   </span>
                   <span>
                     <strong>Settlement</strong>
-                    <small>{getSettlementPeriodLabel(item, activeApproval)}{settlementReference ? ` · Ref: ${settlementReference}` : ''}</small>
+                    <small>{getSettlementPeriodLabel(item, activeApproval)}</small>
                   </span>
                   <span>
                     <strong>Gross {formatMinor(item.grossSalesMinor, item.currency)}</strong>
@@ -1500,7 +1491,7 @@ function SettlementReviewQueue({
                 </MetadataGroup>
                 {selectedWaitingReason ? (
                   <section className="op-panel-section">
-                    <h4>Why is this waiting?</h4>
+                    <h4>Current Blocker</h4>
                     <p className="page-description">{selectedWaitingReason}</p>
                   </section>
                 ) : null}
@@ -1508,7 +1499,6 @@ function SettlementReviewQueue({
                   <MetadataRow label="Action" value={getSettlementReviewPanelAction(selectedQueueApproval, activeApproval)} />
                 </MetadataGroup>
                 <MetadataGroup title="Payment Impact">
-                  <MetadataRow label="Net payment" value={formatMinor(selectedQueueApproval.netPayableMinor, selectedQueueApproval.currency)} />
                   <MetadataRow
                     label="Refund adjustment"
                     value={
@@ -1528,10 +1518,9 @@ function SettlementReviewQueue({
                   <h4>Timeline</h4>
                   <ul className="settlement-review-timeline">
                     <li><strong>Settlement created</strong><span>{formatDate(selectedQueueApproval.createdAt)}</span></li>
-                    <li><strong>Refund recorded</strong><span>{selectedQueueIssues.includes('Refund') ? formatDate(selectedQueueApproval.createdAt) : 'No activity recorded yet.'}</span></li>
-                    <li><strong>Review started</strong><span>{selectedQueueApproval.status === 'draft' ? formatDate(selectedQueueApproval.createdAt) : 'No activity recorded yet.'}</span></li>
-                    <li><strong>Approved</strong><span>{formatQueueTimelineDate(selectedQueueApproval.approvedAt)}</span></li>
-                    <li><strong>Paid</strong><span>No payment evidence yet</span></li>
+                    {selectedQueueIssues.includes('Refund') ? <li><strong>Refund recorded</strong><span>{formatDate(selectedQueueApproval.createdAt)}</span></li> : null}
+                    {selectedQueueApproval.status === 'draft' ? <li><strong>Review started</strong><span>{formatDate(selectedQueueApproval.createdAt)}</span></li> : null}
+                    {selectedQueueApproval.approvedAt ? <li><strong>Approved</strong><span>{formatQueueTimelineDate(selectedQueueApproval.approvedAt)}</span></li> : null}
                   </ul>
                 </section>
               </>
@@ -2143,7 +2132,7 @@ export function AdminSettlementApprovalsPage() {
       status: auditStepStatus,
       details: [
         { label: 'Audit loaded', value: Boolean(audit) },
-        { label: 'Line count', value: audit ? formatNumber(audit.lines.length) : 'No activity recorded yet.' },
+        { label: 'Line count', value: audit ? formatNumber(audit.lines.length) : 'No finance activity recorded yet.' },
         { label: 'Eligibility reasons', value: audit ? (auditReasonsAvailable ? 'Available' : 'Missing') : 'No payment evidence yet' },
       ],
     },

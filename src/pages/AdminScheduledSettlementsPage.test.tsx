@@ -306,7 +306,7 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(within(tabs).getByRole('button', { name: /Due Today4/i })).toBeInTheDocument();
     expect(within(tabs).getByRole('button', { name: /Ready1/i })).toBeInTheDocument();
     expect(within(tabs).getByRole('button', { name: /Blocked2/i })).toBeInTheDocument();
-    expect(within(tabs).getByRole('button', { name: /Already Drafted1/i })).toBeInTheDocument();
+    expect(within(tabs).getByRole('button', { name: /In Review1/i })).toBeInTheDocument();
     expect(within(tabs).getByRole('button', { name: /Not Due1/i })).toBeInTheDocument();
 
     expect(screen.getByRole('columnheader', { name: 'Vendor' })).toBeInTheDocument();
@@ -323,7 +323,7 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Create Draft').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund Adjustment')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund').length).toBeGreaterThan(0);
     expect(screen.queryByText('Sporjinal')).not.toBeInTheDocument();
 
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
@@ -344,15 +344,15 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getAllByText('Empty Vendor').length).toBeGreaterThan(0);
     expect(screen.queryByText('Yalı Spor')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Already Drafted1/i }));
+    await user.click(screen.getByRole('button', { name: /In Review1/i }));
     expect(screen.getAllByText('Draft Vendor').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('No action required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('View').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: /Not Due1/i }));
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument();
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
-    expect(within(panel).getByText('Why is this waiting?')).toBeInTheDocument();
+    expect(within(panel).getByText('Current Blocker')).toBeInTheDocument();
     expect(within(panel).getByText('This vendor is not scheduled for the selected settlement run.')).toBeInTheDocument();
     expect(within(panel).queryByText('Preview Schedule')).not.toBeInTheDocument();
   });
@@ -449,7 +449,7 @@ describe('AdminScheduledSettlementsPage', () => {
     renderPage();
 
     await screen.findAllByText('Yalı Spor');
-    expect(screen.getAllByText('No activity recorded yet.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Last run').length).toBeGreaterThan(0);
     const advancedDetails = screen.getByLabelText('Advanced run details');
     expect(advancedDetails).not.toHaveAttribute('open');
     expect(screen.getByText('Advanced run details')).toBeInTheDocument();
@@ -505,7 +505,7 @@ describe('AdminScheduledSettlementsPage', () => {
 
     await screen.findAllByText('Ready');
     await user.click(screen.getByRole('button', { name: 'Create Scheduled Drafts' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Create settlement drafts for all READY vendors?');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Create settlement drafts for all Ready vendors?');
 
     await user.click(screen.getByLabelText('I understand this will create settlement drafts.'));
     await user.click(screen.getByRole('button', { name: 'Create drafts' }));

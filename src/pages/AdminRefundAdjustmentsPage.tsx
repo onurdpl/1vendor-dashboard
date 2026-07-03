@@ -19,23 +19,23 @@ import { formatCurrency, formatDateTime } from '../services/real/formatting';
 
 type WorkflowTab = 'all' | 'needs_review' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
 type StatusFilter = 'all' | RefundAdjustmentStatus;
-type NextAction = 'Review' | 'Apply' | 'Investigate' | 'No action required';
+type NextAction = 'Apply' | 'Investigate' | 'View';
 
 const HIGH_VALUE_AMOUNT_MINOR = 100000;
 
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'needs_review', label: 'Needs Review' },
-  { id: 'partially_applied', label: 'Partially Applied' },
-  { id: 'applied', label: 'Applied' },
+  { id: 'partially_applied', label: 'In Review' },
+  { id: 'applied', label: 'Approved' },
   { id: 'blocked', label: 'Blocked' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
 
 const STATUS_LABELS: Record<RefundAdjustmentStatus, string> = {
   pending: 'Needs Review',
-  partially_applied: 'Partially Applied',
-  applied: 'Applied',
+  partially_applied: 'In Review',
+  applied: 'Approved',
   blocked: 'Blocked',
   cancelled: 'Cancelled',
 };
@@ -52,7 +52,7 @@ function formatSignedMinor(amountMinor: number | null | undefined, currency = 'T
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'No activity recorded yet.';
+    return 'No finance activity recorded yet.';
   }
   return formatDateTime(value, {
     month: 'short',
@@ -73,15 +73,15 @@ function getStatusTone(status: RefundAdjustmentStatus) {
 
 function getNextAction(adjustment: RefundAdjustmentRecord): NextAction {
   if (adjustment.status === 'pending') {
-    return 'Review';
+    return 'Apply';
   }
   if (adjustment.status === 'partially_applied') {
-    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'No action required';
+    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'View';
   }
   if (adjustment.status === 'blocked') {
     return 'Investigate';
   }
-  return 'No action required';
+  return 'View';
 }
 
 function getAdjustmentType(adjustment: RefundAdjustmentRecord) {
@@ -133,16 +133,13 @@ function getOrderLabel(adjustment: RefundAdjustmentRecord) {
 }
 
 function getRefundLabel(adjustment: RefundAdjustmentRecord) {
-  return safeReferenceLabel(adjustment.references?.refundLabel, 'Refund reference unavailable');
+  return safeReferenceLabel(adjustment.references?.refundLabel, 'Refund Recorded');
 }
 
 function getRefundReferenceLabel(adjustment: RefundAdjustmentRecord) {
   const label = getRefundLabel(adjustment);
-  if (label === 'Refund reference unavailable') {
-    const shortReference = adjustment.refundRecordId && isLikelyRawIdentifier(adjustment.refundRecordId)
-      ? adjustment.refundRecordId.slice(0, 8)
-      : null;
-    return shortReference ? `Refund reference ${shortReference}` : 'No refund reference';
+  if (label === 'Refund Recorded') {
+    return label;
   }
   return `Refund reference ${label.replace(/^Refund\s*#?/i, '').trim() || label}`;
 }
@@ -298,8 +295,8 @@ export function AdminRefundAdjustmentsPage() {
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
               <option value="all">All statuses</option>
               <option value="pending">Needs Review</option>
-              <option value="partially_applied">Partially Applied</option>
-              <option value="applied">Applied</option>
+              <option value="partially_applied">In Review</option>
+              <option value="applied">Approved</option>
               <option value="blocked">Blocked</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -391,7 +388,7 @@ export function AdminRefundAdjustmentsPage() {
 
                   {selectedWaitingReason ? (
                     <section className="op-panel-section">
-                      <h4>Why is this waiting?</h4>
+                      <h4>Current Blocker</h4>
                       <p className="page-description">{selectedWaitingReason}</p>
                     </section>
                   ) : null}
@@ -402,10 +399,9 @@ export function AdminRefundAdjustmentsPage() {
 
                   <MetadataGroup title="Payment Impact">
                     <MetadataRow
-                      label="Net vendor payment effect"
+                      label="Remaining impact"
                       value={formatSignedMinor(-Math.abs(selectedAdjustment.remainingAmountMinor || selectedAdjustment.amountMinor), selectedAdjustment.currencyCode)}
                     />
-                    <MetadataRow label="Refund deduction" value={formatMinor(selectedAdjustment.originalAmountMinor, selectedAdjustment.currencyCode)} />
                     <MetadataRow
                       label="Debt adjustment"
                       value={selectedAdjustment.appliedAmountMinor > 0 ? formatMinor(selectedAdjustment.appliedAmountMinor, selectedAdjustment.currencyCode) : 'No debt adjustment'}
@@ -424,10 +420,12 @@ export function AdminRefundAdjustmentsPage() {
                     <ul className="settlement-review-timeline">
                       <li><strong>Refund recorded</strong><span>{formatDate(selectedAdjustment.createdAt)}</span></li>
                       <li><strong>Adjustment created</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'created') ?? selectedAdjustment.createdAt)}</span></li>
-                      <li><strong>Review started</strong><span>{selectedAdjustment.status === 'pending' ? formatDate(selectedAdjustment.createdAt) : 'No activity recorded yet.'}</span></li>
-                      <li><strong>Applied</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'applied') ?? (selectedAdjustment.status === 'applied' ? selectedAdjustment.updatedAt : null))}</span></li>
-                      <li><strong>Blocked</strong><span>{selectedAdjustment.status === 'blocked' ? formatDate(selectedAdjustment.updatedAt) : 'No activity recorded yet.'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedAdjustment.status === 'cancelled' ? formatDate(selectedAdjustment.updatedAt) : 'No activity recorded yet.'}</span></li>
+                      {selectedAdjustment.status === 'pending' ? <li><strong>Review started</strong><span>{formatDate(selectedAdjustment.createdAt)}</span></li> : null}
+                      {eventTimestamp(selectedAdjustment, 'applied') || selectedAdjustment.status === 'applied' ? (
+                        <li><strong>Applied</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'applied') ?? selectedAdjustment.updatedAt)}</span></li>
+                      ) : null}
+                      {selectedAdjustment.status === 'blocked' ? <li><strong>Blocked</strong><span>{formatDate(selectedAdjustment.updatedAt)}</span></li> : null}
+                      {selectedAdjustment.status === 'cancelled' ? <li><strong>Cancelled</strong><span>{formatDate(selectedAdjustment.updatedAt)}</span></li> : null}
                     </ul>
                   </section>
                 </>

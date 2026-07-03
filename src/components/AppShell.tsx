@@ -44,9 +44,9 @@ const vendorNavItems = [
 const adminNavItems = [
   { to: '/admin/operations', label: 'Operations Queue', icon: 'queue' },
   { to: '/admin/finance/settlement-approvals', label: 'Settlement Approvals', icon: 'settlement' },
-  { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'schedule' },
   { to: '/admin/finance/refund-adjustments', label: 'Refund Adjustments', icon: 'settlement' },
   { to: '/admin/finance/payment-preparation', label: 'Payment Preparation', icon: 'payments' },
+  { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'schedule' },
   { to: '/admin/support', label: 'Support Tickets', icon: 'support' },
   { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'analytics' },
   { to: '/admin/providers', label: 'Providers', icon: 'providers' },

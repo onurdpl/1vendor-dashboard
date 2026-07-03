@@ -30,9 +30,33 @@ describe('Admin Finance queue consistency', () => {
       expect(source).not.toContain('Settlement Review Queue');
       expect(source).not.toContain('No timeline event yet');
       expect(source).not.toContain('No Action Required');
+      expect(source).not.toContain('No action required');
       expect(source).not.toContain('Ready for Draft');
+      expect(source).not.toContain('Ready for Approval');
+      expect(source).not.toContain('Refund Review');
+      expect(source).not.toContain('Vendor Hold');
+      expect(source).not.toContain('Already Drafted');
       expect(source).not.toContain('None / Ready');
+      expect(source).not.toContain('Why is this waiting?');
+      expect(source).not.toMatch(/Ref: [a-z0-9]/i);
+      expect(source).not.toContain('Missing Evidence');
+      expect(source).not.toContain('Export Needed');
+      expect(source).not.toContain('No activity recorded yet.');
+      expect(source).toContain('Current Blocker');
     });
+  });
+
+  it('keeps admin finance navigation in operational workflow order', () => {
+    const source = readProjectFile('src/components/AppShell.tsx');
+    const settlementIndex = source.indexOf("label: 'Settlement Approvals'");
+    const refundIndex = source.indexOf("label: 'Refund Adjustments'");
+    const paymentIndex = source.indexOf("label: 'Payment Preparation'");
+    const scheduledIndex = source.indexOf("label: 'Scheduled Settlements'");
+
+    expect(settlementIndex).toBeGreaterThanOrEqual(0);
+    expect(refundIndex).toBeGreaterThan(settlementIndex);
+    expect(paymentIndex).toBeGreaterThan(refundIndex);
+    expect(scheduledIndex).toBeGreaterThan(paymentIndex);
   });
 
   it('keeps admin finance queue tables buttonless and row-selectable', () => {

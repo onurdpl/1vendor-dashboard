@@ -180,7 +180,7 @@ describe('AdminPaymentPreparationPage', () => {
     expect(screen.getByText('Prepare approved vendor payments before payout execution.')).toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Payment preparation workflow tabs');
-    for (const label of ['All', 'Ready', 'Draft', 'In Review', 'Approved', 'Paid', 'Cancelled']) {
+    for (const label of ['All', 'Ready', 'Needs Review', 'In Review', 'Approved', 'Paid', 'Cancelled']) {
       expect(within(tabs).getByText(label)).toBeInTheDocument();
     }
     expect(within(tabs).queryByText('Ready to Prepare')).not.toBeInTheDocument();
@@ -215,7 +215,7 @@ describe('AdminPaymentPreparationPage', () => {
     expect(draftRow).toHaveClass('op-row-selected');
     const panel = screen.getByLabelText('Payment preparation detail panel');
     expect(within(panel).getAllByText('TRY 48,000.00').length).toBeGreaterThan(0);
-    expect(within(panel).getAllByText('Draft').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('Needs Review').length).toBeGreaterThan(0);
   });
 
   it('renders the right panel hierarchy from queue-safe fields', async () => {
@@ -226,7 +226,7 @@ describe('AdminPaymentPreparationPage', () => {
     const panel = screen.getByLabelText('Payment preparation detail panel');
     for (const section of [
       'Summary',
-      'Why is this waiting?',
+      'Current Blocker',
       'Next Action',
       'Payment Impact',
       'Related Records',

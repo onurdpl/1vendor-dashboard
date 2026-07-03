@@ -158,7 +158,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     expect(screen.getByText('Review refund deductions and balance adjustments before vendor payment.')).toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Refund adjustment workflow tabs');
-    for (const label of ['All', 'Needs Review', 'Partially Applied', 'Applied', 'Blocked', 'Cancelled']) {
+    for (const label of ['All', 'Needs Review', 'In Review', 'Approved', 'Blocked', 'Cancelled']) {
       expect(within(tabs).getByText(label)).toBeInTheDocument();
     }
   });
@@ -199,11 +199,11 @@ describe('AdminRefundAdjustmentsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
 
     const panel = screen.getByLabelText('Refund adjustment detail panel');
-    for (const section of ['Summary', 'Why is this waiting?', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline']) {
+    for (const section of ['Summary', 'Current Blocker', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline']) {
       expect(within(panel).getByText(section)).toBeInTheDocument();
     }
     expect(within(panel).getByText('Refund review required')).toBeInTheDocument();
-    expect(within(panel).getByText('Review')).toBeInTheDocument();
+    expect(within(panel).getByText('Apply')).toBeInTheDocument();
     expect(within(panel).getByText('No debt adjustment')).toBeInTheDocument();
     expect(within(panel).getByText('No linked support')).toBeInTheDocument();
     expect(within(panel).queryByText('UNKNOWN')).not.toBeInTheDocument();

@@ -187,7 +187,7 @@ describe('Settlement Review queue cleanup', () => {
 
     const workflowTabs = queue.querySelector('.settlement-review-tabs') as HTMLElement;
     expect(workflowTabs).toBeTruthy();
-    ['All', 'Needs Review', 'Ready for Approval', 'Refund Review', 'Vendor Hold', 'Approved', 'Paid'].forEach((label) => {
+    ['All', 'Needs Review', 'Ready', 'Refund', 'Hold', 'Approved', 'Paid'].forEach((label) => {
       expect(within(workflowTabs).getByText(label)).toBeInTheDocument();
     });
     ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated'].forEach((column) => {
@@ -201,13 +201,13 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(queue).queryByText('fle-sale-1')).not.toBeInTheDocument();
     expect(within(queue).queryByText(rawSettlementApprovalId)).not.toBeInTheDocument();
     expect(within(queue).getAllByText('Settlement').length).toBeGreaterThan(0);
-    expect(within(queue).getAllByText(/Ref: 11111111/i).length).toBeGreaterThan(0);
+    expect(within(queue).queryByText(/Ref: 11111111/i)).not.toBeInTheDocument();
     expect(within(queue).queryByText('UNKNOWN')).not.toBeInTheDocument();
     expect(within(queue).queryByText('None loaded')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Not loaded')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Approval detail loaded.')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Waiting')).not.toBeInTheDocument();
-    expect(within(queue).getAllByText('No action required').length).toBeGreaterThan(0);
+    expect(within(queue).getAllByText('View').length).toBeGreaterThan(0);
   });
 
   it('keeps admin finance queue cells and badges wrap-safe', () => {

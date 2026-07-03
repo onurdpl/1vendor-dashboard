@@ -21,9 +21,9 @@ import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/
 
 type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
-type QueueStatus = 'Ready' | 'Draft' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
-type NextAction = 'Prepare' | 'Review' | 'Approve' | 'Mark Paid' | 'Investigate' | 'No action required';
-type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Missing Evidence' | 'Export Needed' | 'Ready';
+type QueueStatus = 'Ready' | 'Needs Review' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
+type NextAction = 'Prepare' | 'Approve' | 'Mark Paid' | 'Investigate' | 'View';
+type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Ready';
 
 type PaymentQueueItem =
   | {
@@ -44,7 +44,7 @@ const HIGH_VALUE_AMOUNT = 100000;
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'ready_to_prepare', label: 'Ready' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'draft', label: 'Needs Review' },
   { id: 'review', label: 'In Review' },
   { id: 'approved', label: 'Approved' },
   { id: 'paid', label: 'Paid' },
@@ -54,7 +54,7 @@ const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All statuses' },
   { value: 'ready_to_prepare', label: 'Ready' },
-  { value: 'draft', label: 'Draft' },
+  { value: 'draft', label: 'Needs Review' },
   { value: 'review', label: 'In Review' },
   { value: 'approved', label: 'Approved' },
   { value: 'execution_pending', label: 'In Review' },
@@ -69,7 +69,7 @@ function formatDate(value: string | null | undefined) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }, 'No activity recorded yet.');
+  }, 'No finance activity recorded yet.');
 }
 
 function formatShortDate(value: string | null | undefined) {
@@ -196,7 +196,7 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
     return 'Ready';
   }
   if (item.batch.status === 'draft') {
-    return 'Draft';
+    return 'Needs Review';
   }
   if (item.batch.status === 'review') {
     return 'In Review';
@@ -218,7 +218,7 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
 
 function getStatusTone(status: QueueStatus) {
   if (status === 'Ready' || status === 'Approved' || status === 'Paid') return 'success' as const;
-  if (status === 'Draft') return 'info' as const;
+  if (status === 'Needs Review') return 'info' as const;
   if (status === 'In Review') return 'attention' as const;
   if (status === 'Cancelled') return 'neutral' as const;
   return 'neutral' as const;
@@ -229,7 +229,7 @@ function getIssues(item: PaymentQueueItem): IssueLabel[] {
   if (item.source === 'ready') {
     const summary = item.dashboard.payoutBatchSummary;
     if ((summary?.blockedRowCount ?? 0) > 0) {
-      issues.push('Missing Evidence');
+      issues.push('Hold');
     }
     if (hasAmount(summary?.outstandingDebtAmount) || hasAmount(summary?.debtOffsetPreviewAmount)) {
       issues.push('Debt');
@@ -247,7 +247,7 @@ function getIssues(item: PaymentQueueItem): IssueLabel[] {
     issues.push('Hold');
   }
   if (item.batch.status === 'execution_pending') {
-    issues.push('Export Needed');
+    issues.push('Hold');
   }
   return issues.length > 0 ? issues : ['Ready'];
 }
@@ -285,7 +285,7 @@ function getNextAction(item: PaymentQueueItem): NextAction {
     return waitingReason ? 'Investigate' : 'Prepare';
   }
   if (item.batch.status === 'draft') {
-    return 'Review';
+    return 'Approve';
   }
   if (item.batch.status === 'review') {
     return 'Approve';
@@ -294,9 +294,9 @@ function getNextAction(item: PaymentQueueItem): NextAction {
     return 'Mark Paid';
   }
   if (item.batch.status === 'execution_pending') {
-    return 'No action required';
+    return 'View';
   }
-  return 'No action required';
+  return 'View';
 }
 
 function matchesWorkflow(item: PaymentQueueItem, workflow: WorkflowTab) {
@@ -587,7 +587,7 @@ export function AdminPaymentPreparationPage() {
 
                   {selectedWaitingReason ? (
                     <section className="op-panel-section">
-                      <h4>Why is this waiting?</h4>
+                      <h4>Current Blocker</h4>
                       <p className="page-description">{selectedWaitingReason}</p>
                     </section>
                   ) : null}
@@ -597,7 +597,6 @@ export function AdminPaymentPreparationPage() {
                   </MetadataGroup>
 
                   <MetadataGroup title="Payment Impact">
-                    <MetadataRow label="Net payment" value={formatPaymentAmount(getNetPayable(selectedItem))} />
                     <MetadataRow
                       label="Refund deductions"
                       value={
@@ -647,19 +646,27 @@ export function AdminPaymentPreparationPage() {
                           : 'No refund adjustment'
                       }
                     />
-                    <MetadataRow label="Vendor" value={getSafeVendorLabel(selectedItem.vendorId, currentVendorId, currentVendorName)} />
                     <MetadataRow label="Support" value="No linked support" />
                   </MetadataGroup>
 
                   <section className="op-panel-section">
                     <h4>Timeline</h4>
                     <ul className="settlement-review-timeline">
-                      <li><strong>Settlement approved</strong><span>{selectedItem.source === 'ready' ? 'Loaded from readiness' : formatDate(selectedItem.batch.createdAt)}</span></li>
-                      <li><strong>Payment draft created</strong><span>{selectedItem.source === 'batch' ? formatDate(selectedItem.batch.createdAt) : 'No activity recorded yet.'}</span></li>
-                      <li><strong>Review started</strong><span>{selectedItem.source === 'batch' && ['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
-                      <li><strong>Approved</strong><span>{selectedItem.source === 'batch' && ['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
-                      <li><strong>Marked paid</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'paid_placeholder' ? formatDate(selectedItem.batch.updatedAt) : 'No payment evidence yet'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'cancelled' ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
+                      {selectedItem.source === 'batch' ? (
+                        <>
+                          <li><strong>Payment draft created</strong><span>{formatDate(selectedItem.batch.createdAt)}</span></li>
+                          {['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? (
+                            <li><strong>Review started</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li>
+                          ) : null}
+                          {['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? (
+                            <li><strong>Approved</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li>
+                          ) : null}
+                          {selectedItem.batch.status === 'paid_placeholder' ? <li><strong>Marked paid</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li> : null}
+                          {selectedItem.batch.status === 'cancelled' ? <li><strong>Cancelled</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li> : null}
+                        </>
+                      ) : (
+                        <li><strong>No finance activity recorded yet.</strong></li>
+                      )}
                     </ul>
                   </section>
                 </>

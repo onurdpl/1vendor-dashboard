@@ -30,23 +30,23 @@ const STATE_LABELS: Record<SettlementScheduleState, string> = {
   NO_ELIGIBLE_ROWS: 'Blocked',
   CONFIG_MISSING: 'Blocked',
   BLOCKED: 'Blocked',
-  DRAFT_EXISTS: 'Already Drafted',
-  SETTLEMENT_EXISTS: 'Already Drafted',
+  DRAFT_EXISTS: 'In Review',
+  SETTLEMENT_EXISTS: 'In Review',
 };
 
 type WorkflowTab = 'all' | 'due_today' | 'ready_for_draft' | 'blocked' | 'already_drafted' | 'not_due';
 type StatusFilter = 'all' | WorkflowTab;
-type ScheduleIssue = 'Blocker' | 'Schedule mismatch' | 'Refund Adjustment' | 'No eligible rows' | 'Ready';
-type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'No action required';
+type ScheduleIssue = 'Refund' | 'Hold' | 'Schedule mismatch' | 'Ready';
+type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'View';
 
 const HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR = 100000;
-const TIMELINE_EMPTY_COPY = 'No activity recorded yet.';
+const NO_RECENT_RUN_COPY = 'No recent run';
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'due_today', label: 'Due Today' },
   { id: 'ready_for_draft', label: 'Ready' },
   { id: 'blocked', label: 'Blocked' },
-  { id: 'already_drafted', label: 'Already Drafted' },
+  { id: 'already_drafted', label: 'In Review' },
   { id: 'not_due', label: 'Not Due' },
 ];
 
@@ -55,7 +55,7 @@ const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'due_today', label: 'Due Today' },
   { value: 'ready_for_draft', label: 'Ready' },
   { value: 'blocked', label: 'Blocked' },
-  { value: 'already_drafted', label: 'Already Drafted' },
+  { value: 'already_drafted', label: 'In Review' },
   { value: 'not_due', label: 'Not Due' },
 ];
 
@@ -163,40 +163,40 @@ function getVendorBlockers(vendor: SettlementScheduleDryRunVendor) {
 function getScheduleIssue(vendor: SettlementScheduleDryRunVendor): ScheduleIssue {
   const blockers = getVendorBlockers(vendor);
   if (isBlockedScheduleState(vendor.state) && vendor.state !== 'NO_ELIGIBLE_ROWS') {
-    return 'Blocker';
+    return 'Hold';
   }
   if (blockers.length && vendor.state !== 'NOT_DUE' && vendor.state !== 'NO_ELIGIBLE_ROWS') {
-    return 'Blocker';
+    return 'Hold';
   }
   if (vendor.state === 'NOT_DUE') {
     return 'Schedule mismatch';
   }
   if (vendor.pendingRefundAdjustmentCount > 0) {
-    return 'Refund Adjustment';
+    return 'Refund';
   }
   if (vendor.state === 'NO_ELIGIBLE_ROWS' || vendor.eligibleLineCount === 0) {
-    return 'No eligible rows';
+    return 'Hold';
   }
   return 'Ready';
 }
 
 function getScheduleIssueTone(issue: ScheduleIssue) {
   if (issue === 'Ready') return 'success' as const;
-  if (issue === 'Refund Adjustment') return 'attention' as const;
-  if (issue === 'Blocker' || issue === 'No eligible rows') return 'warning' as const;
+  if (issue === 'Refund') return 'attention' as const;
+  if (issue === 'Hold') return 'warning' as const;
   return 'neutral' as const;
 }
 
 function getScheduleNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'READY') return 'Create Draft';
-  if (isAlreadyDraftedState(vendor.state)) return 'No action required';
+  if (isAlreadyDraftedState(vendor.state)) return 'View';
   if (isBlockedScheduleState(vendor.state)) return 'Investigate';
-  return 'No action required';
+  return 'View';
 }
 
 function getPanelNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'NOT_DUE') {
-    return 'No action required';
+    return 'View';
   }
   return getScheduleNextAction(vendor);
 }
@@ -254,7 +254,7 @@ function CreateDraftsModal({
     <div className="scheduled-settlements-modal" role="dialog" aria-modal="true" aria-labelledby="scheduled-create-drafts-title">
       <div className="scheduled-settlements-modal-card">
         <p className="eyebrow">Scheduled settlements</p>
-        <h3 id="scheduled-create-drafts-title">Create settlement drafts for all READY vendors?</h3>
+        <h3 id="scheduled-create-drafts-title">Create settlement drafts for all Ready vendors?</h3>
         <p className="page-description">
           This uses the existing scheduled draft endpoint. It does not approve settlements, create invoices, call Logo, or execute payouts.
         </p>
@@ -294,7 +294,7 @@ function AutoDraftJobModal({
     <div className="scheduled-settlements-modal" role="dialog" aria-modal="true" aria-labelledby="scheduled-auto-draft-job-title">
       <div className="scheduled-settlements-modal-card">
         <p className="eyebrow">Scheduled auto draft job</p>
-        <h3 id="scheduled-auto-draft-job-title">Create settlement drafts for all READY vendors?</h3>
+        <h3 id="scheduled-auto-draft-job-title">Create settlement drafts for all Ready vendors?</h3>
         <p className="page-description">
           This job creates draft settlement approvals only. It does not approve settlements, create invoices, call Logo, or execute payouts.
         </p>
@@ -304,7 +304,7 @@ function AutoDraftJobModal({
             checked={confirmed}
             onChange={(event) => setConfirmed(event.target.checked)}
           />
-          <span>I understand this will create settlement drafts for all READY vendors.</span>
+          <span>I understand this will create settlement drafts for all Ready vendors.</span>
         </label>
         <div className="scheduled-settlements-modal-actions">
           <button type="button" className="button button-secondary" onClick={onCancel} disabled={submitting}>
@@ -499,7 +499,7 @@ export function AdminScheduledSettlementsPage() {
     : null;
   const lastRunLabel = jobStatus?.lastRun
     ? `${formatDateTime(jobStatus.lastRun.finishedAt ?? jobStatus.lastRun.startedAt)} · ${safeStatusLabel(jobStatus.lastRun.status)}`
-    : TIMELINE_EMPTY_COPY;
+    : NO_RECENT_RUN_COPY;
 
   return (
     <section className="op-page scheduled-settlements-page">
@@ -616,7 +616,7 @@ export function AdminScheduledSettlementsPage() {
                           <strong>{getScheduleNextAction(vendor)}</strong>
                           <span>
                             <strong>{dryRun.runDate}</strong>
-                            <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : TIMELINE_EMPTY_COPY}</small>
+                            <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : NO_RECENT_RUN_COPY}</small>
                           </span>
                         </OperationalTableRow>
                       );
@@ -647,17 +647,14 @@ export function AdminScheduledSettlementsPage() {
                       <MetadataRow label="Current Status" value={selectedState ? STATE_LABELS[selectedState] : 'Not Due'} />
                     </MetadataGroup>
                     {selectedWaitingReason ? (
-                      <MetadataGroup title="Why is this waiting?">
+                      <MetadataGroup title="Current Blocker">
                         <MetadataRow label="Reason" value={selectedWaitingReason} />
                       </MetadataGroup>
                     ) : null}
-                    {selectedVendor.state !== 'NOT_DUE' ? (
-                      <MetadataGroup title="Next Action">
-                        <MetadataRow label="Action" value={getPanelNextAction(selectedVendor)} />
-                      </MetadataGroup>
-                    ) : null}
+                    <MetadataGroup title="Next Action">
+                      <MetadataRow label="Action" value={getPanelNextAction(selectedVendor)} />
+                    </MetadataGroup>
                     <MetadataGroup title="Payment Impact">
-                      <MetadataRow label="Estimated net payable" value={formatMinor(selectedVendor.netPayableMinor)} />
                       <MetadataRow
                         label="Refund adjustments"
                         value={
@@ -666,7 +663,6 @@ export function AdminScheduledSettlementsPage() {
                             : 'No refund adjustment'
                         }
                       />
-                      <MetadataRow label="Eligible rows" value={selectedVendor.eligibleLineCount} />
                     </MetadataGroup>
                     <MetadataGroup title="Related Records">
                       <MetadataRow
@@ -680,24 +676,21 @@ export function AdminScheduledSettlementsPage() {
                         }
                       />
                       <MetadataRow
-                        label="Refund Adjustments"
+                        label="Refund"
                         value={selectedVendor.pendingRefundAdjustmentCount > 0 ? 'Refund adjustment pending' : 'No refund adjustment'}
                       />
-                      <MetadataRow label="Vendor" value={getVendorName(selectedVendor)} />
                     </MetadataGroup>
                     <section className="op-panel-section">
                       <h4>Timeline</h4>
                       <ul className="settlement-review-timeline">
-                        <li><span>Last run</span><strong>{lastRunLabel}</strong></li>
-                        <li>
-                          <span>Last draft created</span>
-                          <strong>{selectedVendor.existingSettlementApprovalId ? 'Existing settlement available' : TIMELINE_EMPTY_COPY}</strong>
-                        </li>
-                        <li><span>Current preview</span><strong>{dryRun.runDate}</strong></li>
-                        <li>
-                          <span>Draft created</span>
-                          <strong>{selectedCreatedDraft ? `Draft created · ${formatMinor(selectedCreatedDraft.netPayableMinor)}` : TIMELINE_EMPTY_COPY}</strong>
-                        </li>
+                        {jobStatus?.lastRun ? <li><span>Last run</span><strong>{lastRunLabel}</strong></li> : null}
+                        {selectedCreatedDraft ? (
+                          <li>
+                            <span>Draft created</span>
+                            <strong>{formatMinor(selectedCreatedDraft.netPayableMinor)}</strong>
+                          </li>
+                        ) : null}
+                        {!jobStatus?.lastRun && !selectedCreatedDraft ? <li><strong>No finance activity recorded yet.</strong></li> : null}
                       </ul>
                     </section>
                   </>
