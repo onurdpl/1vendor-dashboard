@@ -154,6 +154,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Refund Adjustments' })).toBeInTheDocument();
+    expect(screen.getByText('ADMIN FINANCE')).toBeInTheDocument();
     expect(screen.getByText('Review refund deductions and balance adjustments before vendor payment.')).toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Refund adjustment workflow tabs');
@@ -198,7 +199,7 @@ describe('AdminRefundAdjustmentsPage', () => {
     await waitFor(() => expect(screen.getAllByText('Order #1097').length).toBeGreaterThan(0));
 
     const panel = screen.getByLabelText('Refund adjustment detail panel');
-    for (const section of ['Adjustment Summary', 'Why is this waiting?', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline']) {
+    for (const section of ['Summary', 'Why is this waiting?', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline']) {
       expect(within(panel).getByText(section)).toBeInTheDocument();
     }
     expect(within(panel).getByText('Refund review required')).toBeInTheDocument();

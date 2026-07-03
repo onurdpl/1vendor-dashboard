@@ -19,7 +19,7 @@ import { formatCurrency, formatDateTime } from '../services/real/formatting';
 
 type WorkflowTab = 'all' | 'needs_review' | 'partially_applied' | 'applied' | 'blocked' | 'cancelled';
 type StatusFilter = 'all' | RefundAdjustmentStatus;
-type NextAction = 'Review' | 'Apply' | 'Investigate' | 'Waiting' | 'No Action Required';
+type NextAction = 'Review' | 'Apply' | 'Investigate' | 'No action required';
 
 const HIGH_VALUE_AMOUNT_MINOR = 100000;
 
@@ -52,7 +52,7 @@ function formatSignedMinor(amountMinor: number | null | undefined, currency = 'T
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'No timeline event yet';
+    return 'No activity recorded yet.';
   }
   return formatDateTime(value, {
     month: 'short',
@@ -76,12 +76,12 @@ function getNextAction(adjustment: RefundAdjustmentRecord): NextAction {
     return 'Review';
   }
   if (adjustment.status === 'partially_applied') {
-    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'No Action Required';
+    return adjustment.remainingAmountMinor > 0 ? 'Apply' : 'No action required';
   }
   if (adjustment.status === 'blocked') {
     return 'Investigate';
   }
-  return 'No Action Required';
+  return 'No action required';
 }
 
 function getAdjustmentType(adjustment: RefundAdjustmentRecord) {
@@ -263,7 +263,7 @@ export function AdminRefundAdjustmentsPage() {
     <section className="op-page refund-adjustments-page">
       <div className="op-page-heading">
         <div>
-          <p className="eyebrow">Admin Finance</p>
+          <p className="eyebrow">ADMIN FINANCE</p>
           <h1>Refund Adjustments</h1>
           <p className="page-description">Review refund deductions and balance adjustments before vendor payment.</p>
         </div>
@@ -381,7 +381,7 @@ export function AdminRefundAdjustmentsPage() {
             <aside className="op-side-panel settlement-review-panel refund-adjustments-panel" aria-label="Refund adjustment detail panel">
               {selectedAdjustment ? (
                 <>
-                  <MetadataGroup title="Adjustment Summary">
+                  <MetadataGroup title="Summary">
                     <MetadataRow label="Vendor" value={getVendorLabel(selectedAdjustment, currentVendorId, currentVendorName)} />
                     <MetadataRow label="Order / Return" value={`${getOrderLabel(selectedAdjustment)} · ${getRefundReferenceLabel(selectedAdjustment)}`} />
                     <MetadataRow label="Refund Amount" value={formatMinor(selectedAdjustment.originalAmountMinor, selectedAdjustment.currencyCode)} />
@@ -424,10 +424,10 @@ export function AdminRefundAdjustmentsPage() {
                     <ul className="settlement-review-timeline">
                       <li><strong>Refund recorded</strong><span>{formatDate(selectedAdjustment.createdAt)}</span></li>
                       <li><strong>Adjustment created</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'created') ?? selectedAdjustment.createdAt)}</span></li>
-                      <li><strong>Review started</strong><span>{selectedAdjustment.status === 'pending' ? formatDate(selectedAdjustment.createdAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Review started</strong><span>{selectedAdjustment.status === 'pending' ? formatDate(selectedAdjustment.createdAt) : 'No activity recorded yet.'}</span></li>
                       <li><strong>Applied</strong><span>{formatDate(eventTimestamp(selectedAdjustment, 'applied') ?? (selectedAdjustment.status === 'applied' ? selectedAdjustment.updatedAt : null))}</span></li>
-                      <li><strong>Blocked</strong><span>{selectedAdjustment.status === 'blocked' ? formatDate(selectedAdjustment.updatedAt) : 'No timeline event yet'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedAdjustment.status === 'cancelled' ? formatDate(selectedAdjustment.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Blocked</strong><span>{selectedAdjustment.status === 'blocked' ? formatDate(selectedAdjustment.updatedAt) : 'No activity recorded yet.'}</span></li>
+                      <li><strong>Cancelled</strong><span>{selectedAdjustment.status === 'cancelled' ? formatDate(selectedAdjustment.updatedAt) : 'No activity recorded yet.'}</span></li>
                     </ul>
                   </section>
                 </>

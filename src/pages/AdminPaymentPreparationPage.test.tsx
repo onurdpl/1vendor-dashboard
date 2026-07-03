@@ -176,6 +176,7 @@ describe('AdminPaymentPreparationPage', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Payment Preparation' })).toBeInTheDocument();
+    expect(screen.getByText('ADMIN FINANCE')).toBeInTheDocument();
     expect(screen.getByText('Prepare approved vendor payments before payout execution.')).toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Payment preparation workflow tabs');
@@ -224,7 +225,7 @@ describe('AdminPaymentPreparationPage', () => {
 
     const panel = screen.getByLabelText('Payment preparation detail panel');
     for (const section of [
-      'Payment Summary',
+      'Summary',
       'Why is this waiting?',
       'Next Action',
       'Payment Impact',

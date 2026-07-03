@@ -181,7 +181,8 @@ describe('Settlement Review queue cleanup', () => {
     expect(screen.queryByLabelText('Settlement executive summary')).not.toBeInTheDocument();
 
     const queue = screen.getByLabelText('Settlement review queue');
-    expect(within(queue).getByRole('heading', { name: 'Settlement Review Queue' })).toBeInTheDocument();
+    expect(screen.getByText('ADMIN FINANCE')).toBeInTheDocument();
+    expect(within(queue).queryByRole('heading', { name: 'Settlement Review Queue' })).not.toBeInTheDocument();
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
 
     const workflowTabs = queue.querySelector('.settlement-review-tabs') as HTMLElement;
@@ -194,7 +195,7 @@ describe('Settlement Review queue cleanup', () => {
     });
     expect(within(queue).queryByRole('columnheader', { name: 'Review' })).not.toBeInTheDocument();
     expect(within(queue).queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
-    ['Settlement Summary', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline'].forEach((section) => {
+    ['Summary', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline'].forEach((section) => {
       expect(within(queue).getByRole('heading', { name: section })).toBeInTheDocument();
     });
     expect(within(queue).queryByText('fle-sale-1')).not.toBeInTheDocument();
@@ -206,7 +207,7 @@ describe('Settlement Review queue cleanup', () => {
     expect(within(queue).queryByText('Not loaded')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Approval detail loaded.')).not.toBeInTheDocument();
     expect(within(queue).queryByText('Waiting')).not.toBeInTheDocument();
-    expect(within(queue).getAllByText('No Action Required').length).toBeGreaterThan(0);
+    expect(within(queue).getAllByText('No action required').length).toBeGreaterThan(0);
   });
 
   it('keeps admin finance queue cells and badges wrap-safe', () => {
@@ -278,7 +279,7 @@ describe('Settlement Review queue cleanup', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith(rawSettlementApprovalId));
     expect(settlementRow).toHaveClass('op-row-selected');
-    expect(within(queue).getByRole('heading', { name: 'Settlement Summary' })).toBeInTheDocument();
+    expect(within(queue).getByRole('heading', { name: 'Summary' })).toBeInTheDocument();
     expect(within(queue).getAllByText('Yalispor').length).toBeGreaterThan(0);
     expect(within(queue).getAllByText('TRY 1,800.00').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: 'Loaded Approval Snapshot' })).not.toBeInTheDocument();

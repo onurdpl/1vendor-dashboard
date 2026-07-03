@@ -21,8 +21,8 @@ import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/
 
 type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
-type QueueStatus = 'Ready' | 'Draft' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled' | 'Waiting';
-type NextAction = 'Prepare' | 'Review' | 'Approve' | 'Mark Paid' | 'Investigate' | 'Waiting' | 'No Action Required';
+type QueueStatus = 'Ready' | 'Draft' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
+type NextAction = 'Prepare' | 'Review' | 'Approve' | 'Mark Paid' | 'Investigate' | 'No action required';
 type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Missing Evidence' | 'Export Needed' | 'Ready';
 
 type PaymentQueueItem =
@@ -57,7 +57,7 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'draft', label: 'Draft' },
   { value: 'review', label: 'In Review' },
   { value: 'approved', label: 'Approved' },
-  { value: 'execution_pending', label: 'Waiting' },
+  { value: 'execution_pending', label: 'In Review' },
   { value: 'paid_placeholder', label: 'Paid' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
@@ -69,7 +69,7 @@ function formatDate(value: string | null | undefined) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }, 'No timeline event yet');
+  }, 'No activity recorded yet.');
 }
 
 function formatShortDate(value: string | null | undefined) {
@@ -205,7 +205,7 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
     return 'Approved';
   }
   if (item.batch.status === 'execution_pending') {
-    return 'Waiting';
+    return 'In Review';
   }
   if (item.batch.status === 'paid_placeholder') {
     return 'Paid';
@@ -213,13 +213,13 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
   if (item.batch.status === 'cancelled') {
     return 'Cancelled';
   }
-  return 'Waiting';
+  return 'In Review';
 }
 
 function getStatusTone(status: QueueStatus) {
   if (status === 'Ready' || status === 'Approved' || status === 'Paid') return 'success' as const;
   if (status === 'Draft') return 'info' as const;
-  if (status === 'In Review' || status === 'Waiting') return 'attention' as const;
+  if (status === 'In Review') return 'attention' as const;
   if (status === 'Cancelled') return 'neutral' as const;
   return 'neutral' as const;
 }
@@ -294,9 +294,9 @@ function getNextAction(item: PaymentQueueItem): NextAction {
     return 'Mark Paid';
   }
   if (item.batch.status === 'execution_pending') {
-    return 'Waiting';
+    return 'No action required';
   }
-  return 'No Action Required';
+  return 'No action required';
 }
 
 function matchesWorkflow(item: PaymentQueueItem, workflow: WorkflowTab) {
@@ -453,7 +453,7 @@ export function AdminPaymentPreparationPage() {
     <section className="op-page payment-preparation-page">
       <div className="op-page-heading">
         <div>
-          <p className="eyebrow">Admin Finance</p>
+          <p className="eyebrow">ADMIN FINANCE</p>
           <h1>Payment Preparation</h1>
           <p className="page-description">Prepare approved vendor payments before payout execution.</p>
         </div>
@@ -577,7 +577,7 @@ export function AdminPaymentPreparationPage() {
             <aside className="op-side-panel settlement-review-panel payment-preparation-panel" aria-label="Payment preparation detail panel">
               {selectedItem ? (
                 <>
-                  <MetadataGroup title="Payment Summary">
+                  <MetadataGroup title="Summary">
                     <MetadataRow label="Vendor" value={getSafeVendorLabel(selectedItem.vendorId, currentVendorId, currentVendorName)} />
                     <MetadataRow label="Payment Period" value={getPaymentPeriodLabel(getPaymentPeriodKey(selectedItem))} />
                     <MetadataRow label="Gross Amount" value={formatPaymentAmount(getGrossAmount(selectedItem))} />
@@ -655,11 +655,11 @@ export function AdminPaymentPreparationPage() {
                     <h4>Timeline</h4>
                     <ul className="settlement-review-timeline">
                       <li><strong>Settlement approved</strong><span>{selectedItem.source === 'ready' ? 'Loaded from readiness' : formatDate(selectedItem.batch.createdAt)}</span></li>
-                      <li><strong>Payment draft created</strong><span>{selectedItem.source === 'batch' ? formatDate(selectedItem.batch.createdAt) : 'No timeline event yet'}</span></li>
-                      <li><strong>Review started</strong><span>{selectedItem.source === 'batch' && ['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
-                      <li><strong>Approved</strong><span>{selectedItem.source === 'batch' && ['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Payment draft created</strong><span>{selectedItem.source === 'batch' ? formatDate(selectedItem.batch.createdAt) : 'No activity recorded yet.'}</span></li>
+                      <li><strong>Review started</strong><span>{selectedItem.source === 'batch' && ['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
+                      <li><strong>Approved</strong><span>{selectedItem.source === 'batch' && ['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
                       <li><strong>Marked paid</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'paid_placeholder' ? formatDate(selectedItem.batch.updatedAt) : 'No payment evidence yet'}</span></li>
-                      <li><strong>Cancelled</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'cancelled' ? formatDate(selectedItem.batch.updatedAt) : 'No timeline event yet'}</span></li>
+                      <li><strong>Cancelled</strong><span>{selectedItem.source === 'batch' && selectedItem.batch.status === 'cancelled' ? formatDate(selectedItem.batch.updatedAt) : 'No activity recorded yet.'}</span></li>
                     </ul>
                   </section>
                 </>

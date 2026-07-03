@@ -24,7 +24,7 @@ import {
 import { formatCurrency, formatDateTime, safeStatusLabel } from '../services/real/formatting';
 
 const STATE_LABELS: Record<SettlementScheduleState, string> = {
-  READY: 'Ready for Draft',
+  READY: 'Ready',
   NOT_DUE: 'Not Due',
   AUTO_DRAFT_DISABLED: 'Blocked',
   NO_ELIGIBLE_ROWS: 'Blocked',
@@ -37,14 +37,14 @@ const STATE_LABELS: Record<SettlementScheduleState, string> = {
 type WorkflowTab = 'all' | 'due_today' | 'ready_for_draft' | 'blocked' | 'already_drafted' | 'not_due';
 type StatusFilter = 'all' | WorkflowTab;
 type ScheduleIssue = 'Blocker' | 'Schedule mismatch' | 'Refund Adjustment' | 'No eligible rows' | 'Ready';
-type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'No Action Required';
+type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'No action required';
 
 const HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR = 100000;
 const TIMELINE_EMPTY_COPY = 'No activity recorded yet.';
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'due_today', label: 'Due Today' },
-  { id: 'ready_for_draft', label: 'Ready for Draft' },
+  { id: 'ready_for_draft', label: 'Ready' },
   { id: 'blocked', label: 'Blocked' },
   { id: 'already_drafted', label: 'Already Drafted' },
   { id: 'not_due', label: 'Not Due' },
@@ -53,7 +53,7 @@ const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All statuses' },
   { value: 'due_today', label: 'Due Today' },
-  { value: 'ready_for_draft', label: 'Ready for Draft' },
+  { value: 'ready_for_draft', label: 'Ready' },
   { value: 'blocked', label: 'Blocked' },
   { value: 'already_drafted', label: 'Already Drafted' },
   { value: 'not_due', label: 'Not Due' },
@@ -189,14 +189,14 @@ function getScheduleIssueTone(issue: ScheduleIssue) {
 
 function getScheduleNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'READY') return 'Create Draft';
-  if (isAlreadyDraftedState(vendor.state)) return 'No Action Required';
+  if (isAlreadyDraftedState(vendor.state)) return 'No action required';
   if (isBlockedScheduleState(vendor.state)) return 'Investigate';
-  return 'No Action Required';
+  return 'No action required';
 }
 
 function getPanelNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'NOT_DUE') {
-    return 'No Action Required';
+    return 'No action required';
   }
   return getScheduleNextAction(vendor);
 }
@@ -321,6 +321,7 @@ function AutoDraftJobModal({
 
 export function AdminScheduledSettlementsPage() {
   const [runDate, setRunDate] = useState(todayKey);
+  const [search, setSearch] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
   const [dryRun, setDryRun] = useState<SettlementScheduleDryRunResponse | null>(null);
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
@@ -395,16 +396,26 @@ export function AdminScheduledSettlementsPage() {
     setWorkflowTab('all');
     setStatusFilter('all');
     setHighValueOnly(false);
+    setSearch('');
   }
 
   const filteredVendors = useMemo(() => {
     const vendors = dryRun?.vendors ?? [];
+    const searchTerm = search.trim().toLowerCase();
     return sortScheduledVendors(vendors.filter((vendor) =>
       matchesWorkflow(vendor, workflowTab) &&
       matchesStatusFilter(vendor, statusFilter) &&
+      (!searchTerm || [
+        getVendorName(vendor),
+        vendor.vendorId,
+        STATE_LABELS[vendor.state],
+        getScheduleSummary(vendor).detail,
+        getScheduleIssue(vendor),
+        getScheduleNextAction(vendor),
+      ].some((value) => value.toLowerCase().includes(searchTerm))) &&
       (!highValueOnly || Math.abs(vendor.netPayableMinor ?? 0) >= HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR),
     ));
-  }, [dryRun?.vendors, highValueOnly, statusFilter, workflowTab]);
+  }, [dryRun?.vendors, highValueOnly, search, statusFilter, workflowTab]);
 
   const selectedVendor = useMemo(
     () => filteredVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? filteredVendors[0] ?? null,
@@ -494,17 +505,9 @@ export function AdminScheduledSettlementsPage() {
     <section className="op-page scheduled-settlements-page">
       <div className="op-page-heading">
         <div>
-          <p className="eyebrow">Finance operations</p>
-          <h2>Scheduled Settlements</h2>
+          <p className="eyebrow">ADMIN FINANCE</p>
+          <h1>Scheduled Settlements</h1>
           <p className="page-description">Review vendors due for scheduled settlement draft preparation.</p>
-        </div>
-        <div className="scheduled-header-actions" aria-label="Scheduled settlement actions">
-          <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
-            {loading ? 'Previewing...' : 'Preview Schedule'}
-          </button>
-          <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || readyCount === 0}>
-            Create Scheduled Drafts
-          </button>
         </div>
       </div>
 
@@ -529,9 +532,9 @@ export function AdminScheduledSettlementsPage() {
         </div>
 
         <div className="op-toolbar settlement-review-filters scheduled-settlements-controls" aria-label="Scheduled settlement filters">
-          <label>
-            <span>Run date</span>
-            <input type="date" value={runDate} onChange={(event) => setRunDate(event.target.value)} />
+          <label className="op-search-input">
+            <span>Search</span>
+            <input type="text" placeholder="Vendor, status, issue" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
           <label>
             <span>Vendor</span>
@@ -550,10 +553,22 @@ export function AdminScheduledSettlementsPage() {
               ))}
             </select>
           </label>
+          <label>
+            <span>Run date</span>
+            <input type="date" value={runDate} onChange={(event) => setRunDate(event.target.value)} />
+          </label>
           <label className="op-checkbox-row settlement-review-high-value">
             <input type="checkbox" checked={highValueOnly} onChange={(event) => setHighValueOnly(event.target.checked)} />
             <span>High Value only</span>
           </label>
+          <div className="scheduled-header-actions" aria-label="Scheduled settlement actions">
+            <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
+              {loading ? 'Previewing...' : 'Preview Schedule'}
+            </button>
+            <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || readyCount === 0}>
+              Create Scheduled Drafts
+            </button>
+          </div>
         </div>
 
         {dryRun ? (
@@ -620,16 +635,7 @@ export function AdminScheduledSettlementsPage() {
               <aside className="op-side-panel settlement-review-panel scheduled-settlements-panel" aria-label="Scheduled settlement detail panel">
                 {selectedVendor ? (
                   <>
-                    <div className="op-side-panel-header">
-                      <div>
-                        <p className="eyebrow">Schedule detail</p>
-                        <h3>{getVendorName(selectedVendor)}</h3>
-                      </div>
-                      <StatusBadge tone={selectedState ? getStateTone(selectedState) : 'neutral'}>
-                        {selectedState ? STATE_LABELS[selectedState] : 'Not Due'}
-                      </StatusBadge>
-                    </div>
-                    <MetadataGroup title="Schedule Summary">
+                    <MetadataGroup title="Summary">
                       <MetadataRow label="Vendor" value={getVendorName(selectedVendor)} />
                       <MetadataRow label="Frequency" value={getScheduleSummary(selectedVendor).secondary} />
                       <MetadataRow label="Run Date" value={dryRun.runDate} />
