@@ -14583,6 +14583,199 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: var(--space-2);
 }
 
+.settlement-review-queue {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.settlement-review-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settlement-review-heading h2 {
+  margin: 0;
+  color: var(--op-text-strong);
+  font-size: 1.18rem;
+  letter-spacing: 0;
+}
+
+.settlement-review-tabs {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+}
+
+.settlement-review-tabs button {
+  min-height: 54px;
+  padding: 8px 8px;
+}
+
+.settlement-review-tabs span {
+  font-size: 0.68rem;
+}
+
+.settlement-review-tabs strong {
+  font-size: 0.94rem;
+}
+
+.settlement-review-filters {
+  align-items: end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-review-filters label {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  color: var(--op-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.settlement-review-filters .op-search-input {
+  flex: 1 1 240px;
+}
+
+.settlement-review-filters input,
+.settlement-review-filters select {
+  min-height: 36px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-2);
+  background: var(--op-surface);
+  color: var(--op-text);
+  font: inherit;
+}
+
+.settlement-review-high-value {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  min-height: 36px;
+  min-width: 128px;
+}
+
+.settlement-review-high-value input {
+  min-height: auto;
+}
+
+.settlement-review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.settlement-review-table {
+  min-width: 0;
+}
+
+.settlement-review-table .op-table-head,
+.settlement-review-table .op-table-row {
+  grid-template-columns:
+    minmax(144px, 1fr)
+    minmax(180px, 1.16fr)
+    minmax(150px, 1fr)
+    minmax(128px, 0.88fr)
+    minmax(106px, 0.72fr)
+    minmax(132px, 0.88fr)
+    minmax(72px, 0.42fr);
+}
+
+.settlement-review-table .op-table-row small,
+.settlement-review-panel .op-meta-row span,
+.settlement-review-timeline span {
+  color: var(--op-muted);
+}
+
+.settlement-review-table .op-table-row strong,
+.settlement-review-table .op-table-row small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settlement-review-issue-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.settlement-review-panel {
+  position: sticky;
+  top: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.settlement-review-panel .op-meta-group,
+.settlement-review-panel .op-panel-section {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-soft);
+}
+
+.settlement-review-panel h4 {
+  margin: 0;
+  color: var(--op-text-strong);
+  font-size: 0.9rem;
+}
+
+.settlement-review-panel .op-meta-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.settlement-review-panel .op-meta-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.76fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.settlement-review-panel .op-meta-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.settlement-review-timeline {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settlement-review-timeline li {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+
 .settlement-summary-field {
   display: grid;
   gap: 4px;
@@ -15401,10 +15594,12 @@ summary.provider-response-heading::-webkit-details-marker {
 
 @media (max-width: 1180px) {
   .settlement-workspace-header,
+  .settlement-review-layout,
   .settlement-workspace-grid {
     grid-template-columns: 1fr;
   }
 
+  .settlement-review-panel,
   .settlement-workspace-grid.is-loaded-approval-layout .settlement-left-rail {
     position: static;
   }
@@ -15423,6 +15618,10 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .settlement-workflow-steps {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+
+  .settlement-review-tabs {
     grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   }
 

@@ -29,6 +29,7 @@ import {
   type SettlementApproval,
   type SettlementApprovalAudit,
   type SettlementApprovalLine,
+  type SettlementApprovalStatus,
   type SettlementApprovalSummary,
   type SettlementApprovalPreview,
   type SettlementCommissionInvoiceDiagnostics,
@@ -65,6 +66,18 @@ type WorkflowStep = {
 type QualityClassification = 'CLEAN' | 'WARNING' | 'BLOCKED' | 'NOT READY' | 'EMPTY' | 'NO MATCH' | 'SNAPSHOT';
 type CandidateScopeMode = 'vendor_wide' | 'date_range' | 'selected_orders' | 'selected_allocations';
 type WorkspaceTab = 'audit' | 'logo' | 'invoices' | 'history';
+type SettlementReviewWorkflowTab =
+  | 'all'
+  | 'needs_review'
+  | 'ready_for_approval'
+  | 'refund_review'
+  | 'vendor_hold'
+  | 'approved'
+  | 'paid';
+type SettlementReviewNextAction = 'Review' | 'Approve' | 'Investigate' | 'Waiting';
+type SettlementReviewPanelAction = 'Approve' | 'Reject' | 'Investigate' | 'No Action Required';
+type SettlementReviewIssue = 'Refund' | 'Debt' | 'Shipping' | 'Support' | 'Hold' | 'Ready';
+type SettlementStatusFilter = 'all' | SettlementApprovalStatus;
 
 type RecommendedAction = {
   label: string;
@@ -78,6 +91,11 @@ type HeaderMetric = {
   value: ReactNode;
 };
 
+type SettlementReviewWorkflowConfig = {
+  id: SettlementReviewWorkflowTab;
+  label: string;
+};
+
 type SelectedOrderDiagnostic = NonNullable<SettlementApprovalPreview['selectedOrderDiagnostics']>[number];
 
 type DraftFailureSummary = {
@@ -88,6 +106,16 @@ type DraftFailureSummary = {
 
 const NO_ELIGIBLE_SETTLEMENT_ROWS_MESSAGE = 'No eligible settlement rows are available for approval.';
 const ACTIVE_LOGO_COMMISSION_INVOICE_BLOCKER = /active LOGO_ISBASI commission invoice record/i;
+const HIGH_VALUE_SETTLEMENT_MINOR = 100000;
+const SETTLEMENT_REVIEW_WORKFLOW_TABS: SettlementReviewWorkflowConfig[] = [
+  { id: 'all', label: 'All' },
+  { id: 'needs_review', label: 'Needs Review' },
+  { id: 'ready_for_approval', label: 'Ready for Approval' },
+  { id: 'refund_review', label: 'Refund Review' },
+  { id: 'vendor_hold', label: 'Vendor Hold' },
+  { id: 'approved', label: 'Approved' },
+  { id: 'paid', label: 'Paid' },
+];
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed.';
@@ -404,6 +432,151 @@ function getSettlementDecisionMetrics(lines: SettlementApprovalLine[], netPayabl
     payableSales,
     refundAdjustments,
   };
+}
+
+function getApprovalDetailForSummary(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
+  return activeApproval?.id === summary.id ? activeApproval : null;
+}
+
+function getSettlementPeriodLabel(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
+  const detail = getApprovalDetailForSummary(summary, activeApproval);
+  if (detail?.periodStart || detail?.periodEnd) {
+    return `${formatDate(detail.periodStart)} - ${formatDate(detail.periodEnd)}`;
+  }
+  if (summary.scheduledCycleKey) {
+    return safeStatusLabel(summary.scheduledCycleKey);
+  }
+  if (summary.scheduledPeriodEnd) {
+    return `Through ${formatDate(summary.scheduledPeriodEnd)}`;
+  }
+  if (summary.scheduledRunDate) {
+    return `Run ${formatDate(summary.scheduledRunDate)}`;
+  }
+  return `Created ${formatDate(summary.createdAt)}`;
+}
+
+function getSettlementPeriodFilterValue(summary: SettlementApprovalSummary) {
+  return (
+    summary.scheduledCycleKey ||
+    summary.scheduledPeriodEnd?.slice(0, 10) ||
+    summary.scheduledRunDate?.slice(0, 10) ||
+    summary.createdAt.slice(0, 7)
+  );
+}
+
+function getSettlementReviewIssues(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewIssue[] {
+  const detail = getApprovalDetailForSummary(summary, activeApproval);
+  const issues: SettlementReviewIssue[] = [];
+  if (detail) {
+    const metrics = getSettlementDecisionMetrics(safeArray(detail.lines), detail.netPayableMinor);
+    if (metrics.offsetPackages.length || metrics.refundAdjustments.length || metrics.refundOffsetImpactMinor < 0 || metrics.refundAdjustmentImpactMinor < 0) {
+      issues.push('Refund');
+    }
+    if (safeArray(detail.lines).some((line) => line.shippingEvidencePresent === false)) {
+      issues.push('Shipping');
+    }
+  }
+  if (summary.status === 'cancelled' || (summary.netPayableMinor <= 0 && summary.lineCount > 0)) {
+    issues.push('Hold');
+  }
+  return issues.length ? Array.from(new Set(issues)) : ['Ready'];
+}
+
+function hasSettlementIssue(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null, issue: SettlementReviewIssue) {
+  return getSettlementReviewIssues(summary, activeApproval).includes(issue);
+}
+
+function isReadyForSettlementApproval(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
+  return summary.status === 'draft' && getSettlementReviewIssues(summary, activeApproval).every((issue) => issue === 'Ready');
+}
+
+function isSettlementNeedsReview(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
+  return summary.status === 'draft' && !isReadyForSettlementApproval(summary, activeApproval);
+}
+
+function matchesSettlementWorkflowTab(
+  summary: SettlementApprovalSummary,
+  activeApproval: SettlementApproval | null,
+  tab: SettlementReviewWorkflowTab,
+) {
+  if (tab === 'all') {
+    return true;
+  }
+  if (tab === 'needs_review') {
+    return isSettlementNeedsReview(summary, activeApproval);
+  }
+  if (tab === 'ready_for_approval') {
+    return isReadyForSettlementApproval(summary, activeApproval);
+  }
+  if (tab === 'refund_review') {
+    return hasSettlementIssue(summary, activeApproval, 'Refund');
+  }
+  if (tab === 'vendor_hold') {
+    return hasSettlementIssue(summary, activeApproval, 'Hold');
+  }
+  if (tab === 'approved') {
+    return summary.status === 'approved';
+  }
+  return false;
+}
+
+function getSettlementReviewNextAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewNextAction {
+  if (summary.status === 'approved') {
+    return 'Waiting';
+  }
+  if (summary.status === 'cancelled') {
+    return 'Investigate';
+  }
+  if (isReadyForSettlementApproval(summary, activeApproval)) {
+    return 'Approve';
+  }
+  if (hasSettlementIssue(summary, activeApproval, 'Refund') || hasSettlementIssue(summary, activeApproval, 'Shipping')) {
+    return 'Review';
+  }
+  return 'Investigate';
+}
+
+function getSettlementReviewPanelAction(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null): SettlementReviewPanelAction {
+  if (summary.status === 'approved') {
+    return 'No Action Required';
+  }
+  if (summary.status === 'cancelled') {
+    return 'Reject';
+  }
+  if (isReadyForSettlementApproval(summary, activeApproval)) {
+    return 'Approve';
+  }
+  return 'Investigate';
+}
+
+function getSettlementWaitingReason(summary: SettlementApprovalSummary, activeApproval: SettlementApproval | null) {
+  const issues = getSettlementReviewIssues(summary, activeApproval);
+  if (issues.includes('Refund')) {
+    return 'Refund review';
+  }
+  if (issues.includes('Hold')) {
+    return 'Vendor hold';
+  }
+  if (issues.includes('Support')) {
+    return 'Support investigation';
+  }
+  if (issues.includes('Shipping')) {
+    return 'Shipping adjustment';
+  }
+  return null;
+}
+
+function getSettlementReviewIssueTone(issue: SettlementReviewIssue) {
+  if (issue === 'Ready') {
+    return 'success';
+  }
+  if (issue === 'Hold' || issue === 'Support') {
+    return 'warning';
+  }
+  if (issue === 'Refund' || issue === 'Debt' || issue === 'Shipping') {
+    return 'attention';
+  }
+  return 'neutral';
 }
 
 function getOffsetPackageStatus(packageItem: ReturnType<typeof buildRefundOffsetPackages>[number]) {
@@ -1070,7 +1243,8 @@ function WorkspaceHeader({
     <section className="settlement-workspace-header">
       <div>
         <p className="eyebrow">Admin finance</p>
-        <h1>Settlement Workspace</h1>
+        <h1>Settlement Review</h1>
+        <p className="page-description">Review vendor settlements before payment approval.</p>
       </div>
       <div className="settlement-executive-summary" aria-label="Settlement executive summary">
         {metrics.map((metric) => (
@@ -1106,89 +1280,254 @@ function NextActionPanel({
   );
 }
 
-function RecentApprovalsPanel({
+function SettlementReviewQueue({
   approvals,
   loading,
   onOpenApproval,
   activeApprovalId,
   activeApproval,
+  vendorId,
+  vendorName,
+  onVendorIdChange,
+  workflowTab,
+  onWorkflowTabChange,
+  search,
+  onSearchChange,
+  statusFilter,
+  onStatusFilterChange,
+  periodFilter,
+  onPeriodFilterChange,
+  highValueOnly,
+  onHighValueOnlyChange,
 }: {
   approvals: SettlementApprovalSummary[];
   loading: boolean;
   onOpenApproval: (id: string) => void;
   activeApprovalId: string;
   activeApproval: SettlementApproval | null;
+  vendorId: string;
+  vendorName: string;
+  onVendorIdChange: (value: string) => void;
+  workflowTab: SettlementReviewWorkflowTab;
+  onWorkflowTabChange: (tab: SettlementReviewWorkflowTab) => void;
+  search: string;
+  onSearchChange: (value: string) => void;
+  statusFilter: SettlementStatusFilter;
+  onStatusFilterChange: (value: SettlementStatusFilter) => void;
+  periodFilter: string;
+  onPeriodFilterChange: (value: string) => void;
+  highValueOnly: boolean;
+  onHighValueOnlyChange: (value: boolean) => void;
 }) {
   const visibleApprovals = safeArray(approvals);
+  const periodOptions = Array.from(new Map(visibleApprovals.map((item) => [
+    getSettlementPeriodFilterValue(item),
+    getSettlementPeriodLabel(item, activeApproval),
+  ])).entries());
+  const filteredApprovals = visibleApprovals.filter((item) => {
+    if (!matchesSettlementWorkflowTab(item, activeApproval, workflowTab)) {
+      return false;
+    }
+    if (statusFilter !== 'all' && item.status !== statusFilter) {
+      return false;
+    }
+    if (periodFilter !== 'all' && getSettlementPeriodFilterValue(item) !== periodFilter) {
+      return false;
+    }
+    if (highValueOnly && Math.abs(item.netPayableMinor) < HIGH_VALUE_SETTLEMENT_MINOR) {
+      return false;
+    }
+    const searchTerm = search.trim().toLowerCase();
+    if (!searchTerm) {
+      return true;
+    }
+    const periodLabel = getSettlementPeriodLabel(item, activeApproval);
+    return [
+      item.id,
+      item.vendorId,
+      vendorName,
+      item.status,
+      periodLabel,
+      String(item.lineCount),
+    ].some((value) => value.toLowerCase().includes(searchTerm));
+  });
+  const selectedQueueApproval = filteredApprovals.find((item) => item.id === activeApprovalId) ?? filteredApprovals[0] ?? null;
+  const selectedQueueDetail = selectedQueueApproval ? getApprovalDetailForSummary(selectedQueueApproval, activeApproval) : null;
+  const selectedQueueIssues = selectedQueueApproval
+    ? getSettlementReviewIssues(selectedQueueApproval, activeApproval)
+    : [];
+  const selectedWaitingReason = selectedQueueApproval
+    ? getSettlementWaitingReason(selectedQueueApproval, activeApproval)
+    : null;
+  const selectedMetrics = selectedQueueDetail
+    ? getSettlementDecisionMetrics(safeArray(selectedQueueDetail.lines), selectedQueueDetail.netPayableMinor)
+    : null;
+  const workflowCounts = SETTLEMENT_REVIEW_WORKFLOW_TABS.reduce<Record<SettlementReviewWorkflowTab, number>>((counts, tab) => {
+    counts[tab.id] = visibleApprovals.filter((item) => matchesSettlementWorkflowTab(item, activeApproval, tab.id)).length;
+    return counts;
+  }, {
+    all: 0,
+    needs_review: 0,
+    ready_for_approval: 0,
+    refund_review: 0,
+    vendor_hold: 0,
+    approved: 0,
+    paid: 0,
+  });
+
   return (
-    <section className="settlement-history-panel">
-      <h3>Recent approvals</h3>
-      <p className="page-description">Newest first for the selected vendor. Opening an approval loads this workspace context.</p>
+    <section className="settlement-review-queue" aria-label="Settlement review queue">
+      <div className="settlement-review-heading">
+        <div>
+          <p className="eyebrow">Finance operations</p>
+          <h2>Settlement Review Queue</h2>
+        </div>
+      </div>
+      <div className="orders-workflow-tabs settlement-review-tabs" aria-label="Settlement review workflow tabs">
+        {SETTLEMENT_REVIEW_WORKFLOW_TABS.map((tab) => (
+          <button
+            type="button"
+            key={tab.id}
+            className={workflowTab === tab.id ? 'is-active' : ''}
+            onClick={() => onWorkflowTabChange(tab.id)}
+          >
+            <span>{tab.label}</span>
+            <strong>{workflowCounts[tab.id]}</strong>
+          </button>
+        ))}
+      </div>
+      <div className="op-toolbar settlement-review-filters" aria-label="Settlement review filters">
+        <label className="op-search-input">
+          <span>Search</span>
+          <input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Vendor, settlement, status" />
+        </label>
+        <label>
+          <span>Vendor</span>
+          <input value={vendorId} onChange={(event) => onVendorIdChange(event.target.value)} placeholder="Vendor id" />
+        </label>
+        <label>
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value as SettlementStatusFilter)}>
+            <option value="all">All statuses</option>
+            <option value="draft">Draft</option>
+            <option value="approved">Approved</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+        <label>
+          <span>Settlement Period</span>
+          <select value={periodFilter} onChange={(event) => onPeriodFilterChange(event.target.value)}>
+            <option value="all">All periods</option>
+            {periodOptions.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="op-checkbox-row settlement-review-high-value">
+          <input
+            type="checkbox"
+            checked={highValueOnly}
+            onChange={(event) => onHighValueOnlyChange(event.currentTarget.checked)}
+          />
+          <span>High Value only</span>
+        </label>
+      </div>
       {loading ? <p className="page-description">Loading recent approvals...</p> : null}
       {!loading && visibleApprovals.length === 0 ? <p className="settlement-compact-empty">No settlement approvals found.</p> : null}
-      {visibleApprovals.length ? (
-        <div className="settlement-approval-cards">
-          {visibleApprovals.map((item) => (
-            <article key={item.id} className="settlement-approval-card">
-              <div className="settlement-approval-card-header">
-                <StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge>
-                {item.id === activeApprovalId ? <small>Open in workspace</small> : null}
-              </div>
-              <div className="settlement-approval-card-grid">
-                <SummaryField label="Vendor" value={item.vendorId} />
-                <SummaryField label="Approval type" value={item.netPayableMinor > 0 ? 'Settlement payout' : 'Accounting review'} />
-                <SummaryField label="Rows" value={formatNumber(item.lineCount)} />
-                <SummaryField label="Net payable" value={formatMinor(item.netPayableMinor, item.currency)} />
-                <SummaryField label="Created" value={formatDate(item.createdAt)} />
-                <SummaryField label="Approved" value={formatDate(item.approvedAt)} />
-              </div>
-              <p className="settlement-line-helper">
-                Composition: {activeApproval?.id === item.id
-                  ? `${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).payableSales.length)} payable sales · ${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).offsetPackages.length)} offset packages · ${formatNumber(getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).refundAdjustments.length)} refund adjustments`
-                  : `${formatNumber(item.lineCount)} rows; open approval for row composition.`}
-              </p>
-              {activeApproval?.id === item.id && getSettlementDecisionMetrics(activeApproval.lines, activeApproval.netPayableMinor).offsetPackages.length > 0 ? (
-                <p className="settlement-line-helper">Contains refund offsets</p>
-              ) : null}
-              {item.netPayableMinor === 0 && item.lineCount > 0 ? (
-                <p className="settlement-line-helper">Accounting review · Zero payable</p>
-              ) : null}
-              <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                Open
-              </button>
-            </article>
-          ))}
-        </div>
+      {!loading && visibleApprovals.length > 0 && filteredApprovals.length === 0 ? (
+        <p className="settlement-compact-empty">No settlements match the selected workflow and filters.</p>
       ) : null}
-      {visibleApprovals.length ? (
-        <details className="settlement-advanced-diagnostics">
-          <summary>Advanced table view</summary>
+      {filteredApprovals.length ? (
+        <div className="settlement-review-layout">
           <OperationalTable
-            columns={['Created', 'Status', 'Vendor', 'Rows', 'Gross sales', 'Net payable', 'Approved', 'Workspace']}
-            className="settlement-approvals-table"
+            columns={['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Open']}
+            className="settlement-review-table"
             stickyHeader={false}
           >
-            {visibleApprovals.map((item) => (
-              <OperationalTableRow key={item.id}>
-                <span>
-                  <strong>{formatDate(item.createdAt)}</strong>
-                  {item.id === activeApprovalId ? <small>Open in workspace</small> : null}
-                </span>
-                <span><StatusBadge status={item.status}>{safeStatusLabel(item.status)}</StatusBadge></span>
-                <span>{item.vendorId}</span>
-                <span>{formatNumber(item.lineCount)}</span>
-                <span>{formatMinor(item.grossSalesMinor, item.currency)}</span>
-                <span>{formatMinor(item.netPayableMinor, item.currency)}</span>
-                <span>{formatDate(item.approvedAt)}</span>
-                <span>
-                  <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
-                    Open
-                  </button>
-                </span>
-              </OperationalTableRow>
-            ))}
+            {filteredApprovals.map((item) => {
+              const itemIssues = getSettlementReviewIssues(item, activeApproval);
+              const vendorDisplayName = item.vendorId === vendorId && vendorName ? vendorName : item.vendorId;
+              return (
+                <OperationalTableRow key={item.id} selected={item.id === selectedQueueApproval?.id}>
+                  <span>
+                    <strong>{vendorDisplayName}</strong>
+                    <small>{item.vendorId}</small>
+                  </span>
+                  <span>
+                    <strong>{item.id}</strong>
+                    <small>{getSettlementPeriodLabel(item, activeApproval)}</small>
+                  </span>
+                  <span>
+                    <strong>Gross {formatMinor(item.grossSalesMinor, item.currency)}</strong>
+                    <small>Net {formatMinor(item.netPayableMinor, item.currency)}</small>
+                  </span>
+                  <span className="settlement-review-issue-list">
+                    {itemIssues.map((issue) => (
+                      <StatusBadge key={issue} tone={getSettlementReviewIssueTone(issue)}>{issue}</StatusBadge>
+                    ))}
+                  </span>
+                  <span><strong>{getSettlementReviewNextAction(item, activeApproval)}</strong></span>
+                  <span>{formatDate(item.approvedAt ?? item.createdAt)}</span>
+                  <span>
+                    <button type="button" className="button button-secondary button-compact" onClick={() => onOpenApproval(item.id)}>
+                      Open
+                    </button>
+                  </span>
+                </OperationalTableRow>
+              );
+            })}
           </OperationalTable>
-        </details>
+
+          <aside className="op-side-panel settlement-review-panel" aria-label="Settlement review detail panel">
+            {selectedQueueApproval ? (
+              <>
+                <MetadataGroup title="Settlement Summary">
+                  <MetadataRow
+                    label="Vendor"
+                    value={selectedQueueApproval.vendorId === vendorId && vendorName ? vendorName : selectedQueueApproval.vendorId}
+                  />
+                  <MetadataRow label="Settlement Period" value={getSettlementPeriodLabel(selectedQueueApproval, activeApproval)} />
+                  <MetadataRow label="Gross Amount" value={formatMinor(selectedQueueApproval.grossSalesMinor, selectedQueueApproval.currency)} />
+                  <MetadataRow label="Net Amount" value={formatMinor(selectedQueueApproval.netPayableMinor, selectedQueueApproval.currency)} />
+                </MetadataGroup>
+                {selectedWaitingReason ? (
+                  <section className="op-panel-section">
+                    <h4>Why is this waiting?</h4>
+                    <p className="page-description">{selectedWaitingReason}</p>
+                  </section>
+                ) : null}
+                <MetadataGroup title="Next Action">
+                  <MetadataRow label="Action" value={getSettlementReviewPanelAction(selectedQueueApproval, activeApproval)} />
+                </MetadataGroup>
+                <MetadataGroup title="Payment Impact">
+                  <MetadataRow label="Net payment" value={formatMinor(selectedQueueApproval.netPayableMinor, selectedQueueApproval.currency)} />
+                  <MetadataRow
+                    label="Refund adjustment"
+                    value={selectedMetrics ? formatMinor(Math.abs(selectedMetrics.refundAdjustmentImpactMinor), selectedQueueApproval.currency) : 'Not loaded'}
+                  />
+                  <MetadataRow label="Debt adjustment" value="Not loaded" />
+                </MetadataGroup>
+                <MetadataGroup title="Related Records">
+                  <MetadataRow label="Orders" value={formatNumber(selectedQueueApproval.lineCount)} />
+                  <MetadataRow label="Returns" value={selectedQueueIssues.includes('Refund') ? 'Linked refund activity' : 'None loaded'} />
+                  <MetadataRow label="Support" value={selectedQueueIssues.includes('Support') ? 'Support investigation' : 'None loaded'} />
+                </MetadataGroup>
+                <section className="op-panel-section">
+                  <h4>Timeline</h4>
+                  <ul className="settlement-review-timeline">
+                    <li><strong>Settlement created</strong><span>{formatDate(selectedQueueApproval.createdAt)}</span></li>
+                    <li><strong>Refund recorded</strong><span>{selectedQueueIssues.includes('Refund') ? formatDate(selectedQueueApproval.createdAt) : 'Not recorded'}</span></li>
+                    <li><strong>Review started</strong><span>{selectedQueueApproval.status === 'draft' ? formatDate(selectedQueueApproval.createdAt) : 'Not active'}</span></li>
+                    <li><strong>Approved</strong><span>{formatDate(selectedQueueApproval.approvedAt)}</span></li>
+                    <li><strong>Paid</strong><span>Not recorded</span></li>
+                  </ul>
+                </section>
+              </>
+            ) : (
+              <p className="settlement-compact-empty">Select a settlement to review.</p>
+            )}
+          </aside>
+        </div>
       ) : null}
     </section>
   );
@@ -1444,6 +1783,11 @@ export function AdminSettlementApprovalsPage() {
   const [invoiceRecordsWarning, setInvoiceRecordsWarning] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('history');
+  const [settlementWorkflowTab, setSettlementWorkflowTab] = useState<SettlementReviewWorkflowTab>('all');
+  const [settlementQueueSearch, setSettlementQueueSearch] = useState('');
+  const [settlementQueueStatusFilter, setSettlementQueueStatusFilter] = useState<SettlementStatusFilter>('all');
+  const [settlementQueuePeriodFilter, setSettlementQueuePeriodFilter] = useState('all');
+  const [settlementHighValueOnly, setSettlementHighValueOnly] = useState(false);
   const [logoCreateConfirmations, setLogoCreateConfirmations] = useState<Record<string, boolean>>({});
   const [salesInvoiceSyncConfirmations, setSalesInvoiceSyncConfirmations] = useState<Record<string, boolean>>({});
 
@@ -2367,6 +2711,27 @@ export function AdminSettlementApprovalsPage() {
       ) : null}
       {success ? <div className="settlement-alert op-tone-success"><strong>{success}</strong></div> : null}
 
+      <SettlementReviewQueue
+        approvals={recentApprovals}
+        loading={recentApprovalsLoading}
+        activeApprovalId={selectedApprovalId}
+        activeApproval={approval}
+        vendorId={vendorId}
+        vendorName={appReadiness.currentVendor.vendorName}
+        onVendorIdChange={setVendorId}
+        workflowTab={settlementWorkflowTab}
+        onWorkflowTabChange={setSettlementWorkflowTab}
+        search={settlementQueueSearch}
+        onSearchChange={setSettlementQueueSearch}
+        statusFilter={settlementQueueStatusFilter}
+        onStatusFilterChange={setSettlementQueueStatusFilter}
+        periodFilter={settlementQueuePeriodFilter}
+        onPeriodFilterChange={setSettlementQueuePeriodFilter}
+        highValueOnly={settlementHighValueOnly}
+        onHighValueOnlyChange={setSettlementHighValueOnly}
+        onOpenApproval={(id) => void handleOpenRecentApproval(id)}
+      />
+
       <section
         className={`settlement-workspace-grid is-${workspaceState}-state${approval ? ' is-loaded-approval-layout' : ''}`}
         aria-label="Settlement workspace layout"
@@ -3071,13 +3436,8 @@ export function AdminSettlementApprovalsPage() {
 
         {activeTab === 'history' ? (
           <article className="settlement-tab-panel" role="tabpanel">
-            <RecentApprovalsPanel
-              approvals={recentApprovals}
-              loading={recentApprovalsLoading}
-              activeApprovalId={selectedApprovalId}
-              activeApproval={approval}
-              onOpenApproval={(id) => void handleOpenRecentApproval(id)}
-            />
+            <h3>History</h3>
+            <p className="settlement-compact-empty">Settlement review history is shown in the queue above.</p>
           </article>
         ) : null}
       </section>

@@ -1359,7 +1359,24 @@ describe('Finance Settlement approval admin UI', () => {
   it('renders the settlement workspace shell and advanced database details', async () => {
     renderPage();
 
-    expect(screen.getByRole('heading', { name: 'Settlement Workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Settlement Review' })).toBeInTheDocument();
+    expect(screen.getByText('Review vendor settlements before payment approval.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Settlement Review Queue' })).toBeInTheDocument();
+    const queue = screen.getByLabelText('Settlement review queue');
+    const workflowTabs = queue.querySelector('.settlement-review-tabs') as HTMLElement;
+    expect(workflowTabs).toBeTruthy();
+    ['All', 'Needs Review', 'Ready for Approval', 'Refund Review', 'Vendor Hold', 'Approved', 'Paid'].forEach((label) => {
+      expect(within(workflowTabs).getByText(label)).toBeInTheDocument();
+    });
+    await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
+    ['Vendor', 'Settlement', 'Amount', 'Issues', 'Next Action', 'Updated', 'Open'].forEach((column) => {
+      expect(within(queue).getByRole('columnheader', { name: column })).toBeInTheDocument();
+    });
+    ['Settlement Summary', 'Next Action', 'Payment Impact', 'Related Records', 'Timeline'].forEach((section) => {
+      expect(within(queue).getByRole('heading', { name: section })).toBeInTheDocument();
+    });
+    expect(within(queue).queryByText('fle-sale-1')).not.toBeInTheDocument();
+    expect(within(queue).queryByText('settlement-logo-request-v1')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Candidate source' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Current Candidate Preview' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Audit' })).toBeInTheDocument();
@@ -1377,20 +1394,22 @@ describe('Finance Settlement approval admin UI', () => {
     await waitFor(() => expect(screen.getByText(/vendor_dashboard_dev/i)).toBeInTheDocument());
   });
 
-  it('renders recent approvals and opens an approval without manual id copy paste', async () => {
+  it('renders settlement review queue and opens an approval without manual id copy paste', async () => {
     getSettlementApprovalMock.mockResolvedValueOnce(selectedRecentApproval);
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
-    expect(screen.getByRole('heading', { name: 'Recent approvals' })).toBeInTheDocument();
-    expect(screen.queryByText('approval-2')).not.toBeInTheDocument();
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(within(queue).getByRole('heading', { name: 'Settlement Review Queue' })).toBeInTheDocument();
+    expect(within(queue).getByText('approval-2')).toBeInTheDocument();
     expect(screen.getAllByText('Approved').length).toBeGreaterThan(0);
+    expect(within(queue).getByText('TRY 2,200.00')).toBeInTheDocument();
+    expect(within(queue).getAllByText('TRY 1,800.00').length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'Open' })[0]);
+    await userEvent.click(within(queue).getAllByRole('button', { name: 'Open' })[0]);
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-2'));
     expect(screen.getByLabelText(/Approval id/i)).toHaveValue('approval-2');
-    expect(screen.getAllByText('Open in workspace').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Current Candidate Preview' })).not.toBeInTheDocument();
     expect(screen.queryByText('Candidate Quality')).not.toBeInTheDocument();
@@ -1587,7 +1606,7 @@ describe('Finance Settlement approval admin UI', () => {
 
     await waitFor(() => expect(getSettlementApprovalMock).toHaveBeenCalledWith('approval-1'));
     expect(screen.getByRole('heading', { name: 'Loaded Approval Snapshot' })).toBeInTheDocument();
-    expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund adjustment').length).toBeGreaterThan(0);
     expect(screen.getAllByText('adjustment-1086').length).toBeGreaterThan(0);
     expect(screen.getByText('order-1086')).toBeInTheDocument();
     expect(screen.getAllByText((_content, element) =>
@@ -1646,7 +1665,7 @@ describe('Finance Settlement approval admin UI', () => {
     expect(within(auditEvidence).getByText('fle-sale-1098')).toBeInTheDocument();
     expect(screen.getByText('Refunded sale basis')).toBeInTheDocument();
     expect(screen.getByText('Refund offset')).toBeInTheDocument();
-    expect(screen.getByText('Refund adjustment')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund adjustment').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Settlement status is the business review state. Ledger state is the stored finance row state.')).toHaveLength(1);
     expect(screen.getAllByText('Carry-forward refund adjustment. Original order/allocation snapshot is not available on this settlement line.').length).toBeGreaterThan(0);
     expect(screen.getByText('Next: Approve Accounting Review.')).toBeInTheDocument();
@@ -1670,15 +1689,20 @@ describe('Finance Settlement approval admin UI', () => {
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
-    expect(screen.getByText('Accounting review')).toBeInTheDocument();
-    expect(screen.getByText('Accounting review · Zero payable')).toBeInTheDocument();
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(within(queue).getByText('Vendor Hold')).toBeInTheDocument();
+    expect(within(queue).getByText('Hold')).toBeInTheDocument();
+    expect(within(queue).getAllByText('Waiting').length).toBeGreaterThan(0);
   });
 
-  it('labels positive-payable history cards as settlement payout', async () => {
+  it('labels positive-payable history rows as ready for approval', async () => {
     renderPage();
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
-    expect(screen.getAllByText('Settlement payout').length).toBeGreaterThan(0);
+    const queue = screen.getByLabelText('Settlement review queue');
+    expect(within(queue).getByText('Ready for Approval')).toBeInTheDocument();
+    expect(within(queue).getAllByText('Ready').length).toBeGreaterThan(0);
+    expect(within(queue).getAllByText('Approve').length).toBeGreaterThan(0);
   });
 
   it('loads settlement preview totals and sample lines', async () => {
@@ -1745,7 +1769,7 @@ describe('Finance Settlement approval admin UI', () => {
   it('sends period filters to preview and draft creation', async () => {
     renderPage();
 
-    await userEvent.click(screen.getByLabelText(/Period/i));
+    await userEvent.click(screen.getByRole('radio', { name: 'Period' }));
     await userEvent.type(screen.getByLabelText(/Period start/i), '2026-06-01');
     await userEvent.type(screen.getByLabelText(/Period end/i), '2026-06-30');
     await userEvent.click(screen.getByRole('button', { name: 'Preview Settlement' }));
