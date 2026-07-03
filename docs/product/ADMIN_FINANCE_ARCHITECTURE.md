@@ -72,6 +72,34 @@ Not yet implemented:
 - Detailed payment blocker aggregation
 - Audit/idempotency/rollback policy for final payment actions
 
+### Approved Settlement Guard Rollout
+
+Target rule:
+
+Every payout batch candidate must eventually be backed by an `APPROVED` settlement snapshot.
+
+Current rollout decision:
+
+Do not hard-enable this guard immediately.
+
+Required rollout sequence:
+
+1. Read-only diagnostic report / audit mode
+2. Production data compatibility check
+3. Backfill or legacy handling if needed
+4. Soft warning mode
+5. Hard enforcement for new payout batch preparation
+6. Hard enforcement for mark-review/final release
+7. Future immutable traceability via `PayoutBatchLine.settlementApprovalLineId`
+
+Reason:
+
+Hard enforcement may block legacy production payout rows because `PayoutBatch` existed before `SettlementApproval`. Legacy rows may lack approved settlement linkage, `PayoutBatchLine` does not yet store `settlementApprovalLineId`, and production compatibility is `UNKNOWN` until verified.
+
+Rule:
+
+Any implementation of the approved-settlement guard must first prove production compatibility or include an explicit legacy strategy.
+
 ## Primary Question
 
 Every Admin Finance screen must answer:
