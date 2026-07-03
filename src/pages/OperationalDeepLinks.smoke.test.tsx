@@ -425,6 +425,15 @@ describe('operational deep-link smoke navigation', () => {
 
   it('navigates Order Detail → Finance linked record and selects the correct finance row', async () => {
     const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [vendorId],
+      vendorDetails: [{ vendorId, vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: vendorId,
+    });
 
     renderOperationalRoutes(`/orders/${targetOrder.id}`);
 
@@ -439,6 +448,15 @@ describe('operational deep-link smoke navigation', () => {
 
   it('navigates Return Detail → Finance linked record and selects the correct refund row', async () => {
     const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [vendorId],
+      vendorDetails: [{ vendorId, vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: vendorId,
+    });
 
     renderOperationalRoutes(`/returns/${targetReturn.id}`);
 
@@ -455,8 +473,9 @@ describe('operational deep-link smoke navigation', () => {
 
     renderOperationalRoutes(`/finance?ledgerId=${targetSaleFinanceRow.id}`);
 
-    await screen.findByRole('heading', { name: 'Order #1030' });
-    const linkedOrder = getLinkedRecordAnchor('Order #1030');
+    await screen.findByText('İşlem Özeti');
+    expect((await screen.findAllByText('#1030')).length).toBeGreaterThan(0);
+    const linkedOrder = getLinkedRecordAnchor('Sipariş #1030');
     expect(linkedOrder).toHaveAttribute(
       'href',
       '/orders?order=1030&shopifyOrderId=gid%3A%2F%2Fshopify%2FOrder%2F999999999',
@@ -473,8 +492,9 @@ describe('operational deep-link smoke navigation', () => {
 
     renderOperationalRoutes(`/finance?ledgerId=${targetRefundFinanceRow.id}`);
 
-    await screen.findByRole('heading', { name: 'Order #1031' });
-    await user.click(getLinkedRecordAnchor('Related return'));
+    await screen.findByText('İşlem Özeti');
+    expect((await screen.findAllByText('#1031')).length).toBeGreaterThan(0);
+    await user.click(getLinkedRecordAnchor('İlgili iade'));
 
     await waitFor(() => expect(getReturnMock).toHaveBeenCalledWith(targetReturn.id, expect.objectContaining({ vendorId })));
     expect((await screen.findAllByText('Target returned item')).length).toBeGreaterThan(0);
@@ -484,8 +504,8 @@ describe('operational deep-link smoke navigation', () => {
   it('shows unavailable for missing Finance deep-link targets without selecting the first row', async () => {
     renderOperationalRoutes('/finance?ledgerId=missing-ledger');
 
-    expect(await screen.findByText('Linked finance record unavailable')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Order #1001' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Linked transaction unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('İşlem Özeti')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
   });
 });
