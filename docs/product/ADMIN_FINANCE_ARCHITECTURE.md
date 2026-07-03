@@ -100,6 +100,13 @@ Rule:
 
 Any implementation of the approved-settlement guard must first prove production compatibility or include an explicit legacy strategy.
 
+Initial production launch assumption:
+
+- Initial production launch will use fresh vendor profiles and fresh finance data.
+- Legacy payout batch / settlement approval backfill is not required for launch if no historical finance rows are imported.
+- Approved-settlement guard can be implemented as hard enforcement for new payout preparation after a final read-only code audit confirms no historical finance data will be migrated.
+- If historical finance data is ever imported later, the diagnostic/backfill flow becomes mandatory before enabling/importing payment preparation.
+
 ## Primary Question
 
 Every Admin Finance screen must answer:
