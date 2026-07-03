@@ -14715,6 +14715,27 @@ summary.provider-response-heading::-webkit-details-marker {
     minmax(68px, 0.4fr);
 }
 
+.payment-preparation-tabs {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.payment-preparation-filters .op-search-input {
+  flex-basis: 220px;
+}
+
+.payment-preparation-table .op-table-head,
+.payment-preparation-table .op-table-row {
+  grid-template-columns:
+    minmax(124px, 0.78fr)
+    minmax(172px, 1.02fr)
+    minmax(152px, 0.9fr)
+    minmax(110px, 0.68fr)
+    minmax(132px, 0.8fr)
+    minmax(112px, 0.66fr)
+    minmax(116px, 0.7fr)
+    minmax(68px, 0.38fr);
+}
+
 .settlement-review-table .op-table-row small,
 .settlement-review-panel .op-meta-row span,
 .settlement-review-timeline span {

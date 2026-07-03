@@ -134,6 +134,7 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByRole('navigation', { name: 'Admin tools' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Settlement Approvals/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Refund Adjustments/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Payment Preparation/i })).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Workspace'), 'vendor');
 

@@ -43,6 +43,9 @@ const AdminScheduledSettlementsPage = lazy(() =>
 const AdminRefundAdjustmentsPage = lazy(() =>
   import('./pages/AdminRefundAdjustmentsPage').then((module) => ({ default: module.AdminRefundAdjustmentsPage })),
 );
+const AdminPaymentPreparationPage = lazy(() =>
+  import('./pages/AdminPaymentPreparationPage').then((module) => ({ default: module.AdminPaymentPreparationPage })),
+);
 const VendorSupportTicketsPage = lazy(() =>
   import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
 );
@@ -277,6 +280,14 @@ export default function App() {
             element={
               <RequirePermission permission="orders:write">
                 {resilientRoute('Refund adjustments', <AdminRefundAdjustmentsPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/finance/payment-preparation"
+            element={
+              <RequirePermission permission="orders:write">
+                {resilientRoute('Payment preparation', <AdminPaymentPreparationPage />)}
               </RequirePermission>
             }
           />
