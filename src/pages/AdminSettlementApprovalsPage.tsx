@@ -1235,9 +1235,9 @@ function SummaryField({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function WorkspaceHeader({
-  metrics,
+  metrics = [],
 }: {
-  metrics: HeaderMetric[];
+  metrics?: HeaderMetric[];
 }) {
   return (
     <section className="settlement-workspace-header">
@@ -1246,11 +1246,13 @@ function WorkspaceHeader({
         <h1>Settlement Review</h1>
         <p className="page-description">Review vendor settlements before payment approval.</p>
       </div>
-      <div className="settlement-executive-summary" aria-label="Settlement executive summary">
-        {metrics.map((metric) => (
-          <SummaryField key={metric.label} label={metric.label} value={metric.value} />
-        ))}
-      </div>
+      {metrics.length ? (
+        <div className="settlement-executive-summary" aria-label="Settlement executive summary">
+          {metrics.map((metric) => (
+            <SummaryField key={metric.label} label={metric.label} value={metric.value} />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2695,11 +2697,11 @@ export function AdminSettlementApprovalsPage() {
     }
   }
 
+  const showSettlementDetailTools = false;
+
   return (
     <section className="op-page settlement-approvals-page">
-      <WorkspaceHeader
-        metrics={headerMetrics}
-      />
+      <WorkspaceHeader />
 
       {dbWarnings.length ? <ReadinessList title="Database warnings" items={dbWarnings} tone="warning" /> : null}
 
@@ -2732,6 +2734,8 @@ export function AdminSettlementApprovalsPage() {
         onOpenApproval={(id) => void handleOpenRecentApproval(id)}
       />
 
+      {showSettlementDetailTools ? (
+        <>
       <section
         className={`settlement-workspace-grid is-${workspaceState}-state${approval ? ' is-loaded-approval-layout' : ''}`}
         aria-label="Settlement workspace layout"
@@ -3501,6 +3505,8 @@ export function AdminSettlementApprovalsPage() {
           </>
         ) : null}
       </details>
+        </>
+      ) : null}
     </section>
   );
 }
