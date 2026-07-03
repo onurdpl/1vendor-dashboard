@@ -239,7 +239,7 @@ const autoDraftJobResult: SettlementScheduleAutoDraftJobResponse = {
 };
 
 function renderPage() {
-  render(
+  return render(
     <MemoryRouter>
       <AdminScheduledSettlementsPage />
     </MemoryRouter>,
@@ -295,7 +295,10 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.queryByText('Candidate Builder')).not.toBeInTheDocument();
     expect(screen.queryByText('Current Candidate Preview')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Dry Run' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview Schedule' })).toBeInTheDocument();
+    const headerActions = screen.getByLabelText('Scheduled settlement actions');
+    expect(within(headerActions).getByRole('button', { name: 'Preview Schedule' })).toBeInTheDocument();
+    expect(within(headerActions).getByRole('button', { name: 'Create Scheduled Drafts' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Scheduled settlement filters')).queryByRole('button', { name: 'Preview Schedule' })).not.toBeInTheDocument();
 
     const tabs = screen.getByLabelText('Scheduled settlement workflow tabs');
     expect(within(tabs).getByRole('button', { name: /All5/i })).toBeInTheDocument();
@@ -312,12 +315,13 @@ describe('AdminScheduledSettlementsPage', () => {
     expect(screen.getByRole('columnheader', { name: 'Issues' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Next Action' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Updated' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Review' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Action' })).toBeInTheDocument();
 
     expect(screen.getAllByText('Yalı Spor').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ready for Draft').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Create Draft').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund')).toBeInTheDocument();
+    expect(screen.getByText('Refund Adjustment')).toBeInTheDocument();
+    expect(screen.queryByText('Sporjinal')).not.toBeInTheDocument();
 
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
     expect(within(panel).getByText('Schedule Summary')).toBeInTheDocument();
@@ -343,15 +347,87 @@ describe('AdminScheduledSettlementsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /Not Due1/i }));
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
     const panel = screen.getByLabelText('Scheduled settlement detail panel');
     expect(within(panel).getByText('Why is this waiting?')).toBeInTheDocument();
-    expect(within(panel).getAllByText('Not due for this run date')[0]).toBeInTheDocument();
+    expect(within(panel).getByText('This vendor is not scheduled for the selected settlement run.')).toBeInTheDocument();
+    expect(within(panel).queryByText('Preview Schedule')).not.toBeInTheDocument();
+  });
+
+  it('orders all schedules by operational priority and keeps not due rows informational', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    await user.click(screen.getByRole('button', { name: /All5/i }));
+
+    const queueText = screen.getByLabelText('Scheduled settlement queue').textContent ?? '';
+    expect(queueText.indexOf('Yalı Spor')).toBeGreaterThanOrEqual(0);
+    expect(queueText.indexOf('Sporjinal')).toBeGreaterThanOrEqual(0);
+    expect(queueText.indexOf('Yalı Spor')).toBeLessThan(queueText.indexOf('Sporjinal'));
+
+    await user.click(screen.getByRole('button', { name: /Not Due1/i }));
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
+    expect(screen.queryByText('Waiting')).not.toBeInTheDocument();
+  });
+
+  it('shows only one highest-priority issue badge per vendor row', async () => {
+    const user = userEvent.setup();
+    const { container } = renderPage();
+
+    await screen.findAllByText('Yalı Spor');
+    await user.click(screen.getByRole('button', { name: /All5/i }));
+
+    const issueLists = container.querySelectorAll('.scheduled-settlements-table .settlement-review-issue-list');
+    expect(issueLists.length).toBeGreaterThan(0);
+    issueLists.forEach((list) => {
+      expect(list.querySelectorAll('.op-badge')).toHaveLength(1);
+    });
+  });
+
+  it('shows an operational empty state instead of defaulting to not due vendors', async () => {
+    const user = userEvent.setup();
+    getSettlementScheduleDryRunMock.mockResolvedValue({
+      ...dryRunResponse,
+      summary: {
+        ...dryRunResponse.summary,
+        dueVendors: 1,
+        autoDraftEligibleVendors: 0,
+      },
+      vendors: [
+        {
+          ...dryRunResponse.vendors[1],
+          vendorId: 'not-due-only',
+          vendorName: 'Not Due Vendor',
+          state: 'NOT_DUE',
+          due: false,
+        },
+        {
+          ...dryRunResponse.vendors[4],
+          vendorId: 'already-prepared',
+          vendorName: 'Already Prepared Vendor',
+          state: 'DRAFT_EXISTS',
+          due: true,
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Nothing requires settlement preparation today.')).toBeInTheDocument();
+    expect(screen.getByText('All vendors are either not due or already prepared.')).toBeInTheDocument();
+    expect(screen.queryByText('Not Due Vendor')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show all schedules' }));
+    expect(await screen.findByText('Already Prepared Vendor')).toBeInTheDocument();
+    expect(screen.getAllByText('Not Due Vendor').length).toBeGreaterThan(0);
   });
 
   it('moves run notes and scheduler diagnostics into a collapsed advanced details area', async () => {
     renderPage();
 
     await screen.findAllByText('Yalı Spor');
+    expect(screen.getAllByText('No activity recorded yet.').length).toBeGreaterThan(0);
     const advancedDetails = screen.getByLabelText('Advanced run details');
     expect(advancedDetails).not.toHaveAttribute('open');
     expect(screen.getByText('Advanced run details')).toBeInTheDocument();

@@ -14213,6 +14213,13 @@ summary.provider-response-heading::-webkit-details-marker {
   max-width: 1560px;
 }
 
+.scheduled-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
 .scheduled-settlements-controls {
   display: flex;
   flex-wrap: wrap;
@@ -14295,6 +14302,26 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .scheduled-table-empty {
   grid-column: 1 / -1;
+}
+
+.scheduled-operational-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--space-2);
+  min-height: 300px;
+  padding: var(--space-5);
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface);
+  color: var(--op-muted);
+  text-align: center;
+  box-shadow: var(--op-shadow-sm);
+}
+
+.scheduled-operational-empty strong {
+  color: var(--op-text-strong);
+  font-size: 1rem;
 }
 
 .scheduled-advanced-details {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -36,10 +36,12 @@ const STATE_LABELS: Record<SettlementScheduleState, string> = {
 
 type WorkflowTab = 'all' | 'due_today' | 'ready_for_draft' | 'blocked' | 'already_drafted' | 'not_due';
 type StatusFilter = 'all' | WorkflowTab;
-type ScheduleIssue = 'Refund' | 'Blocker' | 'No rows' | 'Schedule mismatch' | 'Ready';
-type ScheduleNextAction = 'Preview' | 'Create Draft' | 'Investigate' | 'Waiting' | 'No Action Required';
+type ScheduleIssue = 'Blocker' | 'Schedule mismatch' | 'Refund Adjustment' | 'No eligible rows' | 'Ready';
+type ScheduleNextAction = 'Create Draft' | 'Investigate' | 'No Action Required';
+type RowActionLabel = 'Review' | 'Investigate' | 'View';
 
 const HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR = 100000;
+const TIMELINE_EMPTY_COPY = 'No activity recorded yet.';
 const WORKFLOW_TABS: Array<{ id: WorkflowTab; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'due_today', label: 'Due Today' },
@@ -107,6 +109,40 @@ function matchesStatusFilter(vendor: SettlementScheduleDryRunVendor, statusFilte
   return statusFilter === 'all' || matchesWorkflow(vendor, statusFilter);
 }
 
+function hasReadyForDraftVendor(vendors: SettlementScheduleDryRunVendor[]) {
+  return vendors.some((vendor) => vendor.state === 'READY');
+}
+
+function hasDueActionVendor(vendors: SettlementScheduleDryRunVendor[]) {
+  return vendors.some((vendor) => vendor.due && (vendor.state === 'READY' || isBlockedScheduleState(vendor.state)));
+}
+
+function getDefaultWorkflowTab(vendors: SettlementScheduleDryRunVendor[]): WorkflowTab {
+  if (hasReadyForDraftVendor(vendors)) {
+    return 'ready_for_draft';
+  }
+  if (hasDueActionVendor(vendors)) {
+    return 'due_today';
+  }
+  return 'ready_for_draft';
+}
+
+function getScheduleSortRank(vendor: SettlementScheduleDryRunVendor) {
+  if (vendor.state === 'READY') return 0;
+  if (isBlockedScheduleState(vendor.state)) return 1;
+  if (isAlreadyDraftedState(vendor.state)) return 2;
+  if (vendor.state === 'NOT_DUE') return 3;
+  return 4;
+}
+
+function sortScheduledVendors(vendors: SettlementScheduleDryRunVendor[]) {
+  return [...vendors].sort((left, right) => {
+    const rankDifference = getScheduleSortRank(left) - getScheduleSortRank(right);
+    if (rankDifference !== 0) return rankDifference;
+    return getVendorName(left).localeCompare(getVendorName(right));
+  });
+}
+
 function getOpenSettlementHref(approvalId: string) {
   return `/admin/finance/settlement-approvals?approvalId=${encodeURIComponent(approvalId)}`;
 }
@@ -125,49 +161,56 @@ function getVendorBlockers(vendor: SettlementScheduleDryRunVendor) {
   return [vendor.blockedReason, ...vendor.warnings].filter((item): item is string => Boolean(item));
 }
 
-function getScheduleIssues(vendor: SettlementScheduleDryRunVendor): ScheduleIssue[] {
-  const issues: ScheduleIssue[] = [];
+function getScheduleIssue(vendor: SettlementScheduleDryRunVendor): ScheduleIssue {
   const blockers = getVendorBlockers(vendor);
-  if (vendor.pendingRefundAdjustmentCount > 0) {
-    issues.push('Refund');
+  if (isBlockedScheduleState(vendor.state) && vendor.state !== 'NO_ELIGIBLE_ROWS') {
+    return 'Blocker';
   }
-  if (blockers.length || isBlockedScheduleState(vendor.state)) {
-    issues.push('Blocker');
-  }
-  if (vendor.state === 'NO_ELIGIBLE_ROWS' || vendor.eligibleLineCount === 0) {
-    issues.push('No rows');
+  if (blockers.length && vendor.state !== 'NOT_DUE' && vendor.state !== 'NO_ELIGIBLE_ROWS') {
+    return 'Blocker';
   }
   if (vendor.state === 'NOT_DUE') {
-    issues.push('Schedule mismatch');
+    return 'Schedule mismatch';
   }
-  return issues.length ? Array.from(new Set(issues)) : ['Ready'];
+  if (vendor.pendingRefundAdjustmentCount > 0) {
+    return 'Refund Adjustment';
+  }
+  if (vendor.state === 'NO_ELIGIBLE_ROWS' || vendor.eligibleLineCount === 0) {
+    return 'No eligible rows';
+  }
+  return 'Ready';
 }
 
 function getScheduleIssueTone(issue: ScheduleIssue) {
   if (issue === 'Ready') return 'success' as const;
-  if (issue === 'Refund') return 'attention' as const;
-  if (issue === 'Blocker' || issue === 'No rows') return 'warning' as const;
+  if (issue === 'Refund Adjustment') return 'attention' as const;
+  if (issue === 'Blocker' || issue === 'No eligible rows') return 'warning' as const;
   return 'neutral' as const;
 }
 
 function getScheduleNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'READY') return 'Create Draft';
   if (isAlreadyDraftedState(vendor.state)) return 'No Action Required';
-  if (vendor.state === 'NOT_DUE') return 'Waiting';
   if (isBlockedScheduleState(vendor.state)) return 'Investigate';
-  return 'Preview';
+  return 'No Action Required';
 }
 
-function getPanelNextAction(vendor: SettlementScheduleDryRunVendor) {
+function getRowActionLabel(vendor: SettlementScheduleDryRunVendor): RowActionLabel {
+  if (vendor.state === 'READY') return 'Review';
+  if (isBlockedScheduleState(vendor.state)) return 'Investigate';
+  return 'View';
+}
+
+function getPanelNextAction(vendor: SettlementScheduleDryRunVendor): ScheduleNextAction {
   if (vendor.state === 'NOT_DUE') {
-    return 'Preview Schedule';
+    return 'No Action Required';
   }
   return getScheduleNextAction(vendor);
 }
 
 function getWaitingReason(vendor: SettlementScheduleDryRunVendor) {
   if (vendor.state === 'NOT_DUE') {
-    return 'Not due for this run date';
+    return 'This vendor is not scheduled for the selected settlement run.';
   }
   if (vendor.state === 'DRAFT_EXISTS') {
     return 'Existing draft already exists';
@@ -300,9 +343,10 @@ export function AdminScheduledSettlementsPage() {
   const [jobRunOpen, setJobRunOpen] = useState(false);
   const [jobRunError, setJobRunError] = useState<string | null>(null);
   const [jobResult, setJobResult] = useState<SettlementScheduleAutoDraftJobResponse | null>(null);
-  const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('all');
+  const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('ready_for_draft');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [highValueOnly, setHighValueOnly] = useState(false);
+  const workflowTouchedRef = useRef(false);
 
   async function loadDryRun(nextRunDate = runDate, nextVendorFilter = vendorFilter) {
     setLoading(true);
@@ -313,11 +357,16 @@ export function AdminScheduledSettlementsPage() {
         vendorId: nextVendorFilter.trim() || null,
       });
       setDryRun(response);
+      const nextWorkflowTab = workflowTouchedRef.current ? workflowTab : getDefaultWorkflowTab(response.vendors);
+      if (!workflowTouchedRef.current) {
+        setWorkflowTab(nextWorkflowTab);
+      }
       setSelectedVendorId((current) => {
-        if (current && response.vendors.some((vendor) => vendor.vendorId === current)) {
+        const nextWorkflowVendors = response.vendors.filter((vendor) => matchesWorkflow(vendor, nextWorkflowTab));
+        if (current && nextWorkflowVendors.some((vendor) => vendor.vendorId === current)) {
           return current;
         }
-        return response.vendors[0]?.vendorId ?? null;
+        return nextWorkflowVendors[0]?.vendorId ?? response.vendors[0]?.vendorId ?? null;
       });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Scheduled settlement dry run failed.');
@@ -342,13 +391,26 @@ export function AdminScheduledSettlementsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function handleWorkflowTabChange(tab: WorkflowTab) {
+    workflowTouchedRef.current = true;
+    setWorkflowTab(tab);
+    setStatusFilter('all');
+  }
+
+  function handleShowAllSchedules() {
+    workflowTouchedRef.current = true;
+    setWorkflowTab('all');
+    setStatusFilter('all');
+    setHighValueOnly(false);
+  }
+
   const filteredVendors = useMemo(() => {
     const vendors = dryRun?.vendors ?? [];
-    return vendors.filter((vendor) =>
+    return sortScheduledVendors(vendors.filter((vendor) =>
       matchesWorkflow(vendor, workflowTab) &&
       matchesStatusFilter(vendor, statusFilter) &&
       (!highValueOnly || Math.abs(vendor.netPayableMinor ?? 0) >= HIGH_VALUE_SCHEDULED_SETTLEMENT_MINOR),
-    );
+    ));
   }, [dryRun?.vendors, highValueOnly, statusFilter, workflowTab]);
 
   const selectedVendor = useMemo(
@@ -407,6 +469,10 @@ export function AdminScheduledSettlementsPage() {
 
   const jobModeLabel = jobStatus?.mode === 'WRITE' ? 'Write mode' : 'Dry-run mode';
   const jobEnabled = jobStatus?.enabled === true;
+  const allVendors = dryRun?.vendors ?? [];
+  const readyVendorExists = hasReadyForDraftVendor(allVendors);
+  const dueActionVendorExists = hasDueActionVendor(allVendors);
+  const showOperationalEmpty = Boolean(dryRun && !readyVendorExists && !dueActionVendorExists && workflowTab !== 'all');
   const workflowCounts = useMemo(() => {
     const vendors = dryRun?.vendors ?? [];
     return WORKFLOW_TABS.reduce<Record<WorkflowTab, number>>((counts, tab) => {
@@ -429,7 +495,7 @@ export function AdminScheduledSettlementsPage() {
     : null;
   const lastRunLabel = jobStatus?.lastRun
     ? `${formatDateTime(jobStatus.lastRun.finishedAt ?? jobStatus.lastRun.startedAt)} · ${safeStatusLabel(jobStatus.lastRun.status)}`
-    : 'No timeline event yet';
+    : TIMELINE_EMPTY_COPY;
 
   return (
     <section className="op-page scheduled-settlements-page">
@@ -439,9 +505,14 @@ export function AdminScheduledSettlementsPage() {
           <h2>Scheduled Settlements</h2>
           <p className="page-description">Review vendors due for scheduled settlement draft preparation.</p>
         </div>
-        <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || readyCount === 0}>
-          Create Scheduled Drafts
-        </button>
+        <div className="scheduled-header-actions" aria-label="Scheduled settlement actions">
+          <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
+            {loading ? 'Previewing...' : 'Preview Schedule'}
+          </button>
+          <button type="button" className="button button-primary" onClick={() => setCreateOpen(true)} disabled={loading || readyCount === 0}>
+            Create Scheduled Drafts
+          </button>
+        </div>
       </div>
 
       {error ? <SectionErrorRetry title="Scheduled settlement dry run failed" description={error} onRetry={() => void loadDryRun()} /> : null}
@@ -456,7 +527,7 @@ export function AdminScheduledSettlementsPage() {
               key={tab.id}
               type="button"
               className={workflowTab === tab.id ? 'is-active' : undefined}
-              onClick={() => setWorkflowTab(tab.id)}
+              onClick={() => handleWorkflowTabChange(tab.id)}
             >
               <span>{tab.label}</span>
               <strong>{workflowCounts[tab.id]}</strong>
@@ -490,62 +561,67 @@ export function AdminScheduledSettlementsPage() {
             <input type="checkbox" checked={highValueOnly} onChange={(event) => setHighValueOnly(event.target.checked)} />
             <span>High Value only</span>
           </label>
-          <button type="button" className="button button-secondary" onClick={() => void loadDryRun()} disabled={loading}>
-            {loading ? 'Previewing...' : 'Preview Schedule'}
-          </button>
         </div>
 
         {dryRun ? (
           <>
             <div className="settlement-review-layout scheduled-settlements-workspace">
-              <OperationalTable
-                columns={['Vendor', 'Schedule', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Review']}
-                className="settlement-review-table scheduled-settlements-table"
-              >
-                {filteredVendors.length ? (
-                  filteredVendors.map((vendor) => {
-                    const schedule = getScheduleSummary(vendor);
-                    const issues = getScheduleIssues(vendor);
-                    return (
-                      <OperationalTableRow key={vendor.vendorId} selected={vendor.vendorId === selectedVendor?.vendorId}>
-                        <span>
-                          <strong>{getVendorName(vendor)}</strong>
-                          <small>{vendor.due ? 'Due for this run date' : 'Not due for this run date'}</small>
-                        </span>
-                        <span>
-                          <strong>{schedule.primary}</strong>
-                          <small>{schedule.secondary}</small>
-                        </span>
-                        <span>
-                          <strong>{formatMinor(vendor.netPayableMinor)}</strong>
-                          <small>{vendor.eligibleLineCount} eligible row{vendor.eligibleLineCount === 1 ? '' : 's'}</small>
-                        </span>
-                        <StatusBadge tone={getStateTone(vendor.state)}>{STATE_LABELS[vendor.state]}</StatusBadge>
-                        <span className="settlement-review-issue-list">
-                          {issues.map((issue) => (
-                            <StatusBadge key={issue} tone={getScheduleIssueTone(issue)}>{issue}</StatusBadge>
-                          ))}
-                        </span>
-                        <strong>{getScheduleNextAction(vendor)}</strong>
-                        <span>
-                          <strong>{dryRun.runDate}</strong>
-                          <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : 'No timeline event yet'}</small>
-                        </span>
-                        <button type="button" className="button button-secondary button-small" onClick={() => setSelectedVendorId(vendor.vendorId)}>
-                          Review
-                        </button>
-                      </OperationalTableRow>
-                    );
-                  })
-                ) : (
-                  <OperationalTableRow>
-                    <span className="scheduled-table-empty">
-                      <strong>No scheduled drafts ready for this run date.</strong>
-                      <small>Try another run date or review vendor schedule settings.</small>
-                    </span>
-                  </OperationalTableRow>
-                )}
-              </OperationalTable>
+              {showOperationalEmpty ? (
+                <div className="scheduled-operational-empty" role="status">
+                  <strong>Nothing requires settlement preparation today.</strong>
+                  <span>All vendors are either not due or already prepared.</span>
+                  <button type="button" className="button button-secondary" onClick={handleShowAllSchedules}>
+                    Show all schedules
+                  </button>
+                </div>
+              ) : (
+                <OperationalTable
+                  columns={['Vendor', 'Schedule', 'Amount', 'Status', 'Issues', 'Next Action', 'Updated', 'Action']}
+                  className="settlement-review-table scheduled-settlements-table"
+                >
+                  {filteredVendors.length ? (
+                    filteredVendors.map((vendor) => {
+                      const schedule = getScheduleSummary(vendor);
+                      const issue = getScheduleIssue(vendor);
+                      return (
+                        <OperationalTableRow key={vendor.vendorId} selected={vendor.vendorId === selectedVendor?.vendorId}>
+                          <span>
+                            <strong>{getVendorName(vendor)}</strong>
+                            <small>{vendor.due ? 'Due for this run date' : 'Not due for this run date'}</small>
+                          </span>
+                          <span>
+                            <strong>{schedule.primary}</strong>
+                            <small>{schedule.secondary}</small>
+                          </span>
+                          <span>
+                            <strong>{formatMinor(vendor.netPayableMinor)}</strong>
+                            <small>{vendor.eligibleLineCount} eligible row{vendor.eligibleLineCount === 1 ? '' : 's'}</small>
+                          </span>
+                          <StatusBadge tone={getStateTone(vendor.state)}>{STATE_LABELS[vendor.state]}</StatusBadge>
+                          <span className="settlement-review-issue-list">
+                            <StatusBadge tone={getScheduleIssueTone(issue)}>{issue}</StatusBadge>
+                          </span>
+                          <strong>{getScheduleNextAction(vendor)}</strong>
+                          <span>
+                            <strong>{dryRun.runDate}</strong>
+                            <small>{jobStatus?.lastRun ? `Last run ${jobStatus.lastRun.runDate}` : TIMELINE_EMPTY_COPY}</small>
+                          </span>
+                          <button type="button" className="button button-secondary button-small" onClick={() => setSelectedVendorId(vendor.vendorId)}>
+                            {getRowActionLabel(vendor)}
+                          </button>
+                        </OperationalTableRow>
+                      );
+                    })
+                  ) : (
+                    <OperationalTableRow>
+                      <span className="scheduled-table-empty">
+                        <strong>No scheduled vendors match the current filters.</strong>
+                        <small>Adjust the filters or show all schedules.</small>
+                      </span>
+                    </OperationalTableRow>
+                  )}
+                </OperationalTable>
+              )}
 
               <aside className="op-side-panel settlement-review-panel scheduled-settlements-panel" aria-label="Scheduled settlement detail panel">
                 {selectedVendor ? (
@@ -575,9 +651,11 @@ export function AdminScheduledSettlementsPage() {
                         <MetadataRow label="Reason" value={selectedWaitingReason} />
                       </MetadataGroup>
                     ) : null}
-                    <MetadataGroup title="Next Action">
-                      <MetadataRow label="Action" value={getPanelNextAction(selectedVendor)} />
-                    </MetadataGroup>
+                    {selectedVendor.state !== 'NOT_DUE' ? (
+                      <MetadataGroup title="Next Action">
+                        <MetadataRow label="Action" value={getPanelNextAction(selectedVendor)} />
+                      </MetadataGroup>
+                    ) : null}
                     <MetadataGroup title="Payment Impact">
                       <MetadataRow label="Estimated net payable" value={formatMinor(selectedVendor.netPayableMinor)} />
                       <MetadataRow
@@ -613,12 +691,12 @@ export function AdminScheduledSettlementsPage() {
                         <li><span>Last run</span><strong>{lastRunLabel}</strong></li>
                         <li>
                           <span>Last draft created</span>
-                          <strong>{selectedVendor.existingSettlementApprovalId ? 'Existing settlement available' : 'No timeline event yet'}</strong>
+                          <strong>{selectedVendor.existingSettlementApprovalId ? 'Existing settlement available' : TIMELINE_EMPTY_COPY}</strong>
                         </li>
                         <li><span>Current preview</span><strong>{dryRun.runDate}</strong></li>
                         <li>
                           <span>Draft created</span>
-                          <strong>{selectedCreatedDraft ? `Draft created · ${formatMinor(selectedCreatedDraft.netPayableMinor)}` : 'No timeline event yet'}</strong>
+                          <strong>{selectedCreatedDraft ? `Draft created · ${formatMinor(selectedCreatedDraft.netPayableMinor)}` : TIMELINE_EMPTY_COPY}</strong>
                         </li>
                       </ul>
                     </section>
