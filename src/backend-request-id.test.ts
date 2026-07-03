@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../backend/src/app';
 
+function stubBackendTestEnv() {
+  vi.stubEnv('NODE_ENV', 'test');
+  vi.stubEnv('SHIPPING_PROVIDER', 'kargonomi');
+  vi.stubEnv('KARGONOMI_BASE_URL', 'https://app.kargonomi.com.tr/api/v1');
+  vi.stubEnv('KARGONOMI_API_TOKEN', 'test-token');
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe('backend request id diagnostics', () => {
   it('propagates a safe request id header and error response field', async () => {
+    stubBackendTestEnv();
     const app = createApp();
 
     try {
@@ -29,6 +37,7 @@ describe('backend request id diagnostics', () => {
   });
 
   it('echoes a safe auth attempt id header on login validation failures', async () => {
+    stubBackendTestEnv();
     const app = createApp();
 
     try {
@@ -51,6 +60,7 @@ describe('backend request id diagnostics', () => {
   });
 
   it('allows credentialed CORS requests from an exact configured frontend origin', async () => {
+    stubBackendTestEnv();
     const app = createApp();
 
     try {
@@ -72,6 +82,7 @@ describe('backend request id diagnostics', () => {
   });
 
   it('allows auth attempt id on login CORS preflight requests', async () => {
+    stubBackendTestEnv();
     const app = createApp();
 
     try {
@@ -95,6 +106,7 @@ describe('backend request id diagnostics', () => {
   });
 
   it('allows credentialed CORS requests from the configured Render frontend origin', async () => {
+    stubBackendTestEnv();
     vi.stubEnv('CORS_ORIGIN', 'https://onevendor-dashboard.onrender.com');
     const app = createApp();
 

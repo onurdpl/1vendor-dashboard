@@ -32,6 +32,9 @@ function resetBackendEnv(overrides: Record<string, string | undefined>) {
     NODE_ENV: 'test',
     JWT_SECRET: 'test-jwt-secret',
     SHOPIFY_WEBHOOK_SECRET: 'test-shopify-webhook-secret',
+    SHIPPING_PROVIDER: 'kargonomi',
+    KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+    KARGONOMI_API_TOKEN: 'test-token',
     ...overrides,
   };
 }
