@@ -49,11 +49,12 @@ function buildEntry(input: {
   relatedSalePaid?: boolean;
   relatedSaleActiveApproval?: boolean;
   relatedSaleActivePayoutBatch?: boolean;
-	  activeSettlementApproval?: boolean;
-	  approvedRefundOffsetRepresented?: boolean;
-	  voidedAt?: Date | null;
-	  allocationStatus?: string | null;
-	  cancelRefundReviewStatus?: string | null;
+  activeSettlementApproval?: boolean;
+  settlementApprovalStatus?: 'DRAFT' | 'APPROVED' | 'CANCELLED' | null;
+  approvedRefundOffsetRepresented?: boolean;
+  voidedAt?: Date | null;
+  allocationStatus?: string | null;
+  cancelRefundReviewStatus?: string | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
@@ -71,6 +72,8 @@ function buildEntry(input: {
       : input.deliveredAt;
   const settlementDelayDaysSnapshot = input.settlementDelayDaysSnapshot ?? 21;
   const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
+  const settlementApprovalStatus =
+    input.settlementApprovalStatus ?? (input.activeSettlementApproval ? 'APPROVED' : null);
   return {
     id: input.id,
     vendorId: 'demo-vendor-a',
@@ -93,9 +96,9 @@ function buildEntry(input: {
     voidReason: input.voidedAt ? 'economic transfer superseded source ledger' : null,
     supersededByLedgerId: input.voidedAt ? `replacement-${input.id}` : null,
     createdAt: new Date('2026-05-13T09:00:00Z'),
-	    vendorAllocation: {
-	      id: `alloc-${input.id}`,
-	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
+    vendorAllocation: {
+      id: `alloc-${input.id}`,
+      allocationStatus: input.allocationStatus ?? 'ACTIVE',
       cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
@@ -147,8 +150,8 @@ function buildEntry(input: {
     payoutBatchLines: input.batched
       ? [{ id: `line-${input.id}`, payoutBatch: { id: 'batch-review', status: 'DRAFT' } }]
       : [],
-    settlementApprovalLines: input.activeSettlementApproval
-      ? [{ settlementApproval: { id: `approval-${input.id}`, status: 'APPROVED' } }]
+    settlementApprovalLines: settlementApprovalStatus
+      ? [{ settlementApproval: { id: `approval-${input.id}`, status: settlementApprovalStatus } }]
       : [],
   };
 }
@@ -229,11 +232,11 @@ describe('payout batch preparation', () => {
     });
   });
 
-  it('prepares a draft batch from payable rows and refund reductions only', async () => {
+  it('prepares a draft batch from payable rows and refund reductions backed by approved settlement snapshots only', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
-      buildEntry({ id: 'sale-payable', entryType: 'sale', amount: 1000 }),
+      buildEntry({ id: 'sale-payable', entryType: 'sale', amount: 1000, activeSettlementApproval: true }),
       buildEntry({ id: 'sale-accruing', entryType: 'sale', amount: 500, fulfilled: false }),
-      buildEntry({ id: 'refund-payable', entryType: 'refund', amount: 100 }),
+      buildEntry({ id: 'refund-payable', entryType: 'refund', amount: 100, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-1',
@@ -295,6 +298,48 @@ describe('payout batch preparation', () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ['sale row with draft settlement', buildEntry({
+      id: 'sale-draft-settlement',
+      entryType: 'sale',
+      amount: 1000,
+      settlementApprovalStatus: 'DRAFT',
+    })],
+    ['sale row with cancelled settlement', buildEntry({
+      id: 'sale-cancelled-settlement',
+      entryType: 'sale',
+      amount: 1000,
+      settlementApprovalStatus: 'CANCELLED',
+    })],
+    ['sale row without settlement approval', buildEntry({
+      id: 'sale-no-settlement',
+      entryType: 'sale',
+      amount: 1000,
+    })],
+    ['refund row with draft settlement', buildEntry({
+      id: 'refund-draft-settlement',
+      entryType: 'refund',
+      amount: 100,
+      settlementApprovalStatus: 'DRAFT',
+    })],
+    ['refund row with cancelled settlement', buildEntry({
+      id: 'refund-cancelled-settlement',
+      entryType: 'refund',
+      amount: 100,
+      settlementApprovalStatus: 'CANCELLED',
+    })],
+    ['refund row without settlement approval', buildEntry({
+      id: 'refund-no-settlement',
+      entryType: 'refund',
+      amount: 100,
+    })],
+  ])('rejects payout preparation for %s', async (_label, entry) => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([entry]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow();
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
   it('prevents duplicate active batch inclusion', async () => {
@@ -377,7 +422,7 @@ describe('payout batch preparation', () => {
         activeSettlementApproval: true,
         refundRecords: [{ id: 'refund-late', sourceShopifyRefundId: 'refund-late', amount: 100 }],
       }),
-      buildEntry({ id: 'unaffected-sale', entryType: 'sale', amount: 500 }),
+      buildEntry({ id: 'unaffected-sale', entryType: 'sale', amount: 500, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-unaffected',
@@ -504,8 +549,9 @@ describe('payout batch preparation', () => {
         amount: 500,
         deliveredAt: new Date('2026-06-01T00:00:00Z'),
         settlementDelayDaysSnapshot: 14,
+        activeSettlementApproval: true,
       }),
-      buildEntry({ id: 'refund-payable', entryType: 'refund', amount: 100 }),
+      buildEntry({ id: 'refund-payable', entryType: 'refund', amount: 100, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-delay',
@@ -580,13 +626,14 @@ describe('payout batch preparation', () => {
         id: 'sale-requested-return',
         entryType: 'sale',
         amount: 500,
+        activeSettlementApproval: true,
         returnRecords: [{
           id: 'return-requested',
           status: 'requested',
           returnLifecycleStatus: 'requested',
         }],
       }),
-      buildEntry({ id: 'refund-row', entryType: 'refund', amount: 100 }),
+      buildEntry({ id: 'refund-row', entryType: 'refund', amount: 100, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-open-return',
@@ -641,6 +688,8 @@ describe('payout batch preparation', () => {
         id: 'sale-refund-processed',
         entryType: 'sale',
         amount: 1000,
+        activeSettlementApproval: true,
+        approvedRefundOffsetRepresented: true,
         refundRecords: [{ id: 'refund-processed', sourceShopifyRefundId: 'refund-1', amount: 100 }],
         returnRecords: [{
           id: 'return-approved-processed',
@@ -700,7 +749,7 @@ describe('payout batch preparation', () => {
       },
     ]);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
-      buildEntry({ id: 'sale-payable-with-debt', entryType: 'sale', amount: 1000 }),
+      buildEntry({ id: 'sale-payable-with-debt', entryType: 'sale', amount: 1000, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-debt-carry',
@@ -776,7 +825,7 @@ describe('payout batch preparation', () => {
       },
     ]);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
-      buildEntry({ id: 'sale-clears-debt', entryType: 'sale', amount: 1000 }),
+      buildEntry({ id: 'sale-clears-debt', entryType: 'sale', amount: 1000, activeSettlementApproval: true }),
     ]);
     prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
       id: 'batch-debt-cleared',
@@ -832,7 +881,7 @@ describe('payout batch preparation', () => {
   });
 
   it('moves a clean draft payout batch to review', async () => {
-    const sale = buildEntry({ id: 'sale-clean-review', entryType: 'sale', amount: 1000, batched: true });
+    const sale = buildEntry({ id: 'sale-clean-review', entryType: 'sale', amount: 1000, batched: true, activeSettlementApproval: true });
     const batch = buildTransitionBatch([
       buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
     ]);
@@ -851,6 +900,25 @@ describe('payout batch preparation', () => {
       status: 'review',
       lineCount: 1,
     });
+  });
+
+  it('blocks review when a payout batch line is missing approved settlement backing', async () => {
+    const sale = buildEntry({ id: 'sale-no-approved-review', entryType: 'sale', amount: 1000, batched: true });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [
+        expect.objectContaining({
+          code: 'approved_settlement_snapshot_required',
+          reason: 'Approved settlement snapshot is required before payout batch preparation.',
+          financeLedgerEntryId: 'sale-no-approved-review',
+        }),
+      ],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
 
   it('blocks review when allocation enters cancel/refund review', async () => {
@@ -909,6 +977,8 @@ describe('payout batch preparation', () => {
       entryType: 'sale',
       amount: 1000,
       batched: true,
+      activeSettlementApproval: true,
+      approvedRefundOffsetRepresented: true,
       allocationStatus: 'VENDOR_BLOCKED',
       cancelRefundReviewStatus: 'RESOLVED',
       refundRecords: [{
@@ -938,6 +1008,8 @@ describe('payout batch preparation', () => {
       entryType: 'sale',
       amount: 1000,
       batched: true,
+      activeSettlementApproval: true,
+      approvedRefundOffsetRepresented: true,
       refundRecords: [{
         id: 'refund-late',
         sourceShopifyRefundId: 'refund-late',
@@ -957,7 +1029,13 @@ describe('payout batch preparation', () => {
   });
 
   it('blocks review when a related refund row is held for payout offset', async () => {
-    const sale = buildEntry({ id: 'sale-refund-hold', entryType: 'sale', amount: 1000, batched: true }) as any;
+    const sale = buildEntry({
+      id: 'sale-refund-hold',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    }) as any;
     sale.vendorAllocation.financeEntries = [
       {
         id: 'refund-held',
@@ -988,7 +1066,13 @@ describe('payout batch preparation', () => {
   });
 
   it('blocks review when the payout amount snapshot no longer matches current truth', async () => {
-    const sale = buildEntry({ id: 'sale-amount-changed', entryType: 'sale', amount: 1000, batched: true });
+    const sale = buildEntry({
+      id: 'sale-amount-changed',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
     mockTransitionBatch(buildTransitionBatch([
       buildTransitionLine({ entry: sale, amountSnapshot: 899 }),
     ]));
@@ -1069,6 +1153,7 @@ describe('payout batch preparation', () => {
       entryType: 'sale',
       amount: 1000,
       batched: true,
+      activeSettlementApproval: true,
       voidedAt: new Date('2026-06-21T10:00:00.000Z'),
     });
     mockTransitionBatch(buildTransitionBatch([
@@ -1087,7 +1172,13 @@ describe('payout batch preparation', () => {
   });
 
   it('blocks review when an open finance integrity alert exists for the allocation', async () => {
-    const sale = buildEntry({ id: 'sale-integrity-alert', entryType: 'sale', amount: 1000, batched: true });
+    const sale = buildEntry({
+      id: 'sale-integrity-alert',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
     mockTransitionBatch(buildTransitionBatch([
       buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
     ]));
@@ -1126,6 +1217,7 @@ describe('payout batch preparation', () => {
       entryType: 'refund',
       amount: 100,
       batched: true,
+      activeSettlementApproval: true,
       refundRecords: [{
         id: 'refund-before-batch',
         sourceShopifyRefundId: 'refund-before-batch',

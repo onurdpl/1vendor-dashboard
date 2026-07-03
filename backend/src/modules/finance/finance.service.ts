@@ -63,6 +63,8 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
   'Payout batch requires revision because financial facts changed after batch creation.';
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
+const APPROVED_SETTLEMENT_SNAPSHOT_REQUIRED_REASON =
+  'Approved settlement snapshot is required before payout batch preparation.';
 const DEFAULT_SETTLEMENT_FREQUENCY_TYPE = 'WEEKLY' as const;
 const DEFAULT_WEEKLY_SETTLEMENT_DAY = 'WEDNESDAY' as const;
 const SUPPORTED_SETTLEMENT_FREQUENCY_TYPES = new Set(['WEEKLY', 'BIWEEKLY']);
@@ -125,6 +127,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
+  | 'approved_settlement_snapshot_required'
   | 'ledger_row_no_longer_eligible'
   | 'ledger_row_missing';
 
@@ -292,6 +295,14 @@ function hasDraftSettlementReview(entry: {
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
 }) {
   return getActiveSettlementReview(entry)?.approvalStatus === 'draft';
+}
+
+function hasApprovedSettlementSnapshot(entry: {
+  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
+}) {
+  return (entry.settlementApprovalLines ?? []).some(
+    (line) => normalizeApprovalStatus(line.settlementApproval?.status) === 'approved',
+  );
 }
 
 function getSettlementReviewNote(review: NonNullable<SettlementDto['review']>) {
@@ -745,15 +756,6 @@ function getPostApprovalRefundRisk(entry: {
   });
 }
 
-function refundEntryIsRepresentedByApprovedSettlement(entry: {
-  entryType?: string | null;
-  settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
-}) {
-  return normalizeType(entry.entryType ?? '') === 'refund' && (entry.settlementApprovalLines ?? []).some(
-    (line) => mapStatus(line.settlementApproval?.status ?? '') === 'approved',
-  );
-}
-
 function resolveRefundCommissionSnapshot(entry: {
   commissionPercentSnapshot?: unknown;
   commissionVatPercentSnapshot?: unknown;
@@ -952,7 +954,8 @@ function isEntryEligibleForPayoutBatch(entry: {
       sourceShopifyRefundId?: string | null;
     }>;
   } | null;
-}) {
+}, options: { requireApprovedSettlementSnapshot?: boolean } = {}) {
+  const requireApprovedSettlementSnapshot = options.requireApprovedSettlementSnapshot ?? true;
   const type = normalizeType(entry.entryType);
   if (type !== 'sale' && type !== 'refund') {
     return false;
@@ -975,12 +978,16 @@ function isEntryEligibleForPayoutBatch(entry: {
   if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
     return false;
   }
-  if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible && !refundEntryIsRepresentedByApprovedSettlement(entry)) {
+  if (type === 'refund' && !getRefundOffsetEligibility(entry).eligible && !hasApprovedSettlementSnapshot(entry)) {
     return false;
   }
 
   const settlement = buildSettlement(entry);
-  return settlement.status === 'payable' || settlement.status === 'partially_refunded';
+  if (settlement.status !== 'payable' && settlement.status !== 'partially_refunded') {
+    return false;
+  }
+
+  return !requireApprovedSettlementSnapshot || hasApprovedSettlementSnapshot(entry);
 }
 
 function calculateEntryBatchAmounts(
@@ -2288,7 +2295,12 @@ export async function preparePayoutBatch(
       getVendorBalanceSummary(tx, input.vendorId, 'TRY'),
     ]);
     const profile = mapProfile(storedProfile, input.vendorId);
-    const eligibleEntries = entries.filter(isEntryEligibleForPayoutBatch);
+    const eligibleEntries = entries.filter((entry) => isEntryEligibleForPayoutBatch(entry));
+    const approvedSettlementRequiredEntries = entries.filter(
+      (entry) =>
+        !hasApprovedSettlementSnapshot(entry) &&
+        isEntryEligibleForPayoutBatch(entry, { requireApprovedSettlementSnapshot: false }),
+    );
     const adjustmentRequiredEntries = entries.filter(
       (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
     );
@@ -2296,6 +2308,9 @@ export async function preparePayoutBatch(
     if (eligibleEntries.length === 0) {
       if (adjustmentRequiredEntries.length > 0) {
         throw new Error(POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON);
+      }
+      if (approvedSettlementRequiredEntries.length > 0) {
+        throw new Error(APPROVED_SETTLEMENT_SNAPSHOT_REQUIRED_REASON);
       }
       throw new Error('No eligible payable ledger rows are available for payout batch preparation.');
     }
@@ -2746,11 +2761,23 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
+    const approvedSettlementSnapshotMissing =
+      !hasApprovedSettlementSnapshot(transitionEntry) &&
+      isEntryEligibleForPayoutBatch(transitionEntry, { requireApprovedSettlementSnapshot: false });
+    if (approvedSettlementSnapshotMissing) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'approved_settlement_snapshot_required',
+        reason: APPROVED_SETTLEMENT_SNAPSHOT_REQUIRED_REASON,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+      }));
+    }
+
     if (
       (type !== 'sale' && type !== 'refund') ||
       allocationIsCancelled(transitionEntry) ||
       (payoutStatus === 'hold' && transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
-      (!cancelRefundReviewActive && !isEntryEligibleForPayoutBatch(transitionEntry))
+      (!cancelRefundReviewActive && !approvedSettlementSnapshotMissing && !isEntryEligibleForPayoutBatch(transitionEntry))
     ) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_no_longer_eligible',
