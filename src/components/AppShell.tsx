@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken } from '../lib/auth';
@@ -10,6 +10,7 @@ import {
 } from '../lib/auth';
 import { requestAuthRestoreRetry, useAuthRestoreSnapshot } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
+import { clearCsrfToken } from '../lib/api-client';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeServices } from '../services/runtime-services';
@@ -182,6 +183,8 @@ function useShellContext() {
   const authRestore = useAuthRestoreSnapshot();
   const currentUser = appReadiness.currentUser;
   const { message, tone, showFeedback } = useActionFeedback();
+  const logoutRequestedRef = useRef(false);
+  const [logoutRequested, setLogoutRequested] = useState(false);
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const visibleVendors = currentUser
@@ -204,17 +207,21 @@ function useShellContext() {
   }, [appReadiness.currentVendor.vendorId]);
 
   function handleLogout() {
-    void (async () => {
-      try {
-        await runtimeServices.auth.logout();
-      } catch {
-        // Local sign-out must complete even when the backend logout request fails.
-      } finally {
-        clearToken();
-        showFeedback('Signed out successfully.', 'success');
-        navigate('/login', { replace: true });
-      }
-    })();
+    if (logoutRequestedRef.current) {
+      return;
+    }
+
+    logoutRequestedRef.current = true;
+    setLogoutRequested(true);
+    clearCsrfToken();
+    clearToken();
+    queryClient.clear();
+    showFeedback('Signed out successfully.', 'success');
+    navigate('/login', { replace: true });
+
+    void runtimeServices.auth.logout().catch(() => {
+      // Server logout is best-effort; local sign-out has already completed.
+    });
   }
 
   function handleSignInAgain() {
@@ -250,6 +257,7 @@ function useShellContext() {
     handleVendorChange,
     location,
     message,
+    logoutRequested,
     selectedVendorId,
     sessionRestoreNeedsAttention,
     showSessionRestoreBanner,
@@ -313,7 +321,7 @@ function ShellAccountCard({ context, roleLabel }: { context: ShellContext; roleL
         ) : null}
       </div>
       <AdminWorkspaceSwitcher context={context} />
-      <button type="button" className="vendor-logout-button" onClick={context.handleLogout}>
+      <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
         <ShellIcon name="logout" />
         Log out
       </button>

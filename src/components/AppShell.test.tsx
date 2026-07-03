@@ -1,9 +1,20 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminShell, VendorShell } from './AppShell';
 import { getCurrentUser, getToken, setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
+import { runtimeServices } from '../services/runtime-services';
+
+vi.mock('../services/runtime-services', () => ({
+  runtimeServices: {
+    auth: {
+      logout: vi.fn(() => Promise.resolve()),
+    },
+  },
+}));
+
+const logoutMock = vi.mocked(runtimeServices.auth.logout);
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -66,9 +77,14 @@ function renderShell(initialEntry: string) {
   );
 }
 
+beforeEach(() => {
+  logoutMock.mockResolvedValue(undefined);
+});
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  vi.clearAllMocks();
 });
 
 describe('AppShell workspace navigation', () => {
@@ -179,5 +195,79 @@ describe('AppShell workspace navigation', () => {
     expect(getCurrentUser()).toBeNull();
     expect(getToken()).toBeNull();
     expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs out vendor users immediately when backend logout never resolves', async () => {
+    const user = userEvent.setup();
+    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
+    seedSession(vendorUser);
+
+    renderShell('/orders');
+
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Log out/i }));
+
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
+    expect(getCurrentUser()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs out admin workspace users immediately when backend logout never resolves', async () => {
+    const user = userEvent.setup();
+    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
+    seedSession(adminUser);
+
+    renderShell('/admin/operations');
+
+    expect(screen.getByText('Admin operations content')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Log out/i }));
+
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
+    expect(getCurrentUser()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(screen.queryByText('Admin operations content')).not.toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs out admins viewing vendor workspace immediately', async () => {
+    const user = userEvent.setup();
+    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
+    seedSession(adminUser);
+
+    renderShell('/orders');
+
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
+    expect(screen.getByText('Admin view')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Log out/i }));
+
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
+    expect(getCurrentUser()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps local logout complete when backend logout rejects', async () => {
+    const user = userEvent.setup();
+    logoutMock.mockRejectedValueOnce(new Error('logout unavailable'));
+    seedSession(vendorUser);
+
+    renderShell('/finance');
+
+    expect(screen.getByText('Finance workspace content')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Log out/i }));
+
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
+    expect(getCurrentUser()).toBeNull();
+    expect(getToken()).toBeNull();
+    expect(screen.queryByText('Finance workspace content')).not.toBeInTheDocument();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
   });
 });

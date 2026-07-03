@@ -78,6 +78,7 @@ describe('vendor context', () => {
       scope: 'runtime-vendor-context',
       status: 'active',
       restrictionReason: null,
+      restrictionChangedByUserId: null,
       restrictionChangedByEmail: null,
       restrictionChangedAt: null,
     });
@@ -110,6 +111,7 @@ describe('vendor context', () => {
       scope: 'runtime-vendor-context',
       status: 'inactive',
       restrictionReason: 'Operational review',
+      restrictionChangedByUserId: null,
       restrictionChangedByEmail: 'admin@example.com',
       restrictionChangedAt: '2026-06-30T12:00:00Z',
     });
