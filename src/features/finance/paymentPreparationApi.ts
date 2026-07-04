@@ -31,6 +31,19 @@ export function markPayoutBatchReview(batchId: string) {
   return apiClient.post<PayoutBatch>(`/admin/payout-batches/${encodeURIComponent(batchId)}/mark-review`, {});
 }
 
+export function markPayoutBatchPaid(
+  batchId: string,
+  input: { paymentReference?: string | null; internalNote?: string | null } = {},
+) {
+  const paymentReference = input.paymentReference?.trim();
+  const internalNote = input.internalNote?.trim();
+  return apiClient.post<PayoutBatch>(`/admin/payout-batches/${encodeURIComponent(batchId)}/mark-paid`, {
+    paidAt: new Date().toISOString(),
+    ...(paymentReference ? { paymentReference } : {}),
+    ...(internalNote ? { internalNote } : {}),
+  });
+}
+
 export function cancelPayoutBatch(batchId: string) {
   return apiClient.post<PayoutBatch>(`/admin/payout-batches/${encodeURIComponent(batchId)}/cancel`, {});
 }

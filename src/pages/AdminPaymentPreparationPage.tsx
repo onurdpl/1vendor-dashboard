@@ -12,6 +12,7 @@ import {
   cancelPayoutBatch,
   getPaymentPreparationReadiness,
   listPayoutBatches,
+  markPayoutBatchPaid,
   markPayoutBatchReview,
   preparePayoutBatch,
   type FinanceDashboard,
@@ -25,9 +26,9 @@ import { formatCurrency, formatDateTime, parseSafeDate } from '../services/real/
 type WorkflowTab = 'all' | 'ready_to_prepare' | 'draft' | 'review' | 'approved' | 'paid' | 'cancelled';
 type StatusFilter = 'all' | 'ready_to_prepare' | PayoutBatchStatus;
 type QueueStatus = 'Ready' | 'Needs Review' | 'In Review' | 'Approved' | 'Paid' | 'Cancelled';
-type NextAction = 'Prepare Batch' | 'Mark for Review' | 'No action available';
+type NextAction = 'Prepare Batch' | 'Mark for Review' | 'Mark Paid' | 'No action available';
 type IssueLabel = 'Refund' | 'Debt' | 'Hold' | 'Ready';
-type PaymentAction = 'prepare' | 'mark_review' | 'cancel';
+type PaymentAction = 'prepare' | 'mark_review' | 'mark_paid' | 'cancel';
 
 type PaymentQueueItem =
   | {
@@ -62,7 +63,8 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: 'review', label: 'In Review' },
   { value: 'approved', label: 'Approved' },
   { value: 'execution_pending', label: 'In Review' },
-  { value: 'paid_placeholder', label: 'Paid' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'paid_placeholder', label: 'Payment evidence pending' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -211,8 +213,11 @@ function getQueueStatus(item: PaymentQueueItem): QueueStatus {
   if (item.batch.status === 'execution_pending') {
     return 'In Review';
   }
-  if (item.batch.status === 'paid_placeholder') {
+  if (item.batch.status === 'paid') {
     return 'Paid';
+  }
+  if (item.batch.status === 'paid_placeholder') {
+    return 'In Review';
   }
   if (item.batch.status === 'cancelled') {
     return 'Cancelled';
@@ -287,6 +292,9 @@ function getNextAction(item: PaymentQueueItem): NextAction {
   if (item.batch.status === 'draft') {
     return 'Mark for Review';
   }
+  if (item.batch.status === 'review') {
+    return 'Mark Paid';
+  }
   return 'No action available';
 }
 
@@ -296,6 +304,9 @@ function getSupportedPaymentActions(item: PaymentQueueItem): PaymentAction[] {
   }
   if (item.batch.status === 'draft') {
     return ['mark_review', 'cancel'];
+  }
+  if (item.batch.status === 'review') {
+    return ['mark_paid'];
   }
   return [];
 }
@@ -311,7 +322,7 @@ function matchesWorkflow(item: PaymentQueueItem, workflow: WorkflowTab) {
     return false;
   }
   if (workflow === 'paid') {
-    return item.batch.status === 'paid_placeholder';
+    return item.batch.status === 'paid';
   }
   if (workflow === 'approved') {
     return item.batch.status === 'approved' || item.batch.status === 'execution_pending';
@@ -372,14 +383,22 @@ function buildQueueItems(vendorId: string, dashboard: FinanceDashboard | null, b
 
 function PaymentActionConfirmationModal({
   action,
+  paymentReference,
+  internalNote,
   submitting,
   onCancel,
   onConfirm,
+  onPaymentReferenceChange,
+  onInternalNoteChange,
 }: {
   action: PaymentAction;
+  paymentReference: string;
+  internalNote: string;
   submitting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  onPaymentReferenceChange: (value: string) => void;
+  onInternalNoteChange: (value: string) => void;
 }) {
   const actionConfig: Record<PaymentAction, { title: string; body: string; confirmLabel: string; pendingLabel: string }> = {
     prepare: {
@@ -393,6 +412,12 @@ function PaymentActionConfirmationModal({
       body: 'This payment batch will move into Finance review.',
       confirmLabel: 'Mark for Review',
       pendingLabel: 'Moving...',
+    },
+    mark_paid: {
+      title: 'Mark payment paid?',
+      body: 'Confirm that accounting has completed the EFT outside the application.',
+      confirmLabel: 'Mark Paid',
+      pendingLabel: 'Marking paid...',
     },
     cancel: {
       title: 'Cancel payment batch?',
@@ -409,6 +434,25 @@ function PaymentActionConfirmationModal({
         <p className="eyebrow">Payment preparation</p>
         <h3 id="payment-action-confirmation-title">{config.title}</h3>
         <p className="page-description">{config.body}</p>
+        {action === 'mark_paid' ? (
+          <div className="op-form-grid">
+            <label>
+              <span>Payment reference optional</span>
+              <input
+                value={paymentReference}
+                onChange={(event) => onPaymentReferenceChange(event.currentTarget.value)}
+              />
+            </label>
+            <label>
+              <span>Internal note optional</span>
+              <textarea
+                value={internalNote}
+                onChange={(event) => onInternalNoteChange(event.currentTarget.value)}
+                rows={3}
+              />
+            </label>
+          </div>
+        ) : null}
         <div className="scheduled-settlements-modal-actions">
           <button type="button" className="button button-secondary" onClick={onCancel} disabled={submitting}>
             Cancel
@@ -437,6 +481,8 @@ export function AdminPaymentPreparationPage() {
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [paymentReference, setPaymentReference] = useState('');
+  const [internalNote, setInternalNote] = useState('');
 
   const batchesQuery = useQueryResource(
     ['admin', 'finance', 'payment-preparation', 'batches', vendorFilter],
@@ -517,6 +563,8 @@ export function AdminPaymentPreparationPage() {
   function openAction(action: PaymentAction) {
     setActionError(null);
     setActionSuccess(null);
+    setPaymentReference('');
+    setInternalNote('');
     setPendingAction(action);
   }
 
@@ -534,6 +582,12 @@ export function AdminPaymentPreparationPage() {
       } else if (pendingAction === 'mark_review' && selectedItem.source === 'batch') {
         await markPayoutBatchReview(selectedItem.batch.id);
         setActionSuccess('Payment batch moved to review.');
+      } else if (pendingAction === 'mark_paid' && selectedItem.source === 'batch') {
+        await markPayoutBatchPaid(selectedItem.batch.id, {
+          paymentReference: paymentReference.trim() || undefined,
+          internalNote: internalNote.trim() || undefined,
+        });
+        setActionSuccess('Payment marked paid.');
       } else if (pendingAction === 'cancel' && selectedItem.source === 'batch') {
         await cancelPayoutBatch(selectedItem.batch.id);
         setActionSuccess('Payment batch cancelled.');
@@ -717,6 +771,16 @@ export function AdminPaymentPreparationPage() {
                             Mark for Review
                           </button>
                         ) : null}
+                        {supportedActions.includes('mark_paid') ? (
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            onClick={() => openAction('mark_paid')}
+                            disabled={actionSubmitting}
+                          >
+                            Mark Paid
+                          </button>
+                        ) : null}
                         {supportedActions.includes('cancel') ? (
                           <button
                             type="button"
@@ -790,13 +854,19 @@ export function AdminPaymentPreparationPage() {
                       {selectedItem.source === 'batch' ? (
                         <>
                           <li><strong>Payment draft created</strong><span>{formatDate(selectedItem.batch.createdAt)}</span></li>
-                          {['review', 'approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? (
+                          {['review', 'approved', 'execution_pending', 'paid', 'paid_placeholder'].includes(selectedItem.batch.status) ? (
                             <li><strong>Review started</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li>
                           ) : null}
-                          {['approved', 'execution_pending', 'paid_placeholder'].includes(selectedItem.batch.status) ? (
+                          {['approved', 'execution_pending', 'paid'].includes(selectedItem.batch.status) ? (
                             <li><strong>Approved</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li>
                           ) : null}
-                          {selectedItem.batch.status === 'paid_placeholder' ? <li><strong>Marked paid</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li> : null}
+                          {selectedItem.batch.status === 'paid' && selectedItem.batch.paidAt ? (
+                            <li>
+                              <strong>Paid</strong>
+                              <span>{formatDate(selectedItem.batch.paidAt)}</span>
+                              {selectedItem.batch.paymentReference ? <small>Payment reference {selectedItem.batch.paymentReference}</small> : null}
+                            </li>
+                          ) : null}
                           {selectedItem.batch.status === 'cancelled' ? <li><strong>Cancelled</strong><span>{formatDate(selectedItem.batch.updatedAt)}</span></li> : null}
                         </>
                       ) : (
@@ -815,9 +885,13 @@ export function AdminPaymentPreparationPage() {
       {pendingAction ? (
         <PaymentActionConfirmationModal
           action={pendingAction}
+          paymentReference={paymentReference}
+          internalNote={internalNote}
           submitting={actionSubmitting}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => void handleConfirmAction()}
+          onPaymentReferenceChange={setPaymentReference}
+          onInternalNoteChange={setInternalNote}
         />
       ) : null}
     </section>
