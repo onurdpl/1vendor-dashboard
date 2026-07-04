@@ -31,6 +31,7 @@ type ShellIconName =
   | 'analytics'
   | 'providers'
   | 'diagnostics'
+  | 'vendors'
   | 'logout';
 
 const vendorNavItems = [
@@ -50,6 +51,7 @@ const adminNavItems = [
   { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'schedule' },
   { to: '/admin/support', label: 'Support Tickets', icon: 'support' },
   { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'analytics' },
+  { to: '/admin/vendors/new', label: 'Create Vendor', icon: 'vendors' },
   { to: '/admin/providers', label: 'Providers', icon: 'providers' },
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'diagnostics' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName }>;

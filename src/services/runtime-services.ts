@@ -48,6 +48,8 @@ import type {
   ShipmentCustomerOverrides,
   ShippingProvider,
   VendorBillingProfileInput,
+  VendorProvisioningInput,
+  VendorProvisioningResult,
   VendorStatusInput,
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
@@ -387,6 +389,18 @@ export const runtimeServices = {
             changedByUserId: null,
             changedByEmail: getCurrentUser()?.email ?? null,
             changedAt: new Date().toISOString(),
+          }),
+    provision: (input: VendorProvisioningInput): Promise<VendorProvisioningResult> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.provisionVendor(input)
+        : Promise.resolve({
+            vendorId: input.vendorId,
+            vendorName: input.vendorName,
+            adminUserId: `mock-admin-${input.vendorId}`,
+            adminEmail: input.adminEmail,
+            temporaryPassword: `mock-${input.vendorId}-temporary-password`,
+            vendorStatus: 'inactive',
+            restrictionReason: input.restrictionReason,
           }),
     probeLogoIsbasiLogin: () =>
       runtimeConfig.apiMode === 'real'

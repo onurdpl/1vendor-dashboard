@@ -2002,6 +2002,24 @@ export type VendorStatusInput = {
   reason?: string;
 };
 
+export type VendorProvisioningInput = {
+  vendorId: string;
+  vendorName: string;
+  adminName: string;
+  adminEmail: string;
+  restrictionReason: string;
+};
+
+export type VendorProvisioningResult = {
+  vendorId: string;
+  vendorName: string;
+  adminUserId: string;
+  adminEmail: string;
+  temporaryPassword: string;
+  vendorStatus: string;
+  restrictionReason: string;
+};
+
 export type VendorProfileSnapshotImpact =
   | 'FUTURE_LEDGER_ROWS_ONLY'
   | 'FUTURE_SETTLEMENT_APPROVALS_ONLY'

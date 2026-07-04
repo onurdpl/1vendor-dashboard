@@ -14,6 +14,8 @@ import type {
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorProvisioningInput,
+  VendorProvisioningResult,
   VendorProfileAuditLog,
   VendorStatus,
   VendorStatusInput,
@@ -48,6 +50,14 @@ export function updateVendorStatus(vendorId: string, input: VendorStatusInput) {
   return apiClient.put<VendorStatus>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/status`,
     input,
+  );
+}
+
+export function provisionVendor(input: VendorProvisioningInput) {
+  return apiClient.post<VendorProvisioningResult>(
+    '/admin/vendors/provision',
+    input,
+    { skipVendorContext: true },
   );
 }
 

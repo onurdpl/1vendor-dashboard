@@ -2169,6 +2169,21 @@ h3 {
   background: white;
 }
 
+.field textarea {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: white;
+  resize: vertical;
+}
+
+.field-help {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 500;
+}
+
 .button {
   border: 0;
   border-radius: 14px;
@@ -2217,6 +2232,128 @@ h3 {
 .button-secondary:hover {
   border-color: rgba(40, 72, 255, 0.24);
   background: rgba(255, 255, 255, 0.96);
+}
+
+.admin-vendor-provisioning-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-vendor-provisioning-card,
+.admin-vendor-provisioning-side > div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-vendor-provisioning-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.admin-vendor-provisioning-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.admin-vendor-provisioning-heading h2,
+.admin-vendor-provisioning-success h2,
+.admin-vendor-provisioning-guide h2 {
+  margin: 0;
+}
+
+.admin-vendor-provisioning-heading p,
+.admin-vendor-provisioning-guide p,
+.admin-vendor-provisioning-note p,
+.admin-vendor-password-warning {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.admin-vendor-provisioning-note {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.admin-vendor-provisioning-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 69, 65, 0.28);
+  color: var(--danger);
+  background: rgba(214, 69, 65, 0.08);
+  font-weight: 700;
+}
+
+.admin-vendor-provisioning-success,
+.admin-vendor-provisioning-guide {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.admin-vendor-provisioning-success dl,
+.admin-vendor-provisioning-guide dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-vendor-provisioning-success dl > div,
+.admin-vendor-provisioning-guide dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-vendor-provisioning-success dt,
+.admin-vendor-provisioning-guide dt {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-vendor-provisioning-success dd,
+.admin-vendor-provisioning-guide dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.admin-vendor-temporary-password {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(87, 99, 255, 0.24);
+  background: rgba(87, 99, 255, 0.08);
+}
+
+.admin-vendor-temporary-password span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-vendor-temporary-password strong {
+  overflow-wrap: anywhere;
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+}
+
+@media (max-width: 980px) {
+  .admin-vendor-provisioning-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .button-link {
