@@ -7,11 +7,13 @@ const prismaMock = vi.hoisted(() => ({
   },
   financeLedgerEntry: {
     findMany: vi.fn(),
+    updateMany: vi.fn(),
   },
   payoutBatch: {
     create: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   vendorBalanceEvent: {
     findMany: vi.fn(),
@@ -19,6 +21,9 @@ const prismaMock = vi.hoisted(() => ({
   },
   financeIntegrityAlert: {
     findMany: vi.fn(),
+  },
+  financeEvent: {
+    createMany: vi.fn(),
   },
 }));
 
@@ -28,6 +33,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const {
   PayoutBatchTransitionRevalidationError,
+  markPayoutBatchPaid,
   markPayoutBatchReview,
   preparePayoutBatch,
 } = await import('../backend/src/modules/finance/finance.service.js');
@@ -171,11 +177,11 @@ function buildTransitionLine(input: {
   };
 }
 
-function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[]) {
+function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[], status = 'DRAFT') {
   return {
     id: 'batch-review',
     vendorId: 'demo-vendor-a',
-    status: 'DRAFT',
+    status,
     grossAmount: 1000,
     commissionAmount: 100,
     commissionVatAmount: 0,
@@ -184,6 +190,10 @@ function buildTransitionBatch(lines: ReturnType<typeof buildTransitionLine>[]) {
     netAmount: lines.reduce((sum, line) => sum + Number(line.amountSnapshot ?? 0), 0),
     currency: 'TRY',
     createdByUserId: 'admin-user',
+    paidAt: null,
+    paidByUserId: null,
+    paymentReference: null,
+    internalNote: null,
     createdAt: new Date('2026-05-13T11:00:00Z'),
     updatedAt: new Date('2026-05-13T11:00:00Z'),
     lines,
@@ -199,20 +209,39 @@ function mockTransitionBatch(batch: ReturnType<typeof buildTransitionBatch>) {
   });
 }
 
+function mockMarkPaidBatch(
+  batch: ReturnType<typeof buildTransitionBatch>,
+  paidBatch: ReturnType<typeof buildTransitionBatch>,
+) {
+  prismaMock.payoutBatch.findUnique
+    .mockResolvedValueOnce(batch)
+    .mockResolvedValueOnce(batch)
+    .mockResolvedValueOnce(paidBatch);
+  prismaMock.payoutBatch.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.financeLedgerEntry.updateMany.mockResolvedValue({ count: batch.lines.length });
+  prismaMock.financeEvent.createMany.mockResolvedValue({ count: batch.lines.length });
+}
+
 describe('payout batch preparation', () => {
   beforeEach(() => {
     prismaMock.$transaction.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
+    prismaMock.financeLedgerEntry.updateMany.mockReset();
     prismaMock.payoutBatch.create.mockReset();
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
+    prismaMock.payoutBatch.updateMany.mockReset();
     prismaMock.vendorBalanceEvent.findMany.mockReset();
     prismaMock.vendorBalanceEvent.upsert.mockReset();
     prismaMock.financeIntegrityAlert.findMany.mockReset();
+    prismaMock.financeEvent.createMany.mockReset();
 
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    prismaMock.financeLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.payoutBatch.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.financeEvent.createMany.mockResolvedValue({ count: 0 });
     prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([]);
     prismaMock.vendorBalanceEvent.upsert.mockImplementation(async ({ create }) => ({
       id: 'vendor-balance-event-offset',
@@ -1237,5 +1266,166 @@ describe('payout batch preparation', () => {
       status: 'review',
       lineCount: 1,
     });
+  });
+
+  it('marks a review payout batch paid with manual EFT evidence', async () => {
+    const paidAt = '2026-06-02T08:30:00.000Z';
+    const sale = buildEntry({
+      id: 'sale-mark-paid',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
+    const refund = buildEntry({
+      id: 'refund-mark-paid',
+      entryType: 'refund',
+      amount: 100,
+      batched: true,
+      activeSettlementApproval: true,
+      refundRecords: [{
+        id: 'refund-mark-paid-record',
+        sourceShopifyRefundId: 'refund-mark-paid-record',
+        amount: 100,
+        createdAt: new Date('2026-05-12T11:00:00Z'),
+      }],
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+      buildTransitionLine({ entry: refund, amountSnapshot: -90 }),
+    ], 'REVIEW');
+    const paidBatch = {
+      ...batch,
+      status: 'PAID',
+      paidAt: new Date(paidAt),
+      paidByUserId: 'admin-user',
+      paymentReference: 'EFT-123',
+      internalNote: 'Paid from bank portal',
+      updatedAt: new Date('2026-06-02T08:31:00.000Z'),
+    };
+    mockMarkPaidBatch(batch, paidBatch);
+
+    const paid = await markPayoutBatchPaid(
+      'batch-review',
+      {
+        paidAt,
+        paymentReference: ' EFT-123 ',
+        internalNote: ' Paid from bank portal ',
+      },
+      'admin-user',
+    );
+
+    expect(prismaMock.payoutBatch.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'batch-review',
+        status: 'REVIEW',
+      },
+      data: {
+        status: 'PAID',
+        paidAt: new Date(paidAt),
+        paidByUserId: 'admin-user',
+        paymentReference: 'EFT-123',
+        internalNote: 'Paid from bank portal',
+      },
+    });
+    expect(prismaMock.financeLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ['sale-mark-paid', 'refund-mark-paid'],
+        },
+      },
+      data: {
+        payoutStatus: 'PAID',
+        settlementStatus: 'SETTLED',
+        settledAt: new Date(paidAt),
+      },
+    });
+    expect(prismaMock.financeEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          vendorId: 'demo-vendor-a',
+          financeLedgerEntryId: 'sale-mark-paid',
+          eventType: 'PAYOUT_PAID',
+          amountMinor: 90000,
+          currency: 'TRY',
+          referenceType: 'payout_batch',
+          referenceId: 'batch-review',
+          createdBy: 'admin-user',
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:sale-mark-paid',
+          metadataJson: expect.objectContaining({
+            paymentSource: 'manual_eft',
+            payoutBatchId: 'batch-review',
+            paidAt,
+            paidByUserId: 'admin-user',
+            paymentReference: 'EFT-123',
+            internalNote: 'Paid from bank portal',
+          }),
+        }),
+        expect.objectContaining({
+          financeLedgerEntryId: 'refund-mark-paid',
+          eventType: 'PAYOUT_PAID',
+          amountMinor: -9000,
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:refund-mark-paid',
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(paid).toMatchObject({
+      id: 'batch-review',
+      status: 'paid',
+      paidAt,
+      paidByUserId: 'admin-user',
+      paymentReference: 'EFT-123',
+      internalNote: 'Paid from bank portal',
+      lineCount: 2,
+    });
+  });
+
+  it('rejects a payout batch that is already paid', async () => {
+    const batch = buildTransitionBatch([
+      buildTransitionLine({
+        entry: buildEntry({ id: 'sale-already-paid-batch', entryType: 'sale', amount: 1000, batched: true, activeSettlementApproval: true }),
+        amountSnapshot: 900,
+      }),
+    ], 'PAID');
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(batch);
+
+    await expect(markPayoutBatchPaid('batch-review', { paidAt: '2026-06-02T08:30:00.000Z' }, 'admin-user'))
+      .rejects.toThrow('Payout batch is already paid.');
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cancelled payout batch', async () => {
+    const batch = buildTransitionBatch([
+      buildTransitionLine({
+        entry: buildEntry({ id: 'sale-cancelled-batch', entryType: 'sale', amount: 1000, batched: true, activeSettlementApproval: true }),
+        amountSnapshot: 900,
+      }),
+    ], 'CANCELLED');
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(batch);
+
+    await expect(markPayoutBatchPaid('batch-review', { paidAt: '2026-06-02T08:30:00.000Z' }, 'admin-user'))
+      .rejects.toThrow('Cancelled payout batches cannot be marked paid.');
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payout batch outside review state', async () => {
+    const batch = buildTransitionBatch([
+      buildTransitionLine({
+        entry: buildEntry({ id: 'sale-draft-batch', entryType: 'sale', amount: 1000, batched: true, activeSettlementApproval: true }),
+        amountSnapshot: 900,
+      }),
+    ], 'DRAFT');
+    prismaMock.payoutBatch.findUnique.mockResolvedValueOnce(batch);
+
+    await expect(markPayoutBatchPaid('batch-review', { paidAt: '2026-06-02T08:30:00.000Z' }, 'admin-user'))
+      .rejects.toThrow('Only review payout batches can be marked paid.');
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeEvent.createMany).not.toHaveBeenCalled();
   });
 });

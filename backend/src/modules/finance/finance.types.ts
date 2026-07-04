@@ -24,6 +24,7 @@ export type PayoutBatchStatusDto =
   | 'approved'
   | 'cancelled'
   | 'execution_pending'
+  | 'paid'
   | 'paid_placeholder';
 
 export type PayoutBatchSummaryDto = {
@@ -328,6 +329,10 @@ export type PayoutBatchDto = {
   remainingDebtAmount: string;
   currency: string;
   createdByUserId: string | null;
+  paidAt: string | null;
+  paidByUserId: string | null;
+  paymentReference: string | null;
+  internalNote: string | null;
   createdAt: string;
   updatedAt: string;
   lineCount: number;
@@ -337,4 +342,10 @@ export type PayoutBatchDto = {
 
 export type PreparePayoutBatchDto = {
   vendorId: string;
+};
+
+export type MarkPayoutBatchPaidDto = {
+  paidAt: string;
+  paymentReference?: string | null;
+  internalNote?: string | null;
 };

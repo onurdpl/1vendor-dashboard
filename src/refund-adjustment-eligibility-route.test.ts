@@ -62,6 +62,7 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinancialProfile: vi.fn(),
   getVendorReturnFinanceRecords: vi.fn(),
   listPayoutBatches: vi.fn(),
+  markPayoutBatchPaid: vi.fn(),
   markPayoutBatchReview: vi.fn(),
   PayoutBatchTransitionRevalidationError: class PayoutBatchTransitionRevalidationError extends Error {},
   preparePayoutBatch: vi.fn(),

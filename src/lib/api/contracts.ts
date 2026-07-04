@@ -1636,6 +1636,7 @@ export type PayoutBatchStatus =
   | 'approved'
   | 'cancelled'
   | 'execution_pending'
+  | 'paid'
   | 'paid_placeholder';
 
 export type PayoutBatch = {
@@ -1654,6 +1655,10 @@ export type PayoutBatch = {
   remainingDebtAmount?: string;
   currency: string;
   createdByUserId: string | null;
+  paidAt?: string | null;
+  paidByUserId?: string | null;
+  paymentReference?: string | null;
+  internalNote?: string | null;
   createdAt: string;
   updatedAt: string;
   lineCount: number;

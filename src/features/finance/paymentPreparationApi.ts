@@ -36,5 +36,5 @@ export function cancelPayoutBatch(batchId: string) {
 }
 
 export function isPaymentBatchStatus(value: string): value is PayoutBatchStatus {
-  return ['draft', 'review', 'approved', 'cancelled', 'execution_pending', 'paid_placeholder'].includes(value);
+  return ['draft', 'review', 'approved', 'cancelled', 'execution_pending', 'paid', 'paid_placeholder'].includes(value);
 }

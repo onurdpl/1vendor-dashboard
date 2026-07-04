@@ -44,7 +44,7 @@ import {
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
-const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
 
 async function createSettlementRefundAdjustmentEvent(
   tx: Prisma.TransactionClient,

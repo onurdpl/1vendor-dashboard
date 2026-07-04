@@ -68,6 +68,7 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = [
   PayoutBatchStatus.REVIEW,
   PayoutBatchStatus.APPROVED,
   PayoutBatchStatus.EXECUTION_PENDING,
+  PayoutBatchStatus.PAID,
   PayoutBatchStatus.PAID_PLACEHOLDER,
 ];
 const PAYOUT_REVIEW_STATUSES = [PayoutBatchStatus.DRAFT, PayoutBatchStatus.REVIEW];

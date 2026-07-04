@@ -45,6 +45,7 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinancialProfile: getVendorFinancialProfileMock,
   getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
+  markPayoutBatchPaid: vi.fn(),
   markPayoutBatchReview: vi.fn(),
   PayoutBatchTransitionRevalidationError: class PayoutBatchTransitionRevalidationError extends Error {
     blockers: unknown[];

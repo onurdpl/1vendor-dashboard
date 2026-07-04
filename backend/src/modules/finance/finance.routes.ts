@@ -12,6 +12,7 @@ import {
   getVendorFinancialProfile,
   getVendorReturnFinanceRecords,
   listPayoutBatches,
+  markPayoutBatchPaid,
   markPayoutBatchReview,
   PayoutBatchTransitionRevalidationError,
   preparePayoutBatch,
@@ -82,7 +83,12 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
-import type { PreparePayoutBatchDto, ShippingCostInputDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
+import type {
+  MarkPayoutBatchPaidDto,
+  PreparePayoutBatchDto,
+  ShippingCostInputDto,
+  VendorFinancialProfileUpdateDto,
+} from './finance.types.js';
 
 const SUPPORTED_VENDOR_FINANCIAL_SHIPPING_MODES = new Set(['disabled', 'fixed', 'external_provider']);
 const SUPPORTED_REFUND_ADJUSTMENT_RECOMMENDED_ACTIONS = new Set<RefundAdjustmentRecommendedAction>([
@@ -783,6 +789,37 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
           });
         }
         throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/:id/mark-paid',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      const input: MarkPayoutBatchPaidDto = {
+        paidAt: readOptionalBodyString(request.body, 'paidAt') ?? '',
+        paymentReference: readOptionalBodyString(request.body, 'paymentReference'),
+        internalNote: readOptionalBodyString(request.body, 'internalNote'),
+      };
+      try {
+        return await markPayoutBatchPaid(id, input, request.authUser.id);
+      } catch (error) {
+        if (error instanceof PayoutBatchTransitionRevalidationError) {
+          return reply.code(409).send({
+            message: error.message,
+            blockers: error.blockers,
+          });
+        }
+        const message = error instanceof Error ? error.message : 'Payout batch could not be marked paid.';
+        return reply.code(400).send({ message });
       }
     },
   );

@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import type { Prisma } from '@prisma/client';
+import { FinanceEventType, type Prisma } from '@prisma/client';
 import {
   auditVendorProfileChanges,
   type VendorProfileAuditActor,
@@ -14,6 +14,7 @@ import type {
   FinanceDashboardDto,
   FinanceDashboardSummaryDto,
   FinanceRecordDto,
+  MarkPayoutBatchPaidDto,
   ReturnFinanceRecordsResponseDto,
   PayoutBatchDto,
   PayoutBatchReferenceDto,
@@ -26,6 +27,7 @@ import type {
   ShippingCostDto,
   ShippingCostInputDto,
 } from './finance.types.js';
+import { createEventsIdempotently, type CreateFinanceEventInput } from './finance-event.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { hasApprovedOpenReturnHold } from './settlement-return-hold.service.js';
 import {
@@ -59,7 +61,7 @@ import {
   hasBlockingCancelRefundReviewStatus,
 } from './cancel-refund-review-hold.service.js';
 
-const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
   'Payout batch requires revision because financial facts changed after batch creation.';
 const REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON = 'Refund offset required before payout.';
@@ -1067,6 +1069,10 @@ function mapPayoutBatch(batch: {
   netAmount: unknown;
   currency: string;
   createdByUserId: string | null;
+  paidAt?: Date | null;
+  paidByUserId?: string | null;
+  paymentReference?: string | null;
+  internalNote?: string | null;
   createdAt: Date;
   updatedAt: Date;
   vendorBalanceEvents?: Array<{
@@ -1119,6 +1125,10 @@ function mapPayoutBatch(batch: {
     remainingDebtAmount: toAmountString(remainingDebtMinor / 100),
     currency: batch.currency,
     createdByUserId: batch.createdByUserId,
+    paidAt: toIso(batch.paidAt),
+    paidByUserId: batch.paidByUserId ?? null,
+    paymentReference: batch.paymentReference ?? null,
+    internalNote: batch.internalNote ?? null,
     createdAt: batch.createdAt.toISOString(),
     updatedAt: batch.updatedAt.toISOString(),
     lineCount,
@@ -2833,6 +2843,73 @@ export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto
   return mapPayoutBatch(batch);
 }
 
+function normalizeOptionalPaymentEvidenceString(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function parseMarkPayoutBatchPaidInput(input: MarkPayoutBatchPaidDto) {
+  if (!input.paidAt) {
+    throw new Error('paidAt is required.');
+  }
+
+  const paidAt = new Date(input.paidAt);
+  if (!Number.isFinite(paidAt.getTime())) {
+    throw new Error('paidAt must be a valid date.');
+  }
+
+  return {
+    paidAt,
+    paymentReference: normalizeOptionalPaymentEvidenceString(input.paymentReference),
+    internalNote: normalizeOptionalPaymentEvidenceString(input.internalNote),
+  };
+}
+
+function buildPayoutPaidEvents(input: {
+  batch: {
+    id: string;
+    vendorId: string;
+    netAmount: unknown;
+    currency: string;
+    lines: Array<{
+      id: string;
+      financeLedgerEntryId: string;
+      amountSnapshot: unknown;
+    }>;
+  };
+  paidAt: Date;
+  paidByUserId: string;
+  paymentReference: string | null;
+  internalNote: string | null;
+}): CreateFinanceEventInput[] {
+  return input.batch.lines.map((line) => {
+    const metadata: Prisma.InputJsonObject = {
+      paymentSource: 'manual_eft',
+      payoutBatchId: input.batch.id,
+      payoutBatchLineId: line.id,
+      paidAt: input.paidAt.toISOString(),
+      paidByUserId: input.paidByUserId,
+      batchNetAmount: toAmountString(toNumber(input.batch.netAmount)),
+      lineAmountSnapshot: toAmountString(toNumber(line.amountSnapshot)),
+      ...(input.paymentReference ? { paymentReference: input.paymentReference } : {}),
+      ...(input.internalNote ? { internalNote: input.internalNote } : {}),
+    };
+
+    return {
+      vendorId: input.batch.vendorId,
+      financeLedgerEntryId: line.financeLedgerEntryId,
+      eventType: FinanceEventType.PAYOUT_PAID,
+      amountMinor: toMinorUnits(line.amountSnapshot),
+      currency: input.batch.currency,
+      referenceType: 'payout_batch',
+      referenceId: input.batch.id,
+      metadataJson: metadata,
+      createdBy: input.paidByUserId,
+      idempotencyKey: `payout-batch:${input.batch.id}:mark-paid:${line.financeLedgerEntryId}`,
+    };
+  });
+}
+
 export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatchDto> {
   return prisma.$transaction(async (tx) => {
     await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
@@ -2854,6 +2931,112 @@ export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatc
     });
 
     return mapPayoutBatch(batch);
+  });
+}
+
+export async function markPayoutBatchPaid(
+  batchId: string,
+  input: MarkPayoutBatchPaidDto,
+  paidByUserId: string,
+): Promise<PayoutBatchDto> {
+  const paymentEvidence = parseMarkPayoutBatchPaidInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const batch = await tx.payoutBatch.findUnique({
+      where: {
+        id: batchId,
+      },
+      include: {
+        lines: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!batch) {
+      throw new Error('Payout batch not found.');
+    }
+    if (batch.status === 'PAID') {
+      throw new Error('Payout batch is already paid.');
+    }
+    if (batch.status === 'CANCELLED') {
+      throw new Error('Cancelled payout batches cannot be marked paid.');
+    }
+    if (batch.status !== 'REVIEW') {
+      throw new Error('Only review payout batches can be marked paid.');
+    }
+    if (batch.lines.length === 0) {
+      throw new Error('Payout batch has no lines to mark paid.');
+    }
+
+    await validatePayoutBatchBeforeTransitionWithClient(tx, batchId);
+
+    const batchUpdate = await tx.payoutBatch.updateMany({
+      where: {
+        id: batchId,
+        status: 'REVIEW',
+      },
+      data: {
+        status: 'PAID',
+        paidAt: paymentEvidence.paidAt,
+        paidByUserId,
+        paymentReference: paymentEvidence.paymentReference,
+        internalNote: paymentEvidence.internalNote,
+      },
+    });
+    if (batchUpdate.count !== 1) {
+      throw new Error('Payout batch could not be marked paid because its status changed.');
+    }
+
+    const ledgerEntryIds = batch.lines.map((line) => line.financeLedgerEntryId);
+    const ledgerUpdate = await tx.financeLedgerEntry.updateMany({
+      where: {
+        id: {
+          in: ledgerEntryIds,
+        },
+      },
+      data: {
+        payoutStatus: 'PAID',
+        settlementStatus: 'SETTLED',
+        settledAt: paymentEvidence.paidAt,
+      },
+    });
+    if (ledgerUpdate.count !== ledgerEntryIds.length) {
+      throw new Error('Every payout batch ledger row must be updated before marking paid.');
+    }
+
+    await createEventsIdempotently(
+      buildPayoutPaidEvents({
+        batch,
+        paidAt: paymentEvidence.paidAt,
+        paidByUserId,
+        paymentReference: paymentEvidence.paymentReference,
+        internalNote: paymentEvidence.internalNote,
+      }),
+      tx,
+    );
+
+    const paidBatch = await tx.payoutBatch.findUnique({
+      where: {
+        id: batchId,
+      },
+      include: {
+        vendorBalanceEvents: true,
+        lines: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!paidBatch) {
+      throw new Error('Payout batch not found.');
+    }
+
+    return mapPayoutBatch(paidBatch);
   });
 }
 

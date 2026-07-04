@@ -159,6 +159,7 @@ enum PayoutBatchStatus {
   APPROVED
   CANCELLED
   EXECUTION_PENDING
+  PAID
   PAID_PLACEHOLDER
 }
 
@@ -180,6 +181,7 @@ enum FinanceEventType {
   COMMISSION_VAT_REVERSED
   VENDOR_PAYABLE_REVERSED
   MANUAL_ADJUSTMENT
+  PAYOUT_PAID
 }
 
 enum ShippingCostSourceType {
@@ -1440,6 +1442,10 @@ model PayoutBatch {
   netAmount               Decimal              @default(0.00) @db.Decimal(10, 2)
   currency                String               @default("TRY")
   createdByUserId         String?
+  paidAt                  DateTime?
+  paidByUserId            String?
+  paymentReference        String?
+  internalNote            String?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   vendor                  Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
