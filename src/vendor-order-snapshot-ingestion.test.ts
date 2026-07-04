@@ -393,6 +393,29 @@ describe('vendor order snapshot ingestion', () => {
     );
   });
 
+  it('accepts a newly provisioned vendor id from Shopify seller_info when the vendor exists', async () => {
+    prismaMock.vendor.findMany.mockResolvedValueOnce([{ id: 'newvendor' }]);
+    prismaMock.vendorAllocation.upsert.mockResolvedValueOnce({ id: 'alloc-newvendor-2005' });
+
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-new-provisioned-vendor' } as never,
+      sellerInfo: {
+        'SKU-1': 'newvendor',
+      },
+      payload: buildSimpleOrderPayload(2005),
+    });
+
+    expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          originalVendorId: 'newvendor',
+          assignedVendorId: 'newvendor',
+        }),
+      }),
+    );
+    expect(upsertSaleLedgerForAllocationMock).toHaveBeenCalledWith(prismaMock, 'alloc-newvendor-2005');
+  });
+
   it('updates persisted order contact and shipping address fields from orders/updated payload', async () => {
     prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce({
       id: 'shopify-order-db-1080',
