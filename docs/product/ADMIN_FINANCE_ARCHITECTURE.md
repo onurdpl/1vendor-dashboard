@@ -62,27 +62,45 @@ Already implemented:
 - Payment batch preparation
 - Payment review transition
 - Payment batch cancellation
+- Approved Settlement Guard before payout batching and mark-review
 
 Not yet implemented:
 
-- Approved-settlement guard before payout batching
 - Final payment approve lifecycle
 - Payment execution lifecycle
 - Mark-paid lifecycle
+- Payment confirmation evidence
+- Paid timeline backed by payment confirmation evidence
+- Vendor paid visibility backed by payment confirmation evidence
 - Detailed payment blocker aggregation
 - Audit/idempotency/rollback policy for final payment actions
 
-### Approved Settlement Guard Rollout
+### Approved Settlement Guard Status and Rollout History
 
 Target rule:
 
 Every payout batch candidate must eventually be backed by an `APPROVED` settlement snapshot.
 
-Current rollout decision:
+Current implementation status:
 
-Do not hard-enable this guard immediately.
+- Implemented.
+- Payment Preparation requires approved settlement backing before payout batch preparation.
+- Mark-review revalidates approved settlement backing before moving a payout batch into review.
+- The shared eligibility flow validates:
 
-Required rollout sequence:
+```text
+FinanceLedgerEntry
+↓
+SettlementApprovalLine
+↓
+SettlementApproval.status == APPROVED
+```
+
+Rollout history:
+
+The approved-settlement guard was originally documented as unsafe to hard-enable until launch data assumptions were proven.
+
+Historical rollout sequence:
 
 1. Read-only diagnostic report / audit mode
 2. Production data compatibility check
@@ -92,20 +110,86 @@ Required rollout sequence:
 6. Hard enforcement for mark-review/final release
 7. Future immutable traceability via `PayoutBatchLine.settlementApprovalLineId`
 
-Reason:
+Historical reason:
 
 Hard enforcement may block legacy production payout rows because `PayoutBatch` existed before `SettlementApproval`. Legacy rows may lack approved settlement linkage, `PayoutBatchLine` does not yet store `settlementApprovalLineId`, and production compatibility is `UNKNOWN` until verified.
 
 Rule:
 
-Any implementation of the approved-settlement guard must first prove production compatibility or include an explicit legacy strategy.
+Any future change to the approved-settlement guard must first prove production compatibility or include an explicit legacy strategy.
 
 Initial production launch assumption:
 
 - Initial production launch will use fresh vendor profiles and fresh finance data.
 - Legacy payout batch / settlement approval backfill is not required for launch if no historical finance rows are imported.
-- Approved-settlement guard can be implemented as hard enforcement for new payout preparation after a final read-only code audit confirms no historical finance data will be migrated.
+- Approved-settlement guard is implemented as hard enforcement for new payout preparation and mark-review.
 - If historical finance data is ever imported later, the diagnostic/backfill flow becomes mandatory before enabling/importing payment preparation.
+
+## Manual EFT Payment Lifecycle
+
+The approved production launch model uses manual EFT outside the application.
+
+Workflow:
+
+```text
+Settlement Review
+↓
+Approve Settlement Snapshot
+↓
+Payment Preparation
+↓
+Prepare Batch
+↓
+Mark Review
+↓
+Manual EFT
+(outside the application)
+↓
+Mark Paid
+↓
+Vendor Finance
+↓
+Payment History
+```
+
+Rules:
+
+1. The application does not execute bank transfers.
+2. Accounting performs EFT outside the system.
+3. The application records and audits payment confirmation.
+4. Payment Preparation remains the final financial release gate.
+
+Payment Preparation responsibilities:
+
+- validate blockers
+- prepare payout batches
+- review payout batches
+- record payment completion
+- provide payment history
+
+Payment Preparation is not responsible for executing bank transfers.
+
+### Current Launch Scope
+
+Implemented:
+
+- Prepare Batch
+- Mark Review
+- Cancel Batch
+- Approved Settlement Guard
+
+Planned before launch completion:
+
+- Mark Paid
+- Payment confirmation evidence
+- Paid timeline
+- Vendor paid visibility
+
+Future, not launch:
+
+- Bank integration
+- Automatic payment execution
+- ERP payment automation
 
 ## Primary Question
 
@@ -203,11 +287,18 @@ Contains:
 - Ready
 - Blocked
 - Paid
-- Future payout execution
+- Manual EFT payment confirmation
+- Payment history
 
 Payment Preparation is the target final financial release gate. Every vendor payment must pass Payment Preparation before money can leave the marketplace.
 
-Final payment approval, execution, mark-paid behavior, and rollback policy are not implemented yet.
+For launch, accounting performs EFT outside the application and Payment Preparation records payment completion inside the application.
+
+Payment Preparation does not execute bank transfers.
+
+Mark-paid behavior, payment confirmation evidence, paid timeline, vendor paid visibility, and rollback policy must be completed before launch completion.
+
+Automatic payment execution and bank integration are future work, not launch scope.
 
 ### Evidence & Invoices
 
@@ -266,7 +357,7 @@ The supported decision types are:
 - Scheduled Draft
 - Commission Invoice Readiness
 
-Refund Review represents read-only operational evidence for automatic Refund Adjustments. It must not imply manual refund adjustment apply, block, cancel, or reopen work during normal operations.
+Refund Review represents read-only operational evidence for automatic Refund Adjustments. It must not imply manual refund adjustment apply, block, cancel, or reopen work during normal operations. Refund Adjustments remain automatic read-only evidence for daily Finance work.
 
 Each decision item must contain:
 
