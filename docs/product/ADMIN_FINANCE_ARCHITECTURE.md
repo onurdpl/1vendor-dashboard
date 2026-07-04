@@ -158,6 +158,8 @@ Rules:
 2. Accounting performs EFT outside the system.
 3. The application records and audits payment confirmation.
 4. Payment Preparation remains the final financial release gate.
+5. Manual EFT Mark Paid is a payment-confirmation workflow.
+6. Manual EFT Mark Paid is not settlement approval, bank transfer execution, automatic payout execution, or a refund adjustment action.
 
 Payment Preparation responsibilities:
 
@@ -168,6 +170,73 @@ Payment Preparation responsibilities:
 - provide payment history
 
 Payment Preparation is not responsible for executing bank transfers.
+
+### Manual EFT Mark Paid Evidence Model
+
+Manual EFT Mark Paid confirms that accounting has completed an external EFT for an entire payout batch.
+
+It is a payment-confirmation workflow. It is not:
+
+- settlement approval
+- bank transfer execution
+- automatic payout execution
+- refund adjustment apply/block/cancel/reopen
+
+Status semantics:
+
+When settlement is approved but money has not been sent:
+
+- do not set `payoutStatus = PAID`
+- do not set `settlementStatus = SETTLED`
+- do not set `settledAt`
+
+When manual EFT has been completed and an admin confirms Mark Paid:
+
+- set `payoutStatus = PAID`
+- set `settlementStatus = SETTLED`
+- set `settledAt = paidAt`
+
+Meaning:
+
+- `PAID` means actual vendor payment evidence exists.
+- `SETTLED` means the ledger row is financially closed after payment evidence.
+- `settledAt` represents payment confirmation time for paid ledger rows.
+
+Required payment evidence:
+
+- `paidAt` is required.
+- `paidByUserId` is required.
+- `paymentSource = manual_eft` is required.
+- `payoutBatchId` is required.
+- paid amount and currency must be retained.
+- included payout batch lines and ledger rows are retained through payout batch membership.
+- `paymentReference` is optional.
+- internal finance note is optional.
+
+Idempotency and rejection rules:
+
+- Mark Paid must be idempotency-safe.
+- A payout batch cannot be marked paid twice.
+- Already paid batches must be rejected.
+- Cancelled batches must be rejected.
+
+Batch scope:
+
+- Mark Paid operates on the entire payout batch.
+- Admin UI must not mark individual payout lines paid.
+- Included ledger rows are updated through payout batch membership.
+
+Vendor Finance paid visibility:
+
+- Vendor Finance must show paid status only after real payment evidence exists.
+- `PAID_PLACEHOLDER` is not real paid evidence.
+- Vendor-facing paid status must come from payment confirmation evidence together with `payoutStatus = PAID`, `settlementStatus = SETTLED`, and `settledAt`.
+
+Future compatibility:
+
+- Manual EFT is the launch payment source.
+- Future bank/provider integration can replace the payment source and reference origin without changing the meaning of Mark Paid.
+- Bank execution and automatic payment execution remain future work.
 
 ### Current Launch Scope
 

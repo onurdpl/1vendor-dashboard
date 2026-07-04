@@ -15,6 +15,7 @@ This first phase is a domain foundation only. It does not execute payouts, refun
 - Ledger entries should carry enough source references to audit order, line item, return, refund, payout, and manual adjustment context.
 - Idempotency must be enforced by stable event ids when the ledger is later connected to live ingestion.
 - Historical snapshots such as commission rate, shipping cost, and source references must be preserved on entries that depend on them.
+- Manual EFT Mark Paid status semantics for paid ledger rows are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ## Read-Only Preview
 

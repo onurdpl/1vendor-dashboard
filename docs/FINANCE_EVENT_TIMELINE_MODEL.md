@@ -126,6 +126,7 @@ Rules:
 - draft/review batches are preparation artifacts.
 - `PAID_PLACEHOLDER` is not bank/payment confirmation.
 - future UI may show batch events, but must not call them final payment unless real payment evidence exists.
+- Manual EFT Mark Paid payment evidence and paid timeline semantics are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ### Support And Manual Review Context
 

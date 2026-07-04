@@ -15,6 +15,7 @@ The platform remains an operational control center. It records operational finan
 - Refund impact must be shown separately from sales, commission, and shipping deductions.
 - Draft payout batches are review artifacts, not payment promises.
 - `PAID_PLACEHOLDER` is not real payment confirmation.
+- Manual EFT Mark Paid evidence semantics are defined in `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ## Current State
 
@@ -294,6 +295,8 @@ Current state should be interpreted conservatively:
 - `PAID_PLACEHOLDER` -> not final paid; show as placeholder until payment evidence exists
 - `PayoutStatus.HOLD` -> `blocked`
 - `PayoutStatus.PAID` -> `paid` only if paired with payment confirmation evidence
+
+Final Manual EFT Mark Paid semantics, including the relationship between `PayoutStatus.PAID`, `SettlementStatus.SETTLED`, `settledAt`, and payment confirmation evidence, are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ## Visibility Rules
 
