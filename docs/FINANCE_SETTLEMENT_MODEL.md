@@ -4,7 +4,7 @@
 
 This document defines the finance settlement foundation for marketplace-style vendor operations. It is a design and terminology document only. It does not add a payout engine, accounting integration, schema migration, provider behavior, or finance UI behavior.
 
-The platform remains an operational control center. It records operational finance evidence, produces payout previews, and prepares review workflows. It is not yet the authority for moving money, generating accounting documents, or deciding tax treatment.
+The platform remains an operational control center. It records operational finance evidence, produces payout previews, prepares review workflows, and records Manual EFT payment confirmation evidence. It is not the authority for executing bank transfers, generating accounting documents, or deciding tax treatment.
 
 ## Terminology Rules
 
@@ -92,7 +92,7 @@ The following are not implemented or not confirmed as final authority:
 
 - payout execution
 - bank transfer integration
-- payout payment confirmation
+- automatic payout execution confirmation
 - final vendor statement generation
 - accounting/ERP export
 - invoice or e-fatura authority for vendor payouts
@@ -103,6 +103,8 @@ The following are not implemented or not confirmed as final authority:
 - late provider shipping cost reconciliation policy
 - manual finance adjustment workflow
 - seller-of-record responsibility
+
+Manual EFT Mark Paid payment confirmation is implemented and governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ## Proposed Minimal Domain Model
 
@@ -398,7 +400,8 @@ Support should not be able to approve payouts, mutate finance profiles, or execu
 ### Phase 5: Payment And Accounting Integrations
 
 - Integrate bank/accounting providers only after payout approval semantics, tax ownership, and seller-of-record responsibility are confirmed.
-- Add provider reconciliation, payment confirmation, reversal handling, and export audit trails.
+- Add provider reconciliation, automatic payment execution confirmation, reversal handling, and export audit trails.
+- Manual EFT Mark Paid payment confirmation is already governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ## Open Questions
 

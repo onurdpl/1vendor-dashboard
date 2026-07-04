@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document defines the foundation for finance-related operational timelines on Order Detail and future Finance pages.
+This document defines the foundation for finance-related operational timelines on Order Detail and Finance pages.
 
-It is discovery and design only. It does not add schema, persist new events, implement payout execution, integrate accounting providers, change settlement calculations, or invent fake finance events.
+It is a timeline model and source-alignment document. Manual EFT Mark Paid evidence is implemented and governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`. This document does not implement automatic payout execution, integrate accounting providers, change settlement calculations, or invent fake finance events.
 
 The goal is to make finance history readable while preserving the current truth boundary:
 
@@ -117,15 +117,16 @@ Rules:
 Current payout-related durable objects:
 
 - `PayoutBatch`
-  - statuses: `DRAFT`, `REVIEW`, `APPROVED`, `CANCELLED`, `EXECUTION_PENDING`, `PAID_PLACEHOLDER`.
+  - statuses: `DRAFT`, `REVIEW`, `APPROVED`, `CANCELLED`, `EXECUTION_PENDING`, `PAID`, `PAID_PLACEHOLDER`.
 - `PayoutBatchLine`
   - links finance rows into batch review artifacts.
 
 Rules:
 
 - draft/review batches are preparation artifacts.
+- `PAID` is final paid only when backed by Manual EFT Mark Paid confirmation evidence.
 - `PAID_PLACEHOLDER` is not bank/payment confirmation.
-- future UI may show batch events, but must not call them final payment unless real payment evidence exists.
+- UI must not call a batch final payment unless real payment evidence exists.
 - Manual EFT Mark Paid payment evidence and paid timeline semantics are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ### Support And Manual Review Context
@@ -178,7 +179,7 @@ These are admin-visible in the Order Detail timeline today.
 
 - `Order recorded` or `Refund recorded`
 - `Settlement estimate pending` or `Pending review`
-- `Included in draft review` or `Payment evidence pending` when payout batch data exists
+- `Included in draft review`, `Payment evidence pending`, or paid evidence when payout batch data exists
 
 This is a UI-derived timeline, not a persisted event history.
 
@@ -216,16 +217,17 @@ Refund finance rows appear as refund/finance context for the return.
 | Payout approved | Real existing artifact state, not payment | `PayoutBatch.status = APPROVED` | Use carefully | Yes | Approved review is not bank transfer evidence. |
 | Payout scheduled | Real existing artifact state, not payment | `PayoutBatch.status = EXECUTION_PENDING` | Use carefully | Yes | Requires future execution semantics before stronger wording. |
 | Payout sent | Future concept | future payout provider/bank evidence | No until implemented | No until implemented | Not modeled. |
-| Payment evidence pending | Real placeholder state | `PayoutBatch.status = PAID_PLACEHOLDER` | Maybe hidden or explicitly caveated | Yes | Must not be displayed as paid. |
+| Payment marked paid | Real existing payment confirmation evidence | `PayoutBatch.status = PAID`, `paidAt`, payment evidence fields, `FinanceEventType.PAYOUT_PAID` | Yes | Yes | Manual EFT happened outside the app; the app records confirmation only. |
+| Payment evidence pending | Real placeholder state | `PayoutBatch.status = PAID_PLACEHOLDER` | No as paid evidence | Yes | Must not be displayed as paid. |
 | Payout reversed | Future concept | future reversal/adjustment workflow | No | No until implemented | Not modeled. |
 | Manual adjustment proposed | Future concept | future admin adjustment workflow | No until implemented | No until implemented | `MANUAL_ADJUSTMENT` exists only as preview type. |
 | Manual adjustment applied | Future concept | future durable adjustment line | No until implemented | No until implemented | Requires audit trail and actor. |
 | Finance support ticket opened | Real collaboration event | `SupportTicket` | Yes if scoped to vendor/order | Yes | Context only, not settlement mutation. |
 | Operational signal raised | Real review signal | `OperationalSignal` | Vendor-safe subset only | Yes | Review/risk signal, not a finance event by itself. |
 
-## Proposed FinanceEvent Model
+## FinanceEvent Expansion Model
 
-This is a future model proposal only. Do not implement until finance event persistence is explicitly requested.
+Manual EFT Mark Paid already records durable payment evidence through the current FinanceEvent infrastructure. The model below describes future expansion for additional finance timeline events. Do not implement new event types until that specific workflow is explicitly requested.
 
 ```ts
 type FinanceEvent = {
@@ -248,7 +250,7 @@ type FinanceEvent = {
 };
 ```
 
-Suggested `FinanceEventType` values:
+Suggested future `FinanceEventType` values:
 
 - `order_sale_recorded`
 - `commission_estimated`
@@ -263,6 +265,7 @@ Suggested `FinanceEventType` values:
 - `payout_batch_review_started`
 - `payout_batch_approved`
 - `payout_batch_scheduled`
+- `payout_paid`
 - `payment_evidence_pending`
 - `manual_adjustment_proposed`
 - `manual_adjustment_applied`
@@ -448,8 +451,9 @@ No current durable manual adjustment source exists.
    - Keep raw diagnostics admin-only.
    - Still no new persistence.
 
-3. Add durable event persistence only after workflow decisions.
-   - Introduce `FinanceEvent` when manual adjustments, payout approval, or accounting/bank evidence need immutable audit history.
+3. Extend durable event persistence only after workflow decisions.
+   - Manual EFT Mark Paid already records durable payment evidence and `PAYOUT_PAID` finance events.
+   - Introduce additional `FinanceEvent` coverage when manual adjustments, payout approval, or accounting/bank evidence need immutable audit history.
 
 4. Wire timeline to Order Detail and Finance page.
    - Use the existing `OperationalTimeline` component.
@@ -460,7 +464,7 @@ No current durable manual adjustment source exists.
 - Whether payout approval should be visible to vendors before payment evidence exists.
 - Whether `PayoutBatch.status = APPROVED` means finance approved only or vendor-visible approved settlement.
 - Whether `EXECUTION_PENDING` is a scheduled payout or only an internal preparation state.
-- Whether `PAID_PLACEHOLDER` should ever be visible to vendors.
+- How long `PAID_PLACEHOLDER` should remain supported for admin-only diagnostics.
 - How manual adjustments are requested, approved, reversed, and exposed.
 - How negative vendor positions should be recovered.
 - Whether return-window holds are required before settlement review.
@@ -471,10 +475,8 @@ No current durable manual adjustment source exists.
 
 ## Non-Goals For This Phase
 
-- No `FinanceEvent` table.
-- No event persistence.
 - No payout engine.
 - No accounting integration.
 - No changes to settlement calculations.
-- No fake payout or adjustment events.
+- No fake payout or adjustment events beyond implemented Manual EFT Mark Paid evidence.
 - No new UI behavior.

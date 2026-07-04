@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document defines the operational finance workflow before payout UX, payout execution, accounting integration, or settlement-state changes are implemented.
+This document defines the operational finance workflow for the approved Manual EFT launch model.
 
-It complements `docs/FINANCE_SETTLEMENT_MODEL.md` by describing how marketplace finance work should move through operations. It does not change schema, UI, calculations, Shopify behavior, provider behavior, payout behavior, or accounting behavior.
+It complements `docs/FINANCE_SETTLEMENT_MODEL.md` by describing how marketplace finance work should move through operations. Admin Finance architecture decisions are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`. This document does not change schema, UI, calculations, Shopify behavior, provider behavior, payout behavior, or accounting behavior.
 
 ## Hard Boundaries
 
@@ -44,7 +44,12 @@ Current finance data enters the platform through these operational events:
    - Admin-only `POST /admin/payout-batches/prepare` creates a draft batch from eligible rows.
    - This is preparation/review only, not payment execution.
 
-6. Settlement commission invoice lifecycle
+6. Manual EFT payment confirmation
+   - Admin-only Mark Paid records confirmed external EFT evidence.
+   - The application records payment confirmation; it does not execute bank transfers.
+   - Mark Paid semantics are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
+
+7. Settlement commission invoice lifecycle
    - Legacy `InvoiceExecution` / BizimHesap customer accounting sync was removed after production archive export.
    - Active settlement commission invoices use the settlement approval → immutable request snapshot → Logo İşbaşı commission invoice flow.
    - Finance ledger rows no longer expose legacy customer accounting sync diagnostics.
@@ -71,6 +76,7 @@ Current finance data enters the platform through these operational events:
 - `PayoutBatch`
   - draft/review preparation artifact
   - totals and line snapshots
+  - manual EFT payment confirmation evidence after Mark Paid
 
 - `PayoutBatchLine`
   - rows included in a payout batch artifact
@@ -112,7 +118,7 @@ The following current values are estimated or review-oriented:
 
 ### Current Confirmed Values
 
-The following are confirmed operational facts, but not final payout authority:
+The following are confirmed operational facts, but not final payout authority unless paired with Manual EFT Mark Paid evidence:
 
 - ingested Shopify order allocation amount
 - persisted refund amount from `refunds/create`
@@ -120,14 +126,15 @@ The following are confirmed operational facts, but not final payout authority:
 - immutable profile snapshots on ledger rows
 - persisted shipping cost evidence
 - payout batch row membership
+- Manual EFT Mark Paid evidence on payout batches
 - fulfillment/shipping evidence timestamps or statuses
 
-### Current Missing Capabilities
+### Launch Future And Long-Term Future
 
-- approved payable amount
-- payout execution
-- bank transfer record
-- payment confirmation
+The following are not part of the approved Manual EFT launch model and remain future work:
+
+- automatic payout execution
+- bank/provider payment execution record
 - payment reversal
 - accounting export authority
 - final vendor statement
@@ -168,16 +175,22 @@ Operator review
   +--> blocked / needs reconciliation
   |
   v
-Approved for payout
+Settlement approved
   |
   v
-Payout scheduled
+Payment Preparation
   |
   v
-Payout sent
+Prepare Batch
   |
   v
-Paid confirmation recorded
+Mark Review
+  |
+  v
+Manual EFT outside application
+  |
+  v
+Mark Paid records payment confirmation
 ```
 
 ### Exception Lifecycle Diagram
@@ -351,40 +364,37 @@ Finance output:
 
 Trigger:
 
-- Future explicit admin approval.
+- Settlement Review approves a settlement snapshot.
 
 Operational meaning:
 
 - Amount is approved payable.
 - This is the first phase where payable language can be used without caveat.
+- Settlement Review is not the final payment release gate.
 
 Finance output:
 
-- `approvedPayableAmount`
+- approved settlement snapshot
 - approval actor
 - approval timestamp
 - immutable included line snapshot
-
-Not implemented today.
 
 ### 8. `payout_scheduled`
 
 Trigger:
 
-- Future payout provider, banking workflow, or operator schedule action.
+- Payment Preparation creates a payout batch and moves it through Finance review.
 
 Operational meaning:
 
-- Approved amount is queued for payment.
-- Payment is still not confirmed.
+- Approved settlement rows are prepared for manual EFT.
+- Payment is not confirmed until Mark Paid records external EFT evidence.
 
 Finance output:
 
-- scheduled timestamp
-- expected payment date
-- payment provider reference if known
-
-Not implemented today.
+- payout batch
+- batch line membership
+- review timestamp
 
 ### 9. `payout_sent`
 
@@ -409,7 +419,7 @@ Not implemented today.
 
 Trigger:
 
-- Explicit payment confirmation evidence.
+- Manual EFT is completed outside the application and an admin confirms Mark Paid.
 
 Operational meaning:
 
@@ -418,12 +428,15 @@ Operational meaning:
 Finance output:
 
 - paid timestamp
-- payment reference
-- immutable final statement line references
+- optional payment reference
+- payout batch evidence
+- `PAYOUT_PAID` finance event
+- included ledger rows updated to paid/settled semantics
 
 Rule:
 
 - `PAID_PLACEHOLDER` is not enough.
+- Manual EFT Mark Paid semantics are governed by `docs/product/ADMIN_FINANCE_ARCHITECTURE.md`.
 
 ### 11. `reversed_or_adjusted`
 
@@ -548,9 +561,9 @@ Operational rule:
 
 ### Are Payouts Estimated Until Manual Approval?
 
-Yes. Under the proposed workflow, payouts remain estimated until explicit admin approval creates an approved payable amount.
+Yes. Payouts remain estimated until Settlement Review approves a settlement snapshot and Payment Preparation accepts the batch into review.
 
-Current code can identify rows that are ready for review, but it does not create final approved payable money.
+Payment Preparation is the final release gate for the approved Manual EFT launch model. Manual EFT Mark Paid is the payment confirmation step; bank/provider execution remains future.
 
 ### Does The Return Window Delay Payout?
 
@@ -628,6 +641,7 @@ Admins should see:
 - settlement readiness and missing evidence.
 - shipping cost attachment/import status.
 - payout batch preparation and review artifacts.
+- Manual EFT Mark Paid evidence and payment history.
 - invoice/accounting visibility references.
 - support and operational recommendations.
 
@@ -636,7 +650,7 @@ Admins may perform:
 - profile configuration.
 - shipping cost evidence attachment.
 - draft payout batch preparation.
-- future payout approval only after a separate implementation.
+- payout batch review and Manual EFT Mark Paid confirmation.
 - future manual adjustments only after a separate implementation.
 
 ### Support View
@@ -695,7 +709,10 @@ Review rows by vendor and status
 Move draft to review
   |
   v
-Future approval workflow
+Manual EFT outside application
+  |
+  v
+Mark Paid and record payment evidence
 ```
 
 ### Return/Refund Impact Review
@@ -754,13 +771,13 @@ Batch reviewed
   |
   +--> cancelled: rows released
   |
-  +--> approved: future explicit approval state
+  +--> review accepted: accounting performs manual EFT outside the application
   |
   v
-Future scheduling/payment workflow
+Mark Paid records payment confirmation
 ```
 
-Current implementation supports draft preparation, review marking, cancellation, and placeholder statuses. It does not execute or confirm payment.
+Current implementation supports draft preparation, review marking, cancellation, and Manual EFT Mark Paid confirmation. It does not execute bank/provider payment.
 
 ## Future Integration Boundaries
 
@@ -833,14 +850,14 @@ Future exports should include:
 - Treatment of chargebacks and Shopify payment disputes.
 - Negative vendor amount recovery.
 - Manual adjustment approval roles.
-- Payment confirmation source.
+- Future bank/provider payment confirmation source.
 - Whether accounting provider records are authoritative or visibility-only.
 - Whether payout batches can include multiple currencies.
 - Whether vendors receive formal statements before or after payment.
 
 ## Implementation Entry Criteria
 
-Before implementing payout UX or payout states, confirm:
+Before changing payout UX or adding new payout states beyond the approved Manual EFT launch model, confirm:
 
 - final terminology for estimated vs approved payable values.
 - payout review and approval roles.
@@ -853,7 +870,6 @@ Before implementing payout UX or payout states, confirm:
 Before implementing payout execution, additionally confirm:
 
 - payment provider or bank workflow.
-- payment confirmation evidence.
 - failure/retry/reversal semantics.
 - audit export requirements.
 - tax/accounting ownership.
