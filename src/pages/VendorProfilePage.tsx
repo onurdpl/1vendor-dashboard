@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
@@ -62,6 +62,7 @@ import type {
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
+import type { VendorContext } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { safeArray, safeStatusLabel } from '../services/real/formatting';
 
@@ -994,15 +995,35 @@ function ReadinessChecklistCard({
 
 export function VendorProfilePage() {
   const navigate = useNavigate();
+  const { vendorId: adminRouteVendorIdParam } = useParams<{ vendorId?: string }>();
   const auditHistoryRef = useRef<HTMLElement | null>(null);
   const appReadiness = useAppReadiness();
-  const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
+  const adminRouteVendorId = adminRouteVendorIdParam?.trim() ?? '';
+  const isAdminVendorRoute = Boolean(adminRouteVendorId);
+  const currentVendor = useMemo<VendorContext>(() => {
+    if (!isAdminVendorRoute) {
+      return appReadiness.currentVendor;
+    }
+
+    const knownVendor = currentUser?.vendorDetails?.find((vendor) => vendor.vendorId === adminRouteVendorId);
+    return {
+      vendorId: adminRouteVendorId,
+      vendorName: knownVendor?.vendorName ?? adminRouteVendorId,
+      scope: 'admin-route-vendor-context',
+      status: knownVendor?.status ?? 'active',
+      restrictionReason: knownVendor?.restrictionReason ?? null,
+      restrictionChangedByUserId: knownVendor?.restrictionChangedByUserId ?? null,
+      restrictionChangedByEmail: knownVendor?.restrictionChangedByEmail ?? null,
+      restrictionChangedAt: knownVendor?.restrictionChangedAt ?? null,
+    };
+  }, [adminRouteVendorId, appReadiness.currentVendor, currentUser?.vendorDetails, isAdminVendorRoute]);
   const pageReadiness = getPageReadinessState(appReadiness, {
-    requiresVendorContext: true,
+    requiresVendorContext: !isAdminVendorRoute,
     currentVendorId: currentVendor.vendorId,
   });
   const isAdmin = currentUser?.role === 'admin';
+  const canLoadProfile = pageReadiness.ready && (!isAdminVendorRoute || isAdmin);
   const { message, tone, showFeedback } = useActionFeedback();
   const [billingEditOpen, setBillingEditOpen] = useState(false);
   const [billingForm, setBillingForm] = useState<BillingProfileFormState>(EMPTY_BILLING_PROFILE_FORM);
@@ -1035,32 +1056,32 @@ export function VendorProfilePage() {
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
     ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: canLoadProfile },
   );
   const financeQuery = useQueryResource(
     queryKeys.vendorProfile.financeProfile(currentVendor.vendorId),
     ({ signal }) => getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: pageReadiness.ready },
+    { enabled: canLoadProfile },
   );
   const billingQuery = useQueryResource(
     queryKeys.vendorProfile.billingProfile(currentVendor.vendorId),
     ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
-    { enabled: pageReadiness.ready && isAdmin },
+    { enabled: canLoadProfile && isAdmin },
   );
   const vendorStatusQuery = useQueryResource(
     queryKeys.vendorProfile.status(currentVendor.vendorId),
     ({ signal }) => getVendorStatus(currentVendor.vendorId, { signal }),
-    { enabled: pageReadiness.ready && isAdmin },
+    { enabled: canLoadProfile && isAdmin },
   );
   const auditLogQuery = useQueryResource(
     queryKeys.vendorProfile.auditLogs(currentVendor.vendorId),
     ({ signal }) => listVendorProfileAuditLogs(currentVendor.vendorId, { signal, limit: 50 }),
-    { enabled: pageReadiness.ready && isAdmin },
+    { enabled: canLoadProfile && isAdmin },
   );
   const supportQuery = useQueryResource(
     queryKeys.vendorProfile.supportTickets(currentVendor.vendorId),
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
-    { enabled: pageReadiness.ready },
+    { enabled: canLoadProfile },
   );
 
   const shippingConfig = shippingQuery.data;
@@ -1078,6 +1099,10 @@ export function VendorProfilePage() {
         changedByEmail: currentVendor.restrictionChangedByEmail ?? null,
         changedAt: currentVendor.restrictionChangedAt ?? null,
       };
+  const profileVendorName = formatValue(
+    vendorStatus.vendorName ?? currentVendor.vendorName,
+    currentVendor.vendorId || 'Vendor profile',
+  );
   const logoBindingPresent = Boolean(billingProfile?.logoIsbasiCustomerCode || billingProfile?.logoIsbasiCustomerId);
   const logoBindingNeedsMatch = Boolean(billingProfile?.logoIsbasiCustomerCode?.trim() && !billingProfile?.logoIsbasiCustomerId?.trim());
   const supportTickets = useMemo(
@@ -1125,7 +1150,7 @@ export function VendorProfilePage() {
   const warehouseConfigured = Boolean(defaultWarehouse?.warehouseId || shippingConfig?.defaultWarehouseId || navlungoSenderAddressId);
   const shippingConfigured = Boolean(shippingConfig?.shippingEnabled && providerConfigured && warehouseConfigured);
   const returnsConfigured = Boolean(navlungoReturnRecipientAddressId);
-  const supportWorkflowReady = Boolean(appReadiness.ready && supportDataLoaded && !supportQuery.isError);
+  const supportWorkflowReady = Boolean(canLoadProfile && supportDataLoaded && !supportQuery.isError);
   const marketplaceTermsActive = financeProfile?.active === true;
   const financePreviewAvailable = Boolean(financeDataLoaded && financeProfile);
   const readinessSections = useMemo<ReadinessSection[]>(() => {
@@ -1170,8 +1195,8 @@ export function VendorProfilePage() {
       },
       {
         label: 'Return workflow visible',
-        status: appReadiness.ready ? 'ready' : 'unknown',
-        detail: appReadiness.ready ? 'Return queues are available for this vendor context.' : 'Vendor route context is still loading.',
+        status: canLoadProfile ? 'ready' : 'unknown',
+        detail: canLoadProfile ? 'Return queues are available for this vendor context.' : 'Vendor route context is still loading.',
       },
     ];
     const financeItems: ReadinessItem[] = [
@@ -1197,8 +1222,8 @@ export function VendorProfilePage() {
     const supportItems: ReadinessItem[] = [
       {
         label: 'Support route accessible',
-        status: appReadiness.ready ? 'ready' : 'unknown',
-        detail: appReadiness.ready ? 'Support routes are available in this workspace.' : 'Vendor access context is still loading.',
+        status: canLoadProfile ? 'ready' : 'unknown',
+        detail: canLoadProfile ? 'Support routes are available in this workspace.' : 'Vendor access context is still loading.',
       },
       {
         label: 'Support context available',
@@ -1213,20 +1238,20 @@ export function VendorProfilePage() {
     const workflowItems: ReadinessItem[] = [
       {
         label: 'Vendor access state',
-        status: appReadiness.ready && currentVendor.vendorId ? 'ready' : 'unknown',
-        detail: appReadiness.ready ? 'This workspace is scoped to the selected vendor.' : 'Vendor access is not ready yet.',
+        status: canLoadProfile && currentVendor.vendorId ? 'ready' : 'unknown',
+        detail: canLoadProfile ? 'This workspace is scoped to the selected vendor.' : 'Vendor access is not ready yet.',
       },
       {
         label: 'Workflow queues',
-        status: appReadiness.ready ? 'ready' : 'unknown',
-        detail: appReadiness.ready ? 'Orders, returns, finance, and support routes can open with this vendor scope.' : 'Workflow routes are waiting for vendor context.',
+        status: canLoadProfile ? 'ready' : 'unknown',
+        detail: canLoadProfile ? 'Orders, returns, finance, and support routes can open with this vendor scope.' : 'Workflow routes are waiting for vendor context.',
       },
     ];
     const automationItems: ReadinessItem[] = [
       {
         label: 'Automation queue accessible',
-        status: appReadiness.ready ? 'review' : 'unknown',
-        detail: appReadiness.ready
+        status: canLoadProfile ? 'review' : 'unknown',
+        detail: canLoadProfile
           ? 'Automation visibility exists, but this profile does not model vendor-specific automation readiness.'
           : 'Automation queue access cannot be checked until vendor context is ready.',
       },
@@ -1261,7 +1286,7 @@ export function VendorProfilePage() {
       buildSection('Automation visibility ready', 'Automation readiness stays conservative until vendor-specific alert coverage is modeled.', 'Open automation queue', '/automation?workflow=active-issue-groups', automationItems),
     ];
   }, [
-    appReadiness.ready,
+    canLoadProfile,
     currentVendor.vendorId,
     existingProfileTicket,
     financePreviewAvailable,
@@ -1281,17 +1306,17 @@ export function VendorProfilePage() {
     async () =>
       createSupportTicket({
         subject: 'Vendor profile settings correction',
-        message: `Please review the vendor profile and operational settings for ${currentVendor.vendorName}.`,
+        message: `Please review the vendor profile and operational settings for ${profileVendorName}.`,
         priority: 'normal',
         category: 'OTHER',
         contextType: 'general',
         contextId: currentVendor.vendorId,
         contextSnapshot: {
           route: VENDOR_PROFILE_CONTEXT_ROUTE,
-          path: VENDOR_PROFILE_PATH,
+          path: isAdminVendorRoute ? `/admin/vendors/${encodeURIComponent(currentVendor.vendorId)}` : VENDOR_PROFILE_PATH,
           status: 'correction_requested',
           vendorId: currentVendor.vendorId,
-          vendorName: currentVendor.vendorName,
+          vendorName: profileVendorName,
           shippingProvider: shippingConfig?.preferredProvider ?? null,
           shippingEnabled: shippingConfig?.shippingEnabled ?? null,
           commissionProfileSource: financeProfile?.source ?? null,
@@ -1837,6 +1862,17 @@ export function VendorProfilePage() {
     void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
 
+  if (isAdminVendorRoute && !isAdmin) {
+    return (
+      <section className="op-page vendor-profile-page">
+        <EmptyStatePanel
+          title="Admin access required"
+          description="This vendor profile route is available only to admin users."
+        />
+      </section>
+    );
+  }
+
   if (pageReadiness.status === 'missing_vendor_context') {
     return (
       <section className="op-page vendor-profile-page">
@@ -1906,8 +1942,8 @@ export function VendorProfilePage() {
     {
       title: 'Integrations',
       description: 'Managed by Marketplace',
-      status: appReadiness.ready ? 'Available' : 'Loading',
-      tone: appReadiness.ready ? 'success' : 'warning',
+      status: canLoadProfile ? 'Available' : 'Loading',
+      tone: canLoadProfile ? 'success' : 'warning',
     },
   ] as const;
 
@@ -1916,11 +1952,11 @@ export function VendorProfilePage() {
       <div className={`vendor-profile-hero operational-card ${isAdmin ? '' : 'vendor-profile-hero-compact'}`}>
         <div className="vendor-profile-identity">
           <div className="vendor-profile-avatar" aria-hidden="true">
-            {getVendorInitials(currentVendor.vendorName)}
+            {getVendorInitials(profileVendorName)}
           </div>
           <div>
             <p className="eyebrow">Marketplace Seller Workspace</p>
-            <h1>{currentVendor.vendorName || 'Vendor profile'}</h1>
+            <h1>{profileVendorName || 'Vendor profile'}</h1>
             {isAdmin ? (
               <p>
                 Review the seller identity, finance policy, shipping operations, and return destination currently managed
@@ -1931,8 +1967,8 @@ export function VendorProfilePage() {
         </div>
         <div className="vendor-profile-actions">
           <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
-          <StatusBadge tone={!appReadiness.ready ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
-            {!appReadiness.ready ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
+          <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
+            {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
           </StatusBadge>
           {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
           {isAdmin ? (
@@ -1956,7 +1992,7 @@ export function VendorProfilePage() {
         <>
           <OperationalSection title="My Account">
             <MetadataGroup>
-              <MetadataRow label="Display name" value={formatValue(currentVendor.vendorName, 'Vendor unavailable')} />
+              <MetadataRow label="Display name" value={formatValue(profileVendorName, 'Vendor unavailable')} />
               <MetadataRow label="Signed-in email" value={currentUser?.email ?? 'Unknown'} />
               <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
               <MetadataRow label="Account Status" value={accountStatusLabel} />
@@ -2026,7 +2062,7 @@ export function VendorProfilePage() {
           description="Seller identity currently available to marketplace operations."
         >
           <MetadataGroup>
-            <MetadataRow label="Display name" value={formatValue(currentVendor.vendorName, 'Vendor unavailable')} />
+            <MetadataRow label="Display name" value={formatValue(profileVendorName, 'Vendor unavailable')} />
             <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
             <MetadataRow label="Legal name" value={isAdmin ? formatValue(billingProfile?.legalCompanyName) : 'Admin-managed billing profile'} />
             <MetadataRow label="Store contact" value="Not modeled yet" />
@@ -3613,7 +3649,7 @@ export function VendorProfilePage() {
             </div>
             <div>
               <span>Shopify workspace</span>
-              <StatusBadge tone={appReadiness.ready ? 'success' : 'warning'}>{appReadiness.ready ? 'Connected' : 'Loading'}</StatusBadge>
+              <StatusBadge tone={canLoadProfile ? 'success' : 'warning'}>{canLoadProfile ? 'Connected' : 'Loading'}</StatusBadge>
             </div>
             <div>
               <span>Shipping provider</span>

@@ -216,7 +216,7 @@ export function AdminVendorsPage() {
               <button
                 type="button"
                 className="button button-primary"
-                onClick={() => navigate('/vendor/profile')}
+                onClick={() => navigate(`/admin/vendors/${encodeURIComponent(success.vendorId)}`)}
               >
                 Open Vendor Profile
               </button>

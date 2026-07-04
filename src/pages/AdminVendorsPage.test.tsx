@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequirePermission } from '../components/RequirePermission';
 import { clearToken, setCurrentUser, setCurrentVendorId, setToken, type CurrentUser } from '../lib/auth';
@@ -50,10 +50,15 @@ function renderPage(initialEntry = '/admin/vendors/new') {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/admin/vendors/new" element={<AdminVendorsPage />} />
-        <Route path="/vendor/profile" element={<div>Existing vendor profile route</div>} />
+        <Route path="/admin/vendors/:vendorId" element={<AdminVendorProfileProbe />} />
       </Routes>
     </MemoryRouter>,
   );
+}
+
+function AdminVendorProfileProbe() {
+  const { vendorId } = useParams<{ vendorId: string }>();
+  return <div>Admin vendor profile route {vendorId}</div>;
 }
 
 function renderGuardedPage(user: CurrentUser) {
@@ -201,7 +206,7 @@ describe('AdminVendorsPage', () => {
     expect(storageDump(window.sessionStorage)).not.toContain('Temp-Password-123');
   });
 
-  it('opens the existing vendor profile route after successful provisioning', async () => {
+  it('opens the created vendor admin profile route after successful provisioning', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -209,7 +214,7 @@ describe('AdminVendorsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create Vendor' }));
     await user.click(await screen.findByRole('button', { name: 'Open Vendor Profile' }));
 
-    expect(await screen.findByText('Existing vendor profile route')).toBeInTheDocument();
+    expect(await screen.findByText('Admin vendor profile route newvendor')).toBeInTheDocument();
   });
 
   it('renders duplicate vendor ID errors safely', async () => {

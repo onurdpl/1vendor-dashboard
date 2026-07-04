@@ -271,6 +271,14 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/vendors/:vendorId"
+            element={
+              <RequirePermission permission="orders:write">
+                {resilientRoute('Vendor profile', <VendorProfilePage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/admin/finance/settlement-approvals"
             element={
               <RequirePermission permission="orders:write">

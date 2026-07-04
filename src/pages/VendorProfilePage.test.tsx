@@ -24,8 +24,12 @@ import type {
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
-const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>();
-const getFinanceProfileMock = vi.fn<() => Promise<VendorFinancialProfile>>();
+const getVendorShippingConfigMock = vi.fn<
+  (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorShippingConfig>
+>();
+const getFinanceProfileMock = vi.fn<
+  (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorFinancialProfile>
+>();
 const updateVendorFinancialProfileMock = vi.fn<
   (
     vendorId: string,
@@ -45,13 +49,15 @@ const updateVendorFinancialProfileMock = vi.fn<
   ) => Promise<VendorFinancialProfile>
 >();
 const getFinanceDashboardMock = vi.fn();
-const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
+const getVendorBillingProfileMock = vi.fn<(vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
-const getVendorStatusMock = vi.fn<() => Promise<VendorStatus>>();
+const getVendorStatusMock = vi.fn<(vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorStatus>>();
 const updateVendorStatusMock = vi.fn<
   (vendorId: string, input: { status: 'active' | 'inactive'; reason?: string }) => Promise<VendorStatus>
 >();
-const listVendorProfileAuditLogsMock = vi.fn<() => Promise<VendorProfileAuditLog[]>>();
+const listVendorProfileAuditLogsMock = vi.fn<
+  (vendorId: string, options?: { signal?: AbortSignal; limit?: number }) => Promise<VendorProfileAuditLog[]>
+>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
 const discoverLogoIsbasiIncomingEinvoicesMock = vi.fn<() => Promise<LogoIsbasiIncomingEinvoiceListProbeResult>>();
@@ -69,7 +75,8 @@ vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
   return {
     ...actual,
-    getVendorShippingConfig: () => getVendorShippingConfigMock(),
+    getVendorShippingConfig: (options?: { vendorId?: string | null; signal?: AbortSignal }) =>
+      getVendorShippingConfigMock(options),
   };
 });
 
@@ -78,7 +85,7 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
-    getFinanceProfile: () => getFinanceProfileMock(),
+    getFinanceProfile: (options?: { vendorId?: string | null; signal?: AbortSignal }) => getFinanceProfileMock(options),
     updateVendorFinancialProfile: (
       vendorId: string,
       input: {
@@ -97,9 +104,11 @@ vi.mock('../features/vendors/api', async () => {
   const actual = await vi.importActual<typeof import('../features/vendors/api')>('../features/vendors/api');
   return {
     ...actual,
-    getVendorBillingProfile: () => getVendorBillingProfileMock(),
-    getVendorStatus: () => getVendorStatusMock(),
-    listVendorProfileAuditLogs: () => listVendorProfileAuditLogsMock(),
+    getVendorBillingProfile: (vendorId: string, options?: { signal?: AbortSignal }) =>
+      getVendorBillingProfileMock(vendorId, options),
+    getVendorStatus: (vendorId: string, options?: { signal?: AbortSignal }) => getVendorStatusMock(vendorId, options),
+    listVendorProfileAuditLogs: (vendorId: string, options?: { signal?: AbortSignal; limit?: number }) =>
+      listVendorProfileAuditLogsMock(vendorId, options),
     updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       updateVendorBillingProfileMock(vendorId, input),
     updateVendorStatus: (vendorId: string, input: { status: 'active' | 'inactive'; reason?: string }) =>
@@ -317,6 +326,7 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile']) {
       <MemoryRouter initialEntries={initialEntries}>
         <Routes>
           <Route path="/vendor/profile" element={<VendorProfilePage />} />
+          <Route path="/admin/vendors/:vendorId" element={<VendorProfilePage />} />
           <Route path="/orders" element={<div>Orders queue route</div>} />
           <Route path="/returns" element={<div>Returns queue route</div>} />
           <Route path="/finance" element={<div>Finance route</div>} />
@@ -848,6 +858,60 @@ describe('VendorProfilePage', () => {
     await userEvent.click(supportButtons[0]);
     expect(await screen.findByText('Admin support detail route')).toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('loads the requested vendor on the admin vendor profile route', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'created-vendor',
+      vendorName: 'Created Vendor',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    expect(await screen.findByRole('heading', { name: 'Created Vendor' })).toBeInTheDocument();
+    expect(screen.getByText('Admin view')).toBeInTheDocument();
+    expect(screen.getAllByText('created-vendor').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: 'Demo Vendor A' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'created-vendor' })),
+    );
+    expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'created-vendor' }));
+    expect(getVendorBillingProfileMock).toHaveBeenCalledWith('created-vendor', expect.any(Object));
+    expect(getVendorStatusMock).toHaveBeenCalledWith('created-vendor', expect.any(Object));
+    expect(listVendorProfileAuditLogsMock).toHaveBeenCalledWith('created-vendor', expect.objectContaining({ limit: 50 }));
+  });
+
+  it('keeps vendor self-profile scoped to the current session vendor', async () => {
+    renderVendorProfilePage(['/vendor/profile']);
+
+    expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getVendorStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor users on the admin vendor profile route', async () => {
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    expect(await screen.findByText('Admin access required')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Created Vendor' })).not.toBeInTheDocument();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(getFinanceProfileMock).not.toHaveBeenCalled();
+    expect(getVendorStatusMock).not.toHaveBeenCalled();
   });
 
   it('lets admins save active vendor status without a restriction reason', async () => {
