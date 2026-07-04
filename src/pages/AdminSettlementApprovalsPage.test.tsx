@@ -371,9 +371,13 @@ describe('Settlement Review queue cleanup', () => {
 
     await waitFor(() => expect(listSettlementApprovalsMock).toHaveBeenCalledWith('yalispor'));
     const queue = screen.getByLabelText('Settlement review queue');
-    const rows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
-    const settlementRow = rows[0];
-    expect(settlementRow).toBeTruthy();
+    const settlementRow = await waitFor(() => {
+      const rows = within(queue).getAllByRole('button').filter((element) => element.classList.contains('op-table-row'));
+      if (!rows[0]) {
+        throw new Error('Expected settlement queue rows to render');
+      }
+      return rows[0];
+    });
 
     await user.click(settlementRow);
 

@@ -427,11 +427,12 @@ describe('AdminScheduledSettlementsPage', () => {
     await screen.findAllByText('Yalı Spor');
     getSettlementScheduleDryRunMock.mockClear();
 
+    const runDateInput = screen.getByLabelText('Run date') as HTMLInputElement;
     const filterActions = within(screen.getByLabelText('Scheduled settlement filters')).getByLabelText('Scheduled settlement actions');
     await user.click(within(filterActions).getByRole('button', { name: 'Preview Schedule' }));
 
     await waitFor(() => expect(getSettlementScheduleDryRunMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runDate: '2026-07-03', vendorId: null }),
+      expect.objectContaining({ runDate: runDateInput.value, vendorId: null }),
     ));
     expect(await screen.findByText('Schedule preview updated.')).toBeInTheDocument();
   });
