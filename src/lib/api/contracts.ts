@@ -2414,6 +2414,7 @@ export type FinanceTransaction = {
   category: 'Payout' | 'Refund' | 'Invoice' | 'Adjustment';
   amount: string;
   status: FinanceTransactionStatus;
+  payoutStatus?: string;
   shopifyOrderNumber?: string;
   shopifyOrderId?: string;
   shopifyRefundId?: string;
@@ -2441,6 +2442,8 @@ export type FinanceTransaction = {
     status: PayoutBatchStatus;
     netAmount: string;
     createdAt: string;
+    paidAt?: string | null;
+    paymentReference?: string | null;
   } | null;
   settlementRefundAdjustments?: SettlementRefundAdjustmentReference[];
   splitFinanceSummary?: SplitFinanceSummary | null;

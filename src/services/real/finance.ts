@@ -46,6 +46,7 @@ type FinanceDashboardDto = {
     type: string;
     amount: string;
     status: string;
+    payoutStatus?: string;
     description: string | null;
     relatedOrderId: string | null;
     relatedOrderNumber: string | null;
@@ -233,6 +234,7 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       category: mapTransactionCategory(record.type),
       amount: formatCurrency(record.amount),
       status: mapRecordStatusLabel(record.status),
+      payoutStatus: record.payoutStatus ?? record.status,
       shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,

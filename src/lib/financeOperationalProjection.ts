@@ -96,6 +96,9 @@ export function getPayoutBatchStatusLabel(status?: string, audience: FinanceAudi
   if (status === 'execution_pending') {
     return 'Scheduled';
   }
+  if (status === 'paid') {
+    return 'Paid';
+  }
   if (status === 'paid_placeholder') {
     return audience === 'vendor' ? 'Pending review' : 'Payment evidence pending';
   }

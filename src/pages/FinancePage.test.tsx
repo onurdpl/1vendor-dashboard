@@ -379,6 +379,36 @@ function renderFinancePage(initialEntries = ['/finance']) {
   return result;
 }
 
+function renderFinanceOverviewPage(initialEntries = ['/finance']) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={initialEntries}>
+        <FinancePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function setVendorFinanceUser() {
+  setCurrentUser({
+    email: 'vendor@demo.com',
+    name: 'Demo Vendor',
+    role: 'vendor',
+    vendorAccess: ['demo-vendor-a'],
+    vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+    canSwitchVendors: false,
+    defaultVendorId: 'demo-vendor-a',
+  });
+}
+
 function FinanceNavigationHarness({ target }: { target: string }) {
   const navigate = useNavigate();
 
@@ -1698,6 +1728,169 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('İncelemede').length).toBeGreaterThan(0);
     expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
     expect(screen.queryByText('Included in draft review')).not.toBeInTheDocument();
+  });
+
+  it('shows paid vendor overview activity only from real Mark Paid evidence', async () => {
+    setVendorFinanceUser();
+    const paidAt = '2026-07-04T11:30:00Z';
+    const paidSale: FinanceTransaction = {
+      ...financeDashboard.transactions[0],
+      id: 'ledger-sale-paid',
+      status: 'Completed',
+      payoutStatus: 'paid',
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'settled',
+        payoutReady: false,
+        settledAt: paidAt,
+        note: 'Manual EFT payment was confirmed.',
+      },
+      payoutBatch: {
+        ...financeDashboard.transactions[0].payoutBatch!,
+        status: 'paid',
+        paidAt,
+        paymentReference: 'EFT-2026-07-04',
+      },
+    };
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      summary: {
+        ...financeDashboard.summary,
+        availableBalance: '$0.00',
+        payoutEstimate: '$0.00',
+        pendingPayouts: '$0.00',
+        payableBalance: '$0.00',
+        accruedBalance: '$0.00',
+        heldBalance: '$0.00',
+        netPayableAfterDebt: '$0.00',
+      },
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        eligibleRowCount: 0,
+        eligibleNetAmount: '$0.00',
+        blockedRowCount: 0,
+        netEligibleAfterDebtOffset: '$0.00',
+        latestBatch: {
+          ...financeDashboard.payoutBatchSummary!.latestBatch!,
+          status: 'paid',
+          paidAt,
+          paymentReference: 'EFT-2026-07-04',
+        },
+      },
+      transactions: [paidSale],
+    });
+
+    renderFinanceOverviewPage();
+
+    expect(await screen.findByText('Ödendi Jul 4, 2026')).toBeInTheDocument();
+    expect(screen.getAllByText('Ödendi').length).toBeGreaterThan(0);
+    expect(screen.getByText('Sipariş #1021 ödendi.')).toBeInTheDocument();
+    expect(screen.queryByText('$3,059.10')).not.toBeInTheDocument();
+  });
+
+  it('uses real payment evidence for vendor paid row status and paid date', async () => {
+    setVendorFinanceUser();
+    const paidAt = '2026-07-04T11:30:00Z';
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          id: 'ledger-sale-paid',
+          status: 'Completed',
+          payoutStatus: 'paid',
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'settled',
+            payoutReady: false,
+            settledAt: paidAt,
+            note: 'Manual EFT payment was confirmed.',
+          },
+          payoutBatch: {
+            ...financeDashboard.transactions[0].payoutBatch!,
+            status: 'paid',
+            paidAt,
+            paymentReference: 'EFT-2026-07-04',
+          },
+        },
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+
+    expect(await table.findByText('Ödendi')).toBeInTheDocument();
+    expect(table.getByText('Jul 4, 2026')).toBeInTheDocument();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Aç' }));
+    const panel = getSidePanel(container);
+    expect(panel.getAllByText('Ödendi').length).toBeGreaterThan(0);
+    expect(panel.getByText('Hareket Geçmişi')).toBeInTheDocument();
+  });
+
+  it('does not mark approved, prepared, review, or placeholder vendor rows paid without payment evidence', async () => {
+    setVendorFinanceUser();
+    const makeSaleRecord = (
+      id: string,
+      orderNumber: string,
+      payoutBatch: FinanceTransaction['payoutBatch'],
+      settlementReview: FinanceTransaction['settlement']['review'] = null,
+    ): FinanceTransaction => ({
+      ...financeDashboard.transactions[0],
+      id,
+      shopifyOrderNumber: orderNumber,
+      status: 'Recorded',
+      payoutStatus: 'pending',
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'payable',
+        payoutReady: true,
+        settledAt: null,
+        review: settlementReview,
+      },
+      payoutBatch,
+    });
+
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        makeSaleRecord('approved-settlement-only', '1031', null, {
+          approvalId: 'approval-1031',
+          approvalStatus: 'approved',
+          commissionInvoiceId: null,
+          commissionInvoiceStatus: null,
+          invoiceNo: null,
+          providerUuid: null,
+        }),
+        makeSaleRecord('prepared-batch', '1032', {
+          id: 'batch-prepared',
+          status: 'draft',
+          netAmount: '$100.00',
+          createdAt: '2026-07-01T09:00:00Z',
+        }),
+        makeSaleRecord('review-batch', '1033', {
+          id: 'batch-review',
+          status: 'review',
+          netAmount: '$100.00',
+          createdAt: '2026-07-01T09:00:00Z',
+        }),
+        makeSaleRecord('placeholder-batch', '1034', {
+          id: 'batch-placeholder',
+          status: 'paid_placeholder',
+          netAmount: '$100.00',
+          createdAt: '2026-07-01T09:00:00Z',
+        }),
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+
+    expect(await table.findByText('#1031')).toBeInTheDocument();
+    expect(table.queryByText('Ödendi')).not.toBeInTheDocument();
+    expect(table.getAllByText('Hazır')).toHaveLength(1);
+    expect(table.getAllByText('Beklemede')).toHaveLength(2);
+    expect(table.getAllByText('İncelemede')).toHaveLength(1);
   });
 
   it('communicates negative upcoming payout without enabling vendor actions', async () => {

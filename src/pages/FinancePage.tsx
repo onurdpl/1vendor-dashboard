@@ -521,6 +521,10 @@ function getTurkishWeekday(value: string) {
 }
 
 function getOverviewPaymentDate(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor') {
+  if (finance.payoutBatchSummary?.latestBatch?.status === 'paid' && finance.payoutBatchSummary.latestBatch.paidAt) {
+    const date = formatDateParts(finance.payoutBatchSummary.latestBatch.paidAt).date;
+    return audience === 'vendor' ? `Ödendi ${date}` : `Paid ${date}`;
+  }
   if (finance.payoutBatchSummary?.latestBatch?.createdAt) {
     const date = formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date;
     return audience === 'vendor' ? `Hazırlık başladı ${date}` : `Preparation started ${date}`;
@@ -535,9 +539,9 @@ function getOverviewPaymentDate(finance: NonNullable<Awaited<ReturnType<typeof g
 
 function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>, audience: 'admin' | 'vendor') {
   if (audience === 'vendor') {
-    const status = finance.payoutBatchSummary?.latestBatch?.status;
-    if (status) {
-      return getVendorPayoutBatchStatusLabel(status);
+    const latestBatch = finance.payoutBatchSummary?.latestBatch;
+    if (latestBatch?.status) {
+      return getVendorPayoutBatchStatusLabel(latestBatch.status, Boolean(latestBatch.paidAt));
     }
     if (finance.payoutBatchSummary?.latestBatch || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0) {
       return 'Beklemede';
@@ -553,9 +557,12 @@ function getOverviewPaymentStatus(finance: NonNullable<Awaited<ReturnType<typeof
   return 'Building balance';
 }
 
-function getVendorPayoutBatchStatusLabel(status: string) {
+function getVendorPayoutBatchStatusLabel(status: string, hasPaidEvidence = false) {
   if (status === 'approved') {
     return 'Hazır';
+  }
+  if (status === 'paid') {
+    return hasPaidEvidence ? 'Ödendi' : 'İncelemede';
   }
   if (status === 'cancelled') {
     return 'Beklemede';
@@ -585,8 +592,15 @@ function getRelativeActivityDay(value: string, audience: 'admin' | 'vendor' = 'a
   return audience === 'vendor' ? `${dayDifference} gün önce` : `${dayDifference} days ago`;
 }
 
+function getRecordActivityDate(record: FinanceTransaction) {
+  return hasReliablePaidEvidence(record) ? getPaymentEvidenceDate(record) ?? record.date : record.date;
+}
+
 function getRecentChangeTitle(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   if (audience === 'vendor') {
+    if (hasReliablePaidEvidence(record)) {
+      return 'Ödendi';
+    }
     if (record.category === 'Refund') {
       return 'İade kesildi';
     }
@@ -603,6 +617,9 @@ function getRecentChangeTitle(record: FinanceTransaction, audience: 'admin' | 'v
   }
   if (record.category === 'Refund') {
     return 'Refund deducted';
+  }
+  if (hasReliablePaidEvidence(record)) {
+    return 'Payment marked paid';
   }
   if (record.category === 'Payout') {
     return 'Payment preparation updated';
@@ -621,6 +638,9 @@ function getRecentChangeDetail(record: FinanceTransaction, audience: 'admin' | '
     ? audience === 'vendor' ? `Sipariş #${record.shopifyOrderNumber}` : `Order #${record.shopifyOrderNumber}`
     : audience === 'vendor' ? 'Mağaza hareketi' : 'Marketplace activity';
   if (audience === 'vendor') {
+    if (hasReliablePaidEvidence(record)) {
+      return `${orderLabel} ödendi.`;
+    }
     if (record.category === 'Refund') {
       return `${orderLabel} mevcut bakiyeyi ${record.amount} azalttı.`;
     }
@@ -638,6 +658,9 @@ function getRecentChangeDetail(record: FinanceTransaction, audience: 'admin' | '
   if (record.category === 'Refund') {
     return `${orderLabel} reduced the current balance by ${record.amount}.`;
   }
+  if (hasReliablePaidEvidence(record)) {
+    return `${orderLabel} was marked paid.`;
+  }
   if (record.category === 'Payout') {
     return `${record.amount} moved through payment preparation.`;
   }
@@ -654,6 +677,9 @@ function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof 
   const hasActivity = safeArray(finance.transactions).length > 0;
   const hasEligibleRows = (finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0;
   const hasPaymentPreparation = Boolean(finance.payoutBatchSummary?.latestBatch);
+  const hasPaidEvidence =
+    Boolean(finance.payoutBatchSummary?.latestBatch?.status === 'paid' && finance.payoutBatchSummary.latestBatch.paidAt) ||
+    safeArray(finance.transactions).some(hasReliablePaidEvidence);
   if (audience === 'vendor') {
     return [
       {
@@ -673,13 +699,13 @@ function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof 
       },
       {
         label: 'Ödeme Hazırlığı',
-        detail: hasPaymentPreparation ? 'Devam ediyor' : 'Başlamadı',
-        state: hasPaymentPreparation ? 'current' : 'upcoming',
+        detail: hasPaidEvidence ? 'Tamamlandı' : hasPaymentPreparation ? 'Devam ediyor' : 'Başlamadı',
+        state: hasPaidEvidence ? 'complete' : hasPaymentPreparation ? 'current' : 'upcoming',
       },
       {
         label: 'Ödendi',
-        detail: 'Ödeme kanıtı bekleniyor',
-        state: 'upcoming',
+        detail: hasPaidEvidence ? 'Ödeme kaydedildi' : 'Ödeme kanıtı bekleniyor',
+        state: hasPaidEvidence ? 'complete' : 'upcoming',
       },
     ] as const;
   }
@@ -701,13 +727,13 @@ function getPaymentProgressSteps(finance: NonNullable<Awaited<ReturnType<typeof 
     },
     {
       label: 'Payment preparation',
-      detail: hasPaymentPreparation ? 'In progress' : 'Not started',
-      state: hasPaymentPreparation ? 'current' : 'upcoming',
+      detail: hasPaidEvidence ? 'Complete' : hasPaymentPreparation ? 'In progress' : 'Not started',
+      state: hasPaidEvidence ? 'complete' : hasPaymentPreparation ? 'current' : 'upcoming',
     },
     {
       label: 'Paid',
-      detail: 'Payment evidence pending',
-      state: 'upcoming',
+      detail: hasPaidEvidence ? 'Payment recorded' : 'Payment evidence pending',
+      state: hasPaidEvidence ? 'complete' : 'upcoming',
     },
   ] as const;
 }
@@ -786,6 +812,7 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
   const splitRole = getSplitFinanceLedgerRole(record);
   const refundedSplitChildSaleBasis = isRefundedSplitChildSaleBasis(record);
   const settlementOffsetReviewPending = refundedSplitChildSaleBasis || isRefundDeductionSettlementReviewPending(record);
+  const paymentEvidenceDate = getPaymentEvidenceDate(record);
   const splitItems: Array<FinanceTimelineItem | null> = record.splitFinanceSummary
     ? [
         {
@@ -830,6 +857,14 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
           visibility: 'admin' as const,
         }
       : null,
+    hasReliablePaidEvidence(record)
+      ? {
+          label: 'Payment marked paid',
+          at: paymentEvidenceDate,
+          status: 'Paid',
+          detail: record.payoutBatch?.paymentReference ? `Payment reference ${record.payoutBatch.paymentReference}` : undefined,
+        }
+      : null,
   ];
 
   return items.filter((item): item is FinanceTimelineItem => Boolean(item));
@@ -860,8 +895,16 @@ function hasAdjustmentStatus(record: FinanceTransaction, statuses: Array<NonNull
   return getAdjustmentStatuses(record).some((status) => statuses.includes(status));
 }
 
+function getPaymentEvidenceDate(record: FinanceTransaction) {
+  return record.settlement?.settledAt ?? record.payoutBatch?.paidAt ?? null;
+}
+
 function hasReliablePaidEvidence(record: FinanceTransaction) {
-  return Boolean(record.settlement?.status === 'settled' || record.settlement?.settledAt);
+  return Boolean(
+    record.payoutStatus?.trim().toLowerCase() === 'paid' &&
+      record.settlement?.status === 'settled' &&
+      getPaymentEvidenceDate(record),
+  );
 }
 
 function isShippingFinanceScenario(record: FinanceTransaction) {
@@ -947,13 +990,14 @@ function getVendorFinanceScenario(record: FinanceTransaction): VendorFinanceScen
   }
 
   if (record.category === 'Payout') {
+    if (hasReliablePaidEvidence(record)) {
+      return buildVendorFinanceScenario('payout', 'Ödeme', 'Ödendi', 'İşlem Gerekmiyor');
+    }
     if (payoutBatchStatus === 'approved') {
       return buildVendorFinanceScenario('payout', 'Ödeme', 'Hazır', 'İşlem Gerekmiyor');
     }
     if (payoutBatchStatus === 'paid_placeholder') {
-      return hasReliablePaidEvidence(record)
-        ? buildVendorFinanceScenario('payout', 'Ödeme', 'Ödendi', 'İşlem Gerekmiyor')
-        : buildVendorFinanceScenario('payout', 'Ödeme', 'İncelemede', 'İnceleme Bekleniyor');
+      return buildVendorFinanceScenario('payout', 'Ödeme', 'İncelemede', 'İnceleme Bekleniyor');
     }
     return buildVendorFinanceScenario('payout', 'Ödeme', 'Beklemede', 'İşlem Gerekmiyor');
   }
@@ -974,9 +1018,7 @@ function getVendorFinanceScenario(record: FinanceTransaction): VendorFinanceScen
     return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Hazır', 'İşlem Gerekmiyor');
   }
   if (payoutBatchStatus === 'paid_placeholder') {
-    return hasReliablePaidEvidence(record)
-      ? buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Ödendi', 'İşlem Gerekmiyor')
-      : buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'İncelemede', 'İnceleme Bekleniyor');
+    return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'İncelemede', 'İnceleme Bekleniyor');
   }
   if (payoutBatchStatus === 'draft' || payoutBatchStatus === 'review' || payoutBatchStatus === 'execution_pending') {
     return buildVendorFinanceScenario('sale', 'Sipariş Geliri', 'Beklemede', 'İşlem Gerekmiyor');
@@ -1009,6 +1051,8 @@ function getVendorFinanceTimelineEvents(events: OperationalEventInput[], scenari
     const normalizedTitle = event.title.toLowerCase();
     const title = event.title === 'Refund impact captured' || scenario.kind === 'refund'
       ? 'İade'
+      : normalizedTitle.includes('payment marked paid')
+        ? 'Ödendi'
       : scenario.kind === 'adjustment'
         ? 'Bakiye düzeltmesi'
         : scenario.kind === 'shipping'
@@ -1931,7 +1975,7 @@ export function FinancePage() {
               <ol className="finance-recent-change-timeline">
                 {overviewRecentActivity.map((record) => (
                   <li key={record.id}>
-                    <time>{getRelativeActivityDay(record.date, financeAudience)}</time>
+                    <time>{getRelativeActivityDay(getRecordActivityDate(record), financeAudience)}</time>
                     <button
                       type="button"
                       onClick={() => {
@@ -2127,8 +2171,8 @@ export function FinancePage() {
                       {isRefundRecord(record) ? 'R' : 'S'}
                     </span>
                     <span>
-                      <strong>{formatDateParts(record.date).date}</strong>
-                      <small>{formatDateParts(record.date).time}</small>
+                      <strong>{formatDateParts(getRecordActivityDate(record)).date}</strong>
+                      <small>{formatDateParts(getRecordActivityDate(record)).time}</small>
                     </span>
                   </span>
                   <span className="finance-type-cell">
@@ -2224,7 +2268,7 @@ export function FinancePage() {
                   label={isVendorUser ? 'Son inceleme durumu' : 'Latest draft review'}
                   value={
                     financeView.payoutBatchSummary?.latestBatch
-                      ? `${isVendorUser ? getVendorPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status) : getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, financeAudience)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
+                      ? `${isVendorUser ? getVendorPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, Boolean(financeView.payoutBatchSummary.latestBatch.paidAt)) : getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, financeAudience)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
                       : isVendorUser
                         ? 'Planlanan inceleme yok'
                         : 'No draft prepared'

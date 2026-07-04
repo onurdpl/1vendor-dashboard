@@ -192,6 +192,8 @@ export type PayoutBatchReferenceDto = {
   status: PayoutBatchStatusDto;
   netAmount: string;
   createdAt: string;
+  paidAt: string | null;
+  paymentReference: string | null;
 };
 
 export type SettlementRefundAdjustmentReferenceDto = {
@@ -240,6 +242,7 @@ export type FinanceRecordDto = {
   type: string;
   amount: string;
   status: string;
+  payoutStatus: string;
   description: string | null;
   relatedOrderId: string | null;
   relatedOrderNumber: string | null;

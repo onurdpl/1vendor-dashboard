@@ -1153,6 +1153,8 @@ function mapPayoutBatchReference(line?: {
     status: string;
     netAmount: unknown;
     createdAt: Date;
+    paidAt?: Date | null;
+    paymentReference?: string | null;
   };
 }): PayoutBatchReferenceDto | null {
   if (!line) {
@@ -1164,6 +1166,8 @@ function mapPayoutBatchReference(line?: {
     status: mapPayoutBatchStatus(line.payoutBatch.status),
     netAmount: toAmountString(toNumber(line.payoutBatch.netAmount)),
     createdAt: line.payoutBatch.createdAt.toISOString(),
+    paidAt: toIso(line.payoutBatch.paidAt),
+    paymentReference: line.payoutBatch.paymentReference ?? null,
   };
 }
 
@@ -1466,6 +1470,8 @@ export async function getVendorFinanceDashboard(
                 status: true,
                 netAmount: true,
                 createdAt: true,
+                paidAt: true,
+                paymentReference: true,
               },
             },
           },
@@ -1645,6 +1651,10 @@ export async function getVendorFinanceDashboard(
   const balanceSummary = summaryEntries.reduce(
     (summary, entry) => {
       const type = normalizeType(entry.entryType);
+      const ledgerSettlementStatus = mapStatus(entry.settlementStatus);
+      if (ledgerSettlementStatus === 'settled') {
+        return summary;
+      }
       const settlement = buildSettlement(entry);
       if (type === 'sale') {
         const entryProfile = resolveCalculationProfile(entry, profile);
@@ -1763,6 +1773,7 @@ export async function getVendorFinanceDashboard(
       type,
       amount: toAmountString(toNumber(entry.amount)),
       status: mapStatus(entry.payoutStatus),
+      payoutStatus: mapStatus(entry.payoutStatus),
       description: entry.description,
       relatedOrderId: references.relatedOrderId,
       relatedOrderNumber: references.relatedOrderNumber,
