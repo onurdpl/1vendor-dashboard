@@ -27,6 +27,9 @@ import { setCurrentUser, setToken } from '../lib/auth';
 const getVendorShippingConfigMock = vi.fn<
   (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorShippingConfig>
 >();
+const getShippingProviderDiagnosticsMock = vi.fn();
+const updateVendorShippingConfigMock = vi.fn();
+const syncKargonomiWarehouseDetailsMock = vi.fn();
 const getFinanceProfileMock = vi.fn<
   (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorFinancialProfile>
 >();
@@ -77,6 +80,11 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     getVendorShippingConfig: (options?: { vendorId?: string | null; signal?: AbortSignal }) =>
       getVendorShippingConfigMock(options),
+    getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: string | null; signal?: AbortSignal }) =>
+      getShippingProviderDiagnosticsMock(options),
+    updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
+    syncKargonomiWarehouseDetails: (vendorId: string, warehouseId: string) =>
+      syncKargonomiWarehouseDetailsMock(vendorId, warehouseId),
   };
 });
 
@@ -164,6 +172,33 @@ const shippingConfig: VendorShippingConfig = {
     navlungoReturnRecipientDistrict: 'Selcuklu',
   },
 };
+
+function shippingProviderDiagnostics() {
+  return {
+    provider: 'kargonomi',
+    supportedProviders: ['kargonomi'],
+    executionReady: true,
+    sandboxModeEnabled: false,
+    shippingExecutionEnabled: true,
+    providerSelected: true,
+    providerEnabled: true,
+    webhookIngestEnabled: false,
+    baseUrlConfigured: true,
+    apiKeyConfigured: true,
+    cargoIntegrationIdConfigured: false,
+    warehouseIdConfigured: true,
+    defaultDesiConfigured: true,
+    packageTypeUsed: 'box',
+    notificationUrlConfigured: false,
+    webhookRouteImplemented: true,
+    receiverAddressAvailability: 'confirmed_required',
+    dummyKargoSupport: 'not_implemented',
+    statusSyncSupport: 'not_implemented',
+    missing: [],
+    deprecatedEnvFallbacks: [],
+    warnings: [],
+  };
+}
 
 const financeProfile: VendorFinancialProfile = {
   vendorId: 'demo-vendor-a',
@@ -360,6 +395,37 @@ describe('VendorProfilePage', () => {
     });
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue(shippingConfig);
+    getShippingProviderDiagnosticsMock.mockReset();
+    getShippingProviderDiagnosticsMock.mockResolvedValue(shippingProviderDiagnostics());
+    updateVendorShippingConfigMock.mockReset();
+    updateVendorShippingConfigMock.mockImplementation((vendorId: string, input: Partial<VendorShippingConfig>) =>
+      Promise.resolve({
+        ...shippingConfig,
+        ...input,
+        vendorId,
+        preferredProvider: input.preferredProvider ?? 'kargonomi',
+        defaultDesi: String(input.defaultDesi ?? shippingConfig.defaultDesi),
+        shippingVatPercent: String(input.shippingVatPercent ?? shippingConfig.shippingVatPercent),
+        updatedAt: '2026-06-30T12:30:00Z',
+      }),
+    );
+    syncKargonomiWarehouseDetailsMock.mockReset();
+    syncKargonomiWarehouseDetailsMock.mockResolvedValue({
+      ok: true,
+      provider: 'KARGONOMI',
+      mode: 'warehouse_detail_sync',
+      vendorId: 'demo-vendor-a',
+      warehouseId: '55574',
+      writesPerformed: true,
+      warehouse: {
+        contactNamePresent: true,
+        phonePresent: true,
+        addressPresent: true,
+        stateIdPresent: true,
+        cityIdPresent: true,
+      },
+      syncedConfig: shippingConfig,
+    });
     getFinanceDashboardMock.mockReset();
     getFinanceDashboardMock.mockResolvedValue({ profile: financeProfile });
     getFinanceProfileMock.mockReset();
@@ -893,6 +959,11 @@ describe('VendorProfilePage', () => {
     expect(getVendorBillingProfileMock).toHaveBeenCalledWith('created-vendor', expect.any(Object));
     expect(getVendorStatusMock).toHaveBeenCalledWith('created-vendor', expect.any(Object));
     expect(listVendorProfileAuditLogsMock).toHaveBeenCalledWith('created-vendor', expect.objectContaining({ limit: 50 }));
+    expect(await screen.findByLabelText('Shipping provider configuration editor')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'created-vendor' })),
+    );
   });
 
   it('keeps vendor self-profile scoped to the current session vendor', async () => {
@@ -902,6 +973,122 @@ describe('VendorProfilePage', () => {
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(getVendorStatusMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('saves admin shipping setup for the requested route vendor', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'created-vendor',
+      vendorName: 'Created Vendor',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    const warehouseInput = await screen.findByLabelText('Warehouse ID');
+    await user.clear(warehouseInput);
+    await user.type(warehouseInput, '55575');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'created-vendor',
+        expect.objectContaining({
+          preferredProvider: 'kargonomi',
+          defaultWarehouseId: '55575',
+        }),
+      ),
+    );
+    expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
+  });
+
+  it('shows a safe shipping setup error when admin save fails', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'created-vendor',
+      vendorName: 'Created Vendor',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+    updateVendorShippingConfigMock.mockRejectedValueOnce(new Error('Shipping configuration could not be saved.'));
+
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    expect(await screen.findByLabelText('Shipping provider configuration editor')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    expect(await screen.findByText('Shipping configuration could not be saved.')).toBeInTheDocument();
+  });
+
+  it('lets admins edit shipping setup while a newly provisioned vendor is restricted', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'created-vendor',
+      vendorName: 'Created Vendor',
+      status: 'inactive',
+      restricted: true,
+      restrictionReason: 'Operational review',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    await waitFor(() => expect(screen.getAllByText('Operational review').length).toBeGreaterThan(0));
+    const warehouseInput = await screen.findByLabelText('Warehouse ID');
+    await user.clear(warehouseInput);
+    await user.type(warehouseInput, '55576');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'created-vendor',
+        expect.objectContaining({
+          defaultWarehouseId: '55576',
+        }),
+      ),
+    );
   });
 
   it('rejects vendor users on the admin vendor profile route', async () => {

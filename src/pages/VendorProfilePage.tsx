@@ -11,6 +11,7 @@ import {
   SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
+import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEditor';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
@@ -3614,6 +3615,16 @@ export function VendorProfilePage() {
                 log={latestShippingAudit}
                 onViewChanges={handleViewProfileChanges}
               />
+              {isAdminVendorRoute ? (
+                <VendorShippingConfigEditor
+                  vendorId={currentVendor.vendorId}
+                  vendorName={profileVendorName}
+                  shippingConfig={shippingConfig}
+                  enabled={canLoadProfile && isAdmin}
+                  onSaved={() => void shippingQuery.refetch()}
+                  onSynced={() => void shippingQuery.refetch()}
+                />
+              ) : null}
             </>
           )}
         </OperationalSection>

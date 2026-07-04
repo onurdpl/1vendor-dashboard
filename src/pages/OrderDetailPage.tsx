@@ -5,6 +5,7 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { AllocationSplitRejectModal } from '../components/AllocationSplitRejectModal';
 import { EmptyStatePanel, SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
+import { VendorShippingConfigEditor } from '../components/VendorShippingConfigEditor';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
@@ -12,7 +13,6 @@ import {
   createReturnShipmentLabel,
   createShipmentExecution,
   getOrder,
-  getShippingProviderDiagnostics,
   getVendorShippingConfig,
   probeShopifyReturnLabelUpload,
   probeTryOtoReturnAwbPrint,
@@ -24,17 +24,13 @@ import {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
-  syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
-  updateVendorShippingConfig,
   type AllocationSplitExecutionResponse,
   type OrderDetail,
   type ShipmentCustomerField,
   type ShipmentCustomerOverrides,
   type ShipmentExecution,
-  type ShippingProvider,
   type VendorShippingConfig,
-  type VendorShippingConfigUpdate,
 } from '../features/orders/api';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -1045,164 +1041,10 @@ function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fa
   return fallbackCarrier?.trim() || (shipment ? formatShippingProviderName(shipment.provider) : '');
 }
 
-type ShippingConfigDraftProvider = ShippingProvider | 'navlungo';
-
-type ShippingConfigDraft = {
-  preferredProvider: ShippingConfigDraftProvider;
-  cargoIntegrationId: string;
-  defaultWarehouseId: string;
-  defaultDesi: string;
-  packageType: 'box' | 'document';
-  tryOtoPickupLocationCode: string;
-  tryOtoOriginCity: string;
-  kargonomiShippingProviderId: string;
-  kargonomiBuyerStateId: string;
-  kargonomiBuyerCityId: string;
-  kargonomiReturnReceiverName: string;
-  kargonomiReturnReceiverPhone: string;
-  kargonomiReturnReceiverAddress: string;
-  navlungoSenderAddressId: string;
-  navlungoSenderName: string;
-  navlungoSenderPhone: string;
-  navlungoSenderEmail: string;
-  navlungoSenderAddress: string;
-  navlungoSenderCountry: string;
-  navlungoSenderCity: string;
-  navlungoSenderDistrict: string;
-  navlungoSenderPostCode: string;
-  navlungoReturnRecipientAddressId: string;
-  navlungoReturnRecipientName: string;
-  navlungoReturnRecipientPhone: string;
-  navlungoReturnRecipientEmail: string;
-  navlungoReturnRecipientAddress: string;
-  navlungoReturnRecipientCountry: string;
-  navlungoReturnRecipientCity: string;
-  navlungoReturnRecipientDistrict: string;
-  navlungoReturnRecipientPostCode: string;
-  navlungoBarcodeFormat: string;
-  navlungoCarrierId: string;
-};
-
 const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readPackageType(config?: VendorShippingConfig | null): 'box' | 'document' {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.packageType ?? metadata.package_type;
-  return raw === 'document' ? 'document' : 'box';
-}
-
-function readTryOtoPickupLocationCode(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.tryOtoPickupLocationCode ?? metadata.pickupLocationCode ?? metadata.pickup_location_code;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readTryOtoOriginCity(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.tryOtoOriginCity ?? metadata.originCity ?? metadata.origin_city ?? metadata.pickupCity ?? metadata.pickup_city;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readKargonomiBuyerStateId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.kargonomiBuyerStateId ?? metadata.buyerStateId ?? metadata.buyer_state_id;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readKargonomiShippingProviderId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw =
-    metadata.kargonomiShippingProviderId ??
-    metadata.kargonomi_shipping_provider_id ??
-    metadata.shippingProviderId ??
-    metadata.shipping_provider_id;
-  return typeof raw === 'string' ? raw : typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : '';
-}
-
-function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.kargonomiBuyerCityId ?? metadata.buyerCityId ?? metadata.buyer_city_id;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function getKargonomiDefaultWarehouse(config?: VendorShippingConfig | null) {
-  const warehouses = config?.warehouses ?? [];
-  return (
-    warehouses.find((warehouse) => warehouse.provider === 'kargonomi' && warehouse.warehouseId === config?.defaultWarehouseId) ??
-    warehouses.find((warehouse) => warehouse.provider === 'kargonomi' && warehouse.isDefault) ??
-    warehouses.find((warehouse) => warehouse.provider === 'kargonomi') ??
-    null
-  );
-}
-
-function readKargonomiReturnReceiverField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  for (const key of keys) {
-    const raw = metadata[key];
-    if (typeof raw === 'string' && raw.trim()) {
-      return raw;
-    }
-  }
-  return fallback ?? '';
-}
-
-function readNavlungoSenderAddressId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw =
-    metadata.navlungoSenderAddressId ??
-    metadata.senderAddressId ??
-    metadata.sender_address_id ??
-    (config?.preferredProvider === 'navlungo' ? config.defaultWarehouseId : null);
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readNavlungoReturnRecipientAddressId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw =
-    metadata.navlungoReturnRecipientAddressId ??
-    metadata.returnRecipientAddressId ??
-    metadata.return_recipient_address_id ??
-    metadata.navlungoReturnAddressId ??
-    metadata.returnAddressId;
-  return typeof raw === 'string' ? raw : '';
-}
-
-function readNavlungoBarcodeFormat(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.navlungoBarcodeFormat ?? metadata.barcodeFormat ?? metadata.barcode_format;
-  return typeof raw === 'string' && raw.trim() ? raw : 'pdf-A6';
-}
-
-function readNavlungoCarrierId(config?: VendorShippingConfig | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  const raw = metadata.navlungoCarrierId ?? metadata.carrierId ?? metadata.carrier_id;
-  return typeof raw === 'string' ? raw : '9';
-}
-
-function readNavlungoSenderField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  for (const key of keys) {
-    const raw = metadata[key];
-    if (typeof raw === 'string') {
-      return raw;
-    }
-  }
-  return fallback ?? '';
-}
-
-function readNavlungoReturnRecipientField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
-  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
-  for (const key of keys) {
-    const raw = metadata[key];
-    if (typeof raw === 'string') {
-      return raw;
-    }
-  }
-  return fallback ?? '';
 }
 
 function buildSupportCorrelationId(orderId: string, shipmentId?: string | null) {
@@ -1289,284 +1131,6 @@ function buildDiagnosticsCopyText(title: string, entries: Array<[string, unknown
     title,
     ...entries.map(([label, value]) => `${label}: ${compactDiagnosticsValue(value)}`),
   ].join('\n');
-}
-
-function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
-  const preferredProvider: ShippingConfigDraftProvider = 'kargonomi';
-
-  return {
-    preferredProvider,
-    cargoIntegrationId: config?.cargoIntegrationId ?? '',
-    defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
-    defaultDesi: config?.defaultDesi ?? '3.00',
-    packageType: readPackageType(config),
-    tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
-    tryOtoOriginCity: readTryOtoOriginCity(config),
-    kargonomiShippingProviderId: readKargonomiShippingProviderId(config),
-    kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
-    kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
-    kargonomiReturnReceiverName: readKargonomiReturnReceiverField(
-      config,
-      ['kargonomiReturnReceiverName', 'returnReceiverName'],
-      config?.warehouses.find((warehouse) => warehouse.isDefault)?.name ?? config?.warehouses[0]?.name,
-    ),
-    kargonomiReturnReceiverPhone: readKargonomiReturnReceiverField(config, [
-      'kargonomiReturnReceiverPhone',
-      'returnReceiverPhone',
-      'receiverPhone',
-      'warehousePhone',
-      'phone',
-    ]),
-    kargonomiReturnReceiverAddress: readKargonomiReturnReceiverField(
-      config,
-      ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress'],
-      config?.warehouses.find((warehouse) => warehouse.isDefault)?.address ?? config?.warehouses[0]?.address,
-    ),
-    navlungoSenderAddressId: readNavlungoSenderAddressId(config) || '55574',
-    navlungoSenderName: readNavlungoSenderField(config, ['navlungoSenderName', 'senderName', 'sender_name'], config?.warehouses.find((warehouse) => warehouse.isDefault)?.name ?? config?.warehouses[0]?.name),
-    navlungoSenderPhone: readNavlungoSenderField(config, ['navlungoSenderPhone', 'senderPhone', 'sender_phone']),
-    navlungoSenderEmail: readNavlungoSenderField(config, ['navlungoSenderEmail', 'senderEmail', 'sender_email']),
-    navlungoSenderAddress: readNavlungoSenderField(config, ['navlungoSenderAddress', 'senderAddress', 'sender_address'], config?.warehouses.find((warehouse) => warehouse.isDefault)?.address ?? config?.warehouses[0]?.address),
-    navlungoSenderCountry: readNavlungoSenderField(config, ['navlungoSenderCountry', 'senderCountry', 'sender_country'], 'tr'),
-    navlungoSenderCity: readNavlungoSenderField(config, ['navlungoSenderCity', 'senderCity', 'sender_city']),
-    navlungoSenderDistrict: readNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
-    navlungoSenderPostCode: readNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']),
-    navlungoReturnRecipientAddressId: readNavlungoReturnRecipientAddressId(config),
-    navlungoReturnRecipientName: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientName', 'returnRecipientName', 'return_recipient_name']),
-    navlungoReturnRecipientPhone: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPhone', 'returnRecipientPhone', 'return_recipient_phone']),
-    navlungoReturnRecipientEmail: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientEmail', 'returnRecipientEmail', 'return_recipient_email']),
-    navlungoReturnRecipientAddress: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientAddress', 'returnRecipientAddress', 'return_recipient_address']),
-    navlungoReturnRecipientCountry: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCountry', 'returnRecipientCountry', 'return_recipient_country'], 'tr'),
-    navlungoReturnRecipientCity: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCity', 'returnRecipientCity', 'return_recipient_city']),
-    navlungoReturnRecipientDistrict: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientDistrict', 'returnRecipientDistrict', 'return_recipient_district']),
-    navlungoReturnRecipientPostCode: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPostCode', 'returnRecipientPostCode', 'return_recipient_post_code']),
-    navlungoBarcodeFormat: readNavlungoBarcodeFormat(config),
-    navlungoCarrierId: readNavlungoCarrierId(config),
-  };
-}
-
-function validateShippingConfigDraft(draft: ShippingConfigDraft) {
-  const errors: string[] = [];
-
-  if (!draft.preferredProvider) {
-    errors.push('Provider is required.');
-  }
-  if (
-    draft.preferredProvider === 'navlungo' &&
-    draft.navlungoSenderAddressId.trim() &&
-    !/^\d+$/.test(draft.navlungoSenderAddressId.trim())
-  ) {
-    errors.push('Navlungo sender address ID must be numeric.');
-  }
-  if (
-    draft.preferredProvider === 'navlungo' &&
-    draft.navlungoReturnRecipientAddressId.trim() &&
-    !/^\d+$/.test(draft.navlungoReturnRecipientAddressId.trim())
-  ) {
-    errors.push('Navlungo return recipient address ID must be numeric.');
-  }
-  if (draft.preferredProvider === 'navlungo' && !/^\d+$/.test(draft.navlungoCarrierId.trim())) {
-    errors.push('Navlungo carrier ID must be numeric.');
-  }
-  if (draft.preferredProvider === 'navlungo') {
-    [
-      ['sender address ID', draft.navlungoSenderAddressId],
-    ].forEach(([label, value]) => {
-      if (!String(value).trim()) {
-        errors.push(`Navlungo ${label} is required.`);
-      }
-    });
-  }
-  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoPickupLocationCode.trim()) {
-    errors.push('Try OTO pickup location code is required.');
-  }
-  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoOriginCity.trim()) {
-    errors.push('Try OTO origin city is required.');
-  }
-  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.defaultWarehouseId.trim())) {
-    errors.push('Kargonomi warehouse ID must be numeric.');
-  }
-  if (
-    draft.preferredProvider === 'kargonomi' &&
-    draft.kargonomiShippingProviderId.trim() &&
-    !/^-?\d+$/.test(draft.kargonomiShippingProviderId.trim())
-  ) {
-    errors.push('Kargonomi carrier/provider ID must be numeric, or -1 for automatic selection.');
-  }
-  if (
-    draft.preferredProvider === 'kargonomi' &&
-    draft.kargonomiBuyerStateId.trim() &&
-    !/^\d+$/.test(draft.kargonomiBuyerStateId.trim())
-  ) {
-    errors.push('Fallback Kargonomi buyer state ID must be numeric.');
-  }
-  if (
-    draft.preferredProvider === 'kargonomi' &&
-    draft.kargonomiBuyerCityId.trim() &&
-    !/^\d+$/.test(draft.kargonomiBuyerCityId.trim())
-  ) {
-    errors.push('Fallback Kargonomi buyer city ID must be numeric.');
-  }
-  const defaultDesi = Number(draft.defaultDesi);
-  if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
-    errors.push('Default desi must be greater than zero.');
-  }
-
-  return errors;
-}
-
-function buildShippingConfigUpdate(
-  draft: ShippingConfigDraft,
-  currentConfig?: VendorShippingConfig | null,
-): VendorShippingConfigUpdate {
-  const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
-  const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
-    ?? currentConfig?.warehouses[0];
-  const baseUpdate = {
-    preferredProvider: draft.preferredProvider,
-    shippingEnabled: currentConfig?.shippingEnabled ?? true,
-    defaultDesi: Number(draft.defaultDesi),
-    shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
-  };
-
-  if (draft.preferredProvider === 'try_oto') {
-    return {
-      ...baseUpdate,
-      cargoIntegrationId: null,
-      defaultWarehouseId: null,
-      providerMetadata: {
-        ...metadata,
-        tryOtoPickupLocationCode: draft.tryOtoPickupLocationCode.trim(),
-        tryOtoOriginCity: draft.tryOtoOriginCity.trim(),
-      },
-      warehouses: [],
-    };
-  }
-
-  if (draft.preferredProvider === 'kargonomi') {
-    const selectedWarehouseId = draft.defaultWarehouseId.trim();
-    const selectedWarehouse =
-      currentConfig?.warehouses.find(
-        (warehouse) => warehouse.provider === 'kargonomi' && warehouse.warehouseId === selectedWarehouseId,
-      ) ?? existingDefaultWarehouse;
-    const providerMetadata = { ...metadata };
-    delete providerMetadata.kargonomiBuyerStateId;
-    delete providerMetadata.kargonomiBuyerCityId;
-    delete providerMetadata.buyerStateId;
-    delete providerMetadata.buyerCityId;
-    delete providerMetadata.buyer_state_id;
-    delete providerMetadata.buyer_city_id;
-    delete providerMetadata.kargonomiShippingProviderId;
-    delete providerMetadata.kargonomi_shipping_provider_id;
-    delete providerMetadata.shippingProviderId;
-    delete providerMetadata.shipping_provider_id;
-    delete providerMetadata.kargonomiReturnReceiverName;
-    delete providerMetadata.kargonomiReturnReceiverPhone;
-    delete providerMetadata.kargonomiReturnReceiverAddress;
-    const kargonomiShippingProviderId = draft.kargonomiShippingProviderId.trim();
-    const fallbackBuyerStateId = draft.kargonomiBuyerStateId.trim();
-    const fallbackBuyerCityId = draft.kargonomiBuyerCityId.trim();
-    const returnReceiverName = draft.kargonomiReturnReceiverName.trim();
-    const returnReceiverPhone = draft.kargonomiReturnReceiverPhone.trim();
-    const returnReceiverAddress = draft.kargonomiReturnReceiverAddress.trim();
-    if (kargonomiShippingProviderId) {
-      providerMetadata.kargonomiShippingProviderId = kargonomiShippingProviderId;
-    }
-    if (fallbackBuyerStateId) {
-      providerMetadata.kargonomiBuyerStateId = fallbackBuyerStateId;
-    }
-    if (fallbackBuyerCityId) {
-      providerMetadata.kargonomiBuyerCityId = fallbackBuyerCityId;
-    }
-    if (returnReceiverName) {
-      providerMetadata.kargonomiReturnReceiverName = returnReceiverName;
-    }
-    if (returnReceiverPhone) {
-      providerMetadata.kargonomiReturnReceiverPhone = returnReceiverPhone;
-    }
-    if (returnReceiverAddress) {
-      providerMetadata.kargonomiReturnReceiverAddress = returnReceiverAddress;
-    }
-
-    return {
-      ...baseUpdate,
-      cargoIntegrationId: null,
-      defaultWarehouseId: selectedWarehouseId,
-      providerMetadata,
-      warehouses: [
-        {
-          warehouseId: selectedWarehouseId,
-          name: selectedWarehouse?.name ?? 'Default warehouse',
-          address: selectedWarehouse?.address ?? null,
-          isDefault: true,
-          provider: 'kargonomi',
-        },
-      ],
-    };
-  }
-
-  if (draft.preferredProvider === 'navlungo') {
-    const providerMetadata = { ...metadata };
-    const senderAddressId = draft.navlungoSenderAddressId.trim();
-    const returnRecipientAddressId = draft.navlungoReturnRecipientAddressId.trim();
-    providerMetadata.navlungoSenderAddressId = senderAddressId;
-    providerMetadata.navlungoReturnRecipientAddressId = returnRecipientAddressId;
-    providerMetadata.navlungoSenderName = draft.navlungoSenderName.trim();
-    providerMetadata.navlungoSenderPhone = draft.navlungoSenderPhone.trim();
-    providerMetadata.navlungoSenderEmail = draft.navlungoSenderEmail.trim();
-    providerMetadata.navlungoSenderAddress = draft.navlungoSenderAddress.trim();
-    providerMetadata.navlungoSenderCountry = draft.navlungoSenderCountry.trim();
-    providerMetadata.navlungoSenderCity = draft.navlungoSenderCity.trim();
-    providerMetadata.navlungoSenderDistrict = draft.navlungoSenderDistrict.trim();
-    providerMetadata.navlungoSenderPostCode = draft.navlungoSenderPostCode.trim();
-    providerMetadata.navlungoReturnRecipientName = draft.navlungoReturnRecipientName.trim();
-    providerMetadata.navlungoReturnRecipientPhone = draft.navlungoReturnRecipientPhone.trim();
-    providerMetadata.navlungoReturnRecipientEmail = draft.navlungoReturnRecipientEmail.trim();
-    providerMetadata.navlungoReturnRecipientAddress = draft.navlungoReturnRecipientAddress.trim();
-    providerMetadata.navlungoReturnRecipientCountry = draft.navlungoReturnRecipientCountry.trim();
-    providerMetadata.navlungoReturnRecipientCity = draft.navlungoReturnRecipientCity.trim();
-    providerMetadata.navlungoReturnRecipientDistrict = draft.navlungoReturnRecipientDistrict.trim();
-    providerMetadata.navlungoReturnRecipientPostCode = draft.navlungoReturnRecipientPostCode.trim();
-    providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
-    providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
-
-    return {
-      ...baseUpdate,
-      cargoIntegrationId: null,
-      defaultWarehouseId: senderAddressId || null,
-      providerMetadata,
-      warehouses: senderAddressId
-        ? [
-            {
-              warehouseId: senderAddressId,
-              name: existingDefaultWarehouse?.name || 'Navlungo sender address',
-              address: existingDefaultWarehouse?.address || null,
-              isDefault: true,
-              provider: 'navlungo',
-            },
-          ]
-        : [],
-    };
-  }
-
-  return {
-    ...baseUpdate,
-    cargoIntegrationId: draft.cargoIntegrationId.trim(),
-    defaultWarehouseId: draft.defaultWarehouseId.trim(),
-    providerMetadata: {
-      ...metadata,
-      packageType: draft.packageType,
-    },
-    warehouses: [
-      {
-        warehouseId: draft.defaultWarehouseId.trim(),
-        name: existingDefaultWarehouse?.name ?? 'Default warehouse',
-        address: existingDefaultWarehouse?.address ?? null,
-        isDefault: true,
-        provider: draft.preferredProvider,
-      },
-    ],
-  };
 }
 
 function getInitialsLabel(value: string) {
@@ -1818,9 +1382,6 @@ export function OrderDetailPage() {
   const [copiedDiagnostics, setCopiedDiagnostics] = useState<string | null>(null);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
-  const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
-  const [shippingConfigDraftReady, setShippingConfigDraftReady] = useState(false);
-  const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [kargonomiLookupDiagnostics, setKargonomiLookupDiagnostics] = useState<KargonomiLocationLookupDiagnostics | null>(null);
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
   const [navlungoAuthDiagnostics, setNavlungoAuthDiagnostics] = useState<NavlungoAuthDiagnostics | null>(null);
@@ -1871,14 +1432,6 @@ export function OrderDetailPage() {
     ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId) && Boolean(order),
-    },
-  );
-  const diagnosticsProvider = shippingConfigDraft.preferredProvider;
-  const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
-    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider, signal }),
-    {
-      enabled: authContextReady && isAdmin && Boolean(order) && shippingConfigDraftReady,
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
@@ -2075,51 +1628,6 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
-  const { mutateAsync: updateShippingConfigMutation, isPending: isSavingShippingConfig } = useMutationAction(
-    async (payload: VendorShippingConfigUpdate) => updateVendorShippingConfig(currentVendor.vendorId, payload),
-    {
-      invalidateQueryKeys: [
-        queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-        queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
-      ],
-      onSuccess: (savedConfig, submittedConfig) => {
-        queryClient.setQueryData(
-          queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-          savedConfig,
-        );
-        if (!submittedConfig.preferredProvider || savedConfig.preferredProvider === submittedConfig.preferredProvider) {
-          setShippingConfigDraft(buildShippingConfigDraft(savedConfig));
-        }
-        setShippingConfigFeedback({ tone: 'success', message: 'Shipping provider configuration saved.' });
-        void refetchShippingProviderDiagnostics();
-      },
-      onError: (error) => {
-        const message = error instanceof Error ? error.message : 'Shipping provider configuration could not be saved.';
-        setShippingConfigFeedback({ tone: 'error', message });
-      },
-    },
-  );
-  const { mutateAsync: syncKargonomiWarehouseMutation, isPending: isSyncingKargonomiWarehouse } = useMutationAction(
-    async (warehouseId: string) => syncKargonomiWarehouseDetails(currentVendor.vendorId, warehouseId),
-    {
-      invalidateQueryKeys: [
-        queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-        queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
-      ],
-      onSuccess: (result) => {
-        queryClient.setQueryData(
-          queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-          result.syncedConfig,
-        );
-        setShippingConfigDraft(buildShippingConfigDraft(result.syncedConfig));
-        setShippingConfigFeedback({ tone: 'success', message: 'Kargonomi warehouse details synced.' });
-      },
-      onError: (error) => {
-        const message = error instanceof Error ? error.message : 'Kargonomi warehouse details could not be synced.';
-        setShippingConfigFeedback({ tone: 'error', message });
-      },
-    },
-  );
   const { mutateAsync: runKargonomiLookupDiagnosticsMutation, isPending: isRunningKargonomiLookupDiagnostics } = useMutationAction(
     async () => runtimeServices.diagnostics.kargonomiLocationLookup(),
     {
@@ -2197,40 +1705,9 @@ export function OrderDetailPage() {
     },
   );
 
-  useEffect(() => {
-    setShippingConfigDraftReady(false);
-  }, [currentVendor.vendorId]);
-
-  useEffect(() => {
-    if (vendorShippingConfig) {
-      setShippingConfigDraft(buildShippingConfigDraft(vendorShippingConfig));
-      setShippingConfigDraftReady(true);
-    }
-  }, [vendorShippingConfig]);
-
   function getLineItemImageAlt(item: OrderDetail['lineItems'][number]) {
     return item.name ? `${item.name} product image` : item.sku ? `${item.sku} product image` : 'Product image';
   }
-
-  useEffect(() => {
-    if (shippingConfigDraft.preferredProvider !== 'kargonomi') {
-      setKargonomiLookupDiagnostics(null);
-      setKargonomiLookupError(null);
-    }
-    if (shippingConfigDraft.preferredProvider !== 'navlungo') {
-      setNavlungoAuthDiagnostics(null);
-      setNavlungoAuthError(null);
-      setNavlungoCarrierDiagnostics(null);
-      setNavlungoCarrierError(null);
-      setNavlungoCreatePostProbeConfirmed(false);
-      setNavlungoCreatePostProbeDiagnostics(null);
-      setNavlungoCreatePostProbeError(null);
-      setNavlungoCheckPostProbeDiagnostics(null);
-      setNavlungoCheckPostProbeError(null);
-      setNavlungoBarcodeProbeDiagnostics(null);
-      setNavlungoBarcodeProbeError(null);
-    }
-  }, [shippingConfigDraft.preferredProvider]);
 
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
@@ -4399,17 +3876,6 @@ export function OrderDetailPage() {
   );
   const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
 
-  const handleSaveShippingConfig = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const validationErrors = validateShippingConfigDraft(shippingConfigDraft);
-    if (validationErrors.length) {
-      setShippingConfigFeedback({ tone: 'error', message: validationErrors.join(' ') });
-      return;
-    }
-
-    void updateShippingConfigMutation(buildShippingConfigUpdate(shippingConfigDraft, vendorShippingConfig));
-  };
-
   const handleCopyDiagnostics = (kind: 'diagnostics' | 'shipment-summary' | 'return-summary' | 'shipment' | 'return' | 'shopify') => {
     if (!order) {
       return;
@@ -5417,612 +4883,200 @@ export function OrderDetailPage() {
       : null,
   ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string; href: string | null; action: string | null }>;
 
-  const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
-  const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
-  const isNavlungoConfigDraft = shippingConfigDraft.preferredProvider === 'navlungo';
-  const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
-  const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
-  const kargonomiShippingProviderId = readKargonomiShippingProviderId(vendorShippingConfig);
-  const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
-  const kargonomiBuyerCityId = readKargonomiBuyerCityId(vendorShippingConfig);
-  const kargonomiDefaultWarehouse = getKargonomiDefaultWarehouse(vendorShippingConfig);
-  const kargonomiWarehouseSyncStatus = kargonomiDefaultWarehouse?.syncStatus;
-  const kargonomiWarehouseIdForSync = kargonomiDefaultWarehouse?.warehouseId ?? '';
-  const canSyncKargonomiWarehouse = isKargonomiConfigDraft && /^\d+$/.test(kargonomiWarehouseIdForSync);
-  const renderKargonomiReadinessChip = (label: string, present: boolean | null | undefined) => (
-    <span className={`shipping-config-status-chip ${present ? 'present' : 'missing'}`}>
-      {label} {present ? 'present' : 'missing'}
-    </span>
-  );
-  const shippingProviderSelectField = (
-    <label className="field">
-      <span>Provider</span>
-      <select
-        value={shippingConfigDraft.preferredProvider}
-        onChange={(event) => {
-          const preferredProvider = event.target.value as ShippingConfigDraftProvider;
-          setShippingConfigDraft((current) => ({
-            ...current,
-            preferredProvider,
-          }));
-          setShippingConfigDraftReady(true);
-        }}
-      >
-        <option value="kargonomi">Kargonomi</option>
-      </select>
-    </label>
-  );
-  const shippingDefaultDesiField = (
-    <label className="field">
-      <span>Default desi</span>
-      <input
-        type="number"
-        min="0.1"
-        step="0.1"
-        value={shippingConfigDraft.defaultDesi}
-        onChange={(event) =>
-          setShippingConfigDraft((current) => ({
-            ...current,
-            defaultDesi: event.target.value,
-          }))
-        }
-      />
-    </label>
-  );
-
-  const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
-    <form
-      className="shipping-config-editor"
-      aria-label="Shipping provider configuration editor"
-      noValidate
-      onSubmit={handleSaveShippingConfig}
-    >
-      <div className="shipping-config-editor-heading">
-        <div>
-          <strong>Provider configuration</strong>
-          <span>Shipment settings for {currentVendor.vendorName ?? currentVendor.vendorId}</span>
-        </div>
-        <span>
-          Last updated: {vendorShippingConfig?.updatedAt ? formatOptionalDate(vendorShippingConfig.updatedAt) : 'not configured'}
-        </span>
-      </div>
-      <div className="shipping-config-editor-grid">
-        {!isKargonomiConfigDraft ? shippingProviderSelectField : null}
-        {isKargonomiConfigDraft ? (
-          <>
-            {isKargonomiConfigDraft ? (
-              <div className="shipping-config-kargonomi-layout field-full" aria-label="Kargonomi shipping configuration">
-                <section className="shipping-config-section-card" aria-label="Provider basics">
-                  <div className="shipping-config-section-heading">
-                    <strong>Provider basics</strong>
-                    <span>Core provider, warehouse, carrier, and package defaults.</span>
-                  </div>
-                  <div className="shipping-config-section-grid">
-                    {shippingProviderSelectField}
-                    <label className="field">
-                      <span>Warehouse ID</span>
-                      <input
-                        aria-label="Warehouse ID"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={shippingConfigDraft.defaultWarehouseId}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            defaultWarehouseId: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Kargonomi carrier/provider ID</span>
-                      <input
-                        inputMode="numeric"
-                        pattern="-?[0-9]*"
-                        value={shippingConfigDraft.kargonomiShippingProviderId}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiShippingProviderId: event.target.value,
-                          }))
-                        }
-                      />
-                      <small>
-                        -1 means automatic cheapest provider selection. Use a specific Kargonomi carrier ID from price comparison to force a carrier.
-                      </small>
-                    </label>
-                    {shippingDefaultDesiField}
-                    <label className="field">
-                      <span>Fallback Kargonomi buyer state ID (PoC override)</span>
-                      <input
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={shippingConfigDraft.kargonomiBuyerStateId}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiBuyerStateId: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Fallback Kargonomi buyer city ID (PoC override)</span>
-                      <input
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={shippingConfigDraft.kargonomiBuyerCityId}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiBuyerCityId: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <div className="shipping-config-readonly">
-                      <span>Sandbox</span>
-                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
-                    </div>
-                    <div className="shipping-config-readonly">
-                      <span>Webhook ingest</span>
-                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="shipping-config-section-card" aria-label="Warehouse sync">
-                  <div className="shipping-config-sync-heading">
-                    <div>
-                      <strong>Warehouse sync</strong>
-                      <span>Read-only sync from Kargonomi for return receiver buyer fields.</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={!canSyncKargonomiWarehouse || isSyncingKargonomiWarehouse}
-                      onClick={() => void syncKargonomiWarehouseMutation(kargonomiWarehouseIdForSync)}
-                    >
-                      {isSyncingKargonomiWarehouse ? 'Syncing...' : 'Sync Kargonomi warehouse details'}
-                    </button>
-                  </div>
-                  <div className="shipping-config-sync-grid" aria-label="Kargonomi warehouse readiness">
-                    {renderKargonomiReadinessChip('Contact name', kargonomiWarehouseSyncStatus?.contactNamePresent)}
-                    {renderKargonomiReadinessChip('Phone', kargonomiWarehouseSyncStatus?.phonePresent)}
-                    {renderKargonomiReadinessChip('Address', kargonomiWarehouseSyncStatus?.addressPresent)}
-                    {renderKargonomiReadinessChip('State ID', kargonomiWarehouseSyncStatus?.stateIdPresent)}
-                    {renderKargonomiReadinessChip('City ID', kargonomiWarehouseSyncStatus?.cityIdPresent)}
-                  </div>
-                  <div className="shipping-config-section-grid">
-                    <div className="shipping-config-readonly">
-                      <span>Last sync</span>
-                      <strong>
-                        {kargonomiWarehouseSyncStatus?.syncedAt
-                          ? formatOptionalDate(kargonomiWarehouseSyncStatus.syncedAt)
-                          : kargonomiWarehouseSyncStatus?.lookupStatus ?? 'not synced'}
-                      </strong>
-                    </div>
-                    <div className="shipping-config-readonly">
-                      <span>Resolved location</span>
-                      <strong>
-                        {[kargonomiWarehouseSyncStatus?.stateName, kargonomiWarehouseSyncStatus?.cityName]
-                          .filter(Boolean)
-                          .join(' / ') || '—'}
-                      </strong>
-                    </div>
-                  </div>
-                  {kargonomiWarehouseSyncStatus?.lookupError ? (
-                    <small className="shipping-config-note">{kargonomiWarehouseSyncStatus.lookupError}</small>
-                  ) : null}
-                </section>
-
-                <section className="shipping-config-section-card" aria-label="Return receiver override fallback">
-                  <div className="shipping-config-section-heading">
-                    <strong>Return receiver override / fallback</strong>
-                    <span>Only used when synced warehouse data is missing or intentionally overridden.</span>
-                  </div>
-                  <div className="shipping-config-section-grid">
-                    <label className="field">
-                      <span>Return receiver fallback name</span>
-                      <input
-                        aria-label="Return receiver fallback name"
-                        value={shippingConfigDraft.kargonomiReturnReceiverName}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiReturnReceiverName: event.target.value,
-                          }))
-                        }
-                      />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
-                    </label>
-                    <label className="field">
-                      <span>Return receiver fallback phone</span>
-                      <input
-                        aria-label="Return receiver fallback phone"
-                        value={shippingConfigDraft.kargonomiReturnReceiverPhone}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiReturnReceiverPhone: event.target.value,
-                          }))
-                        }
-                      />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
-                    </label>
-                    <label className="field field-full">
-                      <span>Return receiver fallback address</span>
-                      <textarea
-                        aria-label="Return receiver fallback address"
-                        rows={3}
-                        value={shippingConfigDraft.kargonomiReturnReceiverAddress}
-                        onChange={(event) =>
-                          setShippingConfigDraft((current) => ({
-                            ...current,
-                            kargonomiReturnReceiverAddress: event.target.value,
-                          }))
-                        }
-                      />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
-                    </label>
-                  </div>
-                  {kargonomiWarehouseSyncStatus?.stateName || kargonomiWarehouseSyncStatus?.cityName ? (
-                    <p className="shipping-config-note">
-                      Synced warehouse location is available; fallback receiver fields are optional.
-                    </p>
-                  ) : null}
-                </section>
+  const shippingConfigEditorPanel = isAdmin ? (
+    <VendorShippingConfigEditor
+      vendorId={currentVendor.vendorId}
+      vendorName={currentVendor.vendorName}
+      shippingConfig={vendorShippingConfig}
+      enabled={authContextReady && isAdmin && Boolean(order)}
+      renderContainer={({ form, diagnostics, values }) => (
+        <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
+          <summary className="provider-response-heading">
+            <strong>Shipping provider diagnostics</strong>
+            <span>Provider diagnostics</span>
+          </summary>
+          {form}
+          <div className="summary-row">
+            <span>Sandbox mode</span>
+            <strong>{diagnostics.sandboxModeEnabled ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Shipping execution enabled</span>
+            <strong>{diagnostics.shippingExecutionEnabled ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Provider selected</span>
+            <strong>{diagnostics.providerSelected ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Provider enabled</span>
+            <strong>{diagnostics.providerEnabled ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Webhook ingest enabled</span>
+            <strong>{diagnostics.webhookIngestEnabled ? 'yes' : 'no'}</strong>
+          </div>
+          {diagnostics.provider === 'try_oto' ? (
+            <>
+              <div className="summary-row">
+                <span>Try OTO pickup location</span>
+                <strong>{values.tryOtoPickupLocationCode || '—'}</strong>
               </div>
-            ) : null}
-          </>
-        ) : null}
-        {isTryOtoConfigDraft ? (
-          <>
-            <label className="field">
-              <span>Try OTO pickup location code</span>
-              <input
-                value={shippingConfigDraft.tryOtoPickupLocationCode}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    tryOtoPickupLocationCode: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Try OTO origin city</span>
-              <input
-                value={shippingConfigDraft.tryOtoOriginCity}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    tryOtoOriginCity: event.target.value,
-                  }))
-                }
-              />
-            </label>
-          </>
-        ) : null}
-        {isNavlungoConfigDraft ? (
-          <>
-            <label className="field">
-              <span>Navlungo sender address ID</span>
-              <input
-                inputMode="numeric"
-                value={shippingConfigDraft.navlungoSenderAddressId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderAddressId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Navlungo return recipient address ID</span>
-              <input
-                inputMode="numeric"
-                value={shippingConfigDraft.navlungoReturnRecipientAddressId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoReturnRecipientAddressId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <details className="shipping-config-advanced">
-              <summary>Return recipient address book details</summary>
-              <p>Optional metadata for the return warehouse/address book entry. Return pickup still sends only recipient.addressId.</p>
-              <label className="field">
-                <span>Return recipient name</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientName}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientName: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient phone</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientPhone}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientPhone: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient email</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientEmail}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientEmail: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient address</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientAddress}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientAddress: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient country</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientCountry}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientCountry: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient city</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientCity}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientCity: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient district</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientDistrict}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientDistrict: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Return recipient post code</span>
-                <input
-                  value={shippingConfigDraft.navlungoReturnRecipientPostCode}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoReturnRecipientPostCode: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </details>
-            <label className="field">
-              <span>Default carrier ID</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={shippingConfigDraft.navlungoCarrierId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoCarrierId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Default barcode format</span>
-              <select
-                value={shippingConfigDraft.navlungoBarcodeFormat}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoBarcodeFormat: event.target.value,
-                  }))
-                }
-              >
-                <option value="pdf-A6">pdf-A6</option>
-                <option value="pdf-A5">pdf-A5</option>
-                <option value="pdf-A6Y">pdf-A6Y</option>
-                <option value="pdf-A7">pdf-A7</option>
-                <option value="html">html</option>
-              </select>
-            </label>
-            <details className="shipping-config-advanced">
-              <summary>Full sender details for diagnostics</summary>
-              <p>Optional. Used only when an admin explicitly retries Navlungo with full sender details.</p>
-              <label className="field">
-                <span>Sender name</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderName}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderName: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender phone</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderPhone}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderPhone: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender email</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderEmail}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderEmail: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender address</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderAddress}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderAddress: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender country</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderCountry}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderCountry: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender city</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderCity}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderCity: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender district</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderDistrict}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderDistrict: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>Sender post code</span>
-                <input
-                  value={shippingConfigDraft.navlungoSenderPostCode}
-                  onChange={(event) =>
-                    setShippingConfigDraft((current) => ({
-                      ...current,
-                      navlungoSenderPostCode: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </details>
-            <div className="shipping-config-readonly">
-              <span>Base URL configured</span>
-              <strong>{shippingProviderDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
+              <div className="summary-row">
+                <span>Try OTO origin city configured</span>
+                <strong>{values.tryOtoOriginCity ? 'yes' : 'no'}</strong>
+              </div>
+            </>
+          ) : diagnostics.provider === 'kargonomi' ? (
+            <>
+              <div className="summary-row">
+                <span>Kargonomi warehouse configured</span>
+                <strong>{diagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Kargonomi carrier/provider ID</span>
+                <strong>{values.kargonomiShippingProviderId || '-1 automatic'}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Kargonomi fallback buyer state ID</span>
+                <strong>{values.kargonomiBuyerStateId || '—'}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Kargonomi fallback buyer city ID</span>
+                <strong>{values.kargonomiBuyerCityId || '—'}</strong>
+              </div>
+              <div className="shipment-recovery-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void runKargonomiLookupDiagnosticsMutation(undefined)}
+                  disabled={isRunningKargonomiLookupDiagnostics}
+                >
+                  {isRunningKargonomiLookupDiagnostics ? 'Running lookup...' : 'Run Kargonomi lookup diagnostic'}
+                </button>
+                <span className="muted">Temporary admin-only check. Calls only states and city lookup endpoints.</span>
+              </div>
+              {kargonomiLookupError ? (
+                <p className="form-error" role="alert">{kargonomiLookupError}</p>
+              ) : null}
+              {kargonomiLookupDiagnostics ? (
+                <div className="provider-response-summary admin-diagnostics-panel" aria-label="Kargonomi lookup diagnostic result">
+                  <div className="summary-row">
+                    <span>Base URL</span>
+                    <strong>
+                      {kargonomiLookupDiagnostics.baseUrlHost ?? '—'}
+                      {kargonomiLookupDiagnostics.baseUrlPath ? kargonomiLookupDiagnostics.baseUrlPath : ''}
+                    </strong>
+                  </div>
+                  {kargonomiLookupDiagnostics.baseUrlParseError ? (
+                    <div className="summary-row">
+                      <span>Base URL parse error</span>
+                      <strong>{kargonomiLookupDiagnostics.baseUrlParseError}</strong>
+                    </div>
+                  ) : null}
+                  <div className="summary-row">
+                    <span>Token present</span>
+                    <strong>{kargonomiLookupDiagnostics.tokenPresent ? 'yes' : 'no'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>States request</span>
+                    <strong>{kargonomiLookupDiagnostics.statesRequestUrl}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>States result</span>
+                    <strong>
+                      {kargonomiLookupDiagnostics.statesFetchError
+                        ? kargonomiLookupDiagnostics.statesFetchError.name + ': ' + kargonomiLookupDiagnostics.statesFetchError.message
+                        : kargonomiLookupDiagnostics.statesHttpStatus ?? '—'}
+                    </strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>States content type</span>
+                    <strong>{kargonomiLookupDiagnostics.statesContentType ?? '—'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>States response shape</span>
+                    <strong>
+                      {kargonomiLookupDiagnostics.statesShapeSummary
+                        ? kargonomiLookupDiagnostics.statesShapeSummary.kind +
+                          (kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.length
+                            ? ' · ' + kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.join(', ')
+                            : '')
+                        : '—'}
+                    </strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>First states</span>
+                    <strong>{kargonomiLookupDiagnostics.firstStateNames.length ? kargonomiLookupDiagnostics.firstStateNames.join(', ') : '—'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>İstanbul state ID</span>
+                    <strong>{kargonomiLookupDiagnostics.istanbulStateId ?? '—'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>Cities result</span>
+                    <strong>
+                      {kargonomiLookupDiagnostics.citiesFetchError
+                        ? kargonomiLookupDiagnostics.citiesFetchError.name + ': ' + kargonomiLookupDiagnostics.citiesFetchError.message
+                        : kargonomiLookupDiagnostics.citiesHttpStatus ?? '—'}
+                    </strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>First İstanbul districts</span>
+                    <strong>{kargonomiLookupDiagnostics.firstCityNames.length ? kargonomiLookupDiagnostics.firstCityNames.join(', ') : '—'}</strong>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="summary-row">
+                <span>Cargo integration configured</span>
+                <strong>{diagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Warehouse configured</span>
+                <strong>{diagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+              </div>
+            </>
+          )}
+          <div className="summary-row">
+            <span>Default desi configured</span>
+            <strong>{diagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Notification URL configured</span>
+            <strong>{diagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Webhook route implemented</span>
+            <strong>{diagnostics.webhookRouteImplemented ? 'yes' : 'no'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Receiver address availability</span>
+            <strong>{diagnostics.receiverAddressAvailability === 'confirmed_required' ? 'confirmed required' : 'unknown / required'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Status sync support</span>
+            <strong>{diagnostics.statusSyncSupport === 'webhook_ingest' ? 'webhook ingest' : 'not implemented'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Missing env names</span>
+            <strong>{diagnostics.missing.length ? diagnostics.missing.join(', ') : '—'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Deprecated env fallback</span>
+            <strong>{diagnostics.deprecatedEnvFallbacks?.length ? diagnostics.deprecatedEnvFallbacks.join(', ') : '—'}</strong>
+          </div>
+          {diagnostics.warnings?.length ? (
+            <div className="summary-row">
+              <span>Readiness warnings</span>
+              <strong>{diagnostics.warnings.join(' · ')}</strong>
             </div>
-            <div className="shipping-config-readonly">
-              <span>Username configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.usernameConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Password configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.passwordConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Sender address configured</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.defaultSenderAddressIdConfigured ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Auth diagnostics available</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.authDiagnosticsAvailable ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Runtime shipment execution enabled</span>
-              <strong>{shippingProviderDiagnostics?.navlungo?.runtimeShipmentExecutionEnabled ? 'yes' : 'no'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Return/reverse implementation</span>
-              <strong>NOT IMPLEMENTED</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Create Post execution</span>
-              <strong>{shippingProviderDiagnostics?.executionReady ? 'ready' : 'not ready'}</strong>
-            </div>
-          </>
-        ) : null}
-        {!isKargonomiConfigDraft ? shippingDefaultDesiField : null}
-        {!isKargonomiConfigDraft ? (
-          <>
-            <div className="shipping-config-readonly">
-              <span>Sandbox</span>
-              <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
-            </div>
-            <div className="shipping-config-readonly">
-              <span>Webhook ingest</span>
-              <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
-            </div>
-          </>
-        ) : null}
-      </div>
-      {shippingConfigFeedback ? (
-        <div className={`shipping-config-feedback ${shippingConfigFeedback.tone}`}>
-          {shippingConfigFeedback.message}
-        </div>
-      ) : null}
-      <div className="shipping-config-actions">
-        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
-          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
-        </button>
-      </div>
-    </form>
+          ) : null}
+        </details>
+      )}
+    />
   ) : null;
 
   return (
@@ -7411,61 +6465,7 @@ export function OrderDetailPage() {
                         {renderShipmentFieldCompletionForm()}
                       </div>
                     ) : null}
-                    {shippingProviderDiagnostics && shippingConfigEditorForm ? (
-                      <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
-                        <summary className="provider-response-heading">
-                          <strong>Shipping provider diagnostics</strong>
-                          <span>Provider diagnostics</span>
-                        </summary>
-                        {shippingConfigEditorForm}
-                        {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                          <>
-                            <div className="summary-row">
-                              <span>Try OTO pickup location</span>
-                              <strong>{tryOtoPickupLocationCode || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Try OTO origin city configured</span>
-                              <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
-                            </div>
-                          </>
-                        ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
-                          <>
-                            <div className="summary-row">
-                              <span>Kargonomi warehouse configured</span>
-                              <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Kargonomi carrier/provider ID</span>
-                              <strong>{kargonomiShippingProviderId || '-1 automatic'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Kargonomi fallback buyer state ID</span>
-                              <strong>{kargonomiBuyerStateId || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Kargonomi fallback buyer city ID</span>
-                              <strong>{kargonomiBuyerCityId || '—'}</strong>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="summary-row">
-                              <span>Cargo integration configured</span>
-                              <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Warehouse configured</span>
-                              <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                            </div>
-                          </>
-                        )}
-                        <div className="summary-row">
-                          <span>Default desi configured</span>
-                          <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
-                        </div>
-                      </details>
-                    ) : null}
+                    {shippingConfigEditorPanel}
                     {shouldShowRealTrackingForm ? (
                       <form
                         className="detail-actions tracking-form order-tracking-form order-shipment-action-form"
@@ -8529,805 +7529,7 @@ export function OrderDetailPage() {
                     ) : null}
                   </div>
                 ) : null}
-                {isAdmin && shippingProviderDiagnostics ? (
-                  <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
-                    <summary className="provider-response-heading">
-                      <strong>Shipping provider diagnostics</strong>
-                      <span>Provider diagnostics</span>
-                    </summary>
-                    {shippingConfigEditorForm}
-                    <div className="summary-row">
-                      <span>Sandbox mode</span>
-                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Shipping execution enabled</span>
-                      <strong>{shippingProviderDiagnostics.shippingExecutionEnabled ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Provider selected</span>
-                      <strong>{shippingProviderDiagnostics.providerSelected ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Provider enabled</span>
-                      <strong>{shippingProviderDiagnostics.providerEnabled ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Webhook ingest enabled</span>
-                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'yes' : 'no'}</strong>
-                    </div>
-                    {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                      <>
-                        <div className="summary-row">
-                          <span>Last webhook received</span>
-                          <strong>
-                            {shippingProviderDiagnostics.lastWebhookReceived
-                              ? formatOptionalDate(shippingProviderDiagnostics.lastWebhookReceivedAt ?? undefined)
-                              : 'no'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook payload keys</span>
-                          <strong>
-                            {shippingProviderDiagnostics.lastWebhookPayloadKeys?.length
-                              ? shippingProviderDiagnostics.lastWebhookPayloadKeys.join(', ')
-                              : '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook match</span>
-                          <strong>{shippingProviderDiagnostics.lastWebhookMatchStatus || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook matched by</span>
-                          <strong>{shippingProviderDiagnostics.lastWebhookMatchedByField || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook status value</span>
-                          <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook status mapped</span>
-                          <strong>
-                            {shippingProviderDiagnostics.lastWebhookStatusMapped === null ||
-                            shippingProviderDiagnostics.lastWebhookStatusMapped === undefined
-                              ? '—'
-                              : shippingProviderDiagnostics.lastWebhookStatusMapped
-                                ? 'yes'
-                                : 'no'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook local status</span>
-                          <strong>{shippingProviderDiagnostics.lastWebhookMappedLocalStatus || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Last webhook parse error</span>
-                          <strong>{shippingProviderDiagnostics.lastWebhookParseError || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Webhook signature verification</span>
-                          <strong>{shippingProviderDiagnostics.webhookSignatureVerificationImplemented ? 'implemented' : 'not implemented'}</strong>
-                        </div>
-                      </>
-                    ) : null}
-                    <div className="summary-row">
-                      <span>Base URL configured</span>
-                      <strong>{shippingProviderDiagnostics.baseUrlConfigured ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>API key configured</span>
-                      <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
-                    </div>
-                        {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                          <>
-                            <div className="summary-row">
-                              <span>Last webhook received</span>
-                              <strong>
-                                {shippingProviderDiagnostics.lastWebhookReceived
-                                  ? formatOptionalDate(shippingProviderDiagnostics.lastWebhookReceivedAt ?? undefined)
-                                  : 'no'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook payload keys</span>
-                              <strong>
-                                {shippingProviderDiagnostics.lastWebhookPayloadKeys?.length
-                                  ? shippingProviderDiagnostics.lastWebhookPayloadKeys.join(', ')
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook match</span>
-                              <strong>{shippingProviderDiagnostics.lastWebhookMatchStatus || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook matched by</span>
-                              <strong>{shippingProviderDiagnostics.lastWebhookMatchedByField || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook status value</span>
-                              <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook status mapped</span>
-                              <strong>
-                                {shippingProviderDiagnostics.lastWebhookStatusMapped === null ||
-                                shippingProviderDiagnostics.lastWebhookStatusMapped === undefined
-                                  ? '—'
-                                  : shippingProviderDiagnostics.lastWebhookStatusMapped
-                                    ? 'yes'
-                                    : 'no'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook local status</span>
-                              <strong>{shippingProviderDiagnostics.lastWebhookMappedLocalStatus || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Last webhook parse error</span>
-                              <strong>{shippingProviderDiagnostics.lastWebhookParseError || '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Webhook signature verification</span>
-                              <strong>{shippingProviderDiagnostics.webhookSignatureVerificationImplemented ? 'implemented' : 'not implemented'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Try OTO pickup location</span>
-                          <strong>{tryOtoPickupLocationCode || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Try OTO origin city configured</span>
-                          <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
-                        </div>
-                      </>
-                    ) : isKargonomiConfigDraft ? (
-                      <>
-                        <div className="summary-row">
-                          <span>Kargonomi warehouse configured</span>
-                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Kargonomi carrier/provider ID</span>
-                          <strong>{kargonomiShippingProviderId || '-1 automatic'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Kargonomi fallback buyer state ID</span>
-                          <strong>{kargonomiBuyerStateId || '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Kargonomi fallback buyer city ID</span>
-                          <strong>{kargonomiBuyerCityId || '—'}</strong>
-                        </div>
-                        <div className="shipment-recovery-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => void runKargonomiLookupDiagnosticsMutation(undefined)}
-                            disabled={isRunningKargonomiLookupDiagnostics}
-                          >
-                            {isRunningKargonomiLookupDiagnostics ? 'Running lookup...' : 'Run Kargonomi lookup diagnostic'}
-                          </button>
-                          <span className="muted">Temporary admin-only check. Calls only states and city lookup endpoints.</span>
-                        </div>
-                        {kargonomiLookupError ? (
-                          <p className="form-error" role="alert">{kargonomiLookupError}</p>
-                        ) : null}
-                        {kargonomiLookupDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Kargonomi lookup diagnostic result">
-                            <div className="summary-row">
-                              <span>Base URL</span>
-                              <strong>
-                                {kargonomiLookupDiagnostics.baseUrlHost ?? '—'}
-                                {kargonomiLookupDiagnostics.baseUrlPath ? kargonomiLookupDiagnostics.baseUrlPath : ''}
-                              </strong>
-                            </div>
-                            {kargonomiLookupDiagnostics.baseUrlParseError ? (
-                              <div className="summary-row">
-                                <span>Base URL parse error</span>
-                                <strong>{kargonomiLookupDiagnostics.baseUrlParseError}</strong>
-                              </div>
-                            ) : null}
-                            <div className="summary-row">
-                              <span>Token present</span>
-                              <strong>{kargonomiLookupDiagnostics.tokenPresent ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>States request</span>
-                              <strong>{kargonomiLookupDiagnostics.statesRequestUrl}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>States result</span>
-                              <strong>
-                                {kargonomiLookupDiagnostics.statesFetchError
-                                  ? `${kargonomiLookupDiagnostics.statesFetchError.name}: ${kargonomiLookupDiagnostics.statesFetchError.message}`
-                                  : kargonomiLookupDiagnostics.statesHttpStatus ?? '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>States content type</span>
-                              <strong>{kargonomiLookupDiagnostics.statesContentType ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>States response shape</span>
-                              <strong>
-                                {kargonomiLookupDiagnostics.statesShapeSummary
-                                  ? `${kargonomiLookupDiagnostics.statesShapeSummary.kind}${
-                                      kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.length
-                                        ? ` · ${kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.join(', ')}`
-                                        : ''
-                                    }`
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>First states</span>
-                              <strong>{kargonomiLookupDiagnostics.firstStateNames.length ? kargonomiLookupDiagnostics.firstStateNames.join(', ') : '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>İstanbul state ID</span>
-                              <strong>{kargonomiLookupDiagnostics.istanbulStateId ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Cities result</span>
-                              <strong>
-                                {kargonomiLookupDiagnostics.citiesFetchError
-                                  ? `${kargonomiLookupDiagnostics.citiesFetchError.name}: ${kargonomiLookupDiagnostics.citiesFetchError.message}`
-                                  : kargonomiLookupDiagnostics.citiesHttpStatus ?? '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>First İstanbul districts</span>
-                              <strong>{kargonomiLookupDiagnostics.firstCityNames.length ? kargonomiLookupDiagnostics.firstCityNames.join(', ') : '—'}</strong>
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <div className="summary-row">
-                          <span>Cargo integration configured</span>
-                          <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Warehouse configured</span>
-                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                        </div>
-                      </>
-                    )}
-                    {isNavlungoConfigDraft ? (
-                      <>
-                        <div className="shipment-recovery-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => void runNavlungoAuthDiagnosticsMutation(undefined)}
-                            disabled={isRunningNavlungoAuthDiagnostics}
-                          >
-                            {isRunningNavlungoAuthDiagnostics ? 'Running auth...' : 'Run Navlungo auth diagnostic'}
-                          </button>
-                          <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
-                        </div>
-                        <div className="shipment-recovery-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => void runNavlungoCarrierDiagnosticsMutation(undefined)}
-                            disabled={isRunningNavlungoCarrierDiagnostics}
-                          >
-                            {isRunningNavlungoCarrierDiagnostics ? 'Running carrier diagnostic...' : 'Run Navlungo carrier diagnostic'}
-                          </button>
-                          <span className="muted">Authenticates, then checks configured and listed carriers. No posts are created.</span>
-                        </div>
-                        <div className="shipment-recovery-actions" aria-label="Navlungo Create Post probe controls">
-                          <span className="muted">Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.</span>
-                          <label className="field checkbox-field">
-                            <span>I understand this creates one Navlungo test post</span>
-                            <input
-                              type="checkbox"
-                              checked={navlungoCreatePostProbeConfirmed}
-                              onChange={(event) => setNavlungoCreatePostProbeConfirmed(event.target.checked)}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => void runNavlungoCreatePostProbeMutation(undefined)}
-                            disabled={!navlungoCreatePostProbeConfirmed || isRunningNavlungoCreatePostProbe}
-                          >
-                            {isRunningNavlungoCreatePostProbe ? 'Running Create Post probe...' : 'Run Navlungo Create Post probe'}
-                          </button>
-                        </div>
-                        {navlungoAuthError ? (
-                          <p className="form-error" role="alert">{navlungoAuthError}</p>
-                        ) : null}
-                        {navlungoCarrierError ? (
-                          <p className="form-error" role="alert">{navlungoCarrierError}</p>
-                        ) : null}
-                        {navlungoAuthDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo auth diagnostic result">
-                        <div className="summary-row">
-                          <span>Base URL</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.baseUrlHost ?? '—'}
-                            {navlungoAuthDiagnostics.baseUrlPath ? navlungoAuthDiagnostics.baseUrlPath : ''}
-                          </strong>
-                        </div>
-                        {navlungoAuthDiagnostics.baseUrlParseError ? (
-                          <div className="summary-row">
-                            <span>Base URL parse error</span>
-                            <strong>{navlungoAuthDiagnostics.baseUrlParseError}</strong>
-                          </div>
-                        ) : null}
-                        <div className="summary-row">
-                          <span>Username configured</span>
-                          <strong>{navlungoAuthDiagnostics.usernamePresent ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Password configured</span>
-                          <strong>{navlungoAuthDiagnostics.passwordPresent ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Auth result</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.fetchError
-                              ? `${navlungoAuthDiagnostics.fetchError.name}: ${navlungoAuthDiagnostics.fetchError.message}`
-                              : navlungoAuthDiagnostics.authHttpStatus ?? '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Auth validation fields</span>
-                          <strong>{navlungoAuthDiagnostics.authFailedFieldNames.length ? navlungoAuthDiagnostics.authFailedFieldNames.join(', ') : '—'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Auth validation messages</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.authValidationErrorMessages.length
-                              ? navlungoAuthDiagnostics.authValidationErrorMessages.join(' · ')
-                              : '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Response shape</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.responseShapeSummary
-                              ? `${navlungoAuthDiagnostics.responseShapeSummary.kind}${
-                                  navlungoAuthDiagnostics.responseShapeSummary.topLevelKeys.length
-                                    ? ` · ${navlungoAuthDiagnostics.responseShapeSummary.topLevelKeys.join(', ')}`
-                                    : ''
-                                }`
-                              : '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Data shape</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.responseDataShapeSummary
-                              ? `${navlungoAuthDiagnostics.responseDataShapeSummary.kind}${
-                                  navlungoAuthDiagnostics.responseDataShapeSummary.topLevelKeys.length
-                                    ? ` · ${navlungoAuthDiagnostics.responseDataShapeSummary.topLevelKeys.join(', ')}`
-                                    : ''
-                                }`
-                              : '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Access token field</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.tokenKeyPresence.rootAccessToken
-                              ? 'root.access_token'
-                              : navlungoAuthDiagnostics.tokenKeyPresence.dataAccessToken
-                                ? 'data.access_token'
-                                : navlungoAuthDiagnostics.tokenKeyPresence.dataToken
-                                  ? 'data.token'
-                                  : navlungoAuthDiagnostics.tokenKeyPresence.anyTokenLikeKey
-                                    ? 'other token-like key'
-                                    : 'not present'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Refresh token field</span>
-                          <strong>
-                            {navlungoAuthDiagnostics.refreshTokenKeyPresence.rootRefreshToken
-                              ? 'root.refresh_token'
-                              : navlungoAuthDiagnostics.refreshTokenKeyPresence.dataRefreshToken
-                                ? 'data.refresh_token'
-                                : 'not present'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>token_type present</span>
-                          <strong>{navlungoAuthDiagnostics.tokenTypePresent ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>expires_in present</span>
-                          <strong>{navlungoAuthDiagnostics.expiresInPresent ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Token received</span>
-                          <strong>{navlungoAuthDiagnostics.tokenReceived ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Expires in</span>
-                          <strong>{navlungoAuthDiagnostics.expiresIn ?? '—'}</strong>
-                        </div>
-                          </div>
-                        ) : null}
-                        {navlungoCarrierDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo carrier diagnostic result">
-                            <div className="summary-row">
-                              <span>Auth HTTP</span>
-                              <strong>{navlungoCarrierDiagnostics.authHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Token received</span>
-                              <strong>{navlungoCarrierDiagnostics.authTokenReceived ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Carrier endpoint paths known</span>
-                              <strong>{navlungoCarrierDiagnostics.carrierEndpointPathsKnown ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Skipped reason</span>
-                              <strong>{navlungoCarrierDiagnostics.skippedReason ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>My Carriers HTTP</span>
-                              <strong>{navlungoCarrierDiagnostics.myCarriersHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>My Carriers shape</span>
-                              <strong>
-                                {navlungoCarrierDiagnostics.myCarriersResponseShape
-                                  ? `${navlungoCarrierDiagnostics.myCarriersResponseShape.kind}${
-                                      navlungoCarrierDiagnostics.myCarriersResponseShape.topLevelKeys.length
-                                        ? ` · ${navlungoCarrierDiagnostics.myCarriersResponseShape.topLevelKeys.join(', ')}`
-                                        : ''
-                                    }`
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Configured carriers</span>
-                              <strong>{navlungoCarrierDiagnostics.myCarrierCount ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>First configured carriers</span>
-                              <strong>
-                                {navlungoCarrierDiagnostics.myCarrierSamples.length
-                                  ? navlungoCarrierDiagnostics.myCarrierSamples
-                                      .map((carrier) => [carrier.id ?? 'unknown', carrier.name ?? carrier.shortName ?? 'unnamed'].join(' · '))
-                                      .join(', ')
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>List Carriers HTTP</span>
-                              <strong>{navlungoCarrierDiagnostics.listCarriersHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>List Carriers shape</span>
-                              <strong>
-                                {navlungoCarrierDiagnostics.listCarriersResponseShape
-                                  ? `${navlungoCarrierDiagnostics.listCarriersResponseShape.kind}${
-                                      navlungoCarrierDiagnostics.listCarriersResponseShape.topLevelKeys.length
-                                        ? ` · ${navlungoCarrierDiagnostics.listCarriersResponseShape.topLevelKeys.join(', ')}`
-                                        : ''
-                                    }`
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Listed carriers</span>
-                              <strong>{navlungoCarrierDiagnostics.listCarrierCount ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>First listed carriers</span>
-                              <strong>
-                                {navlungoCarrierDiagnostics.listCarrierSamples.length
-                                  ? navlungoCarrierDiagnostics.listCarrierSamples
-                                      .map((carrier) => [carrier.id ?? 'unknown', carrier.name ?? carrier.shortName ?? 'unnamed'].join(' · '))
-                                      .join(', ')
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Configured carrier available</span>
-                              <strong>{navlungoCarrierDiagnostics.anyConfiguredCarrier ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Provider messages</span>
-                              <strong>{navlungoCarrierDiagnostics.providerMessages.length ? navlungoCarrierDiagnostics.providerMessages.join(' · ') : '—'}</strong>
-                            </div>
-                            {navlungoCarrierDiagnostics.fetchError ? (
-                              <div className="summary-row">
-                                <span>Fetch error</span>
-                                <strong>{`${navlungoCarrierDiagnostics.fetchError.name}: ${navlungoCarrierDiagnostics.fetchError.message}`}</strong>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {navlungoCreatePostProbeError ? (
-                          <p className="form-error" role="alert">{navlungoCreatePostProbeError}</p>
-                        ) : null}
-                        {navlungoCreatePostProbeDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Create Post probe result">
-                            <div className="summary-row">
-                              <span>Auth HTTP</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.authHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Create Post HTTP</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.createPostHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Requested carrier id</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.requestedCarrierId}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Requested post type</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.requestedPostType}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Requested barcode format</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.requestedBarcodeFormat}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>COD payment included</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.codPaymentIncluded ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Price included</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.priceIncluded ? 'yes' : 'no'}</strong>
-                            </div>
-                            <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo Create Post probe request summary">
-                              <summary className="provider-response-heading">
-                                <strong>Probe request shape</strong>
-                                <span>Field names, types, and booleans only</span>
-                              </summary>
-                              <div className="summary-row">
-                                <span>Base URL</span>
-                                <strong>{navlungoCreatePostProbeDiagnostics.requestSummary.baseUrl ?? '—'}</strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>Endpoint</span>
-                                <strong>
-                                  {`${navlungoCreatePostProbeDiagnostics.requestSummary.method} ${navlungoCreatePostProbeDiagnostics.requestSummary.endpointPath}`}
-                                </strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>Header keys</span>
-                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.headerKeys)}</strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>Body keys</span>
-                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.topLevelBodyKeys)}</strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>sender keys</span>
-                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.senderKeys)}</strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>recipient keys</span>
-                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.recipientKeys)}</strong>
-                              </div>
-                              <div className="summary-row">
-                                <span>post keys</span>
-                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.postPayloadKeys)}</strong>
-                              </div>
-                            </details>
-                            <div className="summary-row">
-                              <span>Response shape</span>
-                              <strong>
-                                {navlungoCreatePostProbeDiagnostics.responseShape
-                                  ? `${navlungoCreatePostProbeDiagnostics.responseShape.kind}${
-                                      navlungoCreatePostProbeDiagnostics.responseShape.topLevelKeys.length
-                                        ? ` · ${navlungoCreatePostProbeDiagnostics.responseShape.topLevelKeys.join(', ')}`
-                                        : ''
-                                    }`
-                                  : '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Data keys</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.dataKeys.length ? navlungoCreatePostProbeDiagnostics.dataKeys.join(', ') : '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Post number</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.postNumber ?? (navlungoCreatePostProbeDiagnostics.postNumberPresent ? 'present' : 'missing')}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Reference id</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.referenceId ?? (navlungoCreatePostProbeDiagnostics.referenceIdPresent ? 'present' : 'missing')}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Tracking URL</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.trackingUrlPresent ? 'present' : 'missing'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode URL</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.barcodeUrlPresent ? 'present' : 'missing'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode field</span>
-                              <strong>
-                                {navlungoCreatePostProbeDiagnostics.barcodePresent
-                                  ? `present${navlungoCreatePostProbeDiagnostics.barcodeType ? ` · ${navlungoCreatePostProbeDiagnostics.barcodeType}` : ''}`
-                                  : 'missing'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Carrier fields</span>
-                              <strong>
-                                {navlungoCreatePostProbeDiagnostics.carrierIdPresent || navlungoCreatePostProbeDiagnostics.carrierNamePresent
-                                  ? `present${navlungoCreatePostProbeDiagnostics.postCarrierKeys.length ? ` · ${navlungoCreatePostProbeDiagnostics.postCarrierKeys.join(', ')}` : ''}`
-                                  : 'missing'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Provider message</span>
-                              <strong>{navlungoCreatePostProbeDiagnostics.providerMessage ?? navlungoCreatePostProbeDiagnostics.errorMessage ?? '—'}</strong>
-                            </div>
-                            {navlungoCreatePostProbeDiagnostics.postNumber ? (
-                              <div className="shipment-recovery-actions">
-                                <span className="muted">Last probe post_number: {navlungoCreatePostProbeDiagnostics.postNumber}</span>
-                                <button
-                                  type="button"
-                                  className="button button-secondary"
-                                  onClick={() => void runNavlungoCheckPostProbeMutation(navlungoCreatePostProbeDiagnostics.postNumber!)}
-                                  disabled={isRunningNavlungoCheckPostProbe}
-                                >
-                                  {isRunningNavlungoCheckPostProbe ? 'Running Check Post...' : 'Run Navlungo Check Post probe'}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="button button-secondary"
-                                  onClick={() => void runNavlungoBarcodeProbeMutation(navlungoCreatePostProbeDiagnostics.postNumber!)}
-                                  disabled={isRunningNavlungoBarcodeProbe}
-                                >
-                                  {isRunningNavlungoBarcodeProbe ? 'Running Barcode probe...' : 'Run Navlungo Barcode probe'}
-                                </button>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {navlungoCheckPostProbeError ? (
-                          <p className="form-error" role="alert">{navlungoCheckPostProbeError}</p>
-                        ) : null}
-                        {navlungoCheckPostProbeDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Check Post probe result">
-                            <div className="summary-row">
-                              <span>Post number</span>
-                              <strong>{navlungoCheckPostProbeDiagnostics.postNumber}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Check Post HTTP</span>
-                              <strong>{navlungoCheckPostProbeDiagnostics.checkPostHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Data keys</span>
-                              <strong>{navlungoCheckPostProbeDiagnostics.dataKeys.length ? navlungoCheckPostProbeDiagnostics.dataKeys.join(', ') : '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Status</span>
-                              <strong>{navlungoCheckPostProbeDiagnostics.statusName ?? navlungoCheckPostProbeDiagnostics.statusCode ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Tracking fields</span>
-                              <strong>
-                                {[
-                                  navlungoCheckPostProbeDiagnostics.trackingUrlPresent ? 'tracking_url' : null,
-                                  navlungoCheckPostProbeDiagnostics.carrierTrackingUrlPresent ? 'carrier_tracking_url' : null,
-                                ].filter(Boolean).join(', ') || '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode field</span>
-                              <strong>
-                                {navlungoCheckPostProbeDiagnostics.barcodePresent
-                                  ? `present${navlungoCheckPostProbeDiagnostics.barcodeType ? ` · ${navlungoCheckPostProbeDiagnostics.barcodeType}` : ''}`
-                                  : 'missing'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Carrier fields</span>
-                              <strong>
-                                {navlungoCheckPostProbeDiagnostics.carrierIdPresent || navlungoCheckPostProbeDiagnostics.carrierNamePresent ? 'present' : 'missing'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Provider message</span>
-                              <strong>{navlungoCheckPostProbeDiagnostics.providerMessage ?? navlungoCheckPostProbeDiagnostics.errorMessage ?? '—'}</strong>
-                            </div>
-                          </div>
-                        ) : null}
-                        {navlungoBarcodeProbeError ? (
-                          <p className="form-error" role="alert">{navlungoBarcodeProbeError}</p>
-                        ) : null}
-                        {navlungoBarcodeProbeDiagnostics ? (
-                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Barcode probe result">
-                            <div className="summary-row">
-                              <span>Post number</span>
-                              <strong>{navlungoBarcodeProbeDiagnostics.postNumber}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode endpoint path known</span>
-                              <strong>{navlungoBarcodeProbeDiagnostics.barcodeEndpointPathKnown ? 'yes' : 'no'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Skipped reason</span>
-                              <strong>{navlungoBarcodeProbeDiagnostics.skippedReason}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode HTTP</span>
-                              <strong>{navlungoBarcodeProbeDiagnostics.barcodeHttpStatus ?? '—'}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode field/url/base64</span>
-                              <strong>
-                                {[
-                                  navlungoBarcodeProbeDiagnostics.barcodeFieldPresent ? 'field' : null,
-                                  navlungoBarcodeProbeDiagnostics.barcodeUrlPresent ? 'url' : null,
-                                  navlungoBarcodeProbeDiagnostics.barcodeBase64Present ? 'base64' : null,
-                                ].filter(Boolean).join(', ') || '—'}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Provider message</span>
-                              <strong>{navlungoBarcodeProbeDiagnostics.providerMessage ?? navlungoBarcodeProbeDiagnostics.errorMessage ?? '—'}</strong>
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                    <div className="summary-row">
-                      <span>Default desi configured</span>
-                      <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Notification URL configured</span>
-                      <strong>{shippingProviderDiagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Webhook route implemented</span>
-                      <strong>{shippingProviderDiagnostics.webhookRouteImplemented ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Receiver address availability</span>
-                      <strong>
-                        {shippingProviderDiagnostics.receiverAddressAvailability === 'confirmed_required'
-                          ? 'confirmed required'
-                          : 'unknown / required'}
-                      </strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Status sync support</span>
-                      <strong>
-                        {shippingProviderDiagnostics.statusSyncSupport === 'webhook_ingest'
-                          ? 'webhook ingest'
-                          : 'not implemented'}
-                      </strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Missing env names</span>
-                      <strong>{shippingProviderDiagnostics.missing.length ? shippingProviderDiagnostics.missing.join(', ') : '—'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Deprecated env fallback</span>
-                      <strong>
-                        {shippingProviderDiagnostics.deprecatedEnvFallbacks?.length
-                          ? shippingProviderDiagnostics.deprecatedEnvFallbacks.join(', ')
-                          : '—'}
-                      </strong>
-                    </div>
-                    {shippingProviderDiagnostics.warnings?.length ? (
-                      <div className="summary-row">
-                        <span>Readiness warnings</span>
-                        <strong>{shippingProviderDiagnostics.warnings.join(' · ')}</strong>
-                      </div>
-                    ) : null}
-                  </details>
-                ) : null}
+                {shippingConfigEditorPanel}
                 <p className="page-description">
                   Shipping actions are currently unavailable.
                   {order.cancellationReason ? ` Reason: ${order.cancellationReason.replace(/_/g, ' ')}.` : ''}
