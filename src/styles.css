@@ -13878,6 +13878,47 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 700;
 }
 
+.vendor-profile-integration-list > div > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.vendor-profile-token-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: #eff6ff;
+  padding: 12px;
+}
+
+.vendor-profile-token-panel strong,
+.vendor-profile-token-panel p {
+  margin: 0;
+}
+
+.vendor-profile-token-panel p {
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.vendor-profile-token-panel code {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 800;
+  padding: 10px 12px;
+}
+
 .vendor-profile-audit-metadata {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

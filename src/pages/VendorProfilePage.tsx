@@ -58,6 +58,9 @@ import type {
   VendorProfileAuditLog,
   VendorStatus,
   VendorStatusInput,
+  VendorIntegrationProviderSummary,
+  VendorIntegrationScope,
+  VendorIntegrationTokenCreateResult,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -65,6 +68,7 @@ import { getPageReadinessState } from '../lib/pageReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
 import type { VendorContext } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
+import { runtimeServices } from '../services/runtime-services';
 import { safeArray, safeStatusLabel } from '../services/real/formatting';
 
 const VENDOR_PROFILE_CONTEXT_ROUTE = 'vendor_profile_settings';
@@ -77,6 +81,14 @@ const VENDOR_STATUS_REASONS = [
   'Compliance review',
   'Other',
 ] as const;
+const VENDOR_INTEGRATION_SCOPE_OPTIONS: Array<{ value: VendorIntegrationScope; label: string }> = [
+  { value: 'orders:read', label: 'Read orders' },
+  { value: 'status:write', label: 'Write status updates' },
+  { value: 'shipment:write', label: 'Write shipment updates' },
+  { value: 'invoice:write', label: 'Write invoice updates' },
+];
+const DEFAULT_VENDOR_INTEGRATION_SCOPES: VendorIntegrationScope[] =
+  VENDOR_INTEGRATION_SCOPE_OPTIONS.map((scope) => scope.value);
 type ReadinessStatus = 'ready' | 'review' | 'unknown' | 'not_modeled';
 type ReadinessItem = {
   label: string;
@@ -90,6 +102,14 @@ type ReadinessSection = {
   actionLabel: string;
   actionPath: string;
   items: ReadinessItem[];
+};
+type IntegrationTokenFormState = {
+  providerName: string;
+  scopes: VendorIntegrationScope[];
+};
+const EMPTY_INTEGRATION_TOKEN_FORM: IntegrationTokenFormState = {
+  providerName: '',
+  scopes: DEFAULT_VENDOR_INTEGRATION_SCOPES,
 };
 
 function formatValue(value: string | null | undefined, fallback = 'Not configured') {
@@ -105,6 +125,45 @@ function formatAuditDate(value: string | null | undefined) {
     return value;
   }
   return parsed.toLocaleString();
+}
+
+function getSortTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function formatIntegrationTokenError(error: unknown) {
+  if (error instanceof Error && error.message.trim() && !/tokenHash|stack|spg_vi_/i.test(error.message)) {
+    return error.message.trim();
+  }
+  return 'Integration token could not be created. Please retry.';
+}
+
+function normalizeIntegrationScopes(scopes: string[]): VendorIntegrationScope[] {
+  const allowed = new Set<VendorIntegrationScope>(DEFAULT_VENDOR_INTEGRATION_SCOPES);
+  return scopes.filter((scope): scope is VendorIntegrationScope => allowed.has(scope as VendorIntegrationScope));
+}
+
+function getProviderTokenStatus(provider: VendorIntegrationProviderSummary | null) {
+  if (!provider) {
+    return {
+      label: 'No token created',
+      tone: 'warning' as const,
+    };
+  }
+  if (!provider.enabled || provider.revokedAt) {
+    return {
+      label: 'Revoked',
+      tone: 'neutral' as const,
+    };
+  }
+  return {
+    label: 'Active',
+    tone: 'success' as const,
+  };
 }
 
 function formatAuditDisplayValue(value: unknown) {
@@ -1053,6 +1112,11 @@ export function VendorProfilePage() {
   const [logoPreviewForm, setLogoPreviewForm] = useState<LogoCommissionPreviewFormState>(DEFAULT_LOGO_COMMISSION_PREVIEW_FORM);
   const [logoPreviewFormError, setLogoPreviewFormError] = useState<string | null>(null);
   const [logoPreviewResult, setLogoPreviewResult] = useState<LogoIsbasiCommissionInvoicePreviewResult | null>(null);
+  const [integrationTokenForm, setIntegrationTokenForm] =
+    useState<IntegrationTokenFormState>(EMPTY_INTEGRATION_TOKEN_FORM);
+  const [integrationTokenFormError, setIntegrationTokenFormError] = useState<string | null>(null);
+  const [createdIntegrationToken, setCreatedIntegrationToken] = useState<VendorIntegrationTokenCreateResult | null>(null);
+  const [integrationTokenCopyStatus, setIntegrationTokenCopyStatus] = useState<string | null>(null);
 
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
@@ -1084,6 +1148,11 @@ export function VendorProfilePage() {
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     { enabled: canLoadProfile },
   );
+  const integrationProvidersQuery = useQueryResource(
+    queryKeys.admin.vendorIntegration.providers(),
+    ({ signal }) => runtimeServices.vendorIntegration.providers({ signal }),
+    { enabled: canLoadProfile && isAdminVendorRoute && isAdmin },
+  );
 
   const shippingConfig = shippingQuery.data;
   const financeProfile = savedFinanceProfile?.vendorId === currentVendor.vendorId ? savedFinanceProfile : financeQuery.data ?? null;
@@ -1111,6 +1180,15 @@ export function VendorProfilePage() {
     [currentVendor.vendorId, supportQuery.data],
   );
   const profileAuditLogs = useMemo(() => safeArray<VendorProfileAuditLog>(auditLogQuery.data), [auditLogQuery.data]);
+  const integrationProviders = useMemo(() => {
+    return safeArray<VendorIntegrationProviderSummary>(integrationProvidersQuery.data?.providers)
+      .filter((provider) => provider.vendorIdentifier === currentVendor.vendorId)
+      .sort((left, right) => getSortTimestamp(right.createdAt) - getSortTimestamp(left.createdAt));
+  }, [currentVendor.vendorId, integrationProvidersQuery.data?.providers]);
+  const latestIntegrationProvider = integrationProviders[0] ?? null;
+  const activeIntegrationProvider = integrationProviders.find((provider) => provider.enabled && !provider.revokedAt) ?? null;
+  const displayedIntegrationProvider = activeIntegrationProvider ?? latestIntegrationProvider;
+  const integrationTokenStatus = getProviderTokenStatus(displayedIntegrationProvider);
   const latestAuditBySection = useMemo(() => {
     const bySection = new Map<string, VendorProfileAuditLog>();
     for (const log of profileAuditLogs) {
@@ -1128,6 +1206,12 @@ export function VendorProfilePage() {
     });
     setVendorStatusFormError(null);
   }, [currentVendor.vendorId, vendorStatus.restricted, vendorStatus.restrictionReason, vendorStatus.status]);
+  useEffect(() => {
+    setIntegrationTokenForm(EMPTY_INTEGRATION_TOKEN_FORM);
+    setIntegrationTokenFormError(null);
+    setCreatedIntegrationToken(null);
+    setIntegrationTokenCopyStatus(null);
+  }, [currentVendor.vendorId]);
   const latestBillingAudit = latestAuditBySection.get('billing_legal_profile') ?? null;
   const latestLogoBindingAudit = latestAuditBySection.get('logo_binding') ?? null;
   const latestFinanceAudit = latestAuditBySection.get('finance_policy') ?? null;
@@ -1398,6 +1482,33 @@ export function VendorProfilePage() {
       },
       onError: (error) => {
         setVendorStatusFormError(error instanceof Error ? error.message : 'Unable to save vendor status.');
+      },
+    },
+  );
+
+  const integrationTokenMutation = useMutationAction(
+    () =>
+      runtimeServices.vendorIntegration.createToken({
+        vendorIdentifier: currentVendor.vendorId,
+        providerName: integrationTokenForm.providerName.trim(),
+        scopes: integrationTokenForm.scopes,
+      }),
+    {
+      onSuccess: async (result) => {
+        setCreatedIntegrationToken(result);
+        setIntegrationTokenCopyStatus(null);
+        setIntegrationTokenFormError(null);
+        setIntegrationTokenForm({
+          providerName: result.providerName,
+          scopes: normalizeIntegrationScopes(result.scopes),
+        });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.admin.vendorIntegration.providers() });
+        showFeedback('Integration token created.', 'success');
+      },
+      onError: (error) => {
+        setCreatedIntegrationToken(null);
+        setIntegrationTokenCopyStatus(null);
+        setIntegrationTokenFormError(formatIntegrationTokenError(error));
       },
     },
   );
@@ -1736,6 +1847,57 @@ export function VendorProfilePage() {
 
   function handleViewProfileChanges() {
     auditHistoryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function handleIntegrationTokenProviderNameChange(value: string) {
+    setIntegrationTokenForm((current) => ({ ...current, providerName: value }));
+    if (integrationTokenFormError) {
+      setIntegrationTokenFormError(null);
+    }
+  }
+
+  function handleIntegrationTokenScopeChange(scope: VendorIntegrationScope, checked: boolean) {
+    setIntegrationTokenForm((current) => {
+      const scopes = checked
+        ? Array.from(new Set([...current.scopes, scope]))
+        : current.scopes.filter((item) => item !== scope);
+      return { ...current, scopes };
+    });
+    if (integrationTokenFormError) {
+      setIntegrationTokenFormError(null);
+    }
+  }
+
+  function handleIntegrationTokenSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!integrationTokenForm.providerName.trim()) {
+      setIntegrationTokenFormError('Provider name is required.');
+      return;
+    }
+    if (integrationTokenForm.scopes.length === 0) {
+      setIntegrationTokenFormError('Select at least one integration scope.');
+      return;
+    }
+    setCreatedIntegrationToken(null);
+    setIntegrationTokenCopyStatus(null);
+    void integrationTokenMutation.mutateAsync(undefined).catch(() => undefined);
+  }
+
+  async function handleCopyCreatedIntegrationToken() {
+    if (!createdIntegrationToken?.token) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(createdIntegrationToken.token);
+      setIntegrationTokenCopyStatus('Token copied.');
+    } catch {
+      setIntegrationTokenCopyStatus('Copy unavailable. Select the token manually.');
+    }
+  }
+
+  function handleDoneCreatedIntegrationToken() {
+    setCreatedIntegrationToken(null);
+    setIntegrationTokenCopyStatus(null);
   }
 
   function handleOpenBillingEdit() {
@@ -3635,6 +3797,42 @@ export function VendorProfilePage() {
         >
           <div className="vendor-profile-integration-list">
             <div>
+              <span>Vendor Integration API</span>
+              <StatusBadge
+                tone={
+                  integrationProvidersQuery.isError
+                    ? 'warning'
+                    : integrationProvidersQuery.isInitialLoading
+                      ? 'warning'
+                      : displayedIntegrationProvider
+                        ? 'success'
+                        : 'warning'
+                }
+              >
+                {integrationProvidersQuery.isError
+                  ? 'Unavailable'
+                  : integrationProvidersQuery.isInitialLoading
+                    ? 'Loading'
+                    : displayedIntegrationProvider
+                      ? 'Configured'
+                      : 'Needs token'}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Client ID</span>
+              <strong>{displayedIntegrationProvider?.clientId ?? (integrationProvidersQuery.isInitialLoading ? 'Loading' : 'Not created')}</strong>
+            </div>
+            <div>
+              <span>Token status</span>
+              <StatusBadge tone={integrationProvidersQuery.isInitialLoading ? 'warning' : integrationTokenStatus.tone}>
+                {integrationProvidersQuery.isInitialLoading ? 'Loading' : integrationTokenStatus.label}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Last created</span>
+              <strong>{displayedIntegrationProvider ? formatAuditDate(displayedIntegrationProvider.createdAt) : 'No token created'}</strong>
+            </div>
+            <div>
               <span>Finance policy configured</span>
               <StatusBadge tone={marketplaceTermsActive ? 'success' : 'warning'}>
                 {marketplaceTermsActive ? 'Configured' : 'Needs review'}
@@ -3679,6 +3877,77 @@ export function VendorProfilePage() {
               </StatusBadge>
             </div>
           </div>
+          {isAdminVendorRoute ? (
+            <form
+              aria-label="Create integration token"
+              className="vendor-profile-billing-form"
+              onSubmit={handleIntegrationTokenSubmit}
+              noValidate
+            >
+              <div className="vendor-profile-billing-form-heading">
+                <div>
+                  <h3>Create Integration Token</h3>
+                  <p>Create the onboarding API token for this vendor's ERP integration.</p>
+                </div>
+              </div>
+              <div className="vendor-profile-billing-form-grid">
+                <label className="vendor-profile-billing-form-wide">
+                  Provider name
+                  <input
+                    type="text"
+                    value={integrationTokenForm.providerName}
+                    onChange={(event) => handleIntegrationTokenProviderNameChange(event.target.value)}
+                    placeholder="ERP provider name"
+                    disabled={integrationTokenMutation.isPending}
+                    required
+                  />
+                </label>
+                {VENDOR_INTEGRATION_SCOPE_OPTIONS.map((scope) => (
+                  <label className="vendor-profile-checkbox-field" key={scope.value}>
+                    <input
+                      type="checkbox"
+                      checked={integrationTokenForm.scopes.includes(scope.value)}
+                      onChange={(event) => handleIntegrationTokenScopeChange(scope.value, event.target.checked)}
+                      disabled={integrationTokenMutation.isPending}
+                    />
+                    <span>{scope.label}</span>
+                  </label>
+                ))}
+              </div>
+              {integrationTokenFormError ? (
+                <p className="vendor-profile-billing-error" role="alert">{integrationTokenFormError}</p>
+              ) : null}
+              {createdIntegrationToken ? (
+                <div className="vendor-profile-token-panel" aria-label="One-time integration token" role="status">
+                  <div>
+                    <strong>Integration token created</strong>
+                    <p>Copy this token now. It will never be shown again.</p>
+                  </div>
+                  <code>{createdIntegrationToken.token}</code>
+                  <OperationalActionGroup>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => void handleCopyCreatedIntegrationToken()}
+                    >
+                      Copy
+                    </button>
+                    <button type="button" className="button button-primary" onClick={handleDoneCreatedIntegrationToken}>
+                      Done
+                    </button>
+                  </OperationalActionGroup>
+                  {integrationTokenCopyStatus ? (
+                    <p className="action-feedback action-success">{integrationTokenCopyStatus}</p>
+                  ) : null}
+                </div>
+              ) : null}
+              <OperationalActionGroup>
+                <button type="submit" className="button button-primary" disabled={integrationTokenMutation.isPending}>
+                  {integrationTokenMutation.isPending ? 'Creating token...' : 'Create Integration Token'}
+                </button>
+              </OperationalActionGroup>
+            </form>
+          ) : null}
         </OperationalSection>
 
         <OperationalSection

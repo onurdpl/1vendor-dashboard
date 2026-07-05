@@ -18,6 +18,9 @@ import type {
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorFinancialProfile,
+  VendorIntegrationProviderManagement,
+  VendorIntegrationTokenCreateInput,
+  VendorIntegrationTokenCreateResult,
   VendorProfileAuditLog,
   VendorStatus,
   VendorShippingConfig,
@@ -73,6 +76,10 @@ const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const createSupportTicketMock = vi.fn();
+const vendorIntegrationProvidersMock = vi.fn<() => Promise<VendorIntegrationProviderManagement>>();
+const createVendorIntegrationTokenMock = vi.fn<
+  (input: VendorIntegrationTokenCreateInput) => Promise<VendorIntegrationTokenCreateResult>
+>();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -142,6 +149,16 @@ vi.mock('../features/support/api', async () => {
   };
 });
 
+vi.mock('../services/runtime-services', () => ({
+  runtimeServices: {
+    vendorIntegration: {
+      providers: () => vendorIntegrationProvidersMock(),
+      createToken: (input: VendorIntegrationTokenCreateInput) => createVendorIntegrationTokenMock(input),
+      revokeProviderToken: vi.fn(),
+    },
+  },
+}));
+
 const shippingConfig: VendorShippingConfig = {
   vendorId: 'demo-vendor-a',
   preferredProvider: 'navlungo',
@@ -171,6 +188,33 @@ const shippingConfig: VendorShippingConfig = {
     navlungoReturnRecipientCity: 'Konya',
     navlungoReturnRecipientDistrict: 'Selcuklu',
   },
+};
+
+const emptyVendorIntegrationProviders: VendorIntegrationProviderManagement = {
+  generatedAt: '2026-06-02T12:00:00.000Z',
+  providers: [],
+};
+
+const vendorIntegrationProviders: VendorIntegrationProviderManagement = {
+  generatedAt: '2026-06-02T12:00:00.000Z',
+  providers: [
+    {
+      clientId: 'client-demo-vendor-a',
+      providerName: 'Demo ERP',
+      vendorIdentifier: 'demo-vendor-a',
+      scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+      enabled: true,
+      revokedAt: null,
+      createdAt: '2026-06-01T10:00:00.000Z',
+      updatedAt: '2026-06-01T10:00:00.000Z',
+      lastUsedAt: null,
+      lastRequestAt: null,
+      requestsLast24h: 0,
+      rateLimitedLast24h: 0,
+      authFailuresLast24h: null,
+      recentAuditLogs: [],
+    },
+  ],
 };
 
 function shippingProviderDiagnostics() {
@@ -721,6 +765,17 @@ describe('VendorProfilePage', () => {
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
     createSupportTicketMock.mockReset();
+    vendorIntegrationProvidersMock.mockReset();
+    vendorIntegrationProvidersMock.mockResolvedValue(emptyVendorIntegrationProviders);
+    createVendorIntegrationTokenMock.mockReset();
+    createVendorIntegrationTokenMock.mockResolvedValue({
+      clientId: 'client-demo-vendor-a',
+      vendorIdentifier: 'demo-vendor-a',
+      providerName: 'Demo ERP',
+      scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+      token: 'spg_vi_plaintext_once',
+      tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
+    });
   });
 
   it('renders a simplified vendor settings workspace from existing config', async () => {
@@ -966,6 +1021,124 @@ describe('VendorProfilePage', () => {
     );
   });
 
+  it('shows integration token onboarding controls to admins on the vendor-specific profile route', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    vendorIntegrationProvidersMock.mockResolvedValueOnce(vendorIntegrationProviders);
+
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+
+    const integrationHeading = await screen.findByRole('heading', { name: 'Integration status' });
+    const integrationSection = integrationHeading.closest('section');
+    expect(integrationSection).not.toBeNull();
+    expect(within(integrationSection!).getByText('Vendor Integration API')).toBeInTheDocument();
+    expect(await within(integrationSection!).findByText('client-demo-vendor-a')).toBeInTheDocument();
+    expect(within(integrationSection!).getByText('Active')).toBeInTheDocument();
+    expect(within(integrationSection!).getByRole('button', { name: 'Create Integration Token' })).toBeInTheDocument();
+    expect(vendorIntegrationProvidersMock).toHaveBeenCalled();
+  });
+
+  it('creates an onboarding token for a restricted vendor and only displays the plaintext once', async () => {
+    const user = userEvent.setup();
+    const clipboardWriteMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteMock,
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'created-vendor' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'created-vendor' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'created-vendor' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'created-vendor',
+      vendorName: 'Created Vendor',
+      status: 'inactive',
+      restricted: true,
+      restrictionReason: 'Operational review',
+    });
+    createVendorIntegrationTokenMock.mockResolvedValueOnce({
+      clientId: 'client-created-vendor',
+      vendorIdentifier: 'created-vendor',
+      providerName: 'Onboarding ERP',
+      scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+      token: 'spg_vi_created_once',
+      tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
+    });
+    const storageSetSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    renderVendorProfilePage(['/admin/vendors/created-vendor']);
+
+    const integrationHeading = await screen.findByRole('heading', { name: 'Integration status' });
+    const integrationSection = integrationHeading.closest('section');
+    expect(integrationSection).not.toBeNull();
+    await user.type(within(integrationSection!).getByLabelText('Provider name'), '  Onboarding ERP  ');
+    await user.click(within(integrationSection!).getByRole('button', { name: 'Create Integration Token' }));
+
+    await waitFor(() =>
+      expect(createVendorIntegrationTokenMock).toHaveBeenCalledWith({
+        vendorIdentifier: 'created-vendor',
+        providerName: 'Onboarding ERP',
+        scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+      }),
+    );
+    expect(await within(integrationSection!).findByText('Copy this token now. It will never be shown again.')).toBeInTheDocument();
+    expect(within(integrationSection!).getAllByText('spg_vi_created_once')).toHaveLength(1);
+    await user.click(within(integrationSection!).getByRole('button', { name: 'Copy' }));
+    expect(clipboardWriteMock).toHaveBeenCalledWith('spg_vi_created_once');
+    expect(await within(integrationSection!).findByText('Token copied.')).toBeInTheDocument();
+    expect(JSON.stringify(storageSetSpy.mock.calls)).not.toContain('spg_vi_created_once');
+
+    await user.click(within(integrationSection!).getByRole('button', { name: 'Done' }));
+    expect(within(integrationSection!).queryByText('spg_vi_created_once')).not.toBeInTheDocument();
+    storageSetSpy.mockRestore();
+  });
+
+  it('shows safe integration token creation errors without leaking token internals', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    createVendorIntegrationTokenMock.mockRejectedValueOnce(new Error('tokenHash leaked stack spg_vi_secret'));
+
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+
+    const integrationHeading = await screen.findByRole('heading', { name: 'Integration status' });
+    const integrationSection = integrationHeading.closest('section');
+    expect(integrationSection).not.toBeNull();
+    await user.type(within(integrationSection!).getByLabelText('Provider name'), 'Demo ERP');
+    await user.click(within(integrationSection!).getByRole('button', { name: 'Create Integration Token' }));
+
+    expect(await within(integrationSection!).findByRole('alert')).toHaveTextContent(
+      'Integration token could not be created. Please retry.',
+    );
+    expect(JSON.stringify(document.body.textContent)).not.toContain('tokenHash leaked stack');
+    expect(JSON.stringify(document.body.textContent)).not.toContain('spg_vi_secret');
+  });
+
   it('keeps vendor self-profile scoped to the current session vendor', async () => {
     renderVendorProfilePage(['/vendor/profile']);
 
@@ -975,8 +1148,10 @@ describe('VendorProfilePage', () => {
     expect(getVendorStatusMock).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Integration Token' })).not.toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
     expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+    expect(vendorIntegrationProvidersMock).not.toHaveBeenCalled();
   });
 
   it('saves admin shipping setup for the requested route vendor', async () => {

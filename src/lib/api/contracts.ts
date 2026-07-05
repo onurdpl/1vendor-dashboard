@@ -2936,3 +2936,20 @@ export type VendorIntegrationProviderRevokeResult = {
   enabled: boolean;
   revokedAt: string | null;
 };
+
+export type VendorIntegrationScope = 'orders:read' | 'status:write' | 'shipment:write' | 'invoice:write';
+
+export type VendorIntegrationTokenCreateInput = {
+  vendorIdentifier: string;
+  providerName: string;
+  scopes: VendorIntegrationScope[];
+};
+
+export type VendorIntegrationTokenCreateResult = {
+  clientId: string;
+  vendorIdentifier: string;
+  providerName: string;
+  scopes: string[];
+  token: string;
+  tokenWarning: string;
+};

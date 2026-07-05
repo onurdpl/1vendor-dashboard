@@ -176,13 +176,13 @@ Use these classifications when deciding whether a section should be visible, pro
 | Marketplace terms | Shared operational | Read-only | Admin-owned | Vendor sees terms, not editor unless supported. |
 | Shipping operations | Shared operational | Read-only summary | Admin-owned config | Keep IDs visible but not dominant. |
 | Warehouse/return destination | Shared operational | Read-only summary | Admin-owned config | Use readable location plus ID. |
-| Integration status | Shared operational | Visible | Visible | Vendor-safe status labels. |
+| Integration status | Shared operational | Visible | Visible + onboarding token creation | Vendor-safe status labels; admin creates onboarding tokens from the vendor-specific profile only. |
 | Request profile correction | Vendor operational | Primary support CTA | Useful | Must reuse/open support workflow, avoid duplicates. |
 | Fields not modeled yet | Passive analytics / future | Collapsed/muted | Useful planning | Keep low visual weight. |
 
 ## Vendor Operational Readiness
 
-Vendor Profile now acts as a lightweight readiness workspace. It is not an onboarding automation engine and does not create payout, accounting, provider, or Shopify behavior. Its job is narrower:
+Vendor Profile now acts as a lightweight readiness and admin onboarding workspace. It does not create payout, accounting, Shopify behavior, or provider operations beyond admin-created Vendor Integration API onboarding tokens. Its job is narrower:
 
 ```text
 Existing configuration and workflow visibility -> is this vendor operationally ready?
@@ -199,7 +199,7 @@ Readiness sections must use only currently available truth:
 
 Readiness labels must avoid fake certainty. Missing, failed, or unmodeled data should render `Unknown`, `Requires configuration review`, or `Not modeled yet`, not a green state.
 
-Readiness is role-aware but shared: vendors see a read-only operational checklist and correction/support actions; admins see the same truth with admin-owned configuration context preserved. Vendor isolation still applies to all linked queues and support records.
+Readiness is role-aware but shared: vendors see read-only status and correction/support actions; admins see the same truth with admin-owned configuration context preserved, including onboarding token creation for the selected vendor. Vendor isolation still applies to all linked queues and support records.
 
 ### Automation
 

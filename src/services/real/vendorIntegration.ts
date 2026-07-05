@@ -2,6 +2,8 @@ import { apiClient } from '../../lib/api-client';
 import type {
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
+  VendorIntegrationTokenCreateInput,
+  VendorIntegrationTokenCreateResult,
 } from '../../lib/api/contracts';
 
 export function getVendorIntegrationProviderManagement(options: { signal?: AbortSignal } = {}) {
@@ -15,4 +17,10 @@ export function revokeVendorIntegrationProviderToken(clientId: string) {
     `/admin/vendor-integration/tokens/${encodeURIComponent(clientId)}/revoke`,
     {},
   );
+}
+
+export function createVendorIntegrationToken(input: VendorIntegrationTokenCreateInput) {
+  return apiClient.post<VendorIntegrationTokenCreateResult>('/admin/vendor-integration/tokens', input, {
+    skipVendorContext: true,
+  });
 }

@@ -54,6 +54,8 @@ import type {
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
+  VendorIntegrationTokenCreateInput,
+  VendorIntegrationTokenCreateResult,
 } from '../lib/api/contracts';
 import type {
   AdminCancelRefundReviewPayload,
@@ -155,6 +157,21 @@ function getMockVendorIntegrationProviderRevokeResult(clientId: string): VendorI
     providerName: 'Mock Provider',
     enabled: false,
     revokedAt: new Date().toISOString(),
+  };
+}
+
+function getMockVendorIntegrationTokenCreateResult(
+  input: VendorIntegrationTokenCreateInput,
+): VendorIntegrationTokenCreateResult {
+  const vendorIdentifier = input.vendorIdentifier.trim();
+  const providerName = input.providerName.trim();
+  return {
+    clientId: `mock-${vendorIdentifier || 'vendor'}-integration-client`,
+    vendorIdentifier,
+    providerName,
+    scopes: [...input.scopes],
+    token: `spg_vi_mock_${vendorIdentifier || 'vendor'}_${Date.now()}`,
+    tokenWarning: 'Sensitive: this plaintext token is shown only once. Store it securely.',
   };
 }
 
@@ -2779,6 +2796,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realVendorIntegration.getVendorIntegrationProviderManagement({ signal: options.signal })
         : Promise.resolve(getMockVendorIntegrationProviderManagement()),
+    createToken: (input: VendorIntegrationTokenCreateInput) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendorIntegration.createVendorIntegrationToken(input)
+        : Promise.resolve(getMockVendorIntegrationTokenCreateResult(input)),
     revokeProviderToken: (clientId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realVendorIntegration.revokeVendorIntegrationProviderToken(clientId)
