@@ -567,6 +567,23 @@ describe('vendor integration API foundation', () => {
     );
   });
 
+  it('allows restricted vendor tokens to read allocated orders', async () => {
+    prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal', status: 'inactive' });
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer restricted-token' }, { limit: '25' });
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assignedVendorId: 'sporjinal',
+        },
+      }),
+    );
+    expect(response.payload).toEqual(expect.objectContaining({ data: [expect.objectContaining({ vendorIdentifier: 'sporjinal' })] }));
+  });
+
   it('keeps the existing first-page response when cursor is missing', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
 
@@ -788,6 +805,85 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
+  it('allows the same vendor integration token to write after vendor activation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(
+      buildClient({
+        id: 'client-onboarding',
+        scopes: ['status:write', 'shipment:write', 'invoice:write'],
+      }),
+    );
+    prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal', status: 'active' });
+    prismaMock.vendorAllocation.update
+      .mockResolvedValueOnce({
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        vendorIntegrationStatus: 'acknowledged',
+        vendorIntegrationStatusMessage: 'Order imported into Entegra',
+        vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:06:00.000Z'),
+        vendorIntegrationProvider: 'Provider A',
+        lastVendorIntegrationRequestId: 'status-req-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        carrier: 'Yurtici Kargo',
+        trackingNumber: 'ABC123456',
+        vendorIntegrationTrackingUrl: 'https://tracking.example/ABC123456',
+        vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
+        shippingStatus: 'In Transit',
+        lastVendorIntegrationShipmentRequestId: 'shipment-req-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        vendorInvoiceNumber: 'ABC202600001',
+        vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+        vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+        vendorInvoiceAmount: '1299.90',
+        vendorInvoiceReceivedAt: new Date('2026-06-02T12:30:00.000Z'),
+        lastVendorIntegrationInvoiceRequestId: 'invoice-req-1',
+      });
+
+    const statusResponse = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer onboarding-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'acknowledged', message: 'Order imported into Entegra' },
+    );
+    const shipmentResponse = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer onboarding-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+    const invoiceResponse = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer onboarding-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(statusResponse.statusCode).toBe(200);
+    expect(shipmentResponse.statusCode).toBe(200);
+    expect(invoiceResponse.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledTimes(3);
+    expect(prismaMock.vendorIntegrationStatusEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ clientId: 'client-onboarding' }) }),
+    );
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ clientId: 'client-onboarding' }) }),
+    );
+    expect(prismaMock.vendorIntegrationInvoiceEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ clientId: 'client-onboarding' }) }),
+    );
+  });
+
   it('rejects unsupported vendor integration statuses', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
 
@@ -954,6 +1050,26 @@ describe('vendor integration API foundation', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks vendor integration shipment writes for restricted vendors', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendor.findUnique.mockResolvedValueOnce({ id: 'sporjinal', status: 'inactive' });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({
+      message: 'Your account is temporarily restricted. Please contact support if you believe this is incorrect.',
+    });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
@@ -1155,6 +1271,26 @@ describe('vendor integration API foundation', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks vendor integration invoice writes for restricted vendors', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+    prismaMock.vendor.findUnique.mockResolvedValueOnce({ id: 'sporjinal', status: 'inactive' });
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({
+      message: 'Your account is temporarily restricted. Please contact support if you believe this is incorrect.',
+    });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
@@ -1387,6 +1523,62 @@ describe('vendor integration API foundation', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('allows admins to create tokens for restricted existing vendors during onboarding', async () => {
+    prismaMock.vendor.findUnique.mockResolvedValueOnce({ id: 'sporjinal', status: 'inactive' });
+    prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
+      id: 'client-created',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'ayensoftware-test',
+      scopes: ['orders:read', 'status:write'],
+    });
+
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      authUser: adminUser,
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read', 'status:write'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        clientId: 'client-created',
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read', 'status:write'],
+        token: expect.stringMatching(/^spg_vi_/),
+      }),
+    );
+    expect(prismaMock.vendor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'sporjinal' },
+      select: { id: true },
+    });
+    expect(prismaMock.vendorIntegrationClient.create).toHaveBeenCalled();
+  });
+
+  it('rejects admin token creation for non-existing vendors', async () => {
+    prismaMock.vendor.findUnique.mockResolvedValueOnce(null);
+
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      authUser: adminUser,
+      body: {
+        vendorIdentifier: 'unknown-vendor',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Vendor integration token requires an existing vendor.' });
+    expect(prismaMock.vendor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'unknown-vendor' },
+      select: { id: true },
+    });
     expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
   });
 

@@ -24,7 +24,7 @@ export type CreatedVendorIntegrationClientToken = {
   token: string;
 };
 
-type VendorIntegrationClientStore = Pick<typeof prisma, 'vendorIntegrationClient'>;
+type VendorIntegrationClientStore = Pick<typeof prisma, 'vendor' | 'vendorIntegrationClient'>;
 
 export function generateVendorIntegrationToken() {
   return `spg_vi_${randomBytes(32).toString('base64url')}`;
@@ -69,6 +69,18 @@ export async function createVendorIntegrationClientToken(
 
   if (scopes.length === 0) {
     throw new Error('At least one scope is required.');
+  }
+
+  const vendor = await store.vendor.findUnique({
+    where: {
+      id: vendorIdentifier,
+    },
+    select: {
+      id: true,
+    },
+  });
+  if (!vendor) {
+    throw new Error('Vendor integration token requires an existing vendor.');
   }
 
   const token = generateVendorIntegrationToken();

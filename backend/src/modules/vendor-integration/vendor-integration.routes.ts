@@ -10,7 +10,6 @@ import {
   requireUnrestrictedVendorIntegration,
   writeVendorIntegrationAuditLog,
 } from './vendor-integration.auth.js';
-import { getVendorOperationalRestriction, RESTRICTED_VENDOR_MESSAGE } from '../vendor-access/restricted-vendor.js';
 import { listVendorIntegrationOrders, type VendorIntegrationOrdersQuery } from './vendor-integration.orders.service.js';
 import {
   updateVendorIntegrationOrderInvoice,
@@ -133,11 +132,6 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
       const scopes = Array.isArray(request.body?.scopes) ? request.body.scopes : [];
 
       try {
-        const restriction = await getVendorOperationalRestriction(vendorIdentifier);
-        if (restriction) {
-          return reply.code(403).send({ message: RESTRICTED_VENDOR_MESSAGE });
-        }
-
         const created = await createVendorIntegrationClientToken({
           vendorIdentifier,
           providerName,
