@@ -184,6 +184,8 @@ Use these classifications when deciding whether a section should be visible, pro
 
 Vendor Profile now acts as a lightweight readiness and admin onboarding workspace. It does not create payout, accounting, Shopify behavior, or provider operations beyond admin-created Vendor Integration API onboarding tokens. Its job is narrower:
 
+The end-to-end Vendor Provisioning lifecycle is owned by `docs/product/VENDOR_PROVISIONING_ARCHITECTURE.md`; this section owns only role-aware readiness and presentation rules.
+
 ```text
 Existing configuration and workflow visibility -> is this vendor operationally ready?
 ```

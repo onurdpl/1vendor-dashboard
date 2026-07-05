@@ -2,6 +2,8 @@
 
 `VendorProfileAuditLog` is an immutable, append-only audit trail for admin-owned vendor configuration changes.
 
+The end-to-end Vendor Provisioning lifecycle is owned by `docs/product/VENDOR_PROVISIONING_ARCHITECTURE.md`; this document owns only Vendor Profile audit behavior.
+
 The log records one row per changed normalized field. No row is written when a saved value is unchanged after normalization.
 
 Tracked areas:

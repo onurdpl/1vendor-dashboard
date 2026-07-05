@@ -462,6 +462,8 @@ Creates a VendorIntegrationClient and returns the plaintext token once.
 
 The endpoint is reused by Admin Vendor Profile integration onboarding. Admins may create onboarding tokens for restricted vendors; restricted vendor write endpoints remain blocked by the existing restricted-mode authorization checks until activation.
 
+The end-to-end Vendor Provisioning lifecycle is owned by `docs/product/VENDOR_PROVISIONING_ARCHITECTURE.md`; this section owns only Vendor Integration API token behavior.
+
 Required body:
 
 - `vendorIdentifier`
