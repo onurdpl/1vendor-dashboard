@@ -21,6 +21,9 @@ export const queryKeys = {
     runtime: {
       health: () => ['admin', 'runtime', 'health'] as const,
     },
+    vendors: {
+      directory: (search = '', status = 'all') => ['admin', 'vendors', 'directory', search, status] as const,
+    },
     vendorIntegration: {
       providers: () => ['admin', 'vendor-integration', 'providers'] as const,
     },

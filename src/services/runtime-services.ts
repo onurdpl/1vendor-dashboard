@@ -47,6 +47,8 @@ import type {
   SupportTicketStatus,
   ShipmentCustomerOverrides,
   ShippingProvider,
+  VendorDirectoryResponse,
+  VendorDirectoryStatusFilter,
   VendorBillingProfileInput,
   VendorProvisioningInput,
   VendorProvisioningResult,
@@ -345,6 +347,54 @@ export const runtimeServices = {
           }),
   },
   vendors: {
+    directory: (
+      options: ReadRequestOptions & { search?: string | null; status?: VendorDirectoryStatusFilter } = {},
+    ): Promise<VendorDirectoryResponse> => {
+      if (runtimeConfig.apiMode === 'real') {
+        return realVendors.listAdminVendors({
+          signal: options.signal,
+          search: options.search,
+          status: options.status,
+          limit: options.limit,
+        });
+      }
+
+      const search = options.search?.trim().toLowerCase() ?? '';
+      const status = options.status ?? 'all';
+      const now = new Date().toISOString();
+      const vendors = (getCurrentUser()?.vendorDetails ?? []).map((vendor) => {
+        const restricted = String(vendor.status ?? 'active').toLowerCase() !== 'active';
+        return {
+          vendorId: vendor.vendorId,
+          vendorName: vendor.vendorName,
+          status: vendor.status ?? 'active',
+          statusLabel: restricted ? 'Restricted' as const : 'Active' as const,
+          restrictionReason: restricted ? vendor.restrictionReason ?? null : null,
+          restrictedAt: restricted ? vendor.restrictionChangedAt ?? null : null,
+          updatedAt: vendor.restrictionChangedAt ?? now,
+          createdAt: now,
+          profileUrl: `/admin/vendors/${encodeURIComponent(vendor.vendorId)}`,
+        };
+      }).filter((vendor) => {
+        const matchesSearch = !search
+          || vendor.vendorId.toLowerCase().includes(search)
+          || vendor.vendorName.toLowerCase().includes(search);
+        const matchesStatus = status === 'all'
+          || (status === 'active' && vendor.status === 'active')
+          || (status === 'restricted' && vendor.status !== 'active');
+        return matchesSearch && matchesStatus;
+      });
+
+      return Promise.resolve({
+        vendors,
+        generatedAt: now,
+        filters: {
+          search: search || null,
+          status,
+          limit: options.limit ?? 100,
+        },
+      });
+    },
     status: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.getVendorStatus(vendorId, { signal: options.signal })

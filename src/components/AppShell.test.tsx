@@ -70,6 +70,7 @@ function renderShell(initialEntry: string) {
         <Route element={<AdminShell />}>
           <Route path="/admin/operations" element={<div>Admin operations content</div>} />
           <Route path="/admin/finance/settlement-schedules" element={<div>Scheduled settlements queue content</div>} />
+          <Route path="/admin/vendors" element={<div>Vendor directory content</div>} />
           <Route path="/admin/vendors/new" element={<div>Create vendor content</div>} />
         </Route>
         <Route path="/login" element={<div>Login screen</div>} />
@@ -97,7 +98,7 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Orders/i })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Create Vendor/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Vendors$/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Admin workspace switcher')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText(/Admin Workspace/i)).not.toBeInTheDocument();
@@ -154,7 +155,10 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByRole('link', { name: /Settlement Approvals/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Refund Adjustments/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Payment Preparation/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Create Vendor/i })).toBeInTheDocument();
+    const vendorsLink = screen.getByRole('link', { name: /^Vendors$/i });
+    expect(vendorsLink).toBeInTheDocument();
+    expect(vendorsLink).toHaveAttribute('href', '/admin/vendors');
+    expect(screen.queryByRole('link', { name: /Create Vendor/i })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Workspace'), 'vendor');
 

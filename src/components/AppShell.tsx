@@ -51,7 +51,7 @@ const adminNavItems = [
   { to: '/admin/finance/settlement-schedules', label: 'Scheduled Settlements', icon: 'schedule' },
   { to: '/admin/support', label: 'Support Tickets', icon: 'support' },
   { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'analytics' },
-  { to: '/admin/vendors/new', label: 'Create Vendor', icon: 'vendors' },
+  { to: '/admin/vendors', label: 'Vendors', icon: 'vendors' },
   { to: '/admin/providers', label: 'Providers', icon: 'providers' },
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'diagnostics' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName }>;
@@ -500,6 +500,7 @@ export function AdminShell() {
     '/admin/finance/settlement-schedules',
     '/admin/finance/refund-adjustments',
     '/admin/finance/payment-preparation',
+    '/admin/vendors',
   ].some((path) => location.pathname.startsWith(path));
 
   return (

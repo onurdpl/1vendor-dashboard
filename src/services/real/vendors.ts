@@ -14,12 +14,35 @@ import type {
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorDirectoryResponse,
+  VendorDirectoryStatusFilter,
   VendorProvisioningInput,
   VendorProvisioningResult,
   VendorProfileAuditLog,
   VendorStatus,
   VendorStatusInput,
 } from '../../lib/api/contracts';
+
+export function listAdminVendors(
+  options: { search?: string | null; status?: VendorDirectoryStatusFilter; limit?: number; signal?: AbortSignal } = {},
+) {
+  const searchParams = new URLSearchParams();
+  const search = options.search?.trim();
+  if (search) {
+    searchParams.set('search', search);
+  }
+  if (options.status && options.status !== 'all') {
+    searchParams.set('status', options.status);
+  }
+  if (options.limit) {
+    searchParams.set('limit', String(options.limit));
+  }
+  const query = searchParams.toString();
+
+  return apiClient.get<VendorDirectoryResponse>(`/admin/vendors${query ? `?${query}` : ''}`, {
+    signal: options.signal,
+  });
+}
 
 export function getVendorBillingProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
   return apiClient.get<VendorBillingProfile | null>(

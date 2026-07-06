@@ -25,6 +25,7 @@ This document is authoritative for:
 - `UserVendorAccess` creation
 - temporary password handling
 - restricted-first onboarding
+- `/admin/vendors` as the admin vendor directory
 - `/admin/vendors/:vendorId` as the admin onboarding workspace
 - activation prerequisites and activation rule
 
@@ -36,6 +37,7 @@ The launch lifecycle is:
 
 ```text
 Admin
+-> Vendor Directory
 -> Create Vendor
 -> Vendor
 -> Vendor Admin User
@@ -59,7 +61,15 @@ The admin provisioning entry point is:
 POST /admin/vendors/provision
 ```
 
-The admin UI entry point is:
+The admin vendor management UI entry point is:
+
+```text
+/admin/vendors
+```
+
+This directory lets admins find, review, and reopen existing vendors after provisioning.
+
+The Create Vendor UI entry point is:
 
 ```text
 /admin/vendors/new

@@ -33,6 +33,7 @@ import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integration/vendor-integration.docs.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
+import { registerVendorDirectoryRoutes } from './modules/vendors/vendor-directory.routes.js';
 import { registerVendorProfileAuditLogRoutes } from './modules/vendors/vendor-profile-audit-log.routes.js';
 import { registerVendorProvisioningRoutes } from './modules/vendors/vendor-provisioning.routes.js';
 import { registerVendorStatusRoutes } from './modules/vendors/vendor-status.routes.js';
@@ -456,6 +457,7 @@ export function createApp() {
   registerSupportRoutes(app, env);
   registerVendorIntegrationDocsRoutes(app);
   registerVendorIntegrationRoutes(app, env);
+  registerVendorDirectoryRoutes(app, env);
   registerVendorProvisioningRoutes(app, env);
   registerVendorStatusRoutes(app, env);
   registerVendorBillingProfileRoutes(app, env);

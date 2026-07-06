@@ -2002,6 +2002,30 @@ export type VendorStatusInput = {
   reason?: string;
 };
 
+export type VendorDirectoryStatusFilter = 'all' | 'active' | 'restricted';
+
+export type VendorDirectoryItem = {
+  vendorId: string;
+  vendorName: string;
+  status: string;
+  statusLabel: 'Active' | 'Restricted';
+  restrictionReason: string | null;
+  restrictedAt: string | null;
+  updatedAt: string;
+  createdAt: string;
+  profileUrl: string;
+};
+
+export type VendorDirectoryResponse = {
+  vendors: VendorDirectoryItem[];
+  generatedAt: string;
+  filters: {
+    search: string | null;
+    status: VendorDirectoryStatusFilter;
+    limit: number;
+  };
+};
+
 export type VendorProvisioningInput = {
   vendorId: string;
   vendorName: string;
