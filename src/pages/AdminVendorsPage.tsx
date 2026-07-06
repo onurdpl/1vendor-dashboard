@@ -3,14 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import { provisionVendor } from '../lib/api/vendors';
 import type { VendorProvisioningInput, VendorProvisioningResult } from '../lib/api/contracts';
 
-type VendorProvisioningFormState = VendorProvisioningInput;
+type VendorProvisioningFormState = Omit<VendorProvisioningInput, 'restrictionReason'>;
 
+const STANDARD_ONBOARDING_RESTRICTION_REASON = 'Operational review';
 const initialFormState: VendorProvisioningFormState = {
   vendorId: '',
   vendorName: '',
   adminName: '',
   adminEmail: '',
-  restrictionReason: '',
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,12 +21,12 @@ function trimForm(state: VendorProvisioningFormState): VendorProvisioningInput {
     vendorName: state.vendorName.trim(),
     adminName: state.adminName.trim(),
     adminEmail: state.adminEmail.trim(),
-    restrictionReason: state.restrictionReason.trim(),
+    restrictionReason: STANDARD_ONBOARDING_RESTRICTION_REASON,
   };
 }
 
 function validateForm(input: VendorProvisioningInput) {
-  if (!input.vendorId || !input.vendorName || !input.adminName || !input.adminEmail || !input.restrictionReason) {
+  if (!input.vendorId || !input.vendorName || !input.adminName || !input.adminEmail) {
     return 'All fields are required.';
   }
 
@@ -35,6 +35,10 @@ function validateForm(input: VendorProvisioningInput) {
   }
 
   return null;
+}
+
+function formatVendorStatus(status: string) {
+  return status.trim().toLowerCase() === 'active' ? 'Active' : 'Restricted';
 }
 
 function getSafeErrorMessage(error: unknown) {
@@ -80,7 +84,6 @@ export function AdminVendorsPage() {
         vendorName: input.vendorName,
         adminName: input.adminName,
         adminEmail: input.adminEmail,
-        restrictionReason: input.restrictionReason,
       });
     } catch (error) {
       setSuccess(null);
@@ -96,7 +99,7 @@ export function AdminVendorsPage() {
         <div>
           <p className="eyebrow">Admin Workspace</p>
           <h1>Create Vendor</h1>
-          <p>Provision a marketplace seller account and initial vendor admin without seed data.</p>
+          <p>Create a marketplace vendor and initial vendor administrator.</p>
         </div>
       </div>
 
@@ -105,7 +108,7 @@ export function AdminVendorsPage() {
           <div className="admin-vendor-provisioning-heading">
             <div>
               <h2>Vendor account</h2>
-              <p>Vendor starts restricted until setup is complete.</p>
+              <p>New vendors start in Restricted mode while onboarding is completed.</p>
             </div>
             <span className="severity-chip severity-attention">Restricted start</span>
           </div>
@@ -159,19 +162,12 @@ export function AdminVendorsPage() {
             />
           </div>
 
-          <div className="field">
-            <label htmlFor="vendor-provisioning-restriction-reason">Restriction reason</label>
-            <textarea
-              id="vendor-provisioning-restriction-reason"
-              value={form.restrictionReason}
-              onChange={(event) => updateField('restrictionReason', event.target.value)}
-              rows={4}
-              required
-            />
-          </div>
-
           <div className="admin-vendor-provisioning-note">
             <strong>Before you submit</strong>
+            <p>
+              New vendors can sign in, view workspace information, and contact support while onboarding is completed.
+            </p>
+            <p>Operational actions remain unavailable until activation.</p>
             <p>Temporary password will be shown once after creation.</p>
             <p>Admin must complete setup before activating vendor.</p>
           </div>
@@ -190,8 +186,9 @@ export function AdminVendorsPage() {
         <aside className="admin-vendor-provisioning-side">
           {success ? (
             <div className="admin-vendor-provisioning-success" role="status" aria-live="polite">
-              <p className="eyebrow">Vendor provisioned</p>
+              <p className="eyebrow">Vendor created successfully</p>
               <h2>{success.vendorName}</h2>
+              <p>Complete Vendor Profile onboarding before activating this vendor.</p>
               <dl>
                 <div>
                   <dt>Vendor ID</dt>
@@ -202,8 +199,8 @@ export function AdminVendorsPage() {
                   <dd>{success.adminEmail}</dd>
                 </div>
                 <div>
-                  <dt>Status</dt>
-                  <dd>{success.vendorStatus}</dd>
+                  <dt>Current status</dt>
+                  <dd>{formatVendorStatus(success.vendorStatus)}</dd>
                 </div>
               </dl>
               <div className="admin-vendor-temporary-password">
@@ -226,9 +223,10 @@ export function AdminVendorsPage() {
               <p className="eyebrow">Setup model</p>
               <h2>Restricted first</h2>
               <p>
-                The vendor is created in restricted mode so sellers can sign in and view their workspace while setup is
-                completed by the Marketplace team.
+                The vendor is created in Restricted mode so sellers can sign in, view workspace information, and
+                contact support while onboarding is completed by the Marketplace team.
               </p>
+              <p>Operational actions remain unavailable until activation.</p>
               <dl>
                 <div>
                   <dt>Vendor ID</dt>

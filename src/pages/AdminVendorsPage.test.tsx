@@ -84,7 +84,6 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Vendor name'), '  New Vendor  ');
   await user.type(screen.getByLabelText('Admin name'), '  Vendor Admin  ');
   await user.type(screen.getByLabelText('Admin email'), '  ADMIN@NEWVENDOR.TEST  ');
-  await user.type(screen.getByLabelText('Restriction reason'), '  Operational review  ');
 }
 
 function mockSuccessfulProvision() {
@@ -126,14 +125,19 @@ describe('AdminVendorsPage', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Create Vendor' })).toBeInTheDocument();
+    expect(screen.getByText('Create a marketplace vendor and initial vendor administrator.')).toBeInTheDocument();
     expect(screen.getByLabelText('Vendor ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Vendor name')).toBeInTheDocument();
     expect(screen.getByLabelText('Admin name')).toBeInTheDocument();
     expect(screen.getByLabelText('Admin email')).toBeInTheDocument();
-    expect(screen.getByLabelText('Restriction reason')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Restriction reason')).not.toBeInTheDocument();
     expect(screen.getByText('Vendor ID must match Shopify seller_info.')).toBeInTheDocument();
+    expect(screen.getByText('New vendors start in Restricted mode while onboarding is completed.')).toBeInTheDocument();
+    expect(
+      screen.getByText('New vendors can sign in, view workspace information, and contact support while onboarding is completed.'),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('Operational actions remain unavailable until activation.').length).toBeGreaterThan(0);
     expect(screen.getByText('Temporary password will be shown once after creation.')).toBeInTheDocument();
-    expect(screen.getByText('Vendor starts restricted until setup is complete.')).toBeInTheDocument();
   });
 
   it('validates required fields before calling the provisioning API', async () => {
@@ -154,7 +158,6 @@ describe('AdminVendorsPage', () => {
     await user.type(screen.getByLabelText('Vendor name'), 'New Vendor');
     await user.type(screen.getByLabelText('Admin name'), 'Vendor Admin');
     await user.type(screen.getByLabelText('Admin email'), 'not-an-email');
-    await user.type(screen.getByLabelText('Restriction reason'), 'Operational review');
     await user.click(screen.getByRole('button', { name: 'Create Vendor' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('Admin email must be a valid email address.');
@@ -187,9 +190,13 @@ describe('AdminVendorsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create Vendor' }));
 
     const successPanel = await screen.findByRole('status');
-    expect(successPanel).toHaveTextContent('Vendor provisioned');
+    expect(successPanel).toHaveTextContent('Vendor created successfully');
     expect(successPanel).toHaveTextContent('newvendor');
     expect(successPanel).toHaveTextContent('admin@newvendor.test');
+    expect(successPanel).toHaveTextContent('Current status');
+    expect(successPanel).toHaveTextContent('Restricted');
+    expect(successPanel).toHaveTextContent('Complete Vendor Profile onboarding before activating this vendor.');
+    expect(successPanel).not.toHaveTextContent('inactive');
     expect(within(successPanel).getAllByText('Temp-Password-123')).toHaveLength(1);
     expect(successPanel).toHaveTextContent('Copy this password now. It will not be shown again.');
   });
@@ -226,7 +233,7 @@ describe('AdminVendorsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create Vendor' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('A vendor with this ID already exists.');
-    expect(screen.queryByText('Vendor provisioned')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor created successfully')).not.toBeInTheDocument();
   });
 
   it('renders duplicate admin email errors safely', async () => {
@@ -238,7 +245,7 @@ describe('AdminVendorsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Create Vendor' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('A user with this email already exists.');
-    expect(screen.queryByText('Vendor provisioned')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor created successfully')).not.toBeInTheDocument();
   });
 
   it('does not render the create vendor page for vendor users behind the existing permission guard', () => {

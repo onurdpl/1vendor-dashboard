@@ -83,12 +83,13 @@ Required launch inputs:
 
 - `vendorId`
 - `vendorName`
-- `restrictionReason`
+
+The Create Vendor UI does not ask the Marketplace Admin to write a restriction reason. It applies the standard onboarding restriction reason and submits it through the existing backend provisioning contract.
 
 Initial launch status:
 
 - `status = inactive`
-- `restrictionReason` is stored on the Vendor
+- the standard onboarding `restrictionReason` is stored on the Vendor
 - `restrictedByUserId` is set from the admin actor when available
 - `restrictedAt` is set at provisioning time
 
