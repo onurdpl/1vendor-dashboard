@@ -25,7 +25,7 @@ import type {
   VendorStatus,
   VendorShippingConfig,
 } from '../lib/api/contracts';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { getCurrentVendorContext, setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const getVendorShippingConfigMock = vi.fn<
   (options?: { vendorId?: string | null; signal?: AbortSignal }) => Promise<VendorShippingConfig>
@@ -76,6 +76,7 @@ const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const createSupportTicketMock = vi.fn();
+const createAdminVendorSupportTicketMock = vi.fn();
 const vendorIntegrationProvidersMock = vi.fn<() => Promise<VendorIntegrationProviderManagement>>();
 const createVendorIntegrationTokenMock = vi.fn<
   (input: VendorIntegrationTokenCreateInput) => Promise<VendorIntegrationTokenCreateResult>
@@ -143,6 +144,7 @@ vi.mock('../features/support/api', async () => {
   const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
   return {
     ...actual,
+    createAdminVendorSupportTicket: (...args: unknown[]) => createAdminVendorSupportTicketMock(...args),
     createSupportTicket: (...args: unknown[]) => createSupportTicketMock(...args),
     listAdminSupportTickets: () => listAdminSupportTicketsMock(),
     listVendorSupportTickets: () => listVendorSupportTicketsMock(),
@@ -765,6 +767,7 @@ describe('VendorProfilePage', () => {
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
     createSupportTicketMock.mockReset();
+    createAdminVendorSupportTicketMock.mockReset();
     vendorIntegrationProvidersMock.mockReset();
     vendorIntegrationProvidersMock.mockResolvedValue(emptyVendorIntegrationProviders);
     createVendorIntegrationTokenMock.mockReset();
@@ -1004,6 +1007,7 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage(['/admin/vendors/created-vendor']);
 
     expect(await screen.findByRole('heading', { name: 'Created Vendor' })).toBeInTheDocument();
+    expect(screen.getByText('Managing vendor: Created Vendor')).toBeInTheDocument();
     expect(screen.getByText('Admin view')).toBeInTheDocument();
     expect(screen.getAllByText('created-vendor').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: 'Demo Vendor A' })).not.toBeInTheDocument();
@@ -1019,6 +1023,98 @@ describe('VendorProfilePage', () => {
     await waitFor(() =>
       expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'created-vendor' })),
     );
+  });
+
+  it('keeps route vendor data authoritative when the selected workspace vendor changes', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['yalispor', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'yalispor',
+    });
+    setCurrentVendorId('demo-vendor-b');
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'sporborsa' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'sporborsa' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'sporborsa' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'sporborsa',
+      vendorName: 'Sporborsa',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+
+    renderVendorProfilePage(['/admin/vendors/sporborsa']);
+
+    expect(await screen.findByRole('heading', { name: 'Sporborsa' })).toBeInTheDocument();
+    expect(screen.getByText('Managing vendor: Sporborsa')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Demo Vendor B' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporborsa' })),
+    );
+    expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporborsa' }));
+    expect(getVendorBillingProfileMock).toHaveBeenCalledWith('sporborsa', expect.any(Object));
+    expect(getVendorStatusMock).toHaveBeenCalledWith('sporborsa', expect.any(Object));
+    expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
+  });
+
+  it('creates admin route correction tickets with the route vendor context override', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['yalispor', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'yalispor',
+    });
+    setCurrentVendorId('yalispor');
+    getVendorShippingConfigMock.mockResolvedValue({ ...shippingConfig, vendorId: 'sporborsa' });
+    getFinanceProfileMock.mockResolvedValue({ ...financeProfile, vendorId: 'sporborsa' });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, vendorId: 'sporborsa' });
+    getVendorStatusMock.mockResolvedValue({
+      ...activeVendorStatus,
+      vendorId: 'sporborsa',
+      vendorName: 'Sporborsa',
+    });
+    listVendorProfileAuditLogsMock.mockResolvedValue([]);
+    createAdminVendorSupportTicketMock.mockResolvedValue(supportTicket({
+      id: 'support-sporborsa',
+      vendorId: 'sporborsa',
+      vendorName: 'Sporborsa',
+      contextId: 'sporborsa',
+    }));
+
+    renderVendorProfilePage(['/admin/vendors/sporborsa']);
+
+    const contactButton = await screen.findByRole('button', { name: 'Request profile correction' });
+    await waitFor(() => expect(contactButton).not.toBeDisabled());
+    await user.click(contactButton);
+
+    await waitFor(() =>
+      expect(createAdminVendorSupportTicketMock).toHaveBeenCalledWith(
+        'sporborsa',
+        expect.objectContaining({
+          contextId: 'sporborsa',
+          contextSnapshot: expect.objectContaining({
+            path: '/admin/vendors/sporborsa',
+            vendorId: 'sporborsa',
+            vendorName: 'Sporborsa',
+          }),
+        }),
+      ),
+    );
+    expect(createSupportTicketMock).not.toHaveBeenCalled();
+    expect(getCurrentVendorContext().vendorId).toBe('yalispor');
   });
 
   it('shows integration token onboarding controls to admins on the vendor-specific profile route', async () => {

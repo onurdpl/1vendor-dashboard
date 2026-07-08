@@ -2939,9 +2939,53 @@ export const runtimeServices = {
           }),
   },
   support: {
-    async create(input: CreateSupportTicketInput) {
+    async create(input: CreateSupportTicketInput, options: { vendorId?: string | null } = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realSupport.createSupportTicket(input);
+        return realSupport.createSupportTicket(input, options);
+      }
+
+      const now = new Date().toISOString();
+      const vendorId = options.vendorId || getCurrentVendorId();
+      const currentVendor = getCurrentVendorContext();
+      const ticket: SupportTicket = {
+        id: `mock-support-${Date.now()}`,
+        createdAt: now,
+        updatedAt: now,
+        createdByUserId: 'mock-user',
+        createdByRole: 'vendor',
+        vendorId,
+        vendorName: currentVendor.vendorId === vendorId ? currentVendor.vendorName : vendorId,
+        subject: input.subject,
+        message: input.message,
+        priority: input.priority,
+        status: 'OPEN',
+        category: input.category ?? (input.contextType === 'return' ? 'RETURN' : input.contextType === 'order' ? 'ORDER' : input.contextType === 'shipment' ? 'SHIPMENT' : 'OTHER'),
+        contextType: input.contextType,
+        contextId: input.contextId ?? null,
+        contextSnapshot: input.contextSnapshot ?? null,
+        contextSummary: buildMockSupportContextSummary(input.contextSnapshot),
+        resolvedAt: null,
+        closedAt: null,
+        assigneeUserId: null,
+        assigneeName: null,
+        vendorUnreadCount: 0,
+        adminUnreadCount: 0,
+        lastReplyAt: null,
+        lastReplyByRole: null,
+        firstResponseDueAt: calculateMockSupportDueAt(input.priority),
+        nextResponseDueAt: null,
+        escalatedAt: null,
+        escalationReason: null,
+        sla: null,
+        notes: [],
+        replies: [],
+      };
+      mockSupportTickets.unshift(ticket);
+      return toMockVendorSupportTicket(ticket);
+    },
+    async createForAdminVendor(vendorId: string, input: CreateSupportTicketInput) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.createAdminVendorSupportTicket(vendorId, input);
       }
 
       const now = new Date().toISOString();
@@ -2949,10 +2993,10 @@ export const runtimeServices = {
         id: `mock-support-${Date.now()}`,
         createdAt: now,
         updatedAt: now,
-        createdByUserId: 'mock-user',
-        createdByRole: 'vendor',
-        vendorId: getCurrentVendorId(),
-        vendorName: getCurrentVendorContext().vendorName,
+        createdByUserId: 'mock-admin',
+        createdByRole: 'admin',
+        vendorId,
+        vendorName: vendorId,
         subject: input.subject,
         message: input.message,
         priority: input.priority,

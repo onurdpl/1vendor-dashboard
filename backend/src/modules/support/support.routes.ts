@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
+import { prisma } from '../../db/prisma.js';
 import {
   addAdminSupportTicketNote,
   addAdminSupportTicketReply,
@@ -52,6 +53,47 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
 
       try {
         return await createSupportTicket(request.authUser, request.vendorContext, request.body ?? {});
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { vendorId: string }; Body: CreateSupportTicketInput }>(
+    '/admin/vendors/:vendorId/support-tickets',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendor = await prisma.vendor.findUnique({
+        where: { id: request.params.vendorId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      if (!vendor) {
+        return reply.code(404).send({ message: 'Vendor not found.' });
+      }
+
+      try {
+        return await createSupportTicket(
+          request.authUser,
+          {
+            vendorId: vendor.id,
+            vendorName: vendor.name,
+            vendorStatus: vendor.status,
+            role: request.authUser.role,
+            accessScope: 'admin',
+          },
+          request.body ?? {},
+        );
       } catch (error) {
         return sendSupportError(error, reply);
       }

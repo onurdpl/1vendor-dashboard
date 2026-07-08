@@ -1,8 +1,24 @@
 import { apiClient } from '../../lib/api-client';
 import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketNote, SupportTicketStatus } from '../../lib/api/contracts';
 
-export async function createSupportTicket(input: CreateSupportTicketInput): Promise<SupportTicket> {
-  return apiClient.post<SupportTicket>('/support/tickets', input);
+export async function createSupportTicket(
+  input: CreateSupportTicketInput,
+  options: { vendorId?: string | null } = {},
+): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>('/support/tickets', input, {
+    vendorId: options.vendorId,
+  });
+}
+
+export async function createAdminVendorSupportTicket(
+  vendorId: string,
+  input: CreateSupportTicketInput,
+): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/support-tickets`,
+    input,
+    { skipVendorContext: true },
+  );
 }
 
 export async function listAdminSupportTickets(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<SupportTicket[]> {

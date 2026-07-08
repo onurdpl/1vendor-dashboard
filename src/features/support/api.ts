@@ -3,6 +3,7 @@ export {
   addAdminSupportTicketReply,
   addVendorSupportTicketReply,
   assignAdminSupportTicketToSelf,
+  createAdminVendorSupportTicket,
   createSupportTicket,
   escalateVendorSupportTicket,
   getAdminSupportAnalytics,

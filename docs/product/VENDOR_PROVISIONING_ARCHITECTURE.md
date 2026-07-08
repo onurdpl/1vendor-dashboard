@@ -165,6 +165,10 @@ Restricted-mode enforcement is owned by the restricted vendor authorization mode
 
 It must load the requested route vendor, not the current session vendor.
 
+The Vendor Workspace selector is not authoritative on this route. Admin Vendor Profile must treat the route `vendorId` as the managed vendor context and must not sync local selected-vendor storage to that route vendor.
+
+Admin-created profile correction/support tickets from this workspace must also use the route vendor, not the Vendor Workspace selector.
+
 The existing vendor self-profile route remains:
 
 ```text

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerSupportRoutes } from '../backend/src/modules/support/support.routes.js';
 
+const prismaMock = vi.hoisted(() => ({
+  vendor: {
+    findUnique: vi.fn(),
+  },
+}));
 const createSupportTicketMock = vi.hoisted(() => vi.fn());
 const listAdminSupportTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportAnalyticsMock = vi.hoisted(() => vi.fn());
@@ -35,6 +40,10 @@ vi.mock('../backend/src/modules/support/support.service.js', () => ({
       this.statusCode = statusCode;
     }
   },
+}));
+
+vi.mock('../backend/src/db/prisma.js', () => ({
+  prisma: prismaMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -75,6 +84,105 @@ describe('support route contract', () => {
       { vendorId: 'vendor-a', vendorName: 'Vendor A' },
       { subject: 'Help', message: 'Need help', contextType: 'return', contextId: 'return-1' },
     );
+  });
+
+  it('creates admin vendor profile support tickets with route vendor context', async () => {
+    createSupportTicketMock.mockClear();
+    prismaMock.vendor.findUnique.mockReset();
+    createSupportTicketMock.mockResolvedValueOnce({ id: 'ticket-admin-vendor' });
+    prismaMock.vendor.findUnique.mockResolvedValueOnce({
+      id: 'sporborsa',
+      name: 'Sporborsa',
+      status: 'inactive',
+    });
+    const posts = new Map<string, (request: unknown, reply: unknown) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: unknown, reply: unknown) => unknown) => {
+        posts.set(path, handler);
+      }),
+      get: vi.fn(),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const response = await posts.get('/admin/vendors/:vendorId/support-tickets')?.({
+      authUser: { id: 'admin-1', email: 'admin@example.test', role: 'admin' },
+      params: { vendorId: 'sporborsa' },
+      body: { subject: 'Profile correction', message: 'Review profile', priority: 'normal', contextType: 'general' },
+    }, {});
+
+    expect(response).toEqual({ id: 'ticket-admin-vendor' });
+    expect(prismaMock.vendor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'sporborsa' },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
+    });
+    expect(createSupportTicketMock).toHaveBeenCalledWith(
+      { id: 'admin-1', email: 'admin@example.test', role: 'admin' },
+      {
+        vendorId: 'sporborsa',
+        vendorName: 'Sporborsa',
+        vendorStatus: 'inactive',
+        role: 'admin',
+        accessScope: 'admin',
+      },
+      { subject: 'Profile correction', message: 'Review profile', priority: 'normal', contextType: 'general' },
+    );
+  });
+
+  it('blocks non-admin users from admin vendor profile support ticket creation', async () => {
+    createSupportTicketMock.mockClear();
+    prismaMock.vendor.findUnique.mockReset();
+    const posts = new Map<string, (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      get: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const blocked = await posts.get('/admin/vendors/:vendorId/support-tickets')?.({
+      authUser: { role: 'vendor' },
+    }, reply);
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(prismaMock.vendor.findUnique).not.toHaveBeenCalled();
+    expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe not found error when an admin creates support for a missing route vendor', async () => {
+    createSupportTicketMock.mockClear();
+    prismaMock.vendor.findUnique.mockReset();
+    prismaMock.vendor.findUnique.mockResolvedValueOnce(null);
+    const posts = new Map<string, (request: { authUser?: { role?: string }; params: { vendorId: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; params: { vendorId: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+      get: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const missing = await posts.get('/admin/vendors/:vendorId/support-tickets')?.({
+      authUser: { role: 'admin' },
+      params: { vendorId: 'missing-vendor' },
+    }, reply);
+
+    expect(missing).toEqual({ status: 404, body: { message: 'Vendor not found.' } });
+    expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
 
   it('lists tickets for admins and blocks vendors', async () => {

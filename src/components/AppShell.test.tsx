@@ -27,6 +27,16 @@ const adminUser: CurrentUser = {
   defaultVendorId: 'yalispor',
 };
 
+const multiVendorAdminUser: CurrentUser = {
+  ...adminUser,
+  vendorAccess: ['yalispor', 'demo-vendor-b'],
+  vendorDetails: [
+    { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+    { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+  ],
+  canSwitchVendors: true,
+};
+
 const vendorUser: CurrentUser = {
   email: 'vendor@example.com',
   name: 'Vendor User',
@@ -72,6 +82,7 @@ function renderShell(initialEntry: string) {
           <Route path="/admin/finance/settlement-schedules" element={<div>Scheduled settlements queue content</div>} />
           <Route path="/admin/vendors" element={<div>Vendor directory content</div>} />
           <Route path="/admin/vendors/new" element={<div>Create vendor content</div>} />
+          <Route path="/admin/vendors/:vendorId" element={<div>Admin vendor profile content</div>} />
         </Route>
         <Route path="/login" element={<div>Login screen</div>} />
       </Routes>
@@ -173,6 +184,19 @@ describe('AppShell workspace navigation', () => {
     expect(within(primaryNav).getByRole('link', { name: /Finance/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Inbox/i })).toBeInTheDocument();
     expect(within(primaryNav).getByRole('link', { name: /Settings/i })).toBeInTheDocument();
+  });
+
+  it('does not present the selected workspace vendor as the managed vendor on admin vendor profile routes', () => {
+    seedSession(multiVendorAdminUser);
+    setCurrentVendorId('yalispor');
+
+    renderShell('/admin/vendors/sporborsa');
+
+    expect(screen.getByText('Admin vendor profile content')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workspace')).toHaveValue('admin');
+    expect(screen.getByText('Route-scoped vendor profile')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor Yalı Spor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Select vendor')).not.toBeInTheDocument();
   });
 
   it('does not render the generic admin page heading on finance queue routes', () => {

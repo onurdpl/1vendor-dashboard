@@ -16,7 +16,12 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getFinanceProfile, updateVendorFinancialProfile } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
-import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import {
+  createAdminVendorSupportTicket,
+  createSupportTicket,
+  listAdminSupportTickets,
+  listVendorSupportTickets,
+} from '../features/support/api';
 import {
   bindVendorLogoIsbasiFirm,
   discoverLogoIsbasiFirms,
@@ -51,6 +56,7 @@ import type {
   LogoIsbasiInvoiceSummary,
   LogoIsbasiLoginProbeResult,
   LogoIsbasiProductServiceDiscoveryResult,
+  CreateSupportTicketInput,
   SupportTicket,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -1324,7 +1330,11 @@ export function VendorProfilePage() {
       {
         label: 'Vendor access state',
         status: canLoadProfile && currentVendor.vendorId ? 'ready' : 'unknown',
-        detail: canLoadProfile ? 'This workspace is scoped to the selected vendor.' : 'Vendor access is not ready yet.',
+        detail: canLoadProfile
+          ? isAdminVendorRoute
+            ? 'This workspace is scoped to the route vendor.'
+            : 'This workspace is scoped to the selected vendor.'
+          : 'Vendor access is not ready yet.',
       },
       {
         label: 'Workflow queues',
@@ -1388,8 +1398,8 @@ export function VendorProfilePage() {
   ]);
 
   const supportMutation = useMutationAction(
-    async () =>
-      createSupportTicket({
+    async () => {
+      const input: CreateSupportTicketInput = {
         subject: 'Vendor profile settings correction',
         message: `Please review the vendor profile and operational settings for ${profileVendorName}.`,
         priority: 'normal',
@@ -1407,7 +1417,11 @@ export function VendorProfilePage() {
           commissionProfileSource: financeProfile?.source ?? null,
           returnRecipientConfigured: Boolean(navlungoReturnRecipientAddressId),
         },
-      }),
+      };
+      return isAdminVendorRoute
+        ? createAdminVendorSupportTicket(currentVendor.vendorId, input)
+        : createSupportTicket(input);
+    },
     {
       onSuccess: async (ticket) => {
         await Promise.all([
@@ -2120,6 +2134,9 @@ export function VendorProfilePage() {
           <div>
             <p className="eyebrow">Marketplace Seller Workspace</p>
             <h1>{profileVendorName || 'Vendor profile'}</h1>
+            {isAdminVendorRoute ? (
+              <p className="vendor-profile-route-context">Managing vendor: {profileVendorName || currentVendor.vendorId}</p>
+            ) : null}
             {isAdmin ? (
               <p>
                 Review the seller identity, finance policy, shipping operations, and return destination currently managed

@@ -201,7 +201,7 @@ Readiness sections must use only currently available truth:
 
 Readiness labels must avoid fake certainty. Missing, failed, or unmodeled data should render `Unknown`, `Requires configuration review`, or `Not modeled yet`, not a green state.
 
-Readiness is role-aware but shared: vendors see read-only status and correction/support actions; admins see the same truth with admin-owned configuration context preserved, including onboarding token creation for the selected vendor. Vendor isolation still applies to all linked queues and support records.
+Readiness is role-aware but shared: vendors see read-only status and correction/support actions; admins see the same truth with admin-owned configuration context preserved, including onboarding token creation for the selected vendor. On `/admin/vendors/:vendorId`, the route vendor is authoritative; the Vendor Workspace selector is not the managed vendor context for that admin profile route. Vendor isolation still applies to all linked queues and support records.
 
 ### Automation
 

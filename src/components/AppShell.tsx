@@ -276,6 +276,11 @@ function getWorkspaceMode(pathname: string): WorkspaceMode {
   return pathname.startsWith('/admin') ? 'admin' : 'vendor';
 }
 
+function isAdminVendorProfileRoute(pathname: string) {
+  const match = pathname.match(/^\/admin\/vendors\/([^/?#]+)$/);
+  return Boolean(match?.[1] && match[1] !== 'new');
+}
+
 function getVendorContextLabel(context: ShellContext) {
   return context.currentVendor.vendorId ? context.currentVendor.vendorName || 'unknown' : 'unknown';
 }
@@ -294,18 +299,33 @@ function BrandLockup({ subtitle }: { subtitle: string }) {
   );
 }
 
-function ShellAccountCard({ context, roleLabel }: { context: ShellContext; roleLabel: string }) {
+function ShellAccountCard({
+  context,
+  roleLabel,
+  suppressVendorContext = false,
+}: {
+  context: ShellContext;
+  roleLabel: string;
+  suppressVendorContext?: boolean;
+}) {
+  const accountLabel = suppressVendorContext
+    ? context.currentUser?.name ?? 'Admin workspace'
+    : context.currentVendor.vendorName;
+  const accountInitial = suppressVendorContext
+    ? (context.currentUser?.name ?? 'A').trim().charAt(0).toUpperCase() || 'A'
+    : getVendorInitial(context.currentVendor.vendorName);
+
   return (
     <div className="vendor-account-card shell-card">
       <div className="vendor-account-main">
         <span className="vendor-account-avatar" aria-hidden="true">
-          {getVendorInitial(context.currentVendor.vendorName)}
+          {accountInitial}
         </span>
         <div className="vendor-account-copy">
-          <strong>{context.currentVendor.vendorName}</strong>
+          <strong>{accountLabel}</strong>
           <span>{roleLabel}</span>
         </div>
-        {context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0 ? (
+        {!suppressVendorContext && context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0 ? (
           <label className="vendor-account-switcher">
             <span className="sr-only">Select vendor</span>
             <select
@@ -495,6 +515,7 @@ export function VendorShell() {
 export function AdminShell() {
   const context = useShellContext();
   const location = useLocation();
+  const suppressVendorContext = isAdminVendorProfileRoute(location.pathname);
   const hideGenericAdminHeader = [
     '/admin/finance/settlement-approvals',
     '/admin/finance/settlement-schedules',
@@ -528,7 +549,7 @@ export function AdminShell() {
           </div>
         ) : null}
 
-        <ShellAccountCard context={context} roleLabel="Admin" />
+        <ShellAccountCard context={context} roleLabel="Admin" suppressVendorContext={suppressVendorContext} />
 
         {context.message ? <ActionFeedback tone={context.tone} message={context.message} /> : null}
       </aside>
@@ -540,7 +561,11 @@ export function AdminShell() {
         <div className="shell-context-bar">
           <span className="severity-chip severity-normal">User {context.currentUser?.name ?? 'Unknown user'}</span>
           <span className="severity-chip severity-attention">Role {context.currentUser?.role ?? 'Unauthenticated'}</span>
-          <span className="severity-chip severity-low">Vendor {context.currentVendor.vendorName}</span>
+          {suppressVendorContext ? (
+            <span className="severity-chip severity-low">Route-scoped vendor profile</span>
+          ) : (
+            <span className="severity-chip severity-low">Vendor {context.currentVendor.vendorName}</span>
+          )}
         </div>
         <SessionRestoreBanner context={context} />
         <main className="page-frame">
