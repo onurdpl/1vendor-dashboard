@@ -11,7 +11,7 @@ Set these in `backend/.env` or the runtime environment before live rollout:
 - `SHOPIFY_SHOP_DOMAIN`
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`
 - `SHOPIFY_WEBHOOK_SECRET`
-- `SHOPIFY_API_VERSION`
+- `SHOPIFY_API_VERSION` (production webhooks currently use stable `2026-01`; do not use `unstable`)
 - `SHOPIFY_RETURN_WEBHOOK_BASE_URL` (required only when registering return lifecycle webhooks)
 - `SHOPIFY_ORDER_WEBHOOK_BASE_URL` (required only when registering order-create webhooks)
 
@@ -26,6 +26,30 @@ Optional:
 - `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
   - opt-in flag required to register order lifecycle webhooks
   - script exits safely without mutating Shopify when this flag is not set to `true`
+
+## Current Live Webhook Configuration
+Live Shopify webhook configuration uses:
+
+- Backend base URL: `https://vendor-dashboard-backend-398h.onrender.com`
+- Webhook API version: `2026-01`
+- Format: JSON
+
+Configured production webhooks:
+
+| Shopify event | Production callback URL |
+| --- | --- |
+| Order creation | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-create` |
+| Order payment | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-paid` |
+| Order update | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-updated` |
+| Order cancellation | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-cancelled` |
+| Refund create | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/refunds-create` |
+| Fulfillment orders canceled | `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/fulfillment-orders-cancelled` |
+
+Production webhook guardrails:
+- All configured Shopify webhooks should use the same stable API version, currently `2026-01`.
+- Do not use `unstable` for production webhooks.
+- Do not use temporary or non-production callback bases such as `https://onevendor-dashboard-backend.onrender.com`.
+- The expected production cancellation URL is `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-cancelled`.
 
 ## Readiness Check
 From the repository root:
@@ -154,11 +178,12 @@ https://<public-domain>/webhooks/shopify/orders-create
 4. Start the backend.
 5. Expose the backend through a public HTTPS tunnel or deployed domain.
 6. Confirm the webhook target URL:
-   - `https://<public-domain>/webhooks/shopify/orders-create`
-   - `https://<public-domain>/webhooks/shopify/returns-request`
-   - `https://<public-domain>/webhooks/shopify/returns-approve`
-   - `https://<public-domain>/webhooks/shopify/returns-decline`
-   - `https://<public-domain>/webhooks/shopify/returns-close`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-create`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-paid`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-updated`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-cancelled`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/refunds-create`
+   - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/fulfillment-orders-cancelled`
 7. Confirm the configured Shopify webhook secret matches backend configuration.
 8. Register or update the live webhooks manually, or run the order/return/fulfillment registration scripts with explicit opt-in flags.
 9. Observe webhook verification, ingestion, and diagnostics endpoints during the first live deliveries.

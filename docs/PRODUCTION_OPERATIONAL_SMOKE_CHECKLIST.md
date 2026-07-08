@@ -10,12 +10,16 @@
 - Backend: `https://vendor-dashboard-backend-398h.onrender.com`
 - Database: Render Postgres through backend `DATABASE_URL`
 - Canonical webhook target: Render backend routes under `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/*`
+- Live Shopify webhook API version: stable `2026-01`
+- Live Shopify webhook format: JSON
+- Production Shopify webhooks must not use `unstable`; exact live callback URLs are listed in `docs/SHOPIFY_LIVE_ROLLOUT.md`.
 
 ## Pre-Smoke Checks
 - Confirm backend `GET /health` returns `{ "ok": true }`.
 - Confirm backend `GET /version` returns `service: "vendor-dashboard-backend"` and `nodeEnv: "production"`.
 - Confirm frontend loads from the Render frontend URL.
 - Confirm Render backend envs are present before testing live Shopify-dependent paths.
+- Confirm all configured Shopify webhooks use API version `2026-01`, JSON format, and the `https://vendor-dashboard-backend-398h.onrender.com` backend base URL.
 - Confirm no smoke step uses another vendor's credentials, allocation id, return id, refund id, or fulfillment state.
 
 ## Login
