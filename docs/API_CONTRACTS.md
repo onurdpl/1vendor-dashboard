@@ -71,6 +71,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 
 - `POST /webhooks/shopify/orders-create`
 - `POST /webhooks/shopify/orders-paid`
+- `POST /webhooks/shopify/orders-cancelled`
 - `POST /webhooks/shopify/refunds-create`
 - `POST /webhooks/shopify/returns-request` (pending-return ingestion path)
 - `POST /webhooks/shopify/returns-approve` (lifecycle status update)
@@ -396,7 +397,27 @@ Webhook processing lifecycle states:
 - Processing note:
   - updates only `financialStatus` and safe `paymentGatewayName` snapshot data when present
   - does not create orders, allocations, line items, refunds, returns, fulfillment state, finance ledgers, settlement state, or payout state
-  - `orders/updated` remains limited to contact/address snapshot updates
+  - `orders/updated` remains limited to contact/address snapshot updates unless `cancelled_at` is present as the full-order cancellation fallback
+
+### POST /webhooks/shopify/orders-cancelled
+
+- Purpose: receive verified Shopify `orders/cancelled` webhook envelopes and bridge full-order cancellation into canonical cancellation reconciliation.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - processed: `{ ok: true, duplicate: false, action: "canonical_cancellation_reconciled", processingStatus: "processed", shopifyOrderId, cancellationProcessed, cancellationState }`
+  - ignored when canonical cancellation is absent: `{ ok: true, duplicate: false, action: "canonical_cancellation_ignored", processingStatus: "processed", cancellationProcessed: false, reason: "canonical_cancelled_at_missing" }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+  - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
+- Expected `202` behavior: valid HMAC signature accepted whether reconciliation runs, canonical cancellation is absent, processing needs attention, or the delivery is duplicate.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Processing note:
+  - `orders/cancelled` is the primary full-order cancellation webhook
+  - webhook payload is treated as trigger/envelope
+  - backend fetches canonical Shopify order state before local reconciliation
+  - `cancelled_at` / canonical `cancelledAt` is required before full-order cancellation reconciliation runs
+  - `financial_status=voided` alone is not sufficient
+  - this endpoint uses existing canonical cancellation reconciliation behavior only
+  - SHOP-CANCEL-1 does not add vendor order UI projection, shipping queue projection, or new finance payout blocker logic
 
 ### POST /webhooks/shopify/refunds-create
 

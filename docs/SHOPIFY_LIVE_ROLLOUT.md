@@ -24,7 +24,7 @@ Optional:
   - opt-in flag required to register return lifecycle webhooks
   - script exits safely without mutating Shopify when this flag is not set to `true`
 - `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
-  - opt-in flag required to register `ORDERS_CREATE` and `ORDERS_UPDATED`
+  - opt-in flag required to register order lifecycle webhooks
   - script exits safely without mutating Shopify when this flag is not set to `true`
 
 ## Readiness Check
@@ -48,7 +48,7 @@ Behavior:
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
 
 ## Order Webhook Registration (Opt-In)
-Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Payment snapshot updates depend on `ORDERS_PAID` delivery. Order address/contact correction depends on `ORDERS_UPDATED` delivery. Register all three through the same idempotent GraphQL helper used for other webhook groups.
+Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Payment snapshot updates depend on `ORDERS_PAID` delivery. Full-order cancellation reconciliation depends on `ORDERS_CANCELLED` delivery. Order address/contact correction and cancellation fallback depend on `ORDERS_UPDATED` delivery. Register all four through the same idempotent GraphQL helper used for other webhook groups.
 
 Registration command from repository root:
 
@@ -74,7 +74,16 @@ Required env for registration:
 Registered topics and callbacks:
 - `ORDERS_CREATE` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-create`
 - `ORDERS_PAID` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-paid`
+- `ORDERS_CANCELLED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-cancelled`
 - `ORDERS_UPDATED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-updated`
+
+Full-order cancellation notes:
+- `ORDERS_CANCELLED` is the primary full-order cancellation webhook.
+- `ORDERS_UPDATED` is a fallback only when the payload contains `cancelled_at`.
+- `cancelled_at` is the canonical cancellation signal.
+- `financial_status=voided` alone is not sufficient for full-order cancellation processing.
+- The cancellation bridge fetches canonical Shopify order state before invoking local reconciliation.
+- SHOP-CANCEL-1 does not add vendor order UI projection, shipping queue projection, or new finance payout blocker logic.
 
 ## Starting the Backend for Tunnel Testing
 Use the normal backend start flow:

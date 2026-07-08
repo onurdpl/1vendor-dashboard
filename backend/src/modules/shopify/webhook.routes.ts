@@ -38,9 +38,11 @@ import {
   markOperationalJobFailed,
   markOperationalJobProcessing,
 } from '../operational-jobs/operational-jobs.service.js';
+import { createCanonicalCancellationReconciliationService } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
+  const canonicalCancellationReconciliationService = createCanonicalCancellationReconciliationService(env);
   const resolveWebhookSecret = (topic: string) => {
     if (topic.startsWith('returns/')) {
       return env.SHOPIFY_RETURN_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
@@ -161,11 +163,67 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
   const getPersistedShopDomain = (shopDomain: string | null) => shopDomain ?? 'unknown.myshopify.com';
 
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+  const readPayloadString = (payload: unknown, keys: string[]) => {
+    if (!isRecord(payload)) {
+      return null;
+    }
+
+    for (const key of keys) {
+      const raw = payload[key];
+      if (typeof raw === 'string' && raw.trim()) {
+        return raw.trim();
+      }
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        return String(raw);
+      }
+    }
+
+    return null;
+  };
+
+  const normalizeShopifyGidTail = (value: string | null) => {
+    if (!value) {
+      return null;
+    }
+
+    const tail = value.split('/').at(-1)?.trim();
+    return tail || value.trim();
+  };
+
+  const resolveShopifyOrderIdFromPayload = (payload: unknown) =>
+    readPayloadString(payload, ['id', 'order_id', 'orderId', 'sourceShopifyOrderId']) ??
+    normalizeShopifyGidTail(
+      readPayloadString(payload, [
+        'admin_graphql_api_id',
+        'admin_graphql_api_order_id',
+        'adminGraphqlApiId',
+        'orderGid',
+        'order_gid',
+      ]),
+    );
+
+  const hasCanonicalCancellationSignal = (payload: unknown) =>
+    Boolean(readPayloadString(payload, ['cancelled_at', 'cancelledAt']));
+
   const markWebhookProcessing = async (eventId: string) => {
     await prisma.webhookEvent.update({
       where: { id: eventId },
       data: {
         status: 'PROCESSING',
+        errorMessage: null,
+      },
+    });
+  };
+
+  const markWebhookProcessed = async (eventId: string) => {
+    await prisma.webhookEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'PROCESSED',
+        processedAt: new Date(),
         errorMessage: null,
       },
     });
@@ -223,6 +281,131 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       await markOperationalJobFailed(jobId, error);
     } catch (jobError) {
       app.log.error({ error: jobError, operationalJobId: jobId }, 'Failed to mark operational job failed.');
+    }
+  };
+
+  const processCanonicalOrderCancellationBridge = async (input: {
+    topic: string;
+    idempotencyResult: Awaited<ReturnType<typeof getOrCreateWebhookEvent>>;
+    payload: unknown;
+    sourceShopifyOrderId: string | null;
+    responseContext?: Record<string, unknown>;
+  }) => {
+    const operationalJob = await createWebhookJob({
+      topic: input.topic,
+      webhookEventId: input.idempotencyResult.event.id,
+      payloadRef: input.idempotencyResult.event.payloadHash,
+      sourceShopifyOrderId: input.sourceShopifyOrderId,
+    });
+
+    try {
+      await markJobProcessing(operationalJob?.id);
+      await markWebhookProcessing(input.idempotencyResult.event.id);
+
+      if (!input.sourceShopifyOrderId) {
+        const message = `Shopify ${input.topic} payload did not include an order id.`;
+        await markJobFailed(operationalJob?.id, message);
+        await markWebhookFailed(input.idempotencyResult.event.id, message);
+        return {
+          ok: true,
+          duplicate: false,
+          topic: input.topic,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message,
+          ...(input.responseContext ?? {}),
+        };
+      }
+
+      const canonicalOrder = await shopifyAdminService.fetchCanonicalOrderSnapshot(input.sourceShopifyOrderId);
+      if (!canonicalOrder) {
+        const message = 'Shopify canonical order cancellation state not found or Shopify Admin is not configured.';
+        await markJobFailed(operationalJob?.id, message);
+        await markWebhookFailed(input.idempotencyResult.event.id, message);
+        return {
+          ok: true,
+          duplicate: false,
+          topic: input.topic,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          shopifyOrderId: input.sourceShopifyOrderId,
+          message,
+          ...(input.responseContext ?? {}),
+        };
+      }
+
+      if (!canonicalOrder.cancelledAt) {
+        app.log.info(
+          {
+            topic: input.topic,
+            sourceShopifyOrderId: input.sourceShopifyOrderId,
+            financialStatus: canonicalOrder.financialStatus,
+          },
+          'Shopify order cancellation bridge ignored a webhook because canonical cancelledAt was empty.',
+        );
+        await markWebhookProcessed(input.idempotencyResult.event.id);
+        await markJobCompleted(operationalJob?.id);
+        return {
+          ok: true,
+          duplicate: false,
+          topic: input.topic,
+          action: 'canonical_cancellation_ignored',
+          processingStatus: 'processed',
+          shopifyOrderId: input.sourceShopifyOrderId,
+          cancellationProcessed: false,
+          reason: 'canonical_cancelled_at_missing',
+          ...(input.responseContext ?? {}),
+        };
+      }
+
+      const reconciliationResult =
+        await canonicalCancellationReconciliationService.reconcileShopifyOrderCancellation(input.sourceShopifyOrderId);
+
+      if (!reconciliationResult) {
+        const message = 'Shopify order cancellation state not found or Shopify Admin is not configured.';
+        await markJobFailed(operationalJob?.id, message);
+        await markWebhookFailed(input.idempotencyResult.event.id, message);
+        return {
+          ok: true,
+          duplicate: false,
+          topic: input.topic,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          shopifyOrderId: input.sourceShopifyOrderId,
+          message,
+          ...(input.responseContext ?? {}),
+        };
+      }
+
+      await markWebhookProcessed(input.idempotencyResult.event.id);
+      await markJobCompleted(operationalJob?.id);
+      return {
+        ok: true,
+        duplicate: false,
+        topic: input.topic,
+        action: 'canonical_cancellation_reconciled',
+        processingStatus: 'processed',
+        shopifyOrderId: input.sourceShopifyOrderId,
+        cancellationProcessed: true,
+        cancellationState: reconciliationResult.cancellationState,
+        affectedAllocationCount: reconciliationResult.affectedAllocations.length,
+        ledgersHeldOrVoidedCount: reconciliationResult.ledgersHeldOrVoided.length,
+        signalsCreatedOrUpdated: reconciliationResult.signalsCreatedOrUpdated,
+        ...(input.responseContext ?? {}),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Shopify ${input.topic} cancellation bridge failed.`;
+      await markJobFailed(operationalJob?.id, message);
+      await markWebhookFailed(input.idempotencyResult.event.id, message);
+      return {
+        ok: true,
+        duplicate: false,
+        topic: input.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+        ...(input.responseContext ?? {}),
+      };
     }
   };
 
@@ -381,6 +564,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       const payload = request.body ?? {};
+      const cancellationFallbackRequired = topic === 'orders/updated' && hasCanonicalCancellationSignal(payload);
       const orderUpdateResult = topic === 'orders/updated'
         ? await updateShopifyOrderContactAddressSnapshotFromWebhook(payload as ShopifyOrdersCreateWebhookPayload)
         : null;
@@ -388,7 +572,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         event: idempotencyResult.event,
         payload,
         topic,
-        markProcessed: true,
+        markProcessed: !cancellationFallbackRequired,
       });
       app.log.info(
         {
@@ -406,6 +590,26 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         },
         'Shopify return signal discovery webhook received.',
       );
+
+      if (cancellationFallbackRequired) {
+        const cancellationResult = await processCanonicalOrderCancellationBridge({
+          topic,
+          idempotencyResult,
+          payload,
+          sourceShopifyOrderId: resolveShopifyOrderIdFromPayload(payload),
+          responseContext: {
+            matchedOrder: Boolean(summary.matchedOrderId),
+            matchedByField: summary.matchedByField,
+            ...(orderUpdateResult
+              ? {
+                  addressContactSnapshotUpdated: orderUpdateResult.updated,
+                  changedFields: orderUpdateResult.changedFields,
+                }
+              : {}),
+          },
+        });
+        return reply.code(202).send(cancellationResult);
+      }
 
       return reply.code(202).send({
         ok: true,
@@ -770,6 +974,61 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         message,
       });
     }
+  });
+
+  app.post('/webhooks/shopify/orders-cancelled', async (request, reply) => {
+    const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
+    const rawBody = rawBodyBuffer.toString('utf8');
+    const headers = getShopifyWebhookHeaders(request);
+    const topic = 'orders/cancelled';
+    const verification = verifyShopifyWebhookRequest({
+      path: '/webhooks/shopify/orders-cancelled',
+      topic,
+      contentType: request.headers['content-type'] as string | undefined,
+      rawBodyBuffer,
+      headers,
+    });
+
+    if (!verification.ok) {
+      return reply.code(verification.statusCode).send({ message: verification.message });
+    }
+
+    const payload = request.body ?? {};
+    const sourceShopifyOrderId = resolveShopifyOrderIdFromPayload(payload);
+
+    if (!env.DATABASE_URL) {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'accepted',
+        processingStatus: 'deferred',
+        topic,
+      });
+    }
+
+    const idempotencyResult = await getOrCreateWebhookEvent({
+      topic,
+      shopDomain: getPersistedShopDomain(headers.shopDomain),
+      webhookId: headers.webhookId,
+      rawBody,
+    });
+
+    if (idempotencyResult.isDuplicate) {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'duplicate_ignored',
+        topic,
+      });
+    }
+
+    const cancellationResult = await processCanonicalOrderCancellationBridge({
+      topic,
+      idempotencyResult,
+      payload,
+      sourceShopifyOrderId,
+    });
+    return reply.code(202).send(cancellationResult);
   });
 
   app.post('/webhooks/shopify/refunds-create', async (request, reply) => {

@@ -87,7 +87,7 @@ describe('admin Shopify order webhook registration route', () => {
     expect(registrationLibMock.registerWebhookTopics).not.toHaveBeenCalled();
   });
 
-  it('skips existing ORDERS_CREATE and creates missing paid/updated order webhooks', async () => {
+  it('skips existing ORDERS_CREATE and creates missing paid/cancelled/updated order webhooks', async () => {
     registrationLibMock.registerWebhookTopics.mockResolvedValueOnce({
       existing: [
         {
@@ -103,9 +103,14 @@ describe('admin Shopify order webhook registration route', () => {
           subscriptionId: 'gid://shopify/WebhookSubscription/2',
         },
         {
+          topic: 'ORDERS_CANCELLED',
+          callbackUrl: 'https://backend.example/webhooks/shopify/orders-cancelled',
+          subscriptionId: 'gid://shopify/WebhookSubscription/3',
+        },
+        {
           topic: 'ORDERS_UPDATED',
           callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
-          subscriptionId: 'gid://shopify/WebhookSubscription/3',
+          subscriptionId: 'gid://shopify/WebhookSubscription/4',
         },
       ],
       failed: [],
@@ -119,6 +124,7 @@ describe('admin Shopify order webhook registration route', () => {
       topics: [
         { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
         { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
+        { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
         { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
       ],
       baseUrl: 'https://backend.example',
@@ -127,6 +133,11 @@ describe('admin Shopify order webhook registration route', () => {
       ok: true,
       baseUrl: 'https://backend.example',
       results: [
+        {
+          topic: 'ORDERS_CANCELLED',
+          action: 'created',
+          subscriptionId: 'gid://shopify/WebhookSubscription/3',
+        },
         {
           topic: 'ORDERS_CREATE',
           action: 'exists',
@@ -140,7 +151,7 @@ describe('admin Shopify order webhook registration route', () => {
         {
           topic: 'ORDERS_UPDATED',
           action: 'created',
-          subscriptionId: 'gid://shopify/WebhookSubscription/3',
+          subscriptionId: 'gid://shopify/WebhookSubscription/4',
         },
       ],
     });

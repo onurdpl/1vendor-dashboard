@@ -14,6 +14,8 @@ const exampleEnvFilePath = path.join(backendDir, '.env.example');
 
 const topics = [
   { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+  { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
+  { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
   { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
 ];
 

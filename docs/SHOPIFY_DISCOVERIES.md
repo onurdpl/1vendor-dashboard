@@ -389,6 +389,23 @@ POST /fulfillments.json
 - `FULFILLMENT_EVENTS_CREATE` may indicate delivery progression, but unknown event status values should go to diagnostics instead of false delivery state.
 - Delivery/in-transit/failure event status must be scoped to the matching Shopify fulfillment id before updating vendor allocation shipping status.
 
+## Full Order Cancellation
+- Full order cancellation is separate from fulfillment cancellation.
+- Primary webhook topic for full order cancellation:
+  - `ORDERS_CANCELLED`
+- Fallback webhook topic:
+  - `ORDERS_UPDATED`, only when the payload contains `cancelled_at`
+- Canonical cancellation signal:
+  - `cancelled_at != null`
+- `financial_status=voided` alone is not sufficient to process a full order cancellation.
+- Recommended marketplace pattern:
+  - webhook envelope
+  - fetch canonical Shopify order through Admin GraphQL
+  - reconcile locally from canonical state
+- SHOP-CANCEL-1 bridges full order cancellation webhooks into existing canonical cancellation reconciliation.
+- SHOP-CANCEL-1 does not implement vendor order UI projection, shipping queue projection, or new finance payout blocker logic.
+- Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
+
 ## Customer Notifications
 - `tracking_info.number` stores tracking number.
 - `tracking_info.company` stores carrier.

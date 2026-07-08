@@ -56,6 +56,13 @@
 - Confirm vendor return/refund records and finance ledger rows are created only for affected vendor allocations.
 - Confirm duplicate refund delivery is ignored through webhook idempotency.
 
+## Full Order Cancellation
+- Trigger or identify a Shopify `ORDERS_CANCELLED` delivery.
+- Confirm `ORDERS_UPDATED` acts only as fallback when `cancelled_at` exists.
+- Confirm `financial_status=voided` alone does not trigger full-order cancellation reconciliation.
+- Confirm backend fetches canonical Shopify order state before invoking local cancellation reconciliation.
+- Confirm SHOP-CANCEL-1 does not change vendor order UI projection, shipping queue projection, or new finance payout blocker behavior.
+
 ## Fulfillment Update
 - Trigger or identify `FULFILLMENTS_CREATE` or `FULFILLMENTS_UPDATE`.
 - Confirm webhook payload is treated as an envelope and canonical Shopify fulfillment state is fetched.

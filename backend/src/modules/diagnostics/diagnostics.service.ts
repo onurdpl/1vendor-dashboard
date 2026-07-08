@@ -42,6 +42,7 @@ import type {
 const SHOPIFY_ORDER_WEBHOOK_ROUTES: Record<string, string> = {
   ORDERS_CREATE: '/webhooks/shopify/orders-create',
   ORDERS_PAID: '/webhooks/shopify/orders-paid',
+  ORDERS_CANCELLED: '/webhooks/shopify/orders-cancelled',
   ORDERS_UPDATED: '/webhooks/shopify/orders-updated',
 };
 
