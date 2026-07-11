@@ -9,6 +9,9 @@
 Set these in `backend/.env` or the runtime environment before live rollout:
 
 - `SHOPIFY_SHOP_DOMAIN`
+  - must be Shopify's canonical `shop.myshopifyDomain`
+  - current production canonical value: `xgi47p-3k.myshopify.com`
+  - do not use historical aliases such as `sporgym-3.myshopify.com`
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`
 - `SHOPIFY_WEBHOOK_SECRET`
 - `SHOPIFY_API_VERSION` (production webhooks currently use stable `2026-01`; do not use `unstable`)
@@ -33,6 +36,7 @@ Live Shopify webhook configuration uses:
 - Backend base URL: `https://vendor-dashboard-backend-398h.onrender.com`
 - Webhook API version: `2026-01`
 - Format: JSON
+- Canonical `SHOPIFY_SHOP_DOMAIN`: `xgi47p-3k.myshopify.com`
 
 Configured production webhooks:
 
@@ -50,6 +54,27 @@ Production webhook guardrails:
 - Do not use `unstable` for production webhooks.
 - Do not use temporary or non-production callback bases such as `https://onevendor-dashboard-backend.onrender.com`.
 - The expected production cancellation URL is `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-cancelled`.
+- `SHOPIFY_SHOP_DOMAIN` must match the canonical domain Shopify sends in `X-Shopify-Shop-Domain`.
+- Determine the canonical domain with Admin GraphQL `shop.myshopifyDomain`; do not rely on historical aliases that may still accept Admin API requests.
+
+## July 11, 2026 Canonical Domain Incident
+Before the production fix, Render had `SHOPIFY_SHOP_DOMAIN=sporgym-3.myshopify.com` while Shopify sent `X-Shopify-Shop-Domain=xgi47p-3k.myshopify.com`. After commit `925447f3` enforced webhook shop-domain validation, valid Shopify webhooks were rejected with `403 shop_domain_mismatch`.
+
+Impact:
+- `orders/create` was rejected before ingestion.
+- No local `VendorAllocation` was created.
+- Vendors did not see new orders.
+- Full-order cancellation reconciliation could not execute for orders that had never been ingested.
+
+Verification:
+- Production Render logs showed `shop_domain_mismatch`.
+- Admin GraphQL verified both `sporgym-3.myshopify.com` and `xgi47p-3k.myshopify.com` resolved to the same Shopify shop id.
+- Shopify returned canonical `shop.myshopifyDomain=xgi47p-3k.myshopify.com`.
+
+Resolution:
+- Render `SHOPIFY_SHOP_DOMAIN` was changed to `xgi47p-3k.myshopify.com`.
+- No code change, webhook secret change, or Admin API token change was required.
+- Shopify order `#1108` validated the fix: `orders/create` was accepted, `VendorAllocation` was created, and the order appeared immediately in the Yali Spor vendor workspace.
 
 ## Readiness Check
 From the repository root:
@@ -68,6 +93,7 @@ Behavior:
 - validates that required Shopify environment variables exist
 - rejects known development placeholder values
 - checks that the shop domain looks like a valid `*.myshopify.com` domain
+- live operators must additionally confirm `SHOPIFY_SHOP_DOMAIN` equals Admin GraphQL `shop.myshopifyDomain`
 - never prints secret values
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
 
@@ -173,20 +199,21 @@ https://<public-domain>/webhooks/shopify/orders-create
 
 ## Live Rollout Order
 1. Configure backend live Shopify environment variables locally or in the target environment.
-2. Run `npm run shopify:readiness`.
-3. If needed, rerun with `SHOPIFY_READINESS_LIVE_CHECK=true` for one live Shopify Admin API confirmation.
-4. Start the backend.
-5. Expose the backend through a public HTTPS tunnel or deployed domain.
-6. Confirm the webhook target URL:
+2. Verify canonical Shopify identity with Admin GraphQL `shop.myshopifyDomain` and set `SHOPIFY_SHOP_DOMAIN` to that exact value.
+3. Run `npm run shopify:readiness`.
+4. If needed, rerun with `SHOPIFY_READINESS_LIVE_CHECK=true` for one live Shopify Admin API confirmation.
+5. Start the backend.
+6. Expose the backend through a public HTTPS tunnel or deployed domain.
+7. Confirm the webhook target URL:
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-create`
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-paid`
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-updated`
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-cancelled`
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/refunds-create`
    - `https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/fulfillment-orders-cancelled`
-7. Confirm the configured Shopify webhook secret matches backend configuration.
-8. Register or update the live webhooks manually, or run the order/return/fulfillment registration scripts with explicit opt-in flags.
-9. Observe webhook verification, ingestion, and diagnostics endpoints during the first live deliveries.
+8. Confirm the configured Shopify webhook secret matches backend configuration.
+9. Register or update the live webhooks manually, or run the order/return/fulfillment registration scripts with explicit opt-in flags.
+10. Observe webhook verification, ingestion, and diagnostics endpoints during the first live deliveries.
 
 ## Guardrails
 - Do not register live webhooks automatically from the app.

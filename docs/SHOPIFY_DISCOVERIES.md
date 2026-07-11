@@ -30,6 +30,58 @@
 - If operational uncertainty remains, ask Shopify AI before implementation.
 - Do not invent Shopify behavior.
 
+## Canonical Shopify Shop Domain
+- Production webhook verification must use Shopify's canonical `shop.myshopifyDomain`, not a historical or accepted alias.
+- Canonical identity must be verified with this backend-only Admin GraphQL query:
+
+```graphql
+query {
+  shop {
+    id
+    name
+    myshopifyDomain
+    primaryDomain {
+      host
+    }
+  }
+}
+```
+
+- On July 11, 2026, both Admin GraphQL endpoints accepted the configured Admin API token:
+  - `https://sporgym-3.myshopify.com/admin/api/2026-01/graphql.json`
+  - `https://xgi47p-3k.myshopify.com/admin/api/2026-01/graphql.json`
+- Both endpoints resolved to the same Shopify shop id and shop name, but Shopify returned canonical `shop.myshopifyDomain` as `xgi47p-3k.myshopify.com`.
+- `SHOPIFY_SHOP_DOMAIN` must therefore contain `xgi47p-3k.myshopify.com` for production.
+- Alias domains may continue to work for Admin API requests, but they are not acceptable for webhook verification after commit `925447f3` because webhook validation compares `X-Shopify-Shop-Domain` with `SHOPIFY_SHOP_DOMAIN`.
+
+### July 11, 2026 Production Webhook Ingestion Failure
+- Production root cause:
+  - Render had `SHOPIFY_SHOP_DOMAIN=sporgym-3.myshopify.com`.
+  - Shopify webhooks sent `X-Shopify-Shop-Domain=xgi47p-3k.myshopify.com`.
+  - Commit `925447f3` added shop-domain enforcement.
+  - Backend rejected otherwise valid Shopify webhooks with `403 shop_domain_mismatch`.
+- Symptoms:
+  - `orders/create` deliveries were rejected before ingestion.
+  - `VendorAllocation` rows were never created.
+  - Vendors did not see new Shopify orders in their workspace.
+  - Cancellation reconciliation could not run for those orders because the original order ingestion never happened.
+- Evidence:
+  - Production Render logs showed `shop_domain_mismatch`.
+  - Admin GraphQL verified both hostnames reached the same shop id.
+  - Shopify returned canonical `shop.myshopifyDomain=xgi47p-3k.myshopify.com`.
+- Verified fix:
+  - Render `SHOPIFY_SHOP_DOMAIN` was updated to `xgi47p-3k.myshopify.com`.
+  - No code change was required.
+  - No webhook secret change was required.
+  - No Admin API token change was required.
+- Validation:
+  - New Shopify order `#1108` produced an accepted `orders/create` delivery.
+  - Local order ingestion created the expected `VendorAllocation`.
+  - The order appeared immediately in the Yali Spor vendor workspace.
+- Lesson learned:
+  - Do not rely on historical `.myshopify.com` aliases when configuring webhook verification.
+  - Always verify canonical Shopify identity through `shop.myshopifyDomain` before changing production Shopify environment variables.
+
 ## Turkey Address2 District Split
 - Shopify Support confirmed that Turkey checkout neighborhood/district (`İlçe`) is not exposed as a separate Order API, webhook, or GraphQL field.
 - Shopify merges the address line 2 value and neighborhood/district into `address2` using its reserved Unicode delimiter.
