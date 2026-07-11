@@ -434,11 +434,35 @@ function normalizeTimelineTitle(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? '';
 }
 
-function getTrackingTitle(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
+function getTrackingTitle(order: {
+  trackingNumber?: string;
+  carrier?: string;
+  trackingUrl?: string;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+}) {
+  if (order.isCancelled) {
+    if (order.isCancellationConflict && (order.trackingNumber || order.carrier || order.trackingUrl)) {
+      return 'Tracking Synced';
+    }
+    return 'Tracking not required';
+  }
   return order.trackingNumber || order.carrier || order.trackingUrl ? 'Tracking Synced' : 'Missing Tracking';
 }
 
-function getTrackingHelper(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
+function getTrackingHelper(order: {
+  trackingNumber?: string;
+  carrier?: string;
+  trackingUrl?: string;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+}) {
+  if (order.isCancelled) {
+    if (order.isCancellationConflict && (order.trackingNumber || order.carrier)) {
+      return [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ');
+    }
+    return 'Shopify cancelled this order. Tracking is not required.';
+  }
   const carrier = formatTrackingCarrierLabel(order.carrier);
   if (order.trackingNumber || carrier) {
     return [carrier, order.trackingNumber].filter(Boolean).join(' / ');
@@ -4156,11 +4180,15 @@ export function OrderDetailPage() {
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
   const vendorBlockedStory = getVendorBlockedOperationalStory(order);
-  const operationalStatusLabel = operationalStory.resolvedByRefund
+  const operationalStatusLabel = hasCanonicalOperationalStory
     ? operationalStory.primaryLabel
     : toTitleCaseLabel(order.allocationStatus);
-  const operationalStatusClass = operationalStory.resolvedByRefund ? 'refunded' : getStatusClass(order.allocationStatus);
-  const paymentStatusLabel = operationalStory.resolvedByRefund
+  const operationalStatusClass = operationalStory.state === 'shopify_order_cancelled' || operationalStory.state === 'shopify_order_cancelled_conflict'
+    ? 'cancelled'
+    : operationalStory.resolvedByRefund
+      ? 'refunded'
+      : getStatusClass(order.allocationStatus);
+  const paymentStatusLabel = hasCanonicalOperationalStory
     ? operationalStory.financeLabel
     : formatSnapshotValue(order.orderSnapshot?.financialStatus);
   const isRefundResolvedVendorBlockedOrder = operationalStory.state === 'vendor_blocked_resolved_by_refund';
@@ -4468,29 +4496,43 @@ export function OrderDetailPage() {
     ? [
         {
           label: 'Current state',
-          value: operationalStory.resolvedByRefund ? 'Refunded' : 'Vendor rejected allocation',
+          value: operationalStory.primaryLabel,
           helper: operationalStory.resolvedByRefund
             ? 'Shopify refund completed for this blocked allocation.'
-            : vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
-          tone: operationalStory.resolvedByRefund ? 'success' : 'danger',
+            : operationalStory.state === 'shopify_order_cancelled' || operationalStory.state === 'shopify_order_cancelled_conflict'
+              ? operationalStory.secondaryLabel
+              : vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
+          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled'
+            ? 'success'
+            : operationalStory.state === 'shopify_order_cancelled_conflict'
+              ? 'warning'
+              : 'danger',
           icon: 'A',
         },
         {
           label: 'Fulfillment',
           value: operationalStory.fulfillmentLabel,
-          helper: operationalStory.resolvedByRefund
+          helper: operationalStory.state === 'shopify_order_cancelled'
+            ? 'Shipment work is closed for the cancelled order.'
+            : operationalStory.state === 'shopify_order_cancelled_conflict'
+              ? 'Existing fulfillment evidence is preserved for review.'
+              : operationalStory.resolvedByRefund
             ? 'Shipment work is closed for the refunded allocation.'
             : 'Shipment work is paused until admin resolves the rejection.',
-          tone: operationalStory.resolvedByRefund ? 'success' : 'warning',
+          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled' ? 'success' : 'warning',
           icon: 'F',
         },
         {
           label: 'Finance',
           value: operationalStory.financeLabel,
-          helper: operationalStory.resolvedByRefund
+          helper: operationalStory.state === 'shopify_order_cancelled'
+            ? 'Sale ledger is voided for the cancelled order.'
+            : operationalStory.state === 'shopify_order_cancelled_conflict'
+              ? 'Finance evidence is preserved for review.'
+              : operationalStory.resolvedByRefund
             ? 'Refund impact is recorded; vendor-blocked hold no longer applies.'
             : 'Settlement and payout movement are held while the allocation is blocked.',
-          tone: operationalStory.resolvedByRefund ? 'success' : 'warning',
+          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled' ? 'success' : 'warning',
           icon: 'H',
         },
         {
@@ -4778,12 +4820,27 @@ export function OrderDetailPage() {
   const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
   const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
-  const needsOperationalAttention = isActiveVendorBlockedOrder || Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
+  const needsOperationalAttention =
+    isActiveVendorBlockedOrder ||
+    Boolean(waitingSupportTicket) ||
+    (!hasCanonicalOperationalStory && !hasTrackingSync && order.shippingStatus !== 'Delivered');
   const orderHealth = operationalStory.resolvedByRefund
     ? {
         label: operationalStory.financeLabel,
         helper: 'Fulfillment is not required for this refunded order.',
         tone: 'healthy',
+      }
+    : operationalStory.state === 'shopify_order_cancelled'
+    ? {
+        label: operationalStory.primaryLabel,
+        helper: operationalStory.secondaryLabel,
+        tone: 'healthy',
+      }
+    : operationalStory.state === 'shopify_order_cancelled_conflict'
+    ? {
+        label: operationalStory.primaryLabel,
+        helper: operationalStory.secondaryLabel,
+        tone: 'attention',
       }
     : isActiveVendorBlockedOrder
     ? {
@@ -4805,6 +4862,18 @@ export function OrderDetailPage() {
         tone: 'healthy',
       };
   const operationalAlerts = [
+    operationalStory.state === 'shopify_order_cancelled' || operationalStory.state === 'shopify_order_cancelled_conflict'
+      ? {
+          id: 'shopify-order-cancelled',
+          label: 'Cancelled',
+          detail: operationalStory.state === 'shopify_order_cancelled_conflict'
+            ? 'Shopify cancelled this order. Existing fulfillment, shipment, refund, or return evidence is preserved for review.'
+            : 'Shopify cancelled this order. Fulfillment, shipment, and tracking are not required.',
+          tone: operationalStory.state === 'shopify_order_cancelled_conflict' ? 'warning' : 'success',
+          href: null,
+          action: null,
+        }
+      : null,
     operationalStory.resolvedByRefund
       ? {
           id: 'vendor-blocked-refund-completed',
@@ -4851,7 +4920,7 @@ export function OrderDetailPage() {
           action: activeReturn ? 'Open return details' : null,
         }
       : null,
-    !isVendorBlockedOrder && !hasOperationalReturn && !hasTrackingSync
+    !hasCanonicalOperationalStory && !isVendorBlockedOrder && !hasOperationalReturn && !hasTrackingSync
       ? {
           id: 'tracking-missing',
           label: 'Tracking missing',
@@ -4861,7 +4930,7 @@ export function OrderDetailPage() {
           action: null,
         }
       : null,
-    !isVendorBlockedOrder && !hasOperationalReturn && order.shippingStatus === 'Awaiting Shipment'
+    !hasCanonicalOperationalStory && !isVendorBlockedOrder && !hasOperationalReturn && order.shippingStatus === 'Awaiting Shipment'
       ? {
           id: 'awaiting-shipment',
           label: 'Awaiting shipment',

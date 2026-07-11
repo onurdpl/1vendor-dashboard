@@ -133,7 +133,9 @@ Full-order cancellation notes:
 - `cancelled_at` is the canonical cancellation signal.
 - `financial_status=voided` alone is not sufficient for full-order cancellation processing.
 - The cancellation bridge fetches canonical Shopify order state before invoking local reconciliation.
-- SHOP-CANCEL-1 does not add vendor order UI projection, shipping queue projection, or new finance payout blocker logic.
+- SHOP-CANCEL-2 persists canonical full-order cancellation metadata on `ShopifyOrder` and projects full-cancelled orders as terminal/non-actionable in Vendor Orders, order detail, shipment/tracking workload counts, and admin Operations queues.
+- Full-cancelled orders remain historically visible but cannot be shipped, tracked, rejected, split, or updated through Vendor Integration status/shipment/invoice writes.
+- SHOP-CANCEL-2 does not add missed-order repair, new finance payout blockers, or fulfillment-cancellation redesign.
 
 ## Starting the Backend for Tunnel Testing
 Use the normal backend start flow:

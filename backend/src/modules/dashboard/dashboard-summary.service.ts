@@ -13,6 +13,7 @@ const NON_AWAITING_SHIPPING_STATUSES = [
   'label created',
   'label_created',
 ];
+
 function insensitiveEquals(value: string) {
   return {
     equals: value,
@@ -51,6 +52,9 @@ export async function getDashboardOperationalSummary(vendorId: string): Promise<
       prisma.vendorAllocation.count({
         where: {
           assignedVendorId: vendorId,
+          order: {
+            cancelledAt: null,
+          },
           NOT: NON_AWAITING_SHIPPING_STATUSES.map((status) => ({
             shippingStatus: insensitiveEquals(status),
           })),

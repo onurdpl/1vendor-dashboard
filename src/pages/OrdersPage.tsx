@@ -133,6 +133,12 @@ function getLineItemCount(order: OrderSummary | OrderDetail) {
 }
 
 function getTrackingLabel(order: OrderSummary | OrderDetail) {
+  if (order.isCancelled) {
+    if (order.isCancellationConflict && (order.trackingNumber || order.carrier)) {
+      return [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ');
+    }
+    return 'Tracking not required';
+  }
   const carrier = formatTrackingCarrierLabel(order.carrier);
   if (order.trackingNumber || carrier) {
     return [carrier, order.trackingNumber].filter(Boolean).join(' / ');
@@ -172,6 +178,9 @@ function getCustomerLabel(customer?: string | null) {
 }
 
 function getAttentionLabel(order: OrderSummary) {
+  if (order.isCancelled) {
+    return 'Cancelled';
+  }
   if (order.allocationStatus === 'vendor_blocked') {
     return 'Vendor blocked';
   }
@@ -217,6 +226,12 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
 
 function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
   const story = getOperationalStory(order);
+  if (story.state === 'shopify_order_cancelled') {
+    return { label: story.shippingLabel, tone: 'fulfilled' as const, helper: 'Shopify order cancelled.' };
+  }
+  if (story.state === 'shopify_order_cancelled_conflict') {
+    return { label: story.shippingLabel, tone: 'blocked' as const, helper: story.secondaryLabel };
+  }
   if (story.state !== 'active_or_unknown') {
     return {
       label: story.state === 'vendor_blocked_awaiting_admin_resolution' ? story.secondaryLabel : story.fulfillmentLabel,
@@ -249,6 +264,9 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
 
 function getShopifyFulfillmentRailLabel(order: OrderSummary | OrderDetail) {
   const story = getOperationalStory(order);
+  if (story.state === 'shopify_order_cancelled') {
+    return story.fulfillmentLabel;
+  }
   if (story.state !== 'active_or_unknown') {
     return story.state === 'vendor_blocked_awaiting_admin_resolution' ? 'Not fulfilled' : story.fulfillmentLabel;
   }
@@ -504,7 +522,7 @@ export function OrdersPage() {
         effectiveQuickFilter === 'all' ||
         (effectiveQuickFilter === 'blocked' && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
         (effectiveQuickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
-        (effectiveQuickFilter === 'tracking_missing' && !order.trackingNumber && !order.carrier) ||
+        (effectiveQuickFilter === 'tracking_missing' && !order.isCancelled && !order.trackingNumber && !order.carrier) ||
         (effectiveQuickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
         (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
 
@@ -600,14 +618,14 @@ export function OrdersPage() {
   const summary = useMemo(() => {
     const source = safeArray(orders);
     return {
-      awaitingShipment: source.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
+      awaitingShipment: source.filter((order) => !order.isCancelled && order.shippingStatus === 'Awaiting Shipment').length,
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
     };
   }, [orders]);
 
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
-    { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length },
+    { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier).length },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
   ];
   const workflowTabs: Array<{
@@ -650,7 +668,7 @@ export function OrdersPage() {
       workflow: 'tracking-missing',
       label: 'Tracking missing',
       description: 'Needs tracking evidence',
-      count: safeArray(orders).filter((order) => !order.trackingNumber && !order.carrier).length,
+      count: safeArray(orders).filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier).length,
     },
   ];
   const workflowParam = searchParams.get('workflow');
@@ -994,7 +1012,7 @@ export function OrdersPage() {
               const snapshotCurrency = getSnapshotCurrency(selectedOrder);
               const operationalStatusLabel = hasCanonicalTerminalStory ? operationalStory.primaryLabel : safeStatusLabel(selectedOrder.allocationStatus);
               const operationalStatusTone = hasCanonicalTerminalStory
-                ? (operationalStory.resolvedByRefund ? 'success' : 'warning')
+                ? (operationalStory.state === 'shopify_order_cancelled' ? 'neutral' : operationalStory.resolvedByRefund ? 'success' : 'warning')
                 : getStatusTone(selectedOrder.allocationStatus);
               const paymentStatusLabel = hasCanonicalTerminalStory
                 ? operationalStory.financeLabel

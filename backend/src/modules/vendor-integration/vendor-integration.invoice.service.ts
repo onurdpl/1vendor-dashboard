@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
 
 export type VendorIntegrationInvoiceInput = {
@@ -107,6 +108,15 @@ function serializeInvoice(allocation: {
   };
 }
 
+function assertAllocationIsOperational(allocation: {
+  cancellationReason?: string | null;
+  order?: { cancelledAt?: Date | null } | null;
+}) {
+  if (allocation.order?.cancelledAt || allocation.cancellationReason) {
+    throw new VendorIntegrationOrderStateError('Order is cancelled and cannot receive invoice updates.');
+  }
+}
+
 export function validateVendorIntegrationInvoicePayload(input: {
   invoiceNumber?: string | null;
   invoiceDate?: string | null;
@@ -164,6 +174,12 @@ export async function updateVendorIntegrationOrderInvoice(
           vendorInvoiceAmount: true,
           vendorInvoiceReceivedAt: true,
           lastVendorIntegrationInvoiceRequestId: true,
+          cancellationReason: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
         },
       },
     },
@@ -184,12 +200,19 @@ export async function updateVendorIntegrationOrderInvoice(
     select: {
       id: true,
       assignedVendorId: true,
+      cancellationReason: true,
+      order: {
+        select: {
+          cancelledAt: true,
+        },
+      },
     },
   });
 
   if (!allocation) {
     return null;
   }
+  assertAllocationIsOperational(allocation);
 
   const invoiceDate = parseInvoiceDate(input.invoiceDate);
   const invoiceAmount = normalizeInvoiceAmount(input.invoiceAmount);

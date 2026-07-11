@@ -142,6 +142,10 @@ type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   cancelRefundReviewStatus?: string | null;
   refundRecordCount: number;
   latestOutboundRefundAttemptStatus?: string | null;
@@ -209,6 +213,8 @@ type AdminOrderBreakdownDto = {
     customerName: string | null;
     customerEmail: string | null;
     financialStatus?: string | null;
+    cancelledAt?: string | null;
+    cancelReason?: string | null;
     totalAmount: string;
     createdAt: string;
     updatedAt: string;
@@ -224,6 +230,10 @@ type AdminOrderBreakdownDto = {
     originalVendorId: string;
     assignedVendorId: string;
     allocationStatus: string;
+    isCancelled?: boolean;
+    isCancellationConflict?: boolean;
+    cancelledAt?: string | null;
+    cancelReason?: string | null;
     cancellationReason: string | null;
     reassignmentRequired: boolean;
     cancelRefundReview?: {
@@ -383,7 +393,22 @@ function toOrderStatus(allocationStatus: AllocationStatus, fulfillmentStatus: Fu
   return 'Processing';
 }
 
+function toProjectedOrderStatus(
+  allocationStatus: AllocationStatus,
+  fulfillmentStatus: FulfillmentStatus,
+  shippingStatus: ShippingStatus,
+  isCancelled: boolean,
+): OrderStatus {
+  if (isCancelled) {
+    return 'Cancelled';
+  }
+  return toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus);
+}
+
 function toFulfillmentActionState(shippingStatus: ShippingStatus): FulfillmentActionState {
+  if (shippingStatus === 'Not Required') {
+    return 'not_required';
+  }
   if (shippingStatus === 'Delivered') {
     return 'delivered';
   }
@@ -394,6 +419,30 @@ function toFulfillmentActionState(shippingStatus: ShippingStatus): FulfillmentAc
     return 'label_created';
   }
   return 'awaiting_shipment';
+}
+
+function hasCancellationConflict(input: {
+  isCancelled: boolean;
+  fulfillmentStatus: FulfillmentStatus;
+  shippingStatus: ShippingStatus;
+  trackingNumber?: string | null;
+  carrier?: string | null;
+  refundRecordCount?: number | null;
+}) {
+  if (!input.isCancelled) {
+    return false;
+  }
+
+  return (
+    input.fulfillmentStatus === 'Fulfilled' ||
+    input.fulfillmentStatus === 'Partially Fulfilled' ||
+    input.shippingStatus === 'Delivered' ||
+    input.shippingStatus === 'In Transit' ||
+    input.shippingStatus === 'Label Created' ||
+    Boolean(input.trackingNumber?.trim()) ||
+    Boolean(input.carrier?.trim()) ||
+    (input.refundRecordCount ?? 0) > 0
+  );
 }
 
 function mapAssignmentHistory(entries: OrderDetailDto['assignmentHistory']): AssignmentHistoryEntry[] {
@@ -421,9 +470,15 @@ function mapOrderLineItems(
   fulfilledAt?: string | null,
   shipmentCreatedAt?: string | null,
   shipmentUpdatedAt?: string | null,
+  isCancelled = false,
+  isCancellationConflict = false,
+  cancelledAt?: string | null,
+  cancelReason?: string | null,
 ): OrderLineItem[] {
-  const fulfillmentActionState = toFulfillmentActionState(shippingStatus);
-  const fulfillmentActionAvailable = allocationStatus === 'active';
+  const projectedFulfillmentStatus: FulfillmentStatus = isCancelled && !isCancellationConflict ? 'Not Required' : fulfillmentStatus;
+  const projectedShippingStatus: ShippingStatus = isCancelled && !isCancellationConflict ? 'Not Required' : shippingStatus;
+  const fulfillmentActionState = toFulfillmentActionState(projectedShippingStatus);
+  const fulfillmentActionAvailable = !isCancelled && allocationStatus === 'active';
 
   return items.map((item) => ({
     id: item.id,
@@ -442,11 +497,15 @@ function mapOrderLineItems(
     lineTaxAmount: item.lineTaxAmount ?? null,
     vatRate: item.vatRate ?? null,
     allocationStatus,
+    isCancelled,
+    isCancellationConflict,
+    cancelledAt: cancelledAt ?? undefined,
+    cancelReason: cancelReason ?? undefined,
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     fulfillmentActionState,
     fulfillmentActionAvailable,
-    fulfillmentStatus,
-    shippingStatus,
+    fulfillmentStatus: projectedFulfillmentStatus,
+    shippingStatus: projectedShippingStatus,
     trackingNumber: trackingNumber ?? undefined,
     carrier: carrier ?? undefined,
     trackingUrl: trackingUrl ?? undefined,
@@ -459,8 +518,19 @@ function mapOrderLineItems(
 
 function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
   const allocationStatus = toAllocationStatus(dto.allocationStatus);
-  const fulfillmentStatus = toFulfillmentStatus(dto.fulfillmentStatus);
-  const shippingStatus = toShippingStatus(dto.shippingStatus);
+  const isCancelled = dto.isCancelled === true || Boolean(dto.cancelledAt);
+  const rawFulfillmentStatus = toFulfillmentStatus(dto.fulfillmentStatus);
+  const rawShippingStatus = toShippingStatus(dto.shippingStatus);
+  const isCancellationConflict = dto.isCancellationConflict === true || hasCancellationConflict({
+    isCancelled,
+    fulfillmentStatus: rawFulfillmentStatus,
+    shippingStatus: rawShippingStatus,
+    trackingNumber: dto.trackingNumber,
+    carrier: dto.carrier,
+    refundRecordCount: dto.refundRecordCount,
+  });
+  const fulfillmentStatus: FulfillmentStatus = isCancelled && !isCancellationConflict ? 'Not Required' : rawFulfillmentStatus;
+  const shippingStatus: ShippingStatus = isCancelled && !isCancellationConflict ? 'Not Required' : rawShippingStatus;
 
   return {
     id: dto.id,
@@ -469,15 +539,19 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     vendorId: dto.assignedVendorId,
     sourceShopifyOrderId: dto.sourceShopifyOrderId,
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
-    status: toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus),
+    status: toProjectedOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus, isCancelled),
     allocationStatus,
+    isCancelled,
+    isCancellationConflict,
+    cancelledAt: dto.cancelledAt ?? undefined,
+    cancelReason: dto.cancelReason ?? undefined,
     cancelRefundReviewStatus: dto.cancelRefundReviewStatus ?? undefined,
     refundRecordCount: dto.refundRecordCount,
     latestOutboundRefundAttemptStatus: dto.latestOutboundRefundAttemptStatus ?? undefined,
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     assignmentHistory: [],
     fulfillmentActionState: toFulfillmentActionState(shippingStatus),
-    fulfillmentActionAvailable: allocationStatus === 'active',
+    fulfillmentActionAvailable: !isCancelled && allocationStatus === 'active',
     fulfillmentStatus,
     shippingStatus,
     trackingNumber: dto.trackingNumber ?? undefined,
@@ -532,6 +606,10 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       dto.fulfilledAt,
       dto.shipmentCreatedAt,
       dto.shipmentUpdatedAt,
+      summary.isCancelled,
+      summary.isCancellationConflict,
+      summary.cancelledAt,
+      summary.cancelReason,
     ),
     items: mapOrderLineItems(
       dto.lineItems,
@@ -546,6 +624,10 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       dto.fulfilledAt,
       dto.shipmentCreatedAt,
       dto.shipmentUpdatedAt,
+      summary.isCancelled,
+      summary.isCancellationConflict,
+      summary.cancelledAt,
+      summary.cancelReason,
     ),
     timeline: history.map((entry) => ({
       label: entry.action.replace(/_/g, ' '),
@@ -572,8 +654,19 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     productPanelVariantDisableMode: response.productPanelVariantDisableMode,
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {
       const allocationStatus = toAllocationStatus(allocation.allocationStatus);
-      const shippingStatus = toShippingStatus(allocation.shippingStatus);
-      const fulfillmentStatus = toFulfillmentStatus(allocation.fulfillmentStatus);
+      const isCancelled = allocation.isCancelled === true || Boolean(allocation.cancelledAt ?? response.order.cancelledAt);
+      const rawShippingStatus = toShippingStatus(allocation.shippingStatus);
+      const rawFulfillmentStatus = toFulfillmentStatus(allocation.fulfillmentStatus);
+      const isCancellationConflict = allocation.isCancellationConflict === true || hasCancellationConflict({
+        isCancelled,
+        fulfillmentStatus: rawFulfillmentStatus,
+        shippingStatus: rawShippingStatus,
+        trackingNumber: allocation.trackingNumber,
+        carrier: allocation.carrier,
+        refundRecordCount: allocation.refundRecords.length,
+      });
+      const shippingStatus: ShippingStatus = isCancelled && !isCancellationConflict ? 'Not Required' : rawShippingStatus;
+      const fulfillmentStatus: FulfillmentStatus = isCancelled && !isCancellationConflict ? 'Not Required' : rawFulfillmentStatus;
       const refundedItems = allocation.refundRecords.flatMap((refund) => {
         const lineItems = refund.lineItems ?? [];
         if (lineItems.length > 0) {
@@ -613,14 +706,18 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         vendorId: allocation.vendorId,
         vendorName: allocation.vendorName,
         allocationOrderId: allocation.id,
-        status: toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus),
+        status: toProjectedOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus, isCancelled),
         allocationStatus,
+        isCancelled,
+        isCancellationConflict,
+        cancelledAt: allocation.cancelledAt ?? response.order.cancelledAt ?? undefined,
+        cancelReason: allocation.cancelReason ?? response.order.cancelReason ?? undefined,
         cancellationReason: (allocation.cancellationReason?.trim().toLowerCase() as VendorAllocationSummary['cancellationReason']) ?? undefined,
         reassignmentRequired: allocation.reassignmentRequired,
         reassignmentCandidateVendorIds: [],
         assignmentHistory: mapAssignmentHistory(allocation.assignmentHistory),
         fulfillmentActionState: toFulfillmentActionState(shippingStatus),
-        fulfillmentActionAvailable: allocationStatus === 'active',
+        fulfillmentActionAvailable: !isCancelled && allocationStatus === 'active',
         fulfillmentStatus,
         shippingStatus,
         trackingNumber: allocation.trackingNumber ?? undefined,
@@ -644,6 +741,10 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
           allocation.fulfilledAt,
           allocation.shipmentCreatedAt,
           allocation.shipmentUpdatedAt,
+          isCancelled,
+          isCancellationConflict,
+          allocation.cancelledAt ?? response.order.cancelledAt,
+          allocation.cancelReason ?? response.order.cancelReason,
         ),
         refundedItems,
           refundTotal: formatCurrency(

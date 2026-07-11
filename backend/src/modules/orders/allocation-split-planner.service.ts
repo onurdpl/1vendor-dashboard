@@ -205,6 +205,14 @@ export async function planAllocationSplitForLineItemReject(
     addBlocker(blockers, 'allocation_not_active', 'Only active allocations can be planned for line-item rejection split.');
   }
 
+  if (allocation.order.cancelledAt) {
+    addBlocker(blockers, 'order_cancelled', 'Cancelled orders cannot be split.');
+  }
+
+  if (allocation.cancellationReason) {
+    addBlocker(blockers, 'allocation_cancelled', 'Cancelled allocations cannot be split.');
+  }
+
   if (allocation.reassignmentRequired) {
     addBlocker(blockers, 'reassignment_already_required', 'Allocation already requires reassignment.');
   }

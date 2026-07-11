@@ -10,6 +10,9 @@ export type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  isCancelled: boolean;
+  cancelledAt: string | null;
+  cancelReason: string | null;
   cancelRefundReviewStatus?: string | null;
   refundRecordCount: number;
   latestOutboundRefundAttemptStatus?: string | null;
@@ -71,6 +74,8 @@ export type OrderSnapshotDto = {
   shopifyCreatedAt: string | null;
   currency: string | null;
   financialStatus: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
   paymentGatewayName: string | null;
   taxesIncluded: boolean | null;
   orderTaxAmount: string | null;
@@ -759,6 +764,8 @@ export type AdminOrderBreakdownDto = {
     customerName: string | null;
     customerEmail: string | null;
     financialStatus: string | null;
+    cancelledAt: string | null;
+    cancelReason: string | null;
     totalAmount: string;
     createdAt: string;
     updatedAt: string;

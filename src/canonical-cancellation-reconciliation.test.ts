@@ -6,6 +6,7 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaMock)),
   shopifyOrder: {
     findUnique: vi.fn(),
+    update: vi.fn(),
   },
   vendorAllocation: {
     updateMany: vi.fn(),
@@ -144,6 +145,7 @@ describe('canonical Shopify cancellation reconciliation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(localOrder());
+    prismaMock.shopifyOrder.update.mockResolvedValue({});
     prismaMock.vendorAllocation.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.financeLedgerEntry.update.mockResolvedValue({});
     prismaMock.operationalSignal.upsert.mockResolvedValue({});
@@ -176,6 +178,13 @@ describe('canonical Shopify cancellation reconciliation', () => {
         reassignmentRequired: false,
       }),
     }));
+    expect(prismaMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-1' },
+      data: {
+        cancelledAt: new Date('2026-06-26T10:00:00.000Z'),
+        cancelReason: 'customer',
+      },
+    });
     expect(prismaMock.financeLedgerEntry.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'fin-vendor-a-sale-order-1-alloc-a' },
       data: expect.objectContaining({
@@ -364,6 +373,7 @@ describe('canonical Shopify cancellation reconciliation', () => {
       affectedLineItems: [],
       results: [],
     });
+    expect(prismaMock.shopifyOrder.update).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.updateMany).toHaveBeenCalled();
   });
 

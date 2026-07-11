@@ -60,10 +60,12 @@ describe('vendor orders list visibility', () => {
         },
         select: expect.objectContaining({
           order: {
-            select: {
+            select: expect.objectContaining({
               sourceShopifyOrderId: true,
               sourceShopifyOrderNumber: true,
-            },
+              cancelledAt: true,
+              cancelReason: true,
+            }),
           },
           fulfillment: {
             select: {

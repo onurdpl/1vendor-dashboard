@@ -19,6 +19,9 @@ export function getRejectUnavailableReason(order: RejectableOrder | null | undef
   if (story.state === 'refunded_completed') {
     return 'Refund completed. No further rejection action is required.';
   }
+  if (story.state === 'shopify_order_cancelled' || story.state === 'shopify_order_cancelled_conflict') {
+    return 'Cancelled orders cannot be rejected.';
+  }
   if (order.allocationStatus !== 'active') {
     return 'This order is already blocked or no longer active.';
   }

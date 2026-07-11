@@ -65,7 +65,11 @@
 - Confirm `ORDERS_UPDATED` acts only as fallback when `cancelled_at` exists.
 - Confirm `financial_status=voided` alone does not trigger full-order cancellation reconciliation.
 - Confirm backend fetches canonical Shopify order state before invoking local cancellation reconciliation.
-- Confirm SHOP-CANCEL-1 does not change vendor order UI projection, shipping queue projection, or new finance payout blocker behavior.
+- Confirm `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason` are persisted after canonical full-order cancellation.
+- Confirm Vendor Orders shows `Cancelled`, `Fulfillment not required`, `Shipment not required`, and `Tracking not required`.
+- Confirm full-cancelled orders are excluded from awaiting-shipment/tracking-missing/workload counts and admin Operations shipment queues.
+- Confirm shipment creation, tracking updates, vendor reject, allocation split, and Vendor Integration writes are blocked for full-cancelled orders.
+- Confirm fulfillment cancellation still follows the separate fulfillment-cancellation path.
 
 ## Fulfillment Update
 - Trigger or identify `FULFILLMENTS_CREATE` or `FULFILLMENTS_UPDATE`.

@@ -558,6 +558,9 @@ export async function splitAllocationForLineItemReject(
     if (!freshSource || freshSource.allocationStatus !== AllocationStatus.ACTIVE) {
       throw new AllocationSplitValidationError('allocation_not_active', 'Source allocation is no longer active.');
     }
+    if (freshSource.order.cancelledAt || freshSource.cancellationReason) {
+      throw new AllocationSplitValidationError('order_cancelled', 'Cancelled orders cannot be split.');
+    }
     const selectedLines = planner.selectedLines;
     const selectedLineIds = selectedLines.map((line) => line.id);
     const remainingLineIds = planner.remainingLines.map((line) => line.id);

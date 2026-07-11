@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
 
 export const VENDOR_INTEGRATION_STATUSES = [
@@ -65,6 +66,15 @@ function serializeAllocationStatus(allocation: {
   };
 }
 
+function assertAllocationIsOperational(allocation: {
+  cancellationReason?: string | null;
+  order?: { cancelledAt?: Date | null } | null;
+}) {
+  if (allocation.order?.cancelledAt || allocation.cancellationReason) {
+    throw new VendorIntegrationOrderStateError('Order is cancelled and cannot be updated.');
+  }
+}
+
 export async function updateVendorIntegrationOrderStatus(
   input: VendorIntegrationStatusInput,
   db: Pick<Prisma.TransactionClient, 'vendorAllocation' | 'vendorIntegrationStatusEvent'> = prisma,
@@ -87,6 +97,12 @@ export async function updateVendorIntegrationOrderStatus(
           vendorIntegrationStatusUpdatedAt: true,
           vendorIntegrationProvider: true,
           lastVendorIntegrationRequestId: true,
+          cancellationReason: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
         },
       },
     },
@@ -107,12 +123,19 @@ export async function updateVendorIntegrationOrderStatus(
     select: {
       id: true,
       assignedVendorId: true,
+      cancellationReason: true,
+      order: {
+        select: {
+          cancelledAt: true,
+        },
+      },
     },
   });
 
   if (!allocation) {
     return null;
   }
+  assertAllocationIsOperational(allocation);
 
   const now = new Date();
   const message = normalizeMessage(input.message);

@@ -555,6 +555,8 @@ model ShopifyOrder {
   shopifyCreatedAt            DateTime?
   currency                    String?
   financialStatus             String?
+  cancelledAt                 DateTime?
+  cancelReason                String?
   paymentGatewayName          String?
   taxesIncluded               Boolean?
   orderTaxAmount              Decimal?                     @db.Decimal(10, 2)

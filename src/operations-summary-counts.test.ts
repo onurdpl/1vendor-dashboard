@@ -799,6 +799,35 @@ describe('admin operations summary counts', () => {
     expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
   });
 
+  it('excludes full Shopify cancellations from awaiting shipment summary candidates', async () => {
+    prismaMock.vendorAllocation.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    prismaMock.returnRecord.count.mockResolvedValueOnce(0);
+    prismaMock.financeIntegrityAlert.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([]);
+    prismaMock.automationAction.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await getAdminOperationsQueueSummary();
+
+    expect(prismaMock.vendorAllocation.count).toHaveBeenNthCalledWith(3, {
+      where: {
+        AND: expect.arrayContaining([
+          {
+            order: {
+              cancelledAt: null,
+            },
+          },
+        ]),
+      },
+    });
+  });
+
   it('keeps signal generation explicit', async () => {
     evaluateOperationalSignalsMock.mockResolvedValueOnce([{ id: 'signal-1' }]);
 

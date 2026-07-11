@@ -15,6 +15,7 @@ import {
   updateVendorIntegrationOrderInvoice,
   validateVendorIntegrationInvoicePayload,
 } from './vendor-integration.invoice.service.js';
+import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import { rateLimitVendorIntegrationClient } from './vendor-integration.rate-limit.js';
 import {
   updateVendorIntegrationOrderShipment,
@@ -316,14 +317,22 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
         return reply.code(400).send({ message: 'Unsupported vendor integration status.' });
       }
 
-      const result = await updateVendorIntegrationOrderStatus({
-        allocationId: request.params.allocationId,
-        context,
-        idempotencyKey,
-        status,
-        message: request.body?.message ?? null,
-        requestId: request.requestId ?? request.id ?? null,
-      });
+      let result;
+      try {
+        result = await updateVendorIntegrationOrderStatus({
+          allocationId: request.params.allocationId,
+          context,
+          idempotencyKey,
+          status,
+          message: request.body?.message ?? null,
+          requestId: request.requestId ?? request.id ?? null,
+        });
+      } catch (error) {
+        if (error instanceof VendorIntegrationOrderStateError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
 
       if (!result) {
         return reply.code(404).send({ message: 'Vendor allocation not found.' });
@@ -362,16 +371,24 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
         return reply.code(400).send({ message: validation.message });
       }
 
-      const result = await updateVendorIntegrationOrderShipment({
-        allocationId: request.params.allocationId,
-        context,
-        idempotencyKey,
-        carrier: validation.shipment.carrier,
-        trackingNumber: validation.shipment.trackingNumber,
-        trackingUrl: validation.shipment.trackingUrl,
-        shippedAt: validation.shipment.shippedAt?.toISOString() ?? null,
-        requestId: request.requestId ?? request.id ?? null,
-      });
+      let result;
+      try {
+        result = await updateVendorIntegrationOrderShipment({
+          allocationId: request.params.allocationId,
+          context,
+          idempotencyKey,
+          carrier: validation.shipment.carrier,
+          trackingNumber: validation.shipment.trackingNumber,
+          trackingUrl: validation.shipment.trackingUrl,
+          shippedAt: validation.shipment.shippedAt?.toISOString() ?? null,
+          requestId: request.requestId ?? request.id ?? null,
+        });
+      } catch (error) {
+        if (error instanceof VendorIntegrationOrderStateError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
 
       if (!result) {
         return reply.code(404).send({ message: 'Vendor allocation not found.' });
@@ -410,16 +427,24 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
         return reply.code(400).send({ message: validation.message });
       }
 
-      const result = await updateVendorIntegrationOrderInvoice({
-        allocationId: request.params.allocationId,
-        context,
-        idempotencyKey,
-        invoiceNumber: validation.invoice.invoiceNumber,
-        invoiceDate: validation.invoice.invoiceDate.toISOString().slice(0, 10),
-        invoiceUrl: validation.invoice.invoiceUrl,
-        invoiceAmount: validation.invoice.invoiceAmount,
-        requestId: request.requestId ?? request.id ?? null,
-      });
+      let result;
+      try {
+        result = await updateVendorIntegrationOrderInvoice({
+          allocationId: request.params.allocationId,
+          context,
+          idempotencyKey,
+          invoiceNumber: validation.invoice.invoiceNumber,
+          invoiceDate: validation.invoice.invoiceDate.toISOString().slice(0, 10),
+          invoiceUrl: validation.invoice.invoiceUrl,
+          invoiceAmount: validation.invoice.invoiceAmount,
+          requestId: request.requestId ?? request.id ?? null,
+        });
+      } catch (error) {
+        if (error instanceof VendorIntegrationOrderStateError) {
+          return reply.code(error.statusCode).send({ message: error.message });
+        }
+        throw error;
+      }
 
       if (!result) {
         return reply.code(404).send({ message: 'Vendor allocation not found.' });

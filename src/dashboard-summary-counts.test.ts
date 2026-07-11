@@ -38,6 +38,15 @@ describe('dashboard summary return review counts', () => {
     const summary = await getDashboardOperationalSummary('yalispor');
 
     expect(summary.returns.refundAttention).toBe(5);
+    expect(prismaMock.vendorAllocation.count).toHaveBeenNthCalledWith(2, {
+      where: {
+        assignedVendorId: 'yalispor',
+        order: {
+          cancelledAt: null,
+        },
+        NOT: expect.any(Array),
+      },
+    });
     expect(prismaMock.returnRecord.count).toHaveBeenCalledWith({
       where: {
         vendorAllocation: {

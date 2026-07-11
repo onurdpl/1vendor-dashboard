@@ -200,6 +200,21 @@ describe('allocation split planner', () => {
     expect(voided.result.blockers.map((blocker) => blocker.code)).toContain('source_sale_ledger_voided');
   });
 
+  it('blocks full Shopify cancelled orders from line-item split planning', async () => {
+    const { result } = await plan({
+      order: {
+        id: 'shopify-order-db-1097',
+        sourceShopifyOrderId: '781877444617',
+        sourceShopifyOrderNumber: '#1097',
+        cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
+        cancelReason: 'customer',
+      },
+    });
+
+    expect(result.canSplit).toBe(false);
+    expect(result.blockers.map((blocker) => blocker.code)).toContain('order_cancelled');
+  });
+
   it('builds deterministic child allocation ids independent of selected line order', () => {
     const first = __allocationSplitPlannerTesting.buildDeterministicChildAllocationId('alloc-source', ['line-3', 'line-1']);
     const second = __allocationSplitPlannerTesting.buildDeterministicChildAllocationId('alloc-source', ['line-1', 'line-3']);

@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
 
 const SHIPPED_STATUS = 'In Transit';
@@ -76,6 +77,15 @@ function serializeShipment(allocation: {
   };
 }
 
+function assertAllocationIsOperational(allocation: {
+  cancellationReason?: string | null;
+  order?: { cancelledAt?: Date | null } | null;
+}) {
+  if (allocation.order?.cancelledAt || allocation.cancellationReason) {
+    throw new VendorIntegrationOrderStateError('Order is cancelled and cannot receive shipment updates.');
+  }
+}
+
 export function validateVendorIntegrationShipmentPayload(input: {
   carrier?: string | null;
   trackingNumber?: string | null;
@@ -133,6 +143,12 @@ export async function updateVendorIntegrationOrderShipment(
           vendorIntegrationShippedAt: true,
           shippingStatus: true,
           lastVendorIntegrationShipmentRequestId: true,
+          cancellationReason: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
         },
       },
     },
@@ -153,12 +169,19 @@ export async function updateVendorIntegrationOrderShipment(
     select: {
       id: true,
       assignedVendorId: true,
+      cancellationReason: true,
+      order: {
+        select: {
+          cancelledAt: true,
+        },
+      },
     },
   });
 
   if (!allocation) {
     return null;
   }
+  assertAllocationIsOperational(allocation);
 
   const shippedAt = parseShippedAt(input.shippedAt);
   const updated = await db.vendorAllocation.update({

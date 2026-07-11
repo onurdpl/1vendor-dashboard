@@ -236,6 +236,25 @@ async function findLocalOrderForCancellation(sourceShopifyOrderId: string) {
   });
 }
 
+function buildCanonicalCancellationOrderData(canonicalOrder: CanonicalShopifyOrderSnapshot) {
+  return {
+    cancelledAt: canonicalOrder.cancelledAt ? new Date(canonicalOrder.cancelledAt) : null,
+    cancelReason: canonicalOrder.cancelReason ?? null,
+  };
+}
+
+async function persistCanonicalCancellationMetadata(
+  orderId: string,
+  canonicalOrder: CanonicalShopifyOrderSnapshot,
+) {
+  await prisma.shopifyOrder.update({
+    where: {
+      id: orderId,
+    },
+    data: buildCanonicalCancellationOrderData(canonicalOrder),
+  });
+}
+
 function buildEmptyReport(input: {
   shopifyOrderId: string;
   cancellationState: CanonicalOrderCancellationState;
@@ -334,6 +353,8 @@ export function createCanonicalCancellationReconciliationService(env: AppEnv) {
       });
       return report;
     }
+
+    await persistCanonicalCancellationMetadata(localOrder.id, canonicalOrder);
 
     const affectedAllocations = localOrder.allocations;
     report.affectedAllocations = affectedAllocations.map((allocation) => allocation.id);

@@ -1,9 +1,9 @@
 import type { VendorId } from '../auth/vendorContext';
 
-export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
-export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partially Fulfilled';
-export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
-export type FulfillmentActionState = 'awaiting_shipment' | 'label_created' | 'shipped' | 'delivered';
+export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold' | 'Cancelled';
+export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partially Fulfilled' | 'Not Required';
+export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered' | 'Not Required';
+export type FulfillmentActionState = 'awaiting_shipment' | 'label_created' | 'shipped' | 'delivered' | 'not_required';
 export type AllocationStatus = 'active' | 'vendor_blocked' | 'pending_reassignment' | 'reassigned' | 'fulfilled';
 export type AllocationBlockReason =
   | 'out_of_stock'
@@ -711,6 +711,10 @@ export type OrderSummary = {
   sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
   allocationStatus: AllocationStatus;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   cancelRefundReviewStatus?: string | null;
   refundRecordCount?: number;
   latestOutboundRefundAttemptStatus?: string | null;
@@ -757,6 +761,10 @@ export type OrderLineItem = {
   vendorId: VendorId;
   fulfillmentStatus: FulfillmentStatus;
   allocationStatus: AllocationStatus;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
@@ -777,6 +785,8 @@ export type OrderIntegrationSnapshot = {
   shopifyCreatedAt: string | null;
   currency: string | null;
   financialStatus: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   paymentGatewayName: string | null;
   taxesIncluded: boolean | null;
   orderTaxAmount: string | null;
@@ -1180,6 +1190,10 @@ export type VendorAllocationSummary = {
   allocationOrderId: string;
   status: OrderStatus;
   allocationStatus: AllocationStatus;
+  isCancelled?: boolean;
+  isCancellationConflict?: boolean;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;

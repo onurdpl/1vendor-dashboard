@@ -805,6 +805,31 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
+  it('rejects status writes for full Shopify cancellations', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      cancellationReason: null,
+      order: {
+        cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
+      },
+    });
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-cancelled-key',
+      },
+      { status: 'acknowledged', message: 'Order imported into Entegra' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({ message: 'Order is cancelled and cannot be updated.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
   it('allows the same vendor integration token to write after vendor activation', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(
       buildClient({
@@ -1073,6 +1098,31 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
+  it('rejects shipment writes for full Shopify cancellations', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      cancellationReason: null,
+      order: {
+        cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
+      },
+    });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-cancelled-key',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({ message: 'Order is cancelled and cannot receive shipment updates.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
   it('rejects shipment writes for another vendor allocation', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
     prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
@@ -1291,6 +1341,31 @@ describe('vendor integration API foundation', () => {
     expect(response.payload).toEqual({
       message: 'Your account is temporarily restricted. Please contact support if you believe this is incorrect.',
     });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects invoice writes for full Shopify cancellations', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      cancellationReason: null,
+      order: {
+        cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
+      },
+    });
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-cancelled-key',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({ message: 'Order is cancelled and cannot receive invoice updates.' });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 

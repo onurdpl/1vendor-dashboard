@@ -572,6 +572,27 @@ describe('vendor order reject operational hold', () => {
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
+  it('blocks full Shopify cancelled orders from being rejected', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRejectAllocation({
+      order: {
+        cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
+        cancelReason: 'customer',
+      },
+    }));
+
+    await expect(
+      rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
+        reason: 'OUT_OF_STOCK',
+        note: 'Missing stock',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Order is cancelled and cannot be rejected.',
+    });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
   it('requires a valid reason', async () => {
     await expect(
       rejectVendorOrderAllocation('yalispor', 'alloc-1088', {

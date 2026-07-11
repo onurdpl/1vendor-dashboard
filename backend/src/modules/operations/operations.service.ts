@@ -363,6 +363,10 @@ function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   );
 }
 
+function isFullOrderCancelled(order: { cancelledAt?: Date | null }) {
+  return Boolean(order.cancelledAt);
+}
+
 function insensitiveEquals(value: string) {
   return {
     equals: value,
@@ -485,6 +489,11 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
       prisma.vendorAllocation.count({
         where: {
           AND: [
+            {
+              order: {
+                cancelledAt: null,
+              },
+            },
             {
               OR: [
                 { fulfillmentStatus: insensitiveEquals('processing') },
@@ -798,6 +807,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         select: {
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
+          cancelledAt: true,
         },
       },
     },
@@ -818,6 +828,10 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const orderReference = formatOrderReference(shopifyOrderNumber, shopifyOrderId) ?? `allocation ${allocation.id}`;
     const resolvedByRefund = isVendorBlockedAllocationResolvedByRefund(allocation);
     const splitChildAllocation = (allocation.childAllocationSplitEvents ?? []).length > 0;
+
+    if (isFullOrderCancelled(allocation.order)) {
+      continue;
+    }
 
     if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED && !resolvedByRefund) {
       const description = splitChildAllocation

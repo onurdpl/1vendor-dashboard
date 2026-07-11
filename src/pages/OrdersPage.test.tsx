@@ -401,6 +401,90 @@ describe('OrdersPage control center', () => {
     expect(within(axes).getByText('pending')).toBeInTheDocument();
   });
 
+  it('renders full Shopify cancellations as terminal and non-actionable', async () => {
+    const cancelledOrder = buildAwaitingRejectableOrder({
+      status: 'Cancelled',
+      isCancelled: true,
+      cancelledAt: '2026-07-11T10:00:00.000Z',
+      cancelReason: 'customer',
+      fulfillmentStatus: 'Not Required',
+      shippingStatus: 'Not Required',
+      fulfillmentActionState: 'not_required',
+      fulfillmentActionAvailable: false,
+      trackingNumber: undefined,
+      carrier: undefined,
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus: 'voided',
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        cancelReason: 'customer',
+      },
+      lineItems: orderDetail.lineItems.map((item) => ({
+        ...item,
+        isCancelled: true,
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        cancelReason: 'customer',
+        fulfillmentStatus: 'Not Required',
+        shippingStatus: 'Not Required',
+        fulfillmentActionState: 'not_required',
+        fulfillmentActionAvailable: false,
+      })),
+    });
+    listOrdersMock.mockResolvedValue([toSummary(cancelledOrder)]);
+    getOrderMock.mockResolvedValue(cancelledOrder);
+
+    renderOrdersPage();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Shipment not required').length).toBeGreaterThan(0);
+    expect(screen.getByText('Tracking not required')).toBeInTheDocument();
+    expect(screen.queryByText('Tracking pending')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument();
+  });
+
+  it('preserves fulfillment evidence for cancelled orders that already have shipping history', async () => {
+    const cancelledShippedOrder: OrderDetail = {
+      ...orderDetail,
+      status: 'Cancelled',
+      isCancelled: true,
+      isCancellationConflict: true,
+      cancelledAt: '2026-07-11T10:00:00.000Z',
+      cancelReason: 'customer',
+      fulfillmentActionAvailable: false,
+      orderSnapshot: {
+        ...orderDetail.orderSnapshot!,
+        financialStatus: 'voided',
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        cancelReason: 'customer',
+      },
+      lineItems: orderDetail.lineItems.map((item) => ({
+        ...item,
+        isCancelled: true,
+        isCancellationConflict: true,
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        cancelReason: 'customer',
+        fulfillmentActionAvailable: false,
+      })),
+    };
+    listOrdersMock.mockResolvedValue([toSummary(cancelledShippedOrder)]);
+    getOrderMock.mockResolvedValue(cancelledShippedOrder);
+
+    renderOrdersPage();
+
+    const axes = await screen.findByLabelText('Order status axes');
+    expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getAllByText('Review existing fulfillment evidence').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
+    expect(screen.getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+    expect(screen.queryByText('Shipment not required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tracking not required')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Reject/i })).not.toBeInTheDocument();
+  });
+
   it('renders the inspector line item initials fallback when imageUrl is missing', async () => {
     listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
     getOrderMock.mockResolvedValue({

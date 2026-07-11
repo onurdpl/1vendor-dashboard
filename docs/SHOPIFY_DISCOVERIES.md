@@ -455,7 +455,12 @@ POST /fulfillments.json
   - fetch canonical Shopify order through Admin GraphQL
   - reconcile locally from canonical state
 - SHOP-CANCEL-1 bridges full order cancellation webhooks into existing canonical cancellation reconciliation.
-- SHOP-CANCEL-1 does not implement vendor order UI projection, shipping queue projection, or new finance payout blocker logic.
+- SHOP-CANCEL-2 persists canonical full-order cancellation metadata on `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason`.
+- Full-cancelled orders remain historically visible, but are operationally terminal:
+  - Vendor Orders shows `Cancelled`, `Fulfillment not required`, `Shipment not required`, and `Tracking not required`.
+  - Shipment/tracking workload queues and dashboard counts exclude full-cancelled orders.
+  - Shipment creation, tracking updates, vendor reject, allocation split, and Vendor Integration status/shipment/invoice writes are blocked.
+- SHOP-CANCEL-2 does not implement missed-order repair, new finance payout blockers, or fulfillment-cancellation redesign.
 - Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
 
 ## Customer Notifications

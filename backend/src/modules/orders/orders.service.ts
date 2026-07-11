@@ -100,6 +100,10 @@ function isActiveSaleLedger(entry: { entryType: string; voidedAt: Date | null })
   return entry.entryType.trim().toLowerCase() === 'sale' && !entry.voidedAt;
 }
 
+function isFullOrderCancelled(order: { cancelledAt?: Date | null } | null | undefined) {
+  return Boolean(order?.cancelledAt);
+}
+
 function buildReturnOwnershipSummary(input: {
   returnRecord: {
     ownerVendorId?: string | null;
@@ -2178,6 +2182,8 @@ export async function listVendorOrders(
         select: {
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
+          cancelledAt: true,
+          cancelReason: true,
         },
       },
       fulfillment: {
@@ -2234,6 +2240,9 @@ export async function listVendorOrders(
       assignedVendorId: allocation.assignedVendorId,
       originalVendorId: allocation.originalVendorId,
       allocationStatus: allocation.allocationStatus,
+      isCancelled: isFullOrderCancelled(allocation.order),
+      cancelledAt: toIsoString(allocation.order.cancelledAt),
+      cancelReason: allocation.order.cancelReason,
       refundRecordCount: (allocation.refundRecords ?? []).length,
       ...(cancelRefundReviewStatus ? { cancelRefundReviewStatus } : {}),
       ...(latestOutboundRefundAttemptStatus ? { latestOutboundRefundAttemptStatus } : {}),
@@ -2275,6 +2284,7 @@ export async function rejectVendorOrderAllocation(
         allocationStatus: true,
         fulfillmentStatus: true,
         shippingStatus: true,
+        cancellationReason: true,
         trackingNumber: true,
         carrier: true,
         fulfillment: {
@@ -2299,6 +2309,12 @@ export async function rejectVendorOrderAllocation(
           },
           take: 1,
         },
+        order: {
+          select: {
+            cancelledAt: true,
+            cancelReason: true,
+          },
+        },
       },
     });
 
@@ -2311,6 +2327,10 @@ export async function rejectVendorOrderAllocation(
         ? 'Order allocation cannot be rejected in its current status.'
         : 'Only active order allocations can be rejected.';
       throw new OrderRejectValidationError(message, 409);
+    }
+
+    if (isFullOrderCancelled(allocation.order) || allocation.cancellationReason) {
+      throw new OrderRejectValidationError('Order is cancelled and cannot be rejected.', 409);
     }
 
     if (hasShipmentEvidence(allocation)) {
@@ -3732,6 +3752,9 @@ export async function getVendorOrderById(
     assignedVendorId: allocation.assignedVendorId,
     originalVendorId: allocation.originalVendorId,
     allocationStatus: allocation.allocationStatus,
+    isCancelled: isFullOrderCancelled(allocation.order),
+    cancelledAt: toIsoString(allocation.order.cancelledAt),
+    cancelReason: allocation.order.cancelReason,
     refundRecordCount: (allocation.refundRecords ?? []).length,
     ...(cancelRefundReviewStatus ? { cancelRefundReviewStatus } : {}),
     ...(latestOutboundRefundAttemptStatus ? { latestOutboundRefundAttemptStatus } : {}),
@@ -3760,6 +3783,8 @@ export async function getVendorOrderById(
       shopifyCreatedAt: toIsoString(allocation.order.shopifyCreatedAt),
       currency: allocation.order.currency,
       financialStatus: allocation.order.financialStatus,
+      cancelledAt: toIsoString(allocation.order.cancelledAt),
+      cancelReason: allocation.order.cancelReason,
       paymentGatewayName: allocation.order.paymentGatewayName,
       taxesIncluded: allocation.order.taxesIncluded,
       orderTaxAmount: toNullableAmountString(allocation.order.orderTaxAmount),
@@ -4098,6 +4123,8 @@ export async function getAdminShopifyOrderBreakdown(
       customerName: order.customerName,
       customerEmail: order.customerEmail,
       financialStatus: order.financialStatus,
+      cancelledAt: toIsoString(order.cancelledAt),
+      cancelReason: order.cancelReason,
       totalAmount: order.totalPrice ? toAmountString(toNumber(order.totalPrice)) : toAmountString(orderTotal),
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),
@@ -4123,6 +4150,9 @@ export async function getAdminShopifyOrderBreakdown(
         originalVendorId: allocation.originalVendorId,
         assignedVendorId: allocation.assignedVendorId,
         allocationStatus: allocation.allocationStatus,
+        isCancelled: isFullOrderCancelled(order),
+        cancelledAt: toIsoString(order.cancelledAt),
+        cancelReason: order.cancelReason,
         cancellationReason: allocation.cancellationReason,
         reassignmentRequired: allocation.reassignmentRequired,
         cancelRefundReview: allocation.cancelRefundReviewStatus

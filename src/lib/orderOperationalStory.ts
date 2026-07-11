@@ -1,9 +1,15 @@
 type OrderOperationalStoryInput = {
   allocationStatus?: string | null;
+  isCancelled?: boolean | null;
+  isCancellationConflict?: boolean | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   cancellationReason?: string | null;
   reassignmentRequired?: boolean | null;
   fulfillmentStatus?: string | null;
   shippingStatus?: string | null;
+  trackingNumber?: string | null;
+  carrier?: string | null;
   cancelRefundReviewStatus?: string | null;
   outboundRefundAttemptStatus?: string | null;
   latestOutboundRefundAttemptStatus?: string | null;
@@ -20,6 +26,8 @@ type OrderOperationalStoryInput = {
 };
 
 export type OperationalStoryState =
+  | 'shopify_order_cancelled'
+  | 'shopify_order_cancelled_conflict'
   | 'vendor_blocked_awaiting_admin_resolution'
   | 'vendor_blocked_resolved_by_refund'
   | 'refunded_completed'
@@ -107,6 +115,83 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
   const reason = input.cancellationReason?.trim();
   const allocationStatus = normalizeToken(input.allocationStatus);
   const resolvedByRefund = isVendorBlockedResolvedByRefund(input);
+  const isFullOrderCancelled = input.isCancelled === true || Boolean(input.cancelledAt);
+  const cancellationConflict =
+    input.isCancellationConflict === true ||
+    (
+      isFullOrderCancelled &&
+      (
+        hasRefundEvidence(input) ||
+        ['fulfilled', 'partially_fulfilled'].includes(normalizeToken(input.fulfillmentStatus)) ||
+        ['delivered', 'in_transit', 'label_created', 'shipped'].includes(normalizeToken(input.shippingStatus)) ||
+        Boolean(input.trackingNumber?.trim()) ||
+        Boolean(input.carrier?.trim())
+      )
+    );
+
+  if (isFullOrderCancelled && cancellationConflict) {
+    return {
+      state: 'shopify_order_cancelled_conflict',
+      resolvedByRefund: false,
+      primaryLabel: 'Cancelled',
+      secondaryLabel: 'Review existing fulfillment evidence',
+      fulfillmentLabel: input.fulfillmentStatus?.trim() || 'Review required',
+      shippingLabel: input.shippingStatus?.trim() || 'Review required',
+      financeLabel: 'Review required',
+      nextActionLabel: 'Review cancellation',
+      queueVisible: false,
+      actionVisibility: {
+        canCreateShipment: false,
+        canReject: false,
+        canTransfer: false,
+        canPreviewRefund: false,
+      },
+      timelineEvents: [
+        {
+          label: 'Shopify order cancelled',
+          detail: input.cancelReason ? `Reason: ${input.cancelReason}.` : 'Shopify confirmed full order cancellation.',
+          tone: 'warning',
+        },
+        {
+          label: 'Existing operational evidence',
+          detail: 'Local fulfillment, shipment, refund, or return evidence was preserved for review.',
+          tone: 'warning',
+        },
+      ],
+    };
+  }
+
+  if (isFullOrderCancelled) {
+    return {
+      state: 'shopify_order_cancelled',
+      resolvedByRefund: false,
+      primaryLabel: 'Cancelled',
+      secondaryLabel: 'Fulfillment not required',
+      fulfillmentLabel: 'Fulfillment not required',
+      shippingLabel: 'Shipment not required',
+      financeLabel: 'Sale voided',
+      nextActionLabel: 'No action required',
+      queueVisible: false,
+      actionVisibility: {
+        canCreateShipment: false,
+        canReject: false,
+        canTransfer: false,
+        canPreviewRefund: false,
+      },
+      timelineEvents: [
+        {
+          label: 'Shopify order cancelled',
+          detail: input.cancelReason ? `Reason: ${input.cancelReason}.` : 'Shopify confirmed full order cancellation.',
+          tone: 'neutral',
+        },
+        {
+          label: 'Fulfillment not required',
+          detail: 'Shipment and tracking work are closed for this order.',
+          tone: 'success',
+        },
+      ],
+    };
+  }
 
   if (resolvedByRefund) {
     return {
