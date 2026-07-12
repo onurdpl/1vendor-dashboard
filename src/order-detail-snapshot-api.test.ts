@@ -117,6 +117,8 @@ describe('order detail snapshot API mapping', () => {
     expect(result?.shipmentCreatedAt).toBe('2026-06-02T12:00:00.000Z');
     expect(result?.orderSnapshot).toEqual({
       shopifyCreatedAt: '2026-06-01T09:55:00.000Z',
+      cancelledAt: null,
+      cancelReason: undefined,
       currency: 'TRY',
       financialStatus: 'paid',
       paymentGatewayName: 'PayTR Marketplace',

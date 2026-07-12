@@ -1,14 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminDiagnosticsPage } from './AdminDiagnosticsPage';
 
 const diagnosticsMocks = vi.hoisted(() => ({
   webhooks: vi.fn(),
   webhookDetail: vi.fn(),
+  inspectOrderState: vi.fn(),
   syncEvents: vi.fn(),
   reconciliation: vi.fn(),
   replay: vi.fn(),
@@ -20,6 +21,8 @@ const diagnosticsMocks = vi.hoisted(() => ({
   observabilitySummary: vi.fn(),
   runtimeHealth: vi.fn(),
 }));
+
+afterEach(cleanup);
 
 vi.mock('../config/runtime', () => ({
   runtimeConfig: {
@@ -138,6 +141,163 @@ const replayableDetail = {
   relatedShopifyOrderId: 'gid://shopify/Order/1001',
 };
 
+function orderStateInspectorResult() {
+  return {
+    orderIdentity: {
+      localOrderId: 'order-db-1108',
+      shopifyOrderId: '7856124985681',
+      orderNumber: '#1108',
+      createdAt: '2026-07-11T16:07:00Z',
+      updatedAt: '2026-07-11T18:07:00Z',
+      shopifyCreatedAt: '2026-07-11T16:07:00Z',
+      vendors: [{ vendorId: 'yalispor', vendorName: 'Yali Spor' }],
+    },
+    shopifyState: {
+      source: 'persisted_local_truth',
+      financialStatus: 'voided',
+      cancelledAt: '2026-07-11T18:07:00Z',
+      cancelReason: 'customer',
+      currency: 'TRY',
+      lineItemCount: 1,
+      mappedLineItemCount: 1,
+      unmappedLineItemCount: 0,
+      vendorMapping: [{ vendorId: 'yalispor', lineItemCount: 1 }],
+    },
+    localOrderState: {
+      exists: true,
+      allocationCount: 1,
+      isCancelled: true,
+      hasOperationalConflict: true,
+    },
+    allocations: [{
+      allocationId: 'allocation-1108',
+      originalVendor: { vendorId: 'yalispor', vendorName: 'Yali Spor' },
+      assignedVendor: { vendorId: 'yalispor', vendorName: 'Yali Spor' },
+      allocationStatus: 'ACTIVE',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      cancellationReason: 'VENDOR_CANCELLED',
+      trackingPresent: false,
+      carrierPresent: false,
+      createdAt: '2026-07-11T16:07:00Z',
+      updatedAt: '2026-07-11T18:07:00Z',
+    }],
+    shippingState: [{
+      allocationId: 'allocation-1108',
+      shipmentRecordCount: 0,
+      labelExists: false,
+      trackingPresent: false,
+      carrier: null,
+      providerStatuses: [],
+      eligibility: {
+        eligibleFromPersistedOrderState: false,
+        blockedReason: 'full_order_cancelled',
+        scope: 'persisted_order_state_only',
+      },
+    }],
+    returnRefundState: {
+      returnRequests: [{
+        id: 'return-1',
+        allocationId: 'allocation-1108',
+        vendorId: 'yalispor',
+        sourceType: 'shopify_return_request',
+        sourceShopifyReturnId: 'shopify-return-1',
+        status: 'Requested',
+        requestedAt: '2026-07-11T19:00:00Z',
+        createdAt: '2026-07-11T19:00:00Z',
+        updatedAt: '2026-07-11T19:00:00Z',
+      }],
+      refundDerivedReturns: [{
+        id: 'return-refund-1',
+        allocationId: 'allocation-1108',
+        vendorId: 'yalispor',
+        sourceType: 'shopify_refund_derived',
+        sourceShopifyRefundId: 'refund-1',
+        status: 'Refunded',
+        requestedAt: null,
+        createdAt: '2026-07-11T19:10:00Z',
+        updatedAt: '2026-07-11T19:10:00Z',
+      }],
+      refundRecords: [{
+        id: 'refund-record-1',
+        allocationId: 'allocation-1108',
+        sourceShopifyRefundId: 'refund-1',
+        status: 'Processed',
+        createdAt: '2026-07-11T19:10:00Z',
+        updatedAt: '2026-07-11T19:10:00Z',
+      }],
+    },
+    financeState: {
+      ledgerCount: 1,
+      saleLedgerCount: 1,
+      financeReviewRequired: true,
+      ledgers: [{
+        id: 'ledger-1',
+        allocationId: 'allocation-1108',
+        vendorId: 'yalispor',
+        entryType: 'sale',
+        payoutStatus: 'HOLD',
+        settlementStatus: 'HELD',
+        voidedAt: '2026-07-11T18:07:00Z',
+        voidReason: 'shopify_order_cancelled',
+        approvedSettlementPresent: false,
+        payoutBatchPresent: false,
+        paidEvidencePresent: false,
+        createdAt: '2026-07-11T16:07:00Z',
+        updatedAt: '2026-07-11T18:07:00Z',
+      }],
+      events: [],
+    },
+    operationalSignals: [{
+      id: 'signal-1',
+      allocationId: 'allocation-1108',
+      financeLedgerEntryId: null,
+      type: 'canonical_cancellation_conflict',
+      severity: 'HIGH',
+      status: 'ACTIVE',
+      sourceArea: 'RECONCILIATION',
+      title: 'Cancellation conflict',
+      description: 'Existing refund evidence requires review.',
+      suggestedAction: 'Review evidence.',
+      triggeredAt: '2026-07-11T18:07:00Z',
+      resolvedAt: null,
+      metadata: { conflictType: 'refund_evidence' },
+    }],
+    webhookHistory: [{
+      webhookEventId: 'webhook-1',
+      topic: 'orders/cancelled',
+      status: 'PROCESSED',
+      receivedAt: '2026-07-11T18:07:00Z',
+      processedAt: '2026-07-11T18:07:01Z',
+      errorMessage: null,
+      shopifyOrderId: '7856124985681',
+      shopifyOrderNumber: '#1108',
+      webhookId: 'shopify-webhook-1',
+      payloadAvailable: true,
+    }],
+    projectionExplanation: {
+      orderStatus: { label: 'Cancelled', reasons: ['ShopifyOrder.cancelledAt is persisted.'] },
+      fulfillment: { label: 'Pending', reasons: ['1 refund evidence record is persisted.'] },
+      shipment: { label: 'Awaiting Shipment', reasons: ['1 refund evidence record is persisted.'] },
+      tracking: { label: 'Tracking pending', reasons: ['1 refund evidence record is persisted.'] },
+      finance: { label: 'Review required', reasons: ['Cancellation conflict is active.'] },
+      cancellationConflict: { active: true, reasons: ['refund:1'] },
+      operationalEvidence: [{ type: 'refund', source: 'RefundRecord', recordCount: 1 }],
+      queueState: { included: false, reasons: ['Full-cancelled orders are excluded from active operational queues.'] },
+      actions: [{ action: 'create_shipment', available: false, blockedReason: 'full_order_cancelled' }],
+    },
+    currentStateSummary: 'This order is cancelled, but existing operational evidence requires review.',
+    repairReadiness: {
+      repairNeeded: false,
+      repairSupported: false,
+      repairClassification: 'cancellation_conflict_review_required',
+      blockers: ['Refund evidence is persisted.'],
+      recommendedNextStep: 'Review the preserved operational evidence.',
+    },
+    limits: { webhookHistory: 50, operationalSignals: 50, financeEvents: 100 },
+  };
+}
+
 function renderDiagnosticsPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -171,6 +331,7 @@ describe('AdminDiagnosticsPage control center', () => {
     });
     diagnosticsMocks.webhooks.mockReset();
     diagnosticsMocks.webhookDetail.mockReset();
+    diagnosticsMocks.inspectOrderState.mockReset();
     diagnosticsMocks.syncEvents.mockReset();
     diagnosticsMocks.reconciliation.mockReset();
     diagnosticsMocks.replay.mockReset();
@@ -181,6 +342,8 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.canonicalReconciliationSummary.mockReset();
     diagnosticsMocks.observabilitySummary.mockReset();
     diagnosticsMocks.runtimeHealth.mockReset();
+
+    diagnosticsMocks.inspectOrderState.mockResolvedValue(orderStateInspectorResult());
 
     diagnosticsMocks.webhooks.mockResolvedValue({
       summary: {
@@ -420,5 +583,46 @@ describe('AdminDiagnosticsPage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hide payload preview' }));
 
     expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
+  });
+
+  it('inspects an explicit order and renders source-specific operational evidence', async () => {
+    renderDiagnosticsPage();
+    expect(await screen.findByRole('heading', { name: 'Order State Inspector' })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('Order number'), '  #1108  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledWith('#1108', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(await screen.findByText('This order is cancelled, but existing operational evidence requires review.')).toBeInTheDocument();
+    expect(screen.getByText('Shopify return requests')).toBeInTheDocument();
+    expect(screen.getByText('Refund-derived return evidence')).toBeInTheDocument();
+    expect(screen.getByText('Shopify refund records')).toBeInTheDocument();
+    expect(screen.getByText('Projection explanation')).toBeInTheDocument();
+    expect(screen.getByText('Repair readiness')).toBeInTheDocument();
+
+    const inspector = screen.getByRole('heading', { name: 'Order State Inspector' }).closest('section');
+    expect(inspector).not.toBeNull();
+    expect(within(inspector as HTMLElement).queryByRole('button', { name: /repair/i })).not.toBeInTheDocument();
+    expect(within(inspector as HTMLElement).queryByRole('button', { name: /replay/i })).not.toBeInTheDocument();
+  });
+
+  it('renders loading and safe not-found states without changing the data path on narrow screens', async () => {
+    let rejectInspection: ((reason?: unknown) => void) | null = null;
+    diagnosticsMocks.inspectOrderState.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectInspection = reject;
+    }));
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    window.dispatchEvent(new Event('resize'));
+    renderDiagnosticsPage();
+
+    await screen.findByRole('heading', { name: 'Order State Inspector' });
+    await userEvent.type(screen.getByLabelText('Order number'), '1108');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    expect(await screen.findByText('Inspecting order state')).toBeInTheDocument();
+    expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledTimes(1);
+
+    rejectInspection?.(new Error('Order not found.'));
+    expect(await screen.findByText('Order state unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Order not found.')).toBeInTheDocument();
   });
 });

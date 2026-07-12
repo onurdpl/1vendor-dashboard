@@ -37,6 +37,7 @@ import type {
   OperationalJobRetryResponse,
   WebhookReplayResponse,
   ReturnVisibilityDiagnostic,
+  OrderStateInspectorDiagnostic,
 } from './diagnostics.types.js';
 
 const SHOPIFY_ORDER_WEBHOOK_ROUTES: Record<string, string> = {
@@ -70,6 +71,21 @@ const SUPPORTED_RECOVER_TOPICS = new Set([
 ]);
 
 const PAYLOAD_PREVIEW_LIMIT = 1200;
+const ORDER_INSPECTOR_WEBHOOK_LIMIT = 50;
+const ORDER_INSPECTOR_SIGNAL_LIMIT = 50;
+const ORDER_INSPECTOR_FINANCE_EVENT_LIMIT = 100;
+const SAFE_SIGNAL_METADATA_KEYS = new Set([
+  'allocationId',
+  'conflictType',
+  'currentStatus',
+  'expectedStatus',
+  'financeLedgerEntryId',
+  'orderNumber',
+  'reason',
+  'reconciliationStatus',
+  'sourceShopifyOrderId',
+  'status',
+]);
 
 export type InvoiceExecutionCleanupReadinessClassification =
   | 'READY_TO_REMOVE'
@@ -82,6 +98,28 @@ const INVOICE_EXECUTION_REMOVED_MESSAGE =
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function sanitizeSignalMetadata(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key, item]) =>
+        SAFE_SIGNAL_METADATA_KEYS.has(key) &&
+        (item === null || ['string', 'number', 'boolean'].includes(typeof item)))
+      .slice(0, 12),
+  ) as Record<string, string | number | boolean | null>;
+}
+
+function normalizeStateToken(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_') ?? '';
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value?.trim()))));
 }
 
 function buildInvoiceExecutionRemovedDiagnosticBase(env: AppEnv) {
@@ -1470,7 +1508,7 @@ export async function listShopifyWebhookSubscriptionDiagnostics(env: AppEnv) {
   };
 }
 
-export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
+export async function getOrderWebhookEventsDiagnostic(orderNumber: string, options: { limit?: number } = {}) {
   const normalized = normalizeDiagnosticOrderNumber(orderNumber);
   const order = await prisma.shopifyOrder.findFirst({
     where: {
@@ -1510,9 +1548,11 @@ export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
         receivedAt: 'asc',
       },
     ],
+    take: Math.min(Math.max(options.limit ?? 100, 1), 100),
     select: {
       id: true,
       topic: true,
+      webhookId: true,
       receivedAt: true,
       processedAt: true,
       status: true,
@@ -1522,6 +1562,7 @@ export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
     },
   });
 
+  const eventLimit = Math.min(Math.max(options.limit ?? 100, 1), 100);
   const webhookEvents = events
     .map((event) => {
       const payload = parseDiagnosticPayload(event.rawPayload);
@@ -1530,6 +1571,7 @@ export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
       const payloadMatches = payloadMatchesOrder(payload, order);
       return {
         webhookEventId: event.id,
+        webhookId: event.webhookId,
         topic: event.topic,
         receivedAt: event.receivedAt.toISOString(),
         processedAt: toIsoString(event.processedAt),
@@ -1546,7 +1588,8 @@ export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
         billing_address: readSafeAddressHistoryFields(readDiagnosticRecord(payload?.billing_address)),
       };
     })
-    .filter((event) => event.linkedToOrder || event.payloadMatchesOrder);
+    .filter((event) => event.linkedToOrder || event.payloadMatchesOrder)
+    .slice(0, eventLimit);
 
   const ordersUpdatedEvents = webhookEvents.filter((event) => event.topic === 'orders/updated');
 
@@ -1564,6 +1607,592 @@ export async function getOrderWebhookEventsDiagnostic(orderNumber: string) {
         : ordersUpdatedEvents.some((event) => event.processedAt && event.status === 'PROCESSED')
           ? 'unknown'
           : 'orders_updated_stored_but_not_processed',
+    },
+  };
+}
+
+export async function getOrderStateInspectorDiagnostic(
+  orderIdentifier: string,
+): Promise<OrderStateInspectorDiagnostic | null> {
+  const normalized = normalizeDiagnosticOrderNumber(orderIdentifier);
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        { sourceShopifyOrderNumber: { in: [normalized.plain, normalized.hash] } },
+        { sourceShopifyOrderId: normalized.plain },
+        { id: normalized.plain },
+      ],
+    },
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      shopifyCreatedAt: true,
+      currency: true,
+      financialStatus: true,
+      cancelledAt: true,
+      cancelReason: true,
+      createdAt: true,
+      updatedAt: true,
+      lineItems: {
+        select: {
+          originalVendorId: true,
+        },
+      },
+      financeEvents: {
+        orderBy: { createdAt: 'asc' },
+        take: ORDER_INSPECTOR_FINANCE_EVENT_LIMIT,
+        select: {
+          id: true,
+          vendorId: true,
+          financeLedgerEntryId: true,
+          eventType: true,
+          amountMinor: true,
+          currency: true,
+          createdAt: true,
+        },
+      },
+      allocations: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          originalVendorId: true,
+          assignedVendorId: true,
+          allocationStatus: true,
+          fulfillmentStatus: true,
+          shippingStatus: true,
+          cancellationReason: true,
+          trackingNumber: true,
+          carrier: true,
+          createdAt: true,
+          updatedAt: true,
+          originalVendor: { select: { id: true, name: true } },
+          assignedVendor: { select: { id: true, name: true } },
+          fulfillment: {
+            select: {
+              fulfillmentStatus: true,
+              trackingNumber: true,
+              carrier: true,
+              fulfilledAt: true,
+              shipmentCreatedAt: true,
+            },
+          },
+          shipmentExecutions: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              provider: true,
+              shipmentStatus: true,
+              trackingNumber: true,
+              labelUrl: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+          returnRecords: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              ownerVendorId: true,
+              sourceShopifyRefundId: true,
+              sourceShopifyReturnId: true,
+              returnRequestSource: true,
+              requestCreatedAt: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+          refundRecords: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              sourceShopifyRefundId: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+          financeEntries: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              vendorId: true,
+              entryType: true,
+              payoutStatus: true,
+              settlementStatus: true,
+              settledAt: true,
+              voidedAt: true,
+              voidReason: true,
+              createdAt: true,
+              updatedAt: true,
+              settlementApprovalLines: {
+                select: {
+                  settlementApproval: { select: { status: true } },
+                },
+              },
+              payoutBatchLines: {
+                select: {
+                  payoutBatch: { select: { status: true, paidAt: true } },
+                },
+              },
+              operationalSignals: {
+                orderBy: { triggeredAt: 'desc' },
+                take: ORDER_INSPECTOR_SIGNAL_LIMIT,
+                select: {
+                  id: true,
+                  allocationId: true,
+                  financeLedgerEntryId: true,
+                  type: true,
+                  severity: true,
+                  status: true,
+                  sourceArea: true,
+                  title: true,
+                  description: true,
+                  suggestedAction: true,
+                  triggeredAt: true,
+                  resolvedAt: true,
+                  metadata: true,
+                },
+              },
+            },
+          },
+          operationalSignals: {
+            orderBy: { triggeredAt: 'desc' },
+            take: ORDER_INSPECTOR_SIGNAL_LIMIT,
+            select: {
+              id: true,
+              allocationId: true,
+              financeLedgerEntryId: true,
+              type: true,
+              severity: true,
+              status: true,
+              sourceArea: true,
+              title: true,
+              description: true,
+              suggestedAction: true,
+              triggeredAt: true,
+              resolvedAt: true,
+              metadata: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const webhookDiagnostic = await getOrderWebhookEventsDiagnostic(order.sourceShopifyOrderNumber, {
+    limit: ORDER_INSPECTOR_WEBHOOK_LIMIT,
+  });
+  const allocationIds = new Set(order.allocations.map((allocation) => allocation.id));
+  const ledgers = order.allocations.flatMap((allocation) =>
+    allocation.financeEntries.map((entry) => ({ ...entry, allocationId: allocation.id })),
+  );
+  const returnRecords = order.allocations.flatMap((allocation) =>
+    allocation.returnRecords.map((record) => ({ ...record, allocationId: allocation.id })),
+  );
+  const refundRecords = order.allocations.flatMap((allocation) =>
+    allocation.refundRecords.map((record) => ({ ...record, allocationId: allocation.id })),
+  );
+  const scopedSignalMap = new Map(
+    order.allocations
+      .flatMap((allocation) => [
+        ...allocation.operationalSignals,
+        ...allocation.financeEntries.flatMap((entry) => entry.operationalSignals),
+      ])
+      .map((signal) => [signal.id, signal]),
+  );
+  const operationalSignals = Array.from(scopedSignalMap.values())
+    .filter((signal) => !signal.allocationId || allocationIds.has(signal.allocationId))
+    .sort((left, right) => right.triggeredAt.getTime() - left.triggeredAt.getTime())
+    .slice(0, ORDER_INSPECTOR_SIGNAL_LIMIT);
+  const isCancelled = Boolean(order.cancelledAt);
+
+  const operationalEvidence = [
+    {
+      type: 'fulfillment',
+      source: 'VendorAllocation/Fulfillment',
+      recordCount: order.allocations.filter((allocation) =>
+        ['fulfilled', 'partially_fulfilled'].includes(normalizeStateToken(allocation.fulfillmentStatus)) ||
+        Boolean(allocation.fulfillment?.fulfilledAt),
+      ).length,
+    },
+    {
+      type: 'shipment',
+      source: 'ShipmentExecution',
+      recordCount: order.allocations.reduce((count, allocation) => count + allocation.shipmentExecutions.length, 0),
+    },
+    {
+      type: 'tracking',
+      source: 'VendorAllocation/Fulfillment/ShipmentExecution',
+      recordCount: order.allocations.filter((allocation) =>
+        Boolean(
+          allocation.trackingNumber?.trim() ||
+          allocation.fulfillment?.trackingNumber?.trim() ||
+          allocation.shipmentExecutions.some((execution) => execution.trackingNumber?.trim()),
+        ),
+      ).length,
+    },
+    {
+      type: 'return_request',
+      source: 'ReturnRecord:returnRequestSource=shopify_return_request',
+      recordCount: returnRecords.filter((record) => record.returnRequestSource === 'shopify_return_request').length,
+    },
+    {
+      type: 'refund_derived_return',
+      source: 'ReturnRecord:refund-derived',
+      recordCount: returnRecords.filter((record) => record.returnRequestSource !== 'shopify_return_request').length,
+    },
+    {
+      type: 'refund',
+      source: 'RefundRecord',
+      recordCount: refundRecords.length,
+    },
+    {
+      type: 'approved_settlement',
+      source: 'SettlementApprovalLine',
+      recordCount: ledgers.filter((entry) =>
+        entry.settlementApprovalLines.some((line) => line.settlementApproval.status === 'APPROVED')).length,
+    },
+    {
+      type: 'payout_batch',
+      source: 'PayoutBatchLine',
+      recordCount: ledgers.filter((entry) =>
+        entry.payoutBatchLines.some((line) => line.payoutBatch.status !== 'CANCELLED')).length,
+    },
+    {
+      type: 'payment',
+      source: 'PayoutBatch:paid evidence',
+      recordCount: ledgers.filter((entry) =>
+        entry.payoutBatchLines.some((line) => line.payoutBatch.status === 'PAID' && Boolean(line.payoutBatch.paidAt))).length,
+    },
+  ].filter((item) => item.recordCount > 0);
+  const conflictReasons = operationalEvidence.map((item) => `${item.type}:${item.recordCount}`);
+  const hasOperationalConflict = isCancelled && conflictReasons.length > 0;
+  const saleLedgers = ledgers.filter((entry) => normalizeStateToken(entry.entryType) === 'sale');
+  const cancelledSaleClosureIncomplete = isCancelled && saleLedgers.some((entry) => !entry.voidedAt);
+  const financeReviewRequired =
+    hasOperationalConflict ||
+    cancelledSaleClosureIncomplete ||
+    (!isCancelled && ledgers.some((entry) =>
+      entry.payoutStatus === 'HOLD' || ['HELD', 'DISPUTED'].includes(entry.settlementStatus))) ||
+    operationalSignals.some((signal) =>
+      signal.status === 'ACTIVE' &&
+      ['PAYOUT', 'REFUND', 'SETTLEMENT'].includes(signal.sourceArea));
+
+  const shippingState = order.allocations.map((allocation) => {
+    const blockingExecution = allocation.shipmentExecutions.find((execution) =>
+      !['FAILED', 'CANCELLED'].includes(execution.shipmentStatus));
+    const blockedReason = isCancelled
+      ? 'full_order_cancelled'
+      : allocation.cancellationReason
+        ? 'allocation_cancelled'
+        : allocation.allocationStatus !== 'ACTIVE'
+          ? 'allocation_not_active'
+          : blockingExecution
+            ? 'shipment_record_exists'
+            : null;
+
+    return {
+      allocationId: allocation.id,
+      shipmentRecordCount: allocation.shipmentExecutions.length,
+      labelExists: allocation.shipmentExecutions.some((execution) => Boolean(execution.labelUrl)),
+      trackingPresent: Boolean(
+        allocation.trackingNumber?.trim() ||
+        allocation.fulfillment?.trackingNumber?.trim() ||
+        allocation.shipmentExecutions.some((execution) => execution.trackingNumber?.trim()),
+      ),
+      carrier: allocation.carrier?.trim() || allocation.fulfillment?.carrier?.trim() || null,
+      providerStatuses: allocation.shipmentExecutions.map((execution) => ({
+        provider: execution.provider,
+        status: execution.shipmentStatus,
+        createdAt: execution.createdAt.toISOString(),
+        updatedAt: execution.updatedAt.toISOString(),
+      })),
+      eligibility: {
+        eligibleFromPersistedOrderState: !blockedReason,
+        blockedReason,
+        scope: 'persisted_order_state_only' as const,
+      },
+    };
+  });
+
+  const assignedVendors = new Map<string, string>();
+  for (const allocation of order.allocations) {
+    assignedVendors.set(allocation.originalVendor.id, allocation.originalVendor.name);
+    assignedVendors.set(allocation.assignedVendor.id, allocation.assignedVendor.name);
+  }
+  const mappingCounts = new Map<string, number>();
+  for (const lineItem of order.lineItems) {
+    if (lineItem.originalVendorId) {
+      mappingCounts.set(lineItem.originalVendorId, (mappingCounts.get(lineItem.originalVendorId) ?? 0) + 1);
+    }
+  }
+
+  const projectionReasons = isCancelled
+    ? ['ShopifyOrder.cancelledAt is persisted.']
+    : ['No persisted ShopifyOrder.cancelledAt value exists.'];
+  const conflictProjectionReasons = hasOperationalConflict
+    ? operationalEvidence.map((item) => `${item.recordCount} ${item.type} evidence record(s) are persisted.`)
+    : ['No fulfillment, shipment, tracking, return, or refund evidence conflicts with cancellation.'];
+  const firstAllocation = order.allocations[0] ?? null;
+  const actionBlockedReason = isCancelled ? 'full_order_cancelled' : null;
+  const activeAllocationExists = order.allocations.some((allocation) =>
+    allocation.allocationStatus === 'ACTIVE' && !allocation.cancellationReason);
+
+  let currentStateSummary: string;
+  if (order.allocations.length === 0) {
+    currentStateSummary = isCancelled
+      ? 'This order is cancelled, but no local vendor allocation exists. Current-state repair is required before operational history can be reconciled.'
+      : 'This order exists locally, but no vendor allocation was created. Current-state repair is required.';
+  } else if (hasOperationalConflict) {
+    currentStateSummary = 'This order is cancelled, but existing operational evidence requires review. Shipment, tracking, reject, split, and Vendor Integration writes are blocked.';
+  } else if (isCancelled) {
+    currentStateSummary = saleLedgers.length > 0 && saleLedgers.every((entry) => Boolean(entry.voidedAt))
+      ? 'This order was cancelled before fulfillment. Shipment and tracking actions are blocked, and sale ledger rows are voided.'
+      : saleLedgers.length === 0
+        ? 'This order was cancelled before fulfillment. Shipment and tracking actions are blocked, and no sale ledger row is present.'
+        : 'This order was cancelled before fulfillment, but scoped sale ledger closure is incomplete and requires Finance review.';
+  } else {
+    currentStateSummary = `This order is active with ${order.allocations.length} vendor allocation(s). Current operational state is derived from persisted allocation, shipping, return, and finance records.`;
+  }
+
+  let repairReadiness: OrderStateInspectorDiagnostic['repairReadiness'];
+  if (order.allocations.length === 0) {
+    repairReadiness = {
+      repairNeeded: true,
+      repairSupported: false,
+      repairClassification: 'current_state_repair_required',
+      blockers: ['The local ShopifyOrder exists without a VendorAllocation.', 'The existing order backfill rejects orders that already exist locally.'],
+      recommendedNextStep: 'Review persisted webhook and seller mapping evidence before designing an explicit current-state repair.',
+    };
+  } else if (hasOperationalConflict) {
+    repairReadiness = {
+      repairNeeded: false,
+      repairSupported: false,
+      repairClassification: 'cancellation_conflict_review_required',
+      blockers: conflictProjectionReasons,
+      recommendedNextStep: 'Review the preserved operational evidence. This inspector does not perform repair or replay.',
+    };
+  } else if (financeReviewRequired) {
+    repairReadiness = {
+      repairNeeded: false,
+      repairSupported: false,
+      repairClassification: 'finance_review_required',
+      blockers: ['Persisted finance state requires review.'],
+      recommendedNextStep: 'Use the existing Admin Finance workflow to review the scoped ledger and signal evidence.',
+    };
+  } else {
+    repairReadiness = {
+      repairNeeded: false,
+      repairSupported: false,
+      repairClassification: 'no_repair_needed',
+      blockers: [],
+      recommendedNextStep: 'No repair is indicated by the available persisted evidence.',
+    };
+  }
+
+  return {
+    orderIdentity: {
+      localOrderId: order.id,
+      shopifyOrderId: order.sourceShopifyOrderId,
+      orderNumber: order.sourceShopifyOrderNumber,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      shopifyCreatedAt: toIsoString(order.shopifyCreatedAt),
+      vendors: Array.from(assignedVendors, ([vendorId, vendorName]) => ({ vendorId, vendorName })),
+    },
+    shopifyState: {
+      source: 'persisted_local_truth',
+      financialStatus: order.financialStatus,
+      cancelledAt: toIsoString(order.cancelledAt),
+      cancelReason: order.cancelReason,
+      currency: order.currency,
+      lineItemCount: order.lineItems.length,
+      mappedLineItemCount: order.lineItems.filter((lineItem) => Boolean(lineItem.originalVendorId)).length,
+      unmappedLineItemCount: order.lineItems.filter((lineItem) => !lineItem.originalVendorId).length,
+      vendorMapping: Array.from(mappingCounts, ([vendorId, lineItemCount]) => ({ vendorId, lineItemCount })),
+    },
+    localOrderState: {
+      exists: true,
+      allocationCount: order.allocations.length,
+      isCancelled,
+      hasOperationalConflict,
+    },
+    allocations: order.allocations.map((allocation) => ({
+      allocationId: allocation.id,
+      originalVendor: { vendorId: allocation.originalVendor.id, vendorName: allocation.originalVendor.name },
+      assignedVendor: { vendorId: allocation.assignedVendor.id, vendorName: allocation.assignedVendor.name },
+      allocationStatus: allocation.allocationStatus,
+      fulfillmentStatus: allocation.fulfillmentStatus,
+      shippingStatus: allocation.shippingStatus,
+      cancellationReason: allocation.cancellationReason,
+      trackingPresent: Boolean(allocation.trackingNumber?.trim() || allocation.fulfillment?.trackingNumber?.trim()),
+      carrierPresent: Boolean(allocation.carrier?.trim() || allocation.fulfillment?.carrier?.trim()),
+      createdAt: allocation.createdAt.toISOString(),
+      updatedAt: allocation.updatedAt.toISOString(),
+    })),
+    shippingState,
+    returnRefundState: {
+      returnRequests: returnRecords
+        .filter((record) => record.returnRequestSource === 'shopify_return_request')
+        .map((record) => ({
+          id: record.id,
+          allocationId: record.allocationId,
+          vendorId: record.ownerVendorId,
+          sourceType: 'shopify_return_request' as const,
+          sourceShopifyReturnId: record.sourceShopifyReturnId,
+          status: record.status,
+          requestedAt: toIsoString(record.requestCreatedAt),
+          createdAt: record.createdAt.toISOString(),
+          updatedAt: record.updatedAt.toISOString(),
+        })),
+      refundDerivedReturns: returnRecords
+        .filter((record) => record.returnRequestSource !== 'shopify_return_request')
+        .map((record) => ({
+          id: record.id,
+          allocationId: record.allocationId,
+          vendorId: record.ownerVendorId,
+          sourceType: 'shopify_refund_derived' as const,
+          sourceShopifyRefundId: record.sourceShopifyRefundId,
+          status: record.status,
+          requestedAt: toIsoString(record.requestCreatedAt),
+          createdAt: record.createdAt.toISOString(),
+          updatedAt: record.updatedAt.toISOString(),
+        })),
+      refundRecords: refundRecords.map((record) => ({
+        id: record.id,
+        allocationId: record.allocationId,
+        sourceShopifyRefundId: record.sourceShopifyRefundId,
+        status: record.status,
+        createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString(),
+      })),
+    },
+    financeState: {
+      ledgerCount: ledgers.length,
+      saleLedgerCount: saleLedgers.length,
+      ledgers: ledgers.map((entry) => ({
+        id: entry.id,
+        allocationId: entry.allocationId,
+        vendorId: entry.vendorId,
+        entryType: entry.entryType,
+        payoutStatus: entry.payoutStatus,
+        settlementStatus: entry.settlementStatus,
+        voidedAt: toIsoString(entry.voidedAt),
+        voidReason: entry.voidReason,
+        approvedSettlementPresent: entry.settlementApprovalLines.some((line) => line.settlementApproval.status === 'APPROVED'),
+        payoutBatchPresent: entry.payoutBatchLines.length > 0,
+        paidEvidencePresent: entry.payoutBatchLines.some((line) => line.payoutBatch.status === 'PAID' && Boolean(line.payoutBatch.paidAt)),
+        createdAt: entry.createdAt.toISOString(),
+        updatedAt: entry.updatedAt.toISOString(),
+      })),
+      financeReviewRequired,
+      events: order.financeEvents.slice(0, ORDER_INSPECTOR_FINANCE_EVENT_LIMIT).map((event) => ({
+        id: event.id,
+        vendorId: event.vendorId,
+        ledgerEntryId: event.financeLedgerEntryId,
+        eventType: event.eventType,
+        amountMinor: event.amountMinor,
+        currency: event.currency,
+        createdAt: event.createdAt.toISOString(),
+      })),
+    },
+    operationalSignals: operationalSignals.map((signal) => ({
+      id: signal.id,
+      allocationId: signal.allocationId,
+      financeLedgerEntryId: signal.financeLedgerEntryId,
+      type: signal.type,
+      severity: signal.severity,
+      status: signal.status,
+      sourceArea: signal.sourceArea,
+      title: signal.title,
+      description: signal.description,
+      suggestedAction: signal.suggestedAction,
+      triggeredAt: signal.triggeredAt.toISOString(),
+      resolvedAt: toIsoString(signal.resolvedAt),
+      metadata: sanitizeSignalMetadata(signal.metadata),
+    })),
+    webhookHistory: (webhookDiagnostic?.webhookEvents ?? []).map((event) => ({
+      webhookEventId: event.webhookEventId,
+      topic: event.topic,
+      status: event.status,
+      receivedAt: event.receivedAt,
+      processedAt: event.processedAt,
+      errorMessage: summarizeError(event.errorMessage),
+      shopifyOrderId: event.safeOrder.shopifyOrderId,
+      shopifyOrderNumber: event.safeOrder.shopifyOrderNumber,
+      webhookId: event.webhookId,
+      payloadAvailable: event.hasRawPayload,
+    })),
+    projectionExplanation: {
+      orderStatus: {
+        label: isCancelled ? 'Cancelled' : 'Active',
+        reasons: projectionReasons,
+      },
+      fulfillment: {
+        label: isCancelled && !hasOperationalConflict
+          ? 'Fulfillment not required'
+          : firstAllocation?.fulfillmentStatus?.trim() || 'Unknown',
+        reasons: hasOperationalConflict ? conflictProjectionReasons : projectionReasons,
+      },
+      shipment: {
+        label: isCancelled && !hasOperationalConflict
+          ? 'Shipment not required'
+          : firstAllocation?.shippingStatus?.trim() || 'Unknown',
+        reasons: hasOperationalConflict ? conflictProjectionReasons : projectionReasons,
+      },
+      tracking: {
+        label: isCancelled && !hasOperationalConflict
+          ? 'Tracking not required'
+          : shippingState.some((state) => state.trackingPresent) ? 'Tracking recorded' : 'Tracking pending',
+        reasons: hasOperationalConflict ? conflictProjectionReasons : projectionReasons,
+      },
+      finance: {
+        label: financeReviewRequired ? 'Review required' : isCancelled ? 'Sale voided' : 'Current ledger state',
+        reasons: financeReviewRequired
+          ? uniqueStrings(['Cancellation conflict is active.', ...conflictProjectionReasons])
+          : saleLedgers.length > 0 && saleLedgers.every((entry) => Boolean(entry.voidedAt))
+            ? ['All scoped sale ledger rows are voided.']
+            : ['No persisted finance review requirement was found.'],
+      },
+      cancellationConflict: {
+        active: hasOperationalConflict,
+        reasons: conflictProjectionReasons,
+      },
+      operationalEvidence,
+      queueState: {
+        included: !isCancelled && activeAllocationExists,
+        reasons: isCancelled
+          ? ['Full-cancelled orders are excluded from active operational queues.']
+          : activeAllocationExists
+            ? ['At least one active allocation remains operational.']
+            : ['No active allocation is available for operational queues.'],
+      },
+      actions: ['create_shipment', 'update_tracking', 'vendor_reject', 'allocation_split', 'vendor_integration_write'].map((action) => {
+        const available = action === 'create_shipment'
+          ? shippingState.some((state) => state.eligibility.eligibleFromPersistedOrderState)
+          : !isCancelled && activeAllocationExists;
+        return {
+          action,
+          available,
+          blockedReason: available
+            ? null
+            : actionBlockedReason ?? (action === 'create_shipment'
+              ? shippingState.find((state) => state.eligibility.blockedReason)?.eligibility.blockedReason ?? 'no_active_allocation'
+              : 'no_active_allocation'),
+        };
+      }),
+    },
+    currentStateSummary,
+    repairReadiness,
+    limits: {
+      webhookHistory: ORDER_INSPECTOR_WEBHOOK_LIMIT,
+      operationalSignals: ORDER_INSPECTOR_SIGNAL_LIMIT,
+      financeEvents: ORDER_INSPECTOR_FINANCE_EVENT_LIMIT,
     },
   };
 }

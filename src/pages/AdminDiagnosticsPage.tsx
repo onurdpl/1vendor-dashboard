@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { OrderStateInspector } from '../components/diagnostics/OrderStateInspector';
 import {
   EmptyStatePanel,
   FilterBar,
@@ -513,6 +514,8 @@ export function AdminDiagnosticsPage() {
           }}
         />
       </div>
+
+      <OrderStateInspector />
 
       <OperationalSection
         title="Deployment runtime"

@@ -99,6 +99,14 @@
 - Confirm vendor users receive `403` for diagnostics routes.
 - Confirm blocked replay/recover returns an explicit reason instead of silent success.
 
+## Order State Inspector
+- As admin, open `/admin/diagnostics` and inspect one explicit order number such as `1108` or `#1108`.
+- Confirm identity, persisted cancellation state, allocations, shipping evidence, source-specific returns/refunds, finance, operational signals, webhook history, projection reasons, and repair readiness are visible.
+- Confirm the inspector explains cancelled, conflict-review, queue-exclusion, and blocked-action labels from persisted evidence.
+- Confirm vendor, support, and finance roles receive `403` from `GET /admin/diagnostics/orders/:orderNumber/state`.
+- Confirm no raw payload, customer PII, full address, access token, HMAC/API secret, provider credential, bank information, or payment reference is returned.
+- Confirm the inspector exposes no repair, replay, or mutation action.
+
 ## Reconciliation Action
 - As admin, open reconciliation diagnostics.
 - Confirm stale allocation, failed webhook, missing payload, and fulfillment sync failure items are visible when present.

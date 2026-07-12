@@ -209,6 +209,27 @@ Webhook processing lifecycle states:
   - response includes `payloadAvailable` so admin tooling can fail clearly before replay
   - secrets and webhook signing material are never returned
 
+### GET /admin/diagnostics/orders/:orderNumber/state
+
+- Purpose: power the permanent DIAG-ORDER-1 Admin Order State Inspector with one read-only, explicit-order lifecycle view.
+- Product position: Tier-1 Operational Tool and the first-stop source for production order incident investigation.
+- Required auth: yes; admin-only. Authenticated vendor, support, and finance roles receive `403 Forbidden`.
+- Accepted identifier: repository-supported order number or identifier, including `1108` and `#1108`.
+- Expected `404` behavior: `{ "message": "Order not found." }` when no local `ShopifyOrder` matches.
+- Response sections:
+  - safe order identity and persisted local Shopify state
+  - vendor allocations and order-state shipping eligibility
+  - source-specific Shopify return requests, refund-derived return evidence, and refund records
+  - order/allocation-scoped finance ledgers, settlement/payout/paid evidence, and FinanceEvents
+  - sanitized operational signals and chronological webhook history
+  - deterministic frontend projection reasons, current-state summary, and read-only repair readiness
+- Safety rules:
+  - no live Shopify or shipping-provider call
+  - no mutation, repair, replay, or reconciliation execution
+  - no raw webhook payload, request/response snapshot, HMAC material, token, provider credential, bank/payment reference, customer PII, or full address
+  - webhook history, operational signals, and finance events have fixed maximum result limits
+- Repair readiness is explanatory only. It reports whether persisted evidence indicates review or unsupported repair work; it never performs that work.
+
 ### GET /admin/diagnostics/sync-events
 
 - Purpose: return a consolidated admin-only diagnostics feed across webhook ingestion and fulfillment sync state.

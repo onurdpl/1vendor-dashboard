@@ -17,6 +17,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const {
   getOrderAddressHistoryDiagnostic,
   getOrderAddressPersistenceDiagnostic,
+  getOrderStateInspectorDiagnostic,
   getOrderWebhookEventsDiagnostic,
   listShopifyWebhookSubscriptionDiagnostics,
 } = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
@@ -885,5 +886,275 @@ describe('order webhook events diagnostic', () => {
       },
     });
     expect(JSON.stringify(diagnostic)).not.toContain('+90 555');
+  });
+});
+
+function buildInspectorOrder(overrides: Record<string, unknown> = {}) {
+  const createdAt = new Date('2026-07-11T16:07:00.000Z');
+  const cancelledAt = new Date('2026-07-11T18:07:00.000Z');
+  return {
+    id: 'order-db-1108',
+    sourceShopifyOrderId: '7856124985681',
+    sourceShopifyOrderNumber: '#1108',
+    shopifyCreatedAt: createdAt,
+    currency: 'TRY',
+    financialStatus: 'voided',
+    cancelledAt,
+    cancelReason: 'customer',
+    createdAt,
+    updatedAt: cancelledAt,
+    lineItems: [{ originalVendorId: 'yalispor' }],
+    financeEvents: [],
+    allocations: [
+      {
+        id: 'allocation-1108',
+        originalVendorId: 'yalispor',
+        assignedVendorId: 'yalispor',
+        allocationStatus: 'ACTIVE',
+        fulfillmentStatus: 'Pending',
+        shippingStatus: 'Awaiting Shipment',
+        cancellationReason: 'VENDOR_CANCELLED',
+        trackingNumber: null,
+        carrier: null,
+        createdAt,
+        updatedAt: cancelledAt,
+        originalVendor: { id: 'yalispor', name: 'Yali Spor' },
+        assignedVendor: { id: 'yalispor', name: 'Yali Spor' },
+        fulfillment: null,
+        shipmentExecutions: [],
+        returnRecords: [],
+        refundRecords: [],
+        financeEntries: [
+          {
+            id: 'ledger-sale-1108',
+            vendorId: 'yalispor',
+            entryType: 'sale',
+            payoutStatus: 'HOLD',
+            settlementStatus: 'HELD',
+            settledAt: null,
+            voidedAt: cancelledAt,
+            voidReason: 'shopify_order_cancelled',
+            createdAt,
+            updatedAt: cancelledAt,
+            settlementApprovalLines: [],
+            payoutBatchLines: [],
+            operationalSignals: [],
+          },
+        ],
+        operationalSignals: [],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function buildInspectorWebhook(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'webhook-cancel-1108',
+    webhookId: 'shopify-webhook-1108',
+    topic: 'orders/cancelled',
+    receivedAt: new Date('2026-07-11T18:07:00.000Z'),
+    processedAt: new Date('2026-07-11T18:07:01.000Z'),
+    status: 'PROCESSED',
+    errorMessage: null,
+    shopifyOrderId: 'order-db-1108',
+    rawPayload: JSON.stringify({ id: '7856124985681', name: '#1108', email: 'customer@example.com' }),
+    ...overrides,
+  };
+}
+
+describe('admin order state inspector', () => {
+  beforeEach(() => {
+    prismaMock.shopifyOrder.findFirst.mockReset();
+    prismaMock.webhookEvent.findMany.mockReset();
+  });
+
+  it('allows an admin to inspect one order and rejects non-admin roles', async () => {
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/orders/:orderNumber/state');
+    const forbidden = await handler?.(
+      { authUser: { role: 'support' }, params: { orderNumber: '1108' } },
+      buildReply(),
+    );
+    expect(forbidden).toMatchObject({ status: 403, body: { message: 'Forbidden' } });
+
+    prismaMock.shopifyOrder.findFirst
+      .mockResolvedValueOnce(buildInspectorOrder())
+      .mockResolvedValueOnce(buildInspectorOrder());
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildInspectorWebhook()]);
+
+    const diagnostic = await handler?.(
+      { authUser: { role: 'admin' }, params: { orderNumber: '#1108' } },
+      buildReply(),
+    );
+    expect(diagnostic).toMatchObject({
+      orderIdentity: { orderNumber: '#1108' },
+      localOrderState: { isCancelled: true },
+    });
+  });
+
+  it('returns a safe deterministic 404 when the order is missing', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(null);
+    const handler = registerOrderDiagnosticRoute('/admin/diagnostics/orders/:orderNumber/state');
+    const result = await handler?.(
+      { authUser: { role: 'admin' }, params: { orderNumber: 'missing' } },
+      buildReply(),
+    );
+
+    expect(result).toMatchObject({ status: 404, body: { message: 'Order not found.' } });
+  });
+
+  it('explains a simple cancelled order without exposing raw payloads, customer PII, or payment secrets', async () => {
+    prismaMock.shopifyOrder.findFirst
+      .mockResolvedValueOnce(buildInspectorOrder({
+        customerEmail: 'must-not-be-selected@example.com',
+        shippingAddress: 'must not be selected',
+      }))
+      .mockResolvedValueOnce(buildInspectorOrder());
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildInspectorWebhook()]);
+
+    const diagnostic = await getOrderStateInspectorDiagnostic('1108');
+    expect(diagnostic).toMatchObject({
+      projectionExplanation: {
+        orderStatus: { label: 'Cancelled' },
+        fulfillment: { label: 'Fulfillment not required' },
+        shipment: { label: 'Shipment not required' },
+        tracking: { label: 'Tracking not required' },
+        finance: { label: 'Sale voided' },
+      },
+      repairReadiness: { repairClassification: 'no_repair_needed' },
+    });
+    const serialized = JSON.stringify(diagnostic);
+    expect(serialized).not.toContain('customer@example.com');
+    expect(serialized).not.toContain('rawPayload');
+    expect(serialized).not.toContain('paymentReference');
+    expect(serialized).not.toContain('requestSnapshot');
+  });
+
+  it('distinguishes return requests from refund-derived records and explains cancellation conflict evidence', async () => {
+    const recordDates = {
+      createdAt: new Date('2026-07-11T20:00:00.000Z'),
+      updatedAt: new Date('2026-07-11T20:05:00.000Z'),
+    };
+    const order = buildInspectorOrder();
+    const allocation = order.allocations[0];
+    allocation.returnRecords = [
+      {
+        id: 'return-real',
+        ownerVendorId: 'yalispor',
+        sourceShopifyRefundId: null,
+        sourceShopifyReturnId: 'shopify-return-1',
+        returnRequestSource: 'shopify_return_request',
+        requestCreatedAt: recordDates.createdAt,
+        status: 'Requested',
+        ...recordDates,
+      },
+      {
+        id: 'return-refund-derived',
+        ownerVendorId: 'yalispor',
+        sourceShopifyRefundId: 'shopify-refund-1',
+        sourceShopifyReturnId: null,
+        returnRequestSource: 'shopify_refund',
+        requestCreatedAt: null,
+        status: 'Refunded',
+        ...recordDates,
+      },
+    ];
+    allocation.refundRecords = [{
+      id: 'refund-1',
+      sourceShopifyRefundId: 'shopify-refund-1',
+      status: 'Processed',
+      ...recordDates,
+    }];
+    allocation.operationalSignals = [{
+      id: 'signal-1',
+      allocationId: 'allocation-1108',
+      financeLedgerEntryId: null,
+      type: 'canonical_cancellation_conflict',
+      severity: 'HIGH',
+      status: 'ACTIVE',
+      sourceArea: 'RECONCILIATION',
+      title: 'Cancellation conflict',
+      description: 'Existing refund evidence requires review.',
+      suggestedAction: 'Review evidence.',
+      triggeredAt: recordDates.createdAt,
+      resolvedAt: null,
+      metadata: {
+        conflictType: 'refund_evidence',
+        orderNumber: '#1108',
+        customerEmail: 'must-not-leak@example.com',
+        accessToken: 'must-not-leak',
+      },
+    }];
+
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(order).mockResolvedValueOnce(order);
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildInspectorWebhook()]);
+    const diagnostic = await getOrderStateInspectorDiagnostic('#1108');
+
+    expect(diagnostic?.returnRefundState.returnRequests).toHaveLength(1);
+    expect(diagnostic?.returnRefundState.refundDerivedReturns).toHaveLength(1);
+    expect(diagnostic?.returnRefundState.refundRecords).toHaveLength(1);
+    expect(diagnostic).toMatchObject({
+      localOrderState: { hasOperationalConflict: true },
+      projectionExplanation: { finance: { label: 'Review required' } },
+      repairReadiness: { repairClassification: 'cancellation_conflict_review_required' },
+      operationalSignals: [{ metadata: { conflictType: 'refund_evidence', orderNumber: '#1108' } }],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+  });
+
+  it('keeps finance, signals, and webhook history target-scoped and enforces result limits', async () => {
+    const order = buildInspectorOrder();
+    const allocation = order.allocations[0];
+    allocation.operationalSignals = Array.from({ length: 60 }, (_, index) => ({
+      id: `signal-${index}`,
+      allocationId: 'allocation-1108',
+      financeLedgerEntryId: 'ledger-sale-1108',
+      type: 'test_signal',
+      severity: 'INFO',
+      status: 'ACTIVE',
+      sourceArea: 'DIAGNOSTICS',
+      title: `Signal ${index}`,
+      description: 'Scoped signal.',
+      suggestedAction: null,
+      triggeredAt: new Date(1_700_000_000_000 + index),
+      resolvedAt: null,
+      metadata: null,
+    }));
+    order.financeEvents = Array.from({ length: 120 }, (_, index) => ({
+      id: `finance-event-${index}`,
+      vendorId: 'yalispor',
+      financeLedgerEntryId: 'ledger-sale-1108',
+      eventType: 'SALE_RECORDED',
+      amountMinor: 100,
+      currency: 'TRY',
+      createdAt: new Date(1_700_000_000_000 + index),
+    }));
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(order).mockResolvedValueOnce(order);
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce(
+      Array.from({ length: 60 }, (_, index) => buildInspectorWebhook({ id: `webhook-${index}` })),
+    );
+
+    const diagnostic = await getOrderStateInspectorDiagnostic('1108');
+    expect(diagnostic?.operationalSignals).toHaveLength(50);
+    expect(diagnostic?.financeState.events).toHaveLength(100);
+    expect(diagnostic?.webhookHistory).toHaveLength(50);
+    expect(diagnostic?.financeState.ledgers.every((ledger) => ledger.allocationId === 'allocation-1108')).toBe(true);
+    expect(prismaMock.webhookEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50 }));
+  });
+
+  it('classifies a local order without allocations as unsupported current-state repair', async () => {
+    const order = buildInspectorOrder({ allocations: [] });
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(order).mockResolvedValueOnce(order);
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildInspectorWebhook()]);
+
+    const diagnostic = await getOrderStateInspectorDiagnostic('1108');
+    expect(diagnostic).toMatchObject({
+      localOrderState: { allocationCount: 0 },
+      repairReadiness: {
+        repairNeeded: true,
+        repairSupported: false,
+        repairClassification: 'current_state_repair_required',
+      },
+    });
   });
 });

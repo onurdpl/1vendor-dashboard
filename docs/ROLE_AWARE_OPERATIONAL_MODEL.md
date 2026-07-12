@@ -220,6 +220,7 @@ Readiness is role-aware but shared: vendors see read-only status and correction/
 | Deployment runtime | Internal diagnostics | Hidden | Primary | Admin-only. |
 | Backend health | Internal diagnostics | Hidden | Primary | Admin-only. |
 | Reconciliation backlog | Admin operational | Hidden | Primary | Admin-only recovery context. |
+| Order State Inspector | Internal diagnostics / Tier-1 operational tool | Hidden | Primary | Read-only, explicit-order incident evidence; no repair or replay. |
 | Replay/recover/retry controls | Internal diagnostics/admin operational | Hidden | Primary | Preserve auditability and permissions. |
 | Payload diagnostics | Internal diagnostics | Hidden | Admin-only collapsed | Redacted preview only. |
 
@@ -441,6 +442,12 @@ These overlays should be collapsible or visually subordinate.
 - Provider behavior must not change because of UI visibility cleanup.
 
 ## Implementation Roadmap
+
+### Implemented Tier-1 Operational Tool
+
+- DIAG-ORDER-1 provides an admin-only Order State Inspector inside `/admin/diagnostics`.
+- It is the first-stop production tool for explaining one order across Shopify ingestion, local allocations, cancellation, shipping, returns/refunds, finance, operational signals, webhook history, and frontend projection.
+- It is explicit-order scoped, redacted, and read-only. It supports future repair decisions but does not perform repair, replay, reconciliation, or provider calls.
 
 ### Phase A: Low-Risk Visibility Cleanup
 

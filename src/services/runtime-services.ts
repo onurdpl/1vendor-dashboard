@@ -3273,6 +3273,10 @@ export const runtimeServices = {
             updatedAt: new Date().toISOString(),
             relatedShopifyOrderId: null,
           }),
+    inspectOrderState: (orderNumber: string, options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.inspectOrderState(orderNumber, { signal: options.signal })
+        : Promise.reject(new ApiError('Order state inspection is available in real mode only.', 'server', { status: 503 })),
     syncEvents: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.listSyncEvents({ signal: options.signal })

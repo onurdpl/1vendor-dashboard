@@ -548,6 +548,10 @@ Create a product availability workspace that supports sellable, unavailable, dis
 
 Build a support workspace that connects conversations to orders, returns, products, and finance context. The vendor should always know why a ticket matters.
 
+### Operations And Diagnostics
+
+DIAG-ORDER-1 is an implemented Tier-1 Operational Tool. Admins use the read-only Order State Inspector in `/admin/diagnostics` as the first stop for one-order production incidents. It explains persisted lifecycle state and projection reasons without repairing records, replaying webhooks, calling providers, or exposing customer PII and secrets.
+
 ### Analytics
 
 Add analytics only after daily workflows are clear. Analytics should answer business questions, not fill space.

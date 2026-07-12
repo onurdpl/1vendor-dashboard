@@ -261,3 +261,176 @@ export type ReturnVisibilityDiagnostic = {
     productionRepairNeeded: boolean;
   };
 };
+
+export type OrderStateInspectorDiagnostic = {
+  orderIdentity: {
+    localOrderId: string;
+    shopifyOrderId: string;
+    orderNumber: string;
+    createdAt: string;
+    updatedAt: string;
+    shopifyCreatedAt: string | null;
+    vendors: Array<{ vendorId: string; vendorName: string }>;
+  };
+  shopifyState: {
+    source: 'persisted_local_truth';
+    financialStatus: string | null;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    currency: string | null;
+    lineItemCount: number;
+    mappedLineItemCount: number;
+    unmappedLineItemCount: number;
+    vendorMapping: Array<{ vendorId: string; lineItemCount: number }>;
+  };
+  localOrderState: {
+    exists: true;
+    allocationCount: number;
+    isCancelled: boolean;
+    hasOperationalConflict: boolean;
+  };
+  allocations: Array<{
+    allocationId: string;
+    originalVendor: { vendorId: string; vendorName: string };
+    assignedVendor: { vendorId: string; vendorName: string };
+    allocationStatus: string;
+    fulfillmentStatus: string;
+    shippingStatus: string;
+    cancellationReason: string | null;
+    trackingPresent: boolean;
+    carrierPresent: boolean;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  shippingState: Array<{
+    allocationId: string;
+    shipmentRecordCount: number;
+    labelExists: boolean;
+    trackingPresent: boolean;
+    carrier: string | null;
+    providerStatuses: Array<{ provider: string; status: string; createdAt: string; updatedAt: string }>;
+    eligibility: {
+      eligibleFromPersistedOrderState: boolean;
+      blockedReason: string | null;
+      scope: 'persisted_order_state_only';
+    };
+  }>;
+  returnRefundState: {
+    returnRequests: Array<{
+      id: string;
+      allocationId: string;
+      vendorId: string | null;
+      sourceType: 'shopify_return_request';
+      sourceShopifyReturnId: string | null;
+      status: string;
+      requestedAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    refundDerivedReturns: Array<{
+      id: string;
+      allocationId: string;
+      vendorId: string | null;
+      sourceType: 'shopify_refund_derived';
+      sourceShopifyRefundId: string | null;
+      status: string;
+      requestedAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    refundRecords: Array<{
+      id: string;
+      allocationId: string;
+      sourceShopifyRefundId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
+  financeState: {
+    ledgerCount: number;
+    saleLedgerCount: number;
+    ledgers: Array<{
+      id: string;
+      allocationId: string | null;
+      vendorId: string;
+      entryType: string;
+      payoutStatus: string;
+      settlementStatus: string;
+      voidedAt: string | null;
+      voidReason: string | null;
+      approvedSettlementPresent: boolean;
+      payoutBatchPresent: boolean;
+      paidEvidencePresent: boolean;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    financeReviewRequired: boolean;
+    events: Array<{
+      id: string;
+      vendorId: string;
+      ledgerEntryId: string | null;
+      eventType: string;
+      amountMinor: number;
+      currency: string;
+      createdAt: string;
+    }>;
+  };
+  operationalSignals: Array<{
+    id: string;
+    allocationId: string | null;
+    financeLedgerEntryId: string | null;
+    type: string;
+    severity: string;
+    status: string;
+    sourceArea: string;
+    title: string;
+    description: string;
+    suggestedAction: string | null;
+    triggeredAt: string;
+    resolvedAt: string | null;
+    metadata: Record<string, string | number | boolean | null>;
+  }>;
+  webhookHistory: Array<{
+    webhookEventId: string;
+    topic: string;
+    status: string;
+    receivedAt: string;
+    processedAt: string | null;
+    errorMessage: string | null;
+    shopifyOrderId: string | null;
+    shopifyOrderNumber: string | null;
+    webhookId: string | null;
+    payloadAvailable: boolean;
+  }>;
+  projectionExplanation: {
+    orderStatus: { label: string; reasons: string[] };
+    fulfillment: { label: string; reasons: string[] };
+    shipment: { label: string; reasons: string[] };
+    tracking: { label: string; reasons: string[] };
+    finance: { label: string; reasons: string[] };
+    cancellationConflict: { active: boolean; reasons: string[] };
+    operationalEvidence: Array<{ type: string; source: string; recordCount: number }>;
+    queueState: { included: boolean; reasons: string[] };
+    actions: Array<{ action: string; available: boolean; blockedReason: string | null }>;
+  };
+  currentStateSummary: string;
+  repairReadiness: {
+    repairNeeded: boolean;
+    repairSupported: boolean;
+    repairClassification:
+      | 'no_repair_needed'
+      | 'current_state_repair_required'
+      | 'cancellation_conflict_review_required'
+      | 'finance_review_required'
+      | 'unsupported_state'
+      | 'unknown';
+    blockers: string[];
+    recommendedNextStep: string;
+  };
+  limits: {
+    webhookHistory: number;
+    operationalSignals: number;
+    financeEvents: number;
+  };
+};
