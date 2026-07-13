@@ -1,4 +1,4 @@
-import type { WebhookEvent } from '@prisma/client';
+import type { Prisma, WebhookEvent } from '@prisma/client';
 
 export type ShopifyRefundLineItemPayload = {
   id?: string | number | null;
@@ -57,7 +57,10 @@ export type RefundIngestionFailureResult = {
 
 export type RefundIngestionResult = RefundIngestionSuccessResult | RefundIngestionFailureResult;
 
-export type RefundIngestionInput = {
-  event: WebhookEvent;
+type RefundIngestionSource =
+  | { event: WebhookEvent; transactionClient?: never }
+  | { event?: never; transactionClient: Prisma.TransactionClient };
+
+export type RefundIngestionInput = RefundIngestionSource & {
   payload: ShopifyRefundsCreateWebhookPayload;
 };

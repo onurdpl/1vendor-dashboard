@@ -438,6 +438,17 @@ export type OrderStateInspectorDiagnostic = {
     webhookId: string | null;
     payloadAvailable: boolean;
   }>;
+  repairHistory: Array<{
+    jobId: string;
+    repairSource: string;
+    repairTimestamp: string;
+    dryRun: boolean;
+    executed: boolean;
+    status: string;
+    actorUserId: string | null;
+    actorEmail: string | null;
+    errorSummary: string | null;
+  }>;
   projectionExplanation: {
     orderStatus: { label: string; reasons: string[] };
     fulfillment: { label: string; reasons: string[] };
@@ -461,6 +472,7 @@ export type OrderStateInspectorDiagnostic = {
     webhookHistory: number;
     operationalSignals: number;
     financeEvents: number;
+    repairHistory: number;
   };
 };
 

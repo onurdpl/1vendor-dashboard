@@ -221,14 +221,38 @@ Webhook processing lifecycle states:
   - vendor allocations and order-state shipping eligibility
   - source-specific Shopify return requests, refund-derived return evidence, and refund records
   - order/allocation-scoped finance ledgers, settlement/payout/paid evidence, and FinanceEvents
-  - sanitized operational signals and chronological webhook history
+  - sanitized operational signals, chronological webhook history, and safe executed current-state repair history
   - deterministic frontend projection reasons, current-state summary, and read-only repair readiness
 - Safety rules:
   - no live Shopify or shipping-provider call
   - no mutation, repair, replay, or reconciliation execution
   - no raw webhook payload, request/response snapshot, HMAC material, token, provider credential, bank/payment reference, customer PII, or full address
-  - webhook history, operational signals, and finance events have fixed maximum result limits
-- Repair readiness is explanatory only. It reports whether persisted evidence indicates review or unsupported repair work; it never performs that work.
+  - webhook history, repair history, operational signals, and finance events have fixed maximum result limits
+- Repair readiness is explanatory only. It can point to the separate current-state repair endpoint, but the inspector itself never performs mutation.
+
+### POST /admin/diagnostics/shopify/order-repair
+
+- Purpose: reconstruct exactly one missed Shopify order from current canonical Shopify state without replaying a historical webhook payload.
+- Required auth: yes; admin-only. Authenticated vendor, support, and finance roles receive `403 Forbidden`.
+- Request body:
+  - `orderIdentifier`: required single numeric Shopify order ID or `#` order number
+  - `execute`: optional boolean; omission or `false` is dry-run, and only `true` permits mutation
+- Bulk/range/date input is unsupported.
+- Dry-run response includes `repairSource`, `repairTimestamp`, `dryRun: true`, `executed: false`, and a safe planned summary. Dry-run performs no database or audit write.
+- Execute behavior:
+  - fetch canonical order, refund, and return snapshots before mutation
+  - validate seller/SKU/vendor/finance-profile mapping and snapshot completeness
+  - create missing local order, line items, allocations, and sale ledgers directly from canonical current state
+  - apply existing refund, return, and canonical full-order cancellation lifecycles in one transaction
+  - write a safe reconciliation job and operational signal; no raw Shopify payload is retained
+  - roll back commerce and finance repair records if any step fails
+- The response summary reports `ShopifyOrder`, allocation, and finance as `Created` or `Existing`, plus cancellation/refund/return application, warnings, and skipped state.
+- Expected errors:
+  - `400 invalid_order_identifier` for missing, malformed, range, or bulk-like input
+  - `404 shopify_order_not_found` when Shopify has no exact order
+  - `409 repair_preflight_failed` for unsafe/incomplete mapping or unsupported current state
+  - `409 repair_transaction_failed` when execution rolls back
+  - `502`/`503` for unavailable or incomplete Shopify Admin current-state evidence
 
 ### GET /admin/diagnostics/sync-events
 

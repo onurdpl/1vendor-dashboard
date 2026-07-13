@@ -466,6 +466,11 @@ POST /fulfillments.json
 - Conflict cancellations preserve fulfillment, shipping, refund, settlement, and paid evidence, but block new operational and finance progression and require review.
 - No `AllocationStatus.CANCELLED` was introduced; full-order cancellation remains an order lifecycle fact.
 - SHOP-CANCEL-2A does not implement missed-order repair, vendor debt, payment reversal, or fulfillment-cancellation redesign.
+- SHOP-REPAIR-1 provides the separate admin-only missed-order recovery path. It fetches the current canonical Shopify order, refund, and return state and does not replay historical webhook payloads.
+- Current-state repair is dry-run by default, accepts one explicit Shopify order ID or number, and requires `execute: true` before mutation.
+- Executed repair creates missing order/allocation/finance evidence and applies refund, return, and full-order cancellation lifecycles inside one transaction. Failure rolls back repair data and records a safe failed reconciliation job/signal.
+- Current-state repair must be used instead of Fresh Order Backfill when a missed order is now cancelled, refunded, or returned.
+- Repair history contains only safe source, timestamp, actor, mode, status, and error-summary metadata. Raw Shopify payloads are not retained by the repair path.
 - Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
 
 ## Customer Notifications

@@ -158,7 +158,7 @@ function canonicalRefundLineToWebhookLine(lineItem: CanonicalShopifyRefundLineIt
   };
 }
 
-function canonicalRefundToWebhookPayload(input: {
+export function canonicalRefundToWebhookPayload(input: {
   sourceShopifyOrderId: string;
   refund: CanonicalShopifyRefundSnapshot;
 }): ShopifyRefundsCreateWebhookPayload {

@@ -233,13 +233,15 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
   const parsedRefund = parseRefundPayload(input.payload);
 
   if (!parsedRefund.sourceShopifyOrderId) {
-    await prisma.webhookEvent.update({
-      where: { id: input.event.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: 'Shopify refunds/create payload did not include an order id.',
-      },
-    });
+    if (input.event) {
+      await prisma.webhookEvent.update({
+        where: { id: input.event.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: 'Shopify refunds/create payload did not include an order id.',
+        },
+      });
+    }
 
     return {
       ok: false,
@@ -250,13 +252,15 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
   }
 
   if (parsedRefund.refundLineItems.length === 0) {
-    await prisma.webhookEvent.update({
-      where: { id: input.event.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: 'Shopify refunds/create payload did not include refund line items.',
-      },
-    });
+    if (input.event) {
+      await prisma.webhookEvent.update({
+        where: { id: input.event.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: 'Shopify refunds/create payload did not include refund line items.',
+        },
+      });
+    }
 
     return {
       ok: false,
@@ -267,14 +271,16 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.webhookEvent.update({
-        where: { id: input.event.id },
-        data: {
-          status: 'PROCESSING',
-          errorMessage: null,
-        },
-      });
+    const applyRefund = async (tx: Prisma.TransactionClient) => {
+      if (input.event) {
+        await tx.webhookEvent.update({
+          where: { id: input.event.id },
+          data: {
+            status: 'PROCESSING',
+            errorMessage: null,
+          },
+        });
+      }
 
       const shopifyOrder = await tx.shopifyOrder.findUnique({
         where: {
@@ -764,21 +770,26 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
         });
       }
 
-      await tx.webhookEvent.update({
-        where: { id: input.event.id },
-        data: {
-          status: 'PROCESSED',
-          processedAt: new Date(),
-          errorMessage: null,
-          shopifyOrderId: shopifyOrder.id,
-        },
-      });
+      if (input.event) {
+        await tx.webhookEvent.update({
+          where: { id: input.event.id },
+          data: {
+            status: 'PROCESSED',
+            processedAt: new Date(),
+            errorMessage: null,
+            shopifyOrderId: shopifyOrder.id,
+          },
+        });
+      }
 
       return {
         shopifyOrderId: parsedRefund.sourceShopifyOrderId,
         refundAllocationCount: groupedByAllocationAndVendor.size,
       };
-    });
+    };
+    const result = input.transactionClient
+      ? await applyRefund(input.transactionClient)
+      : await prisma.$transaction(applyRefund);
 
     return {
       ok: true,
@@ -790,13 +801,15 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Shopify refund ingestion failed.';
 
-    await prisma.webhookEvent.update({
-      where: { id: input.event.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: message,
-      },
-    });
+    if (input.event) {
+      await prisma.webhookEvent.update({
+        where: { id: input.event.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: message,
+        },
+      });
+    }
 
     return {
       ok: false,

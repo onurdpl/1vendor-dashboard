@@ -424,6 +424,44 @@ async function reconcileReturnRecordForLineItem(input: {
   };
 }
 
+export async function applyCanonicalReturnsInTransaction(input: {
+  tx: Prisma.TransactionClient;
+  shopifyOrder: {
+    id: string;
+    sourceShopifyOrderNumber: string;
+    lineItems: Array<{
+      id: string;
+      sourceLineItemId: string | null;
+      sku: string | null;
+    }>;
+  };
+  canonicalReturns: CanonicalShopifyReturnSnapshot[];
+}) {
+  const records: ReconciledReturnRecord[] = [];
+
+  for (const canonicalReturn of input.canonicalReturns) {
+    const lifecycleStatus = mapCanonicalReturnStatus(canonicalReturn.status);
+    if (!lifecycleStatus) {
+      throw new Error(`Unsupported canonical return status: ${canonicalReturn.status}.`);
+    }
+    if (canonicalReturn.returnLineItems.length === 0) {
+      throw new Error(`Canonical return ${canonicalReturn.sourceShopifyReturnId} did not include return line items.`);
+    }
+
+    for (const lineItem of canonicalReturn.returnLineItems) {
+      records.push(await reconcileReturnRecordForLineItem({
+        tx: input.tx,
+        shopifyOrder: input.shopifyOrder,
+        canonicalReturn,
+        lineItem,
+        lifecycleStatus,
+      }));
+    }
+  }
+
+  return records;
+}
+
 export function createCanonicalReturnReconciliationService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
 

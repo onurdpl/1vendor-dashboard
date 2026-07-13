@@ -273,6 +273,134 @@ function buildEmptyReport(input: {
   };
 }
 
+export type TransactionalCanonicalCancellationResult = {
+  applied: boolean;
+  conflict: 'none' | 'operational_state' | 'finance_review';
+  affectedAllocationIds: string[];
+  ledgerIds: string[];
+  warnings: string[];
+};
+
+export async function applyCanonicalCancellationInTransaction(input: {
+  tx: Prisma.TransactionClient;
+  canonicalOrder: CanonicalShopifyOrderSnapshot;
+}): Promise<TransactionalCanonicalCancellationResult> {
+  const classification = classifyCanonicalCancellation(input.canonicalOrder);
+  if (classification.state === 'none') {
+    return {
+      applied: false,
+      conflict: 'none',
+      affectedAllocationIds: [],
+      ledgerIds: [],
+      warnings: [],
+    };
+  }
+  if (classification.state !== 'full_order_cancelled') {
+    throw new Error('Partial Shopify order cancellation requires manual review and cannot be repaired automatically.');
+  }
+
+  const localOrder = await input.tx.shopifyOrder.findUnique({
+    where: {
+      sourceShopifyOrderId: input.canonicalOrder.sourceShopifyOrderId,
+    },
+    include: {
+      allocations: {
+        include: {
+          refundRecords: { select: { id: true } },
+          returnRecords: { select: { id: true } },
+          financeEntries: {
+            where: { entryType: 'sale' },
+            include: {
+              settlementApprovalLines: {
+                include: {
+                  settlementApproval: { select: { status: true } },
+                },
+              },
+              payoutBatchLines: {
+                include: {
+                  payoutBatch: { select: { status: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!localOrder) {
+    throw new Error('Canonical cancellation cannot be applied because the local Shopify order is missing.');
+  }
+
+  await input.tx.shopifyOrder.update({
+    where: { id: localOrder.id },
+    data: buildCanonicalCancellationOrderData(input.canonicalOrder),
+  });
+
+  const affectedAllocationIds = localOrder.allocations.map((allocation) => allocation.id);
+  const operationalConflict = localOrder.allocations.find((allocation) =>
+    isFulfillmentConflict(allocation) ||
+    allocation.refundRecords.length > 0 ||
+    allocation.returnRecords.length > 0
+  );
+  if (operationalConflict) {
+    return {
+      applied: true,
+      conflict: 'operational_state',
+      affectedAllocationIds,
+      ledgerIds: [],
+      warnings: ['Canonical cancellation metadata was stored, but existing fulfillment, refund, or return evidence requires review.'],
+    };
+  }
+
+  const activeLedgers = localOrder.allocations.flatMap((allocation) =>
+    allocation.financeEntries
+      .filter((ledger) => !ledger.voidedAt)
+      .map((ledger) => ({ allocation, ledger }))
+  );
+  if (activeLedgers.some(({ ledger }) => isFinanceReviewRequired(ledger))) {
+    return {
+      applied: true,
+      conflict: 'finance_review',
+      affectedAllocationIds,
+      ledgerIds: [],
+      warnings: ['Canonical cancellation metadata was stored, but settlement, payout, or paid evidence requires Finance review.'],
+    };
+  }
+
+  await input.tx.vendorAllocation.updateMany({
+    where: { id: { in: affectedAllocationIds } },
+    data: {
+      cancellationReason: CancellationReason.VENDOR_CANCELLED,
+      reassignmentRequired: false,
+    },
+  });
+
+  const voidedAt = input.canonicalOrder.cancelledAt
+    ? new Date(input.canonicalOrder.cancelledAt)
+    : new Date();
+  const voidReason = `canonical_order_cancelled:${classification.reason ?? 'shopify'}`;
+  for (const { ledger } of activeLedgers) {
+    await input.tx.financeLedgerEntry.update({
+      where: { id: ledger.id },
+      data: {
+        payoutStatus: PayoutStatus.HOLD,
+        settlementStatus: SettlementStatus.HELD,
+        settlementHoldReason: 'Canonical Shopify order cancellation.',
+        voidedAt,
+        voidReason,
+      },
+    });
+  }
+
+  return {
+    applied: true,
+    conflict: 'none',
+    affectedAllocationIds,
+    ledgerIds: activeLedgers.map(({ ledger }) => ledger.id),
+    warnings: [],
+  };
+}
+
 export function createCanonicalCancellationReconciliationService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
 

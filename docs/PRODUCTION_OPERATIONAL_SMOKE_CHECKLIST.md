@@ -109,11 +109,24 @@
 
 ## Order State Inspector
 - As admin, open `/admin/diagnostics` and inspect one explicit order number such as `1108` or `#1108`.
-- Confirm identity, persisted cancellation state, allocations, shipping evidence, source-specific returns/refunds, finance, operational signals, webhook history, projection reasons, and repair readiness are visible.
+- Confirm identity, persisted cancellation state, allocations, shipping evidence, source-specific returns/refunds, finance, operational signals, webhook history, executed repair history, projection reasons, and repair readiness are visible.
 - Confirm the inspector identifies `ShopifyOrder.cancelledAt` as canonical, explains raw allocation fields as preserved ownership/history, and reports cancellation-policy queue/action/finance blocking from persisted evidence.
 - Confirm vendor, support, and finance roles receive `403` from `GET /admin/diagnostics/orders/:orderNumber/state`.
 - Confirm no raw payload, customer PII, full address, access token, HMAC/API secret, provider credential, bank information, or payment reference is returned.
 - Confirm the inspector exposes no repair, replay, or mutation action.
+
+## Current-State Order Repair
+- Use only one explicitly approved Shopify order ID or number. Do not use a range, date window, or bulk input.
+- Call `POST /admin/diagnostics/shopify/order-repair` without `execute` first and confirm `dryRun: true` and `executed: false`.
+- Confirm dry-run creates no local order, allocation, ledger, refund, return, job, or operational signal.
+- Review canonical identity, expected vendors, `Created`/`Existing` summary, cancellation/refund/return flags, warnings, and skipped state.
+- Confirm missing `seller_info`, missing/unknown SKU mapping, unknown vendor, missing active finance profile, or incomplete canonical evidence fails before mutation.
+- Only after review, repeat the same explicit order with `execute: true`.
+- Confirm missing order, line item, allocation, and sale ledger evidence is created exactly once.
+- For a currently cancelled order, confirm terminal cancellation metadata and finance hold/void or conflict-review evidence appear at the same commit; no active operational state should be externally observable between creation and cancellation.
+- Confirm canonical refunds and returns use existing lifecycle records and do not create duplicate records, ledgers, adjustments, debt, or FinanceEvents on repeat execution.
+- Confirm a forced lifecycle failure rolls back all repair commerce/finance records while retaining only the safe failed job/signal evidence.
+- Confirm the Order State Inspector shows repair source, timestamp, executed mode, actor, and status without raw Shopify payload or secrets.
 
 ## Reconciliation Action
 - As admin, open reconciliation diagnostics.

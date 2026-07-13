@@ -302,6 +302,28 @@ export function OrderStateInspector() {
             ) : <EmptyStatePanel title="No webhook history" description="No stored webhook event matched this order." />}
           </OperationalSection>
 
+          <OperationalSection title="Repair history" description={`Executed current-state repairs, limited to ${result.limits.repairHistory} records. Dry runs never persist data.`}>
+            {result.repairHistory.length ? (
+              <div className="order-state-record-grid">
+                {result.repairHistory.map((repair) => (
+                  <article key={repair.jobId} className="order-state-record">
+                    <div className="order-state-record-heading">
+                      <strong>{toTitleCaseLabel(repair.repairSource)}</strong>
+                      <StatusBadge tone={repair.status === 'COMPLETED' ? 'success' : 'danger'}>
+                        {repair.status}
+                      </StatusBadge>
+                    </div>
+                    <small>Timestamp {formatDate(repair.repairTimestamp)}</small>
+                    <small>Dry run: {yesNo(repair.dryRun)}</small>
+                    <small>Executed: {yesNo(repair.executed)}</small>
+                    <small>Actor: {repair.actorEmail ?? repair.actorUserId ?? 'Not recorded'}</small>
+                    {repair.errorSummary ? <p>{repair.errorSummary}</p> : null}
+                  </article>
+                ))}
+              </div>
+            ) : <EmptyStatePanel title="No repair history" description="No executed current-state repair was recorded for this order." />}
+          </OperationalSection>
+
           <OperationalSection title="Projection explanation" description="Deterministic reasons for current operational labels and action state.">
             <div className="order-state-projection-grid">
               {([

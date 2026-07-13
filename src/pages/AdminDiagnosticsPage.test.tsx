@@ -300,7 +300,8 @@ function orderStateInspectorResult() {
       blockers: ['Refund evidence is persisted.'],
       recommendedNextStep: 'Review the preserved operational evidence.',
     },
-    limits: { webhookHistory: 50, operationalSignals: 50, financeEvents: 100 },
+    repairHistory: [],
+    limits: { webhookHistory: 50, operationalSignals: 50, financeEvents: 100, repairHistory: 20 },
   };
 }
 

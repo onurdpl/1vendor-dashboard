@@ -30,10 +30,15 @@ import {
   validateNavlungoCreatePostProbeEnv,
 } from '../shipping/navlungo-create-post-probe.js';
 import { runNavlungoAuthDiagnostics, runNavlungoCarrierDiagnostics } from '../shipping/navlungo-provider.adapter.js';
+import {
+  createCurrentStateOrderRepairService,
+  CurrentStateOrderRepairError,
+} from '../shopify/current-state-order-repair.service.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+  const currentStateOrderRepair = createCurrentStateOrderRepairService(env);
 
   app.get(
     '/admin/diagnostics/shopify/webhook-subscriptions',
@@ -154,6 +159,44 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return diagnostic;
+    },
+  );
+
+  app.post<{ Body: { orderIdentifier?: string; execute?: boolean } }>(
+    '/admin/diagnostics/shopify/order-repair',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+      if (typeof request.body?.orderIdentifier !== 'string') {
+        return reply.code(400).send({
+          code: 'invalid_order_identifier',
+          message: 'Provide exactly one Shopify order ID or order number.',
+        });
+      }
+
+      try {
+        return await currentStateOrderRepair.repair({
+          orderIdentifier: request.body.orderIdentifier,
+          execute: request.body.execute === true,
+          actor: {
+            userId: request.authUser.id,
+            email: request.authUser.email,
+          },
+        });
+      } catch (error) {
+        if (error instanceof CurrentStateOrderRepairError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
+        request.log.error({ error }, 'Current-state Shopify order repair failed');
+        return reply.code(500).send({
+          code: 'current_state_repair_failed',
+          message: 'Current-state Shopify order repair failed.',
+        });
+      }
     },
   );
 

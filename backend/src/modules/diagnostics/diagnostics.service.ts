@@ -75,6 +75,8 @@ const PAYLOAD_PREVIEW_LIMIT = 1200;
 const ORDER_INSPECTOR_WEBHOOK_LIMIT = 50;
 const ORDER_INSPECTOR_SIGNAL_LIMIT = 50;
 const ORDER_INSPECTOR_FINANCE_EVENT_LIMIT = 100;
+const ORDER_INSPECTOR_REPAIR_HISTORY_LIMIT = 20;
+const CURRENT_STATE_REPAIR_OPERATION = 'shopify_current_state_order_repair';
 const SAFE_SIGNAL_METADATA_KEYS = new Set([
   'allocationId',
   'conflictType',
@@ -113,6 +115,23 @@ function sanitizeSignalMetadata(value: unknown) {
         (item === null || ['string', 'number', 'boolean'].includes(typeof item)))
       .slice(0, 12),
   ) as Record<string, string | number | boolean | null>;
+}
+
+function readSafeRepairJobPayload(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const payload = value as Record<string, unknown>;
+  if (payload.operation !== CURRENT_STATE_REPAIR_OPERATION) {
+    return null;
+  }
+  return {
+    repairSource: typeof payload.repairSource === 'string' ? payload.repairSource : 'shopify_admin_current_state',
+    dryRun: payload.dryRun === true,
+    executed: payload.executed === true,
+    actorUserId: typeof payload.actorUserId === 'string' ? payload.actorUserId : null,
+    actorEmail: typeof payload.actorEmail === 'string' ? payload.actorEmail : null,
+  };
 }
 
 function normalizeStateToken(value: string | null | undefined) {
@@ -1785,6 +1804,45 @@ export async function getOrderStateInspectorDiagnostic(
     return null;
   }
 
+  const repairJobs = await prisma.operationalJob.findMany({
+    where: {
+      sourceShopifyOrderId: order.sourceShopifyOrderId,
+      jobType: OperationalJobType.RECONCILIATION,
+    },
+    select: {
+      id: true,
+      status: true,
+      payload: true,
+      startedAt: true,
+      completedAt: true,
+      failedAt: true,
+      createdAt: true,
+      errorSummary: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  const repairHistory = repairJobs
+    .map((job) => {
+      const payload = readSafeRepairJobPayload(job.payload);
+      if (!payload) {
+        return null;
+      }
+      return {
+        jobId: job.id,
+        repairSource: payload.repairSource,
+        repairTimestamp: (job.completedAt ?? job.failedAt ?? job.startedAt ?? job.createdAt).toISOString(),
+        dryRun: payload.dryRun,
+        executed: payload.executed,
+        status: job.status,
+        actorUserId: payload.actorUserId,
+        actorEmail: payload.actorEmail,
+        errorSummary: summarizeError(job.errorSummary),
+      };
+    })
+    .filter((job): job is NonNullable<typeof job> => Boolean(job))
+    .slice(0, ORDER_INSPECTOR_REPAIR_HISTORY_LIMIT);
+
   const webhookDiagnostic = await getOrderWebhookEventsDiagnostic(order.sourceShopifyOrderNumber, {
     limit: ORDER_INSPECTOR_WEBHOOK_LIMIT,
   });
@@ -1968,10 +2026,10 @@ export async function getOrderStateInspectorDiagnostic(
   if (order.allocations.length === 0) {
     repairReadiness = {
       repairNeeded: true,
-      repairSupported: false,
+      repairSupported: true,
       repairClassification: 'current_state_repair_required',
-      blockers: ['The local ShopifyOrder exists without a VendorAllocation.', 'The existing order backfill rejects orders that already exist locally.'],
-      recommendedNextStep: 'Review persisted webhook and seller mapping evidence before designing an explicit current-state repair.',
+      blockers: ['The local ShopifyOrder exists without a VendorAllocation.'],
+      recommendedNextStep: 'Run the admin current-state repair endpoint in dry-run mode, review the summary, then execute explicitly if safe.',
     };
   } else if (hasOperationalConflict) {
     repairReadiness = {
@@ -2132,6 +2190,7 @@ export async function getOrderStateInspectorDiagnostic(
       webhookId: event.webhookId,
       payloadAvailable: event.hasRawPayload,
     })),
+    repairHistory,
     projectionExplanation: {
       orderStatus: {
         label: isCancelled ? 'Cancelled' : 'Active',
@@ -2197,6 +2256,7 @@ export async function getOrderStateInspectorDiagnostic(
       webhookHistory: ORDER_INSPECTOR_WEBHOOK_LIMIT,
       operationalSignals: ORDER_INSPECTOR_SIGNAL_LIMIT,
       financeEvents: ORDER_INSPECTOR_FINANCE_EVENT_LIMIT,
+      repairHistory: ORDER_INSPECTOR_REPAIR_HISTORY_LIMIT,
     },
   };
 }

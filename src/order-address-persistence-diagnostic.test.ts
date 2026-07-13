@@ -8,6 +8,9 @@ const prismaMock = vi.hoisted(() => ({
   webhookEvent: {
     findMany: vi.fn(),
   },
+  operationalJob: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -146,6 +149,8 @@ describe('order address persistence diagnostic', () => {
   beforeEach(() => {
     prismaMock.shopifyOrder.findFirst.mockReset();
     prismaMock.webhookEvent.findMany.mockReset();
+    prismaMock.operationalJob.findMany.mockReset();
+    prismaMock.operationalJob.findMany.mockResolvedValue([]);
   });
 
   it('requires admin access on the diagnostic route', async () => {
@@ -1115,6 +1120,47 @@ describe('admin order state inspector', () => {
     expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
   });
 
+  it('shows safe current-state repair history without raw Shopify payloads', async () => {
+    const order = buildInspectorOrder();
+    prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(order).mockResolvedValueOnce(order);
+    prismaMock.webhookEvent.findMany.mockResolvedValueOnce([]);
+    prismaMock.operationalJob.findMany.mockResolvedValueOnce([
+      {
+        id: 'repair-job-1',
+        status: 'COMPLETED',
+        payload: {
+          operation: 'shopify_current_state_order_repair',
+          repairSource: 'shopify_admin_current_state',
+          dryRun: false,
+          executed: true,
+          actorUserId: 'admin-1',
+          actorEmail: 'admin@example.com',
+          rawPayload: 'must-not-leak',
+        },
+        startedAt: new Date('2026-07-13T10:00:00.000Z'),
+        completedAt: new Date('2026-07-13T10:00:02.000Z'),
+        failedAt: null,
+        createdAt: new Date('2026-07-13T10:00:00.000Z'),
+        errorSummary: null,
+      },
+    ]);
+
+    const diagnostic = await getOrderStateInspectorDiagnostic('1108');
+
+    expect(diagnostic?.repairHistory).toEqual([
+      expect.objectContaining({
+        jobId: 'repair-job-1',
+        repairSource: 'shopify_admin_current_state',
+        repairTimestamp: '2026-07-13T10:00:02.000Z',
+        dryRun: false,
+        executed: true,
+        status: 'COMPLETED',
+        actorEmail: 'admin@example.com',
+      }),
+    ]);
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+  });
+
   it('keeps finance, signals, and webhook history target-scoped and enforces result limits', async () => {
     const order = buildInspectorOrder();
     const allocation = order.allocations[0];
@@ -1155,7 +1201,7 @@ describe('admin order state inspector', () => {
     expect(prismaMock.webhookEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 50 }));
   });
 
-  it('classifies a local order without allocations as unsupported current-state repair', async () => {
+  it('classifies a local order without allocations as supported current-state repair', async () => {
     const order = buildInspectorOrder({ allocations: [] });
     prismaMock.shopifyOrder.findFirst.mockResolvedValueOnce(order).mockResolvedValueOnce(order);
     prismaMock.webhookEvent.findMany.mockResolvedValueOnce([buildInspectorWebhook()]);
@@ -1165,7 +1211,7 @@ describe('admin order state inspector', () => {
       localOrderState: { allocationCount: 0 },
       repairReadiness: {
         repairNeeded: true,
-        repairSupported: false,
+        repairSupported: true,
         repairClassification: 'current_state_repair_required',
       },
     });
