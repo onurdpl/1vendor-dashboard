@@ -582,7 +582,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getAllByText('Use manual Shopify reconciliation.').length).toBeGreaterThan(0);
   });
 
-  it('confirms stored webhook replay and explains that it does not fetch current Shopify state', async () => {
+  it('confirms stored refund replay and explains canonical monetary verification', async () => {
     renderDiagnosticsPage();
 
     expect((await screen.findAllByText('event-replayable')).length).toBeGreaterThan(0);
@@ -591,7 +591,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Replay Stored Webhook?' });
     expect(dialog).toHaveTextContent('Historical payload will be replayed.');
-    expect(dialog).toHaveTextContent('This does NOT use current Shopify state.');
+    expect(dialog).toHaveTextContent('Current Shopify monetary evidence will be verified before any refund finance mutation.');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Replay Stored Webhook' }));
 
     expect(await screen.findByText('Replay accepted')).toBeInTheDocument();
@@ -615,7 +615,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Recover Failed Webhook?' });
     expect(dialog).toHaveTextContent('Stored webhook processing will resume.');
-    expect(dialog).toHaveTextContent('It does NOT fetch current Shopify state.');
+    expect(dialog).toHaveTextContent('The stored payload will be reprocessed only after current Shopify monetary evidence is verified.');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Recover Failed Webhook' }));
 
     expect(await screen.findByText('Recovery accepted')).toBeInTheDocument();

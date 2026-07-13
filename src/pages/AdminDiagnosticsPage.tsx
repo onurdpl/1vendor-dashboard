@@ -169,6 +169,7 @@ export function AdminDiagnosticsPage() {
   const [pendingWebhookAction, setPendingWebhookAction] = useState<{
     action: 'replay' | 'recover';
     webhookEventId: string;
+    topic: string;
   } | null>(null);
   const isRealMode = runtimeConfig.apiMode === 'real';
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -741,7 +742,7 @@ export function AdminDiagnosticsPage() {
                       disabled={!event.replayEligible || replayMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
-                        setPendingWebhookAction({ action: 'replay', webhookEventId: event.id });
+                        setPendingWebhookAction({ action: 'replay', webhookEventId: event.id, topic: event.topic });
                       }}
                     >
                       Replay Stored Webhook
@@ -752,7 +753,7 @@ export function AdminDiagnosticsPage() {
                       disabled={!event.recoverEligible || recoverMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
-                        setPendingWebhookAction({ action: 'recover', webhookEventId: event.id });
+                        setPendingWebhookAction({ action: 'recover', webhookEventId: event.id, topic: event.topic });
                       }}
                     >
                       Recover Failed Webhook
@@ -946,7 +947,7 @@ export function AdminDiagnosticsPage() {
                     type="button"
                     className="button button-primary button-compact"
                     disabled={!canRecover || recoverMutation.isPending}
-                    onClick={() => setPendingWebhookAction({ action: 'recover', webhookEventId: selectedWebhook.id })}
+                    onClick={() => setPendingWebhookAction({ action: 'recover', webhookEventId: selectedWebhook.id, topic: selectedWebhook.topic })}
                   >
                     {recoverMutation.isPending ? 'Recovering...' : 'Recover Failed Webhook'}
                   </button>
@@ -954,7 +955,7 @@ export function AdminDiagnosticsPage() {
                     type="button"
                     className="button button-secondary button-compact"
                     disabled={!canReplay || replayMutation.isPending}
-                    onClick={() => setPendingWebhookAction({ action: 'replay', webhookEventId: selectedWebhook.id })}
+                    onClick={() => setPendingWebhookAction({ action: 'replay', webhookEventId: selectedWebhook.id, topic: selectedWebhook.topic })}
                   >
                     {replayMutation.isPending ? 'Replaying...' : 'Replay Stored Webhook'}
                   </button>
@@ -1035,12 +1036,16 @@ export function AdminDiagnosticsPage() {
             {pendingWebhookAction.action === 'replay' ? (
               <>
                 <p>Historical payload will be replayed.</p>
-                <p>This does NOT use current Shopify state.</p>
+                <p>{pendingWebhookAction.topic === 'refunds/create'
+                  ? 'Current Shopify monetary evidence will be verified before any refund finance mutation.'
+                  : 'This does NOT use current Shopify state.'}</p>
               </>
             ) : (
               <>
                 <p>Stored webhook processing will resume.</p>
-                <p>This reprocesses the stored webhook payload. It does NOT fetch current Shopify state.</p>
+                <p>{pendingWebhookAction.topic === 'refunds/create'
+                  ? 'The stored payload will be reprocessed only after current Shopify monetary evidence is verified.'
+                  : 'This reprocesses the stored webhook payload. It does NOT fetch current Shopify state.'}</p>
               </>
             )}
             <div className="support-modal-actions">
