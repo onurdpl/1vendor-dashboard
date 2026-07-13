@@ -121,6 +121,7 @@
 
 ## Current-State Order Repair
 - Use only one explicitly approved Shopify order ID or number. Do not use a range, date window, or bulk input.
+- In the Recovery Center `Order number` field, enter the Shopify order number as `1105` or `#1105`; the UI sends `#1105` to the repair API. Use a numeric Shopify legacy ID only through the explicit backend/API contract.
 - Confirm production uses stable Shopify Admin GraphQL API `2026-01`; canonical refunds must parse from the direct `Order.refunds` list and canonical returns must use Shopify GraphQL IDs without requesting `Return.legacyResourceId`.
 - From the missing-order inspector result, choose Repair Missing Shopify Order and confirm the first request omits execution (`execute: false`) and returns `dryRun: true`, `executed: false`.
 - Confirm dry-run creates no local order, allocation, ledger, refund, return, job, or operational signal.

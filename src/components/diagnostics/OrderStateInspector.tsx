@@ -48,6 +48,11 @@ function currentRecordState(value: 'Created' | 'Existing') {
   return value === 'Created' ? 'Missing' : 'Existing';
 }
 
+function normalizeRepairOrderNumber(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+
 export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspectorProps = {}) {
   const [orderNumber, setOrderNumber] = useState('');
   const [inspectedOrderNumber, setInspectedOrderNumber] = useState('');
@@ -76,7 +81,10 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
   }, [normalizedOrderNumber]);
 
   const dryRunMutation = useMutationAction(
-    async (orderIdentifier: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(orderIdentifier, false),
+    async (orderNumber: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(
+      normalizeRepairOrderNumber(orderNumber),
+      false,
+    ),
     {
       onSuccess: (repairResult) => {
         setDryRunResult(repairResult);
@@ -92,7 +100,10 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
   );
 
   const executeMutation = useMutationAction(
-    async (orderIdentifier: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(orderIdentifier, true),
+    async (orderNumber: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(
+      normalizeRepairOrderNumber(orderNumber),
+      true,
+    ),
     {
       onSuccess: async () => {
         setExecuteConfirmationOpen(false);
@@ -143,7 +154,10 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             onChange={(event) => setOrderNumber(event.target.value)}
             placeholder="1108 or #1108"
             autoComplete="off"
+            aria-label="Order number"
+            aria-describedby="order-state-inspector-number-help"
           />
+          <small id="order-state-inspector-number-help">Enter Shopify order number, for example 1105 or #1105.</small>
         </label>
         <button type="submit" className="button button-primary" disabled={!orderNumber.trim() || inspectorQuery.isLoading}>
           Inspect

@@ -667,6 +667,21 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(within(inspector as HTMLElement).queryByRole('button', { name: /replay/i })).not.toBeInTheDocument();
   });
 
+  it('normalizes a plain Shopify order number before the repair dry run', async () => {
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValueOnce(new Error('Order not found.'));
+
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '  1105  ');
+    expect(screen.getByText('Enter Shopify order number, for example 1105 or #1105.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledWith('1105', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+
+    expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenCalledWith('#1105', false);
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
   it('offers one-order current-state repair only after a missing-order inspection and requires dry-run review', async () => {
     const repairedOrder = orderStateInspectorResult();
     repairedOrder.orderIdentity = {

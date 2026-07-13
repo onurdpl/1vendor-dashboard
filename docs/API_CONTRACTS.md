@@ -237,6 +237,7 @@ Webhook processing lifecycle states:
 - Request body:
   - `orderIdentifier`: required single numeric Shopify order ID or `#` order number
   - `execute`: optional boolean; omission or `false` is dry-run, and only `true` permits mutation
+- The Recovery Center `Order number` field accepts `1105` or `#1105` and sends the canonical order-name form `#1105`. Numeric Shopify legacy IDs remain available through the backend/API contract and are not mixed into this operator field.
 - Bulk/range/date input is unsupported.
 - Dry-run response includes `repairSource`, `repairTimestamp`, `dryRun: true`, `executed: false`, and a safe planned summary. Dry-run performs no database or audit write.
 - Recovery Center operator flow: inspect one order, run dry-run, review canonical identity/local state/planned mutations/warnings, then use a separate explicit confirmation before sending `execute: true`.
