@@ -12,7 +12,16 @@ import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js
 import { canonicalRefundToWebhookPayload } from '../reconciliation/canonical-refund-reconciliation.service.js';
 import { applyCanonicalReturnsInTransaction } from '../reconciliation/canonical-return-reconciliation.service.js';
 import { applyCanonicalCancellationInTransaction } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
-import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
+import { ingestVerifiedShopifyRefund } from './refund-ingestion.service.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  findCanonicalRefundItemEvidence,
+  isRefundEvidenceBlocked,
+  REFUND_MONETARY_CLASSIFICATIONS,
+  requiresRefundMonetaryEvidenceClassification,
+  toSafeRefundMonetaryEvidence,
+  type CanonicalRefundMonetaryEvidence,
+} from './shopify-refund-monetary-evidence.js';
 import {
   CanonicalShopifySnapshotParseError,
   createShopifyAdminService,
@@ -21,6 +30,7 @@ import type {
   CanonicalShopifyOrderSnapshot,
   CanonicalShopifyRefundSnapshot,
   CanonicalShopifyReturnSnapshot,
+  FetchCanonicalShopifyRefundsForOrderResult,
 } from './shopify-admin.types.js';
 
 const REPAIR_OPERATION = 'shopify_current_state_order_repair';
@@ -36,6 +46,8 @@ export type CurrentStateOrderRepairSummary = {
   cancellationApplied: boolean;
   refundApplied: boolean;
   returnApplied: boolean;
+  refundEvidence: Omit<CanonicalRefundMonetaryEvidence, 'refunds'> | null;
+  executionBlocked: boolean;
   warnings: string[];
   skipped: boolean;
 };
@@ -59,6 +71,7 @@ export type CurrentStateOrderRepairActor = {
 
 type CanonicalRepairBundle = {
   order: CanonicalShopifyOrderSnapshot;
+  refundCollection: NonNullable<FetchCanonicalShopifyRefundsForOrderResult>;
   refunds: CanonicalShopifyRefundSnapshot[];
   returns: CanonicalShopifyReturnSnapshot[];
 };
@@ -88,6 +101,7 @@ export type CurrentStateOrderRepairDependencies = {
     actor: CurrentStateOrderRepairActor;
     requestedIdentifier: string;
     inspectedState: LocalRepairState;
+    refundEvidence: CanonicalRefundMonetaryEvidence | null;
     repairTimestamp: Date;
   }): Promise<CurrentStateOrderRepairSummary>;
   recordFailure(input: {
@@ -209,9 +223,31 @@ async function fetchCanonicalRepairBundle(
 
   return {
     order,
+    refundCollection: refundResult.value,
     refunds: refundResult.value.refunds,
     returns: returnResult.value.returns,
   };
+}
+
+function classifyBundleRefunds(bundle: CanonicalRepairBundle) {
+  return requiresRefundMonetaryEvidenceClassification(bundle.refundCollection)
+    ? classifyCanonicalRefundMonetaryEvidence(bundle.refundCollection)
+    : null;
+}
+
+function getMonetaryRefunds(
+  bundle: CanonicalRepairBundle,
+  evidence: CanonicalRefundMonetaryEvidence | null,
+) {
+  if (!evidence || evidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
+    return [];
+  }
+  return bundle.refunds.flatMap((refund) => {
+    const itemEvidence = findCanonicalRefundItemEvidence(evidence, refund.sourceShopifyRefundId);
+    return itemEvidence?.classification === REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund
+      ? [{ refund, itemEvidence }]
+      : [];
+  });
 }
 
 function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepairState) {
@@ -311,19 +347,26 @@ function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepa
   }
 }
 
-function buildPlannedSummary(bundle: CanonicalRepairBundle, state: LocalRepairState): CurrentStateOrderRepairSummary {
+function buildPlannedSummary(
+  bundle: CanonicalRepairBundle,
+  state: LocalRepairState,
+  refundEvidence: CanonicalRefundMonetaryEvidence | null,
+): CurrentStateOrderRepairSummary {
+  const monetaryRefunds = getMonetaryRefunds(bundle, refundEvidence);
   const lifecycleAlreadyCurrent =
     (!bundle.order.cancelledAt || state.cancelledAt === bundle.order.cancelledAt) &&
-    bundle.refunds.every((refund) => state.existingRefundIds.includes(refund.sourceShopifyRefundId)) &&
+    monetaryRefunds.every(({ refund }) => state.existingRefundIds.includes(refund.sourceShopifyRefundId)) &&
     bundle.returns.every((returnRecord) => state.existingReturnIds.includes(returnRecord.sourceShopifyReturnId));
   return {
     shopifyOrder: state.orderExists ? 'Existing' : 'Created',
     allocation: state.allocationExists ? 'Existing' : 'Created',
     finance: state.financeExists ? 'Existing' : 'Created',
     cancellationApplied: Boolean(bundle.order.cancelledAt),
-    refundApplied: bundle.refunds.length > 0,
+    refundApplied: monetaryRefunds.length > 0,
     returnApplied: bundle.returns.length > 0,
-    warnings: [],
+    refundEvidence: refundEvidence ? toSafeRefundMonetaryEvidence(refundEvidence) : null,
+    executionBlocked: refundEvidence ? isRefundEvidenceBlocked(refundEvidence) : false,
+    warnings: refundEvidence?.sanitizedWarnings ?? [],
     skipped: state.orderExists && state.allocationExists && state.financeExists && lifecycleAlreadyCurrent,
   };
 }
@@ -701,13 +744,15 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
       return prisma.$transaction(async (tx) => {
         const base = await applyBaseOrderInTransaction(tx, input.bundle);
 
-        for (const refund of input.bundle.refunds) {
-          const result = await ingestShopifyRefundWebhook({
+        const monetaryRefunds = getMonetaryRefunds(input.bundle, input.refundEvidence);
+        for (const { refund, itemEvidence } of monetaryRefunds) {
+          const result = await ingestVerifiedShopifyRefund({
             payload: canonicalRefundToWebhookPayload({
               sourceShopifyOrderId: input.bundle.order.sourceShopifyOrderId,
               refund,
             }),
             transactionClient: tx,
+            monetaryEvidence: itemEvidence,
           });
           if (!result.ok) {
             throw new Error(result.error);
@@ -734,15 +779,17 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
         const summary: CurrentStateOrderRepairSummary = {
           ...base.summary,
           cancellationApplied: cancellation.applied,
-          refundApplied: input.bundle.refunds.length > 0,
+          refundApplied: monetaryRefunds.length > 0,
           returnApplied: input.bundle.returns.length > 0,
-          warnings: cancellation.warnings,
+          refundEvidence: input.refundEvidence ? toSafeRefundMonetaryEvidence(input.refundEvidence) : null,
+          executionBlocked: false,
+          warnings: [...(input.refundEvidence?.sanitizedWarnings ?? []), ...cancellation.warnings],
           skipped: base.summary.shopifyOrder === 'Existing' &&
             base.summary.allocation === 'Existing' &&
             base.summary.finance === 'Existing' &&
             cancellation.ledgerIds.length === 0 &&
             (!input.bundle.order.cancelledAt || input.inspectedState.cancelledAt === input.bundle.order.cancelledAt) &&
-            input.bundle.refunds.every((refund) =>
+            monetaryRefunds.every(({ refund }) =>
               input.inspectedState.existingRefundIds.includes(refund.sourceShopifyRefundId)) &&
             input.bundle.returns.every((returnRecord) =>
               input.inspectedState.existingReturnIds.includes(returnRecord.sourceShopifyReturnId)),
@@ -888,6 +935,7 @@ export function createCurrentStateOrderRepairService(
     }
     const inspectedState = await dependencies.inspectLocalState(bundle);
     validateCanonicalBundle(bundle, inspectedState);
+    const refundEvidence = classifyBundleRefunds(bundle);
     const repairTimestamp = new Date();
     const dryRun = input.execute !== true;
     if (dryRun) {
@@ -900,8 +948,16 @@ export function createCurrentStateOrderRepairService(
         repairTimestamp: repairTimestamp.toISOString(),
         dryRun: true,
         executed: false,
-        summary: buildPlannedSummary(bundle, inspectedState),
+        summary: buildPlannedSummary(bundle, inspectedState, refundEvidence),
       };
+    }
+
+    if (refundEvidence && isRefundEvidenceBlocked(refundEvidence)) {
+      throw new CurrentStateOrderRepairError(
+        refundEvidence.reasonCode,
+        `Current-state repair is blocked: ${refundEvidence.sanitizedWarnings[0] ?? 'Canonical refund evidence is not safe to apply.'}`,
+        409,
+      );
     }
 
     try {
@@ -910,6 +966,7 @@ export function createCurrentStateOrderRepairService(
         actor: input.actor,
         requestedIdentifier: orderIdentifier,
         inspectedState,
+        refundEvidence,
         repairTimestamp,
       });
       return {

@@ -91,7 +91,10 @@ Mutation requires explicit execution:
 Current-State Repair:
 
 - fetches the canonical order, refunds, and returns through Shopify Admin GraphQL before mutation
-- uses the API `2026-01` schema shapes: `Order.refunds` is a direct list with per-refund `refundLineItems` connections; `Order.returns` is a connection and return identity is derived from the stable Shopify GraphQL ID
+- uses the API `2026-01` schema shapes: `Order.refunds` is a direct list with per-refund `transactions` and `refundLineItems` connections; `Order.returns` is a connection and return identity is derived from the stable Shopify GraphQL ID
+- classifies canonical refund evidence before planning or executing refund ingestion; dry-run exposes only sanitized classification, amount, currency, counts, completeness flags, warnings, and reason codes
+- skips the refund lifecycle for `ZERO_VALUE_VOID`, then applies the existing canonical cancellation lifecycle so a simple cancelled order's sale ledger is held/voided without false refund artifacts
+- blocks execution for non-final, incomplete, malformed, duplicate-conflicting, currency-mismatched, or aggregate-mismatched refund evidence
 - validates `seller_info`, exact SKU mapping, vendor existence, active finance profile, and snapshot completeness
 - creates missing `ShopifyOrder`, line item, `VendorAllocation`, and sale ledger records without creating a synthetic `orders/create` webhook
 - applies the existing refund and return lifecycles, then applies canonical full-order cancellation in one database transaction
@@ -103,10 +106,10 @@ Current-State Repair:
 
 Dry-run performs no database write and therefore does not create repair history. Its response still includes `dryRun: true`, `executed: false`, and the planned repair summary.
 
-The safe summary reports whether the Shopify order, allocation, and finance evidence are `Created` or `Existing`, whether cancellation/refund/return work applies, warnings, and whether the execution was skipped as already current.
+The safe summary reports whether the Shopify order, allocation, and finance evidence are `Created` or `Existing`, whether cancellation/refund/return work applies, the canonical refund classification, safe evidence counts/completeness, warnings, execution blocking, and whether the execution was skipped as already current.
 
 Missing orders with existing fulfillment progress fail closed for manual review; this phase does not reconstruct historical fulfillment or tracking evidence.
 
 Canonical fetch failures are returned with safe, deterministic codes: `canonical_order_fetch_failed`, `canonical_refund_fetch_failed`, `canonical_return_fetch_failed`, or `canonical_snapshot_parse_failed`. These responses do not include request headers, tokens, raw Shopify payloads, or customer data.
 
-The first production dry-run for `#1105` returned a canonical snapshot fetch failure before SHOP-REPAIR-1B and wrote no local order, allocation, finance, audit, or signal data. `#1105` and `#1106` remain unrepaired. A new successful dry-run and operator review are mandatory before any execute request is considered.
+FIN-VOID-1 does not correct existing `#1105` production refund/return/ledger evidence. Any correction remains a separately reviewed production action. `#1106` is not repaired by FIN-VOID-1.

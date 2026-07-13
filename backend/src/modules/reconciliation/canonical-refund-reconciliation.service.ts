@@ -12,7 +12,14 @@ import type {
   CanonicalShopifyRefundLineItemSnapshot,
   CanonicalShopifyRefundSnapshot,
 } from '../shopify/shopify-admin.types.js';
-import { ingestShopifyRefundWebhook } from '../shopify/refund-ingestion.service.js';
+import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  findCanonicalRefundItemEvidence,
+  isRefundEvidenceBlocked,
+  REFUND_MONETARY_CLASSIFICATIONS,
+  requiresRefundMonetaryEvidenceClassification,
+} from '../shopify/shopify-refund-monetary-evidence.js';
 import type { ShopifyRefundsCreateWebhookPayload } from '../shopify/refund-ingestion.types.js';
 import type {
   CanonicalRefundReconciliationItemResult,
@@ -308,6 +315,72 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
       results: [],
     };
 
+    const monetaryEvidence = requiresRefundMonetaryEvidenceClassification(canonicalRefunds)
+      ? classifyCanonicalRefundMonetaryEvidence(canonicalRefunds)
+      : null;
+
+    if (monetaryEvidence && isRefundEvidenceBlocked(monetaryEvidence)) {
+      const blockedRefunds = canonicalRefunds.refunds.length > 0 ? canonicalRefunds.refunds : [null];
+      for (const refund of blockedRefunds) {
+        await upsertCanonicalRefundSignal({
+          ruleKey: CANONICAL_REFUND_SIGNAL_RULE_KEYS.requiresManualReview,
+          sourceShopifyOrderId,
+          sourceShopifyRefundId: refund?.sourceShopifyRefundId,
+          severity: OperationalSignalSeverity.HIGH,
+          title: 'Canonical refund requires monetary evidence review',
+          description: 'Canonical Shopify refund evidence is incomplete, non-final, or inconsistent. No refund finance records were created.',
+          suggestedAction: 'Review the safe classification reason and canonical Shopify refund state before retrying.',
+          metadata: {
+            classification: monetaryEvidence.classification,
+            reasonCode: monetaryEvidence.reasonCode,
+            aggregateMismatch: monetaryEvidence.aggregateMismatch,
+            currencyMismatch: monetaryEvidence.currencyMismatch,
+            incompletePagination: monetaryEvidence.incompletePagination,
+          },
+        });
+        report.signalsCreatedOrUpdated += 1;
+        report.failedCount += 1;
+        if (refund) {
+          report.results.push({
+            refundId: refund.sourceShopifyRefundId,
+            status: 'failed',
+            reason: monetaryEvidence.reasonCode,
+            affectedAllocationIds: [],
+            affectedVendorIds: [],
+            affectedRefundRecordIds: [],
+          });
+        }
+      }
+      return report;
+    }
+
+    if (monetaryEvidence?.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+      for (const refund of canonicalRefunds.refunds) {
+        const refundEvidence = findCanonicalRefundItemEvidence(monetaryEvidence, refund.sourceShopifyRefundId);
+        await resolveCanonicalRefundSignals({
+          sourceShopifyOrderId,
+          sourceShopifyRefundId: refund.sourceShopifyRefundId,
+          ruleKeys: [
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.lineItemUnmatched,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.requiresManualReview,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.repairFailed,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.repaired,
+          ],
+        });
+        report.skippedCount += 1;
+        report.results.push({
+          refundId: refund.sourceShopifyRefundId,
+          status: 'skipped',
+          reason: refundEvidence?.reasonCode ?? 'zero_value_void_not_monetary_refund',
+          affectedAllocationIds: [],
+          affectedVendorIds: [],
+          affectedRefundRecordIds: [],
+        });
+      }
+      return report;
+    }
+
     const localOrder = await prisma.shopifyOrder.findUnique({
       where: {
         sourceShopifyOrderId,
@@ -319,6 +392,21 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
 
     if (!localOrder) {
       for (const refund of canonicalRefunds.refunds) {
+        const refundEvidence = monetaryEvidence
+          ? findCanonicalRefundItemEvidence(monetaryEvidence, refund.sourceShopifyRefundId)
+          : null;
+        if (refundEvidence?.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+          report.skippedCount += 1;
+          report.results.push({
+            refundId: refund.sourceShopifyRefundId,
+            status: 'skipped',
+            reason: refundEvidence.reasonCode,
+            affectedAllocationIds: [],
+            affectedVendorIds: [],
+            affectedRefundRecordIds: [],
+          });
+          continue;
+        }
         await upsertCanonicalRefundSignal({
           ruleKey: CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
           sourceShopifyOrderId,
@@ -347,6 +435,45 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
     }
 
     for (const refund of canonicalRefunds.refunds) {
+      const refundEvidence = monetaryEvidence
+        ? findCanonicalRefundItemEvidence(monetaryEvidence, refund.sourceShopifyRefundId)
+        : null;
+      if (refundEvidence?.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+        await resolveCanonicalRefundSignals({
+          sourceShopifyOrderId,
+          sourceShopifyRefundId: refund.sourceShopifyRefundId,
+          ruleKeys: [
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.missingLocalOrder,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.lineItemUnmatched,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.requiresManualReview,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.repairFailed,
+            CANONICAL_REFUND_SIGNAL_RULE_KEYS.repaired,
+          ],
+        });
+        report.skippedCount += 1;
+        report.results.push({
+          refundId: refund.sourceShopifyRefundId,
+          status: 'skipped',
+          reason: refundEvidence.reasonCode,
+          affectedAllocationIds: [],
+          affectedVendorIds: [],
+          affectedRefundRecordIds: [],
+        });
+        continue;
+      }
+      if (!refundEvidence || refundEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
+        report.failedCount += 1;
+        report.results.push({
+          refundId: refund.sourceShopifyRefundId,
+          status: 'failed',
+          reason: refundEvidence?.reasonCode ?? 'monetary_refund_transaction_missing',
+          affectedAllocationIds: [],
+          affectedVendorIds: [],
+          affectedRefundRecordIds: [],
+        });
+        continue;
+      }
+
       const before = await getRefundEvidenceCounts(refund.sourceShopifyRefundId);
       const payload = canonicalRefundToWebhookPayload({
         sourceShopifyOrderId: canonicalRefunds.sourceShopifyOrderId,
@@ -360,9 +487,10 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
         rawPayload,
       });
 
-      const ingestionResult = await ingestShopifyRefundWebhook({
+      const ingestionResult = await ingestVerifiedShopifyRefund({
         event: webhookEvent,
         payload,
+        monetaryEvidence: refundEvidence,
       });
       const after = await getRefundEvidenceCounts(refund.sourceShopifyRefundId);
       const recordSummary = await getRefundRecordSummary(refund.sourceShopifyRefundId);

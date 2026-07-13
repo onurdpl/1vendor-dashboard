@@ -379,7 +379,9 @@ Webhook processing lifecycle states:
   - any state other than `FAILED`
 - Replay note:
   - replay uses stored payload content only
-  - replay does not fetch current Shopify state
+  - replay does not replace the historical payload with current Shopify state
+  - for `refunds/create`, replay fetches canonical Admin GraphQL monetary evidence and runs the shared classifier before the retained payload may reach refund ingestion
+  - zero-value void evidence is processed as a non-financial skip; blocked/unavailable evidence remains needs-attention
   - processed `orders/create`, processed `orders/cancelled`, and stateful order/fulfillment payloads are not safe replay candidates
   - older persisted webhook events may not have replayable payloads because raw payload retention was added later
 
@@ -408,7 +410,8 @@ Webhook processing lifecycle states:
 - Recovery note:
   - recover marks the event `PROCESSING` before executing ingestion path
   - recover reuses idempotent ingestion/upsert behavior
-  - recover resumes processing from the retained webhook payload and does not fetch current Shopify state
+  - recover resumes processing from the retained webhook payload
+  - for `refunds/create`, recover fetches canonical Admin GraphQL monetary evidence before the retained payload may create refund finance
   - recover does not add background workers in this phase
 
 ### POST /webhooks/shopify/orders-create
@@ -480,16 +483,24 @@ Webhook processing lifecycle states:
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
   - processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", shopifyOrderId, refundAllocationCount }`
+  - zero-value void skipped: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", shopifyOrderId, refundAllocationCount: 0, refundClassification: "ZERO_VALUE_VOID", reasonCode: "zero_value_void_not_monetary_refund" }`
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
   - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
 - Expected `202` behavior: valid HMAC signature accepted whether refund processing succeeds immediately, is ignored as duplicate, or is parked in needs-attention state.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Processing note:
+  - the raw webhook is an envelope for refund identity and line-item mapping; it is not sufficient monetary evidence
+  - backend fetches canonical Admin GraphQL order/refund totals and transactions before monetary refund ingestion
+  - only verified unique positive `REFUND / SUCCESS` shop-money transactions may reach existing refund ingestion
+  - `ZERO_VALUE_VOID` creates no refund-derived commerce or finance evidence
+  - non-final, ambiguous, incomplete, amount-mismatched, or currency-mismatched evidence remains needs-attention with deterministic safe reason codes
   - refund mapping uses the original persisted order allocation snapshot
   - primary vendor lookup path is `refund_line_items[].line_item.sku`
   - no silent fallback allocation is allowed for missing SKU or unresolved vendor mapping
 - duplicate refund delivery is ignored through the existing webhook idempotency layer
 - future webhook events persist raw payloads for explicit admin replay and reconciliation
+
+Sanitized repair/reconciliation diagnostics may expose `classification`, exact decimal `monetaryRefundAmount`, `currency`, transaction counts, aggregate amounts/mismatch flags, pagination completeness, `reasonCode`, and sanitized warnings. They never expose transaction IDs, gateways, authorization/payment identifiers, raw Shopify payment payloads, or customer data.
 
 ### POST /webhooks/shopify/returns-request
 

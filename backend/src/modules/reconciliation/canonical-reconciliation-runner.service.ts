@@ -4,6 +4,13 @@ import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import type { CanonicalShopifyOrderSnapshot } from '../shopify/shopify-admin.types.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  findCanonicalRefundItemEvidence,
+  isRefundEvidenceBlocked,
+  REFUND_MONETARY_CLASSIFICATIONS,
+  requiresRefundMonetaryEvidenceClassification,
+} from '../shopify/shopify-refund-monetary-evidence.js';
 import { createReconciliationService } from './reconciliation.service.js';
 import { createCanonicalRefundReconciliationService } from './canonical-refund-reconciliation.service.js';
 import { createCanonicalReturnReconciliationService } from './canonical-return-reconciliation.service.js';
@@ -393,7 +400,28 @@ async function inspectOrderDryRun(env: AppEnv, shopifyOrderId: string): Promise<
   }
 
   const canonicalRefunds = await shopifyAdmin.fetchCanonicalRefundsForOrder(shopifyOrderId);
+  const refundEvidence = canonicalRefunds && requiresRefundMonetaryEvidenceClassification(canonicalRefunds)
+    ? classifyCanonicalRefundMonetaryEvidence(canonicalRefunds)
+    : null;
+  if (refundEvidence && isRefundEvidenceBlocked(refundEvidence)) {
+    detail.wouldRepair.signals += 1;
+    detail.actions.push(`Canonical refund finance is blocked: ${refundEvidence.reasonCode}.`);
+  }
   for (const refund of canonicalRefunds?.refunds ?? []) {
+    const itemEvidence = refundEvidence
+      ? findCanonicalRefundItemEvidence(refundEvidence, refund.sourceShopifyRefundId)
+      : null;
+    if (itemEvidence?.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+      detail.actions.push(`Refund object ${refund.sourceShopifyRefundId} is a zero-value void; no refund finance repair is required.`);
+      continue;
+    }
+    if (
+      !itemEvidence ||
+      itemEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund ||
+      (refundEvidence && isRefundEvidenceBlocked(refundEvidence))
+    ) {
+      continue;
+    }
     const localRefundCount = await prisma.refundRecord.count({
       where: {
         sourceShopifyOrderId: shopifyOrderId,

@@ -25,6 +25,10 @@ import type {
   ShopifyRefundLineItemPayload,
   ShopifyRefundsCreateWebhookPayload,
 } from './refund-ingestion.types.js';
+import {
+  REFUND_MONETARY_CLASSIFICATIONS,
+  type CanonicalRefundItemMonetaryEvidence,
+} from './shopify-refund-monetary-evidence.js';
 
 const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
 
@@ -818,4 +822,18 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
       error: message,
     };
   }
+}
+
+export async function ingestVerifiedShopifyRefund(
+  input: RefundIngestionInput & { monetaryEvidence: CanonicalRefundItemMonetaryEvidence },
+): Promise<RefundIngestionResult> {
+  const sourceShopifyRefundId = String(input.payload.id);
+  if (
+    input.monetaryEvidence.sourceShopifyRefundId !== sourceShopifyRefundId ||
+    input.monetaryEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund
+  ) {
+    throw new Error('Verified positive Shopify monetary refund evidence is required before refund ingestion.');
+  }
+
+  return ingestShopifyRefundWebhook(input);
 }

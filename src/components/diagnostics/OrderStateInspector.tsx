@@ -256,7 +256,28 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                   <MetadataRow label="Shopify order ID" value={dryRunResult.shopifyOrderId} />
                   <MetadataRow label="Source" value="Current Shopify Admin state" />
                   <MetadataRow label="Cancellation evidence" value={dryRunResult.summary.cancellationApplied ? 'Present' : 'Not present'} />
-                  <MetadataRow label="Refund evidence" value={dryRunResult.summary.refundApplied ? 'Present' : 'Not present'} />
+                  <MetadataRow
+                    label="Refund classification"
+                    value={dryRunResult.summary.refundEvidence?.classification ?? 'No refund object'}
+                  />
+                  <MetadataRow
+                    label="Monetary refund amount"
+                    value={dryRunResult.summary.refundEvidence
+                      ? `${dryRunResult.summary.refundEvidence.monetaryRefundAmount}${dryRunResult.summary.refundEvidence.currency ? ` ${dryRunResult.summary.refundEvidence.currency}` : ''}`
+                      : 'Not present'}
+                  />
+                  <MetadataRow
+                    label="Successful refund transactions"
+                    value={String(dryRunResult.summary.refundEvidence?.successfulRefundTransactionCount ?? 0)}
+                  />
+                  <MetadataRow
+                    label="Successful void transactions"
+                    value={String(dryRunResult.summary.refundEvidence?.successfulVoidTransactionCount ?? 0)}
+                  />
+                  <MetadataRow
+                    label="Classification reason"
+                    value={dryRunResult.summary.refundEvidence?.reasonCode ?? 'not_applicable'}
+                  />
                   <MetadataRow label="Return evidence" value={dryRunResult.summary.returnApplied ? 'Present' : 'Not present'} />
                 </MetadataGroup>
                 <MetadataGroup title="Current local state">
@@ -296,10 +317,10 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={executeMutation.isPending}
+                  disabled={executeMutation.isPending || dryRunResult.summary.executionBlocked}
                   onClick={() => setExecuteConfirmationOpen(true)}
                 >
-                  Execute Repair
+                  {dryRunResult.summary.executionBlocked ? 'Execution Blocked' : 'Execute Repair'}
                 </button>
                 <a className="button button-secondary" href="#order-state-inspector-title">Back to Order State Inspector</a>
               </div>

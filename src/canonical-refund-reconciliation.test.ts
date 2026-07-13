@@ -25,14 +25,14 @@ const prismaMock = vi.hoisted(() => ({
   },
 }));
 
-const ingestShopifyRefundWebhookMock = vi.hoisted(() => vi.fn());
+const ingestVerifiedShopifyRefundMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
 vi.mock('../backend/src/modules/shopify/refund-ingestion.service.js', () => ({
-  ingestShopifyRefundWebhook: ingestShopifyRefundWebhookMock,
+  ingestVerifiedShopifyRefund: ingestVerifiedShopifyRefundMock,
 }));
 
 const {
@@ -45,7 +45,24 @@ function canonicalRefund(overrides: Partial<CanonicalShopifyRefundSnapshot> = {}
     refundGid: 'gid://shopify/Refund/5001',
     sourceShopifyRefundId: '5001',
     createdAt: '2026-06-26T10:00:00.000Z',
+    updatedAt: '2026-06-26T10:00:01.000Z',
     note: 'Customer refund',
+    totalRefundedAmount: '100.00',
+    totalRefundedCurrencyCode: 'TRY',
+    transactionPaginationComplete: true,
+    lineItemPaginationComplete: true,
+    transactions: [
+      {
+        transactionGid: 'gid://shopify/OrderTransaction/5001',
+        kind: 'REFUND',
+        status: 'SUCCESS',
+        amount: '100.00',
+        currencyCode: 'TRY',
+        parentTransactionGid: 'gid://shopify/OrderTransaction/parent-5001',
+        createdAt: '2026-06-26T10:00:00.000Z',
+        processedAt: '2026-06-26T10:00:01.000Z',
+      },
+    ],
     refundLineItems: [
       {
         refundLineItemGid: 'gid://shopify/RefundLineItem/9001',
@@ -66,12 +83,19 @@ function canonicalRefund(overrides: Partial<CanonicalShopifyRefundSnapshot> = {}
 }
 
 function buildEnv(refunds: CanonicalShopifyRefundSnapshot[]): AppEnv {
+  const totalRefundedAmount = refunds.reduce((total, refund) =>
+    total + Number(refund.totalRefundedAmount ?? 0), 0).toFixed(2);
   return {
     NODE_ENV: 'test',
     SHOPIFY_API_VERSION: '2026-01',
     SHOPIFY_SHOP_DOMAIN: 'demo.myshopify.com',
     SHOPIFY_MOCK_CANONICAL_REFUNDS: JSON.stringify({
-      'order-1': refunds,
+      'order-1': {
+        orderTotalRefundedAmount: totalRefundedAmount,
+        orderTotalRefundedCurrencyCode: 'TRY',
+        refundsListComplete: true,
+        refunds,
+      },
     }),
   } as AppEnv;
 }
@@ -109,7 +133,7 @@ describe('canonical Shopify refund reconciliation', () => {
     prismaMock.refundRecord.findMany.mockResolvedValue(localRefundRecords());
     prismaMock.operationalSignal.upsert.mockResolvedValue({});
     prismaMock.operationalSignal.updateMany.mockResolvedValue({ count: 0 });
-    ingestShopifyRefundWebhookMock.mockResolvedValue({
+    ingestVerifiedShopifyRefundMock.mockResolvedValue({
       ok: true,
       action: 'accepted',
       processingStatus: 'processed',
@@ -145,8 +169,12 @@ describe('canonical Shopify refund reconciliation', () => {
         }),
       ],
     });
-    expect(ingestShopifyRefundWebhookMock).toHaveBeenCalledWith({
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenCalledWith(expect.objectContaining({
       event: expect.objectContaining({ id: 'webhook-canonical-refund-1' }),
+      monetaryEvidence: expect.objectContaining({
+        classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: '100',
+      }),
       payload: expect.objectContaining({
         id: '5001',
         order_id: 'order-1',
@@ -165,7 +193,7 @@ describe('canonical Shopify refund reconciliation', () => {
           }),
         ],
       }),
-    });
+    }));
     expect(prismaMock.webhookEvent.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         idempotencyKey: 'canonical_refund_reconciliation:demo.myshopify.com:order-1:5001',
@@ -235,7 +263,7 @@ describe('canonical Shopify refund reconciliation', () => {
         }),
       ],
     });
-    expect(ingestShopifyRefundWebhookMock).not.toHaveBeenCalled();
+    expect(ingestVerifiedShopifyRefundMock).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         ruleKey: 'canonical_refund_missing_local_order',
@@ -250,7 +278,7 @@ describe('canonical Shopify refund reconciliation', () => {
       { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
     ]);
     prismaMock.refundRecord.findMany.mockResolvedValueOnce([]);
-    ingestShopifyRefundWebhookMock.mockResolvedValueOnce({
+    ingestVerifiedShopifyRefundMock.mockResolvedValueOnce({
       ok: false,
       action: 'received_needs_attention',
       processingStatus: 'needs_attention',
@@ -277,6 +305,43 @@ describe('canonical Shopify refund reconciliation', () => {
         sourceArea: 'RECONCILIATION',
       }),
     }));
+  });
+
+  it('skips zero-value void evidence without creating synthetic refund finance', async () => {
+    const zeroValueVoid = canonicalRefund({
+      totalRefundedAmount: '0.00',
+      transactions: [
+        {
+          transactionGid: 'gid://shopify/OrderTransaction/void-5001',
+          kind: 'VOID',
+          status: 'SUCCESS',
+          amount: '0.00',
+          currencyCode: 'TRY',
+          parentTransactionGid: 'gid://shopify/OrderTransaction/parent-5001',
+          createdAt: '2026-06-26T10:00:00.000Z',
+          processedAt: '2026-06-26T10:00:01.000Z',
+        },
+      ],
+    });
+
+    const result = await createCanonicalRefundReconciliationService(
+      buildEnv([zeroValueVoid]),
+    ).reconcileShopifyOrderRefunds('order-1');
+
+    expect(result).toMatchObject({
+      refundsFetched: 1,
+      refundsCreated: 0,
+      failedCount: 0,
+      skippedCount: 1,
+      results: [expect.objectContaining({
+        refundId: '5001',
+        status: 'skipped',
+        reason: 'zero_value_void_not_monetary_refund',
+      })],
+    });
+    expect(ingestVerifiedShopifyRefundMock).not.toHaveBeenCalled();
+    expect(prismaMock.webhookEvent.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.updateMany).toHaveBeenCalled();
   });
 
   it('exposes canonical refund signal keys and webhook adapter for diagnostics', () => {

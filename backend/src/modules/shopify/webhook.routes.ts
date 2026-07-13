@@ -8,7 +8,7 @@ import {
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
 } from './order-ingestion.service.js';
-import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
+import { ingestVerifiedShopifyRefund } from './refund-ingestion.service.js';
 import { fetchSellerInfoWithRetry } from './seller-info-retry.service.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
 import {
@@ -39,6 +39,12 @@ import {
   markOperationalJobProcessing,
 } from '../operational-jobs/operational-jobs.service.js';
 import { createCanonicalCancellationReconciliationService } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  findCanonicalRefundItemEvidence,
+  isRefundEvidenceBlocked,
+  REFUND_MONETARY_CLASSIFICATIONS,
+} from './shopify-refund-monetary-evidence.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
@@ -1089,9 +1095,47 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     try {
       await markJobProcessing(operationalJob?.id);
       await markWebhookProcessing(idempotencyResult.event.id);
-      ingestionResult = await ingestShopifyRefundWebhook({
+      const sourceShopifyOrderId = payload.order_id !== undefined && payload.order_id !== null
+        ? String(payload.order_id)
+        : '';
+      const sourceShopifyRefundId = payload.id !== undefined && payload.id !== null
+        ? String(payload.id)
+        : '';
+      if (!sourceShopifyOrderId || !sourceShopifyRefundId) {
+        throw new Error('Shopify refunds/create payload did not include an order and refund id.');
+      }
+      const canonicalRefunds = await shopifyAdminService
+        .fetchCanonicalRefundsForOrder(sourceShopifyOrderId)
+        .catch(() => null);
+      if (!canonicalRefunds || canonicalRefunds.refunds.length === 0) {
+        throw new Error('Canonical Shopify refund evidence is unavailable.');
+      }
+      const monetaryEvidence = classifyCanonicalRefundMonetaryEvidence(canonicalRefunds);
+      const refundEvidence = findCanonicalRefundItemEvidence(monetaryEvidence, sourceShopifyRefundId);
+      if (isRefundEvidenceBlocked(monetaryEvidence) || !refundEvidence) {
+        throw new Error(`Canonical Shopify refund verification blocked: ${monetaryEvidence.reasonCode}.`);
+      }
+      if (refundEvidence.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+        await markWebhookProcessed(idempotencyResult.event.id);
+        await markJobCompleted(operationalJob?.id);
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'accepted',
+          processingStatus: 'processed',
+          shopifyOrderId: sourceShopifyOrderId,
+          refundAllocationCount: 0,
+          refundClassification: refundEvidence.classification,
+          reasonCode: refundEvidence.reasonCode,
+        });
+      }
+      if (refundEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
+        throw new Error(`Canonical Shopify refund verification blocked: ${refundEvidence.reasonCode}.`);
+      }
+      ingestionResult = await ingestVerifiedShopifyRefund({
         event: idempotencyResult.event,
         payload,
+        monetaryEvidence: refundEvidence,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify refunds/create ingestion failed.';

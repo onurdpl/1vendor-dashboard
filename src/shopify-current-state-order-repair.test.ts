@@ -4,6 +4,7 @@ import type {
   CanonicalShopifyOrderSnapshot,
   CanonicalShopifyRefundSnapshot,
   CanonicalShopifyReturnSnapshot,
+  FetchCanonicalShopifyRefundsForOrderResult,
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
 import { CanonicalShopifySnapshotParseError } from '../backend/src/modules/shopify/shopify-admin.service.js';
 import {
@@ -90,12 +91,31 @@ function canonicalOrder(overrides: Partial<CanonicalShopifyOrderSnapshot> = {}):
   };
 }
 
-function canonicalRefund(): CanonicalShopifyRefundSnapshot {
+function canonicalRefund(
+  overrides: Partial<CanonicalShopifyRefundSnapshot> = {},
+): CanonicalShopifyRefundSnapshot {
   return {
     refundGid: 'gid://shopify/Refund/6001',
     sourceShopifyRefundId: '6001',
     createdAt: '2026-07-11T17:00:00.000Z',
+    updatedAt: '2026-07-11T17:00:01.000Z',
     note: 'Refunded',
+    totalRefundedAmount: '100.00',
+    totalRefundedCurrencyCode: 'TRY',
+    transactionPaginationComplete: true,
+    lineItemPaginationComplete: true,
+    transactions: [
+      {
+        transactionGid: 'gid://shopify/OrderTransaction/6001',
+        kind: 'REFUND',
+        status: 'SUCCESS',
+        amount: '100.00',
+        currencyCode: 'TRY',
+        parentTransactionGid: 'gid://shopify/OrderTransaction/parent-6001',
+        createdAt: '2026-07-11T17:00:00.000Z',
+        processedAt: '2026-07-11T17:00:01.000Z',
+      },
+    ],
     refundLineItems: [
       {
         refundLineItemGid: 'gid://shopify/RefundLineItem/7001',
@@ -111,6 +131,23 @@ function canonicalRefund(): CanonicalShopifyRefundSnapshot {
         currencyCode: 'TRY',
       },
     ],
+    ...overrides,
+  };
+}
+
+function canonicalRefundCollection(
+  refunds: CanonicalShopifyRefundSnapshot[],
+): NonNullable<FetchCanonicalShopifyRefundsForOrderResult> {
+  const orderTotal = refunds.reduce((total, refund) =>
+    total + Number(refund.totalRefundedAmount ?? 0), 0).toFixed(2);
+  return {
+    orderGid: 'gid://shopify/Order/7856043819345',
+    sourceShopifyOrderId: '7856043819345',
+    orderTotalRefundedAmount: orderTotal,
+    orderTotalRefundedCurrencyCode: 'TRY',
+    refundsListComplete: true,
+    refunds,
+    source: 'mock',
   };
 }
 
@@ -145,6 +182,8 @@ function summary(overrides: Partial<CurrentStateOrderRepairSummary> = {}): Curre
     cancellationApplied: false,
     refundApplied: false,
     returnApplied: false,
+    refundEvidence: null,
+    executionBlocked: false,
     warnings: [],
     skipped: false,
     ...overrides,
@@ -182,10 +221,12 @@ function dependencies(input: {
     });
   });
   const recordFailure = vi.fn(async () => undefined);
+  const refunds = input.refunds ?? [];
   const deps: CurrentStateOrderRepairDependencies = {
     fetchCanonicalBundle: vi.fn(async () => ({
       order: input.order ?? canonicalOrder(),
-      refunds: input.refunds ?? [],
+      refundCollection: canonicalRefundCollection(refunds),
+      refunds,
       returns: input.returns ?? [],
     })),
     inspectLocalState: vi.fn(async () => state),
@@ -253,6 +294,23 @@ describe('Shopify current-state order repair', () => {
     expect(result.summary.refundApplied).toBe(true);
   });
 
+  it('blocks execution when canonical refund evidence is non-final', async () => {
+    const refund = canonicalRefund({
+      totalRefundedAmount: '0.00',
+      transactions: [{
+        ...canonicalRefund().transactions[0],
+        status: 'PENDING',
+        amount: '0.00',
+      }],
+    });
+    const fixture = dependencies({ refunds: [refund] });
+
+    await expect(service(fixture.deps).repair({ orderIdentifier: '#1105', execute: true, actor }))
+      .rejects.toMatchObject({ code: 'non_final_refund_transaction', statusCode: 409 });
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+    expect(fixture.recordFailure).not.toHaveBeenCalled();
+  });
+
   it('applies canonical return state through the repair transaction', async () => {
     const fixture = dependencies({ returns: [canonicalReturn()], executeResult: summary({ returnApplied: true }) });
     const result = await service(fixture.deps).repair({ orderIdentifier: '#1105', execute: true, actor });
@@ -317,7 +375,7 @@ describe('Shopify current-state order repair', () => {
 
     const result = await __currentStateOrderRepairTesting.applyBaseOrderInTransaction(
       tx as never,
-      { order, refunds: [], returns: [] },
+      { order, refundCollection: canonicalRefundCollection([]), refunds: [], returns: [] },
     );
 
     expect(result.summary).toEqual({
@@ -361,6 +419,9 @@ describe('Shopify current-state order repair', () => {
       fetchCanonicalRefundsForOrder: vi.fn(async () => ({
         orderGid: 'gid://shopify/Order/7856043819345',
         sourceShopifyOrderId: '7856043819345',
+        orderTotalRefundedAmount: '0.00',
+        orderTotalRefundedCurrencyCode: 'TRY',
+        refundsListComplete: true,
         refunds: [],
         source: 'mock' as const,
       })),
@@ -444,7 +505,27 @@ describe('Shopify current-state order repair', () => {
         },
       ],
     });
-    const refund = canonicalRefund();
+    const refund = canonicalRefund({
+      totalRefundedAmount: '0.00',
+      transactions: [
+        {
+          transactionGid: 'gid://shopify/OrderTransaction/void-1105',
+          kind: 'VOID',
+          status: 'SUCCESS',
+          amount: '0.00',
+          currencyCode: 'TRY',
+          parentTransactionGid: 'gid://shopify/OrderTransaction/parent-1105',
+          createdAt: '2026-07-06T08:39:10Z',
+          processedAt: '2026-07-06T08:39:11Z',
+        },
+      ],
+      refundLineItems: [
+        {
+          ...canonicalRefund().refundLineItems[0],
+          subtotalAmount: '2399.00',
+        },
+      ],
+    });
     refund.refundLineItems.push({
       ...refund.refundLineItems[0],
       refundLineItemGid: 'gid://shopify/RefundLineItem/771211133265',
@@ -452,6 +533,7 @@ describe('Shopify current-state order repair', () => {
       lineItemGid: secondLine.lineItemGid,
       sourceLineItemId: secondLine.sourceLineItemId,
       sku: secondLine.sku,
+      subtotalAmount: '2400.00',
     });
     const fixture = dependencies({ order, refunds: [refund], returns: [] });
 
@@ -467,8 +549,16 @@ describe('Shopify current-state order repair', () => {
         allocation: 'Created',
         finance: 'Created',
         cancellationApplied: true,
-        refundApplied: true,
+        refundApplied: false,
         returnApplied: false,
+        refundEvidence: {
+          classification: 'ZERO_VALUE_VOID',
+          monetaryRefundAmount: '0',
+          successfulRefundTransactionCount: 0,
+          successfulVoidTransactionCount: 1,
+          reasonCode: 'zero_value_void_not_monetary_refund',
+        },
+        executionBlocked: false,
         skipped: false,
       },
     });

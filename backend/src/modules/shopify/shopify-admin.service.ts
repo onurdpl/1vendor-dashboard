@@ -108,6 +108,10 @@ type ShopifyMoneySetNode = {
     amount?: string | null;
     currencyCode?: string | null;
   } | null;
+  presentmentMoney?: {
+    amount?: string | null;
+    currencyCode?: string | null;
+  } | null;
 } | null;
 
 type ShopifyTaxLineNode = {
@@ -241,10 +245,31 @@ type CanonicalRefundsForOrderQueryResponse = {
   order: {
     id: string;
     legacyResourceId?: string | null;
+    totalRefundedSet?: ShopifyMoneySetNode;
     refunds: Array<{
       id: string;
       createdAt?: string | null;
+      updatedAt?: string | null;
       note?: string | null;
+      totalRefundedSet?: ShopifyMoneySetNode;
+      transactions: {
+        pageInfo?: {
+          hasNextPage?: boolean | null;
+        } | null;
+        edges: Array<{
+          node: {
+            id: string;
+            kind?: string | null;
+            status?: string | null;
+            amountSet?: ShopifyMoneySetNode;
+            parentTransaction?: {
+              id?: string | null;
+            } | null;
+            createdAt?: string | null;
+            processedAt?: string | null;
+          };
+        }>;
+      };
       refundLineItems: {
         pageInfo?: {
           hasNextPage?: boolean | null;
@@ -772,11 +797,24 @@ function normalizeCanonicalRefundSnapshot(value: unknown): CanonicalShopifyRefun
   return {
     ...refund,
     sourceShopifyRefundId: refund.sourceShopifyRefundId ?? extractShopifyGidTail(refund.refundGid) ?? refund.refundGid,
+    updatedAt: refund.updatedAt ?? null,
+    totalRefundedAmount: refund.totalRefundedAmount ?? null,
+    totalRefundedCurrencyCode: refund.totalRefundedCurrencyCode ?? null,
+    transactionPaginationComplete: refund.transactionPaginationComplete === true,
+    lineItemPaginationComplete: refund.lineItemPaginationComplete === true,
+    transactions: Array.isArray(refund.transactions) ? refund.transactions : [],
     refundLineItems: Array.isArray(refund.refundLineItems) ? refund.refundLineItems : [],
   };
 }
 
-function parseMockCanonicalRefundsByOrderId(rawValue: string | undefined): Record<string, CanonicalShopifyRefundSnapshot[]> {
+type MockCanonicalRefundCollection = {
+  orderTotalRefundedAmount: string | null;
+  orderTotalRefundedCurrencyCode: string | null;
+  refundsListComplete: boolean;
+  refunds: CanonicalShopifyRefundSnapshot[];
+};
+
+function parseMockCanonicalRefundsByOrderId(rawValue: string | undefined): Record<string, MockCanonicalRefundCollection> {
   if (!rawValue) {
     return {};
   }
@@ -786,11 +824,19 @@ function parseMockCanonicalRefundsByOrderId(rawValue: string | undefined): Recor
     throw new Error('SHOPIFY_MOCK_CANONICAL_REFUNDS must be a JSON object keyed by Shopify order id.');
   }
 
-  return Object.entries(parsed).reduce<Record<string, CanonicalShopifyRefundSnapshot[]>>((acc, [orderId, value]) => {
-    const values = Array.isArray(value) ? value : [];
-    acc[orderId] = values
+  return Object.entries(parsed).reduce<Record<string, MockCanonicalRefundCollection>>((acc, [orderId, value]) => {
+    const collection = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Partial<MockCanonicalRefundCollection>
+      : null;
+    const values = Array.isArray(value) ? value : Array.isArray(collection?.refunds) ? collection.refunds : [];
+    acc[orderId] = {
+      orderTotalRefundedAmount: collection?.orderTotalRefundedAmount ?? null,
+      orderTotalRefundedCurrencyCode: collection?.orderTotalRefundedCurrencyCode ?? null,
+      refundsListComplete: collection?.refundsListComplete === true,
+      refunds: values
       .map(normalizeCanonicalRefundSnapshot)
-      .filter((refund): refund is CanonicalShopifyRefundSnapshot => Boolean(refund));
+      .filter((refund): refund is CanonicalShopifyRefundSnapshot => Boolean(refund)),
+    };
     return acc;
   }, {});
 }
@@ -1820,12 +1866,12 @@ export function createShopifyAdminService(env: AppEnv) {
   }
 
   async function fetchCanonicalRefundsForOrder(orderId: string): Promise<FetchCanonicalShopifyRefundsForOrderResult> {
-    const mockRefunds = mockCanonicalRefundsByOrderId[orderId];
-    if (mockRefunds) {
+    const mockRefundCollection = mockCanonicalRefundsByOrderId[orderId];
+    if (mockRefundCollection) {
       return {
         orderGid: toShopifyOrderGid(orderId),
         sourceShopifyOrderId: orderId,
-        refunds: mockRefunds,
+        ...mockRefundCollection,
         source: 'mock',
       };
     }
@@ -1848,11 +1894,59 @@ export function createShopifyAdminService(env: AppEnv) {
               order(id: $orderId) {
                 id
                 legacyResourceId
-                refunds(first: 50) {
+                totalRefundedSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                  presentmentMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                refunds(first: 250) {
                   id
                   createdAt
+                  updatedAt
                   note
-                  refundLineItems(first: 100) {
+                  totalRefundedSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                    presentmentMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  transactions(first: 250) {
+                    pageInfo {
+                      hasNextPage
+                    }
+                    edges {
+                      node {
+                        id
+                        kind
+                        status
+                        amountSet {
+                          shopMoney {
+                            amount
+                            currencyCode
+                          }
+                          presentmentMoney {
+                            amount
+                            currencyCode
+                          }
+                        }
+                        parentTransaction {
+                          id
+                        }
+                        createdAt
+                        processedAt
+                      }
+                    }
+                  }
+                  refundLineItems(first: 250) {
                     pageInfo {
                       hasNextPage
                     }
@@ -1913,26 +2007,46 @@ export function createShopifyAdminService(env: AppEnv) {
     }
 
     const malformedRefund = order.refunds.find((refund) =>
-      !refund?.id || !refund.refundLineItems || !Array.isArray(refund.refundLineItems.edges)
+      !refund?.id ||
+      !refund.transactions ||
+      !Array.isArray(refund.transactions.edges) ||
+      !refund.refundLineItems ||
+      !Array.isArray(refund.refundLineItems.edges)
     );
     if (malformedRefund) {
       throw new CanonicalShopifySnapshotParseError('Shopify canonical refund record was malformed.');
     }
-    const paginatedRefund = order.refunds.find((refund) => refund.refundLineItems.pageInfo?.hasNextPage);
-    if (paginatedRefund) {
-      throw new Error(`Shopify canonical refund ${paginatedRefund.id} line item pagination incomplete.`);
-    }
-
     return {
       orderGid: order.id,
       sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
+      orderTotalRefundedAmount: readMoneyAmount(order.totalRefundedSet ?? null),
+      orderTotalRefundedCurrencyCode: order.totalRefundedSet?.shopMoney?.currencyCode ?? null,
+      refundsListComplete: order.refunds.length < 250,
       source: 'shopify_admin',
       refunds: order.refunds.map((refund) => {
         return {
           refundGid: refund.id,
           sourceShopifyRefundId: extractShopifyGidTail(refund.id) ?? refund.id,
           createdAt: refund.createdAt ?? null,
+          updatedAt: refund.updatedAt ?? null,
           note: normalizeShopifyString(refund.note),
+          totalRefundedAmount: readMoneyAmount(refund.totalRefundedSet ?? null),
+          totalRefundedCurrencyCode: refund.totalRefundedSet?.shopMoney?.currencyCode ?? null,
+          transactionPaginationComplete: refund.transactions.pageInfo?.hasNextPage !== true,
+          lineItemPaginationComplete: refund.refundLineItems.pageInfo?.hasNextPage !== true,
+          transactions: (refund.transactions.edges ?? []).map((transactionEdge) => {
+            const transaction = transactionEdge.node;
+            return {
+              transactionGid: transaction.id,
+              kind: normalizeShopifyString(transaction.kind),
+              status: normalizeShopifyString(transaction.status),
+              amount: readMoneyAmount(transaction.amountSet ?? null),
+              currencyCode: transaction.amountSet?.shopMoney?.currencyCode ?? null,
+              parentTransactionGid: transaction.parentTransaction?.id ?? null,
+              createdAt: transaction.createdAt ?? null,
+              processedAt: transaction.processedAt ?? null,
+            };
+          }),
           refundLineItems: (refund.refundLineItems.edges ?? []).map((lineItemEdge) => {
             const lineItem = lineItemEdge.node;
             return {

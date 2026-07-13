@@ -145,6 +145,16 @@ Initial production launch assumption:
 
 No `AllocationStatus.CANCELLED`, missed-order repair, or broad finance redesign is part of this safety correction.
 
+### Canonical Refund Monetary-Evidence Gate
+
+Shopify refund finance starts only after canonical Admin GraphQL evidence proves a unique positive `REFUND / SUCCESS` transaction in shop currency and its exact total agrees at refund and order scope.
+
+- Zero-value successful `VOID` activity is non-monetary and creates no refund ledger, FinanceEvents, adjustment, or vendor debt.
+- Non-final, incomplete, malformed, duplicate-conflicting, currency-mismatched, or amount-mismatched evidence is blocked for review with no finance mutation.
+- Refund line-item subtotals remain ownership/quantity allocation evidence and are not standalone proof of refunded money.
+- Existing positive-refund commission, payable reversal, adjustment, and vendor-debt formulas remain unchanged after verification.
+- Settlement, payout, Mark Paid, and full-order cancellation policies are unchanged by FIN-VOID-1.
+
 ## Manual EFT Payment Lifecycle
 
 The approved production launch model uses manual EFT outside the application.

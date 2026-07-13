@@ -25,7 +25,23 @@ function refundNode(id: string, lineItemId: string, sku: string) {
   return {
     id: `gid://shopify/Refund/${id}`,
     createdAt: '2026-07-06T08:39:10Z',
+    updatedAt: '2026-07-06T08:39:11Z',
     note: null,
+    totalRefundedSet: { shopMoney: { amount: '100.00', currencyCode: 'TRY' } },
+    transactions: {
+      pageInfo: { hasNextPage: false },
+      edges: [{
+        node: {
+          id: `gid://shopify/OrderTransaction/${id}`,
+          kind: 'REFUND',
+          status: 'SUCCESS',
+          amountSet: { shopMoney: { amount: '100.00', currencyCode: 'TRY' } },
+          parentTransaction: { id: 'gid://shopify/OrderTransaction/parent' },
+          createdAt: '2026-07-06T08:39:10Z',
+          processedAt: '2026-07-06T08:39:11Z',
+        },
+      }],
+    },
     refundLineItems: {
       pageInfo: { hasNextPage: false },
       edges: [
@@ -73,6 +89,7 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
         order: {
           id: 'gid://shopify/Order/7856043819345',
           legacyResourceId: '7856043819345',
+          totalRefundedSet: { shopMoney: { amount: '100.00', currencyCode: 'TRY' } },
           refunds: [refundNode('1083708080465', '20754005197137', 'HJ5228-001-46')],
         },
       },
@@ -81,8 +98,10 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
     const result = await createShopifyAdminService(env).fetchCanonicalRefundsForOrder('7856043819345');
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { query: string };
 
-    expect(request.query).not.toMatch(/refunds\(first:\s*50\)\s*\{\s*pageInfo/);
-    expect(request.query).not.toMatch(/refunds\(first:\s*50\)\s*\{\s*edges/);
+    expect(request.query).toContain('refunds(first: 250)');
+    expect(request.query).toContain('transactions(first: 250)');
+    expect(request.query).toContain('refundLineItems(first: 250)');
+    expect(request.query).toContain('totalRefundedSet');
     expect(result?.refunds).toHaveLength(1);
     expect(result?.refunds[0].sourceShopifyRefundId).toBe('1083708080465');
   });
@@ -93,6 +112,7 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
         order: {
           id: 'gid://shopify/Order/7856043819345',
           legacyResourceId: '7856043819345',
+          totalRefundedSet: { shopMoney: { amount: '200.00', currencyCode: 'TRY' } },
           refunds: [
             refundNode('1083708080465', '20754005197137', 'HJ5228-001-46'),
             refundNode('1083708080466', '20754005229905', 'HJ5228-300-46'),
@@ -119,6 +139,7 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
         order: {
           id: 'gid://shopify/Order/7856043819345',
           legacyResourceId: '7856043819345',
+          totalRefundedSet: { shopMoney: { amount: '0.00', currencyCode: 'TRY' } },
           refunds: [],
         },
       },
@@ -126,6 +147,24 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
 
     await expect(createShopifyAdminService(env).fetchCanonicalRefundsForOrder('7856043819345'))
       .resolves.toMatchObject({ refunds: [] });
+  });
+
+  it('marks an exactly 250-refund response incomplete', async () => {
+    const refunds = Array.from({ length: 250 }, (_, index) =>
+      refundNode(String(10_000 + index), String(20_000 + index), `SKU-${index}`));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
+      data: {
+        order: {
+          id: 'gid://shopify/Order/7856043819345',
+          legacyResourceId: '7856043819345',
+          totalRefundedSet: { shopMoney: { amount: '25000.00', currencyCode: 'TRY' } },
+          refunds,
+        },
+      },
+    }));
+
+    await expect(createShopifyAdminService(env).fetchCanonicalRefundsForOrder('7856043819345'))
+      .resolves.toMatchObject({ refundsListComplete: false, refunds: { length: 250 } });
   });
 
   it('does not request Return.legacyResourceId and derives stable return identity from GraphQL ID', async () => {
@@ -248,6 +287,9 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
       fetchCanonicalRefundsForOrder: vi.fn(async () => ({
         orderGid: 'gid://shopify/Order/7856043819345',
         sourceShopifyOrderId: '7856043819345',
+        orderTotalRefundedAmount: '0.00',
+        orderTotalRefundedCurrencyCode: 'TRY',
+        refundsListComplete: true,
         refunds: [],
         source: 'mock' as const,
       })),

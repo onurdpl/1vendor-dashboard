@@ -6,7 +6,13 @@ import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '..
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
 import { ingestShopifyOrderWebhook } from '../shopify/order-ingestion.service.js';
-import { ingestShopifyRefundWebhook } from '../shopify/refund-ingestion.service.js';
+import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  findCanonicalRefundItemEvidence,
+  isRefundEvidenceBlocked,
+  REFUND_MONETARY_CLASSIFICATIONS,
+} from '../shopify/shopify-refund-monetary-evidence.js';
 import {
   applyReturnLifecycleStatusWebhook,
   ingestReturnRequestWebhook,
@@ -2685,6 +2691,17 @@ async function markWebhookFailed(eventId: string, message: string) {
   });
 }
 
+async function markWebhookProcessed(eventId: string) {
+  await prisma.webhookEvent.update({
+    where: { id: eventId },
+    data: {
+      status: 'PROCESSED',
+      processedAt: new Date(),
+      errorMessage: null,
+    },
+  });
+}
+
 async function processWebhookEvent(
   env: AppEnv,
   event: WebhookEvent,
@@ -2773,9 +2790,86 @@ async function processWebhookEvent(
   }
 
   if (event.topic === 'refunds/create') {
-    const ingestionResult = await ingestShopifyRefundWebhook({
+    const typedPayload = payload as ShopifyRefundsCreateWebhookPayload;
+    const sourceShopifyOrderId = typedPayload.order_id !== undefined && typedPayload.order_id !== null
+      ? String(typedPayload.order_id)
+      : '';
+    const sourceShopifyRefundId = typedPayload.id !== undefined && typedPayload.id !== null
+      ? String(typedPayload.id)
+      : '';
+    if (!sourceShopifyOrderId || !sourceShopifyRefundId) {
+      const message = 'Stored refunds/create payload did not include an order and refund id.';
+      await markWebhookFailed(event.id, message);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+      };
+    }
+
+    let canonicalRefunds;
+    try {
+      canonicalRefunds = await createShopifyAdminService(env).fetchCanonicalRefundsForOrder(sourceShopifyOrderId);
+    } catch {
+      canonicalRefunds = null;
+    }
+    if (!canonicalRefunds || canonicalRefunds.refunds.length === 0) {
+      const message = 'Canonical Shopify refund verification is unavailable.';
+      await markWebhookFailed(event.id, message);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+      };
+    }
+    const monetaryEvidence = classifyCanonicalRefundMonetaryEvidence(canonicalRefunds);
+    const refundEvidence = findCanonicalRefundItemEvidence(monetaryEvidence, sourceShopifyRefundId);
+    if (isRefundEvidenceBlocked(monetaryEvidence) || !refundEvidence) {
+      const message = `Canonical Shopify refund verification blocked: ${monetaryEvidence.reasonCode}.`;
+      await markWebhookFailed(event.id, message);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        reasonCode: monetaryEvidence.reasonCode,
+        message,
+      };
+    }
+    if (refundEvidence.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+      await markWebhookProcessed(event.id);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'accepted',
+        processingStatus: 'processed',
+        shopifyOrderId: sourceShopifyOrderId,
+        refundAllocationCount: 0,
+        refundClassification: refundEvidence.classification,
+        reasonCode: refundEvidence.reasonCode,
+      };
+    }
+    if (refundEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
+      const message = `Canonical Shopify refund verification blocked: ${refundEvidence.reasonCode}.`;
+      await markWebhookFailed(event.id, message);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        reasonCode: refundEvidence.reasonCode,
+        message,
+      };
+    }
+
+    const ingestionResult = await ingestVerifiedShopifyRefund({
       event,
-      payload: payload as ShopifyRefundsCreateWebhookPayload,
+      payload: typedPayload,
+      monetaryEvidence: refundEvidence,
     });
 
     return ingestionResult.ok
@@ -2885,6 +2979,10 @@ async function processWebhookEvent(
     message: `Replay/recover is not supported for topic ${event.topic}.`,
   };
 }
+
+export const __diagnosticsWebhookProcessingTesting = {
+  processWebhookEvent,
+};
 
 async function getWebhookStatus(webhookEventId: string) {
   const event = await prisma.webhookEvent.findUnique({

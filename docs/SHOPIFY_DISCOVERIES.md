@@ -157,6 +157,17 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - `refunds/create` fires when money refund is created, not when a customer initially opens a return request.
 - Vendor and admin operational flows should eventually show earlier pending return request visibility before refund creation.
 
+### Admin GraphQL 2026-01 Monetary Refund Evidence
+
+- A Shopify `Refund` object or refund line-item subtotal does not by itself prove that money was refunded.
+- Monetary refund ingestion requires canonical Admin GraphQL evidence from `Order.totalRefundedSet`, each `Refund.totalRefundedSet`, and unique `Refund.transactions` rows where `kind = REFUND`, `status = SUCCESS`, and `shopMoney.amount > 0`.
+- Exact transaction totals must agree with each refund total and the order total in one shop currency. Refund line-item subtotals remain allocation and quantity evidence only.
+- A successful zero-value `VOID` with zero refund and order aggregates is classified `ZERO_VALUE_VOID`; it creates no refund, refund-derived return, refund ledger/event, adjustment, or vendor debt.
+- `PENDING`, `FAILURE`, `ERROR`, `AWAITING_RESPONSE`, or unknown refund transaction states are non-final and create no finance mutation.
+- Canonical refund reads request at most 250 refunds, transactions, and refund line items. Exactly 250 refunds, `hasNextPage` on either connection, malformed money, duplicate transaction conflicts, currency mismatch, or aggregate mismatch fail closed for review.
+- Live `refunds/create`, stored replay/recovery, canonical reconciliation, and Current-State Repair all use this shared canonical monetary-evidence gate before existing positive-refund ingestion.
+- FIN-VOID-1 prevents future false refund evidence. It does not correct the existing `#1105` production refund/return/ledger records; those remain a separate controlled correction. `#1106` is not repaired by this phase.
+
 ### Return Lifecycle Webhook Topics
 - Confirmed return lifecycle topics to support:
   - `RETURNS_REQUEST` (fires first when customer starts self-serve return request)
@@ -469,15 +480,15 @@ POST /fulfillments.json
 - SHOP-REPAIR-1 provides the separate admin-only missed-order recovery path. It fetches the current canonical Shopify order, refund, and return state and does not replay historical webhook payloads.
 - Current-state repair is dry-run by default, accepts one explicit Shopify order ID or number, and requires `execute: true` before mutation.
 - The admin Recovery Center is the operator entry point: inspect the explicit order first, use Repair Missing Shopify Order only for missing local commerce state, review the dry-run plan, then confirm execution separately.
-- Replay Stored Webhook is limited to failed `refunds/create` events with retained payload because refund ingestion is identity-based and idempotent. Stateful order and fulfillment payloads may be stale and are not safe replay candidates.
-- Recover Failed Webhook is limited to retained `FAILED` or stuck `RECEIVED` events. It resumes stored-payload processing and does not fetch current Shopify state.
+- Replay Stored Webhook is limited to failed `refunds/create` events with retained payload because refund ingestion is identity-based and idempotent. Before finance mutation, the refund path fetches current canonical monetary evidence; stateful order and fulfillment payloads remain unsafe replay candidates.
+- Recover Failed Webhook is limited to retained `FAILED` or stuck `RECEIVED` events. It resumes stored-payload processing; for `refunds/create`, current canonical monetary evidence is fetched before the retained payload may reach refund ingestion.
 - Missing orders rejected before `WebhookEvent` persistence or never delivered must use current-state repair; replay and recover cannot reconstruct them.
 - Executed repair creates missing order/allocation/finance evidence and applies refund, return, and full-order cancellation lifecycles inside one transaction. Failure rolls back repair data and records a safe failed reconciliation job/signal.
 - Current-state repair must be used instead of Fresh Order Backfill when a missed order is now cancelled, refunded, or returned.
 - Repair history contains only safe source, timestamp, actor, mode, status, and error-summary metadata. Raw Shopify payloads are not retained by the repair path.
 - SHOP-REPAIR-1B aligns canonical recovery reads with Admin GraphQL API `2026-01`: `Order.refunds` is read as a direct refund list, each refund keeps its `refundLineItems` connection, and `Order.returns` remains a connection whose stable return identity comes from the Shopify GraphQL ID rather than unsupported `Return.legacyResourceId`.
 - Canonical repair fetch failures are classified safely as order, refund, return, or response-parse failures without returning GraphQL headers, tokens, or raw payloads.
-- The first production dry-run for `#1105` failed during the previous incompatible refund/return queries and performed no mutation. `#1105` and `#1106` remain unrepaired until a new dry-run completes successfully and is reviewed.
+- FIN-VOID-1 does not rewrite existing `#1105` false monetary-refund evidence; that production correction remains separately controlled. `#1106` remains outside this phase.
 - Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
 
 ## Customer Notifications

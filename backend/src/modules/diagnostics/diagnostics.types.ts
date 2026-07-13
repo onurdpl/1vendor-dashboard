@@ -137,6 +137,8 @@ export type WebhookReplayResponse = {
   shopifyOrderId?: string;
   allocationCount?: number;
   refundAllocationCount?: number;
+  refundClassification?: string;
+  reasonCode?: string;
   affectedAllocationCount?: number;
   skippedReason?: string;
   errorSummary?: string | null;

@@ -21,6 +21,11 @@ const shopifyAdminMock = vi.hoisted(() => ({
   fetchOrderLineItemImages: vi.fn(),
   fetchOrderTaxSnapshot: vi.fn(),
   fetchCanonicalOrderSnapshot: vi.fn(),
+  fetchCanonicalRefundsForOrder: vi.fn(),
+}));
+
+const refundIngestionMock = vi.hoisted(() => ({
+  ingestVerifiedShopifyRefund: vi.fn(),
 }));
 
 const cancellationReconciliationMock = vi.hoisted(() => ({
@@ -53,6 +58,8 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 vi.mock('../backend/src/modules/shopify/webhook-idempotency.service.js', () => webhookIdempotencyMock);
 
 vi.mock('../backend/src/modules/shopify/order-ingestion.service.js', () => orderIngestionMock);
+
+vi.mock('../backend/src/modules/shopify/refund-ingestion.service.js', () => refundIngestionMock);
 
 vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
   createShopifyAdminService: vi.fn(() => shopifyAdminMock),
@@ -156,6 +163,51 @@ function canonicalOrder(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function canonicalRefunds(kind: 'REFUND' | 'VOID', amount: string) {
+  return {
+    orderGid: 'gid://shopify/Order/1105',
+    sourceShopifyOrderId: '1105',
+    orderTotalRefundedAmount: amount,
+    orderTotalRefundedCurrencyCode: 'TRY',
+    refundsListComplete: true,
+    source: 'shopify_admin',
+    refunds: [{
+      refundGid: 'gid://shopify/Refund/5001',
+      sourceShopifyRefundId: '5001',
+      createdAt: '2026-07-11T18:00:00.000Z',
+      updatedAt: '2026-07-11T18:00:01.000Z',
+      note: null,
+      totalRefundedAmount: amount,
+      totalRefundedCurrencyCode: 'TRY',
+      transactionPaginationComplete: true,
+      lineItemPaginationComplete: true,
+      transactions: [{
+        transactionGid: 'gid://shopify/OrderTransaction/5001',
+        kind,
+        status: 'SUCCESS',
+        amount,
+        currencyCode: 'TRY',
+        parentTransactionGid: 'gid://shopify/OrderTransaction/parent-5001',
+        createdAt: '2026-07-11T18:00:00.000Z',
+        processedAt: '2026-07-11T18:00:01.000Z',
+      }],
+      refundLineItems: [{
+        refundLineItemGid: 'gid://shopify/RefundLineItem/6001',
+        sourceRefundLineItemId: '6001',
+        lineItemGid: 'gid://shopify/LineItem/7001',
+        sourceLineItemId: '7001',
+        sku: 'SKU-1',
+        title: 'Product',
+        name: 'Product',
+        variantTitle: null,
+        quantity: 1,
+        subtotalAmount: kind === 'VOID' ? '4799.00' : amount,
+        currencyCode: 'TRY',
+      }],
+    }],
+  };
+}
+
 describe('Shopify orders/cancelled webhook bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,6 +225,14 @@ describe('Shopify orders/cancelled webhook bridge', () => {
       id: 'operational-job-cancelled',
     });
     shopifyAdminMock.fetchCanonicalOrderSnapshot.mockResolvedValue(canonicalOrder());
+    shopifyAdminMock.fetchCanonicalRefundsForOrder.mockResolvedValue(canonicalRefunds('REFUND', '100.00'));
+    refundIngestionMock.ingestVerifiedShopifyRefund.mockResolvedValue({
+      ok: true,
+      action: 'accepted',
+      processingStatus: 'processed',
+      shopifyOrderId: '1105',
+      refundAllocationCount: 1,
+    });
     cancellationReconciliationMock.reconcileShopifyOrderCancellation.mockResolvedValue({
       shopifyOrderId: '1104',
       cancellationState: 'full_order_cancelled',
@@ -457,6 +517,79 @@ describe('Shopify orders/cancelled webhook bridge', () => {
       body: {
         topic: 'fulfillment_orders/cancelled',
         action: 'fulfilled_synced',
+      },
+    });
+  });
+
+  it('verifies a positive refunds/create event against canonical transaction evidence', async () => {
+    const { routes } = registerRoutes();
+    const handler = routes.get('/webhooks/shopify/refunds-create');
+    const payload = {
+      id: 5001,
+      order_id: 1105,
+      refund_line_items: [{ id: 6001, quantity: 1, subtotal: '100.00' }],
+    };
+
+    const result = await handler?.(buildWebhookRequest({
+      topic: 'refunds/create',
+      payload,
+    }), buildReply());
+
+    expect(shopifyAdminMock.fetchCanonicalRefundsForOrder).toHaveBeenCalledWith('1105');
+    expect(refundIngestionMock.ingestVerifiedShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      payload,
+      monetaryEvidence: expect.objectContaining({
+        classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: '100',
+      }),
+    }));
+    expect(result).toMatchObject({
+      status: 202,
+      body: { action: 'accepted', processingStatus: 'processed', refundAllocationCount: 1 },
+    });
+  });
+
+  it('processes a zero-value void without invoking refund ingestion', async () => {
+    shopifyAdminMock.fetchCanonicalRefundsForOrder.mockResolvedValueOnce(canonicalRefunds('VOID', '0.00'));
+    const { routes } = registerRoutes();
+    const handler = routes.get('/webhooks/shopify/refunds-create');
+
+    const result = await handler?.(buildWebhookRequest({
+      topic: 'refunds/create',
+      payload: { id: 5001, order_id: 1105, refund_line_items: [] },
+    }), buildReply());
+
+    expect(refundIngestionMock.ingestVerifiedShopifyRefund).not.toHaveBeenCalled();
+    expect(operationalJobsMock.markOperationalJobCompleted).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 202,
+      body: {
+        processingStatus: 'processed',
+        refundAllocationCount: 0,
+        refundClassification: 'ZERO_VALUE_VOID',
+        reasonCode: 'zero_value_void_not_monetary_refund',
+      },
+    });
+  });
+
+  it('fails closed when canonical refund verification is unavailable', async () => {
+    shopifyAdminMock.fetchCanonicalRefundsForOrder.mockRejectedValueOnce(new Error('upstream detail'));
+    const { routes } = registerRoutes();
+    const handler = routes.get('/webhooks/shopify/refunds-create');
+
+    const result = await handler?.(buildWebhookRequest({
+      topic: 'refunds/create',
+      payload: { id: 5001, order_id: 1105, refund_line_items: [] },
+    }), buildReply());
+
+    expect(refundIngestionMock.ingestVerifiedShopifyRefund).not.toHaveBeenCalled();
+    expect(operationalJobsMock.markOperationalJobFailed).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 202,
+      body: {
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message: 'Canonical Shopify refund evidence is unavailable.',
       },
     });
   });

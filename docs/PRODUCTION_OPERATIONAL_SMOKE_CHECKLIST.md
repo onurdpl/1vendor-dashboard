@@ -55,10 +55,16 @@
 
 ## Refund Ingest
 - Trigger or identify a Shopify `REFUNDS_CREATE` delivery.
+- Confirm a positive full refund has unique `REFUND / SUCCESS` transaction totals matching each refund and `Order.totalRefundedSet`, then creates existing refund finance once.
+- Confirm a positive partial refund uses the verified transaction amount as monetary proof while preserving existing line-item allocation behavior.
+- Confirm a zero-value successful `VOID` with zero refund/order totals is reported as `ZERO_VALUE_VOID` and creates no refund, refund-derived return, ledger/events, adjustment, or vendor debt.
+- Confirm a zero-value `VOID` plus a valid positive refund processes only the positive refund without double counting.
+- Confirm non-final transactions, amount mismatch, currency mismatch, incomplete transaction/line-item pages, exactly 250 refunds, malformed evidence, and canonical verification failure create no finance mutation and remain retry/review candidates.
 - Confirm refund ingestion uses original persisted order allocation snapshots.
 - Confirm refund line items map by `refund_line_items[].line_item.sku`.
 - Confirm vendor return/refund records and finance ledger rows are created only for affected vendor allocations.
 - Confirm duplicate refund delivery is ignored through webhook idempotency.
+- Confirm repeated canonical reconciliation, replay/recovery, and Current-State Repair do not duplicate valid positive-refund records or finance evidence.
 
 ## Full Order Cancellation
 - Trigger or identify a Shopify `ORDERS_CANCELLED` delivery.
@@ -105,8 +111,8 @@
 - Confirm Safe Replay Candidates include only `FAILED` `refunds/create` events with retained raw payload and payload hash.
 - Confirm processed `orders/create`, processed `orders/cancelled`, and stateful order/fulfillment topics cannot use Replay Stored Webhook.
 - Confirm recover is available only for `RECEIVED` or `FAILED` events with retained payload.
-- Confirm Replay Stored Webhook requires confirmation stating that historical payload is replayed and current Shopify state is not fetched.
-- Confirm Recover Failed Webhook requires confirmation stating that stored webhook processing resumes and current Shopify state is not fetched.
+- Confirm Replay Stored Webhook warns that the retained historical payload is replayed; for `refunds/create`, confirm canonical monetary evidence is fetched before finance mutation.
+- Confirm Recover Failed Webhook warns that stored processing resumes; for `refunds/create`, confirm canonical monetary evidence is fetched before finance mutation.
 - Confirm vendor users receive `403` for diagnostics routes.
 - Confirm blocked replay/recover returns an explicit reason instead of silent success.
 
@@ -122,10 +128,10 @@
 ## Current-State Order Repair
 - Use only one explicitly approved Shopify order ID or number. Do not use a range, date window, or bulk input.
 - In the Recovery Center `Order number` field, enter the Shopify order number as `1105` or `#1105`; the UI sends `#1105` to the repair API. Use a numeric Shopify legacy ID only through the explicit backend/API contract.
-- Confirm production uses stable Shopify Admin GraphQL API `2026-01`; canonical refunds must parse from the direct `Order.refunds` list and canonical returns must use Shopify GraphQL IDs without requesting `Return.legacyResourceId`.
+- Confirm production uses stable Shopify Admin GraphQL API `2026-01`; canonical refunds must parse totals, transactions, and pagination completeness from the direct `Order.refunds` list, and canonical returns must use Shopify GraphQL IDs without requesting `Return.legacyResourceId`.
 - From the missing-order inspector result, choose Repair Missing Shopify Order and confirm the first request omits execution (`execute: false`) and returns `dryRun: true`, `executed: false`.
 - Confirm dry-run creates no local order, allocation, ledger, refund, return, job, or operational signal.
-- Review canonical identity, expected vendors, `Created`/`Existing` summary, cancellation/refund/return flags, warnings, and skipped state.
+- Review canonical identity, expected vendors, `Created`/`Existing` summary, cancellation/refund/return flags, monetary classification/counts/completeness, warnings, execution blocking, and skipped state.
 - Confirm missing `seller_info`, missing/unknown SKU mapping, unknown vendor, missing active finance profile, or incomplete canonical evidence fails before mutation.
 - Confirm Execute Repair is unavailable until dry-run results are visible.
 - Only after review, open the separate confirmation and repeat the same explicit order with `execute: true`.
@@ -136,7 +142,7 @@
 - Confirm a forced lifecycle failure rolls back all repair commerce/finance records while retaining only the safe failed job/signal evidence.
 - Confirm the Order State Inspector shows repair source, timestamp, executed mode, actor, and status without raw Shopify payload or secrets.
 - Treat `canonical_order_fetch_failed`, `canonical_refund_fetch_failed`, `canonical_return_fetch_failed`, and `canonical_snapshot_parse_failed` as blockers; do not proceed to execute until dry-run succeeds.
-- The pre-SHOP-REPAIR-1B `#1105` dry-run failed before mutation. Confirm `#1105` and `#1106` remain unrepaired until each receives its own successful reviewed dry-run.
+- FIN-VOID-1 does not correct existing `#1105` production refund/return/ledger evidence and does not repair `#1106`; keep any production correction as a separate controlled action.
 
 ## Reconciliation Action
 - As admin, open reconciliation diagnostics.

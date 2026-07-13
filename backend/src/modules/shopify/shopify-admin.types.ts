@@ -215,17 +215,37 @@ export type CanonicalShopifyRefundLineItemSnapshot = {
   currencyCode: string | null;
 };
 
+export type CanonicalShopifyRefundTransactionSnapshot = {
+  transactionGid: string;
+  kind: string | null;
+  status: string | null;
+  amount: string | null;
+  currencyCode: string | null;
+  parentTransactionGid: string | null;
+  createdAt: string | null;
+  processedAt: string | null;
+};
+
 export type CanonicalShopifyRefundSnapshot = {
   refundGid: string;
   sourceShopifyRefundId: string;
   createdAt: string | null;
+  updatedAt: string | null;
   note: string | null;
+  totalRefundedAmount: string | null;
+  totalRefundedCurrencyCode: string | null;
+  transactionPaginationComplete: boolean;
+  lineItemPaginationComplete: boolean;
+  transactions: CanonicalShopifyRefundTransactionSnapshot[];
   refundLineItems: CanonicalShopifyRefundLineItemSnapshot[];
 };
 
 export type FetchCanonicalShopifyRefundsForOrderResult = {
   orderGid: string;
   sourceShopifyOrderId: string;
+  orderTotalRefundedAmount: string | null;
+  orderTotalRefundedCurrencyCode: string | null;
+  refundsListComplete: boolean;
   refunds: CanonicalShopifyRefundSnapshot[];
   source: 'mock' | 'shopify_admin';
 } | null;

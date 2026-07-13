@@ -178,7 +178,12 @@ function buildEnv(input: {
       },
     }),
     SHOPIFY_MOCK_CANONICAL_REFUNDS: JSON.stringify({
-      'order-1': input.refunds ?? [],
+      'order-1': {
+        orderTotalRefundedAmount: input.refunds?.length ? '100.00' : '0.00',
+        orderTotalRefundedCurrencyCode: 'TRY',
+        refundsListComplete: true,
+        refunds: input.refunds ?? [],
+      },
     }),
     SHOPIFY_MOCK_CANONICAL_RETURNS: JSON.stringify({
       'order-1': input.returns ?? [],
@@ -270,7 +275,24 @@ describe('canonical reconciliation runner', () => {
           refundGid: 'gid://shopify/Refund/5001',
           sourceShopifyRefundId: '5001',
           createdAt: '2026-06-26T10:00:00.000Z',
+          updatedAt: '2026-06-26T10:00:01.000Z',
           note: null,
+          totalRefundedAmount: '100.00',
+          totalRefundedCurrencyCode: 'TRY',
+          transactionPaginationComplete: true,
+          lineItemPaginationComplete: true,
+          transactions: [
+            {
+              transactionGid: 'gid://shopify/OrderTransaction/5001',
+              kind: 'REFUND',
+              status: 'SUCCESS',
+              amount: '100.00',
+              currencyCode: 'TRY',
+              parentTransactionGid: 'gid://shopify/OrderTransaction/parent-5001',
+              createdAt: '2026-06-26T10:00:00.000Z',
+              processedAt: '2026-06-26T10:00:01.000Z',
+            },
+          ],
           refundLineItems: [],
         },
       ],

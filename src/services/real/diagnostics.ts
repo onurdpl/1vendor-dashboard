@@ -253,6 +253,8 @@ export type ReplayWebhookResponse = {
   shopifyOrderId?: string;
   allocationCount?: number;
   refundAllocationCount?: number;
+  refundClassification?: string;
+  reasonCode?: string;
   affectedRecordCount?: number;
   affectedAllocationCount?: number;
   skippedReason?: string;
@@ -280,6 +282,28 @@ export type CurrentStateOrderRepairResult = {
     cancellationApplied: boolean;
     refundApplied: boolean;
     returnApplied: boolean;
+    refundEvidence: {
+      classification: 'MONETARY_REFUND' | 'ZERO_VALUE_VOID' | 'NON_FINAL_REFUND' | 'UNSUPPORTED_OR_AMBIGUOUS';
+      monetaryRefundAmount: string;
+      currency: string | null;
+      totalTransactionCount: number;
+      uniqueTransactionCount: number;
+      successfulRefundTransactionCount: number;
+      successfulVoidTransactionCount: number;
+      nonFinalTransactionCount: number;
+      duplicateTransactionCount: number;
+      refundAggregateAmount: string | null;
+      orderAggregateAmount: string | null;
+      transactionPaginationComplete: boolean;
+      lineItemPaginationComplete: boolean;
+      refundsListComplete: boolean;
+      aggregateMismatch: boolean;
+      currencyMismatch: boolean;
+      incompletePagination: boolean;
+      reasonCode: string;
+      sanitizedWarnings: string[];
+    } | null;
+    executionBlocked: boolean;
     warnings: string[];
     skipped: boolean;
   };
