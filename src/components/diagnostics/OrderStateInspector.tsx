@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ActionFeedback } from '../ActionFeedback';
 import { useMutationAction } from '../../hooks/useMutationAction';
 import { useQueryResource } from '../../hooks/useQueryResource';
@@ -40,6 +40,11 @@ type OrderStateInspectorProps = {
   onRepairCandidateChange?: (isCandidate: boolean) => void;
 };
 
+type RepairFeedback = {
+  message: string;
+  tone: 'success' | 'error' | 'info';
+};
+
 function plannedAction(value: 'Created' | 'Existing') {
   return value === 'Created' ? 'CREATE' : 'REUSE';
 }
@@ -58,7 +63,9 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
   const [inspectedOrderNumber, setInspectedOrderNumber] = useState('');
   const [dryRunResult, setDryRunResult] = useState<CurrentStateOrderRepairResult | null>(null);
   const [executeConfirmationOpen, setExecuteConfirmationOpen] = useState(false);
-  const [repairFeedback, setRepairFeedback] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null);
+  const [dryRunFeedback, setDryRunFeedback] = useState<RepairFeedback | null>(null);
+  const [executeFeedback, setExecuteFeedback] = useState<RepairFeedback | null>(null);
+  const currentInputOrderNumberRef = useRef('');
   const normalizedOrderNumber = inspectedOrderNumber.trim();
   const inspectorQuery = useQueryResource(
     queryKeys.admin.diagnostics.orderState(normalizedOrderNumber || 'idle'),
@@ -70,28 +77,32 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
     inspectorQuery.diagnostics?.status === 404 || inspectorQuery.error?.trim().toLowerCase() === 'order not found.'
   );
 
-  useEffect(() => {
-    onRepairCandidateChange?.(isMissingLocalOrder);
-  }, [isMissingLocalOrder, onRepairCandidateChange]);
-
-  useEffect(() => {
-    setDryRunResult(null);
-    setExecuteConfirmationOpen(false);
-    setRepairFeedback(null);
-  }, [normalizedOrderNumber]);
-
   const dryRunMutation = useMutationAction(
     async (orderNumber: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(
       normalizeRepairOrderNumber(orderNumber),
       false,
     ),
     {
-      onSuccess: (repairResult) => {
-        setDryRunResult(repairResult);
-        setRepairFeedback({ message: 'Dry run complete. Review the current-state plan before execution.', tone: 'info' });
+      onMutate: () => {
+        setDryRunResult(null);
+        setExecuteConfirmationOpen(false);
+        setDryRunFeedback(null);
+        setExecuteFeedback(null);
       },
-      onError: (error) => {
-        setRepairFeedback({
+      onSuccess: (repairResult, requestedOrderNumber) => {
+        if (normalizeRepairOrderNumber(requestedOrderNumber) !== normalizeRepairOrderNumber(currentInputOrderNumberRef.current)) {
+          return;
+        }
+        setDryRunResult(repairResult);
+        setDryRunFeedback({ message: 'Dry run complete. Review the current-state plan before execution.', tone: 'info' });
+      },
+      onError: (error, requestedOrderNumber) => {
+        if (normalizeRepairOrderNumber(requestedOrderNumber) !== normalizeRepairOrderNumber(currentInputOrderNumberRef.current)) {
+          return;
+        }
+        setDryRunResult(null);
+        setExecuteConfirmationOpen(false);
+        setDryRunFeedback({
           message: error instanceof Error ? error.message : 'Current-state repair dry run failed.',
           tone: 'error',
         });
@@ -105,20 +116,48 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
       true,
     ),
     {
+      onMutate: () => {
+        setExecuteFeedback(null);
+      },
       onSuccess: async () => {
         setExecuteConfirmationOpen(false);
-        setRepairFeedback({ message: 'Current-state repair completed. The inspector is refreshing persisted evidence.', tone: 'success' });
+        setExecuteFeedback({ message: 'Current-state repair completed. The inspector is refreshing persisted evidence.', tone: 'success' });
         await inspectorQuery.refetch();
       },
       onError: (error) => {
         setExecuteConfirmationOpen(false);
-        setRepairFeedback({
+        setExecuteFeedback({
           message: error instanceof Error ? error.message : 'Current-state order repair failed.',
           tone: 'error',
         });
       },
     },
   );
+
+  function clearRepairState() {
+    setDryRunResult(null);
+    setExecuteConfirmationOpen(false);
+    setDryRunFeedback(null);
+    setExecuteFeedback(null);
+    dryRunMutation.reset();
+    executeMutation.reset();
+  }
+
+  useEffect(() => {
+    onRepairCandidateChange?.(isMissingLocalOrder);
+  }, [isMissingLocalOrder, onRepairCandidateChange]);
+
+  useEffect(() => {
+    clearRepairState();
+  }, [normalizedOrderNumber]);
+
+  function handleOrderNumberChange(value: string) {
+    currentInputOrderNumberRef.current = value.trim();
+    setOrderNumber(value);
+    if (value.trim() !== normalizedOrderNumber) {
+      clearRepairState();
+    }
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -128,10 +167,16 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
     }
 
     if (nextOrderNumber === normalizedOrderNumber) {
+      clearRepairState();
       void inspectorQuery.refetch();
       return;
     }
     setInspectedOrderNumber(nextOrderNumber);
+  }
+
+  function handleInspectorRetry() {
+    clearRepairState();
+    void inspectorQuery.refetch();
   }
 
   const result = isMissingLocalOrder ? null : inspectorQuery.data;
@@ -151,7 +196,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
           <input
             id="order-state-inspector-number"
             value={orderNumber}
-            onChange={(event) => setOrderNumber(event.target.value)}
+            onChange={(event) => handleOrderNumberChange(event.target.value)}
             placeholder="1108 or #1108"
             autoComplete="off"
             aria-label="Order number"
@@ -175,11 +220,11 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
         <SectionSkeleton title="Inspecting order state" description="Collecting persisted evidence for the requested order." />
       ) : null}
 
-      {inspectorQuery.isError ? (
+      {inspectorQuery.isError && !isMissingLocalOrder ? (
         <SectionErrorRetry
           title="Order state unavailable"
           description={inspectorQuery.error ?? 'Order state could not be loaded.'}
-          onRetry={() => void inspectorQuery.refetch()}
+          onRetry={handleInspectorRetry}
         />
       ) : null}
 
@@ -200,7 +245,8 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             <span>One explicit Shopify order only. Bulk or range repair is unavailable.</span>
           </div>
 
-          {repairFeedback ? <ActionFeedback tone={repairFeedback.tone} message={repairFeedback.message} /> : null}
+          {dryRunFeedback ? <ActionFeedback tone={dryRunFeedback.tone} message={dryRunFeedback.message} /> : null}
+          {executeFeedback ? <ActionFeedback tone={executeFeedback.tone} message={executeFeedback.message} /> : null}
 
           {dryRunResult?.dryRun ? (
             <div className="current-state-repair-plan" aria-label="Current-state repair dry-run plan">

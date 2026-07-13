@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -306,6 +306,29 @@ function orderStateInspectorResult() {
   };
 }
 
+function currentStateRepairResult(orderIdentifier: string, execute: boolean) {
+  return {
+    ok: true,
+    orderIdentifier,
+    shopifyOrderId: '7856043819345',
+    shopifyOrderNumber: '#1105',
+    repairSource: 'shopify_admin_current_state',
+    repairTimestamp: '2026-07-13T10:00:00.000Z',
+    dryRun: !execute,
+    executed: execute,
+    summary: {
+      shopifyOrder: 'Created',
+      allocation: 'Created',
+      finance: 'Created',
+      cancellationApplied: true,
+      refundApplied: true,
+      returnApplied: false,
+      warnings: [],
+      skipped: false,
+    },
+  } as const;
+}
+
 function renderDiagnosticsPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -353,26 +376,9 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.runtimeHealth.mockReset();
 
     diagnosticsMocks.inspectOrderState.mockResolvedValue(orderStateInspectorResult());
-    diagnosticsMocks.repairMissingShopifyOrder.mockImplementation(async (orderIdentifier: string, execute: boolean) => ({
-      ok: true,
-      orderIdentifier,
-      shopifyOrderId: '7856043819345',
-      shopifyOrderNumber: '#1105',
-      repairSource: 'shopify_admin_current_state',
-      repairTimestamp: '2026-07-13T10:00:00.000Z',
-      dryRun: !execute,
-      executed: execute,
-      summary: {
-        shopifyOrder: 'Created',
-        allocation: 'Created',
-        finance: 'Created',
-        cancellationApplied: true,
-        refundApplied: true,
-        returnApplied: false,
-        warnings: [],
-        skipped: false,
-      },
-    }));
+    diagnosticsMocks.repairMissingShopifyOrder.mockImplementation(async (orderIdentifier: string, execute: boolean) =>
+      currentStateRepairResult(orderIdentifier, execute)
+    );
 
     diagnosticsMocks.webhooks.mockResolvedValue({
       summary: {
@@ -682,6 +688,97 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
   });
 
+  it('replaces a failed repair dry run with the later successful plan', async () => {
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValue(new Error('Order not found.'));
+    diagnosticsMocks.repairMissingShopifyOrder.mockRejectedValueOnce(new Error('Shopify order was not found.'));
+
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+
+    const staleError = await screen.findByText('Shopify order was not found.');
+    expect(staleError).toHaveClass('action-error');
+    expect(screen.queryByText('Order state unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Current-state repair dry-run plan')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Repair Missing Shopify Order' }));
+
+    const plan = await screen.findByLabelText('Current-state repair dry-run plan');
+    expect(screen.getByText('Dry run complete. Review the current-state plan before execution.')).toBeInTheDocument();
+    expect(screen.queryByText('Shopify order was not found.')).not.toBeInTheDocument();
+    expect(within(plan).getByText('#1105')).toBeInTheDocument();
+    expect(within(plan).getByText('7856043819345')).toBeInTheDocument();
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
+  it('clears a successful plan and execute confirmation as soon as the identifier changes', async () => {
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValue(new Error('Order not found.'));
+
+    renderDiagnosticsPage();
+    const orderNumberInput = await screen.findByLabelText('Order number');
+    await userEvent.type(orderNumberInput, '1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+    await screen.findByLabelText('Current-state repair dry-run plan');
+    await userEvent.click(screen.getByRole('button', { name: 'Execute Repair' }));
+    expect(screen.getByRole('dialog', { name: 'Execute Current-State Repair?' })).toBeInTheDocument();
+
+    await userEvent.clear(orderNumberInput);
+    await userEvent.type(orderNumberInput, '1106');
+
+    expect(screen.queryByLabelText('Current-state repair dry-run plan')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Execute Current-State Repair?' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Execute Repair' })).not.toBeInTheDocument();
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
+  it('does not restore a late dry-run result after the identifier changes', async () => {
+    let resolveDryRun: ((result: ReturnType<typeof currentStateRepairResult>) => void) | null = null;
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValue(new Error('Order not found.'));
+    diagnosticsMocks.repairMissingShopifyOrder.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveDryRun = resolve;
+    }));
+
+    renderDiagnosticsPage();
+    const orderNumberInput = await screen.findByLabelText('Order number');
+    await userEvent.type(orderNumberInput, '1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+    expect(await screen.findByRole('button', { name: 'Running Dry Run...' })).toBeDisabled();
+
+    await userEvent.clear(orderNumberInput);
+    await userEvent.type(orderNumberInput, '1106');
+    await act(async () => {
+      resolveDryRun?.(currentStateRepairResult('#1105', false));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByLabelText('Current-state repair dry-run plan')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dry run complete. Review the current-state plan before execution.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Execute Repair' })).not.toBeInTheDocument();
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
+  it('clears a repair error when the operator changes identifiers', async () => {
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValue(new Error('Order not found.'));
+    diagnosticsMocks.repairMissingShopifyOrder.mockRejectedValueOnce(new Error('Shopify order was not found.'));
+
+    renderDiagnosticsPage();
+    const orderNumberInput = await screen.findByLabelText('Order number');
+    await userEvent.type(orderNumberInput, '1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+    expect(await screen.findByText('Shopify order was not found.')).toBeInTheDocument();
+
+    await userEvent.clear(orderNumberInput);
+    await userEvent.type(orderNumberInput, '1106');
+
+    expect(screen.queryByText('Shopify order was not found.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Current-state repair dry-run plan')).not.toBeInTheDocument();
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
   it('offers one-order current-state repair only after a missing-order inspection and requires dry-run review', async () => {
     const repairedOrder = orderStateInspectorResult();
     repairedOrder.orderIdentity = {
@@ -748,7 +845,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledTimes(1);
 
     rejectInspection?.(new Error('Order not found.'));
-    expect(await screen.findByText('Order state unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Order not found.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' })).toBeInTheDocument();
+    expect(screen.queryByText('Order state unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText('Order not found.')).not.toBeInTheDocument();
   });
 });
