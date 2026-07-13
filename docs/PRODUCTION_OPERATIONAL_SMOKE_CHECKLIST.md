@@ -66,6 +66,8 @@
 - Confirm `financial_status=voided` alone does not trigger full-order cancellation reconciliation.
 - Confirm backend fetches canonical Shopify order state before invoking local cancellation reconciliation.
 - Confirm `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason` are persisted after canonical full-order cancellation.
+- Confirm Order Activity timestamps `Shopify order cancelled` from canonical `ShopifyOrder.cancelledAt`, with the existing legacy fallback used only when canonical cancellation time is unavailable.
+- Confirm Order Activity labels real Shopify return requests as `Return requested` and refund-derived records with refund-specific status labels such as `Refund processed`; when both exist, confirm both rows remain distinct.
 - Confirm `ShopifyOrder.cancelledAt` alone blocks the order when allocation `cancellationReason` is absent and raw allocation state remains `ACTIVE` / `Pending` / `Awaiting Shipment`.
 - Confirm Vendor Orders shows `Cancelled`, `Fulfillment not required`, `Shipment not required`, and `Tracking not required`.
 - Confirm full-cancelled orders are excluded from awaiting-shipment/tracking-missing/workload counts and admin Operations shipment queues.

@@ -77,6 +77,51 @@ describe('orderOperationalStory', () => {
     ]);
   });
 
+  it.each([
+    { name: 'simple', conflict: false, refundRecordCount: 0 },
+    { name: 'conflict', conflict: true, refundRecordCount: 1 },
+  ])('uses canonical cancelledAt for $name cancellation activity', ({ conflict, refundRecordCount }) => {
+    const cancelledAt = '2026-07-11T21:23:00.000Z';
+    const story = getOperationalStory({
+      allocationStatus: 'ACTIVE',
+      isCancelled: true,
+      isCancellationConflict: conflict,
+      cancelledAt,
+      refundRecordCount,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+    });
+
+    expect(story.timelineEvents.find((event) => event.label === 'Shopify order cancelled')?.at).toBe(cancelledAt);
+  });
+
+  it('leaves legacy cancellation activity undated for the existing page fallback', () => {
+    const story = getOperationalStory({
+      allocationStatus: 'ACTIVE',
+      isCancelled: true,
+      cancelledAt: null,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+    });
+
+    expect(story.timelineEvents.find((event) => event.label === 'Shopify order cancelled')?.at).toBeUndefined();
+  });
+
+  it('preserves cancellation conflict evidence and finance review copy', () => {
+    const story = getOperationalStory({
+      allocationStatus: 'ACTIVE',
+      isCancelled: true,
+      cancelledAt: '2026-07-11T21:23:00.000Z',
+      refundRecordCount: 1,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+    });
+
+    expect(story.state).toBe('shopify_order_cancelled_conflict');
+    expect(story.financeLabel).toBe('Review required');
+    expect(story.timelineEvents.map((event) => event.label)).toContain('Existing operational evidence');
+  });
+
   it('keeps active orders in fallback story', () => {
     const story = getOperationalStory({
       allocationStatus: 'ACTIVE',

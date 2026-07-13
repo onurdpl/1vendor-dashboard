@@ -405,6 +405,31 @@ function getStatusClass(value: string | null | undefined) {
   return (value ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
+function getOrderActivityReturnTitle(returnRecord: {
+  sourceType?: 'shopify_refund' | 'shopify_return_request';
+  status: string;
+}) {
+  if (returnRecord.sourceType === 'shopify_return_request') {
+    return 'Return requested';
+  }
+
+  const status = getStatusClass(returnRecord.status);
+  if (['processed', 'refunded', 'approved', 'closed', 'completed', 'resolved'].includes(status)) {
+    return 'Refund processed';
+  }
+  if (status === 'created') {
+    return 'Refund created';
+  }
+  if (['pending', 'requested', 'in-review', 'awaiting-review'].includes(status)) {
+    return 'Refund pending';
+  }
+  if (['failed', 'declined', 'rejected', 'error'].includes(status)) {
+    return 'Refund failed';
+  }
+
+  return 'Refund recorded';
+}
+
 function getPaymentStatusClass(value: string | null | undefined) {
   const normalized = getStatusClass(value);
   if (normalized.includes('refund-completed')) {
@@ -4624,7 +4649,7 @@ export function OrderDetailPage() {
               .replace(/Shopify refund/gi, 'refund')
               .replace(/finance hold/gi, 'order review')
           : event.detail,
-        at: event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt,
+        at: event.at ?? (event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt),
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
       });
@@ -4722,7 +4747,7 @@ export function OrderDetailPage() {
   orderTimelineEvents.push(
     ...relatedReturns.map((returnRecord) => ({
       id: `return-${returnRecord.id}`,
-      title: 'Return requested',
+      title: getOrderActivityReturnTitle(returnRecord),
       description: `${returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item'} · ${getStatusClass(returnRecord.status).replace(/-/g, ' ')}`,
       at: returnRecord.date,
       status: returnRecord.status,

@@ -347,6 +347,24 @@ function renderOrderDetail() {
   );
 }
 
+function formatTimelineDateForTest(value: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function getOrderActivityRow(title: string) {
+  const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+  expect(timeline).not.toBeNull();
+  const row = within(timeline as HTMLElement).getByText(title).closest('li');
+  expect(row).not.toBeNull();
+  return row as HTMLElement;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -2619,6 +2637,152 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(timelineScope.queryByText('Order review started')).not.toBeInTheDocument();
     expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+  });
+
+  it('uses canonical Shopify cancellation time instead of order creation time', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const orderCreatedAt = '2026-07-11T16:07:00.000Z';
+    const cancelledAt = '2026-07-11T21:23:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      isCancelled: true,
+      isCancellationConflict: false,
+      cancelledAt,
+      cancelReason: 'declined',
+      date: orderCreatedAt,
+      shipmentExecution: null,
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Shopify order cancelled');
+    const cancellationRow = getOrderActivityRow('Shopify order cancelled');
+    expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
+    expect(cancellationRow).not.toHaveTextContent(formatTimelineDateForTest(orderCreatedAt));
+  });
+
+  it('uses the existing assignment fallback for legacy cancellation without cancelledAt', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const assignmentBlockedAt = '2026-07-11T20:45:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      isCancelled: true,
+      isCancellationConflict: false,
+      cancelledAt: null,
+      cancelReason: 'legacy cancellation',
+      assignmentBlockedAt,
+      shipmentExecution: null,
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Shopify order cancelled');
+    expect(getOrderActivityRow('Shopify order cancelled')).toHaveTextContent(
+      formatTimelineDateForTest(assignmentBlockedAt),
+    );
+  });
+
+  it.each([
+    { viewport: 'mobile', width: 390 },
+    { viewport: 'desktop', width: 1440 },
+  ])('keeps return and refund activity source-specific on $viewport', async ({ width }) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    window.dispatchEvent(new Event('resize'));
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const cancelledAt = '2026-07-11T21:23:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      isCancelled: true,
+      isCancellationConflict: true,
+      cancelledAt,
+      cancelReason: 'declined',
+      refundRecordCount: 1,
+      date: '2026-07-11T16:07:00.000Z',
+      shipmentExecution: null,
+    });
+    listReturnsMock.mockResolvedValueOnce([
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: 'return-request-1028',
+        sourceShopifyOrderId: '7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: '',
+        sourceShopifyReturnId: 'gid://shopify/Return/1028',
+        sourceType: 'shopify_return_request',
+        status: 'Requested',
+        relatedOrderId: '7616544244049',
+        date: '2026-07-11T22:00:00.000Z',
+        customer: 'Customer unavailable',
+        reason: 'Customer return request',
+        amount: 'TRY 0.00',
+        itemTitle: 'Return-request item',
+      },
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: 'refund-derived-1028',
+        sourceShopifyOrderId: '7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: 'gid://shopify/Refund/1028',
+        sourceShopifyReturnId: null,
+        sourceType: 'shopify_refund',
+        status: 'Processed',
+        relatedOrderId: '7616544244049',
+        date: '2026-07-11T21:24:00.000Z',
+        customer: 'Customer unavailable',
+        reason: 'Shopify refund webhook allocation',
+        amount: 'TRY 4,999.00',
+        itemTitle: 'Refund-derived item',
+      },
+    ]);
+
+    renderOrderDetail();
+
+    await screen.findByText('Shopify order cancelled');
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    expect(timeline).not.toBeNull();
+    const timelineScope = within(timeline as HTMLElement);
+    expect(timelineScope.getByText('Existing operational evidence')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Right panel status')).getByText('Review required')).toBeInTheDocument();
+
+    const cancellationRow = getOrderActivityRow('Shopify order cancelled');
+    expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
+
+    const returnRow = timelineScope.getByText('Return requested').closest('li');
+    const refundRow = timelineScope.getByText('Refund processed').closest('li');
+    expect(returnRow).not.toBeNull();
+    expect(refundRow).not.toBeNull();
+    expect(returnRow).not.toBe(refundRow);
+    expect(returnRow).toHaveTextContent('Return-request item');
+    expect(refundRow).toHaveTextContent('Refund-derived item');
+    expect(refundRow).not.toHaveTextContent('Return requested');
   });
 
   it('keeps support directly below timeline in the right sidebar flow', async () => {

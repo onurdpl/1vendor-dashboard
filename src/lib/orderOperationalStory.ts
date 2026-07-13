@@ -49,7 +49,12 @@ export type OperationalStory = {
     canTransfer: boolean;
     canPreviewRefund: boolean;
   };
-  timelineEvents: Array<{ label: string; detail?: string; tone?: 'neutral' | 'warning' | 'success' }>;
+  timelineEvents: Array<{
+    label: string;
+    detail?: string;
+    at?: string;
+    tone?: 'neutral' | 'warning' | 'success';
+  }>;
 };
 
 export type VendorBlockedOperationalStory = OperationalStory & {
@@ -150,6 +155,7 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
         {
           label: 'Shopify order cancelled',
           detail: input.cancelReason ? `Reason: ${input.cancelReason}.` : 'Shopify confirmed full order cancellation.',
+          at: input.cancelledAt ?? undefined,
           tone: 'warning',
         },
         {
@@ -182,6 +188,7 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
         {
           label: 'Shopify order cancelled',
           detail: input.cancelReason ? `Reason: ${input.cancelReason}.` : 'Shopify confirmed full order cancellation.',
+          at: input.cancelledAt ?? undefined,
           tone: 'neutral',
         },
         {
