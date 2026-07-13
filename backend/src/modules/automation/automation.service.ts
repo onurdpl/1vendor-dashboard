@@ -7,6 +7,10 @@ import type {
   AutomationDashboardDto,
   AutomationSuggestionDto,
 } from './automation.types.js';
+import {
+  fullOrderOperationalAllocationWhere,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 type VendorAutomationSnapshot = {
   vendorId: string;
@@ -96,6 +100,7 @@ export async function getAutomationDashboard(
     withDashboardTiming('automation.allocation_fetch', () => prisma.vendorAllocation.findMany({
       where: {
         assignedVendorId: vendorId,
+        ...fullOrderOperationalAllocationWhere,
       },
       include: {
         order: true,
@@ -109,6 +114,7 @@ export async function getAutomationDashboard(
       where: {
         vendorAllocation: {
           assignedVendorId: vendorId,
+          ...fullOrderOperationalAllocationWhere,
         },
         status: {
           in: ['pending', 'open', 'needs_review'],
@@ -174,6 +180,10 @@ export async function getAutomationDashboard(
   const seenAlertIds = new Set<string>();
 
   for (const allocation of allocations) {
+    if (isFullOrderCancelled(allocation.order)) {
+      continue;
+    }
+
     const allocationStatus = allocation.allocationStatus.toLowerCase();
     const shippingStatus = allocation.shippingStatus.trim().toLowerCase();
 

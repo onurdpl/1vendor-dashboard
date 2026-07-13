@@ -61,6 +61,7 @@ function buildEntry(input: {
   voidedAt?: Date | null;
   allocationStatus?: string | null;
   cancelRefundReviewStatus?: string | null;
+  cancelledAt?: Date | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
     id: string;
@@ -108,6 +109,9 @@ function buildEntry(input: {
       cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
+      order: {
+        cancelledAt: input.cancelledAt ?? null,
+      },
       fulfillment: {
         fulfilledAt: fulfilled ? new Date('2026-05-13T10:00:00Z') : null,
         shipmentUpdatedAt: deliveredAt,
@@ -327,6 +331,23 @@ describe('payout batch preparation', () => {
         }),
       }),
     );
+  });
+
+  it('rejects payout preparation for a conflict-cancelled non-voided row', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-cancelled-conflict-prepare',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+        voidedAt: null,
+      }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user'))
+      .rejects.toThrow('Full Shopify order cancellation blocks this operation.');
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -931,6 +952,62 @@ describe('payout batch preparation', () => {
     });
   });
 
+  it('blocks review when canonical full-order cancellation appears after preparation', async () => {
+    const sale = buildEntry({
+      id: 'sale-cancelled-conflict-review',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+      cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'full_order_cancelled',
+          reason: 'Full Shopify order cancellation blocks this operation.',
+          financeLedgerEntryId: 'sale-cancelled-conflict-review',
+        }),
+      ]),
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks Mark Paid revalidation for a conflict-cancelled review batch', async () => {
+    const sale = buildEntry({
+      id: 'sale-cancelled-conflict-paid',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+      cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ], 'REVIEW');
+    prismaMock.payoutBatch.findUnique.mockResolvedValue(batch);
+
+    await expect(markPayoutBatchPaid(
+      'batch-review',
+      { paidAt: '2026-07-12T08:30:00.000Z' },
+      'admin-user',
+    )).rejects.toMatchObject({
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'full_order_cancelled',
+          financeLedgerEntryId: 'sale-cancelled-conflict-paid',
+        }),
+      ]),
+    });
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+  });
+
   it('blocks review when a payout batch line is missing approved settlement backing', async () => {
     const sale = buildEntry({ id: 'sale-no-approved-review', entryType: 'sale', amount: 1000, batched: true });
     const batch = buildTransitionBatch([
@@ -1384,7 +1461,14 @@ describe('payout batch preparation', () => {
   it('rejects a payout batch that is already paid', async () => {
     const batch = buildTransitionBatch([
       buildTransitionLine({
-        entry: buildEntry({ id: 'sale-already-paid-batch', entryType: 'sale', amount: 1000, batched: true, activeSettlementApproval: true }),
+        entry: buildEntry({
+          id: 'sale-already-paid-batch',
+          entryType: 'sale',
+          amount: 1000,
+          batched: true,
+          activeSettlementApproval: true,
+          cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+        }),
         amountSnapshot: 900,
       }),
     ], 'PAID');

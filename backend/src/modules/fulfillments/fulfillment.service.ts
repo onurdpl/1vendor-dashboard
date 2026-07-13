@@ -4,6 +4,10 @@ import type { RequestVendorContext } from '../vendor-access/vendor-access.types.
 import type { UpdateAllocationTrackingBody, UpdateAllocationTrackingResult } from './fulfillment.types.js';
 import type { AppEnv } from '../../config/env.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import {
+  FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 function normalizeOptionalString(value: string | null | undefined) {
   if (typeof value !== 'string') {
@@ -105,6 +109,14 @@ export function createFulfillmentService(env: AppEnv) {
         ok: false,
         code: 400,
         message: 'Allocation is missing Shopify order linkage.',
+      };
+    }
+
+    if (isFullOrderCancelled(allocation.order)) {
+      return {
+        ok: false,
+        code: 409,
+        message: FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
       };
     }
 

@@ -41,6 +41,10 @@ import {
   hasActiveVendorBlockedFinanceHold,
   hasBlockingCancelRefundReviewStatus,
 } from './cancel-refund-review-hold.service.js';
+import {
+  FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -140,6 +144,9 @@ type SettlementApprovalLedgerRow = {
     shippingStatus: string | null;
     sourceShopifyOrderId: string;
     sourceShopifyOrderNumber: string;
+    order?: {
+      cancelledAt: Date | null;
+    } | null;
     fulfillment: {
       fulfilledAt: Date | null;
       shipmentUpdatedAt: Date | null;
@@ -441,6 +448,9 @@ function resolveSettlementStatus(
   if (payoutStatus === 'paid') {
     return 'settled';
   }
+  if (isFullOrderCancelled(row.vendorAllocation?.order)) {
+    return 'held';
+  }
   if (type === 'refund' && getRefundOffsetEligibility(row, currentSettlementApprovalId).eligible) {
     return 'partially_refunded';
   }
@@ -477,6 +487,9 @@ function rowIsEligible(
   asOfDate?: Date | null,
 ) {
   const type = normalizeType(row.entryType);
+  if (isFullOrderCancelled(row.vendorAllocation?.order)) {
+    return false;
+  }
   if (type !== 'sale' && type !== 'refund') {
     return false;
   }
@@ -525,7 +538,9 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
   let eligibilityDecision: 'included' | 'excluded' = rowIsEligible(row, undefined, asOfDate) ? 'included' : 'excluded';
   let eligibilityReason = 'Excluded because row is not payable or partially refunded.';
 
-  if (type !== 'sale' && type !== 'refund') {
+  if (isFullOrderCancelled(row.vendorAllocation?.order)) {
+    eligibilityReason = `Excluded because ${FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE}`;
+  } else if (type !== 'sale' && type !== 'refund') {
     eligibilityReason = 'Excluded because row type is not sale or refund.';
   } else if (rowHasActiveApproval(row)) {
     eligibilityDecision = 'excluded';
@@ -1141,6 +1156,11 @@ async function loadCurrentLedgerRowForApprovalLine(
           shippingStatus: true,
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
           fulfillment: {
             select: {
               fulfilledAt: true,
@@ -1660,6 +1680,11 @@ async function buildApprovalPreview(
           shippingStatus: true,
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
           fulfillment: {
             select: {
               fulfilledAt: true,
@@ -1820,6 +1845,11 @@ async function buildApprovalPreview(
             shippingStatus: true,
             sourceShopifyOrderId: true,
             sourceShopifyOrderNumber: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
+            },
             fulfillment: {
               select: {
                 fulfilledAt: true,

@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
 import type { DashboardOperationalSummaryDto } from './dashboard-summary.types.js';
+import { fullOrderOperationalAllocationWhere } from '../orders/full-order-cancellation-policy.js';
 
 const NON_AWAITING_SHIPPING_STATUSES = [
   'delivered',
@@ -52,9 +53,7 @@ export async function getDashboardOperationalSummary(vendorId: string): Promise<
       prisma.vendorAllocation.count({
         where: {
           assignedVendorId: vendorId,
-          order: {
-            cancelledAt: null,
-          },
+          ...fullOrderOperationalAllocationWhere,
           NOT: NON_AWAITING_SHIPPING_STATUSES.map((status) => ({
             shippingStatus: insensitiveEquals(status),
           })),

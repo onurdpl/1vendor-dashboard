@@ -20,6 +20,10 @@ import type {
   OperationalSignalSummaryDto,
 } from './rules.types.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
+import {
+  fullOrderOperationalAllocationWhere,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 type SignalDefinition = {
   id: string;
@@ -378,6 +382,7 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
   const staleAllocations = await prisma.vendorAllocation.findMany({
     where: {
       assignedVendorId: options.vendorId ?? undefined,
+      ...fullOrderOperationalAllocationWhere,
       updatedAt: {
         lt: staleFulfillmentCutoff,
       },
@@ -389,7 +394,9 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
     take: 100,
   });
 
-  for (const allocation of staleAllocations.filter(isAwaitingShipment)) {
+  for (const allocation of staleAllocations.filter(
+    (candidate) => !isFullOrderCancelled(candidate.order) && isAwaitingShipment(candidate),
+  )) {
     const elapsedHours = getElapsedHours(allocation.updatedAt, evaluatedAt);
     const severity = getSeverityForHours(elapsedHours, SLA_THRESHOLDS.fulfillmentStuckHours);
     if (!severity) {

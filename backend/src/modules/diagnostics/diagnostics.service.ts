@@ -39,6 +39,7 @@ import type {
   ReturnVisibilityDiagnostic,
   OrderStateInspectorDiagnostic,
 } from './diagnostics.types.js';
+import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 
 const SHOPIFY_ORDER_WEBHOOK_ROUTES: Record<string, string> = {
   ORDERS_CREATE: '/webhooks/shopify/orders-create',
@@ -1809,7 +1810,7 @@ export async function getOrderStateInspectorDiagnostic(
     .filter((signal) => !signal.allocationId || allocationIds.has(signal.allocationId))
     .sort((left, right) => right.triggeredAt.getTime() - left.triggeredAt.getTime())
     .slice(0, ORDER_INSPECTOR_SIGNAL_LIMIT);
-  const isCancelled = Boolean(order.cancelledAt);
+  const isCancelled = isFullOrderCancelled(order);
 
   const operationalEvidence = [
     {
@@ -1933,7 +1934,10 @@ export async function getOrderStateInspectorDiagnostic(
   }
 
   const projectionReasons = isCancelled
-    ? ['ShopifyOrder.cancelledAt is persisted.']
+    ? [
+      'ShopifyOrder.cancelledAt is the canonical full-order cancellation source.',
+      'Raw allocation, fulfillment, and shipping values are preserved as ownership and history; they do not grant operational eligibility.',
+    ]
     : ['No persisted ShopifyOrder.cancelledAt value exists.'];
   const conflictProjectionReasons = hasOperationalConflict
     ? operationalEvidence.map((item) => `${item.recordCount} ${item.type} evidence record(s) are persisted.`)
@@ -1949,7 +1953,7 @@ export async function getOrderStateInspectorDiagnostic(
       ? 'This order is cancelled, but no local vendor allocation exists. Current-state repair is required before operational history can be reconciled.'
       : 'This order exists locally, but no vendor allocation was created. Current-state repair is required.';
   } else if (hasOperationalConflict) {
-    currentStateSummary = 'This order is cancelled, but existing operational evidence requires review. Shipment, tracking, reject, split, and Vendor Integration writes are blocked.';
+    currentStateSummary = 'This order is cancelled, but existing operational evidence requires review. New operational writes and finance progression are blocked by the full-order cancellation policy.';
   } else if (isCancelled) {
     currentStateSummary = saleLedgers.length > 0 && saleLedgers.every((entry) => Boolean(entry.voidedAt))
       ? 'This order was cancelled before fulfillment. Shipment and tracking actions are blocked, and sale ledger rows are voided.'

@@ -1015,11 +1015,24 @@ describe('admin order state inspector', () => {
     const diagnostic = await getOrderStateInspectorDiagnostic('1108');
     expect(diagnostic).toMatchObject({
       projectionExplanation: {
-        orderStatus: { label: 'Cancelled' },
+        orderStatus: {
+          label: 'Cancelled',
+          reasons: expect.arrayContaining([
+            'ShopifyOrder.cancelledAt is the canonical full-order cancellation source.',
+            'Raw allocation, fulfillment, and shipping values are preserved as ownership and history; they do not grant operational eligibility.',
+          ]),
+        },
         fulfillment: { label: 'Fulfillment not required' },
         shipment: { label: 'Shipment not required' },
         tracking: { label: 'Tracking not required' },
         finance: { label: 'Sale voided' },
+        actions: expect.arrayContaining([
+          expect.objectContaining({ action: 'create_shipment', available: false, blockedReason: 'full_order_cancelled' }),
+          expect.objectContaining({ action: 'update_tracking', available: false, blockedReason: 'full_order_cancelled' }),
+          expect.objectContaining({ action: 'vendor_reject', available: false, blockedReason: 'full_order_cancelled' }),
+          expect.objectContaining({ action: 'allocation_split', available: false, blockedReason: 'full_order_cancelled' }),
+          expect.objectContaining({ action: 'vendor_integration_write', available: false, blockedReason: 'full_order_cancelled' }),
+        ]),
       },
       repairReadiness: { repairClassification: 'no_repair_needed' },
     });

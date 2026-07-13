@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { AllocationStatus, ShipmentExecutionStatus, type Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { buildSaleLedgerEntryId } from '../finance/sale-ledger.service.js';
+import { isFullOrderCancelled } from './full-order-cancellation-policy.js';
 
 export type AllocationSplitPlannerInput = {
   vendorAllocationId: string;
@@ -205,7 +206,7 @@ export async function planAllocationSplitForLineItemReject(
     addBlocker(blockers, 'allocation_not_active', 'Only active allocations can be planned for line-item rejection split.');
   }
 
-  if (allocation.order.cancelledAt) {
+  if (isFullOrderCancelled(allocation.order)) {
     addBlocker(blockers, 'order_cancelled', 'Cancelled orders cannot be split.');
   }
 

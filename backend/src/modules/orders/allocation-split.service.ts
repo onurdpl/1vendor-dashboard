@@ -16,6 +16,7 @@ import {
   buildDeterministicChildAllocationId,
   planAllocationSplitForLineItemReject,
 } from './allocation-split-planner.service.js';
+import { isFullOrderCancelled } from './full-order-cancellation-policy.js';
 
 export type SplitAllocationForLineItemRejectInput = {
   vendorAllocationId: string;
@@ -558,7 +559,7 @@ export async function splitAllocationForLineItemReject(
     if (!freshSource || freshSource.allocationStatus !== AllocationStatus.ACTIVE) {
       throw new AllocationSplitValidationError('allocation_not_active', 'Source allocation is no longer active.');
     }
-    if (freshSource.order.cancelledAt || freshSource.cancellationReason) {
+    if (isFullOrderCancelled(freshSource.order) || freshSource.cancellationReason) {
       throw new AllocationSplitValidationError('order_cancelled', 'Cancelled orders cannot be split.');
     }
     const selectedLines = planner.selectedLines;

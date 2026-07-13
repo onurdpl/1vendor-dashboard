@@ -199,6 +199,31 @@ describe('operational rules engine foundation', () => {
     );
   });
 
+  it('excludes conflict-cancelled allocations from stale fulfillment rules', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([{
+      id: 'alloc-cancelled',
+      assignedVendorId: 'sporjinal',
+      assignedVendor: { name: 'Sporjinal' },
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      updatedAt: new Date('2026-05-10T10:00:00.000Z'),
+      order: {
+        sourceShopifyOrderId: 'order-cancelled',
+        cancelledAt: new Date('2026-05-11T10:00:00.000Z'),
+      },
+    }]);
+
+    const signals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+
+    expect(signals.some((signal) => signal.type === 'stale_fulfillment')).toBe(false);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        assignedVendorId: 'sporjinal',
+        order: { cancelledAt: null },
+      }),
+    }));
+  });
+
   it('escalates return request SLA at 24, 48, and 72 hours', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-13T12:00:00.000Z'));

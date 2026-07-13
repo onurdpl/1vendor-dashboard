@@ -520,8 +520,8 @@ export function OrdersPage() {
 
       const matchesQuickFilter =
         effectiveQuickFilter === 'all' ||
-        (effectiveQuickFilter === 'blocked' && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
-        (effectiveQuickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
+        (effectiveQuickFilter === 'blocked' && !order.isCancelled && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
+        (effectiveQuickFilter === 'awaiting' && !order.isCancelled && order.shippingStatus === 'Awaiting Shipment') ||
         (effectiveQuickFilter === 'tracking_missing' && !order.isCancelled && !order.trackingNumber && !order.carrier) ||
         (effectiveQuickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
         (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
@@ -560,7 +560,7 @@ export function OrdersPage() {
     { enabled: authContextReady && Boolean(selectedOrderSummary) },
   );
 
-  const selectedOrder = orderDetailQuery.data ?? selectedOrderSummary;
+  const selectedOrder = selectedOrderSummary ? orderDetailQuery.data ?? selectedOrderSummary : null;
   const selectedOrderContextId = selectedOrderSummary?.id ?? null;
   const selectedOrderActionContextKey = selectedOrderSummary
     ? buildOrderActionContextKey({

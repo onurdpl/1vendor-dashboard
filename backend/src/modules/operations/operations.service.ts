@@ -27,6 +27,10 @@ import { generateAutomationActionsForSignals } from '../automation/automation-ac
 import { deriveSupportSlaState } from '../support/support.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
+import {
+  fullOrderOperationalAllocationWhere,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
@@ -363,10 +367,6 @@ function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   );
 }
 
-function isFullOrderCancelled(order: { cancelledAt?: Date | null }) {
-  return Boolean(order.cancelledAt);
-}
-
 function insensitiveEquals(value: string) {
   return {
     equals: value,
@@ -470,6 +470,7 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     withDashboardTiming('operations.summary.pending_reassignment_count', () =>
       prisma.vendorAllocation.count({
         where: {
+          ...fullOrderOperationalAllocationWhere,
           allocationStatus: {
             not: AllocationStatus.VENDOR_BLOCKED,
           },
@@ -482,18 +483,17 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     ),
     withDashboardTiming('operations.summary.vendor_blocked_count', () =>
       prisma.vendorAllocation.count({
-        where: getUnresolvedVendorBlockedWhere(),
+        where: {
+          ...fullOrderOperationalAllocationWhere,
+          ...getUnresolvedVendorBlockedWhere(),
+        },
       }),
     ),
     withDashboardTiming('operations.summary.awaiting_shipment_count', () =>
       prisma.vendorAllocation.count({
         where: {
           AND: [
-            {
-              order: {
-                cancelledAt: null,
-              },
-            },
+            fullOrderOperationalAllocationWhere,
             {
               OR: [
                 { fulfillmentStatus: insensitiveEquals('processing') },
@@ -1188,6 +1188,9 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     where: {
       shipmentStatus: {
         in: ['PENDING', 'FAILED'],
+      },
+      allocation: {
+        ...fullOrderOperationalAllocationWhere,
       },
     },
     include: {

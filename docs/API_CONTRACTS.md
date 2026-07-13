@@ -438,10 +438,15 @@ Webhook processing lifecycle states:
   - `cancelled_at` / canonical `cancelledAt` is required before full-order cancellation reconciliation runs
   - `financial_status=voided` alone is not sufficient
   - canonical full-order cancellation metadata is persisted on `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason`
+  - `ShopifyOrder.cancelledAt` is authoritative for backend operational and finance eligibility; allocation cancellation metadata is not required
+  - persisted allocation, fulfillment, and shipping values may preserve ownership/history while the API derives terminal cancellation behavior
   - vendor/admin order projections expose terminal cancellation fields such as `isCancelled`, `cancelledAt`, and `cancelReason`
+  - Vendor Integration order reads expose cancellation metadata, `operationalWritesAllowed`, terminal not-required values for simple cancellations, and preserved operational history for conflict cancellations
   - full-cancelled orders remain historically visible, but are terminal for fulfillment, shipment, tracking, reject/split, and Vendor Integration writes
   - full-cancelled orders are excluded from shipment/tracking/workload queues and dashboard counts
-  - SHOP-CANCEL-2 does not add missed-order repair, new finance payout blockers, or fulfillment-cancellation redesign
+  - settlement selection, payout preparation/review, and Mark Paid revalidation block new progression for cancelled conflict rows even when a sale ledger was not voided
+  - no `AllocationStatus.CANCELLED` is introduced and persisted shipping/fulfillment history is not overwritten
+  - SHOP-CANCEL-2A does not add missed-order repair, vendor debt, payment reversal, or fulfillment-cancellation redesign
 
 ### POST /webhooks/shopify/refunds-create
 

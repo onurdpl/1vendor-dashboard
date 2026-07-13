@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
 
@@ -81,7 +82,7 @@ function assertAllocationIsOperational(allocation: {
   cancellationReason?: string | null;
   order?: { cancelledAt?: Date | null } | null;
 }) {
-  if (allocation.order?.cancelledAt || allocation.cancellationReason) {
+  if (isFullOrderCancelled(allocation.order) || allocation.cancellationReason) {
     throw new VendorIntegrationOrderStateError('Order is cancelled and cannot receive shipment updates.');
   }
 }

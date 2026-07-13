@@ -91,6 +91,7 @@ function buildLedgerRow(input: {
   relatedSaleActivePayoutBatch?: boolean;
   sourceShopifyOrderId?: string;
   sourceShopifyOrderNumber?: string;
+	  cancelledAt?: Date | null;
 	  voidedAt?: Date | null;
 	  cancelRefundReviewStatus?: string | null;
 	  allocationStatus?: string | null;
@@ -145,6 +146,9 @@ function buildLedgerRow(input: {
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       sourceShopifyOrderId: input.sourceShopifyOrderId ?? `order-${input.id}`,
       sourceShopifyOrderNumber: input.sourceShopifyOrderNumber ?? '#1001',
+      order: {
+        cancelledAt: input.cancelledAt ?? null,
+      },
       fulfillment: {
         fulfilledAt: fulfilled ? createdAt : null,
         shipmentUpdatedAt: deliveredAt,
@@ -398,6 +402,35 @@ describe('settlement approval foundation', () => {
         }),
       }),
     );
+  });
+
+  it('excludes conflict-cancelled rows from settlement candidates', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-cancelled-conflict',
+        entryType: 'sale',
+        amount: 1000,
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+        voidedAt: null,
+      }),
+    ]);
+
+    const preview = await previewApproval('vendor-a');
+
+    expect(preview.summary.eligibleRowCount).toBe(0);
+    expect(preview.lines).toEqual([]);
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-cancelled-explanation',
+        entryType: 'sale',
+        amount: 1000,
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+      }),
+    )).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: 'Excluded because Full Shopify order cancellation blocks this operation.',
+    });
   });
 
   it('keeps payable sales eligible when no approved open return exists', async () => {

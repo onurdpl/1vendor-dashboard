@@ -536,6 +536,38 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
   });
 
+  it('keeps conflict-cancelled raw awaiting-shipment rows out of open workflow filters', async () => {
+    const cancelledConflict = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1108',
+      sourceShopifyOrderNumber: '#1108',
+      status: 'Cancelled',
+      isCancelled: true,
+      isCancellationConflict: true,
+      cancelledAt: '2026-07-11T20:23:00.000Z',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      trackingNumber: undefined,
+      carrier: undefined,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(cancelledConflict)]);
+    getOrderMock.mockResolvedValue(cancelledConflict);
+
+    renderOrdersPage(['/orders?workflow=awaiting-shipment']);
+
+    expect(await screen.findByText('No shipments currently awaiting action')).toBeInTheDocument();
+    expect(screen.queryByText('#1108')).not.toBeInTheDocument();
+
+    await userEvent.click(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /All orders/i }));
+
+    expect((await screen.findAllByText('#1108')).length).toBeGreaterThan(0);
+
+    await userEvent.click(within(screen.getByLabelText('Orders workflow tabs')).getByRole('button', { name: /Tracking missing/i }));
+
+    expect(await screen.findByText('No orders missing tracking')).toBeInTheDocument();
+    expect(screen.queryByText('#1108')).not.toBeInTheDocument();
+  });
+
   it('uses workflow query params to open blocked allocation queues', async () => {
     const blockedOrder: OrderDetail = {
       ...orderDetail,

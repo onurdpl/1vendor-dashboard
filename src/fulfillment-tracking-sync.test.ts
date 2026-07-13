@@ -139,6 +139,28 @@ describe('fulfillment tracking sync', () => {
     });
   });
 
+  it('blocks tracking mutation from canonical cancellation metadata alone', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      allocationStatus: 'ACTIVE',
+      cancellationReason: null,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1039',
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+      },
+    }));
+    const service = createFulfillmentService(env);
+
+    await expect(service.updateAllocationTracking(buildRequest())).resolves.toEqual({
+      ok: false,
+      code: 409,
+      message: 'Full Shopify order cancellation blocks this operation.',
+    });
+    expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
   it('builds line-item scoped Shopify tracking payload from allocation data', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
     const service = createFulfillmentService(env);

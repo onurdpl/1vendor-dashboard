@@ -66,6 +66,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     originalVendorId: 'sporjinal',
     assignedVendorId: 'sporjinal',
     allocationStatus: 'ACTIVE',
+    cancellationReason: null,
     fulfillmentStatus: 'Pending',
     shippingStatus: 'Awaiting Shipment',
     trackingNumber: null,
@@ -89,6 +90,8 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
       shopifyCreatedAt: new Date('2026-05-31T09:55:00.000Z'),
       currency: 'TRY',
       financialStatus: 'paid',
+      cancelledAt: null,
+      cancelReason: null,
       paymentGatewayName: 'PayTR Marketplace',
       taxesIncluded: true,
       orderTaxAmount: '118.17',
@@ -565,6 +568,38 @@ describe('vendor integration API foundation', () => {
         ],
       }),
     );
+  });
+
+  it('projects canonical full-order cancellation as non-actionable on order reads', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([buildAllocation({
+      allocationStatus: 'ACTIVE',
+      cancellationReason: null,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      order: {
+        ...buildAllocation().order,
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+        cancelReason: 'declined',
+      },
+    })]);
+
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(expect.objectContaining({
+      data: [expect.objectContaining({
+        allocationStatus: 'ACTIVE',
+        orderStatus: 'Cancelled',
+        isCancelled: true,
+        cancelledAt: '2026-07-11T20:23:00.000Z',
+        cancelReason: 'declined',
+        operationalWritesAllowed: false,
+        fulfillmentStatus: 'Not Required',
+        shippingStatus: 'Not Required',
+        trackingStatus: 'Not Required',
+      })],
+    }));
   });
 
   it('allows restricted vendor tokens to read allocated orders', async () => {

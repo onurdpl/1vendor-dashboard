@@ -276,7 +276,13 @@ function orderStateInspectorResult() {
       payloadAvailable: true,
     }],
     projectionExplanation: {
-      orderStatus: { label: 'Cancelled', reasons: ['ShopifyOrder.cancelledAt is persisted.'] },
+      orderStatus: {
+        label: 'Cancelled',
+        reasons: [
+          'ShopifyOrder.cancelledAt is the canonical full-order cancellation source.',
+          'Raw allocation, fulfillment, and shipping values are preserved as ownership and history; they do not grant operational eligibility.',
+        ],
+      },
       fulfillment: { label: 'Pending', reasons: ['1 refund evidence record is persisted.'] },
       shipment: { label: 'Awaiting Shipment', reasons: ['1 refund evidence record is persisted.'] },
       tracking: { label: 'Tracking pending', reasons: ['1 refund evidence record is persisted.'] },
@@ -598,6 +604,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Refund-derived return evidence')).toBeInTheDocument();
     expect(screen.getByText('Shopify refund records')).toBeInTheDocument();
     expect(screen.getByText('Projection explanation')).toBeInTheDocument();
+    expect(screen.getByText(/Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt/)).toBeInTheDocument();
+    expect(screen.getByText('ShopifyOrder.cancelledAt is the canonical full-order cancellation source.')).toBeInTheDocument();
     expect(screen.getByText('Repair readiness')).toBeInTheDocument();
 
     const inspector = screen.getByRole('heading', { name: 'Order State Inspector' }).closest('section');

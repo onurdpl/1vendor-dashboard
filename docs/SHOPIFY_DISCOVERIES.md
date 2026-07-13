@@ -456,11 +456,16 @@ POST /fulfillments.json
   - reconcile locally from canonical state
 - SHOP-CANCEL-1 bridges full order cancellation webhooks into existing canonical cancellation reconciliation.
 - SHOP-CANCEL-2 persists canonical full-order cancellation metadata on `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason`.
+- `ShopifyOrder.cancelledAt` is the shared backend source of truth for full-order cancellation eligibility. `VendorAllocation.cancellationReason` is legacy/secondary metadata and is not sufficient for canonical detection.
+- Raw `VendorAllocation` ownership, fulfillment, and shipping fields may retain their previous values so historical evidence is not rewritten. These values do not make a full-cancelled order operationally eligible.
 - Full-cancelled orders remain historically visible, but are operationally terminal:
   - Vendor Orders shows `Cancelled`, `Fulfillment not required`, `Shipment not required`, and `Tracking not required`.
   - Shipment/tracking workload queues and dashboard counts exclude full-cancelled orders.
   - Shipment creation, tracking updates, vendor reject, allocation split, and Vendor Integration status/shipment/invoice writes are blocked.
-- SHOP-CANCEL-2 does not implement missed-order repair, new finance payout blockers, or fulfillment-cancellation redesign.
+  - Automation, SLA, settlement candidate, payout preparation, payout review, and Mark Paid eligibility use the shared cancellation policy.
+- Conflict cancellations preserve fulfillment, shipping, refund, settlement, and paid evidence, but block new operational and finance progression and require review.
+- No `AllocationStatus.CANCELLED` was introduced; full-order cancellation remains an order lifecycle fact.
+- SHOP-CANCEL-2A does not implement missed-order repair, vendor debt, payment reversal, or fulfillment-cancellation redesign.
 - Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
 
 ## Customer Notifications

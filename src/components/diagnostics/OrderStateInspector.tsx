@@ -150,7 +150,10 @@ export function OrderStateInspector() {
             </OperationalSection>
           </div>
 
-          <OperationalSection title="Allocations" description="Vendor ownership and persisted operational state.">
+          <OperationalSection
+            title="Allocations"
+            description="Vendor ownership and preserved operational history. Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt."
+          >
             {result.allocations.length ? (
               <div className="order-state-record-grid">
                 {result.allocations.map((allocation) => (

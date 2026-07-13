@@ -62,6 +62,7 @@ import {
   type ProductPanelEnv,
 } from '../product-panel/product-panel-variant-disable-outbox.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { isFullOrderCancelled } from './full-order-cancellation-policy.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -98,10 +99,6 @@ function toIsoString(value: Date | null | undefined) {
 
 function isActiveSaleLedger(entry: { entryType: string; voidedAt: Date | null }) {
   return entry.entryType.trim().toLowerCase() === 'sale' && !entry.voidedAt;
-}
-
-function isFullOrderCancelled(order: { cancelledAt?: Date | null } | null | undefined) {
-  return Boolean(order?.cancelledAt);
 }
 
 function buildReturnOwnershipSummary(input: {

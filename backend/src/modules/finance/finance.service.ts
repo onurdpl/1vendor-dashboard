@@ -60,6 +60,10 @@ import {
   hasActiveVendorBlockedFinanceHold,
   hasBlockingCancelRefundReviewStatus,
 } from './cancel-refund-review-hold.service.js';
+import {
+  FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
+  isFullOrderCancelled,
+} from '../orders/full-order-cancellation-policy.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -129,6 +133,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
+  | 'full_order_cancelled'
   | 'approved_settlement_snapshot_required'
   | 'ledger_row_no_longer_eligible'
   | 'ledger_row_missing';
@@ -526,6 +531,7 @@ type FinanceSummaryCalculationEntry = {
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
+    order?: { cancelledAt?: Date | string | null } | null;
     fulfillment?: { fulfilledAt: Date | null } | null;
   } | null;
 };
@@ -800,6 +806,7 @@ function getSettlementStatus(entry: {
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
+    order?: { cancelledAt?: Date | string | null } | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -818,6 +825,9 @@ function getSettlementStatus(entry: {
   const payoutStatus = mapStatus(entry.payoutStatus ?? '');
   if (payoutStatus === 'paid') {
     return 'settled';
+  }
+  if (isFullOrderCancelled(entry.vendorAllocation?.order)) {
+    return 'held';
   }
   if (type === 'refund' && getRefundOffsetEligibility(entry).eligible) {
     return 'partially_refunded';
@@ -868,6 +878,7 @@ function buildSettlement(entry: {
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
+    order?: { cancelledAt?: Date | string | null } | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -902,6 +913,8 @@ function buildSettlement(entry: {
           ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
         : cancelRefundReviewActive
           ? CANCEL_REFUND_REVIEW_HOLD_REASON
+        : isFullOrderCancelled(entry.vendorAllocation?.order)
+          ? FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE
         : entry.settlementHoldReason ?? 'Settlement is held for operator review.',
     settled: 'Marked settled in the operational ledger.',
     disputed: 'Settlement is disputed and requires operator review.',
@@ -947,6 +960,7 @@ function isEntryEligibleForPayoutBatch(entry: {
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
     shippingStatus?: string | null;
+    order?: { cancelledAt?: Date | string | null } | null;
     fulfillment?: { fulfilledAt: Date | null; shipmentUpdatedAt?: Date | null } | null;
     refundRecords?: Array<{ amount?: unknown }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
@@ -959,6 +973,9 @@ function isEntryEligibleForPayoutBatch(entry: {
 }, options: { requireApprovedSettlementSnapshot?: boolean } = {}) {
   const requireApprovedSettlementSnapshot = options.requireApprovedSettlementSnapshot ?? true;
   const type = normalizeType(entry.entryType);
+  if (isFullOrderCancelled(entry.vendorAllocation?.order)) {
+    return false;
+  }
   if (type !== 'sale' && type !== 'refund') {
     return false;
   }
@@ -1210,6 +1227,11 @@ export async function getVendorFinanceDashboard(
             cancelRefundReviewStatus: true,
             fulfillmentStatus: true,
             shippingStatus: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
+            },
             fulfillment: {
               select: {
                 fulfilledAt: true,
@@ -1370,6 +1392,11 @@ export async function getVendorFinanceDashboard(
             cancelRefundReviewStatus: true,
             fulfillmentStatus: true,
             shippingStatus: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
+            },
             fulfillment: {
               select: {
                 fulfilledAt: true,
@@ -1858,6 +1885,11 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
           cancelRefundReviewStatus: true,
           fulfillmentStatus: true,
           shippingStatus: true,
+          order: {
+            select: {
+              cancelledAt: true,
+            },
+          },
           fulfillment: {
             select: {
               fulfilledAt: true,
@@ -2216,6 +2248,11 @@ export async function preparePayoutBatch(
         include: {
           vendorAllocation: {
             include: {
+              order: {
+                select: {
+                  cancelledAt: true,
+                },
+              },
               fulfillment: true,
               refundRecords: true,
               financeEntries: {
@@ -2316,6 +2353,8 @@ export async function preparePayoutBatch(
       getVendorBalanceSummary(tx, input.vendorId, 'TRY'),
     ]);
     const profile = mapProfile(storedProfile, input.vendorId);
+    const fullOrderCancelledEntries = entries.filter((entry) =>
+      isFullOrderCancelled(entry.vendorAllocation?.order));
     const eligibleEntries = entries.filter((entry) => isEntryEligibleForPayoutBatch(entry));
     const approvedSettlementRequiredEntries = entries.filter(
       (entry) =>
@@ -2327,6 +2366,9 @@ export async function preparePayoutBatch(
     );
 
     if (eligibleEntries.length === 0) {
+      if (fullOrderCancelledEntries.length > 0) {
+        throw new Error(FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE);
+      }
       if (adjustmentRequiredEntries.length > 0) {
         throw new Error(POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON);
       }
@@ -2497,15 +2539,6 @@ function getRefundOffsetRequiredLedgerEntries(entry: {
   );
 }
 
-function allocationIsCancelled(entry: {
-  vendorAllocation?: {
-    allocationStatus?: string | null;
-  } | null;
-}) {
-  const status = mapStatus(entry.vendorAllocation?.allocationStatus ?? '');
-  return status === 'cancelled' || status === 'canceled';
-}
-
 function addPayoutAmountChangedBlocker(input: {
   blockers: PayoutBatchTransitionBlocker[];
   payoutBatchLineId: string;
@@ -2549,6 +2582,11 @@ async function validatePayoutBatchBeforeTransitionWithClient(
             include: {
               vendorAllocation: {
                 include: {
+                  order: {
+                    select: {
+                      cancelledAt: true,
+                    },
+                  },
                   fulfillment: true,
                   refundRecords: true,
                   returnRecords: {
@@ -2678,6 +2716,16 @@ async function validatePayoutBatchBeforeTransitionWithClient(
     const type = normalizeType(transitionEntry.entryType);
     const payoutStatus = mapStatus(transitionEntry.payoutStatus ?? '');
     const vendorAllocationId = ledgerEntry.vendorAllocation?.id ?? ledgerEntry.vendorAllocationId ?? null;
+    const fullOrderCancelled = isFullOrderCancelled(transitionEntry.vendorAllocation?.order);
+
+    if (fullOrderCancelled) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'full_order_cancelled',
+        reason: FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+      }));
+    }
 
     if (vendorAllocationId) {
       const blockingAlerts = await findBlockingFinanceIntegrityAlerts({ vendorAllocationId }, db);
@@ -2796,9 +2844,8 @@ async function validatePayoutBatchBeforeTransitionWithClient(
 
     if (
       (type !== 'sale' && type !== 'refund') ||
-      allocationIsCancelled(transitionEntry) ||
       (payoutStatus === 'hold' && transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
-      (!cancelRefundReviewActive && !approvedSettlementSnapshotMissing && !isEntryEligibleForPayoutBatch(transitionEntry))
+      (!fullOrderCancelled && !cancelRefundReviewActive && !approvedSettlementSnapshotMissing && !isEntryEligibleForPayoutBatch(transitionEntry))
     ) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_no_longer_eligible',

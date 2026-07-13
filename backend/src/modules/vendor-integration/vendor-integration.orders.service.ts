@@ -1,6 +1,7 @@
 import { AllocationStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
@@ -113,6 +114,8 @@ const allocationSelect = {
       shopifyCreatedAt: true,
       currency: true,
       financialStatus: true,
+      cancelledAt: true,
+      cancelReason: true,
       paymentGatewayName: true,
       taxesIncluded: true,
       orderTaxAmount: true,
@@ -177,13 +180,44 @@ const allocationSelect = {
 type SelectedAllocation = Prisma.VendorAllocationGetPayload<{ select: typeof allocationSelect }>;
 
 function serializeAllocation(allocation: SelectedAllocation) {
+  const isCancelled = isFullOrderCancelled(allocation.order);
+  const normalizedFulfillment = allocation.fulfillmentStatus.trim().toLowerCase();
+  const normalizedShipping = allocation.shippingStatus.trim().toLowerCase();
+  const hasTrackingEvidence = Boolean(
+    allocation.trackingNumber?.trim() ||
+    allocation.carrier?.trim() ||
+    allocation.fulfillment?.trackingUrl?.trim() ||
+    allocation.vendorIntegrationTrackingUrl?.trim(),
+  );
+  const hasHistoricalOperationalEvidence = Boolean(
+    hasTrackingEvidence ||
+    allocation.fulfillment?.fulfilledAt ||
+    allocation.fulfillment?.shipmentCreatedAt ||
+    allocation.vendorIntegrationShippedAt ||
+    ['fulfilled', 'partially fulfilled', 'partially_fulfilled'].includes(normalizedFulfillment) ||
+    ['label created', 'label_created', 'shipped', 'in transit', 'in_transit', 'delivered'].includes(normalizedShipping),
+  );
+  const projectTerminalCancellation = isCancelled && !hasHistoricalOperationalEvidence;
+
   return {
     id: allocation.id,
     shopifyOrderId: allocation.order.sourceShopifyOrderId,
     shopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
     allocationStatus: allocation.allocationStatus,
-    fulfillmentStatus: allocation.fulfillmentStatus,
-    shippingStatus: allocation.shippingStatus,
+    orderStatus: isCancelled ? 'Cancelled' : 'Active',
+    isCancelled,
+    cancelledAt: toIsoDate(allocation.order.cancelledAt),
+    cancelReason: allocation.order.cancelReason,
+    operationalWritesAllowed: !isCancelled,
+    fulfillmentStatus: projectTerminalCancellation ? 'Not Required' : allocation.fulfillmentStatus,
+    shippingStatus: projectTerminalCancellation ? 'Not Required' : allocation.shippingStatus,
+    trackingStatus: projectTerminalCancellation
+      ? 'Not Required'
+      : hasTrackingEvidence
+        ? 'Recorded'
+        : isCancelled
+          ? 'Review Required'
+          : 'Pending',
     vendorIdentifier: allocation.assignedVendorId,
     originalVendorIdentifier: allocation.originalVendorId,
     vendorIntegrationStatus: allocation.vendorIntegrationStatus,

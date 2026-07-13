@@ -132,6 +132,19 @@ Initial production launch assumption:
 - Approved-settlement guard is implemented as hard enforcement for new payout preparation and mark-review.
 - If historical finance data is ever imported later, the diagnostic/backfill flow becomes mandatory before enabling/importing payment preparation.
 
+### Full Order Cancellation Safety
+
+`ShopifyOrder.cancelledAt` is the canonical full-order cancellation truth used by finance eligibility.
+
+- Simple cancellations preserve the existing void/hold behavior for active sale ledger rows.
+- Conflict cancellations preserve historical fulfillment, refund, settlement, payout, and paid evidence; they do not silently rewrite approved or paid facts.
+- A non-voided cancelled row is excluded from new settlement candidates and payout preparation.
+- Payout review and Mark Paid revalidate cancellation state and block new progression with a deterministic finance blocker.
+- Already paid evidence remains immutable and requires review; this policy does not create vendor debt or payment reversal behavior.
+- `VendorAllocation.cancellationReason` is not the canonical full-order cancellation detector.
+
+No `AllocationStatus.CANCELLED`, missed-order repair, or broad finance redesign is part of this safety correction.
+
 ## Manual EFT Payment Lifecycle
 
 The approved production launch model uses manual EFT outside the application.

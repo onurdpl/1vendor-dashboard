@@ -45,6 +45,7 @@ import type {
   VendorShippingConfigDto,
   VendorShippingConfigUpdateDto,
 } from './shipping-execution.types.js';
+import { assertFullOrderOperationallyEligible } from '../orders/full-order-cancellation-policy.js';
 
 const SHIPPING_VAT_PERCENT = 18;
 const DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG = 1;
@@ -6305,6 +6306,8 @@ async function buildShipmentRequestPreview(
     throw new Error('Allocation could not be found for the selected vendor.');
   }
 
+  assertFullOrderOperationallyEligible(allocation.order);
+
   if (allocation.cancellationReason || allocation.allocationStatus !== 'ACTIVE') {
     throw new Error('Allocation is not eligible for shipment execution.');
   }
@@ -6910,6 +6913,18 @@ export async function createShipmentExecution(
   }
 }
 
+async function assertShipmentRetryOperationallyEligible(allocationId: string) {
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: { id: allocationId },
+    select: {
+      order: {
+        select: { cancelledAt: true },
+      },
+    },
+  });
+  assertFullOrderOperationallyEligible(allocation?.order);
+}
+
 export async function retryDryRunShipmentExecution(
   shipmentExecutionId: string,
   options: {
@@ -6935,6 +6950,8 @@ export async function retryDryRunShipmentExecution(
   }
 
   assertDryRunRetryEligible(existing);
+
+  await assertShipmentRetryOperationallyEligible(existing.allocationId);
 
   const providerDto = mapProvider(existing.provider);
   assertActiveShippingProvider(providerDto);
@@ -7075,6 +7092,8 @@ export async function retryFailedShipmentExecution(
   if (!retryingStaleNavlungo) {
     assertFailedRetryEligible(existing);
   }
+
+  await assertShipmentRetryOperationallyEligible(existing.allocationId);
 
   const providerDto = mapProvider(existing.provider);
   assertActiveShippingProvider(providerDto);

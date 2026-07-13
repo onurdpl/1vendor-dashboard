@@ -483,6 +483,47 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('blocks shipment preview and create from canonical cancellation metadata alone', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      allocationStatus: 'ACTIVE',
+      cancellationReason: null,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      order: {
+        id: 'order-cancelled',
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+      },
+    }));
+
+    await expect(previewShipmentExecution(
+      { allocationId: 'alloc-1', provider: 'hepsijet' },
+      { vendorId: 'sporjinal', env: { ...env, SHIPPING_EXECUTION_ENABLED: true } },
+    )).rejects.toThrow('Full Shopify order cancellation blocks this operation.');
+    await expect(createShipmentExecution(
+      { allocationId: 'alloc-1', provider: 'hepsijet' },
+      { vendorId: 'sporjinal', env: { ...env, SHIPPING_EXECUTION_ENABLED: true } },
+    )).rejects.toThrow('Full Shopify order cancellation blocks this operation.');
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks shipment retry from canonical cancellation metadata alone', async () => {
+    const failedExecution = buildShipmentExecution({ shipmentStatus: 'FAILED' });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(failedExecution);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      cancellationReason: null,
+      order: {
+        id: 'order-cancelled-retry',
+        cancelledAt: new Date('2026-07-11T20:23:00.000Z'),
+      },
+    }));
+
+    await expect(retryFailedShipmentExecution(failedExecution.id, {
+      env: { ...env, SHIPPING_EXECUTION_ENABLED: true },
+      vendorId: 'sporjinal',
+    })).rejects.toThrow('Full Shopify order cancellation blocks this operation.');
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
   it('creates a shipment execution and links confirmed provider cost to finance shipping cost input', async () => {
     const adapter = buildAdapter();
     adapter.createShipment.mockResolvedValue({

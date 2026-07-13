@@ -66,10 +66,16 @@
 - Confirm `financial_status=voided` alone does not trigger full-order cancellation reconciliation.
 - Confirm backend fetches canonical Shopify order state before invoking local cancellation reconciliation.
 - Confirm `ShopifyOrder.cancelledAt` and `ShopifyOrder.cancelReason` are persisted after canonical full-order cancellation.
+- Confirm `ShopifyOrder.cancelledAt` alone blocks the order when allocation `cancellationReason` is absent and raw allocation state remains `ACTIVE` / `Pending` / `Awaiting Shipment`.
 - Confirm Vendor Orders shows `Cancelled`, `Fulfillment not required`, `Shipment not required`, and `Tracking not required`.
 - Confirm full-cancelled orders are excluded from awaiting-shipment/tracking-missing/workload counts and admin Operations shipment queues.
-- Confirm shipment creation, tracking updates, vendor reject, allocation split, and Vendor Integration writes are blocked for full-cancelled orders.
+- Confirm shipment preview/create/retry, tracking updates, vendor reject, allocation split, and Vendor Integration writes are blocked for full-cancelled orders.
+- Confirm Vendor Integration order reads expose `isCancelled`, `cancelledAt`, `cancelReason`, and non-actionable operational projection without hiding preserved shipment history.
+- Confirm automation reminders and stale fulfillment/SLA rules exclude full-cancelled orders.
+- Confirm conflict-cancelled non-voided sale rows cannot enter settlement candidates, payout preparation, payout review, or Mark Paid.
+- Confirm paid evidence and partially fulfilled/shipped evidence remain unchanged and are surfaced for review instead of being rewritten.
 - Confirm fulfillment cancellation still follows the separate fulfillment-cancellation path.
+- Confirm no missed-order repair is attempted by this lifecycle.
 
 ## Fulfillment Update
 - Trigger or identify `FULFILLMENTS_CREATE` or `FULFILLMENTS_UPDATE`.
@@ -102,7 +108,7 @@
 ## Order State Inspector
 - As admin, open `/admin/diagnostics` and inspect one explicit order number such as `1108` or `#1108`.
 - Confirm identity, persisted cancellation state, allocations, shipping evidence, source-specific returns/refunds, finance, operational signals, webhook history, projection reasons, and repair readiness are visible.
-- Confirm the inspector explains cancelled, conflict-review, queue-exclusion, and blocked-action labels from persisted evidence.
+- Confirm the inspector identifies `ShopifyOrder.cancelledAt` as canonical, explains raw allocation fields as preserved ownership/history, and reports cancellation-policy queue/action/finance blocking from persisted evidence.
 - Confirm vendor, support, and finance roles receive `403` from `GET /admin/diagnostics/orders/:orderNumber/state`.
 - Confirm no raw payload, customer PII, full address, access token, HMAC/API secret, provider credential, bank information, or payment reference is returned.
 - Confirm the inspector exposes no repair, replay, or mutation action.
