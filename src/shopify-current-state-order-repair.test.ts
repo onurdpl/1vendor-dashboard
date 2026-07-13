@@ -5,6 +5,7 @@ import type {
   CanonicalShopifyRefundSnapshot,
   CanonicalShopifyReturnSnapshot,
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
+import { CanonicalShopifySnapshotParseError } from '../backend/src/modules/shopify/shopify-admin.service.js';
 import {
   createCurrentStateOrderRepairService,
   CurrentStateOrderRepairError,
@@ -344,10 +345,135 @@ describe('Shopify current-state order repair', () => {
 
     await expect(service(fixture.deps).repair({ orderIdentifier: '#1105', actor }))
       .rejects.toMatchObject({
-        code: 'canonical_snapshot_fetch_failed',
-        message: 'Shopify canonical current state could not be fetched.',
+        code: 'canonical_snapshot_parse_failed',
+        message: 'Shopify canonical current-state response could not be parsed.',
         statusCode: 502,
       });
+  });
+
+  it.each([
+    ['order', 'canonical_order_fetch_failed', 'Shopify canonical order state could not be fetched.'],
+    ['refund', 'canonical_refund_fetch_failed', 'Shopify canonical refund state could not be fetched.'],
+    ['return', 'canonical_return_fetch_failed', 'Shopify canonical return state could not be fetched.'],
+  ] as const)('classifies a canonical %s fetch failure safely', async (failedSource, code, message) => {
+    const source = {
+      fetchCanonicalOrderSnapshot: vi.fn(async () => canonicalOrder()),
+      fetchCanonicalRefundsForOrder: vi.fn(async () => ({
+        orderGid: 'gid://shopify/Order/7856043819345',
+        sourceShopifyOrderId: '7856043819345',
+        refunds: [],
+        source: 'mock' as const,
+      })),
+      fetchCanonicalReturnsForOrder: vi.fn(async () => ({
+        orderGid: 'gid://shopify/Order/7856043819345',
+        sourceShopifyOrderId: '7856043819345',
+        returns: [],
+        source: 'mock' as const,
+      })),
+    };
+    const method = failedSource === 'order'
+      ? source.fetchCanonicalOrderSnapshot
+      : failedSource === 'refund'
+        ? source.fetchCanonicalRefundsForOrder
+        : source.fetchCanonicalReturnsForOrder;
+    method.mockRejectedValueOnce(new Error('upstream details must not escape') as never);
+
+    await expect(__currentStateOrderRepairTesting.fetchCanonicalRepairBundle(source, '7856043819345'))
+      .rejects.toMatchObject({ code, message, statusCode: 502 });
+  });
+
+  it('classifies malformed canonical responses separately from upstream fetch failures', async () => {
+    const source = {
+      fetchCanonicalOrderSnapshot: vi.fn(async () => canonicalOrder()),
+      fetchCanonicalRefundsForOrder: vi.fn(async () => {
+        throw new CanonicalShopifySnapshotParseError('malformed');
+      }),
+      fetchCanonicalReturnsForOrder: vi.fn(async () => ({
+        orderGid: 'gid://shopify/Order/7856043819345',
+        sourceShopifyOrderId: '7856043819345',
+        returns: [],
+        source: 'mock' as const,
+      })),
+    };
+
+    await expect(__currentStateOrderRepairTesting.fetchCanonicalRepairBundle(source, '7856043819345'))
+      .rejects.toMatchObject({
+        code: 'canonical_snapshot_parse_failed',
+        message: 'Shopify canonical current-state response could not be parsed.',
+        statusCode: 502,
+      });
+  });
+
+  it('builds a complete dry-run plan for the verified #1105 canonical shape', async () => {
+    const secondLine = {
+      ...canonicalOrder().lineItems[0],
+      lineItemGid: 'gid://shopify/LineItem/20754005229905',
+      sourceLineItemId: '20754005229905',
+      sku: 'HJ5228-300-46',
+    };
+    const order = canonicalOrder({
+      sourceShopifyOrderId: '7856043819345',
+      sourceShopifyOrderNumber: '#1105',
+      financialStatus: 'voided',
+      cancelledAt: '2026-07-06T08:39:11Z',
+      cancelReason: 'customer',
+      sellerInfo: {
+        'SKU-1': 'yalispor',
+        'HJ5228-300-46': 'yalispor',
+      },
+      lineItems: [canonicalOrder().lineItems[0], secondLine],
+      fulfillmentOrders: [
+        {
+          id: 'gid://shopify/FulfillmentOrder/9008143008081',
+          status: 'CLOSED',
+          requestStatus: 'UNSUBMITTED',
+          lineItems: [
+            {
+              id: 'gid://shopify/FulfillmentOrderLineItem/1',
+              lineItemId: 'gid://shopify/LineItem/1001',
+              remainingQuantity: 0,
+              totalQuantity: 0,
+            },
+            {
+              id: 'gid://shopify/FulfillmentOrderLineItem/2',
+              lineItemId: secondLine.lineItemGid,
+              remainingQuantity: 0,
+              totalQuantity: 0,
+            },
+          ],
+        },
+      ],
+    });
+    const refund = canonicalRefund();
+    refund.refundLineItems.push({
+      ...refund.refundLineItems[0],
+      refundLineItemGid: 'gid://shopify/RefundLineItem/771211133265',
+      sourceRefundLineItemId: '771211133265',
+      lineItemGid: secondLine.lineItemGid,
+      sourceLineItemId: secondLine.sourceLineItemId,
+      sku: secondLine.sku,
+    });
+    const fixture = dependencies({ order, refunds: [refund], returns: [] });
+
+    const result = await service(fixture.deps).repair({ orderIdentifier: '#1105', execute: false, actor });
+
+    expect(result).toMatchObject({
+      dryRun: true,
+      executed: false,
+      shopifyOrderId: '7856043819345',
+      shopifyOrderNumber: '#1105',
+      summary: {
+        shopifyOrder: 'Created',
+        allocation: 'Created',
+        finance: 'Created',
+        cancellationApplied: true,
+        refundApplied: true,
+        returnApplied: false,
+        skipped: false,
+      },
+    });
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+    expect(fixture.recordFailure).not.toHaveBeenCalled();
   });
 
   it('records a failed attempt after the repair transaction rolls back', async () => {

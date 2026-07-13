@@ -117,6 +117,7 @@
 
 ## Current-State Order Repair
 - Use only one explicitly approved Shopify order ID or number. Do not use a range, date window, or bulk input.
+- Confirm production uses stable Shopify Admin GraphQL API `2026-01`; canonical refunds must parse from the direct `Order.refunds` list and canonical returns must use Shopify GraphQL IDs without requesting `Return.legacyResourceId`.
 - Call `POST /admin/diagnostics/shopify/order-repair` without `execute` first and confirm `dryRun: true` and `executed: false`.
 - Confirm dry-run creates no local order, allocation, ledger, refund, return, job, or operational signal.
 - Review canonical identity, expected vendors, `Created`/`Existing` summary, cancellation/refund/return flags, warnings, and skipped state.
@@ -127,6 +128,8 @@
 - Confirm canonical refunds and returns use existing lifecycle records and do not create duplicate records, ledgers, adjustments, debt, or FinanceEvents on repeat execution.
 - Confirm a forced lifecycle failure rolls back all repair commerce/finance records while retaining only the safe failed job/signal evidence.
 - Confirm the Order State Inspector shows repair source, timestamp, executed mode, actor, and status without raw Shopify payload or secrets.
+- Treat `canonical_order_fetch_failed`, `canonical_refund_fetch_failed`, `canonical_return_fetch_failed`, and `canonical_snapshot_parse_failed` as blockers; do not proceed to execute until dry-run succeeds.
+- The pre-SHOP-REPAIR-1B `#1105` dry-run failed before mutation. Confirm `#1105` and `#1106` remain unrepaired until each receives its own successful reviewed dry-run.
 
 ## Reconciliation Action
 - As admin, open reconciliation diagnostics.

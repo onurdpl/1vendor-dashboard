@@ -39,6 +39,26 @@ import type {
   SyncShopifyReturnShippingResult,
 } from './shopify-admin.types.js';
 
+export class CanonicalShopifySnapshotParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CanonicalShopifySnapshotParseError';
+  }
+}
+
+async function parseCanonicalShopifyResponse<T>(response: Response): Promise<ShopifyGraphqlResponse<T>> {
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new CanonicalShopifySnapshotParseError('Shopify canonical response was not valid JSON.');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CanonicalShopifySnapshotParseError('Shopify canonical response had an invalid envelope.');
+  }
+  return value as ShopifyGraphqlResponse<T>;
+}
+
 type OrderSellerInfoQueryResponse = {
   order: {
     metafield: {
@@ -221,38 +241,30 @@ type CanonicalRefundsForOrderQueryResponse = {
   order: {
     id: string;
     legacyResourceId?: string | null;
-    refunds: {
-      pageInfo?: {
-        hasNextPage?: boolean | null;
-      } | null;
-      edges: Array<{
-        node: {
-          id: string;
-          legacyResourceId?: string | null;
-          createdAt?: string | null;
-          note?: string | null;
-          refundLineItems: {
-            pageInfo?: {
-              hasNextPage?: boolean | null;
+    refunds: Array<{
+      id: string;
+      createdAt?: string | null;
+      note?: string | null;
+      refundLineItems: {
+        pageInfo?: {
+          hasNextPage?: boolean | null;
+        } | null;
+        edges: Array<{
+          node: {
+            id: string;
+            quantity?: number | null;
+            subtotalSet?: ShopifyMoneySetNode;
+            lineItem?: {
+              id?: string | null;
+              sku?: string | null;
+              title?: string | null;
+              name?: string | null;
+              variantTitle?: string | null;
             } | null;
-            edges: Array<{
-              node: {
-                id: string;
-                quantity?: number | null;
-                subtotalSet?: ShopifyMoneySetNode;
-                lineItem?: {
-                  id?: string | null;
-                  sku?: string | null;
-                  title?: string | null;
-                  name?: string | null;
-                  variantTitle?: string | null;
-                } | null;
-              };
-            }>;
           };
-        };
-      }>;
-    };
+        }>;
+      };
+    }>;
   } | null;
 };
 
@@ -267,7 +279,6 @@ type CanonicalReturnsForOrderQueryResponse = {
       edges: Array<{
         node: {
           id: string;
-          legacyResourceId?: string | null;
           status?: string | null;
           createdAt?: string | null;
           requestApprovedAt?: string | null;
@@ -1679,16 +1690,22 @@ export function createShopifyAdminService(env: AppEnv) {
       throw new Error(`Shopify canonical order snapshot fetch failed with status ${response.status}.`);
     }
 
-    const json = (await response.json()) as ShopifyGraphqlResponse<CanonicalOrderSnapshotQueryResponse>;
+    const json = await parseCanonicalShopifyResponse<CanonicalOrderSnapshotQueryResponse>(response);
     if (json.errors?.length) {
       throw new Error(
         `Shopify canonical order snapshot fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
       );
     }
 
-    const order = json.data?.order;
-    if (!order?.id) {
+    if (!json.data || !Object.prototype.hasOwnProperty.call(json.data, 'order')) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical order response omitted order data.');
+    }
+    const order = json.data.order;
+    if (order === null) {
       return null;
+    }
+    if (!order.id) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical order response had invalid order identity.');
     }
 
     const shippingAddress = order.shippingAddress ?? null;
@@ -1832,37 +1849,29 @@ export function createShopifyAdminService(env: AppEnv) {
                 id
                 legacyResourceId
                 refunds(first: 50) {
-                  pageInfo {
-                    hasNextPage
-                  }
-                  edges {
-                    node {
-                      id
-                      legacyResourceId
-                      createdAt
-                      note
-                      refundLineItems(first: 100) {
-                        pageInfo {
-                          hasNextPage
-                        }
-                        edges {
-                          node {
-                            id
-                            quantity
-                            subtotalSet {
-                              shopMoney {
-                                amount
-                                currencyCode
-                              }
-                            }
-                            lineItem {
-                              id
-                              sku
-                              title
-                              name
-                              variantTitle
-                            }
+                  id
+                  createdAt
+                  note
+                  refundLineItems(first: 100) {
+                    pageInfo {
+                      hasNextPage
+                    }
+                    edges {
+                      node {
+                        id
+                        quantity
+                        subtotalSet {
+                          shopMoney {
+                            amount
+                            currencyCode
                           }
+                        }
+                        lineItem {
+                          id
+                          sku
+                          title
+                          name
+                          variantTitle
                         }
                       }
                     }
@@ -1882,38 +1891,46 @@ export function createShopifyAdminService(env: AppEnv) {
       throw new Error(`Shopify canonical refund fetch failed with status ${response.status}.`);
     }
 
-    const json = (await response.json()) as ShopifyGraphqlResponse<CanonicalRefundsForOrderQueryResponse>;
+    const json = await parseCanonicalShopifyResponse<CanonicalRefundsForOrderQueryResponse>(response);
     if (json.errors?.length) {
       throw new Error(
         `Shopify canonical refund fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
       );
     }
 
-    const order = json.data?.order;
-    if (!order?.id) {
+    if (!json.data || !Object.prototype.hasOwnProperty.call(json.data, 'order')) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical refund response omitted order data.');
+    }
+    const order = json.data.order;
+    if (order === null) {
       return null;
     }
-
-    if (order.refunds.pageInfo?.hasNextPage) {
-      throw new Error('Shopify canonical refund pagination incomplete.');
+    if (!order.id) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical refund response had invalid order identity.');
+    }
+    if (!Array.isArray(order.refunds)) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical refund collection was malformed.');
     }
 
-    const paginatedRefund = (order.refunds.edges ?? []).find((edge) =>
-      edge.node.refundLineItems.pageInfo?.hasNextPage
+    const malformedRefund = order.refunds.find((refund) =>
+      !refund?.id || !refund.refundLineItems || !Array.isArray(refund.refundLineItems.edges)
     );
+    if (malformedRefund) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical refund record was malformed.');
+    }
+    const paginatedRefund = order.refunds.find((refund) => refund.refundLineItems.pageInfo?.hasNextPage);
     if (paginatedRefund) {
-      throw new Error(`Shopify canonical refund ${paginatedRefund.node.id} line item pagination incomplete.`);
+      throw new Error(`Shopify canonical refund ${paginatedRefund.id} line item pagination incomplete.`);
     }
 
     return {
       orderGid: order.id,
       sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
       source: 'shopify_admin',
-      refunds: (order.refunds.edges ?? []).map((edge) => {
-        const refund = edge.node;
+      refunds: order.refunds.map((refund) => {
         return {
           refundGid: refund.id,
-          sourceShopifyRefundId: refund.legacyResourceId ?? extractShopifyGidTail(refund.id) ?? refund.id,
+          sourceShopifyRefundId: extractShopifyGidTail(refund.id) ?? refund.id,
           createdAt: refund.createdAt ?? null,
           note: normalizeShopifyString(refund.note),
           refundLineItems: (refund.refundLineItems.edges ?? []).map((lineItemEdge) => {
@@ -1973,7 +1990,6 @@ export function createShopifyAdminService(env: AppEnv) {
                   edges {
                     node {
                       id
-                      legacyResourceId
                       status
                       createdAt
                       requestApprovedAt
@@ -2017,16 +2033,31 @@ export function createShopifyAdminService(env: AppEnv) {
       throw new Error(`Shopify canonical return fetch failed with status ${response.status}.`);
     }
 
-    const json = (await response.json()) as ShopifyGraphqlResponse<CanonicalReturnsForOrderQueryResponse>;
+    const json = await parseCanonicalShopifyResponse<CanonicalReturnsForOrderQueryResponse>(response);
     if (json.errors?.length) {
       throw new Error(
         `Shopify canonical return fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
       );
     }
 
-    const order = json.data?.order;
-    if (!order?.id) {
+    if (!json.data || !Object.prototype.hasOwnProperty.call(json.data, 'order')) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical return response omitted order data.');
+    }
+    const order = json.data.order;
+    if (order === null) {
       return null;
+    }
+    if (!order.id) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical return response had invalid order identity.');
+    }
+    if (!order.returns || !Array.isArray(order.returns.edges)) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical return collection was malformed.');
+    }
+    const malformedReturn = order.returns.edges.find((edge) =>
+      !edge?.node?.id || !edge.node.returnLineItems || !Array.isArray(edge.node.returnLineItems.edges)
+    );
+    if (malformedReturn) {
+      throw new CanonicalShopifySnapshotParseError('Shopify canonical return record was malformed.');
     }
 
     if (order.returns.pageInfo?.hasNextPage) {
@@ -2048,7 +2079,7 @@ export function createShopifyAdminService(env: AppEnv) {
         const returnNode = edge.node;
         return {
           returnGid: returnNode.id,
-          sourceShopifyReturnId: returnNode.legacyResourceId ?? extractShopifyGidTail(returnNode.id) ?? returnNode.id,
+          sourceShopifyReturnId: extractShopifyGidTail(returnNode.id) ?? returnNode.id,
           status: normalizeShopifyString(returnNode.status)?.toLowerCase() ?? 'unknown',
           createdAt: returnNode.createdAt ?? null,
           requestApprovedAt: returnNode.requestApprovedAt ?? null,

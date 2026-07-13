@@ -91,6 +91,7 @@ Mutation requires explicit execution:
 Current-State Repair:
 
 - fetches the canonical order, refunds, and returns through Shopify Admin GraphQL before mutation
+- uses the API `2026-01` schema shapes: `Order.refunds` is a direct list with per-refund `refundLineItems` connections; `Order.returns` is a connection and return identity is derived from the stable Shopify GraphQL ID
 - validates `seller_info`, exact SKU mapping, vendor existence, active finance profile, and snapshot completeness
 - creates missing `ShopifyOrder`, line item, `VendorAllocation`, and sale ledger records without creating a synthetic `orders/create` webhook
 - applies the existing refund and return lifecycles, then applies canonical full-order cancellation in one database transaction
@@ -105,3 +106,7 @@ Dry-run performs no database write and therefore does not create repair history.
 The safe summary reports whether the Shopify order, allocation, and finance evidence are `Created` or `Existing`, whether cancellation/refund/return work applies, warnings, and whether the execution was skipped as already current.
 
 Missing orders with existing fulfillment progress fail closed for manual review; this phase does not reconstruct historical fulfillment or tracking evidence.
+
+Canonical fetch failures are returned with safe, deterministic codes: `canonical_order_fetch_failed`, `canonical_refund_fetch_failed`, `canonical_return_fetch_failed`, or `canonical_snapshot_parse_failed`. These responses do not include request headers, tokens, raw Shopify payloads, or customer data.
+
+The first production dry-run for `#1105` returned a canonical snapshot fetch failure before SHOP-REPAIR-1B and wrote no local order, allocation, finance, audit, or signal data. `#1105` and `#1106` remain unrepaired. A new successful dry-run and operator review are mandatory before any execute request is considered.

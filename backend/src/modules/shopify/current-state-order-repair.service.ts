@@ -13,7 +13,10 @@ import { canonicalRefundToWebhookPayload } from '../reconciliation/canonical-ref
 import { applyCanonicalReturnsInTransaction } from '../reconciliation/canonical-return-reconciliation.service.js';
 import { applyCanonicalCancellationInTransaction } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
 import { ingestShopifyRefundWebhook } from './refund-ingestion.service.js';
-import { createShopifyAdminService } from './shopify-admin.service.js';
+import {
+  CanonicalShopifySnapshotParseError,
+  createShopifyAdminService,
+} from './shopify-admin.service.js';
 import type {
   CanonicalShopifyOrderSnapshot,
   CanonicalShopifyRefundSnapshot,
@@ -59,6 +62,11 @@ type CanonicalRepairBundle = {
   refunds: CanonicalShopifyRefundSnapshot[];
   returns: CanonicalShopifyReturnSnapshot[];
 };
+
+type CanonicalRepairSource = Pick<
+  ReturnType<typeof createShopifyAdminService>,
+  'fetchCanonicalOrderSnapshot' | 'fetchCanonicalRefundsForOrder' | 'fetchCanonicalReturnsForOrder'
+>;
 
 type LocalRepairState = {
   orderExists: boolean;
@@ -128,6 +136,82 @@ function toJson(value: Record<string, unknown>): Prisma.InputJsonObject {
 function safeErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : 'Current-state order repair failed.';
   return message.replace(/[\r\n]+/g, ' ').slice(0, 500);
+}
+
+function canonicalFetchError(
+  error: unknown,
+  code: 'canonical_order_fetch_failed' | 'canonical_refund_fetch_failed' | 'canonical_return_fetch_failed',
+  message: string,
+) {
+  if (error instanceof CurrentStateOrderRepairError) {
+    return error;
+  }
+  if (error instanceof CanonicalShopifySnapshotParseError) {
+    return new CurrentStateOrderRepairError(
+      'canonical_snapshot_parse_failed',
+      'Shopify canonical current-state response could not be parsed.',
+      502,
+    );
+  }
+  return new CurrentStateOrderRepairError(code, message, 502);
+}
+
+async function fetchCanonicalRepairBundle(
+  shopifyAdmin: CanonicalRepairSource,
+  orderId: string,
+): Promise<CanonicalRepairBundle | null> {
+  const [orderResult, refundResult, returnResult] = await Promise.allSettled([
+    shopifyAdmin.fetchCanonicalOrderSnapshot(orderId),
+    shopifyAdmin.fetchCanonicalRefundsForOrder(orderId),
+    shopifyAdmin.fetchCanonicalReturnsForOrder(orderId),
+  ]);
+
+  if (orderResult.status === 'rejected') {
+    throw canonicalFetchError(
+      orderResult.reason,
+      'canonical_order_fetch_failed',
+      'Shopify canonical order state could not be fetched.',
+    );
+  }
+  if (refundResult.status === 'rejected') {
+    throw canonicalFetchError(
+      refundResult.reason,
+      'canonical_refund_fetch_failed',
+      'Shopify canonical refund state could not be fetched.',
+    );
+  }
+  if (returnResult.status === 'rejected') {
+    throw canonicalFetchError(
+      returnResult.reason,
+      'canonical_return_fetch_failed',
+      'Shopify canonical return state could not be fetched.',
+    );
+  }
+
+  const order = orderResult.value;
+  if (!order) {
+    return null;
+  }
+  if (!refundResult.value) {
+    throw new CurrentStateOrderRepairError(
+      'canonical_refund_fetch_failed',
+      'Shopify canonical refund state could not be fetched.',
+      502,
+    );
+  }
+  if (!returnResult.value) {
+    throw new CurrentStateOrderRepairError(
+      'canonical_return_fetch_failed',
+      'Shopify canonical return state could not be fetched.',
+      502,
+    );
+  }
+
+  return {
+    order,
+    refunds: refundResult.value.refunds,
+    returns: returnResult.value.returns,
+  };
 }
 
 function validateCanonicalBundle(bundle: CanonicalRepairBundle, state: LocalRepairState) {
@@ -572,22 +656,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
       if (!orderId) {
         return null;
       }
-      const [order, refunds, returns] = await Promise.all([
-        shopifyAdmin.fetchCanonicalOrderSnapshot(orderId),
-        shopifyAdmin.fetchCanonicalRefundsForOrder(orderId),
-        shopifyAdmin.fetchCanonicalReturnsForOrder(orderId),
-      ]);
-      if (!order) {
-        return null;
-      }
-      if (!refunds || !returns) {
-        throw new CurrentStateOrderRepairError(
-          'canonical_snapshot_incomplete',
-          'Shopify refund or return current-state snapshot could not be verified.',
-          502,
-        );
-      }
-      return { order, refunds: refunds.refunds, returns: returns.returns };
+      return fetchCanonicalRepairBundle(shopifyAdmin, orderId);
     },
 
     async inspectLocalState(bundle) {
@@ -809,8 +878,8 @@ export function createCurrentStateOrderRepairService(
         throw error;
       }
       throw new CurrentStateOrderRepairError(
-        'canonical_snapshot_fetch_failed',
-        'Shopify canonical current state could not be fetched.',
+        'canonical_snapshot_parse_failed',
+        'Shopify canonical current-state response could not be parsed.',
         502,
       );
     }
@@ -879,5 +948,6 @@ export const __currentStateOrderRepairTesting = {
   REPAIR_SIGNAL_RULE_KEY,
   normalizeIdentifier,
   validateCanonicalBundle,
+  fetchCanonicalRepairBundle,
   applyBaseOrderInTransaction,
 };

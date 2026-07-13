@@ -471,6 +471,9 @@ POST /fulfillments.json
 - Executed repair creates missing order/allocation/finance evidence and applies refund, return, and full-order cancellation lifecycles inside one transaction. Failure rolls back repair data and records a safe failed reconciliation job/signal.
 - Current-state repair must be used instead of Fresh Order Backfill when a missed order is now cancelled, refunded, or returned.
 - Repair history contains only safe source, timestamp, actor, mode, status, and error-summary metadata. Raw Shopify payloads are not retained by the repair path.
+- SHOP-REPAIR-1B aligns canonical recovery reads with Admin GraphQL API `2026-01`: `Order.refunds` is read as a direct refund list, each refund keeps its `refundLineItems` connection, and `Order.returns` remains a connection whose stable return identity comes from the Shopify GraphQL ID rather than unsupported `Return.legacyResourceId`.
+- Canonical repair fetch failures are classified safely as order, refund, return, or response-parse failures without returning GraphQL headers, tokens, or raw payloads.
+- The first production dry-run for `#1105` failed during the previous incompatible refund/return queries and performed no mutation. `#1105` and `#1106` remain unrepaired until a new dry-run completes successfully and is reviewed.
 - Fulfillment cancellation remains on the existing fulfillment cancellation path and must not be treated as full order cancellation.
 
 ## Customer Notifications
