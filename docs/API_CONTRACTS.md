@@ -228,7 +228,7 @@ Webhook processing lifecycle states:
   - no mutation, repair, replay, or reconciliation execution
   - no raw webhook payload, request/response snapshot, HMAC material, token, provider credential, bank/payment reference, customer PII, or full address
   - webhook history, repair history, operational signals, and finance events have fixed maximum result limits
-- Repair readiness is explanatory only. It can point to the separate current-state repair endpoint, but the inspector itself never performs mutation.
+- Inspection remains read-only. When this route returns `404 Order not found`, the admin Recovery Center may offer the separate current-state repair workflow for that same explicit identifier.
 
 ### POST /admin/diagnostics/shopify/order-repair
 
@@ -239,6 +239,7 @@ Webhook processing lifecycle states:
   - `execute`: optional boolean; omission or `false` is dry-run, and only `true` permits mutation
 - Bulk/range/date input is unsupported.
 - Dry-run response includes `repairSource`, `repairTimestamp`, `dryRun: true`, `executed: false`, and a safe planned summary. Dry-run performs no database or audit write.
+- Recovery Center operator flow: inspect one order, run dry-run, review canonical identity/local state/planned mutations/warnings, then use a separate explicit confirmation before sending `execute: true`.
 - Execute behavior:
   - fetch canonical order, refund, and return snapshots before mutation
   - validate seller/SKU/vendor/finance-profile mapping and snapshot completeness
@@ -357,16 +358,13 @@ Webhook processing lifecycle states:
 
 ### POST /admin/diagnostics/webhooks/:webhookEventId/replay
 
-- Purpose: explicitly replay a persisted webhook event for operational recovery.
+- Purpose: explicitly replay one failed, retained immutable webhook event from its stored payload.
 - Required auth: yes.
 - Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
-- Supported topics:
-  - `orders/create`
-  - `refunds/create`
-  - `fulfillments/create`
-  - `fulfillments/update`
-  - `fulfillment_events/create`
-  - `fulfillment_orders/cancelled`
+- Safe replay topic/state:
+  - topic `refunds/create`
+  - source state `FAILED`
+  - retained raw payload and payload hash
 - Expected `202` behavior:
   - returns an explicit result with `action`, `topic`, `webhookEventId`, `beforeStatus`, `afterStatus`, `replayStatus`, `processingStatus`, optional affected counts, and safe `errorSummary`
   - does not silently succeed
@@ -377,9 +375,11 @@ Webhook processing lifecycle states:
   - payload unavailable
   - payload hash unavailable
   - unsupported topic
-  - currently processing event
+  - any state other than `FAILED`
 - Replay note:
   - replay uses stored payload content only
+  - replay does not fetch current Shopify state
+  - processed `orders/create`, processed `orders/cancelled`, and stateful order/fulfillment payloads are not safe replay candidates
   - older persisted webhook events may not have replayable payloads because raw payload retention was added later
 
 ### POST /admin/diagnostics/webhooks/:webhookEventId/recover
@@ -407,6 +407,7 @@ Webhook processing lifecycle states:
 - Recovery note:
   - recover marks the event `PROCESSING` before executing ingestion path
   - recover reuses idempotent ingestion/upsert behavior
+  - recover resumes processing from the retained webhook payload and does not fetch current Shopify state
   - recover does not add background workers in this phase
 
 ### POST /webhooks/shopify/orders-create

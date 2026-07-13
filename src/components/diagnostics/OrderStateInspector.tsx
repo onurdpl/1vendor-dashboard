@@ -1,8 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { ActionFeedback } from '../ActionFeedback';
+import { useMutationAction } from '../../hooks/useMutationAction';
 import { useQueryResource } from '../../hooks/useQueryResource';
 import { queryKeys } from '../../lib/api/queryKeys';
 import { runtimeServices } from '../../services/runtime-services';
 import { formatDateTime, toTitleCaseLabel } from '../../services/real/formatting';
+import type { CurrentStateOrderRepairResult } from '../../services/real/diagnostics';
 import {
   EmptyStatePanel,
   MetadataGroup,
@@ -33,14 +36,77 @@ function EvidenceList({ items }: { items: string[] }) {
   );
 }
 
-export function OrderStateInspector() {
+type OrderStateInspectorProps = {
+  onRepairCandidateChange?: (isCandidate: boolean) => void;
+};
+
+function plannedAction(value: 'Created' | 'Existing') {
+  return value === 'Created' ? 'CREATE' : 'REUSE';
+}
+
+function currentRecordState(value: 'Created' | 'Existing') {
+  return value === 'Created' ? 'Missing' : 'Existing';
+}
+
+export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspectorProps = {}) {
   const [orderNumber, setOrderNumber] = useState('');
   const [inspectedOrderNumber, setInspectedOrderNumber] = useState('');
+  const [dryRunResult, setDryRunResult] = useState<CurrentStateOrderRepairResult | null>(null);
+  const [executeConfirmationOpen, setExecuteConfirmationOpen] = useState(false);
+  const [repairFeedback, setRepairFeedback] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null);
   const normalizedOrderNumber = inspectedOrderNumber.trim();
   const inspectorQuery = useQueryResource(
     queryKeys.admin.diagnostics.orderState(normalizedOrderNumber || 'idle'),
     ({ signal }) => runtimeServices.diagnostics.inspectOrderState(normalizedOrderNumber, { signal }),
     { enabled: Boolean(normalizedOrderNumber) },
+  );
+
+  const isMissingLocalOrder = Boolean(normalizedOrderNumber) && (
+    inspectorQuery.diagnostics?.status === 404 || inspectorQuery.error?.trim().toLowerCase() === 'order not found.'
+  );
+
+  useEffect(() => {
+    onRepairCandidateChange?.(isMissingLocalOrder);
+  }, [isMissingLocalOrder, onRepairCandidateChange]);
+
+  useEffect(() => {
+    setDryRunResult(null);
+    setExecuteConfirmationOpen(false);
+    setRepairFeedback(null);
+  }, [normalizedOrderNumber]);
+
+  const dryRunMutation = useMutationAction(
+    async (orderIdentifier: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(orderIdentifier, false),
+    {
+      onSuccess: (repairResult) => {
+        setDryRunResult(repairResult);
+        setRepairFeedback({ message: 'Dry run complete. Review the current-state plan before execution.', tone: 'info' });
+      },
+      onError: (error) => {
+        setRepairFeedback({
+          message: error instanceof Error ? error.message : 'Current-state repair dry run failed.',
+          tone: 'error',
+        });
+      },
+    },
+  );
+
+  const executeMutation = useMutationAction(
+    async (orderIdentifier: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(orderIdentifier, true),
+    {
+      onSuccess: async () => {
+        setExecuteConfirmationOpen(false);
+        setRepairFeedback({ message: 'Current-state repair completed. The inspector is refreshing persisted evidence.', tone: 'success' });
+        await inspectorQuery.refetch();
+      },
+      onError: (error) => {
+        setExecuteConfirmationOpen(false);
+        setRepairFeedback({
+          message: error instanceof Error ? error.message : 'Current-state order repair failed.',
+          tone: 'error',
+        });
+      },
+    },
   );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -57,14 +123,14 @@ export function OrderStateInspector() {
     setInspectedOrderNumber(nextOrderNumber);
   }
 
-  const result = inspectorQuery.data;
+  const result = isMissingLocalOrder ? null : inspectorQuery.data;
 
   return (
     <section className="order-state-inspector" aria-labelledby="order-state-inspector-title">
       <div className="order-state-inspector-heading">
         <div>
           <h3 id="order-state-inspector-title">Order State Inspector</h3>
-          <p>Inspect persisted lifecycle evidence for one order. This tool is read-only and does not repair or replay data.</p>
+          <p>Inspect persisted lifecycle evidence for one order. Inspection is read-only; a missing local order can continue into guarded current-state repair.</p>
         </div>
         <StatusBadge tone="info">Tier-1 operational tool</StatusBadge>
       </div>
@@ -101,6 +167,85 @@ export function OrderStateInspector() {
           description={inspectorQuery.error ?? 'Order state could not be loaded.'}
           onRetry={() => void inspectorQuery.refetch()}
         />
+      ) : null}
+
+      {isMissingLocalOrder ? (
+        <OperationalSection
+          title="Repair Missing Shopify Order"
+          description="Fetch current Shopify truth for this one order. The first request is always a dry run and performs no local mutation."
+        >
+          <div className="current-state-repair-actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={dryRunMutation.isPending || executeMutation.isPending}
+              onClick={() => dryRunMutation.mutate(normalizedOrderNumber)}
+            >
+              {dryRunMutation.isPending ? 'Running Dry Run...' : 'Repair Missing Shopify Order'}
+            </button>
+            <span>One explicit Shopify order only. Bulk or range repair is unavailable.</span>
+          </div>
+
+          {repairFeedback ? <ActionFeedback tone={repairFeedback.tone} message={repairFeedback.message} /> : null}
+
+          {dryRunResult?.dryRun ? (
+            <div className="current-state-repair-plan" aria-label="Current-state repair dry-run plan">
+              <div className="order-state-inspector-grid">
+                <MetadataGroup title="Canonical Shopify state">
+                  <MetadataRow label="Order number" value={dryRunResult.shopifyOrderNumber} />
+                  <MetadataRow label="Shopify order ID" value={dryRunResult.shopifyOrderId} />
+                  <MetadataRow label="Source" value="Current Shopify Admin state" />
+                  <MetadataRow label="Cancellation evidence" value={dryRunResult.summary.cancellationApplied ? 'Present' : 'Not present'} />
+                  <MetadataRow label="Refund evidence" value={dryRunResult.summary.refundApplied ? 'Present' : 'Not present'} />
+                  <MetadataRow label="Return evidence" value={dryRunResult.summary.returnApplied ? 'Present' : 'Not present'} />
+                </MetadataGroup>
+                <MetadataGroup title="Current local state">
+                  <MetadataRow label="Shopify order" value={currentRecordState(dryRunResult.summary.shopifyOrder)} />
+                  <MetadataRow label="Vendor allocation" value={currentRecordState(dryRunResult.summary.allocation)} />
+                  <MetadataRow label="Finance ledger" value={currentRecordState(dryRunResult.summary.finance)} />
+                  <MetadataRow label="Dry run" value="Yes" />
+                  <MetadataRow label="Executed" value="No" />
+                  <MetadataRow label="Skipped if executed" value={yesNo(dryRunResult.summary.skipped)} />
+                </MetadataGroup>
+              </div>
+
+              <OperationalSection title="Planned mutations" description="The execute step will use this reviewed one-order plan.">
+                <div className="order-state-action-grid">
+                  {[
+                    ['ShopifyOrder and line items', plannedAction(dryRunResult.summary.shopifyOrder)],
+                    ['VendorAllocation', plannedAction(dryRunResult.summary.allocation)],
+                    ['FinanceLedgerEntry sale evidence', plannedAction(dryRunResult.summary.finance)],
+                    ['Full-order cancellation lifecycle', dryRunResult.summary.cancellationApplied ? 'APPLY' : 'SKIP'],
+                    ['Refund lifecycle', dryRunResult.summary.refundApplied ? 'APPLY' : 'SKIP'],
+                    ['Return lifecycle', dryRunResult.summary.returnApplied ? 'APPLY' : 'SKIP'],
+                  ].map(([entity, action]) => (
+                    <div key={entity} className="order-state-action-row">
+                      <span>{entity}</span>
+                      <StatusBadge tone={action === 'SKIP' ? 'neutral' : 'attention'}>{action}</StatusBadge>
+                      <small>Current-state repair transaction</small>
+                    </div>
+                  ))}
+                </div>
+              </OperationalSection>
+
+              <OperationalSection title="Warnings" description="Execution should stop if the backend reports an unsafe or unsupported state.">
+                <EvidenceList items={dryRunResult.summary.warnings} />
+              </OperationalSection>
+
+              <div className="current-state-repair-actions">
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={executeMutation.isPending}
+                  onClick={() => setExecuteConfirmationOpen(true)}
+                >
+                  Execute Repair
+                </button>
+                <a className="button button-secondary" href="#order-state-inspector-title">Back to Order State Inspector</a>
+              </div>
+            </div>
+          ) : null}
+        </OperationalSection>
       ) : null}
 
       {result ? (
@@ -358,7 +503,7 @@ export function OrderStateInspector() {
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Repair readiness" description="Read-only classification; no repair action is available here.">
+          <OperationalSection title="Repair readiness" description="Read-only classification for an existing local order; missing-order repair is not offered here.">
             <MetadataGroup>
               <MetadataRow label="Repair needed" value={yesNo(result.repairReadiness.repairNeeded)} />
               <MetadataRow label="Repair supported" value={yesNo(result.repairReadiness.repairSupported)} />
@@ -367,6 +512,42 @@ export function OrderStateInspector() {
             </MetadataGroup>
             <EvidenceList items={result.repairReadiness.blockers} />
           </OperationalSection>
+        </div>
+      ) : null}
+
+      {executeConfirmationOpen && dryRunResult ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section className="support-modal" role="dialog" aria-modal="true" aria-labelledby="current-state-repair-confirmation-title">
+            <div className="support-modal-header">
+              <div>
+                <p className="eyebrow">Production recovery</p>
+                <h3 id="current-state-repair-confirmation-title">Execute Current-State Repair?</h3>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                aria-label="Close repair confirmation"
+                onClick={() => setExecuteConfirmationOpen(false)}
+              >
+                X
+              </button>
+            </div>
+            <p>Current Shopify state will be fetched. Missing local records may be created for {dryRunResult.shopifyOrderNumber}.</p>
+            <p>This executes only the reviewed single-order plan. It does not replay a stored webhook or enable bulk repair.</p>
+            <div className="support-modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setExecuteConfirmationOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={executeMutation.isPending}
+                onClick={() => executeMutation.mutate(dryRunResult.orderIdentifier)}
+              >
+                {executeMutation.isPending ? 'Executing...' : 'Execute Repair'}
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
     </section>

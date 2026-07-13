@@ -10,6 +10,7 @@ const diagnosticsMocks = vi.hoisted(() => ({
   webhooks: vi.fn(),
   webhookDetail: vi.fn(),
   inspectOrderState: vi.fn(),
+  repairMissingShopifyOrder: vi.fn(),
   syncEvents: vi.fn(),
   reconciliation: vi.fn(),
   replay: vi.fn(),
@@ -116,14 +117,14 @@ const replayableEvent = {
   shopifyWebhookId: 'wh-replayable',
   eventId: 'event-replayable',
   payloadHash: 'sha256:abc123',
-  status: 'RECEIVED',
-  processingStatus: 'received',
+  status: 'FAILED',
+  processingStatus: 'failed',
   payloadAvailable: true,
   replayEligible: true,
   replayBlockedReason: null,
   recoverEligible: true,
   recoverBlockedReason: null,
-  recommendedAction: 'Replay or recover this stuck event.',
+  recommendedAction: 'Recover this failed event after confirming the root cause is resolved.',
   lastErrorSummary: null,
 };
 
@@ -339,6 +340,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.webhooks.mockReset();
     diagnosticsMocks.webhookDetail.mockReset();
     diagnosticsMocks.inspectOrderState.mockReset();
+    diagnosticsMocks.repairMissingShopifyOrder.mockReset();
     diagnosticsMocks.syncEvents.mockReset();
     diagnosticsMocks.reconciliation.mockReset();
     diagnosticsMocks.replay.mockReset();
@@ -351,6 +353,26 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.runtimeHealth.mockReset();
 
     diagnosticsMocks.inspectOrderState.mockResolvedValue(orderStateInspectorResult());
+    diagnosticsMocks.repairMissingShopifyOrder.mockImplementation(async (orderIdentifier: string, execute: boolean) => ({
+      ok: true,
+      orderIdentifier,
+      shopifyOrderId: '7856043819345',
+      shopifyOrderNumber: '#1105',
+      repairSource: 'shopify_admin_current_state',
+      repairTimestamp: '2026-07-13T10:00:00.000Z',
+      dryRun: !execute,
+      executed: execute,
+      summary: {
+        shopifyOrder: 'Created',
+        allocation: 'Created',
+        finance: 'Created',
+        cancellationApplied: true,
+        refundApplied: true,
+        returnApplied: false,
+        warnings: [],
+        skipped: false,
+      },
+    }));
 
     diagnosticsMocks.webhooks.mockResolvedValue({
       summary: {
@@ -497,9 +519,9 @@ describe('AdminDiagnosticsPage control center', () => {
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {
     renderDiagnosticsPage();
 
-    expect(await screen.findByRole('heading', { name: /webhook recovery command center/i })).toBeInTheDocument();
-    expect((await screen.findAllByText(/Replay blocked: Payload unavailable/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Recover blocked: Already processed/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: /production recovery center/i })).toBeInTheDocument();
+    expect((await screen.findAllByText(/Stored replay blocked: Payload unavailable/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Failed webhook recovery blocked: Already processed/i).length).toBeGreaterThan(0);
     expect(screen.getByText('Refund Sync')).toBeInTheDocument();
     expect(screen.getByText(/Retry 1\/3/i)).toBeInTheDocument();
     expect(screen.getByText('Validation')).toBeInTheDocument();
@@ -554,14 +576,44 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getAllByText('Use manual Shopify reconciliation.').length).toBeGreaterThan(0);
   });
 
-  it('shows replay action feedback without changing the backend action contract', async () => {
+  it('confirms stored webhook replay and explains that it does not fetch current Shopify state', async () => {
     renderDiagnosticsPage();
 
     expect((await screen.findAllByText('event-replayable')).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getAllByRole('button', { name: 'Replay' })[1]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Replay Stored Webhook' })[1]);
+
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Replay Stored Webhook?' });
+    expect(dialog).toHaveTextContent('Historical payload will be replayed.');
+    expect(dialog).toHaveTextContent('This does NOT use current Shopify state.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Replay Stored Webhook' }));
 
     expect(await screen.findByText('Replay accepted')).toBeInTheDocument();
     expect(diagnosticsMocks.replay).toHaveBeenCalledWith('webhook-replayable');
+  });
+
+  it('confirms failed webhook recovery and explains stored-payload processing', async () => {
+    diagnosticsMocks.recover.mockResolvedValueOnce({
+      ok: true,
+      topic: 'refunds/create',
+      action: 'recover',
+      processingStatus: 'processed',
+      recoveryStatus: 'recovered',
+      message: 'Recovery accepted',
+    });
+    renderDiagnosticsPage();
+
+    await screen.findByText('event-replayable');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Recover Failed Webhook' })[1]);
+
+    expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Recover Failed Webhook?' });
+    expect(dialog).toHaveTextContent('Stored webhook processing will resume.');
+    expect(dialog).toHaveTextContent('It does NOT fetch current Shopify state.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Recover Failed Webhook' }));
+
+    expect(await screen.findByText('Recovery accepted')).toBeInTheDocument();
+    expect(diagnosticsMocks.recover).toHaveBeenCalledWith('webhook-replayable');
   });
 
   it('keeps safe payload preview collapsed until explicitly opened', async () => {
@@ -613,6 +665,56 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(inspector).not.toBeNull();
     expect(within(inspector as HTMLElement).queryByRole('button', { name: /repair/i })).not.toBeInTheDocument();
     expect(within(inspector as HTMLElement).queryByRole('button', { name: /replay/i })).not.toBeInTheDocument();
+  });
+
+  it('offers one-order current-state repair only after a missing-order inspection and requires dry-run review', async () => {
+    const repairedOrder = orderStateInspectorResult();
+    repairedOrder.orderIdentity = {
+      ...repairedOrder.orderIdentity,
+      orderNumber: '#1105',
+      shopifyOrderId: '7856043819345',
+    };
+    repairedOrder.repairHistory = [{
+      jobId: 'repair-job-1105',
+      repairSource: 'shopify_admin_current_state',
+      repairTimestamp: '2026-07-13T10:01:00.000Z',
+      dryRun: false,
+      executed: true,
+      status: 'COMPLETED',
+      actorUserId: 'admin-1',
+      actorEmail: 'admin@example.com',
+      errorSummary: null,
+    }];
+    diagnosticsMocks.inspectOrderState
+      .mockReset()
+      .mockRejectedValueOnce(new Error('Order not found.'))
+      .mockResolvedValue(repairedOrder);
+
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '#1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    expect(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' })).toBeInTheDocument();
+    expect(screen.getByText('One explicit Shopify order only. Bulk or range repair is unavailable.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Execute Repair' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Repair Missing Shopify Order' }));
+
+    expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenCalledWith('#1105', false);
+    expect(await screen.findByLabelText('Current-state repair dry-run plan')).toBeInTheDocument();
+    expect(screen.getByText('Canonical Shopify state')).toBeInTheDocument();
+    expect(screen.getByText('Current local state')).toBeInTheDocument();
+    expect(screen.getByText('Planned mutations')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Execute Repair' }));
+    expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenCalledTimes(1);
+    const dialog = screen.getByRole('dialog', { name: 'Execute Current-State Repair?' });
+    expect(dialog).toHaveTextContent('Current Shopify state will be fetched. Missing local records may be created');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Execute Repair' }));
+
+    expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenLastCalledWith('#1105', true);
+    expect(await screen.findByText(/Actor: admin@example.com/)).toBeInTheDocument();
+    expect(screen.getByText('Repair history')).toBeInTheDocument();
   });
 
   it('renders loading and safe not-found states without changing the data path on narrow screens', async () => {

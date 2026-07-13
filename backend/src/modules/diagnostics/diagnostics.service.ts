@@ -48,14 +48,10 @@ const SHOPIFY_ORDER_WEBHOOK_ROUTES: Record<string, string> = {
   ORDERS_UPDATED: '/webhooks/shopify/orders-updated',
 };
 
-const SUPPORTED_REPLAY_TOPICS = new Set([
-  'orders/create',
-  'refunds/create',
-  'fulfillments/create',
-  'fulfillments/update',
-  'fulfillment_events/create',
-  'fulfillment_orders/cancelled',
-]);
+// Stored-payload replay is intentionally narrower than failed-event recovery.
+// Refund creation is an immutable, idempotently persisted event; order and
+// fulfillment payloads can become stale relative to current Shopify state.
+const SAFE_REPLAY_TOPICS = new Set(['refunds/create']);
 
 const SUPPORTED_RECOVER_TOPICS = new Set([
   'orders/create',
@@ -353,8 +349,8 @@ function getReplayBlockedReason(event: {
   payloadAvailable?: boolean;
   payloadHash: string | null;
 }) {
-  if (!SUPPORTED_REPLAY_TOPICS.has(event.topic)) {
-    return `Replay is not supported for topic ${event.topic}.`;
+  if (!SAFE_REPLAY_TOPICS.has(event.topic)) {
+    return `Stored webhook replay is not safe for topic ${event.topic}. Use failed-event recovery or current-state reconciliation instead.`;
   }
 
   if (!(event.payloadAvailable ?? Boolean(event.rawPayload))) {
@@ -365,8 +361,10 @@ function getReplayBlockedReason(event: {
     return 'Webhook payload hash is not available for replay.';
   }
 
-  if (event.status === 'PROCESSING') {
-    return 'Webhook is currently processing.';
+  if (event.status !== 'FAILED') {
+    return event.status === 'PROCESSED'
+      ? 'Successfully processed webhook events are not replay candidates.'
+      : `Webhook event in status ${event.status} is not a safe replay candidate.`;
   }
 
   return null;
@@ -384,7 +382,7 @@ function getRecoverBlockedReason(event: {
   }
 
   if (!(event.payloadAvailable ?? Boolean(event.rawPayload))) {
-    return 'Webhook payload is not available for replay.';
+    return 'Webhook payload is not available for recovery.';
   }
 
   if (!event.payloadHash) {
@@ -401,6 +399,11 @@ function getRecoverBlockedReason(event: {
 
   return null;
 }
+
+export const __diagnosticsRecoveryPolicyTesting = {
+  getReplayBlockedReason,
+  getRecoverBlockedReason,
+};
 
 function getRecommendedAction(event: {
   topic: string;
@@ -496,6 +499,7 @@ export async function listWebhookDiagnostics(options: { limit?: number; offset?:
       webhookId: true,
       idempotencyKey: true,
       payloadHash: true,
+      rawPayload: true,
       status: true,
       receivedAt: true,
       processedAt: true,
@@ -520,12 +524,7 @@ export async function listWebhookDiagnostics(options: { limit?: number; offset?:
     skip: options.offset ?? 0,
   });
 
-  const events = webhookEvents.map((event) =>
-    buildWebhookDiagnosticsEvent({
-      ...event,
-      payloadAvailable: Boolean(event.payloadHash),
-    }),
-  );
+  const events = webhookEvents.map((event) => buildWebhookDiagnosticsEvent(event));
 
   return {
     summary: buildWebhookEventSummary(events),

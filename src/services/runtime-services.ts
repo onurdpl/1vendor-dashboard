@@ -3277,6 +3277,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.inspectOrderState(orderNumber, { signal: options.signal })
         : Promise.reject(new ApiError('Order state inspection is available in real mode only.', 'server', { status: 503 })),
+    repairMissingShopifyOrder: (orderIdentifier: string, execute = false) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.repairMissingShopifyOrder(orderIdentifier, execute)
+        : Promise.reject(new ApiError('Current-state order repair is available in real mode only.', 'server', { status: 503 })),
     syncEvents: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.listSyncEvents({ signal: options.signal })

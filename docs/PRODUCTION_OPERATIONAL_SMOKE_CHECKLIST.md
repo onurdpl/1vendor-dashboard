@@ -100,10 +100,13 @@
 - Confirm unrelated vendor allocations and unrelated active fulfillments remain unchanged.
 
 ## Diagnostics Replay / Recover
-- As admin, open webhook diagnostics.
+- As admin, open `/admin/diagnostics` and use the Production Recovery Center.
 - Confirm processed, failed, stuck, and payload-availability states are visible without exposing full sensitive payloads.
-- Confirm replay is available only for supported topics with retained payload.
+- Confirm Safe Replay Candidates include only `FAILED` `refunds/create` events with retained raw payload and payload hash.
+- Confirm processed `orders/create`, processed `orders/cancelled`, and stateful order/fulfillment topics cannot use Replay Stored Webhook.
 - Confirm recover is available only for `RECEIVED` or `FAILED` events with retained payload.
+- Confirm Replay Stored Webhook requires confirmation stating that historical payload is replayed and current Shopify state is not fetched.
+- Confirm Recover Failed Webhook requires confirmation stating that stored webhook processing resumes and current Shopify state is not fetched.
 - Confirm vendor users receive `403` for diagnostics routes.
 - Confirm blocked replay/recover returns an explicit reason instead of silent success.
 
@@ -113,16 +116,19 @@
 - Confirm the inspector identifies `ShopifyOrder.cancelledAt` as canonical, explains raw allocation fields as preserved ownership/history, and reports cancellation-policy queue/action/finance blocking from persisted evidence.
 - Confirm vendor, support, and finance roles receive `403` from `GET /admin/diagnostics/orders/:orderNumber/state`.
 - Confirm no raw payload, customer PII, full address, access token, HMAC/API secret, provider credential, bank information, or payment reference is returned.
-- Confirm the inspector exposes no repair, replay, or mutation action.
+- Confirm existing local orders expose no repair or replay action.
+- For an order that returns `404 Order not found`, confirm Repair Missing Shopify Order appears for only that explicit identifier.
 
 ## Current-State Order Repair
 - Use only one explicitly approved Shopify order ID or number. Do not use a range, date window, or bulk input.
 - Confirm production uses stable Shopify Admin GraphQL API `2026-01`; canonical refunds must parse from the direct `Order.refunds` list and canonical returns must use Shopify GraphQL IDs without requesting `Return.legacyResourceId`.
-- Call `POST /admin/diagnostics/shopify/order-repair` without `execute` first and confirm `dryRun: true` and `executed: false`.
+- From the missing-order inspector result, choose Repair Missing Shopify Order and confirm the first request omits execution (`execute: false`) and returns `dryRun: true`, `executed: false`.
 - Confirm dry-run creates no local order, allocation, ledger, refund, return, job, or operational signal.
 - Review canonical identity, expected vendors, `Created`/`Existing` summary, cancellation/refund/return flags, warnings, and skipped state.
 - Confirm missing `seller_info`, missing/unknown SKU mapping, unknown vendor, missing active finance profile, or incomplete canonical evidence fails before mutation.
-- Only after review, repeat the same explicit order with `execute: true`.
+- Confirm Execute Repair is unavailable until dry-run results are visible.
+- Only after review, open the separate confirmation and repeat the same explicit order with `execute: true`.
+- Confirm the UI exposes no bulk, range, or date-based repair action and shows executed repair history after refresh.
 - Confirm missing order, line item, allocation, and sale ledger evidence is created exactly once.
 - For a currently cancelled order, confirm terminal cancellation metadata and finance hold/void or conflict-review evidence appear at the same commit; no active operational state should be externally observable between creation and cancellation.
 - Confirm canonical refunds and returns use existing lifecycle records and do not create duplicate records, ledgers, adjustments, debt, or FinanceEvents on repeat execution.

@@ -264,6 +264,27 @@ export type RecoverWebhookResponse = ReplayWebhookResponse & {
   recoveryStatus: 'recovered' | 'failed' | 'not_recoverable';
 };
 
+export type CurrentStateOrderRepairResult = {
+  ok: boolean;
+  orderIdentifier: string;
+  shopifyOrderId: string;
+  shopifyOrderNumber: string;
+  repairSource: 'shopify_admin_current_state';
+  repairTimestamp: string;
+  dryRun: boolean;
+  executed: boolean;
+  summary: {
+    shopifyOrder: 'Created' | 'Existing';
+    allocation: 'Created' | 'Existing';
+    finance: 'Created' | 'Existing';
+    cancellationApplied: boolean;
+    refundApplied: boolean;
+    returnApplied: boolean;
+    warnings: string[];
+    skipped: boolean;
+  };
+};
+
 export type RetryOperationalJobResponse = {
   ok: boolean;
   operationalJobId?: string;
@@ -681,6 +702,13 @@ export async function inspectOrderState(orderNumber: string, options: { signal?:
     `/admin/diagnostics/orders/${encodeURIComponent(orderNumber.trim())}/state`,
     { signal: options.signal },
   );
+}
+
+export async function repairMissingShopifyOrder(orderIdentifier: string, execute = false) {
+  return apiClient.post<CurrentStateOrderRepairResult>('/admin/diagnostics/shopify/order-repair', {
+    orderIdentifier: orderIdentifier.trim(),
+    execute,
+  });
 }
 
 export async function listSyncEvents(options: { signal?: AbortSignal } = {}) {

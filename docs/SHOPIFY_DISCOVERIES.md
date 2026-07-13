@@ -468,6 +468,10 @@ POST /fulfillments.json
 - SHOP-CANCEL-2A does not implement missed-order repair, vendor debt, payment reversal, or fulfillment-cancellation redesign.
 - SHOP-REPAIR-1 provides the separate admin-only missed-order recovery path. It fetches the current canonical Shopify order, refund, and return state and does not replay historical webhook payloads.
 - Current-state repair is dry-run by default, accepts one explicit Shopify order ID or number, and requires `execute: true` before mutation.
+- The admin Recovery Center is the operator entry point: inspect the explicit order first, use Repair Missing Shopify Order only for missing local commerce state, review the dry-run plan, then confirm execution separately.
+- Replay Stored Webhook is limited to failed `refunds/create` events with retained payload because refund ingestion is identity-based and idempotent. Stateful order and fulfillment payloads may be stale and are not safe replay candidates.
+- Recover Failed Webhook is limited to retained `FAILED` or stuck `RECEIVED` events. It resumes stored-payload processing and does not fetch current Shopify state.
+- Missing orders rejected before `WebhookEvent` persistence or never delivered must use current-state repair; replay and recover cannot reconstruct them.
 - Executed repair creates missing order/allocation/finance evidence and applies refund, return, and full-order cancellation lifecycles inside one transaction. Failure rolls back repair data and records a safe failed reconciliation job/signal.
 - Current-state repair must be used instead of Fresh Order Backfill when a missed order is now cancelled, refunded, or returned.
 - Repair history contains only safe source, timestamp, actor, mode, status, and error-summary metadata. Raw Shopify payloads are not retained by the repair path.

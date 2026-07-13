@@ -101,18 +101,26 @@ function formatWebhookTopic(topic?: string | null) {
     .join(' / ');
 }
 
-function formatRecoverability(payloadAvailable: boolean, status: string) {
-  if (!payloadAvailable) {
+function formatRecoverability(input: {
+  payloadAvailable: boolean;
+  status: string;
+  replayEligible: boolean;
+  recoverEligible: boolean;
+}) {
+  if (!input.payloadAvailable) {
     return 'Manual recovery required';
   }
-  if (status === 'RECEIVED' || status === 'FAILED') {
-    return 'Recover eligible';
+  if (input.recoverEligible) {
+    return 'Recoverable failed event';
   }
-  if (status === 'PROCESSING') {
+  if (input.replayEligible) {
+    return 'Safe replay candidate';
+  }
+  if (input.status === 'PROCESSING') {
     return 'Monitor processing';
   }
-  if (status === 'PROCESSED') {
-    return 'Replay only with care';
+  if (input.status === 'PROCESSED') {
+    return 'No recovery action needed';
   }
   return 'Review required';
 }
@@ -157,6 +165,11 @@ export function AdminDiagnosticsPage() {
   const [payloadFilter, setPayloadFilter] = useState('all');
   const [eligibilityFilter, setEligibilityFilter] = useState('all');
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
+  const [repairCandidateCount, setRepairCandidateCount] = useState(0);
+  const [pendingWebhookAction, setPendingWebhookAction] = useState<{
+    action: 'replay' | 'recover';
+    webhookEventId: string;
+  } | null>(null);
   const isRealMode = runtimeConfig.apiMode === 'real';
   const pageReadiness = getPageReadinessState(appReadiness, {
     requiresVendorContext: false,
@@ -222,9 +235,13 @@ export function AdminDiagnosticsPage() {
     {
       invalidateQueryKeys: invalidateDiagnostics,
       onSuccess: (result) => {
-        showFeedback(result.message ?? `Replay finished with ${result.processingStatus}.`, 'info');
+        setPendingWebhookAction(null);
+        showFeedback(result.message ?? `Stored webhook replay finished with ${result.processingStatus}.`, 'info');
       },
-      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Replay request failed.', 'error'),
+      onError: (error) => {
+        setPendingWebhookAction(null);
+        showFeedback(error instanceof Error ? error.message : 'Stored webhook replay request failed.', 'error');
+      },
     },
   );
 
@@ -233,9 +250,13 @@ export function AdminDiagnosticsPage() {
     {
       invalidateQueryKeys: invalidateDiagnostics,
       onSuccess: (result) => {
-        showFeedback(result.message ?? `Recover finished with ${result.recoveryStatus}.`, result.recoveryStatus === 'recovered' ? 'success' : 'info');
+        setPendingWebhookAction(null);
+        showFeedback(result.message ?? `Failed webhook recovery finished with ${result.recoveryStatus}.`, result.recoveryStatus === 'recovered' ? 'success' : 'info');
       },
-      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Recover request failed.', 'error'),
+      onError: (error) => {
+        setPendingWebhookAction(null);
+        showFeedback(error instanceof Error ? error.message : 'Failed webhook recovery request failed.', 'error');
+      },
     },
   );
 
@@ -439,9 +460,9 @@ export function AdminDiagnosticsPage() {
       <div className="op-page-heading">
         <div>
           <p className="eyebrow">Admin diagnostics</p>
-          <h2>Webhook recovery command center</h2>
+          <h2>Production recovery center</h2>
           <p className="page-description">
-            Monitor Shopify event ingestion, reconciliation backlog, payload availability, and operator-triggered recovery.
+            Inspect recovery evidence, resume failed webhook processing, and repair missing Shopify orders through guarded workflows.
           </p>
         </div>
         <div className="op-heading-meta">
@@ -485,11 +506,25 @@ export function AdminDiagnosticsPage() {
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current diagnostics records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Replayable"
+          label="Safe Replay Candidates"
           value={combinedCounts.replayable}
-          detail="Safe idempotent retry"
+          detail="Failed immutable webhook events"
           tone="info"
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Recoverable Failed Events"
+          value={combinedCounts.recoverable}
+          detail="Failed or stuck with stored payload"
+          tone={combinedCounts.recoverable > 0 ? 'attention' : 'success'}
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+        />
+        <KPIStatCard
+          label="Repair Candidates"
+          value={repairCandidateCount}
+          detail="Missing local order from current inspection"
+          tone={repairCandidateCount > 0 ? 'warning' : 'neutral'}
+          metadata={{ scope: 'Order State Inspector', timeWindow: 'Current explicit order inspection', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
           label="Retry pressure"
@@ -515,7 +550,7 @@ export function AdminDiagnosticsPage() {
         />
       </div>
 
-      <OrderStateInspector />
+      <OrderStateInspector onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)} />
 
       <OperationalSection
         title="Deployment runtime"
@@ -628,8 +663,8 @@ export function AdminDiagnosticsPage() {
               </select>
               <select value={eligibilityFilter} onChange={(event) => setEligibilityFilter(event.target.value)}>
                 <option value="all">All action states</option>
-                <option value="replayable">Replayable</option>
-                <option value="recoverable">Recoverable</option>
+                <option value="replayable">Safe replay candidates</option>
+                <option value="recoverable">Recoverable failed events</option>
                 <option value="blocked">Blocked / no-op</option>
               </select>
               <button
@@ -684,7 +719,7 @@ export function AdminDiagnosticsPage() {
                     {event.payloadAvailable ? 'Available' : 'Missing'}
                   </StatusBadge>
                   <span>
-                    <strong>{event.recoverEligible ? 'Recover eligible' : event.replayEligible ? 'Replay available' : 'No action'}</strong>
+                    <strong>{event.recoverEligible ? 'Recoverable failed event' : event.replayEligible ? 'Safe replay candidate' : 'No action'}</strong>
                     <small>{event.recoverBlockedReason ?? event.replayBlockedReason ?? event.lastErrorSummary ?? event.recommendedAction}</small>
                   </span>
                   <span>{getPrimaryEntityLabel(event.affectedEntities)}</span>
@@ -706,10 +741,10 @@ export function AdminDiagnosticsPage() {
                       disabled={!event.replayEligible || replayMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
-                        replayMutation.mutate(event.id);
+                        setPendingWebhookAction({ action: 'replay', webhookEventId: event.id });
                       }}
                     >
-                      Replay
+                      Replay Stored Webhook
                     </button>
                     <button
                       type="button"
@@ -717,10 +752,10 @@ export function AdminDiagnosticsPage() {
                       disabled={!event.recoverEligible || recoverMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
-                        recoverMutation.mutate(event.id);
+                        setPendingWebhookAction({ action: 'recover', webhookEventId: event.id });
                       }}
                     >
-                      Recover
+                      Recover Failed Webhook
                     </button>
                   </OperationalActionGroup>
                 </OperationalTableRow>
@@ -840,10 +875,18 @@ export function AdminDiagnosticsPage() {
                 <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
               </MetadataGroup>
               <MetadataGroup title="Recovery readiness">
-                <MetadataRow label="Recoverability" value={formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)} />
+                <MetadataRow
+                  label="Recoverability"
+                  value={formatRecoverability({
+                    payloadAvailable: selectedWebhook.payloadAvailable,
+                    status: selectedWebhook.status,
+                    replayEligible: selectedWebhook.replayEligible,
+                    recoverEligible: selectedWebhook.recoverEligible,
+                  })}
+                />
                 <MetadataRow label="Recommended action" value={selectedWebhook.recommendedAction} />
-                <MetadataRow label="Replay eligibility" value={selectedWebhook.replayEligible ? 'Replay allowed' : selectedWebhook.replayBlockedReason ?? 'Replay blocked'} />
-                <MetadataRow label="Recover eligibility" value={selectedWebhook.recoverEligible ? 'Recover allowed' : selectedWebhook.recoverBlockedReason ?? 'Recover blocked'} />
+                <MetadataRow label="Safe replay eligibility" value={selectedWebhook.replayEligible ? 'Stored replay allowed' : selectedWebhook.replayBlockedReason ?? 'Stored replay blocked'} />
+                <MetadataRow label="Failed-event recovery eligibility" value={selectedWebhook.recoverEligible ? 'Failed recovery allowed' : selectedWebhook.recoverBlockedReason ?? 'Failed recovery blocked'} />
                 <MetadataRow label="Processing status" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
                 <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
               </MetadataGroup>
@@ -903,24 +946,24 @@ export function AdminDiagnosticsPage() {
                     type="button"
                     className="button button-primary button-compact"
                     disabled={!canRecover || recoverMutation.isPending}
-                    onClick={() => recoverMutation.mutate(selectedWebhook.id)}
+                    onClick={() => setPendingWebhookAction({ action: 'recover', webhookEventId: selectedWebhook.id })}
                   >
-                    {recoverMutation.isPending ? 'Recovering...' : 'Recover'}
+                    {recoverMutation.isPending ? 'Recovering...' : 'Recover Failed Webhook'}
                   </button>
                   <button
                     type="button"
                     className="button button-secondary button-compact"
                     disabled={!canReplay || replayMutation.isPending}
-                    onClick={() => replayMutation.mutate(selectedWebhook.id)}
+                    onClick={() => setPendingWebhookAction({ action: 'replay', webhookEventId: selectedWebhook.id })}
                   >
-                    {replayMutation.isPending ? 'Replaying...' : 'Replay'}
+                    {replayMutation.isPending ? 'Replaying...' : 'Replay Stored Webhook'}
                   </button>
                 </OperationalActionGroup>
                 {!canRecover && selectedWebhook.recoverBlockedReason ? (
-                  <p className="queue-muted-action diagnostics-inline-note">Recover blocked: {selectedWebhook.recoverBlockedReason}</p>
+                  <p className="queue-muted-action diagnostics-inline-note">Failed webhook recovery blocked: {selectedWebhook.recoverBlockedReason}</p>
                 ) : null}
                 {!canReplay && selectedWebhook.replayBlockedReason ? (
-                  <p className="queue-muted-action diagnostics-inline-note">Replay blocked: {selectedWebhook.replayBlockedReason}</p>
+                  <p className="queue-muted-action diagnostics-inline-note">Stored replay blocked: {selectedWebhook.replayBlockedReason}</p>
                 ) : null}
                 {!canRecover && !selectedWebhook.recoverBlockedReason && !canReplay && !selectedWebhook.replayBlockedReason ? (
                   <p className="queue-muted-action diagnostics-inline-note">No action recommended.</p>
@@ -969,6 +1012,59 @@ export function AdminDiagnosticsPage() {
           )}
         </SideDetailPanel>
       </div>
+
+      {pendingWebhookAction ? (
+        <div className="support-modal-backdrop" role="presentation">
+          <section className="support-modal" role="dialog" aria-modal="true" aria-labelledby="webhook-recovery-confirmation-title">
+            <div className="support-modal-header">
+              <div>
+                <p className="eyebrow">Stored webhook action</p>
+                <h3 id="webhook-recovery-confirmation-title">
+                  {pendingWebhookAction.action === 'replay' ? 'Replay Stored Webhook?' : 'Recover Failed Webhook?'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="support-modal-close"
+                aria-label="Close webhook action confirmation"
+                onClick={() => setPendingWebhookAction(null)}
+              >
+                X
+              </button>
+            </div>
+            {pendingWebhookAction.action === 'replay' ? (
+              <>
+                <p>Historical payload will be replayed.</p>
+                <p>This does NOT use current Shopify state.</p>
+              </>
+            ) : (
+              <>
+                <p>Stored webhook processing will resume.</p>
+                <p>This reprocesses the stored webhook payload. It does NOT fetch current Shopify state.</p>
+              </>
+            )}
+            <div className="support-modal-actions">
+              <button type="button" className="button button-secondary" onClick={() => setPendingWebhookAction(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={replayMutation.isPending || recoverMutation.isPending}
+                onClick={() => {
+                  if (pendingWebhookAction.action === 'replay') {
+                    replayMutation.mutate(pendingWebhookAction.webhookEventId);
+                  } else {
+                    recoverMutation.mutate(pendingWebhookAction.webhookEventId);
+                  }
+                }}
+              >
+                {pendingWebhookAction.action === 'replay' ? 'Replay Stored Webhook' : 'Recover Failed Webhook'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>

@@ -216,12 +216,13 @@ Readiness is role-aware but shared: vendors see read-only status and correction/
 
 | Section / Widget / Action | Classification | Vendor Fit | Admin Fit | Guidance |
 | --- | --- | --- | --- | --- |
-| Webhook recovery command center | Internal diagnostics | Hidden | Primary | Admin-only. |
+| Production Recovery Center | Internal diagnostics | Hidden | Primary | Admin-only single entry point for inspection, guarded stored-payload actions, reconciliation awareness, and missing-order repair. |
 | Deployment runtime | Internal diagnostics | Hidden | Primary | Admin-only. |
 | Backend health | Internal diagnostics | Hidden | Primary | Admin-only. |
 | Reconciliation backlog | Admin operational | Hidden | Primary | Admin-only recovery context. |
-| Order State Inspector | Internal diagnostics / Tier-1 operational tool | Hidden | Primary | Read-only, explicit-order incident evidence; no repair or replay. |
-| Replay/recover/retry controls | Internal diagnostics/admin operational | Hidden | Primary | Preserve auditability and permissions. |
+| Order State Inspector | Internal diagnostics / Tier-1 operational tool | Hidden | Primary | Read-only explicit-order evidence; a `404` missing-local result may open the separate guarded repair flow. |
+| Replay/recover/retry controls | Internal diagnostics/admin operational | Hidden | Primary | Use explicit confirmation and backend eligibility; stored-payload actions never imply current Shopify truth. |
+| Missing Shopify order repair | Admin operational | Hidden | Primary | One order only, dry-run first, reviewed plan, separate execute confirmation, and visible repair history. |
 | Payload diagnostics | Internal diagnostics | Hidden | Admin-only collapsed | Redacted preview only. |
 
 ## Vendor UX Noise To Reduce
@@ -447,7 +448,8 @@ These overlays should be collapsible or visually subordinate.
 
 - DIAG-ORDER-1 provides an admin-only Order State Inspector inside `/admin/diagnostics`.
 - It is the first-stop production tool for explaining one order across Shopify ingestion, local allocations, cancellation, shipping, returns/refunds, finance, operational signals, webhook history, and frontend projection.
-- It is explicit-order scoped, redacted, and read-only. It supports future repair decisions but does not perform repair, replay, reconciliation, or provider calls.
+- Inspection is explicit-order scoped, redacted, and read-only. A missing-local result can hand the same identifier to the separate Current-State Repair flow; existing local orders do not expose that action.
+- Recovery Center labels distinguish Replay Stored Webhook, Recover Failed Webhook, and Repair Missing Shopify Order. Replay/recover use retained historical payloads; repair fetches current Shopify state.
 
 ### Phase A: Low-Risk Visibility Cleanup
 

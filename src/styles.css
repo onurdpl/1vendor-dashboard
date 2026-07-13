@@ -5272,6 +5272,23 @@ h3 {
   gap: 7px;
 }
 
+.current-state-repair-plan,
+.current-state-repair-actions {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.current-state-repair-actions {
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+}
+
+.current-state-repair-actions span {
+  color: var(--op-muted);
+  font-size: 0.76rem;
+}
+
 .order-state-summary {
   padding: 12px;
   border-left: 3px solid var(--op-info);
@@ -5369,11 +5386,13 @@ h3 {
   .order-state-inspector-grid,
   .order-state-record-grid,
   .order-state-projection-grid,
-  .order-state-action-row {
+  .order-state-action-row,
+  .current-state-repair-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .order-state-inspector-form .button {
+  .order-state-inspector-form .button,
+  .current-state-repair-actions .button {
     width: 100%;
   }
 }
