@@ -5631,12 +5631,12 @@ h3 {
 }
 
 .diagnostics-control-center .op-side-panel {
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 9px;
 }
 
 .diagnostics-control-center .op-side-panel-header {
-  padding-bottom: 7px;
+  padding-bottom: 6px;
 }
 
 .diagnostics-control-center .op-side-panel .eyebrow {
@@ -5645,13 +5645,13 @@ h3 {
 }
 
 .diagnostics-control-center .op-side-panel h3 {
-  font-size: 0.92rem;
+  font-size: 0.9rem;
 }
 
 .diagnostics-control-center .op-side-panel-body,
 .diagnostics-control-center .op-meta-group,
 .diagnostics-control-center .op-panel-section {
-  gap: 7px;
+  gap: 6px;
 }
 
 .diagnostics-control-center .op-meta-group h4,
@@ -5701,8 +5701,305 @@ h3 {
   font-size: 0.68rem;
 }
 
+.diagnostics-control-center {
+  gap: 10px;
+}
+
+.diagnostics-control-center .op-page-heading {
+  gap: 12px;
+}
+
+.diagnostics-control-center .op-page-heading h2 {
+  font-size: 1.08rem;
+}
+
+.diagnostics-control-center .page-description,
+.diagnostics-control-center .op-section-heading p {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.diagnostics-control-center .op-section {
+  gap: 7px;
+  padding: 8px;
+}
+
+.diagnostics-control-center .op-section-heading {
+  gap: 10px;
+}
+
+.diagnostics-control-center .op-section-heading h3 {
+  font-size: 0.84rem;
+}
+
+.diagnostics-control-center .op-kpi-row,
+.diagnostics-summary-strip,
+.diagnostics-action-metrics,
+.diagnostics-runtime-status-grid {
+  gap: 7px;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+}
+
+.diagnostics-control-center .op-kpi {
+  min-height: 56px;
+  gap: 2px;
+  padding: 8px 9px;
+  box-shadow: none;
+}
+
+.diagnostics-control-center .op-kpi span {
+  font-size: 0.62rem;
+}
+
+.diagnostics-control-center .op-kpi strong {
+  font-size: 0.98rem;
+}
+
+.diagnostics-control-center .op-kpi small {
+  font-size: 0.67rem;
+  line-height: 1.25;
+}
+
+.diagnostics-control-center .button {
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.diagnostics-control-center .button-compact {
+  min-height: 24px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  font-size: 0.7rem;
+}
+
+.diagnostics-control-center .op-badge,
+.diagnostics-control-center .op-severity {
+  min-height: 18px;
+  padding: 1px 6px;
+  font-size: 0.64rem;
+  line-height: 1.2;
+}
+
+.diagnostics-control-center .op-toolbar {
+  gap: 6px;
+  padding: 6px;
+  box-shadow: none;
+}
+
+.diagnostics-control-center .op-toolbar input,
+.diagnostics-control-center .op-toolbar select {
+  min-height: 30px;
+  padding: 5px 7px;
+  font-size: 0.78rem;
+}
+
+.diagnostics-control-center .op-filter-bar {
+  gap: 6px;
+}
+
+.diagnostics-filter-summary {
+  gap: 6px;
+  font-size: 0.7rem;
+}
+
+.diagnostics-filter-summary span,
+.reconciliation-meta span {
+  min-height: 18px;
+  padding: 1px 6px;
+  font-size: 0.66rem;
+}
+
+.diagnostics-control-center .op-event-list {
+  gap: 6px;
+}
+
+.diagnostics-control-center .op-event-row {
+  gap: 8px;
+  padding: 8px;
+  border-radius: 7px;
+}
+
+.diagnostics-control-center .op-event-row strong {
+  font-size: 0.82rem;
+}
+
+.diagnostics-control-center .op-event-row p {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.diagnostics-control-center .op-event-row small {
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.diagnostics-control-center .op-secondary-grid,
+.diagnostics-evidence-grid {
+  gap: 8px;
+}
+
+.diagnostics-layout-redesign {
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 348px);
+}
+
+.diagnostics-op-table-v2 .op-table-head,
+.diagnostics-op-table-v2 .op-table-row {
+  grid-template-columns: 0.54fr 0.98fr 0.58fr 1fr 0.82fr 0.68fr 0.82fr;
+  min-width: 760px;
+}
+
+.diagnostics-op-table-v2 .op-table-head {
+  min-height: 24px;
+  padding: 0 6px;
+}
+
+.diagnostics-op-table-v2 .op-table-row {
+  min-height: 34px;
+  padding: 4px 6px;
+}
+
+.diagnostics-op-table-v2 .op-action-group {
+  gap: 3px;
+}
+
+.diagnostics-empty-state {
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+}
+
+.diagnostics-empty-state h4 {
+  font-size: 0.74rem;
+}
+
+.diagnostics-empty-state p {
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.diagnostics-action-panel {
+  gap: 7px;
+  padding: 8px 9px;
+  border-radius: 8px;
+}
+
+.diagnostics-action-panel-heading {
+  gap: 8px;
+}
+
+.diagnostics-action-panel h4 {
+  font-size: 0.62rem;
+}
+
+.diagnostics-action-panel strong {
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
+.diagnostics-action-panel-controls {
+  gap: 5px;
+}
+
+.diagnostics-technical-details {
+  border-radius: 8px;
+}
+
+.diagnostics-technical-details > summary {
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.7rem;
+}
+
+.diagnostics-technical-details-content {
+  gap: 6px;
+  padding: 7px 8px 8px;
+}
+
+.diagnostics-job-row {
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.diagnostics-job-row small {
+  font-size: 0.68rem;
+}
+
+.diagnostics-job-actions {
+  gap: 4px;
+}
+
+.diagnostics-payload-preview {
+  max-height: 150px;
+  padding: 8px;
+  font-size: 0.68rem;
+}
+
+.diagnostics-deployment-links {
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.diagnostics-control-center .deployment-runtime-grid {
+  gap: 8px;
+}
+
+.diagnostics-control-center .deployment-runtime-grid .op-meta-group {
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.order-state-inspector {
+  gap: 9px;
+  padding-block: 10px;
+}
+
+.order-state-summary {
+  padding: 9px;
+}
+
+.order-state-overview-grid,
+.order-state-inspector-grid,
+.order-state-record-grid,
+.order-state-projection-grid {
+  gap: 7px;
+}
+
+.order-state-overview-card {
+  min-height: 60px;
+  gap: 3px;
+  padding: 8px 9px;
+}
+
+.order-state-record {
+  gap: 6px;
+  padding: 8px;
+}
+
+.order-state-section-stack {
+  gap: 9px;
+}
+
+.order-state-section-stack h4 {
+  margin-bottom: 5px;
+  font-size: 0.78rem;
+}
+
+.order-state-inspector-form input {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.order-state-action-row {
+  padding: 5px 0;
+}
+
 .reconciliation-event-list {
-  max-height: 420px;
+  max-height: 360px;
   overflow: auto;
 }
 
