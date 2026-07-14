@@ -5416,6 +5416,18 @@ h3 {
   gap: 7px;
 }
 
+.order-state-section-stack {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.order-state-section-stack h4 {
+  margin: 0 0 7px;
+  color: var(--op-text);
+  font-size: 0.84rem;
+}
+
 .current-state-repair-plan,
 .current-state-repair-actions {
   display: grid;
@@ -5446,6 +5458,46 @@ h3 {
   gap: 6px;
 }
 
+.order-state-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.order-state-overview-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 72px;
+  padding: 10px 11px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.order-state-overview-card span {
+  color: var(--op-muted);
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.order-state-overview-card strong {
+  color: var(--op-text-strong);
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.order-state-overview-card small,
+.order-state-projection-card p {
+  margin: 0;
+  color: var(--op-muted);
+  font-size: 0.73rem;
+  line-height: 1.4;
+}
+
 .order-state-inspector-grid,
 .order-state-record-grid,
 .order-state-projection-grid {
@@ -5463,12 +5515,26 @@ h3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.order-state-ledger-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
 .order-state-record {
   padding: 10px;
   border: 1px solid var(--op-border);
   border-radius: var(--radius-sm);
   background: #f8fafc;
   overflow-wrap: anywhere;
+}
+
+.order-state-ledger-card {
+  background: var(--op-surface);
+}
+
+.order-state-ledger-safety-grid {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
 }
 
 .order-state-record small,
@@ -5527,6 +5593,7 @@ h3 {
   }
 
   .order-state-inspector-form,
+  .order-state-overview-grid,
   .order-state-inspector-grid,
   .order-state-record-grid,
   .order-state-projection-grid,

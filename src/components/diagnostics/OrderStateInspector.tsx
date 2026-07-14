@@ -5,8 +5,8 @@ import { useQueryResource } from '../../hooks/useQueryResource';
 import { queryKeys } from '../../lib/api/queryKeys';
 import { runtimeServices } from '../../services/runtime-services';
 import { formatDateTime, toTitleCaseLabel } from '../../services/real/formatting';
-import type { CurrentStateOrderRepairResult } from '../../services/real/diagnostics';
-import { DiagnosticsTechnicalDetails } from './DiagnosticsPresentation';
+import type { CurrentStateOrderRepairResult, OrderStateInspectorDiagnostic } from '../../services/real/diagnostics';
+import { DiagnosticsActionPanel, DiagnosticsEmptyState, DiagnosticsTechnicalDetails } from './DiagnosticsPresentation';
 import {
   EmptyStatePanel,
   MetadataGroup,
@@ -23,6 +23,96 @@ function formatDate(value: string | null | undefined) {
 
 function yesNo(value: boolean) {
   return value ? 'Yes' : 'No';
+}
+
+type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention' | 'stale';
+
+type Projection = OrderStateInspectorDiagnostic['projectionExplanation']['orderStatus'];
+type Ledger = OrderStateInspectorDiagnostic['financeState']['ledgers'][number];
+type Signal = OrderStateInspectorDiagnostic['operationalSignals'][number];
+
+function countLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function conflictTone(hasConflict: boolean): StatusTone {
+  return hasConflict ? 'danger' : 'success';
+}
+
+function financeTone(financeReviewRequired: boolean): StatusTone {
+  return financeReviewRequired ? 'warning' : 'success';
+}
+
+function currentSignal(signal: Signal) {
+  const status = signal.status.trim().toLowerCase();
+  return !signal.resolvedAt && !['resolved', 'closed', 'completed'].includes(status);
+}
+
+function SummaryCard({
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: StatusTone;
+}) {
+  return (
+    <article className={`order-state-overview-card op-tone-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
+    </article>
+  );
+}
+
+function ProjectionCard({ title, projection }: { title: string; projection: Projection }) {
+  const [primaryReason, ...supportingReasons] = projection.reasons;
+
+  return (
+    <article className="order-state-record order-state-projection-card">
+      <small>{title}</small>
+      <strong>{projection.label}</strong>
+      <p>{primaryReason ?? 'No deterministic reason recorded.'}</p>
+      {supportingReasons.length ? (
+        <DiagnosticsTechnicalDetails label="Preserved supporting evidence">
+          <EvidenceList items={supportingReasons} />
+        </DiagnosticsTechnicalDetails>
+      ) : null}
+    </article>
+  );
+}
+
+function LedgerCard({ ledger }: { ledger: Ledger }) {
+  return (
+    <article className="order-state-record order-state-ledger-card">
+      <div className="order-state-record-heading">
+        <strong>{toTitleCaseLabel(ledger.entryType)}</strong>
+        <StatusBadge status={ledger.settlementStatus}>{ledger.settlementStatus}</StatusBadge>
+      </div>
+      <div className="order-state-ledger-safety-grid">
+        <MetadataRow label="Payout" value={ledger.payoutStatus} />
+        <MetadataRow label="Settlement" value={ledger.settlementStatus} />
+        <MetadataRow label="Voided" value={ledger.voidedAt ? 'Yes' : 'No'} />
+        <MetadataRow label="Approved settlement" value={yesNo(ledger.approvedSettlementPresent)} />
+        <MetadataRow label="Payout batch" value={yesNo(ledger.payoutBatchPresent)} />
+        <MetadataRow label="Paid evidence" value={yesNo(ledger.paidEvidencePresent)} />
+      </div>
+      <DiagnosticsTechnicalDetails label="Ledger technical evidence">
+        <MetadataGroup>
+          <MetadataRow label="Ledger ID" value={<code className="diagnostics-id-block">{ledger.id}</code>} />
+          <MetadataRow label="Allocation ID" value={ledger.allocationId ? <code className="diagnostics-id-block">{ledger.allocationId}</code> : 'Not recorded'} />
+          <MetadataRow label="Vendor ID" value={ledger.vendorId} />
+          <MetadataRow label="Voided at" value={formatDate(ledger.voidedAt)} />
+          <MetadataRow label="Void reason" value={ledger.voidReason ?? 'None'} />
+          <MetadataRow label="Created" value={formatDate(ledger.createdAt)} />
+          <MetadataRow label="Updated" value={formatDate(ledger.updatedAt)} />
+        </MetadataGroup>
+      </DiagnosticsTechnicalDetails>
+    </article>
+  );
 }
 
 function EvidenceList({ items }: { items: string[] }) {
@@ -181,6 +271,15 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
   }
 
   const result = isMissingLocalOrder ? null : inspectorQuery.data;
+  const currentSignals = result?.operationalSignals.filter(currentSignal) ?? [];
+  const historicalSignals = result?.operationalSignals.filter((signal) => !currentSignal(signal)) ?? [];
+  const returnRequestCount = result?.returnRefundState.returnRequests.length ?? 0;
+  const refundDerivedReturnCount = result?.returnRefundState.refundDerivedReturns.length ?? 0;
+  const refundRecordCount = result?.returnRefundState.refundRecords.length ?? 0;
+  const conflictReasons = result?.projectionExplanation.cancellationConflict.reasons ?? [];
+  const repairReadinessTone: StatusTone = result?.repairReadiness.repairNeeded
+    ? (result.repairReadiness.repairSupported ? 'attention' : 'warning')
+    : 'success';
 
   return (
     <section className="order-state-inspector" aria-labelledby="order-state-inspector-title">
@@ -332,44 +431,62 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
 
       {result ? (
         <div className="order-state-inspector-results">
-          <article className="order-state-summary">
-            <div>
-              <p className="eyebrow">Current state summary</p>
-              <h3>{result.orderIdentity.orderNumber}</h3>
-              <p>{result.currentStateSummary}</p>
-            </div>
-            <div className="order-state-summary-badges">
-              <StatusBadge tone={result.localOrderState.isCancelled ? 'warning' : 'success'}>
-                {result.projectionExplanation.orderStatus.label}
-              </StatusBadge>
-              <StatusBadge tone={result.localOrderState.hasOperationalConflict ? 'danger' : 'neutral'}>
-                {result.localOrderState.hasOperationalConflict ? 'Conflict evidence' : 'No conflict evidence'}
-              </StatusBadge>
-            </div>
-          </article>
+          <OperationalSection title="Current state" description="Operator-first summary from the existing Inspector response.">
+            <article className="order-state-summary">
+              <div>
+                <p className="eyebrow">Current state summary</p>
+                <h3>{result.orderIdentity.orderNumber}</h3>
+                <p>{result.currentStateSummary}</p>
+              </div>
+              <div className="order-state-summary-badges">
+                <StatusBadge tone={result.localOrderState.isCancelled ? 'warning' : 'success'}>
+                  {result.projectionExplanation.orderStatus.label}
+                </StatusBadge>
+                <StatusBadge tone={financeTone(result.financeState.financeReviewRequired)}>
+                  {result.financeState.financeReviewRequired ? 'Finance review required' : 'Finance review clear'}
+                </StatusBadge>
+                <StatusBadge tone={conflictTone(result.localOrderState.hasOperationalConflict)}>
+                  {result.localOrderState.hasOperationalConflict ? 'Conflict evidence' : 'No conflict evidence'}
+                </StatusBadge>
+              </div>
+            </article>
 
-          <div className="order-state-inspector-grid">
-            <OperationalSection title="Identity" description="Safe local and Shopify identifiers.">
-              <MetadataGroup>
-                <MetadataRow label="Order number" value={result.orderIdentity.orderNumber} />
-                <MetadataRow
-                  label="Vendors"
-                  value={result.orderIdentity.vendors.map((vendor) => `${vendor.vendorName} (${vendor.vendorId})`).join(', ') || 'None'}
-                />
-              </MetadataGroup>
-              <DiagnosticsTechnicalDetails>
-                <MetadataGroup>
-                  <MetadataRow label="Local order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.localOrderId}</code>} />
-                  <MetadataRow label="Shopify order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.shopifyOrderId}</code>} />
-                  <MetadataRow label="Shopify created" value={formatDate(result.orderIdentity.shopifyCreatedAt)} />
-                  <MetadataRow label="Local created" value={formatDate(result.orderIdentity.createdAt)} />
-                  <MetadataRow label="Local updated" value={formatDate(result.orderIdentity.updatedAt)} />
-                </MetadataGroup>
-              </DiagnosticsTechnicalDetails>
-            </OperationalSection>
+            <div className="order-state-overview-grid">
+              <SummaryCard
+                label="Order"
+                value={result.projectionExplanation.orderStatus.label}
+                detail={`Financial status: ${result.shopifyState.financialStatus ?? 'Unknown'}`}
+                tone={result.localOrderState.isCancelled ? 'warning' : 'success'}
+              />
+              <SummaryCard
+                label="Finance"
+                value={result.projectionExplanation.finance.label}
+                detail={result.financeState.financeReviewRequired ? 'Review required by existing finance state' : 'No finance review required'}
+                tone={financeTone(result.financeState.financeReviewRequired)}
+              />
+              <SummaryCard
+                label="Operations"
+                value={result.projectionExplanation.queueState.included ? 'Queue included' : 'Queue excluded'}
+                detail={`${result.projectionExplanation.fulfillment.label} / ${result.projectionExplanation.shipment.label}`}
+                tone={result.projectionExplanation.queueState.included ? 'attention' : 'neutral'}
+              />
+              <SummaryCard
+                label="Conflict"
+                value={result.localOrderState.hasOperationalConflict ? 'Existing evidence' : 'None'}
+                detail={conflictReasons[0] ?? 'No conflict reason recorded'}
+                tone={conflictTone(result.localOrderState.hasOperationalConflict)}
+              />
+            </div>
 
-            <OperationalSection title="Order state" description="Persisted local canonical Shopify state.">
-              <MetadataGroup>
+            <DiagnosticsActionPanel
+              id="order-state-inspector-next-action"
+              recommendation={result.repairReadiness.recommendedNextStep}
+              stateLabel={toTitleCaseLabel(result.repairReadiness.repairClassification)}
+              tone={repairReadinessTone}
+            />
+
+            <div className="order-state-inspector-grid">
+              <MetadataGroup title="Order state">
                 <MetadataRow label="Truth source" value="Persisted local truth" />
                 <MetadataRow label="Financial status" value={result.shopifyState.financialStatus ?? 'Unknown'} />
                 <MetadataRow label="Cancelled at" value={formatDate(result.shopifyState.cancelledAt)} />
@@ -378,225 +495,370 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 <MetadataRow label="Mapped line items" value={result.shopifyState.mappedLineItemCount} />
                 <MetadataRow label="Unmapped line items" value={result.shopifyState.unmappedLineItemCount} />
               </MetadataGroup>
-            </OperationalSection>
-          </div>
+              <MetadataGroup title="Ownership">
+                <MetadataRow label="Order number" value={result.orderIdentity.orderNumber} />
+                <MetadataRow
+                  label="Vendors"
+                  value={result.orderIdentity.vendors.map((vendor) => `${vendor.vendorName} (${vendor.vendorId})`).join(', ') || 'None'}
+                />
+                <MetadataRow label="Allocation count" value={result.localOrderState.allocationCount} />
+                <MetadataRow label="Local order exists" value={yesNo(result.localOrderState.exists)} />
+              </MetadataGroup>
+            </div>
+          </OperationalSection>
+
+          <OperationalSection title="Finance and payment safety" description="Order-scoped ledger, settlement, payout, and paid-evidence fields already exposed by the Inspector.">
+            <div className="order-state-overview-grid order-state-finance-metrics">
+              <SummaryCard label="Ledgers" value={String(result.financeState.ledgerCount)} detail={countLabel(result.financeState.saleLedgerCount, 'sale ledger')} />
+              <SummaryCard
+                label="Finance review"
+                value={result.financeState.financeReviewRequired ? 'Required' : 'Not required'}
+                tone={financeTone(result.financeState.financeReviewRequired)}
+              />
+              <SummaryCard label="Finance events" value={String(result.financeState.events.length)} detail="Historical event count" />
+            </div>
+            {result.financeState.ledgers.length ? (
+              <div className="order-state-record-grid order-state-ledger-grid">
+                {result.financeState.ledgers.map((ledger) => <LedgerCard key={ledger.id} ledger={ledger} />)}
+              </div>
+            ) : (
+              <DiagnosticsEmptyState title="No finance ledger rows" description="No order-scoped ledger rows were returned by the Inspector." status="None" />
+            )}
+          </OperationalSection>
 
           <OperationalSection
-            title="Allocations"
-            description="Vendor ownership and preserved operational history. Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt."
+            title="Operational evidence"
+            description="Canonical operational conclusion first, followed by preserved allocation and shipping evidence. Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt."
           >
-            {result.allocations.length ? (
-              <div className="order-state-record-grid">
-                {result.allocations.map((allocation) => (
-                  <article key={allocation.allocationId} className="order-state-record">
-                    <strong>{allocation.assignedVendor.vendorName}</strong>
-                    <small>{allocation.allocationId}</small>
-                    <MetadataGroup>
-                      <MetadataRow label="Original vendor" value={allocation.originalVendor.vendorId} />
-                      <MetadataRow label="Assigned vendor" value={allocation.assignedVendor.vendorId} />
-                      <MetadataRow label="Allocation" value={toTitleCaseLabel(allocation.allocationStatus)} />
-                      <MetadataRow label="Fulfillment" value={allocation.fulfillmentStatus} />
-                      <MetadataRow label="Shipping" value={allocation.shippingStatus} />
-                      <MetadataRow label="Cancellation reason" value={allocation.cancellationReason ?? 'None'} />
-                      <MetadataRow label="Tracking present" value={yesNo(allocation.trackingPresent)} />
-                      <MetadataRow label="Carrier present" value={yesNo(allocation.carrierPresent)} />
-                    </MetadataGroup>
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyStatePanel title="No local allocations" description="The local order exists without a VendorAllocation." />}
-          </OperationalSection>
+            <div className="order-state-projection-grid">
+              <ProjectionCard title="Fulfillment" projection={result.projectionExplanation.fulfillment} />
+              <ProjectionCard title="Shipment" projection={result.projectionExplanation.shipment} />
+              <ProjectionCard title="Tracking" projection={result.projectionExplanation.tracking} />
+              <article className="order-state-record order-state-projection-card">
+                <small>Queue</small>
+                <strong>{result.projectionExplanation.queueState.included ? 'Included' : 'Excluded'}</strong>
+                <p>{result.projectionExplanation.queueState.reasons[0] ?? 'No deterministic reason recorded.'}</p>
+                {result.projectionExplanation.queueState.reasons.length > 1 ? (
+                  <DiagnosticsTechnicalDetails label="Preserved supporting evidence">
+                    <EvidenceList items={result.projectionExplanation.queueState.reasons.slice(1)} />
+                  </DiagnosticsTechnicalDetails>
+                ) : null}
+              </article>
+            </div>
 
-          <OperationalSection title="Shipping" description="Persisted shipment evidence and order-state eligibility only.">
-            {result.shippingState.length ? (
-              <div className="order-state-record-grid">
-                {result.shippingState.map((shipping) => (
-                  <article key={shipping.allocationId} className="order-state-record">
-                    <strong>{shipping.allocationId}</strong>
-                    <MetadataGroup>
-                      <MetadataRow label="Shipment records" value={shipping.shipmentRecordCount} />
-                      <MetadataRow label="Label exists" value={yesNo(shipping.labelExists)} />
-                      <MetadataRow label="Tracking present" value={yesNo(shipping.trackingPresent)} />
-                      <MetadataRow label="Carrier" value={shipping.carrier ?? 'Not recorded'} />
-                      <MetadataRow
-                        label="Order-state eligible"
-                        value={shipping.eligibility.eligibleFromPersistedOrderState ? 'Yes' : 'No'}
-                      />
-                      <MetadataRow label="Blocked reason" value={shipping.eligibility.blockedReason ?? 'None'} />
-                    </MetadataGroup>
-                    {shipping.providerStatuses.map((provider) => (
-                      <small key={`${provider.provider}-${provider.createdAt}`}>{provider.provider}: {provider.status}</small>
+            <div className="order-state-section-stack">
+              <div>
+                <h4>Allocations</h4>
+                {result.allocations.length ? (
+                  <div className="order-state-record-grid">
+                    {result.allocations.map((allocation) => (
+                      <article key={allocation.allocationId} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>{allocation.assignedVendor.vendorName}</strong>
+                          <StatusBadge status={allocation.allocationStatus}>{toTitleCaseLabel(allocation.allocationStatus)}</StatusBadge>
+                        </div>
+                        <MetadataGroup>
+                          <MetadataRow label="Fulfillment" value={allocation.fulfillmentStatus} />
+                          <MetadataRow label="Shipping" value={allocation.shippingStatus} />
+                          <MetadataRow label="Cancellation reason" value={allocation.cancellationReason ?? 'None'} />
+                          <MetadataRow label="Tracking present" value={yesNo(allocation.trackingPresent)} />
+                          <MetadataRow label="Carrier present" value={yesNo(allocation.carrierPresent)} />
+                        </MetadataGroup>
+                        <DiagnosticsTechnicalDetails label="Allocation technical evidence">
+                          <MetadataGroup>
+                            <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{allocation.allocationId}</code>} />
+                            <MetadataRow label="Original vendor" value={`${allocation.originalVendor.vendorName} (${allocation.originalVendor.vendorId})`} />
+                            <MetadataRow label="Assigned vendor" value={`${allocation.assignedVendor.vendorName} (${allocation.assignedVendor.vendorId})`} />
+                            <MetadataRow label="Created" value={formatDate(allocation.createdAt)} />
+                            <MetadataRow label="Updated" value={formatDate(allocation.updatedAt)} />
+                          </MetadataGroup>
+                        </DiagnosticsTechnicalDetails>
+                      </article>
                     ))}
-                  </article>
-                ))}
+                  </div>
+                ) : <DiagnosticsEmptyState title="No local allocations" description="The local order exists without a VendorAllocation." status="None" />}
               </div>
-            ) : <EmptyStatePanel title="No shipping state" description="No vendor allocation exists for shipping inspection." />}
+
+              <div>
+                <h4>Shipping evidence</h4>
+                {result.shippingState.length ? (
+                  <div className="order-state-record-grid">
+                    {result.shippingState.map((shipping) => (
+                      <article key={shipping.allocationId} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>Shipment evidence</strong>
+                          <StatusBadge tone={shipping.eligibility.eligibleFromPersistedOrderState ? 'success' : 'neutral'}>
+                            {shipping.eligibility.eligibleFromPersistedOrderState ? 'Eligible' : 'Blocked'}
+                          </StatusBadge>
+                        </div>
+                        <MetadataGroup>
+                          <MetadataRow label="Shipment records" value={shipping.shipmentRecordCount} />
+                          <MetadataRow label="Label exists" value={yesNo(shipping.labelExists)} />
+                          <MetadataRow label="Tracking present" value={yesNo(shipping.trackingPresent)} />
+                          <MetadataRow label="Carrier" value={shipping.carrier ?? 'Not recorded'} />
+                          <MetadataRow label="Order-state eligible" value={shipping.eligibility.eligibleFromPersistedOrderState ? 'Yes' : 'No'} />
+                          <MetadataRow label="Blocked reason" value={shipping.eligibility.blockedReason ?? 'None'} />
+                        </MetadataGroup>
+                        {shipping.providerStatuses.length ? (
+                          <DiagnosticsTechnicalDetails label="Provider status history">
+                            {shipping.providerStatuses.map((provider) => (
+                              <div key={`${provider.provider}-${provider.createdAt}`} className="order-state-compact-row">
+                                <span>{provider.provider}: {provider.status}</span>
+                                <small>{formatDate(provider.createdAt)} / updated {formatDate(provider.updatedAt)}</small>
+                              </div>
+                            ))}
+                          </DiagnosticsTechnicalDetails>
+                        ) : null}
+                        <DiagnosticsTechnicalDetails label="Shipping technical evidence">
+                          <MetadataGroup>
+                            <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{shipping.allocationId}</code>} />
+                            <MetadataRow label="Eligibility scope" value={shipping.eligibility.scope} />
+                          </MetadataGroup>
+                        </DiagnosticsTechnicalDetails>
+                      </article>
+                    ))}
+                  </div>
+                ) : <DiagnosticsEmptyState title="No shipment records" description="No vendor allocation exists for shipping inspection." status="None" />}
+              </div>
+            </div>
           </OperationalSection>
 
-          <OperationalSection title="Returns / refunds" description="Return requests and refund-derived evidence remain distinct.">
+          <OperationalSection title="Returns and refunds" description="Shopify return requests, refund-derived return evidence, and Shopify refund records remain separate.">
             <div className="order-state-record-grid">
               <article className="order-state-record">
-                <strong>Shopify return requests</strong>
+                <div className="order-state-record-heading">
+                  <strong>Shopify return requests</strong>
+                  <StatusBadge tone={returnRequestCount ? 'attention' : 'neutral'}>{returnRequestCount}</StatusBadge>
+                </div>
                 {result.returnRefundState.returnRequests.length ? result.returnRefundState.returnRequests.map((record) => (
                   <div key={record.id} className="order-state-compact-row">
                     <span>{record.status}</span>
                     <small>{record.sourceShopifyReturnId ?? record.id} · {formatDate(record.requestedAt ?? record.createdAt)}</small>
+                    <DiagnosticsTechnicalDetails label="Return request technical evidence">
+                      <MetadataGroup>
+                        <MetadataRow label="ReturnRecord ID" value={<code className="diagnostics-id-block">{record.id}</code>} />
+                        <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{record.allocationId}</code>} />
+                        <MetadataRow label="Vendor ID" value={record.vendorId ?? 'Not recorded'} />
+                        <MetadataRow label="Source type" value={record.sourceType} />
+                        <MetadataRow label="Updated" value={formatDate(record.updatedAt)} />
+                      </MetadataGroup>
+                    </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <span className="muted">None</span>}
+                )) : <DiagnosticsEmptyState title="No Shopify return request" description="No Shopify return request evidence was returned by the Inspector." status="None" />}
               </article>
               <article className="order-state-record">
-                <strong>Refund-derived return evidence</strong>
+                <div className="order-state-record-heading">
+                  <strong>Refund-derived return evidence</strong>
+                  <StatusBadge tone={refundDerivedReturnCount ? 'attention' : 'neutral'}>{refundDerivedReturnCount}</StatusBadge>
+                </div>
                 {result.returnRefundState.refundDerivedReturns.length ? result.returnRefundState.refundDerivedReturns.map((record) => (
                   <div key={record.id} className="order-state-compact-row">
                     <span>{record.status}</span>
                     <small>{record.sourceShopifyRefundId ?? record.id} · {formatDate(record.createdAt)}</small>
+                    <DiagnosticsTechnicalDetails label="Refund-derived return technical evidence">
+                      <MetadataGroup>
+                        <MetadataRow label="ReturnRecord ID" value={<code className="diagnostics-id-block">{record.id}</code>} />
+                        <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{record.allocationId}</code>} />
+                        <MetadataRow label="Vendor ID" value={record.vendorId ?? 'Not recorded'} />
+                        <MetadataRow label="Source type" value={record.sourceType} />
+                        <MetadataRow label="Requested at" value={formatDate(record.requestedAt)} />
+                        <MetadataRow label="Updated" value={formatDate(record.updatedAt)} />
+                      </MetadataGroup>
+                    </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <span className="muted">None</span>}
+                )) : <DiagnosticsEmptyState title="No refund-derived return evidence" description="No refund-derived return evidence was returned by the Inspector." status="None" />}
               </article>
               <article className="order-state-record">
-                <strong>Shopify refund records</strong>
+                <div className="order-state-record-heading">
+                  <strong>Shopify refund records</strong>
+                  <StatusBadge tone={refundRecordCount ? 'attention' : 'neutral'}>{refundRecordCount}</StatusBadge>
+                </div>
                 {result.returnRefundState.refundRecords.length ? result.returnRefundState.refundRecords.map((record) => (
                   <div key={record.id} className="order-state-compact-row">
                     <span>{record.status}</span>
                     <small>{record.sourceShopifyRefundId} · {formatDate(record.createdAt)}</small>
+                    <DiagnosticsTechnicalDetails label="Refund record technical evidence">
+                      <MetadataGroup>
+                        <MetadataRow label="RefundRecord ID" value={<code className="diagnostics-id-block">{record.id}</code>} />
+                        <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{record.allocationId}</code>} />
+                        <MetadataRow label="Updated" value={formatDate(record.updatedAt)} />
+                      </MetadataGroup>
+                    </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <span className="muted">None</span>}
+                )) : <DiagnosticsEmptyState title="No Shopify refund record" description="No Shopify refund record evidence was returned by the Inspector." status="None" />}
               </article>
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Finance" description="Order-scoped ledger and payment evidence without payment references or bank data.">
-            <div className="order-state-inspector-grid">
-              <MetadataGroup>
-                <MetadataRow label="Ledger rows" value={result.financeState.ledgerCount} />
-                <MetadataRow label="Sale ledger rows" value={result.financeState.saleLedgerCount} />
-                <MetadataRow label="Finance review required" value={yesNo(result.financeState.financeReviewRequired)} />
-                <MetadataRow label="Finance events" value={result.financeState.events.length} />
-              </MetadataGroup>
-              <div className="order-state-record-grid">
-                {result.financeState.ledgers.map((ledger) => (
-                  <article key={ledger.id} className="order-state-record">
-                    <strong>{toTitleCaseLabel(ledger.entryType)}</strong>
-                    <small>{ledger.id}</small>
-                    <MetadataGroup>
-                      <MetadataRow label="Payout" value={ledger.payoutStatus} />
-                      <MetadataRow label="Settlement" value={ledger.settlementStatus} />
-                      <MetadataRow label="Voided at" value={formatDate(ledger.voidedAt)} />
-                      <MetadataRow label="Void reason" value={ledger.voidReason ?? 'None'} />
-                      <MetadataRow label="Approved settlement" value={yesNo(ledger.approvedSettlementPresent)} />
-                      <MetadataRow label="Payout batch" value={yesNo(ledger.payoutBatchPresent)} />
-                      <MetadataRow label="Paid evidence" value={yesNo(ledger.paidEvidencePresent)} />
-                    </MetadataGroup>
-                  </article>
-                ))}
+          <OperationalSection title="History and signals" description="Current unresolved signals first, followed by repair and webhook history.">
+            <div className="order-state-section-stack">
+              <div>
+                <h4>Current operational signals</h4>
+                {currentSignals.length ? (
+                  <div className="order-state-record-grid">
+                    {currentSignals.map((signal) => (
+                      <article key={signal.id} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>{signal.title}</strong>
+                          <StatusBadge tone={signal.severity === 'CRITICAL' || signal.severity === 'HIGH' ? 'danger' : 'warning'}>
+                            {signal.status}
+                          </StatusBadge>
+                        </div>
+                        <p>{signal.description}</p>
+                        <small>{signal.sourceArea} · {formatDate(signal.triggeredAt)}</small>
+                        <DiagnosticsTechnicalDetails label="Signal technical evidence">
+                          <MetadataGroup>
+                            <MetadataRow label="Signal ID" value={<code className="diagnostics-id-block">{signal.id}</code>} />
+                            <MetadataRow label="Allocation ID" value={signal.allocationId ? <code className="diagnostics-id-block">{signal.allocationId}</code> : 'Not recorded'} />
+                            <MetadataRow label="Finance ledger ID" value={signal.financeLedgerEntryId ? <code className="diagnostics-id-block">{signal.financeLedgerEntryId}</code> : 'Not recorded'} />
+                            <MetadataRow label="Type" value={signal.type} />
+                            <MetadataRow label="Suggested action" value={signal.suggestedAction ?? 'Not recorded'} />
+                            <MetadataRow label="Resolved at" value={formatDate(signal.resolvedAt)} />
+                          </MetadataGroup>
+                        </DiagnosticsTechnicalDetails>
+                      </article>
+                    ))}
+                  </div>
+                ) : <DiagnosticsEmptyState title="No signals" description="No unresolved scoped signal records were found." status="None" />}
+              </div>
+
+              {historicalSignals.length ? (
+                <DiagnosticsTechnicalDetails label="Resolved signal history">
+                  <div className="order-state-record-grid">
+                    {historicalSignals.map((signal) => (
+                      <article key={signal.id} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>{signal.title}</strong>
+                          <StatusBadge status={signal.status}>{signal.status}</StatusBadge>
+                        </div>
+                        <p>{signal.description}</p>
+                        <small>{signal.sourceArea} · {formatDate(signal.triggeredAt)}</small>
+                      </article>
+                    ))}
+                  </div>
+                </DiagnosticsTechnicalDetails>
+              ) : null}
+
+              <div>
+                <h4>Repair history</h4>
+                {result.repairHistory.length ? (
+                  <div className="order-state-record-grid">
+                    {result.repairHistory.map((repair) => (
+                      <article key={repair.jobId} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>{toTitleCaseLabel(repair.repairSource)}</strong>
+                          <StatusBadge tone={repair.status === 'COMPLETED' ? 'success' : 'danger'}>
+                            {repair.status}
+                          </StatusBadge>
+                        </div>
+                        <small>Timestamp {formatDate(repair.repairTimestamp)}</small>
+                        <small>Dry run: {yesNo(repair.dryRun)} · Executed: {yesNo(repair.executed)}</small>
+                        {repair.errorSummary ? <p>{repair.errorSummary}</p> : null}
+                        <DiagnosticsTechnicalDetails label="Repair technical evidence">
+                          <MetadataGroup>
+                            <MetadataRow label="Repair job ID" value={<code className="diagnostics-id-block">{repair.jobId}</code>} />
+                            <MetadataRow label="Actor" value={repair.actorEmail ?? repair.actorUserId ?? 'Not recorded'} />
+                          </MetadataGroup>
+                        </DiagnosticsTechnicalDetails>
+                      </article>
+                    ))}
+                  </div>
+                ) : <DiagnosticsEmptyState title="No repair history" description="No executed current-state repair was recorded for this order. Dry runs never persist data." status="None" />}
+              </div>
+
+              <div>
+                <h4>Webhook history</h4>
+                {result.webhookHistory.length ? (
+                  <div className="order-state-record-grid">
+                    {result.webhookHistory.map((event) => (
+                      <article key={event.webhookEventId} className="order-state-record">
+                        <div className="order-state-record-heading">
+                          <strong>{event.topic}</strong>
+                          <StatusBadge tone={event.status === 'PROCESSED' ? 'success' : event.status === 'FAILED' ? 'danger' : 'attention'}>
+                            {event.status}
+                          </StatusBadge>
+                        </div>
+                        <small>Received {formatDate(event.receivedAt)}</small>
+                        <small>Processed {formatDate(event.processedAt)}</small>
+                        <small>Payload available: {yesNo(event.payloadAvailable)}</small>
+                        {event.errorMessage ? <p>{event.errorMessage}</p> : null}
+                        <DiagnosticsTechnicalDetails label="Webhook technical evidence">
+                          <MetadataGroup>
+                            <MetadataRow label="WebhookEvent ID" value={<code className="diagnostics-id-block">{event.webhookEventId}</code>} />
+                            <MetadataRow label="Shopify order ID" value={event.shopifyOrderId ? <code className="diagnostics-id-block">{event.shopifyOrderId}</code> : 'Not recorded'} />
+                            <MetadataRow label="Shopify order number" value={event.shopifyOrderNumber ?? 'Not recorded'} />
+                            <MetadataRow label="Shopify webhook ID" value={event.webhookId ? <code className="diagnostics-id-block">{event.webhookId}</code> : 'Not recorded'} />
+                          </MetadataGroup>
+                        </DiagnosticsTechnicalDetails>
+                      </article>
+                    ))}
+                  </div>
+                ) : <DiagnosticsEmptyState title="No webhook history" description={`No stored webhook event matched this order. Limit: ${result.limits.webhookHistory}.`} status="None" />}
               </div>
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Operational signals" description="Sanitized signals directly scoped to this order's allocations.">
-            {result.operationalSignals.length ? (
-              <div className="order-state-record-grid">
-                {result.operationalSignals.map((signal) => (
-                  <article key={signal.id} className="order-state-record">
-                    <div className="order-state-record-heading">
-                      <strong>{signal.title}</strong>
-                      <StatusBadge tone={signal.severity === 'CRITICAL' || signal.severity === 'HIGH' ? 'danger' : 'warning'}>
-                        {signal.status}
-                      </StatusBadge>
-                    </div>
-                    <p>{signal.description}</p>
-                    <small>{signal.sourceArea} · {formatDate(signal.triggeredAt)}</small>
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyStatePanel title="No operational signals" description="No scoped signal records were found." />}
-          </OperationalSection>
-
-          <OperationalSection title="Webhook history" description={`Chronological safe event history, limited to ${result.limits.webhookHistory} records.`}>
-            {result.webhookHistory.length ? (
-              <div className="order-state-record-grid">
-                {result.webhookHistory.map((event) => (
-                  <article key={event.webhookEventId} className="order-state-record">
-                    <div className="order-state-record-heading">
-                      <strong>{event.topic}</strong>
-                      <StatusBadge tone={event.status === 'PROCESSED' ? 'success' : event.status === 'FAILED' ? 'danger' : 'attention'}>
-                        {event.status}
-                      </StatusBadge>
-                    </div>
-                    <small>Received {formatDate(event.receivedAt)}</small>
-                    <small>Processed {formatDate(event.processedAt)}</small>
-                    <small>Payload available: {yesNo(event.payloadAvailable)}</small>
-                    {event.errorMessage ? <p>{event.errorMessage}</p> : null}
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyStatePanel title="No webhook history" description="No stored webhook event matched this order." />}
-          </OperationalSection>
-
-          <OperationalSection title="Repair history" description={`Executed current-state repairs, limited to ${result.limits.repairHistory} records. Dry runs never persist data.`}>
-            {result.repairHistory.length ? (
-              <div className="order-state-record-grid">
-                {result.repairHistory.map((repair) => (
-                  <article key={repair.jobId} className="order-state-record">
-                    <div className="order-state-record-heading">
-                      <strong>{toTitleCaseLabel(repair.repairSource)}</strong>
-                      <StatusBadge tone={repair.status === 'COMPLETED' ? 'success' : 'danger'}>
-                        {repair.status}
-                      </StatusBadge>
-                    </div>
-                    <small>Timestamp {formatDate(repair.repairTimestamp)}</small>
-                    <small>Dry run: {yesNo(repair.dryRun)}</small>
-                    <small>Executed: {yesNo(repair.executed)}</small>
-                    <small>Actor: {repair.actorEmail ?? repair.actorUserId ?? 'Not recorded'}</small>
-                    {repair.errorSummary ? <p>{repair.errorSummary}</p> : null}
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyStatePanel title="No repair history" description="No executed current-state repair was recorded for this order." />}
-          </OperationalSection>
-
-          <OperationalSection title="Projection explanation" description="Deterministic reasons for current operational labels and action state.">
+          <OperationalSection title="Projection explanation" description="Domain conclusions keep the primary reason visible; detailed action eligibility remains accessible below.">
             <div className="order-state-projection-grid">
-              {([
-                ['Order status', result.projectionExplanation.orderStatus],
-                ['Fulfillment', result.projectionExplanation.fulfillment],
-                ['Shipment', result.projectionExplanation.shipment],
-                ['Tracking', result.projectionExplanation.tracking],
-                ['Finance', result.projectionExplanation.finance],
-              ] as const).map(([title, projection]) => (
-                <article key={title} className="order-state-record">
-                  <small>{title}</small>
-                  <strong>{projection.label}</strong>
-                  <EvidenceList items={projection.reasons} />
-                </article>
-              ))}
-              <article className="order-state-record">
-                <small>Queue state</small>
+              <ProjectionCard title="Order" projection={result.projectionExplanation.orderStatus} />
+              <ProjectionCard title="Fulfillment" projection={result.projectionExplanation.fulfillment} />
+              <ProjectionCard title="Shipment" projection={result.projectionExplanation.shipment} />
+              <ProjectionCard title="Tracking" projection={result.projectionExplanation.tracking} />
+              <ProjectionCard title="Finance" projection={result.projectionExplanation.finance} />
+              <article className="order-state-record order-state-projection-card">
+                <small>Queue</small>
                 <strong>{result.projectionExplanation.queueState.included ? 'Included' : 'Excluded'}</strong>
-                <EvidenceList items={result.projectionExplanation.queueState.reasons} />
+                <p>{result.projectionExplanation.queueState.reasons[0] ?? 'No deterministic reason recorded.'}</p>
+                {result.projectionExplanation.queueState.reasons.length > 1 ? (
+                  <DiagnosticsTechnicalDetails label="Preserved supporting evidence">
+                    <EvidenceList items={result.projectionExplanation.queueState.reasons.slice(1)} />
+                  </DiagnosticsTechnicalDetails>
+                ) : null}
               </article>
             </div>
-            <div className="order-state-action-grid">
-              {result.projectionExplanation.actions.map((action) => (
-                <div key={action.action} className="order-state-action-row">
-                  <span>{toTitleCaseLabel(action.action)}</span>
-                  <StatusBadge tone={action.available ? 'success' : 'neutral'}>
-                    {action.available ? 'Available' : 'Blocked'}
-                  </StatusBadge>
-                  <small>{action.blockedReason ?? 'No lifecycle blocker'}</small>
-                </div>
-              ))}
-            </div>
+            <DiagnosticsTechnicalDetails label="Action eligibility details">
+              <div className="order-state-action-grid">
+                {result.projectionExplanation.actions.map((action) => (
+                  <div key={action.action} className="order-state-action-row">
+                    <span>{toTitleCaseLabel(action.action)}</span>
+                    <StatusBadge tone={action.available ? 'success' : 'neutral'}>
+                      {action.available ? 'Available' : 'Blocked'}
+                    </StatusBadge>
+                    <small>{action.blockedReason ?? 'No lifecycle blocker'}</small>
+                  </div>
+                ))}
+              </div>
+            </DiagnosticsTechnicalDetails>
           </OperationalSection>
 
           <OperationalSection title="Repair readiness" description="Read-only classification for an existing local order; missing-order repair is not offered here.">
-            <MetadataGroup>
-              <MetadataRow label="Repair needed" value={yesNo(result.repairReadiness.repairNeeded)} />
-              <MetadataRow label="Repair supported" value={yesNo(result.repairReadiness.repairSupported)} />
-              <MetadataRow label="Classification" value={toTitleCaseLabel(result.repairReadiness.repairClassification)} />
-              <MetadataRow label="Recommended next step" value={result.repairReadiness.recommendedNextStep} />
-            </MetadataGroup>
+            <div className="order-state-overview-grid">
+              <SummaryCard label="Repair needed" value={yesNo(result.repairReadiness.repairNeeded)} tone={result.repairReadiness.repairNeeded ? 'attention' : 'success'} />
+              <SummaryCard label="Repair supported" value={yesNo(result.repairReadiness.repairSupported)} tone={result.repairReadiness.repairSupported ? 'attention' : 'neutral'} />
+              <SummaryCard label="Classification" value={toTitleCaseLabel(result.repairReadiness.repairClassification)} />
+              <SummaryCard label="Recommended next step" value="Shown in current state" detail="Single visible recommendation is kept at the top." />
+            </div>
             <EvidenceList items={result.repairReadiness.blockers} />
+          </OperationalSection>
+
+          <OperationalSection title="Advanced technical details" description="Low-level identifiers and raw timestamps remain available without competing with operational status.">
+            <DiagnosticsTechnicalDetails label="Order identity and timestamps">
+              <MetadataGroup>
+                <MetadataRow label="Local order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.localOrderId}</code>} />
+                <MetadataRow label="Shopify order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.shopifyOrderId}</code>} />
+                <MetadataRow label="Shopify created" value={formatDate(result.orderIdentity.shopifyCreatedAt)} />
+                <MetadataRow label="Local created" value={formatDate(result.orderIdentity.createdAt)} />
+                <MetadataRow label="Local updated" value={formatDate(result.orderIdentity.updatedAt)} />
+              </MetadataGroup>
+            </DiagnosticsTechnicalDetails>
+            <DiagnosticsTechnicalDetails label="Inspector limits">
+              <MetadataGroup>
+                <MetadataRow label="Webhook history limit" value={result.limits.webhookHistory} />
+                <MetadataRow label="Operational signals limit" value={result.limits.operationalSignals} />
+                <MetadataRow label="Finance events limit" value={result.limits.financeEvents} />
+                <MetadataRow label="Repair history limit" value={result.limits.repairHistory} />
+              </MetadataGroup>
+            </DiagnosticsTechnicalDetails>
           </OperationalSection>
         </div>
       ) : null}

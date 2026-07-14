@@ -49,18 +49,20 @@ export function DiagnosticsActionPanel({
   recommendation,
   stateLabel,
   tone = 'neutral',
+  id = 'diagnostics-recommended-next-action',
   children,
 }: {
   recommendation: ReactNode;
   stateLabel: ReactNode;
   tone?: DiagnosticsTone;
+  id?: string;
   children?: ReactNode;
 }) {
   return (
-    <section className={`diagnostics-action-panel op-tone-${tone}`} aria-labelledby="diagnostics-recommended-next-action">
+    <section className={`diagnostics-action-panel op-tone-${tone}`} aria-labelledby={id}>
       <div className="diagnostics-action-panel-heading">
         <div>
-          <h4 id="diagnostics-recommended-next-action">Recommended next action</h4>
+          <h4 id={id}>Recommended next action</h4>
           <strong>{recommendation}</strong>
         </div>
         <StatusBadge tone={tone}>{stateLabel}</StatusBadge>

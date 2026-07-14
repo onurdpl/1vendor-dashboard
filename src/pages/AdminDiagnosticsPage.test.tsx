@@ -769,9 +769,17 @@ describe('AdminDiagnosticsPage control center', () => {
 
     expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledWith('#1108', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(await screen.findByText('This order is cancelled, but existing operational evidence requires review.')).toBeInTheDocument();
+    expect(screen.getByText('Current state')).toBeInTheDocument();
+    expect(screen.getByText('Finance and payment safety')).toBeInTheDocument();
+    expect(screen.getAllByText('Operations').length).toBeGreaterThan(0);
+    expect(screen.getByText('Review the preserved operational evidence.')).toBeInTheDocument();
+    expect(screen.getByText('Finance review required')).toBeInTheDocument();
+    expect(screen.getByText('Existing evidence')).toBeInTheDocument();
     expect(screen.getByText('Shopify return requests')).toBeInTheDocument();
     expect(screen.getByText('Refund-derived return evidence')).toBeInTheDocument();
     expect(screen.getByText('Shopify refund records')).toBeInTheDocument();
+    expect(screen.getByText('Paid evidence')).toBeInTheDocument();
+    expect(screen.getAllByText('No').length).toBeGreaterThan(0);
     expect(screen.getByText('Projection explanation')).toBeInTheDocument();
     expect(screen.getByText(/Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt/)).toBeInTheDocument();
     expect(screen.getByText('ShopifyOrder.cancelledAt is the canonical full-order cancellation source.')).toBeInTheDocument();
@@ -781,6 +789,74 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(inspector).not.toBeNull();
     expect(within(inspector as HTMLElement).queryByRole('button', { name: /repair/i })).not.toBeInTheDocument();
     expect(within(inspector as HTMLElement).queryByRole('button', { name: /replay/i })).not.toBeInTheDocument();
+  });
+
+  it('renders compact no-conflict and empty return/refund states from existing values', async () => {
+    const noConflictOrder = orderStateInspectorResult();
+    noConflictOrder.localOrderState.hasOperationalConflict = false;
+    noConflictOrder.financeState.financeReviewRequired = false;
+    noConflictOrder.returnRefundState.returnRequests = [];
+    noConflictOrder.returnRefundState.refundDerivedReturns = [];
+    noConflictOrder.returnRefundState.refundRecords = [];
+    noConflictOrder.operationalSignals = [];
+    noConflictOrder.webhookHistory = [];
+    noConflictOrder.repairHistory = [];
+    noConflictOrder.projectionExplanation.cancellationConflict = { active: false, reasons: [] };
+    noConflictOrder.projectionExplanation.finance = { label: 'No review required', reasons: ['No conflict evidence is persisted.'] };
+    noConflictOrder.currentStateSummary = 'This order is cancelled with no persisted conflict evidence.';
+    noConflictOrder.repairReadiness = {
+      repairNeeded: false,
+      repairSupported: false,
+      repairClassification: 'no_repair_needed',
+      blockers: [],
+      recommendedNextStep: 'No action required.',
+    };
+    diagnosticsMocks.inspectOrderState.mockResolvedValueOnce(noConflictOrder);
+
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '#1108');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    expect(await screen.findByText('This order is cancelled with no persisted conflict evidence.')).toBeInTheDocument();
+    expect(screen.getByText('No conflict evidence')).toBeInTheDocument();
+    expect(screen.getByText('No action required.')).toBeInTheDocument();
+    expect(screen.getByText('No Shopify return request')).toBeInTheDocument();
+    expect(screen.getByText('No refund-derived return evidence')).toBeInTheDocument();
+    expect(screen.getByText('No Shopify refund record')).toBeInTheDocument();
+    expect(screen.getByText('No signals')).toBeInTheDocument();
+    expect(screen.getByText('No repair history')).toBeInTheDocument();
+    expect(screen.getByText('No webhook history')).toBeInTheDocument();
+  });
+
+  it('keeps Inspector technical identifiers accessible only through disclosures and preserves action blockers', async () => {
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '#1108');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+
+    await screen.findByText('Current state');
+    const orderDetailsLabel = screen.getByText('Order identity and timestamps');
+    const orderDetails = orderDetailsLabel.closest('details') as HTMLDetailsElement;
+    expect(orderDetails.open).toBe(false);
+    await userEvent.click(orderDetailsLabel);
+    expect(orderDetails.open).toBe(true);
+    expect(screen.getByText('order-db-1108')).toBeInTheDocument();
+    expect(screen.getAllByText('7856124985681').length).toBeGreaterThan(0);
+
+    const ledgerDetailsLabel = screen.getByText('Ledger technical evidence');
+    const ledgerDetails = ledgerDetailsLabel.closest('details') as HTMLDetailsElement;
+    expect(ledgerDetails.open).toBe(false);
+    await userEvent.click(ledgerDetailsLabel);
+    expect(ledgerDetails.open).toBe(true);
+    expect(screen.getByText('ledger-1')).toBeInTheDocument();
+
+    const actionDetailsLabel = screen.getByText('Action eligibility details');
+    const actionDetails = actionDetailsLabel.closest('details') as HTMLDetailsElement;
+    expect(actionDetails.open).toBe(false);
+    await userEvent.click(actionDetailsLabel);
+    expect(actionDetails.open).toBe(true);
+    expect(screen.getByText('Create Shipment')).toBeInTheDocument();
+    expect(screen.getAllByText('full_order_cancelled').length).toBeGreaterThan(0);
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalled();
   });
 
   it('normalizes a plain Shopify order number before the repair dry run', async () => {
@@ -935,8 +1011,13 @@ describe('AdminDiagnosticsPage control center', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Execute Repair' }));
 
     expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenLastCalledWith('#1105', true);
-    expect(await screen.findByText(/Actor: admin@example.com/)).toBeInTheDocument();
-    expect(screen.getByText('Repair history')).toBeInTheDocument();
+    expect(await screen.findByText('Repair history')).toBeInTheDocument();
+    const repairDetailsLabel = screen.getByText('Repair technical evidence');
+    const repairDetails = repairDetailsLabel.closest('details') as HTMLDetailsElement;
+    expect(repairDetails.open).toBe(false);
+    await userEvent.click(repairDetailsLabel);
+    expect(repairDetails.open).toBe(true);
+    expect(screen.getByText('admin@example.com')).toBeInTheDocument();
   });
 
   it('renders loading and safe not-found states without changing the data path on narrow screens', async () => {
