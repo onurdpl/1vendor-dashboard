@@ -394,7 +394,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 <div className="order-state-action-grid">
                   {[
                     ['ShopifyOrder and line items', plannedAction(dryRunResult.summary.shopifyOrder)],
-                    ['VendorAllocation', plannedAction(dryRunResult.summary.allocation)],
+                    ['Vendor allocation', plannedAction(dryRunResult.summary.allocation)],
                     ['FinanceLedgerEntry sale evidence', plannedAction(dryRunResult.summary.finance)],
                     ['Full-order cancellation lifecycle', dryRunResult.summary.cancellationApplied ? 'APPLY' : 'SKIP'],
                     ['Refund lifecycle', dryRunResult.summary.refundApplied ? 'APPLY' : 'SKIP'],
@@ -431,7 +431,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
 
       {result ? (
         <div className="order-state-inspector-results">
-          <OperationalSection title="Current state" description="Operator-first summary from the existing Inspector response.">
+          <OperationalSection title="Current state" description="Summary from the current order inspection.">
             <article className="order-state-summary">
               <div>
                 <p className="eyebrow">Current state summary</p>
@@ -472,7 +472,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
               />
               <SummaryCard
                 label="Conflict"
-                value={result.localOrderState.hasOperationalConflict ? 'Existing evidence' : 'None'}
+                value={result.localOrderState.hasOperationalConflict ? 'Existing evidence' : 'No conflict'}
                 detail={conflictReasons[0] ?? 'No conflict reason recorded'}
                 tone={conflictTone(result.localOrderState.hasOperationalConflict)}
               />
@@ -507,7 +507,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Finance and payment safety" description="Order-scoped ledger, settlement, payout, and paid-evidence fields already exposed by the Inspector.">
+          <OperationalSection title="Finance and payment safety" description="Order-scoped ledger, settlement, payout, and paid-evidence checks from the current inspection.">
             <div className="order-state-overview-grid order-state-finance-metrics">
               <SummaryCard label="Ledgers" value={String(result.financeState.ledgerCount)} detail={countLabel(result.financeState.saleLedgerCount, 'sale ledger')} />
               <SummaryCard
@@ -522,7 +522,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 {result.financeState.ledgers.map((ledger) => <LedgerCard key={ledger.id} ledger={ledger} />)}
               </div>
             ) : (
-              <DiagnosticsEmptyState title="No finance ledger rows" description="No order-scoped ledger rows were returned by the Inspector." status="None" />
+              <DiagnosticsEmptyState title="No finance ledger rows" description="No order-scoped ledger rows were returned for this order." status="No ledger rows" />
             )}
           </OperationalSection>
 
@@ -576,7 +576,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No local allocations" description="The local order exists without a VendorAllocation." status="None" />}
+                ) : <DiagnosticsEmptyState title="No local allocations" description="The local order exists without a vendor allocation." status="No allocations" />}
               </div>
 
               <div>
@@ -588,7 +588,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                         <div className="order-state-record-heading">
                           <strong>Shipment evidence</strong>
                           <StatusBadge tone={shipping.eligibility.eligibleFromPersistedOrderState ? 'success' : 'neutral'}>
-                            {shipping.eligibility.eligibleFromPersistedOrderState ? 'Eligible' : 'Blocked'}
+                            {shipping.eligibility.eligibleFromPersistedOrderState ? 'Shipping eligible' : 'Shipping blocked'}
                           </StatusBadge>
                         </div>
                         <MetadataGroup>
@@ -618,7 +618,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No shipment records" description="No vendor allocation exists for shipping inspection." status="None" />}
+                ) : <DiagnosticsEmptyState title="No shipment records" description="No vendor allocation exists for shipping inspection." status="No shipment records" />}
               </div>
             </div>
           </OperationalSection>
@@ -644,7 +644,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No Shopify return request" description="No Shopify return request evidence was returned by the Inspector." status="None" />}
+                )) : <DiagnosticsEmptyState title="No Shopify return request" description="No Shopify return request evidence was returned for this order." status="No return request" />}
               </article>
               <article className="order-state-record">
                 <div className="order-state-record-heading">
@@ -666,7 +666,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No refund-derived return evidence" description="No refund-derived return evidence was returned by the Inspector." status="None" />}
+                )) : <DiagnosticsEmptyState title="No refund-derived return evidence" description="No refund-derived return evidence was returned for this order." status="No refund-derived return" />}
               </article>
               <article className="order-state-record">
                 <div className="order-state-record-heading">
@@ -685,7 +685,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No Shopify refund record" description="No Shopify refund record evidence was returned by the Inspector." status="None" />}
+                )) : <DiagnosticsEmptyState title="No Shopify refund record" description="No Shopify refund record evidence was returned for this order." status="No refund record" />}
               </article>
             </div>
           </OperationalSection>
@@ -719,7 +719,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No signals" description="No unresolved scoped signal records were found." status="None" />}
+                ) : <DiagnosticsEmptyState title="No signals" description="No unresolved signal records were found for this order." status="No active signals" />}
               </div>
 
               {historicalSignals.length ? (
@@ -763,7 +763,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No repair history" description="No executed current-state repair was recorded for this order. Dry runs never persist data." status="None" />}
+                ) : <DiagnosticsEmptyState title="No repair history" description="No executed current-state repair was recorded for this order. Dry runs never persist data." status="No repair history" />}
               </div>
 
               <div>
@@ -780,7 +780,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                         </div>
                         <small>Received {formatDate(event.receivedAt)}</small>
                         <small>Processed {formatDate(event.processedAt)}</small>
-                        <small>Payload available: {yesNo(event.payloadAvailable)}</small>
+                        <small>Stored payload: {yesNo(event.payloadAvailable)}</small>
                         {event.errorMessage ? <p>{event.errorMessage}</p> : null}
                         <DiagnosticsTechnicalDetails label="Webhook technical evidence">
                           <MetadataGroup>
@@ -793,7 +793,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No webhook history" description={`No stored webhook event matched this order. Limit: ${result.limits.webhookHistory}.`} status="None" />}
+                ) : <DiagnosticsEmptyState title="No webhook history" description={`No stored webhook event matched this order. Limit: ${result.limits.webhookHistory}.`} status="No webhook history" />}
               </div>
             </div>
           </OperationalSection>
@@ -822,7 +822,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                   <div key={action.action} className="order-state-action-row">
                     <span>{toTitleCaseLabel(action.action)}</span>
                     <StatusBadge tone={action.available ? 'success' : 'neutral'}>
-                      {action.available ? 'Available' : 'Blocked'}
+                      {action.available ? 'Action available' : 'Action blocked'}
                     </StatusBadge>
                     <small>{action.blockedReason ?? 'No lifecycle blocker'}</small>
                   </div>

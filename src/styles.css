@@ -5805,11 +5805,28 @@ h3 {
   font-size: 0.7rem;
 }
 
+.diagnostics-filter-summary strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  color: var(--op-text-strong);
+  font-size: 0.72rem;
+}
+
 .diagnostics-filter-summary span,
 .reconciliation-meta span {
   min-height: 18px;
   padding: 1px 6px;
   font-size: 0.66rem;
+}
+
+.diagnostics-filter-summary .diagnostics-filter-summary-label {
+  border-color: transparent;
+  background: transparent;
+  color: var(--op-muted);
+  padding-inline: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .diagnostics-control-center .op-event-list {

@@ -559,7 +559,24 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getAllByText('warning').length).toBeGreaterThan(0);
     expect(screen.getByText('Retry pressure')).toBeInTheDocument();
     expect(screen.getAllByText('Canonical reconciliation').length).toBeGreaterThan(0);
+    expect(screen.getByText('Showing 2 webhook events')).toBeInTheDocument();
+    expect(screen.getByText('No active filters')).toBeInTheDocument();
+    expect(screen.queryByText('All webhook topics')).not.toBeInTheDocument();
     expect(screen.getByText('Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.')).toBeInTheDocument();
+  });
+
+  it('separates webhook result count from non-default active filters', async () => {
+    renderDiagnosticsPage();
+
+    expect(await screen.findByText('Showing 2 webhook events')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByDisplayValue('All payloads'), 'available');
+
+    expect(screen.getByText('Showing 1 webhook event')).toBeInTheDocument();
+    expect(screen.getByText('Active filters')).toBeInTheDocument();
+    expect(screen.getByText('Stored payload: Stored')).toBeInTheDocument();
+    expect(screen.queryByText('All payload states')).not.toBeInTheDocument();
+    expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
+    expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
   });
 
   it('renders safe deployment runtime diagnostics without exposing secrets', async () => {
@@ -577,7 +594,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(technicalDisclosure.open).toBe(true);
     expect(screen.getAllByText('http://127.0.0.1:4000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('def5678').length).toBeGreaterThan(0);
-    const deploymentSectionText = screen.getByText('Advanced technical evidence').closest('section')?.textContent ?? '';
+    const deploymentSectionText = screen.getByText('Technical deployment details').closest('section')?.textContent ?? '';
     expect(deploymentSectionText).not.toContain('Bearer');
     expect(deploymentSectionText).not.toContain('token');
   });
@@ -672,10 +689,10 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    await screen.findByText('Recovery readiness');
+    await screen.findByText('Current conclusion');
     expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
 
-    const payloadLabel = screen.getByText('Payload diagnostics');
+    const payloadLabel = screen.getByText('Stored payload details');
     const payloadDisclosure = payloadLabel.closest('details') as HTMLDetailsElement;
     expect(payloadDisclosure.open).toBe(false);
     await userEvent.click(payloadLabel);
@@ -697,7 +714,7 @@ describe('AdminDiagnosticsPage control center', () => {
     const detailPanel = (await screen.findByText('Webhook detail')).closest('aside');
     expect(detailPanel).not.toBeNull();
 
-    const disclosureLabel = within(detailPanel as HTMLElement).getByText('Advanced technical details');
+    const disclosureLabel = within(detailPanel as HTMLElement).getByText('Technical webhook identifiers');
     const disclosure = disclosureLabel.closest('details') as HTMLDetailsElement;
     expect(disclosure.open).toBe(false);
 
@@ -755,9 +772,9 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    const title = await screen.findByText('No canonical reconciliation run recorded');
+    const title = await screen.findByText('No canonical reconciliation run yet');
     expect(title.closest('.diagnostics-empty-state')).not.toBeNull();
-    expect(screen.getAllByText('Not recorded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('No run yet').length).toBeGreaterThan(0);
   });
 
   it('inspects an explicit order and renders source-specific operational evidence', async () => {
@@ -824,8 +841,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('No refund-derived return evidence')).toBeInTheDocument();
     expect(screen.getByText('No Shopify refund record')).toBeInTheDocument();
     expect(screen.getByText('No signals')).toBeInTheDocument();
-    expect(screen.getByText('No repair history')).toBeInTheDocument();
-    expect(screen.getByText('No webhook history')).toBeInTheDocument();
+    expect(screen.getAllByText('No repair history').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('No webhook history').length).toBeGreaterThan(0);
   });
 
   it('keeps Inspector technical identifiers accessible only through disclosures and preserves action blockers', async () => {

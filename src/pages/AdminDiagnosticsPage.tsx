@@ -423,6 +423,19 @@ export function AdminDiagnosticsPage() {
     combinedCounts.retryPressure ||
     repairCandidateCount,
   );
+  const activeWebhookFilters = [
+    searchTerm.trim() ? ['Search', searchTerm.trim()] : null,
+    topicFilter !== 'all' ? ['Topic', formatWebhookTopic(topicFilter)] : null,
+    statusFilter !== 'all' ? ['Status', safeStatusLabel(statusFilter)] : null,
+    payloadFilter !== 'all' ? ['Stored payload', payloadFilter === 'available' ? 'Stored' : 'Missing'] : null,
+    eligibilityFilter !== 'all'
+      ? ['Next step', eligibilityFilter === 'replayable'
+        ? 'Stored replay allowed'
+        : eligibilityFilter === 'recoverable'
+          ? 'Recovery allowed'
+          : 'Blocked or no recovery needed']
+      : null,
+  ].filter((filter): filter is [string, string] => Boolean(filter));
 
   if (!isRealMode) {
     return (
@@ -518,14 +531,14 @@ export function AdminDiagnosticsPage() {
       </div>
 
       <OperationalSection
-        title="Operational summary"
-        description="Current operator-facing health, action, recovery, repair, and canonical reconciliation signals."
+        title="Diagnostics overview"
+        description="Current health, required work, recovery candidates, repair candidates, and latest canonical reconciliation status."
       >
       <div className="op-kpi-row diagnostics-summary-strip">
         <KPIStatCard
           label="Operational health"
           value={observabilityQuery.data?.health ?? 'Unknown'}
-          detail="Current observability status"
+          detail="Current system health"
           tone={getHealthTone(observabilityQuery.data?.health)}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current observability summary', generatedAt: 'Current diagnostics load' }}
         />
@@ -537,21 +550,21 @@ export function AdminDiagnosticsPage() {
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current stuck received records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Items requiring action"
+          label="Needs attention"
           value={webhooksQuery.data.summary.needsAttention}
-          detail="Existing diagnostics classification"
+          detail="Webhook records needing attention"
           tone={webhooksQuery.data.summary.needsAttention > 0 ? 'attention' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
           label="Recovery candidates"
           value={combinedCounts.recoverable}
-          detail={`${combinedCounts.replayable} safe replay candidate(s)`}
+          detail={`${combinedCounts.replayable} stored replay allowed`}
           tone={combinedCounts.recoverable > 0 ? 'attention' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Repair Candidates"
+          label="Repair candidates"
           value={repairCandidateCount}
           detail="Missing local order from current inspection"
           tone={repairCandidateCount > 0 ? 'warning' : 'neutral'}
@@ -559,7 +572,7 @@ export function AdminDiagnosticsPage() {
         />
         <KPIStatCard
           label="Canonical reconciliation"
-          value={canonicalRun?.status ?? 'Not recorded'}
+          value={canonicalRun?.status ?? 'No run yet'}
           detail={
             canonicalRun
               ? `${canonicalRun.repairOpportunities} repair opportunities · ${canonicalRun.errors.length} errors`
@@ -576,8 +589,8 @@ export function AdminDiagnosticsPage() {
       </OperationalSection>
 
       <OperationalSection
-        title="Action required"
-        description="Failed, stuck, blocked, or stale records that already carry operator-facing action state."
+        title="Needs attention"
+        description="Failed, stuck, blocked, or stale records that may need an operator."
       >
         {hasActionRequired ? (
           <div className="op-kpi-row diagnostics-action-metrics">
@@ -589,8 +602,8 @@ export function AdminDiagnosticsPage() {
           </div>
         ) : (
           <DiagnosticsEmptyState
-            title="No current action records"
-            description="The current diagnostics responses contain no failed, stuck, missing-payload, stale-allocation, retry-pressure, or repair-candidate state."
+            title="No items need attention"
+            description="No failed webhooks, stuck processing, missing payloads, stale allocations, retry pressure, or repair candidates are currently reported."
             status="No action required"
             tone="success"
           />
@@ -634,14 +647,14 @@ export function AdminDiagnosticsPage() {
               </select>
               <select value={payloadFilter} onChange={(event) => setPayloadFilter(event.target.value)}>
                 <option value="all">All payloads</option>
-                <option value="available">Payload available</option>
+                <option value="available">Stored payload available</option>
                 <option value="missing">Payload missing</option>
               </select>
               <select value={eligibilityFilter} onChange={(event) => setEligibilityFilter(event.target.value)}>
                 <option value="all">All action states</option>
-                <option value="replayable">Safe replay candidates</option>
-                <option value="recoverable">Recoverable failed events</option>
-                <option value="blocked">Blocked / no-op</option>
+                <option value="replayable">Stored replay allowed</option>
+                <option value="recoverable">Recovery allowed</option>
+                <option value="blocked">Blocked or no recovery needed</option>
               </select>
               <button
                 type="button"
@@ -659,23 +672,34 @@ export function AdminDiagnosticsPage() {
             </FilterBar>
           </OperationalToolbar>
 
-          <div className="diagnostics-filter-summary">
-            <span>{filteredWebhooks.length} events</span>
-            <span>{topicFilter === 'all' ? 'All webhook topics' : formatWebhookTopic(topicFilter)}</span>
-            <span>{statusFilter === 'all' ? 'All processing statuses' : statusFilter}</span>
-            <span>{payloadFilter === 'all' ? 'All payload states' : payloadFilter}</span>
+          <div className="diagnostics-filter-summary" aria-label="Webhook result summary">
+            <strong>
+              {visibleWebhooks.length < filteredWebhooks.length
+                ? `Showing ${visibleWebhooks.length} of ${filteredWebhooks.length} matching webhook events`
+                : `Showing ${filteredWebhooks.length} ${filteredWebhooks.length === 1 ? 'webhook event' : 'webhook events'}`}
+            </strong>
+            {activeWebhookFilters.length ? (
+              <>
+                <span className="diagnostics-filter-summary-label">Active filters</span>
+                {activeWebhookFilters.map(([label, value]) => (
+                  <span key={label}>{label}: {value}</span>
+                ))}
+              </>
+            ) : (
+              <span>No active filters</span>
+            )}
           </div>
 
           {visibleWebhooks.length === 0 ? (
             <DiagnosticsEmptyState
               title="No webhook events recorded"
               description="Live backend diagnostics will appear here once Shopify deliveries reach the backend, or when filters match recorded events."
-              status="Informational"
+              status="No matching events"
               tone="info"
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Topic', 'Payload', 'Eligibility', 'Affected entity', 'Received', 'Actions']}
+              columns={['Status', 'Topic', 'Stored payload', 'Next step', 'Affected entity', 'Received', 'Actions']}
               className="diagnostics-op-table diagnostics-op-table-v2"
             >
               {visibleWebhooks.map((event) => (
@@ -690,10 +714,10 @@ export function AdminDiagnosticsPage() {
                     <small>{event.shopDomain}</small>
                   </span>
                   <StatusBadge tone={event.payloadAvailable ? 'success' : 'warning'}>
-                    {event.payloadAvailable ? 'Available' : 'Missing'}
+                    {event.payloadAvailable ? 'Payload stored' : 'Payload missing'}
                   </StatusBadge>
                   <span>
-                    <strong>{event.recoverEligible ? 'Recoverable failed event' : event.replayEligible ? 'Safe replay candidate' : 'No action'}</strong>
+                    <strong>{event.recoverEligible ? 'Recovery allowed' : event.replayEligible ? 'Stored replay allowed' : 'No recovery needed'}</strong>
                     <small>{event.recoverBlockedReason ?? event.replayBlockedReason ?? event.lastErrorSummary ?? event.recommendedAction}</small>
                   </span>
                   <span>{getPrimaryEntityLabel(event.affectedEntities)}</span>
@@ -755,12 +779,12 @@ export function AdminDiagnosticsPage() {
               <div className="op-detail-status-row">
                 <StatusBadge tone={getStatusTone(selectedWebhook.status)}>{selectedWebhook.status}</StatusBadge>
                 <StatusBadge tone={selectedWebhook.payloadAvailable ? 'success' : 'warning'}>
-                  {selectedWebhook.payloadAvailable ? 'Payload available' : 'Payload missing'}
+                  {selectedWebhook.payloadAvailable ? 'Payload stored' : 'Payload missing'}
                 </StatusBadge>
               </div>
-              <MetadataGroup title="Recovery readiness">
+              <MetadataGroup title="Current conclusion">
                 <MetadataRow
-                  label="Recoverability"
+                  label="What this means"
                   value={formatRecoverability({
                     payloadAvailable: selectedWebhook.payloadAvailable,
                     status: selectedWebhook.status,
@@ -768,10 +792,10 @@ export function AdminDiagnosticsPage() {
                     recoverEligible: selectedWebhook.recoverEligible,
                   })}
                 />
-                <MetadataRow label="Safe replay eligibility" value={selectedWebhook.replayEligible ? 'Stored replay allowed' : selectedWebhook.replayBlockedReason ?? 'Stored replay blocked'} />
-                <MetadataRow label="Failed-event recovery eligibility" value={selectedWebhook.recoverEligible ? 'Failed recovery allowed' : selectedWebhook.recoverBlockedReason ?? 'Failed recovery blocked'} />
-                <MetadataRow label="Processing status" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
-                <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
+                <MetadataRow label="Stored replay" value={selectedWebhook.replayEligible ? 'Stored replay allowed' : selectedWebhook.replayBlockedReason ?? 'Stored replay blocked'} />
+                <MetadataRow label="Failed-event recovery" value={selectedWebhook.recoverEligible ? 'Recovery allowed' : selectedWebhook.recoverBlockedReason ?? 'Recovery blocked'} />
+                <MetadataRow label="Processing state" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
+                <MetadataRow label="Latest safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
               </MetadataGroup>
               <DiagnosticsActionPanel
                 recommendation={selectedWebhook.recommendedAction}
@@ -812,7 +836,7 @@ export function AdminDiagnosticsPage() {
                   <p className="queue-muted-action diagnostics-inline-note">Stored replay blocked: {selectedWebhook.replayBlockedReason}</p>
                 ) : null}
                 {!canRecover && !selectedWebhook.recoverBlockedReason && !canReplay && !selectedWebhook.replayBlockedReason ? (
-                  <p className="queue-muted-action diagnostics-inline-note">No action recommended.</p>
+                  <p className="queue-muted-action diagnostics-inline-note">No recovery action recommended.</p>
                 ) : null}
               </DiagnosticsActionPanel>
               <MetadataGroup title="Affected entities">
@@ -832,7 +856,7 @@ export function AdminDiagnosticsPage() {
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </MetadataGroup>
               <div className="op-panel-section diagnostics-job-section">
-                <h4>Operational jobs</h4>
+                <h4>Linked processing jobs</h4>
                 {(selectedWebhook.relatedJobs ?? []).length > 0 ? (
                   (selectedWebhook.relatedJobs ?? []).slice(0, 4).map((job) => (
                     <div key={job.id} className="diagnostics-job-row">
@@ -871,9 +895,9 @@ export function AdminDiagnosticsPage() {
                   ))
                 ) : (
                   <DiagnosticsEmptyState
-                    title="No operational jobs"
+                    title="No linked processing jobs"
                     description="No operational job is linked to this webhook event."
-                    status="Informational"
+                    status="No linked job"
                     tone="info"
                   />
                 )}
@@ -889,7 +913,7 @@ export function AdminDiagnosticsPage() {
                   ]}
                 />
               </div>
-              <DiagnosticsTechnicalDetails>
+              <DiagnosticsTechnicalDetails label="Technical webhook identifiers">
                 <MetadataGroup title="Event identity">
                   <MetadataRow label="Topic" value={formatWebhookTopic(selectedWebhook.topic)} />
                   <MetadataRow label="Webhook event ID" value={<code className="diagnostics-id-block">{selectedWebhook.id}</code>} />
@@ -900,7 +924,7 @@ export function AdminDiagnosticsPage() {
                   <MetadataRow label="Idempotency key" value={<code className="diagnostics-id-block">{selectedWebhook.idempotencyKey ?? 'Not synced'}</code>} />
                 </MetadataGroup>
               </DiagnosticsTechnicalDetails>
-              <DiagnosticsTechnicalDetails label="Payload diagnostics" description="Safe preview remains closed until explicitly opened.">
+              <DiagnosticsTechnicalDetails label="Stored payload details" description="Safe preview remains closed until explicitly opened.">
                 <div className="diagnostics-compact-section-heading">
                   <h4>Stored payload preview</h4>
                   {selectedWebhook.payloadPreview ? (
@@ -921,12 +945,12 @@ export function AdminDiagnosticsPage() {
                 ) : selectedWebhook.payloadPreview ? (
                   <p className="page-description diagnostics-inline-note">Safe preview available. It remains collapsed by default.</p>
                 ) : (
-                  <p className="page-description diagnostics-inline-note">No payload preview.</p>
+                  <p className="page-description diagnostics-inline-note">No stored payload preview.</p>
                 )}
               </DiagnosticsTechnicalDetails>
             </>
           ) : (
-            <DiagnosticsEmptyState title="Select a webhook event" description="Choose an event from the stream to inspect payload and recovery readiness." status="Informational" tone="info" />
+            <DiagnosticsEmptyState title="Select a webhook event" description="Choose an event from the stream to inspect recovery status, recommended action, and supporting evidence." status="Select an event" tone="info" />
           )}
         </SideDetailPanel>
       </div>
@@ -934,12 +958,12 @@ export function AdminDiagnosticsPage() {
 
       <OperationalSection
         title="Reconciliation and sync evidence"
-        description="Actionable reconciliation records are separated from informational sync and canonical history."
+        description="Records that may need reconciliation are separated from sync history and canonical dry-run history."
       >
         <div className="op-secondary-grid diagnostics-evidence-grid">
           <OperationalSection
             title="Reconciliation queue"
-            description="Stuck events, missing payloads, and existing suggested recovery actions."
+            description="Stuck events, missing payloads, and suggested recovery actions from the current diagnostics response."
           >
             {visibleReconciliationItems.length === 0 ? (
               <DiagnosticsEmptyState
@@ -974,7 +998,7 @@ export function AdminDiagnosticsPage() {
                     </div>
                     <OperationalActionGroup>
                       <StatusBadge tone={item.payloadAvailable === false ? 'warning' : 'neutral'}>
-                        {item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}
+                        {item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload stored' : 'Payload missing'}
                       </StatusBadge>
                       {item.relatedAllocationId ? (
                         <button
@@ -997,7 +1021,7 @@ export function AdminDiagnosticsPage() {
                         </button>
                       ) : null}
                       {!item.relatedAllocationId && !item.relatedShopifyOrderId ? (
-                        <span className="queue-muted-action">No backend reconcile action exposed</span>
+                        <span className="queue-muted-action">No reconcile action available</span>
                       ) : null}
                     </OperationalActionGroup>
                   </article>
@@ -1036,8 +1060,8 @@ export function AdminDiagnosticsPage() {
         </div>
 
         <OperationalSection
-          title="Canonical reconciliation"
-          description="Nightly Shopify canonical dry-run report across order snapshots, fulfillment, refunds, returns, and cancellations."
+        title="Canonical reconciliation"
+          description="Latest Shopify canonical dry-run report across order snapshots, fulfillment, refunds, returns, and cancellations."
         >
           {canonicalRun ? (
             <div className="deployment-runtime-grid">
@@ -1068,9 +1092,9 @@ export function AdminDiagnosticsPage() {
             </div>
           ) : (
             <DiagnosticsEmptyState
-              title="No canonical reconciliation run recorded"
+              title="No canonical reconciliation run yet"
               description="The nightly dry-run report will appear here after the scheduler or manual admin endpoint runs."
-              status="Not recorded"
+              status="No run yet"
               tone="neutral"
             />
           )}
@@ -1084,7 +1108,7 @@ export function AdminDiagnosticsPage() {
         <div className="op-kpi-row diagnostics-runtime-status-grid">
           <KPIStatCard
             label="Frontend"
-            value={runtimeConfig.startupIssues.length ? 'Needs review' : 'Configured'}
+            value={runtimeConfig.startupIssues.length ? 'Needs review' : 'Frontend configured'}
             detail={`${runtimeConfig.appEnvironment} · ${runtimeConfig.appVersion}`}
             tone={runtimeConfig.startupIssues.length ? 'warning' : 'success'}
           />
@@ -1114,7 +1138,7 @@ export function AdminDiagnosticsPage() {
       </OperationalSection>
 
       <OperationalSection
-        title="Advanced technical evidence"
+        title="Technical deployment details"
         description="Low-level deployment and runtime identifiers remain available on demand."
       >
         <DiagnosticsTechnicalDetails>
