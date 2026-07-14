@@ -52,7 +52,7 @@ const adminNavItems = [
   { to: '/admin/support', label: 'Support Tickets', icon: 'support' },
   { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'analytics' },
   { to: '/admin/vendors', label: 'Vendors', icon: 'vendors' },
-  { to: '/admin/providers', label: 'Providers', icon: 'providers' },
+  { to: '/admin/providers', label: 'Vendor Integrations', icon: 'providers' },
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'diagnostics' },
 ] satisfies Array<{ to: string; label: string; icon: ShellIconName }>;
 

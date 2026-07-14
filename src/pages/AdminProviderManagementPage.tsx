@@ -49,14 +49,73 @@ function getProviderState(provider: VendorIntegrationProviderSummary) {
 }
 
 const PROVIDER_PERMISSION_CHIPS = [
-  { scope: 'orders:read', label: 'Orders' },
-  { scope: 'status:write', label: 'Status' },
-  { scope: 'shipment:write', label: 'Shipment' },
-  { scope: 'invoice:write', label: 'Invoice' },
+  { scope: 'orders:read', label: 'Read Orders' },
+  { scope: 'status:write', label: 'Update Status' },
+  { scope: 'shipment:write', label: 'Update Shipment' },
+  { scope: 'invoice:write', label: 'Update Invoice' },
 ];
 
 function getLastActivity(provider: VendorIntegrationProviderSummary) {
   return provider.lastRequestAt ?? provider.lastUsedAt;
+}
+
+function formatDateGroup(value: string) {
+  return formatDateTime(value, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getActivityDateKey(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function groupRecentActivity(logs: VendorIntegrationProviderSummary['recentAuditLogs']) {
+  const groups: Array<{ key: string; label: string; logs: VendorIntegrationProviderSummary['recentAuditLogs'] }> = [];
+
+  logs.forEach((log) => {
+    const key = getActivityDateKey(log.createdAt);
+    const existing = groups.find((group) => group.key === key);
+    if (existing) {
+      existing.logs.push(log);
+      return;
+    }
+
+    groups.push({
+      key,
+      label: formatDateGroup(log.createdAt),
+      logs: [log],
+    });
+  });
+
+  return groups;
+}
+
+function groupConsecutiveActivityByTimestamp(logs: VendorIntegrationProviderSummary['recentAuditLogs']) {
+  const groups: Array<{ key: string; timestamp: string; label: string; logs: VendorIntegrationProviderSummary['recentAuditLogs'] }> = [];
+
+  logs.forEach((log, index) => {
+    const previous = groups[groups.length - 1];
+    if (previous?.timestamp === log.createdAt) {
+      previous.logs.push(log);
+      return;
+    }
+
+    groups.push({
+      key: `${log.createdAt}-${index}`,
+      timestamp: log.createdAt,
+      label: formatDate(log.createdAt),
+      logs: [log],
+    });
+  });
+
+  return groups;
 }
 
 function getActivityAction(log: VendorIntegrationProviderSummary['recentAuditLogs'][number]) {
@@ -89,6 +148,36 @@ function getActivityAction(log: VendorIntegrationProviderSummary['recentAuditLog
   return 'API request';
 }
 
+function getActivityIcon(log: VendorIntegrationProviderSummary['recentAuditLogs'][number]) {
+  const path = log.path.toLowerCase();
+
+  if (log.statusCode === 429) {
+    return '!';
+  }
+
+  if (log.statusCode >= 400) {
+    return '×';
+  }
+
+  if (log.method === 'GET' && path === '/api/vendor-integration/orders') {
+    return '↧';
+  }
+
+  if (log.method === 'POST' && path.includes('/status')) {
+    return '✓';
+  }
+
+  if (log.method === 'POST' && path.includes('/shipment')) {
+    return '⇢';
+  }
+
+  if (log.method === 'POST' && path.includes('/invoice')) {
+    return '#';
+  }
+
+  return '•';
+}
+
 function getActivityStatus(statusCode: number) {
   if (statusCode === 429) {
     return {
@@ -117,14 +206,9 @@ function getActivityStatus(statusCode: number) {
   };
 }
 
-function getAllocationHint(path: string) {
-  const match = path.match(/\/orders\/([^/?#]+)\/(?:status|shipment|invoice)(?:[/?#]|$)/i);
-  return match?.[1] ? `Allocation ${match[1]}` : null;
-}
-
 function PermissionChips({ provider }: { provider: VendorIntegrationProviderSummary }) {
   return (
-    <div className="provider-permission-chips" aria-label={`${provider.providerName} permissions`}>
+    <div className="provider-permission-chips" aria-label={`${provider.providerName} access permissions`}>
       {PROVIDER_PERMISSION_CHIPS.map((permission) => {
         const isGranted = provider.scopes.includes(permission.scope);
         return (
@@ -184,7 +268,7 @@ export function AdminProviderManagementPage() {
     setRevokeError(null);
 
     const confirmed = window.confirm(
-      'This will disable this provider token. Existing integrations using this token will stop working.',
+      'This will disable this integration token. Existing integrations using this token will stop working. Historical activity remains visible, and continued access requires a newly issued token.',
     );
     if (!confirmed) {
       return;
@@ -195,7 +279,7 @@ export function AdminProviderManagementPage() {
       await runtimeServices.vendorIntegration.revokeProviderToken(provider.clientId);
       await refetch();
     } catch {
-      setRevokeError('Provider token could not be revoked. Please retry.');
+      setRevokeError('Integration token could not be revoked. Please retry.');
     } finally {
       setRevokingClientId(null);
     }
@@ -203,59 +287,69 @@ export function AdminProviderManagementPage() {
 
   return (
     <section className="op-page provider-management-page">
-      <div className="op-page-heading">
+      <div className="op-page-heading provider-page-heading">
         <div>
-          <p className="eyebrow">Vendor integrations</p>
-          <h1>Provider Management</h1>
+          <p className="eyebrow">Vendor Integrations</p>
+          <h1>Integration Clients</h1>
           <p className="page-description">
-            Read-only visibility for vendor integration clients, scopes, usage metadata, and recent audit logs.
+            Monitor vendor integration clients, permissions, activity and token status.
           </p>
         </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone="info">Generated {formatDate(data?.generatedAt)}</StatusBadge>
+        <div className="op-heading-meta provider-generated-meta">
+          <span>Last refreshed {formatDate(data?.generatedAt)}</span>
         </div>
       </div>
 
-      <div className="op-kpi-row">
-        <KPIStatCard label="Providers" value={providers.length} detail="Registered integration clients" tone="info" />
-        <KPIStatCard label="Active" value={activeCount} detail="Enabled and not revoked" tone={activeCount ? 'success' : 'neutral'} />
-        <KPIStatCard label="Revoked" value={revokedCount} detail="Disabled or revoked clients" tone={revokedCount ? 'warning' : 'neutral'} />
-        <KPIStatCard label="Requests 24h" value={requestsLast24h} detail="Valid client audit logs" tone="info" />
-        <KPIStatCard label="Rate limited 24h" value={rateLimitedLast24h} detail="HTTP 429 responses" tone={rateLimitedLast24h ? 'warning' : 'neutral'} />
+      <div className="provider-kpi-groups">
+        <section className="provider-kpi-group" aria-label="Clients">
+          <h2>Clients</h2>
+          <div className="op-kpi-row provider-kpi-row">
+            <KPIStatCard label="Total clients" value={providers.length} detail="Registered integration clients" tone="info" />
+            <KPIStatCard label="Active" value={activeCount} detail="Enabled and not revoked" tone={activeCount ? 'success' : 'neutral'} />
+            <KPIStatCard label="Revoked" value={revokedCount} detail="Disabled or revoked clients" tone={revokedCount ? 'warning' : 'neutral'} />
+          </div>
+        </section>
+        <section className="provider-kpi-group" aria-label="API Activity">
+          <h2>API Activity</h2>
+          <div className="op-kpi-row provider-kpi-row">
+            <KPIStatCard label="Audited requests (24h)" value={requestsLast24h} detail="Valid client audit logs" tone="info" />
+            <KPIStatCard label="Rate limited (24h)" value={rateLimitedLast24h} detail="HTTP 429 responses" tone={rateLimitedLast24h ? 'warning' : 'neutral'} />
+          </div>
+        </section>
       </div>
 
       {isError && !data ? (
         <SectionErrorRetry
-          title="Provider management unavailable"
-          description={error ?? 'Provider management data could not be loaded.'}
+          title="Integration clients unavailable"
+          description={error ?? 'Integration client data could not be loaded.'}
           onRetry={() => void refetch()}
         />
       ) : pageReadiness.status === 'unauthorized' ? (
         <SectionErrorRetry
           title="Sign in required"
-          description="An authenticated admin session is required to load provider management."
+          description="An authenticated admin session is required to load integration clients."
           onRetry={() => void refetch()}
         />
       ) : isLoading ? (
-        <SectionSkeleton title="Loading provider management" description="Reading integration client metadata and audit logs." />
+        <SectionSkeleton title="Loading integration clients" description="Reading integration client metadata and audit logs." />
       ) : null}
 
       {!isLoading && !isError && !providers.length ? (
-        <EmptyStatePanel title="No integration providers" description="No vendor integration clients are registered yet." />
+        <EmptyStatePanel title="No integration clients" description="No vendor integration clients are registered yet." />
       ) : null}
 
       {providers.length ? (
-        <div className="attention-layout">
+        <div className="attention-layout provider-management-layout">
           <main className="attention-main-column">
             <article className="attention-card">
               <div className="attention-card-heading">
                 <div>
-                  <p className="eyebrow">Providers</p>
+                  <p className="eyebrow">Vendor Integrations</p>
                   <h3>Integration clients</h3>
                   <span>Token values are not recoverable and are never shown.</span>
                 </div>
               </div>
-              <div className="provider-card-list" aria-label="Provider list">
+              <div className="provider-card-list" aria-label="Integration client list">
                 {providers.map((provider) => {
                   const state = getProviderState(provider);
                   const isSelected = provider.clientId === selectedProvider?.clientId;
@@ -268,24 +362,26 @@ export function AdminProviderManagementPage() {
                       onClick={() => setSelectedClientId(provider.clientId)}
                     >
                       <div className="provider-card-header">
-                        <h4>{provider.providerName}</h4>
-                        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-                      </div>
-                      <div className="provider-card-body">
+                        <div className="provider-card-identity">
+                          <h4>{provider.providerName}</h4>
+                          <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+                        </div>
                         <div className="provider-card-field">
                           <span>Vendor</span>
                           <strong>{provider.vendorIdentifier}</strong>
                         </div>
+                      </div>
+                      <div className="provider-card-body">
                         <PermissionChips provider={provider} />
                       </div>
                       <div className="provider-card-metrics">
                         <div>
-                          <span>Requests 24h</span>
-                          <strong>{provider.requestsLast24h}</strong>
+                          <span>Last activity</span>
+                          <strong>{formatDate(getLastActivity(provider))}</strong>
                         </div>
                         <div>
-                          <span>Last Activity</span>
-                          <strong>{formatDate(getLastActivity(provider))}</strong>
+                          <span>Requests 24h</span>
+                          <strong>{provider.requestsLast24h}</strong>
                         </div>
                       </div>
                     </button>
@@ -297,15 +393,13 @@ export function AdminProviderManagementPage() {
 
           <aside className="attention-side-column">
             {selectedProvider ? (
-              <article className="attention-card" aria-label="Provider detail">
-                <div className="attention-card-heading">
+              <article className="attention-card provider-detail-card" aria-label="Integration Client">
+                <div className="attention-card-heading provider-client-heading">
                   <div>
-                    <p className="eyebrow">Provider detail</p>
-                    <h3>{selectedProvider.providerName}</h3>
-                    <span>{selectedProvider.vendorIdentifier}</span>
+                    <p className="eyebrow">Integration Client</p>
+                    <h3>Current Client</h3>
                   </div>
                   <div className="provider-detail-actions">
-                    <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
                     {selectedProvider.enabled && !selectedProvider.revokedAt ? (
                       <button
                         type="button"
@@ -324,90 +418,92 @@ export function AdminProviderManagementPage() {
                   </div>
                 ) : null}
 
-                <section className="provider-detail-section" aria-label="Provider summary">
+                <section className="provider-detail-section" aria-label="Current access">
                   <div className="provider-detail-section-heading">
-                    <p className="eyebrow">Summary</p>
-                    <h4>Provider Summary</h4>
+                    <h4>Current Access</h4>
                   </div>
-                  <div className="provider-summary-grid">
+                  <PermissionChips provider={selectedProvider} />
+                </section>
+
+                <section className="provider-detail-section" aria-label="Activity summary">
+                  <div className="provider-detail-section-heading">
+                    <h4>Activity</h4>
+                  </div>
+                  <div className="provider-summary-grid provider-activity-summary-grid">
                     <div>
-                      <span>Provider Name</span>
-                      <strong>{selectedProvider.providerName}</strong>
-                    </div>
-                    <div>
-                      <span>Vendor</span>
-                      <strong>{selectedProvider.vendorIdentifier}</strong>
-                    </div>
-                    <div>
-                      <span>Status</span>
-                      <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
-                    </div>
-                    <div>
-                      <span>Last Activity</span>
+                      <span>Last activity</span>
                       <strong>{formatDate(getLastActivity(selectedProvider))}</strong>
                     </div>
                     <div>
                       <span>Requests 24h</span>
                       <strong>{selectedProvider.requestsLast24h}</strong>
                     </div>
+                    <div>
+                      <span>Rate limited 24h</span>
+                      <strong>{selectedProvider.rateLimitedLast24h}</strong>
+                    </div>
                   </div>
                 </section>
 
-                <section className="provider-detail-section" aria-label="Provider permissions">
+                <section className="provider-detail-section" aria-label="Recent Activity">
                   <div className="provider-detail-section-heading">
-                    <p className="eyebrow">Access</p>
-                    <h4>Permissions</h4>
-                  </div>
-                  <PermissionChips provider={selectedProvider} />
-                </section>
-
-                <section className="provider-detail-section" aria-label="Activity timeline">
-                  <div className="provider-detail-section-heading">
-                    <p className="eyebrow">Activity</p>
-                    <h4>Activity Timeline</h4>
+                    <h4>Recent Activity</h4>
                   </div>
                   {selectedProvider.recentAuditLogs.length ? (
                     <div className="provider-activity-list">
-                      {selectedProvider.recentAuditLogs.map((log) => {
-                        const result = getActivityStatus(log.statusCode);
-                        const allocationHint = getAllocationHint(log.path);
-                        return (
-                          <div className="provider-activity-row" key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
-                            <div className="provider-activity-main">
-                              <div>
-                                <span>{formatDate(log.createdAt)}</span>
-                                <strong>{getActivityAction(log)}</strong>
-                                {allocationHint ? <small>{allocationHint}</small> : null}
+                      {groupRecentActivity(selectedProvider.recentAuditLogs).map((group) => (
+                        <section className="provider-activity-day" key={group.key} aria-label={group.label}>
+                          <h5>{group.label}</h5>
+                          {groupConsecutiveActivityByTimestamp(group.logs).map((timestampGroup) => (
+                            <section className="provider-activity-time-group" key={timestampGroup.key} aria-label={timestampGroup.label}>
+                              <div className="provider-activity-time-heading">
+                                <span>{timestampGroup.label}</span>
+                                <span aria-hidden="true">▾</span>
                               </div>
-                              <StatusBadge tone={result.tone}>{result.label}</StatusBadge>
-                            </div>
-                            <details className="provider-activity-technical">
-                              <summary>Technical details</summary>
-                              <dl>
-                                <div>
-                                  <dt>Method</dt>
-                                  <dd>{log.method}</dd>
-                                </div>
-                                <div>
-                                  <dt>Raw path</dt>
-                                  <dd>{log.path}</dd>
-                                </div>
-                                <div>
-                                  <dt>Status code</dt>
-                                  <dd>{log.statusCode}</dd>
-                                </div>
-                                <div>
-                                  <dt>Request id</dt>
-                                  <dd>{log.requestId ?? '—'}</dd>
-                                </div>
-                              </dl>
-                            </details>
-                          </div>
-                        );
-                      })}
+                              <div className="provider-activity-time-events">
+                                {timestampGroup.logs.map((log, logIndex) => {
+                                  const result = getActivityStatus(log.statusCode);
+                                  return (
+                                    <div className="provider-activity-row" key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}-${logIndex}`}>
+                                      <div className="provider-activity-main">
+                                        <span className="provider-activity-icon" aria-hidden="true">{getActivityIcon(log)}</span>
+                                        <div>
+                                          <strong>{getActivityAction(log)}</strong>
+                                        </div>
+                                        <StatusBadge tone={result.tone}>{result.label}</StatusBadge>
+                                        <details className="provider-activity-technical">
+                                          <summary>Details</summary>
+                                          <dl>
+                                            <div>
+                                              <dt>Method</dt>
+                                              <dd>{log.method}</dd>
+                                            </div>
+                                            <div>
+                                              <dt>Raw path</dt>
+                                              <dd>{log.path}</dd>
+                                            </div>
+                                            <div>
+                                              <dt>Status code</dt>
+                                              <dd>{log.statusCode}</dd>
+                                            </div>
+                                            <div>
+                                              <dt>Request id</dt>
+                                              <dd>{log.requestId ?? '—'}</dd>
+                                            </div>
+                                          </dl>
+                                        </details>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </section>
+                          ))}
+                        </section>
+                      ))}
                     </div>
                   ) : (
-                    <EmptyStatePanel title="No provider activity recorded yet." description="Provider API requests will appear here after they are recorded." />
+                    <EmptyStatePanel title="No client activity recorded yet." description="Provider API requests will appear here after they are recorded." />
                   )}
                 </section>
 
@@ -426,7 +522,7 @@ export function AdminProviderManagementPage() {
                 </details>
               </article>
             ) : (
-              <EmptyStatePanel title="Select a provider to view details." description="Provider summary and activity appear after a provider is selected." />
+              <EmptyStatePanel title="Select an integration client to view details." description="Client summary and activity appear after a client is selected." />
             )}
           </aside>
         </div>

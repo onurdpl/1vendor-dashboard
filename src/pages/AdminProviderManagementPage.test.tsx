@@ -49,7 +49,7 @@ const providerManagement: VendorIntegrationProviderManagement = {
           path: '/api/vendor-integration/orders/alloc-1/status',
           statusCode: 202,
           requestId: 'req-2',
-          createdAt: '2026-06-02T11:10:00.000Z',
+          createdAt: '2026-06-02T11:05:00.000Z',
         },
         {
           method: 'POST',
@@ -63,7 +63,7 @@ const providerManagement: VendorIntegrationProviderManagement = {
           path: '/api/vendor-integration/orders/alloc-1/invoice',
           statusCode: 200,
           requestId: 'req-4',
-          createdAt: '2026-06-02T11:00:00.000Z',
+          createdAt: '2026-06-02T11:05:00.000Z',
         },
         {
           method: 'GET',
@@ -168,26 +168,35 @@ describe('AdminProviderManagementPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Provider Management' })).toBeInTheDocument();
-    const providerList = await screen.findByLabelText('Provider list');
+    expect(await screen.findByRole('heading', { name: 'Integration Clients' })).toBeInTheDocument();
+    expect(screen.getByText('Monitor vendor integration clients, permissions, activity and token status.')).toBeInTheDocument();
+    expect(screen.getByText(/Last refreshed/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Clients' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'API Activity' })).toBeInTheDocument();
+    expect(screen.getByText('Total clients')).toBeInTheDocument();
+    expect(screen.getByText('Audited requests (24h)')).toBeInTheDocument();
+    expect(screen.getByText('Rate limited (24h)')).toBeInTheDocument();
+    const providerList = await screen.findByLabelText('Integration client list');
     expect(within(providerList).getByRole('button', { name: /Ayensoftware/ })).toBeInTheDocument();
     expect(within(providerList).getByRole('button', { name: /Entegra/ })).toBeInTheDocument();
     expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Revoked').length).toBeGreaterThan(0);
-    expect(within(providerList).getAllByText('Orders').length).toBeGreaterThan(0);
-    expect(within(providerList).getAllByText('Status').length).toBeGreaterThan(0);
-    expect(within(providerList).getAllByText('Shipment').length).toBeGreaterThan(0);
-    expect(within(providerList).getAllByText('Invoice').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Read Orders').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Update Status').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Update Shipment').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Update Invoice').length).toBeGreaterThan(0);
     expect(within(providerList).getAllByText('Requests 24h').length).toBeGreaterThan(0);
-    expect(within(providerList).getAllByText('Last Activity').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Last activity').length).toBeGreaterThan(0);
     expect(within(providerList).queryByText('client-active')).not.toBeInTheDocument();
     expect(within(providerList).queryByText('429 24h')).not.toBeInTheDocument();
-    const detail = await screen.findByLabelText('Provider detail');
-    expect(within(detail).getByRole('heading', { name: 'Provider Summary' })).toBeInTheDocument();
-    expect(within(detail).getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
-    expect(within(detail).getByRole('heading', { name: 'Activity Timeline' })).toBeInTheDocument();
+    const detail = await screen.findByLabelText('Integration Client');
+    expect(within(detail).getByRole('heading', { name: 'Current Client' })).toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Current Access' })).toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Recent Activity' })).toBeInTheDocument();
+    expect(within(detail).getByText('Rate limited 24h')).toBeInTheDocument();
     expect(within(detail).getByRole('button', { name: 'Revoke token' })).toBeInTheDocument();
-    const timeline = within(detail).getByLabelText('Activity timeline');
+    const timeline = within(detail).getByLabelText('Recent Activity');
     expect(within(timeline).getByText('Orders synced')).toBeInTheDocument();
     expect(within(timeline).getByText('Status updated')).toBeInTheDocument();
     expect(within(timeline).getByText('Shipment received')).toBeInTheDocument();
@@ -196,12 +205,16 @@ describe('AdminProviderManagementPage', () => {
     expect(within(timeline).getByText('Access rejected')).toBeInTheDocument();
     expect(within(timeline).getAllByText('Success').length).toBeGreaterThan(0);
     expect(within(timeline).getByText('Rejected')).toBeInTheDocument();
-    expect(within(timeline).getAllByText('Allocation alloc-1').length).toBeGreaterThan(0);
+    const groupedTimestamp = within(timeline).getByText('Status updated').closest('.provider-activity-time-group');
+    expect(groupedTimestamp).toBe(within(timeline).getByText('Shipment received').closest('.provider-activity-time-group'));
+    expect(groupedTimestamp).toBe(within(timeline).getByText('Invoice received').closest('.provider-activity-time-group'));
+    expect(groupedTimestamp?.querySelectorAll('.provider-activity-time-heading')).toHaveLength(1);
+    expect(within(timeline).queryByText('Allocation alloc-1')).not.toBeInTheDocument();
     const rawShipmentPath = within(timeline).getByText('/api/vendor-integration/orders/alloc-1/shipment');
     const shipmentDetails = rawShipmentPath.closest('details');
     expect(rawShipmentPath).not.toBeVisible();
     expect(within(shipmentDetails as HTMLElement).getByText('req-3')).not.toBeVisible();
-    await user.click(within(shipmentDetails as HTMLElement).getByText('Technical details'));
+    await user.click(within(shipmentDetails as HTMLElement).getByText('Details'));
     expect(rawShipmentPath).toBeVisible();
     expect(within(shipmentDetails as HTMLElement).getByText('req-3')).toBeVisible();
     const technicalDetails = within(detail).getByText('Technical Details').closest('details');
@@ -220,10 +233,10 @@ describe('AdminProviderManagementPage', () => {
     await screen.findAllByText('Ayensoftware');
     await user.click(screen.getByText('Entegra'));
 
-    const detail = screen.getByLabelText('Provider detail');
-    expect(within(detail).getByRole('heading', { name: 'Entegra' })).toBeInTheDocument();
-    expect(detail).toHaveTextContent('yalispor');
-    expect(within(detail).getByText('No provider activity recorded yet.')).toBeInTheDocument();
+    const detail = screen.getByLabelText('Integration Client');
+    expect(within(detail).getByRole('heading', { name: 'Current Client' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Entegra/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(detail).getByText('No client activity recorded yet.')).toBeInTheDocument();
     expect(within(detail).queryByRole('button', { name: 'Revoke token' })).not.toBeInTheDocument();
   });
 
@@ -235,11 +248,11 @@ describe('AdminProviderManagementPage', () => {
 
     renderPage();
 
-    const detail = await screen.findByLabelText('Provider detail');
+    const detail = await screen.findByLabelText('Integration Client');
     await user.click(within(detail).getByRole('button', { name: 'Revoke token' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'This will disable this provider token. Existing integrations using this token will stop working.',
+      'This will disable this integration token. Existing integrations using this token will stop working. Historical activity remains visible, and continued access requires a newly issued token.',
     );
     expect(revokeProviderTokenMock).toHaveBeenCalledWith('client-active');
     expect((await screen.findAllByText('Revoked')).length).toBeGreaterThan(0);
@@ -253,10 +266,10 @@ describe('AdminProviderManagementPage', () => {
 
     renderPage();
 
-    const detail = await screen.findByLabelText('Provider detail');
+    const detail = await screen.findByLabelText('Integration Client');
     await user.click(within(detail).getByRole('button', { name: 'Revoke token' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Provider token could not be revoked. Please retry.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Integration token could not be revoked. Please retry.');
     expect(JSON.stringify(document.body.textContent)).not.toContain('tokenHash leaked internal detail');
     expect(JSON.stringify(document.body.textContent)).not.toContain('spg_vi_');
   });
@@ -269,16 +282,16 @@ describe('AdminProviderManagementPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('No integration providers')).toBeInTheDocument();
+    expect(await screen.findByText('No integration clients')).toBeInTheDocument();
     expect(screen.getByText('No vendor integration clients are registered yet.')).toBeInTheDocument();
   });
 
   it('renders an error state safely', async () => {
-    providersMock.mockRejectedValueOnce(new Error('Provider management failed'));
+    providersMock.mockRejectedValueOnce(new Error('Integration client load failed'));
 
     renderPage();
 
-    expect(await screen.findByText('Provider management unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Provider management failed')).toBeInTheDocument();
+    expect(await screen.findByText('Integration clients unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Integration client load failed')).toBeInTheDocument();
   });
 });

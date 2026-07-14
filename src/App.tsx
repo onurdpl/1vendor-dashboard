@@ -261,7 +261,7 @@ export default function App() {
             path="/admin/providers"
             element={
               <RequirePermission permission="orders:write">
-                {resilientRoute('Provider management', <AdminProviderManagementPage />)}
+                {resilientRoute('Integration clients', <AdminProviderManagementPage />)}
               </RequirePermission>
             }
           />
