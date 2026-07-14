@@ -6,6 +6,7 @@ import { queryKeys } from '../../lib/api/queryKeys';
 import { runtimeServices } from '../../services/runtime-services';
 import { formatDateTime, toTitleCaseLabel } from '../../services/real/formatting';
 import type { CurrentStateOrderRepairResult } from '../../services/real/diagnostics';
+import { DiagnosticsTechnicalDetails } from './DiagnosticsPresentation';
 import {
   EmptyStatePanel,
   MetadataGroup,
@@ -351,16 +352,20 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             <OperationalSection title="Identity" description="Safe local and Shopify identifiers.">
               <MetadataGroup>
                 <MetadataRow label="Order number" value={result.orderIdentity.orderNumber} />
-                <MetadataRow label="Local order ID" value={result.orderIdentity.localOrderId} />
-                <MetadataRow label="Shopify order ID" value={result.orderIdentity.shopifyOrderId} />
-                <MetadataRow label="Shopify created" value={formatDate(result.orderIdentity.shopifyCreatedAt)} />
-                <MetadataRow label="Local created" value={formatDate(result.orderIdentity.createdAt)} />
-                <MetadataRow label="Local updated" value={formatDate(result.orderIdentity.updatedAt)} />
                 <MetadataRow
                   label="Vendors"
                   value={result.orderIdentity.vendors.map((vendor) => `${vendor.vendorName} (${vendor.vendorId})`).join(', ') || 'None'}
                 />
               </MetadataGroup>
+              <DiagnosticsTechnicalDetails>
+                <MetadataGroup>
+                  <MetadataRow label="Local order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.localOrderId}</code>} />
+                  <MetadataRow label="Shopify order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.shopifyOrderId}</code>} />
+                  <MetadataRow label="Shopify created" value={formatDate(result.orderIdentity.shopifyCreatedAt)} />
+                  <MetadataRow label="Local created" value={formatDate(result.orderIdentity.createdAt)} />
+                  <MetadataRow label="Local updated" value={formatDate(result.orderIdentity.updatedAt)} />
+                </MetadataGroup>
+              </DiagnosticsTechnicalDetails>
             </OperationalSection>
 
             <OperationalSection title="Order state" description="Persisted local canonical Shopify state.">

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
+import {
+  DiagnosticsActionPanel,
+  DiagnosticsEmptyState,
+  DiagnosticsTechnicalDetails,
+} from '../components/diagnostics/DiagnosticsPresentation';
 import { OrderStateInspector } from '../components/diagnostics/OrderStateInspector';
 import {
   EmptyStatePanel,
@@ -84,6 +89,40 @@ function getStatusTone(status?: string | null) {
     return 'info' as const;
   }
   return 'attention' as const;
+}
+
+function getHealthTone(status?: string | null) {
+  const normalized = status?.trim().toLowerCase();
+  if (normalized === 'healthy' || normalized === 'ok' || normalized === 'completed') {
+    return 'success' as const;
+  }
+  if (normalized === 'failed' || normalized === 'critical') {
+    return 'danger' as const;
+  }
+  if (normalized === 'warning' || normalized === 'degraded' || normalized === 'needs_review') {
+    return 'warning' as const;
+  }
+  if (normalized === 'processing' || normalized === 'scheduled') {
+    return 'info' as const;
+  }
+  return 'neutral' as const;
+}
+
+function getRecoveryActionTone(input: {
+  status?: string | null;
+  replayEligible: boolean;
+  recoverEligible: boolean;
+}) {
+  if (input.recoverEligible || input.replayEligible) {
+    return 'attention' as const;
+  }
+  if (input.status?.toUpperCase() === 'PROCESSED') {
+    return 'success' as const;
+  }
+  if (input.status?.toUpperCase() === 'FAILED') {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
 }
 
 function canRetryOperationalJob(status?: string | null) {
@@ -374,6 +413,16 @@ export function AdminDiagnosticsPage() {
       recoverable: webhooksQuery.data?.events.filter((event) => event.recoverEligible).length ?? 0,
     };
   }, [observabilityQuery.data, reconciliationQuery.data, webhooksQuery.data]);
+  const hasActionRequired = Boolean(
+    webhooksQuery.data?.summary.needsAttention ||
+    combinedCounts.stuck ||
+    combinedCounts.failed ||
+    combinedCounts.fulfillmentFailures ||
+    combinedCounts.missingPayload ||
+    combinedCounts.staleAllocations ||
+    combinedCounts.retryPressure ||
+    repairCandidateCount,
+  );
 
   if (!isRealMode) {
     return (
@@ -466,57 +515,38 @@ export function AdminDiagnosticsPage() {
             Inspect recovery evidence, resume failed webhook processing, and repair missing Shopify orders through guarded workflows.
           </p>
         </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone="danger">Failed {webhooksQuery.data.summary.failed}</StatusBadge>
-          <StatusBadge tone="attention">Stuck {combinedCounts.stuck}</StatusBadge>
-          <StatusBadge tone="info">Scheduled {combinedCounts.scheduledReconciliationJobs}</StatusBadge>
-          <StatusBadge tone={observabilityQuery.data?.health === 'healthy' ? 'success' : 'warning'}>
-            Health {observabilityQuery.data?.health ?? 'unknown'}
-          </StatusBadge>
-          <StatusBadge tone="success">Processed {webhooksQuery.data.summary.processed}</StatusBadge>
-        </div>
       </div>
 
-      <div className="op-kpi-row">
+      <OperationalSection
+        title="Operational summary"
+        description="Current operator-facing health, action, recovery, repair, and canonical reconciliation signals."
+      >
+      <div className="op-kpi-row diagnostics-summary-strip">
         <KPIStatCard
-          label="Processed"
-          value={webhooksQuery.data.summary.processed}
-          detail="Completed envelopes"
-          tone="success"
-          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
+          label="Operational health"
+          value={observabilityQuery.data?.health ?? 'Unknown'}
+          detail="Current observability status"
+          tone={getHealthTone(observabilityQuery.data?.health)}
+          metadata={{ scope: 'System diagnostics', timeWindow: 'Current observability summary', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Failed"
-          value={webhooksQuery.data.summary.failed}
-          detail="Current failed webhook records"
-          tone="danger"
-          metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
-        />
-        <KPIStatCard
-          label="Received / stuck"
-          value={combinedCounts.stuck}
-          detail="Not yet processed"
-          tone="attention"
+          label="Failed / stuck"
+          value={`${webhooksQuery.data.summary.failed} / ${combinedCounts.stuck}`}
+          detail="Failed webhooks / stuck received"
+          tone={webhooksQuery.data.summary.failed > 0 ? 'danger' : combinedCounts.stuck > 0 ? 'attention' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current stuck received records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Missing payload"
-          value={combinedCounts.missingPayload}
-          detail="Recovery blocked"
-          tone="warning"
-          metadata={{ scope: 'System diagnostics', timeWindow: 'Current diagnostics records', generatedAt: 'Current diagnostics load' }}
-        />
-        <KPIStatCard
-          label="Safe Replay Candidates"
-          value={combinedCounts.replayable}
-          detail="Failed immutable webhook events"
-          tone="info"
+          label="Items requiring action"
+          value={webhooksQuery.data.summary.needsAttention}
+          detail="Existing diagnostics classification"
+          tone={webhooksQuery.data.summary.needsAttention > 0 ? 'attention' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Recoverable Failed Events"
+          label="Recovery candidates"
           value={combinedCounts.recoverable}
-          detail="Failed or stuck with stored payload"
+          detail={`${combinedCounts.replayable} safe replay candidate(s)`}
           tone={combinedCounts.recoverable > 0 ? 'attention' : 'success'}
           metadata={{ scope: 'System diagnostics', timeWindow: 'Current listed webhook records', generatedAt: 'Current diagnostics load' }}
         />
@@ -528,21 +558,14 @@ export function AdminDiagnosticsPage() {
           metadata={{ scope: 'Order State Inspector', timeWindow: 'Current explicit order inspection', generatedAt: 'Current diagnostics load' }}
         />
         <KPIStatCard
-          label="Retry pressure"
-          value={combinedCounts.retryPressure}
-          detail={`${combinedCounts.deadLetterReady} dead-letter`}
-          tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'}
-          metadata={{ scope: 'System diagnostics', timeWindow: 'Current operational job state', generatedAt: 'Current diagnostics load' }}
-        />
-        <KPIStatCard
-          label="Canonical dry-run"
-          value={canonicalRun ? canonicalRun.repairOpportunities : 'No run'}
+          label="Canonical reconciliation"
+          value={canonicalRun?.status ?? 'Not recorded'}
           detail={
             canonicalRun
-              ? `${canonicalRun.ordersScanned} orders · ${canonicalRun.errors.length} errors`
-              : 'No nightly report yet'
+              ? `${canonicalRun.repairOpportunities} repair opportunities · ${canonicalRun.errors.length} errors`
+              : 'No canonical reconciliation run'
           }
-          tone={!canonicalRun ? 'neutral' : canonicalRun.status === 'COMPLETED' ? 'success' : 'warning'}
+          tone={getHealthTone(canonicalRun?.status)}
           metadata={{
             scope: 'Canonical Shopify reconciliation',
             timeWindow: canonicalRun ? `Lookback ${canonicalRun.lookbackDays}d` : 'No run recorded',
@@ -550,89 +573,41 @@ export function AdminDiagnosticsPage() {
           }}
         />
       </div>
-
-      <OrderStateInspector onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)} />
-
-      <OperationalSection
-        title="Deployment runtime"
-        description="Safe production verification metadata for frontend/backend alignment after deploys."
-      >
-        <div className="deployment-runtime-grid">
-          <MetadataGroup title="Frontend build">
-            <MetadataRow label="Mode" value={runtimeConfig.apiMode} />
-            <MetadataRow label="Environment" value={runtimeConfig.appEnvironment} />
-            <MetadataRow label="Version" value={runtimeConfig.appVersion} />
-            <MetadataRow label="Git commit" value={runtimeConfig.gitCommit ?? 'Not provided'} />
-            <MetadataRow label="Build timestamp" value={runtimeConfig.buildTimestamp ?? 'Not provided'} />
-            <MetadataRow label="API origin" value={runtimeConfig.apiBaseOrigin} />
-            <MetadataRow
-              label="Startup checks"
-              value={runtimeConfig.startupIssues.length ? runtimeConfig.startupIssues.join(' ') : 'Clear'}
-            />
-          </MetadataGroup>
-          <MetadataGroup title="Backend health">
-            <MetadataRow label="Status" value={runtimeHealthQuery.data?.status ?? (runtimeHealthQuery.isError ? 'Unavailable' : 'Checking')} />
-            <MetadataRow label="Environment" value={runtimeHealthQuery.data?.environment ?? 'Unknown'} />
-            <MetadataRow label="Version" value={runtimeHealthQuery.data?.version ?? 'Unknown'} />
-            <MetadataRow label="Git commit" value={runtimeHealthQuery.data?.gitCommit ?? 'Not provided'} />
-            <MetadataRow label="Database" value={runtimeHealthQuery.data?.dbReachable ? 'Reachable' : 'Not confirmed'} />
-            <MetadataRow label="Migration table" value={runtimeHealthQuery.data?.migrationsReachable ? 'Reachable' : 'Not confirmed'} />
-            <MetadataRow label="Checked at" value={runtimeHealthQuery.data ? formatDate(runtimeHealthQuery.data.timestamp) : 'Not checked'} />
-          </MetadataGroup>
-          <MetadataGroup title="Post-deploy verification">
-            <div className="deployment-check-links">
-              <Link to="/orders" className="button button-secondary button-compact">Orders</Link>
-              <Link to="/returns" className="button button-secondary button-compact">Returns</Link>
-              <Link to="/finance" className="button button-secondary button-compact">Finance</Link>
-              <Link to="/support" className="button button-secondary button-compact">Support</Link>
-              <Link to="/admin/operations" className="button button-secondary button-compact">Operations</Link>
-            </div>
-            <p className="page-description diagnostics-inline-note">
-              Open each workspace after deploy to confirm auth, vendor context, and API data load with the current frontend/backend build pair.
-            </p>
-          </MetadataGroup>
-        </div>
       </OperationalSection>
 
       <OperationalSection
-        title="Canonical reconciliation"
-        description="Nightly Shopify canonical dry-run report across order snapshots, fulfillment, refunds, returns, and cancellations."
+        title="Action required"
+        description="Failed, stuck, blocked, or stale records that already carry operator-facing action state."
       >
-        {canonicalRun ? (
-          <div className="deployment-runtime-grid">
-            <MetadataGroup title="Last run">
-              <MetadataRow label="Mode" value={canonicalRun.mode === 'dry-run' ? 'Dry-run' : 'Repair'} />
-              <MetadataRow label="Status" value={canonicalRun.status} />
-              <MetadataRow label="Started" value={formatDate(canonicalRun.startedAt)} />
-              <MetadataRow label="Finished" value={formatDate(canonicalRun.finishedAt)} />
-              <MetadataRow label="Duration" value={formatDuration(canonicalRun.durationMs)} />
-            </MetadataGroup>
-            <MetadataGroup title="Dry-run summary">
-              <MetadataRow label="Orders scanned" value={canonicalRun.ordersScanned} />
-              <MetadataRow label="Repair opportunities" value={canonicalRun.repairOpportunities} />
-              <MetadataRow label="Would create signals" value={canonicalRun.wouldCreateSignals} />
-              <MetadataRow label="Would repair ledgers" value={canonicalRun.wouldRepairLedgers} />
-              <MetadataRow label="Errors" value={canonicalRun.errors.length} />
-            </MetadataGroup>
-            <MetadataGroup title="View Report">
-              <MetadataRow label="Orders" value={canonicalRun.wouldRepairOrders} />
-              <MetadataRow label="Fulfillment" value={canonicalRun.wouldRepairFulfillment} />
-              <MetadataRow label="Refunds" value={canonicalRun.wouldRepairRefunds} />
-              <MetadataRow label="Returns" value={canonicalRun.wouldRepairReturns} />
-              <MetadataRow label="Cancellations" value={canonicalRun.wouldRepairCancellations} />
-              <p className="page-description diagnostics-inline-note">
-                Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.
-              </p>
-            </MetadataGroup>
+        {hasActionRequired ? (
+          <div className="op-kpi-row diagnostics-action-metrics">
+            <KPIStatCard label="Failed webhooks" value={combinedCounts.failed} detail="Current failed records" tone={combinedCounts.failed ? 'danger' : 'success'} />
+            <KPIStatCard label="Stuck processing" value={combinedCounts.stuck} detail="Received, not processed" tone={combinedCounts.stuck ? 'attention' : 'success'} />
+            <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Recovery blocked" tone={combinedCounts.missingPayload ? 'warning' : 'success'} />
+            <KPIStatCard label="Stale allocations" value={combinedCounts.staleAllocations} detail="Reconciliation review" tone={combinedCounts.staleAllocations ? 'attention' : 'success'} />
+            <KPIStatCard label="Retry pressure" value={combinedCounts.retryPressure} detail={`${combinedCounts.deadLetterReady} dead-letter`} tone={combinedCounts.retryPressure ? 'warning' : 'success'} />
           </div>
         ) : (
-          <EmptyStatePanel
-            title="No canonical reconciliation run recorded"
-            description="The nightly dry-run report will appear here after the scheduler or manual admin endpoint runs."
+          <DiagnosticsEmptyState
+            title="No current action records"
+            description="The current diagnostics responses contain no failed, stuck, missing-payload, stale-allocation, retry-pressure, or repair-candidate state."
+            status="No action required"
+            tone="success"
           />
         )}
       </OperationalSection>
 
+      <OperationalSection
+        title="Order investigation"
+        description="Inspect one explicit order using the existing read-only inspector and its guarded repair workflow."
+      >
+        <OrderStateInspector onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)} />
+      </OperationalSection>
+
+      <OperationalSection
+        title="Recovery and webhook operations"
+        description="Inspect stored webhook state and use only the existing eligibility-gated replay, recovery, and retry controls."
+      >
       <div className="op-control-layout diagnostics-layout-redesign">
         <div className="op-main-column">
           <OperationalToolbar>
@@ -692,13 +667,15 @@ export function AdminDiagnosticsPage() {
           </div>
 
           {visibleWebhooks.length === 0 ? (
-            <EmptyStatePanel
+            <DiagnosticsEmptyState
               title="No webhook events recorded"
               description="Live backend diagnostics will appear here once Shopify deliveries reach the backend, or when filters match recorded events."
+              status="Informational"
+              tone="info"
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Topic', 'Event ID', 'Payload', 'Eligibility', 'Affected entity', 'Received', 'Actions']}
+              columns={['Status', 'Topic', 'Payload', 'Eligibility', 'Affected entity', 'Received', 'Actions']}
               className="diagnostics-op-table diagnostics-op-table-v2"
             >
               {visibleWebhooks.map((event) => (
@@ -711,10 +688,6 @@ export function AdminDiagnosticsPage() {
                   <span>
                     <strong>{formatWebhookTopic(event.topic)}</strong>
                     <small>{event.shopDomain}</small>
-                  </span>
-                  <span>
-                    <strong>{event.eventId ?? event.id}</strong>
-                    <small>{event.shopifyWebhookId ?? 'Shopify webhook ID not provided'}</small>
                   </span>
                   <StatusBadge tone={event.payloadAvailable ? 'success' : 'warning'}>
                     {event.payloadAvailable ? 'Available' : 'Missing'}
@@ -749,7 +722,7 @@ export function AdminDiagnosticsPage() {
                     </button>
                     <button
                       type="button"
-                      className="button button-primary button-compact"
+                      className={`button button-compact ${event.recoverEligible ? 'button-primary' : 'button-secondary diagnostics-action-unavailable'}`}
                       disabled={!event.recoverEligible || recoverMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
@@ -764,89 +737,6 @@ export function AdminDiagnosticsPage() {
             </OperationalTable>
           )}
 
-          <div className="op-secondary-grid">
-            <OperationalSection
-              title="Reconciliation queue"
-              description="Stuck events, missing payloads, and suggested recovery actions."
-            >
-              {visibleReconciliationItems.length === 0 ? (
-                <EmptyStatePanel title="No active reconciliation work" description="No stuck webhook events, stale allocations, or sync failures are currently waiting for admin recovery." />
-              ) : (
-                <div className="op-event-list reconciliation-event-list">
-                  {visibleReconciliationItems.map((item) => (
-                    <article key={item.id} className="op-event-row reconciliation-event-row">
-                      <SeverityBadge tone={getSeverityTone(item.severity)}>{item.severity}</SeverityBadge>
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p>{item.description}</p>
-                        <small>Recommended action: {item.suggestedAction}</small>
-                        <div className="reconciliation-meta">
-                          <span>{toTitleCaseLabel(item.type)}</span>
-                          <span>{item.status === 'processed' ? 'No-op / processed' : item.status}</span>
-                          {item.operationalJobId ? <span>Job {item.operationalJobId}</span> : null}
-                          {item.reconciliationReason ? <span>{toTitleCaseLabel(item.reconciliationReason)}</span> : null}
-                          {item.relatedAllocationId ? <span>Allocation {item.relatedAllocationId}</span> : null}
-                          {item.relatedShopifyOrderId ? <span>Order {item.relatedShopifyOrderId}</span> : null}
-                          {item.nextAttemptAt ? <span>Next {formatDate(item.nextAttemptAt)}</span> : null}
-                        </div>
-                      </div>
-                      <OperationalActionGroup>
-                        <StatusBadge tone={item.payloadAvailable === false ? 'warning' : 'neutral'}>
-                          {item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}
-                        </StatusBadge>
-                        {item.relatedAllocationId ? (
-                          <button
-                            type="button"
-                            className="button button-secondary button-compact"
-                            disabled={reconcileAllocationMutation.isPending}
-                            onClick={() => reconcileAllocationMutation.mutate(item.relatedAllocationId as string)}
-                          >
-                            Reconcile allocation
-                          </button>
-                        ) : null}
-                        {!item.relatedAllocationId && item.relatedShopifyOrderId ? (
-                          <button
-                            type="button"
-                            className="button button-secondary button-compact"
-                            disabled={reconcileShopifyOrderMutation.isPending}
-                            onClick={() => reconcileShopifyOrderMutation.mutate(item.relatedShopifyOrderId as string)}
-                          >
-                            Reconcile order
-                          </button>
-                        ) : null}
-                        {!item.relatedAllocationId && !item.relatedShopifyOrderId ? (
-                          <span className="queue-muted-action">No backend reconcile action exposed</span>
-                        ) : null}
-                      </OperationalActionGroup>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </OperationalSection>
-
-            <OperationalSection
-              title="Sync event stream"
-              description="Latest backend ingestion and fulfillment failure signals."
-            >
-              {visibleSyncEvents.length === 0 ? (
-                <EmptyStatePanel title="No sync failures recorded" description="Webhook ingestion and fulfillment sync are currently clear." />
-              ) : (
-                <div className="op-event-list">
-                  {visibleSyncEvents.map((item) => (
-                    <article key={item.id} className="op-event-row">
-                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p>{item.description}</p>
-                        <small>{item.type}</small>
-                      </div>
-                      <span>{formatDate(item.createdAt)}</span>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </OperationalSection>
-          </div>
         </div>
 
         <SideDetailPanel
@@ -868,13 +758,6 @@ export function AdminDiagnosticsPage() {
                   {selectedWebhook.payloadAvailable ? 'Payload available' : 'Payload missing'}
                 </StatusBadge>
               </div>
-              <MetadataGroup title="Event identity">
-                <MetadataRow label="Topic" value={formatWebhookTopic(selectedWebhook.topic)} />
-                <MetadataRow label="Webhook event ID" value={selectedWebhook.id} />
-                <MetadataRow label="Shopify webhook ID" value={selectedWebhook.shopifyWebhookId ?? 'Not provided'} />
-                <MetadataRow label="Event ID" value={selectedWebhook.eventId ?? 'Not provided'} />
-                <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
-              </MetadataGroup>
               <MetadataGroup title="Recovery readiness">
                 <MetadataRow
                   label="Recoverability"
@@ -885,67 +768,29 @@ export function AdminDiagnosticsPage() {
                     recoverEligible: selectedWebhook.recoverEligible,
                   })}
                 />
-                <MetadataRow label="Recommended action" value={selectedWebhook.recommendedAction} />
                 <MetadataRow label="Safe replay eligibility" value={selectedWebhook.replayEligible ? 'Stored replay allowed' : selectedWebhook.replayBlockedReason ?? 'Stored replay blocked'} />
                 <MetadataRow label="Failed-event recovery eligibility" value={selectedWebhook.recoverEligible ? 'Failed recovery allowed' : selectedWebhook.recoverBlockedReason ?? 'Failed recovery blocked'} />
                 <MetadataRow label="Processing status" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
                 <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
               </MetadataGroup>
-              {(selectedWebhook.relatedJobs ?? []).length > 0 ? (
-                <MetadataGroup title="Operational jobs">
-                  {(selectedWebhook.relatedJobs ?? []).slice(0, 4).map((job) => (
-                    <div key={job.id} className="diagnostics-job-row">
-                      <div>
-                        <strong>{toTitleCaseLabel(job.jobType)}</strong>
-                        <small>
-                          Retry {job.retryCount}/{job.maxRetries} · Next {formatDate(job.nextRetryAt ?? job.scheduledAt)}
-                        </small>
-                        {job.failureCategory ? <small>{toTitleCaseLabel(job.failureCategory)}</small> : null}
-                        {job.escalationReason ? <small>{job.escalationReason}</small> : null}
-                        {job.errorSummary ? <small>{job.errorSummary}</small> : null}
-                      </div>
-                      <div className="diagnostics-job-actions">
-                        <StatusBadge tone={getStatusTone(job.status)}>{toTitleCaseLabel(job.status)}</StatusBadge>
-                        {canRetryOperationalJob(job.status) ? (
-                          <button
-                            type="button"
-                            className="button button-secondary button-compact"
-                            disabled={retryOperationalJobMutation.isPending}
-                            onClick={() => retryOperationalJobMutation.mutate(job.id)}
-                          >
-                            Retry
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </MetadataGroup>
-              ) : null}
-              <MetadataGroup title="Affected entities">
-                <MetadataRow
-                  label="Shopify order"
-                  value={
-                    selectedWebhook.affectedEntities?.shopifyOrderNumber ??
-                    selectedWebhook.affectedEntities?.shopifyOrderId ??
-                    selectedWebhook.relatedShopifyOrderId ??
-                    'Not synced'
-                  }
-                />
-                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities?.shopifyReturnId ?? 'Not synced'} />
-                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities?.shopifyRefundId ?? 'Not synced'} />
-                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities?.shopifyFulfillmentId ?? 'Not synced'} />
-                <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
-                <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
-              </MetadataGroup>
-              <div className="op-panel-section">
-                <div className="diagnostics-compact-section-heading">
-                  <h4>Recovery actions</h4>
-                  <span>{selectedWebhook.recommendedAction}</span>
-                </div>
+              <DiagnosticsActionPanel
+                recommendation={selectedWebhook.recommendedAction}
+                stateLabel={formatRecoverability({
+                  payloadAvailable: selectedWebhook.payloadAvailable,
+                  status: selectedWebhook.status,
+                  replayEligible: selectedWebhook.replayEligible,
+                  recoverEligible: selectedWebhook.recoverEligible,
+                })}
+                tone={getRecoveryActionTone({
+                  status: selectedWebhook.status,
+                  replayEligible: selectedWebhook.replayEligible,
+                  recoverEligible: selectedWebhook.recoverEligible,
+                })}
+              >
                 <OperationalActionGroup>
                   <button
                     type="button"
-                    className="button button-primary button-compact"
+                    className={`button button-compact ${canRecover ? 'button-primary' : 'button-secondary diagnostics-action-unavailable'}`}
                     disabled={!canRecover || recoverMutation.isPending}
                     onClick={() => setPendingWebhookAction({ action: 'recover', webhookEventId: selectedWebhook.id, topic: selectedWebhook.topic })}
                   >
@@ -969,6 +814,69 @@ export function AdminDiagnosticsPage() {
                 {!canRecover && !selectedWebhook.recoverBlockedReason && !canReplay && !selectedWebhook.replayBlockedReason ? (
                   <p className="queue-muted-action diagnostics-inline-note">No action recommended.</p>
                 ) : null}
+              </DiagnosticsActionPanel>
+              <MetadataGroup title="Affected entities">
+                <MetadataRow
+                  label="Shopify order"
+                  value={
+                    selectedWebhook.affectedEntities?.shopifyOrderNumber ??
+                    selectedWebhook.affectedEntities?.shopifyOrderId ??
+                    selectedWebhook.relatedShopifyOrderId ??
+                    'Not synced'
+                  }
+                />
+                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities?.shopifyReturnId ?? 'Not synced'} />
+                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities?.shopifyRefundId ?? 'Not synced'} />
+                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities?.shopifyFulfillmentId ?? 'Not synced'} />
+                <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
+                <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
+              </MetadataGroup>
+              <div className="op-panel-section diagnostics-job-section">
+                <h4>Operational jobs</h4>
+                {(selectedWebhook.relatedJobs ?? []).length > 0 ? (
+                  (selectedWebhook.relatedJobs ?? []).slice(0, 4).map((job) => (
+                    <div key={job.id} className="diagnostics-job-row">
+                      <div className="diagnostics-job-summary">
+                        <strong>{toTitleCaseLabel(job.jobType)}</strong>
+                        <small>Attempts {job.retryCount}/{job.maxRetries}</small>
+                        <small>Received {formatDate(job.startedAt ?? job.createdAt)} · Processed {formatDate(job.completedAt)}</small>
+                        <small>Affected entity: {job.sourceShopifyOrderId ?? job.vendorAllocationId ?? job.refundRecordId ?? job.returnRecordId ?? 'Not recorded'}</small>
+                        <small>Error state: {job.errorSummary ?? 'No error recorded'}</small>
+                      </div>
+                      <div className="diagnostics-job-actions">
+                        <StatusBadge tone={getStatusTone(job.status)}>{toTitleCaseLabel(job.status)}</StatusBadge>
+                        {canRetryOperationalJob(job.status) ? (
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={retryOperationalJobMutation.isPending}
+                            onClick={() => retryOperationalJobMutation.mutate(job.id)}
+                          >
+                            Retry
+                          </button>
+                        ) : null}
+                      </div>
+                      <DiagnosticsTechnicalDetails label="Job timeline and technical details">
+                        <MetadataGroup>
+                          <MetadataRow label="Operational job ID" value={<code className="diagnostics-id-block">{job.id}</code>} />
+                          <MetadataRow label="Scheduled" value={formatDate(job.scheduledAt)} />
+                          <MetadataRow label="Next retry" value={formatDate(job.nextRetryAt)} />
+                          <MetadataRow label="Last attempt" value={formatDate(job.lastAttemptAt)} />
+                          <MetadataRow label="Failed" value={formatDate(job.failedAt)} />
+                          <MetadataRow label="Failure category" value={job.failureCategory ? toTitleCaseLabel(job.failureCategory) : 'Not recorded'} />
+                          <MetadataRow label="Escalation" value={job.escalationReason ?? 'Not recorded'} />
+                        </MetadataGroup>
+                      </DiagnosticsTechnicalDetails>
+                    </div>
+                  ))
+                ) : (
+                  <DiagnosticsEmptyState
+                    title="No operational jobs"
+                    description="No operational job is linked to this webhook event."
+                    status="Informational"
+                    tone="info"
+                  />
+                )}
               </div>
               <div className="op-panel-section">
                 <h4>Timeline</h4>
@@ -981,9 +889,20 @@ export function AdminDiagnosticsPage() {
                   ]}
                 />
               </div>
-              <div className="op-panel-section">
+              <DiagnosticsTechnicalDetails>
+                <MetadataGroup title="Event identity">
+                  <MetadataRow label="Topic" value={formatWebhookTopic(selectedWebhook.topic)} />
+                  <MetadataRow label="Webhook event ID" value={<code className="diagnostics-id-block">{selectedWebhook.id}</code>} />
+                  <MetadataRow label="Shopify webhook ID" value={<code className="diagnostics-id-block">{selectedWebhook.shopifyWebhookId ?? 'Not provided'}</code>} />
+                  <MetadataRow label="Event ID" value={<code className="diagnostics-id-block">{selectedWebhook.eventId ?? 'Not provided'}</code>} />
+                  <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
+                  <MetadataRow label="Payload hash" value={<code className="diagnostics-id-block">{selectedWebhook.payloadHash ?? 'Not synced'}</code>} />
+                  <MetadataRow label="Idempotency key" value={<code className="diagnostics-id-block">{selectedWebhook.idempotencyKey ?? 'Not synced'}</code>} />
+                </MetadataGroup>
+              </DiagnosticsTechnicalDetails>
+              <DiagnosticsTechnicalDetails label="Payload diagnostics" description="Safe preview remains closed until explicitly opened.">
                 <div className="diagnostics-compact-section-heading">
-                  <h4>Payload diagnostics</h4>
+                  <h4>Stored payload preview</h4>
                   {selectedWebhook.payloadPreview ? (
                     <button
                       type="button"
@@ -992,10 +911,8 @@ export function AdminDiagnosticsPage() {
                     >
                       {showPayloadPreview ? 'Hide payload preview' : 'Show payload preview'}
                     </button>
-                  ) : null}
+                    ) : null}
                 </div>
-                <MetadataRow label="Payload hash" value={<code className="diagnostics-id-block">{selectedWebhook.payloadHash ?? 'Not synced'}</code>} />
-                <MetadataRow label="Idempotency key" value={<code className="diagnostics-id-block">{selectedWebhook.idempotencyKey ?? 'Not synced'}</code>} />
                 {selectedWebhook.payloadPreview && showPayloadPreview ? (
                   <pre className="diagnostics-payload-preview" aria-label="Payload preview">
                     {selectedWebhook.payloadPreview}
@@ -1006,13 +923,223 @@ export function AdminDiagnosticsPage() {
                 ) : (
                   <p className="page-description diagnostics-inline-note">No payload preview.</p>
                 )}
-              </div>
+              </DiagnosticsTechnicalDetails>
             </>
           ) : (
-            <EmptyStatePanel title="Select a webhook event" description="Choose an event from the stream to inspect payload and recovery readiness." />
+            <DiagnosticsEmptyState title="Select a webhook event" description="Choose an event from the stream to inspect payload and recovery readiness." status="Informational" tone="info" />
           )}
         </SideDetailPanel>
       </div>
+      </OperationalSection>
+
+      <OperationalSection
+        title="Reconciliation and sync evidence"
+        description="Actionable reconciliation records are separated from informational sync and canonical history."
+      >
+        <div className="op-secondary-grid diagnostics-evidence-grid">
+          <OperationalSection
+            title="Reconciliation queue"
+            description="Stuck events, missing payloads, and existing suggested recovery actions."
+          >
+            {visibleReconciliationItems.length === 0 ? (
+              <DiagnosticsEmptyState
+                title="No active reconciliation work"
+                description="No stuck webhook events, stale allocations, or sync failures are currently waiting for admin recovery."
+                status="No action required"
+                tone="success"
+              />
+            ) : (
+              <div className="op-event-list reconciliation-event-list">
+                {visibleReconciliationItems.map((item) => (
+                  <article key={item.id} className="op-event-row reconciliation-event-row">
+                    <SeverityBadge tone={getSeverityTone(item.severity)}>{item.severity}</SeverityBadge>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.description}</p>
+                      <small>Recommended action: {item.suggestedAction}</small>
+                      <div className="reconciliation-meta">
+                        <span>{toTitleCaseLabel(item.type)}</span>
+                        <span>{item.status === 'processed' ? 'No-op / processed' : item.status}</span>
+                        {item.reconciliationReason ? <span>{toTitleCaseLabel(item.reconciliationReason)}</span> : null}
+                        {item.nextAttemptAt ? <span>Next {formatDate(item.nextAttemptAt)}</span> : null}
+                      </div>
+                      <DiagnosticsTechnicalDetails>
+                        <MetadataGroup>
+                          <MetadataRow label="Queue item ID" value={<code className="diagnostics-id-block">{item.id}</code>} />
+                          <MetadataRow label="Operational job ID" value={<code className="diagnostics-id-block">{item.operationalJobId ?? 'Not provided'}</code>} />
+                          <MetadataRow label="Allocation ID" value={<code className="diagnostics-id-block">{item.relatedAllocationId ?? 'Not provided'}</code>} />
+                          <MetadataRow label="Shopify order ID" value={<code className="diagnostics-id-block">{item.relatedShopifyOrderId ?? 'Not provided'}</code>} />
+                        </MetadataGroup>
+                      </DiagnosticsTechnicalDetails>
+                    </div>
+                    <OperationalActionGroup>
+                      <StatusBadge tone={item.payloadAvailable === false ? 'warning' : 'neutral'}>
+                        {item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}
+                      </StatusBadge>
+                      {item.relatedAllocationId ? (
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          disabled={reconcileAllocationMutation.isPending}
+                          onClick={() => reconcileAllocationMutation.mutate(item.relatedAllocationId as string)}
+                        >
+                          Reconcile allocation
+                        </button>
+                      ) : null}
+                      {!item.relatedAllocationId && item.relatedShopifyOrderId ? (
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          disabled={reconcileShopifyOrderMutation.isPending}
+                          onClick={() => reconcileShopifyOrderMutation.mutate(item.relatedShopifyOrderId as string)}
+                        >
+                          Reconcile order
+                        </button>
+                      ) : null}
+                      {!item.relatedAllocationId && !item.relatedShopifyOrderId ? (
+                        <span className="queue-muted-action">No backend reconcile action exposed</span>
+                      ) : null}
+                    </OperationalActionGroup>
+                  </article>
+                ))}
+              </div>
+            )}
+          </OperationalSection>
+
+          <OperationalSection
+            title="Sync event stream"
+            description="Latest backend ingestion and fulfillment failure signals."
+          >
+            {visibleSyncEvents.length === 0 ? (
+              <DiagnosticsEmptyState
+                title="No sync failures recorded"
+                description="Webhook ingestion and fulfillment sync are currently clear."
+                status="No action required"
+                tone="success"
+              />
+            ) : (
+              <div className="op-event-list">
+                {visibleSyncEvents.map((item) => (
+                  <article key={item.id} className="op-event-row">
+                    <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.description}</p>
+                      <small>{item.type}</small>
+                    </div>
+                    <span>{formatDate(item.createdAt)}</span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </OperationalSection>
+        </div>
+
+        <OperationalSection
+          title="Canonical reconciliation"
+          description="Nightly Shopify canonical dry-run report across order snapshots, fulfillment, refunds, returns, and cancellations."
+        >
+          {canonicalRun ? (
+            <div className="deployment-runtime-grid">
+              <MetadataGroup title="Last run">
+                <MetadataRow label="Mode" value={canonicalRun.mode === 'dry-run' ? 'Dry-run' : 'Repair'} />
+                <MetadataRow label="Status" value={<StatusBadge tone={getHealthTone(canonicalRun.status)}>{canonicalRun.status}</StatusBadge>} />
+                <MetadataRow label="Started" value={formatDate(canonicalRun.startedAt)} />
+                <MetadataRow label="Finished" value={formatDate(canonicalRun.finishedAt)} />
+                <MetadataRow label="Duration" value={formatDuration(canonicalRun.durationMs)} />
+              </MetadataGroup>
+              <MetadataGroup title="Dry-run summary">
+                <MetadataRow label="Orders scanned" value={canonicalRun.ordersScanned} />
+                <MetadataRow label="Repair opportunities" value={canonicalRun.repairOpportunities} />
+                <MetadataRow label="Would create signals" value={canonicalRun.wouldCreateSignals} />
+                <MetadataRow label="Would repair ledgers" value={canonicalRun.wouldRepairLedgers} />
+                <MetadataRow label="Errors" value={canonicalRun.errors.length} />
+              </MetadataGroup>
+              <MetadataGroup title="Report scope">
+                <MetadataRow label="Orders" value={canonicalRun.wouldRepairOrders} />
+                <MetadataRow label="Fulfillment" value={canonicalRun.wouldRepairFulfillment} />
+                <MetadataRow label="Refunds" value={canonicalRun.wouldRepairRefunds} />
+                <MetadataRow label="Returns" value={canonicalRun.wouldRepairReturns} />
+                <MetadataRow label="Cancellations" value={canonicalRun.wouldRepairCancellations} />
+                <p className="page-description diagnostics-inline-note">
+                  Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.
+                </p>
+              </MetadataGroup>
+            </div>
+          ) : (
+            <DiagnosticsEmptyState
+              title="No canonical reconciliation run recorded"
+              description="The nightly dry-run report will appear here after the scheduler or manual admin endpoint runs."
+              status="Not recorded"
+              tone="neutral"
+            />
+          )}
+        </OperationalSection>
+      </OperationalSection>
+
+      <OperationalSection
+        title="Deployment/runtime verification"
+        description="First-level frontend, backend, and database verification without treating unknown or unconfirmed state as healthy."
+      >
+        <div className="op-kpi-row diagnostics-runtime-status-grid">
+          <KPIStatCard
+            label="Frontend"
+            value={runtimeConfig.startupIssues.length ? 'Needs review' : 'Configured'}
+            detail={`${runtimeConfig.appEnvironment} · ${runtimeConfig.appVersion}`}
+            tone={runtimeConfig.startupIssues.length ? 'warning' : 'success'}
+          />
+          <KPIStatCard
+            label="Backend"
+            value={runtimeHealthQuery.data?.status ?? (runtimeHealthQuery.isError ? 'Unavailable' : 'Checking')}
+            detail={runtimeHealthQuery.data?.environment ?? 'Environment unknown'}
+            tone={getHealthTone(runtimeHealthQuery.data?.status ?? (runtimeHealthQuery.isError ? 'Unavailable' : 'Unknown'))}
+          />
+          <KPIStatCard
+            label="Database"
+            value={runtimeHealthQuery.data?.dbReachable ? 'Reachable' : 'Not confirmed'}
+            detail={`Migration table: ${runtimeHealthQuery.data?.migrationsReachable ? 'Reachable' : 'Not confirmed'}`}
+            tone={runtimeHealthQuery.data?.dbReachable && runtimeHealthQuery.data?.migrationsReachable ? 'success' : 'neutral'}
+          />
+        </div>
+        <div className="deployment-check-links diagnostics-deployment-links">
+          <Link to="/orders" className="button button-secondary button-compact">Orders</Link>
+          <Link to="/returns" className="button button-secondary button-compact">Returns</Link>
+          <Link to="/finance" className="button button-secondary button-compact">Finance</Link>
+          <Link to="/support" className="button button-secondary button-compact">Support</Link>
+          <Link to="/admin/operations" className="button button-secondary button-compact">Operations</Link>
+        </div>
+        <p className="page-description diagnostics-inline-note">
+          Open each workspace after deploy to confirm auth, vendor context, and API data load with the current frontend/backend build pair.
+        </p>
+      </OperationalSection>
+
+      <OperationalSection
+        title="Advanced technical evidence"
+        description="Low-level deployment and runtime identifiers remain available on demand."
+      >
+        <DiagnosticsTechnicalDetails>
+          <div className="deployment-runtime-grid">
+            <MetadataGroup title="Frontend build">
+              <MetadataRow label="Mode" value={runtimeConfig.apiMode} />
+              <MetadataRow label="Environment" value={runtimeConfig.appEnvironment} />
+              <MetadataRow label="Version" value={runtimeConfig.appVersion} />
+              <MetadataRow label="Git commit" value={<code className="diagnostics-id-block">{runtimeConfig.gitCommit ?? 'Not provided'}</code>} />
+              <MetadataRow label="Build timestamp" value={runtimeConfig.buildTimestamp ?? 'Not provided'} />
+              <MetadataRow label="API origin" value={<code className="diagnostics-id-block">{runtimeConfig.apiBaseOrigin}</code>} />
+              <MetadataRow label="Startup checks" value={runtimeConfig.startupIssues.length ? runtimeConfig.startupIssues.join(' ') : 'Clear'} />
+            </MetadataGroup>
+            <MetadataGroup title="Backend health">
+              <MetadataRow label="Status" value={runtimeHealthQuery.data?.status ?? (runtimeHealthQuery.isError ? 'Unavailable' : 'Checking')} />
+              <MetadataRow label="Environment" value={runtimeHealthQuery.data?.environment ?? 'Unknown'} />
+              <MetadataRow label="Version" value={runtimeHealthQuery.data?.version ?? 'Unknown'} />
+              <MetadataRow label="Git commit" value={<code className="diagnostics-id-block">{runtimeHealthQuery.data?.gitCommit ?? 'Not provided'}</code>} />
+              <MetadataRow label="Database" value={runtimeHealthQuery.data?.dbReachable ? 'Reachable' : 'Not confirmed'} />
+              <MetadataRow label="Migration table" value={runtimeHealthQuery.data?.migrationsReachable ? 'Reachable' : 'Not confirmed'} />
+              <MetadataRow label="Checked at" value={runtimeHealthQuery.data ? formatDate(runtimeHealthQuery.data.timestamp) : 'Not checked'} />
+            </MetadataGroup>
+          </div>
+        </DiagnosticsTechnicalDetails>
+      </OperationalSection>
 
       {pendingWebhookAction ? (
         <div className="support-modal-backdrop" role="presentation">

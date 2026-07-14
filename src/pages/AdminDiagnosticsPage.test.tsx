@@ -142,6 +142,29 @@ const replayableDetail = {
   relatedShopifyOrderId: 'gid://shopify/Order/1001',
 };
 
+const processedEvent = {
+  ...replayableEvent,
+  id: 'webhook-processed',
+  shopifyWebhookId: 'wh-processed',
+  eventId: 'event-processed',
+  status: 'PROCESSED',
+  processingStatus: 'processed',
+  processedAt: '2026-05-12T10:02:00Z',
+  replayEligible: false,
+  replayBlockedReason: 'Event already processed',
+  recoverEligible: false,
+  recoverBlockedReason: 'Event already processed',
+  recommendedAction: 'No action required.',
+  relatedJobs: [],
+};
+
+const processedDetail = {
+  ...processedEvent,
+  payloadPreview: '{"id":501}',
+  payloadPreviewTruncated: false,
+  relatedShopifyOrderId: 'gid://shopify/Order/1001',
+};
+
 function orderStateInspectorResult() {
   return {
     orderIdentity: {
@@ -529,25 +552,32 @@ describe('AdminDiagnosticsPage control center', () => {
     expect((await screen.findAllByText(/Stored replay blocked: Payload unavailable/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Failed webhook recovery blocked: Already processed/i).length).toBeGreaterThan(0);
     expect(screen.getByText('Refund Sync')).toBeInTheDocument();
-    expect(screen.getByText(/Retry 1\/3/i)).toBeInTheDocument();
+    expect(screen.getByText(/Attempts 1\/3/i)).toBeInTheDocument();
     expect(screen.getByText('Validation')).toBeInTheDocument();
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
-    expect(screen.getByText('Health warning')).toBeInTheDocument();
+    expect(screen.getByText('Operational health')).toBeInTheDocument();
+    expect(screen.getAllByText('warning').length).toBeGreaterThan(0);
     expect(screen.getByText('Retry pressure')).toBeInTheDocument();
-    expect(screen.getByText('Canonical reconciliation')).toBeInTheDocument();
+    expect(screen.getAllByText('Canonical reconciliation').length).toBeGreaterThan(0);
     expect(screen.getByText('Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.')).toBeInTheDocument();
   });
 
   it('renders safe deployment runtime diagnostics without exposing secrets', async () => {
     renderDiagnosticsPage();
 
-    expect(await screen.findByText('Deployment runtime')).toBeInTheDocument();
-    expect(screen.getAllByText('http://127.0.0.1:4000').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('def5678').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Deployment/runtime verification')).toBeInTheDocument();
     expect(screen.getAllByText('Reachable').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByRole('link', { name: 'Orders' })[0]).toHaveAttribute('href', '/orders');
 
-    const deploymentSectionText = screen.getAllByText('Deployment runtime')[0].closest('section')?.textContent ?? '';
+    const technicalLabel = screen.getAllByText('Advanced technical details').at(-1) as HTMLElement;
+    const technicalDisclosure = technicalLabel.closest('details') as HTMLDetailsElement;
+    expect(technicalDisclosure.open).toBe(false);
+    await userEvent.click(technicalLabel);
+
+    expect(technicalDisclosure.open).toBe(true);
+    expect(screen.getAllByText('http://127.0.0.1:4000').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('def5678').length).toBeGreaterThan(0);
+    const deploymentSectionText = screen.getByText('Advanced technical evidence').closest('section')?.textContent ?? '';
     expect(deploymentSectionText).not.toContain('Bearer');
     expect(deploymentSectionText).not.toContain('token');
   });
@@ -585,8 +615,10 @@ describe('AdminDiagnosticsPage control center', () => {
   it('confirms stored refund replay and explains canonical monetary verification', async () => {
     renderDiagnosticsPage();
 
-    expect((await screen.findAllByText('event-replayable')).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getAllByRole('button', { name: 'Replay Stored Webhook' })[1]);
+    const replayButtons = await screen.findAllByRole('button', { name: 'Replay Stored Webhook' });
+    const enabledReplayButton = replayButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledReplayButton).toBeDefined();
+    await userEvent.click(enabledReplayButton as HTMLButtonElement);
 
     expect(diagnosticsMocks.replay).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Replay Stored Webhook?' });
@@ -609,8 +641,10 @@ describe('AdminDiagnosticsPage control center', () => {
     });
     renderDiagnosticsPage();
 
-    await screen.findByText('event-replayable');
-    await userEvent.click(screen.getAllByRole('button', { name: 'Recover Failed Webhook' })[1]);
+    const recoverButtons = await screen.findAllByRole('button', { name: 'Recover Failed Webhook' });
+    const enabledRecoverButton = recoverButtons.find((button) => !(button as HTMLButtonElement).disabled);
+    expect(enabledRecoverButton).toBeDefined();
+    await userEvent.click(enabledRecoverButton as HTMLButtonElement);
 
     expect(diagnosticsMocks.recover).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Recover Failed Webhook?' });
@@ -638,8 +672,15 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    expect(await screen.findByRole('button', { name: 'Show payload preview' })).toBeInTheDocument();
+    await screen.findByText('Recovery readiness');
     expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
+
+    const payloadLabel = screen.getByText('Payload diagnostics');
+    const payloadDisclosure = payloadLabel.closest('details') as HTMLDetailsElement;
+    expect(payloadDisclosure.open).toBe(false);
+    await userEvent.click(payloadLabel);
+    expect(payloadDisclosure.open).toBe(true);
+    expect(await screen.findByRole('button', { name: 'Show payload preview' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Show payload preview' }));
 
@@ -648,6 +689,75 @@ describe('AdminDiagnosticsPage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Hide payload preview' }));
 
     expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
+  });
+
+  it('keeps technical identifiers collapsed but accessible on demand', async () => {
+    renderDiagnosticsPage();
+
+    const detailPanel = (await screen.findByText('Webhook detail')).closest('aside');
+    expect(detailPanel).not.toBeNull();
+
+    const disclosureLabel = within(detailPanel as HTMLElement).getByText('Advanced technical details');
+    const disclosure = disclosureLabel.closest('details') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(false);
+
+    await userEvent.click(disclosureLabel);
+
+    expect(disclosure.open).toBe(true);
+    expect(within(detailPanel as HTMLElement).getByText('webhook-blocked')).toBeInTheDocument();
+    expect(within(detailPanel as HTMLElement).getByText('idem-blocked')).toBeInTheDocument();
+  });
+
+  it('renders a processed event as informational with no primary recovery action', async () => {
+    diagnosticsMocks.webhooks.mockResolvedValueOnce({
+      summary: { total: 1, received: 0, processed: 1, failed: 0, duplicates: 0, needsAttention: 0 },
+      events: [processedEvent],
+    });
+    diagnosticsMocks.webhookDetail.mockResolvedValueOnce(processedDetail);
+
+    renderDiagnosticsPage();
+
+    expect(await screen.findByText('No action required.')).toBeInTheDocument();
+    expect(screen.getAllByText('No recovery action needed').length).toBeGreaterThan(0);
+    const detailPanel = screen.getByText('Webhook detail').closest('aside') as HTMLElement;
+    const recoverButton = within(detailPanel).getByRole('button', { name: 'Recover Failed Webhook' });
+    const replayButton = within(detailPanel).getByRole('button', { name: 'Replay Stored Webhook' });
+    expect(recoverButton).toBeDisabled();
+    expect(replayButton).toBeDisabled();
+    expect(recoverButton).toHaveClass('button-secondary');
+    expect(recoverButton).not.toHaveClass('button-primary');
+  });
+
+  it('presents unknown runtime state neutrally instead of as healthy', async () => {
+    diagnosticsMocks.runtimeHealth.mockResolvedValueOnce({
+      ok: false,
+      status: 'unknown',
+      service: 'vendor-dashboard-backend',
+      version: null,
+      gitCommit: null,
+      environment: null,
+      timestamp: '2026-05-12T10:06:00Z',
+      dbReachable: false,
+      migrationsReachable: false,
+    });
+
+    renderDiagnosticsPage();
+
+    const runtimeSection = (await screen.findByText('Deployment/runtime verification')).closest('section') as HTMLElement;
+    expect(within(runtimeSection).getByText('unknown').tagName).toBe('STRONG');
+    expect(within(runtimeSection).getByText('Not confirmed').tagName).toBe('STRONG');
+    expect(within(runtimeSection).getByText('unknown').closest('.op-kpi')).not.toHaveClass('op-tone-success');
+    expect(within(runtimeSection).getByText('Not confirmed').closest('.op-kpi')).not.toHaveClass('op-tone-success');
+  });
+
+  it('uses a compact neutral empty state when canonical history is not recorded', async () => {
+    diagnosticsMocks.canonicalReconciliationSummary.mockResolvedValueOnce({ lastRun: null });
+
+    renderDiagnosticsPage();
+
+    const title = await screen.findByText('No canonical reconciliation run recorded');
+    expect(title.closest('.diagnostics-empty-state')).not.toBeNull();
+    expect(screen.getAllByText('Not recorded').length).toBeGreaterThan(0);
   });
 
   it('inspects an explicit order and renders source-specific operational evidence', async () => {
