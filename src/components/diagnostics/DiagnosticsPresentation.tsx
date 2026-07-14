@@ -62,7 +62,7 @@ export function DiagnosticsActionPanel({
     <section className={`diagnostics-action-panel op-tone-${tone}`} aria-labelledby={id}>
       <div className="diagnostics-action-panel-heading">
         <div>
-          <h4 id={id}>Recommended next action</h4>
+          <h4 id={id}>Operator action</h4>
           <strong>{recommendation}</strong>
         </div>
         <StatusBadge tone={tone}>{stateLabel}</StatusBadge>

@@ -548,9 +548,9 @@ describe('AdminDiagnosticsPage control center', () => {
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {
     renderDiagnosticsPage();
 
-    expect(await screen.findByRole('heading', { name: /production recovery center/i })).toBeInTheDocument();
-    expect((await screen.findAllByText(/Stored replay blocked: Payload unavailable/i)).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Failed webhook recovery blocked: Already processed/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: /diagnostics workspace/i })).toBeInTheDocument();
+    expect((await screen.findAllByText(/Recovery blocked: Already processed/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Stored replay blocked: Payload unavailable/i).length).toBeGreaterThan(0);
     expect(screen.getByText('Refund Sync')).toBeInTheDocument();
     expect(screen.getByText(/Attempts 1\/3/i)).toBeInTheDocument();
     expect(screen.getByText('Validation')).toBeInTheDocument();
@@ -562,7 +562,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Showing 2 webhook events')).toBeInTheDocument();
     expect(screen.getByText('No active filters')).toBeInTheDocument();
     expect(screen.queryByText('All webhook topics')).not.toBeInTheDocument();
-    expect(screen.getByText('Dry-run reports are persisted for audit only. They do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.')).toBeInTheDocument();
+    expect(screen.getByText('Dry-run reports are audit-only and do not mutate orders, refunds, returns, ledgers, payouts, settlements, or operational signals.')).toBeInTheDocument();
   });
 
   it('separates webhook result count from non-default active filters', async () => {
@@ -586,7 +586,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getAllByText('Reachable').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByRole('link', { name: 'Orders' })[0]).toHaveAttribute('href', '/orders');
 
-    const technicalLabel = screen.getAllByText('Advanced technical details').at(-1) as HTMLElement;
+    const technicalLabel = screen.getByText('Runtime identifiers');
     const technicalDisclosure = technicalLabel.closest('details') as HTMLDetailsElement;
     expect(technicalDisclosure.open).toBe(false);
     await userEvent.click(technicalLabel);
@@ -594,7 +594,7 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(technicalDisclosure.open).toBe(true);
     expect(screen.getAllByText('http://127.0.0.1:4000').length).toBeGreaterThan(0);
     expect(screen.getAllByText('def5678').length).toBeGreaterThan(0);
-    const deploymentSectionText = screen.getByText('Technical deployment details').closest('section')?.textContent ?? '';
+    const deploymentSectionText = screen.getByText('Deployment details').closest('section')?.textContent ?? '';
     expect(deploymentSectionText).not.toContain('Bearer');
     expect(deploymentSectionText).not.toContain('token');
   });
@@ -625,7 +625,7 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    expect((await screen.findAllByText('Payload unavailable')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Payload unavailable/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Use manual Shopify reconciliation.').length).toBeGreaterThan(0);
   });
 
@@ -689,10 +689,10 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    await screen.findByText('Current conclusion');
+    await screen.findByText('Webhook state');
     expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
 
-    const payloadLabel = screen.getByText('Stored payload details');
+    const payloadLabel = screen.getAllByText('Stored payload').find((element) => element.closest('summary')) as HTMLElement;
     const payloadDisclosure = payloadLabel.closest('details') as HTMLDetailsElement;
     expect(payloadDisclosure.open).toBe(false);
     await userEvent.click(payloadLabel);
@@ -790,15 +790,15 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Finance and payment safety')).toBeInTheDocument();
     expect(screen.getAllByText('Operations').length).toBeGreaterThan(0);
     expect(screen.getByText('Review the preserved operational evidence.')).toBeInTheDocument();
-    expect(screen.getByText('Finance review required')).toBeInTheDocument();
+    expect(screen.getAllByText('Review required').length).toBeGreaterThan(0);
     expect(screen.getByText('Existing evidence')).toBeInTheDocument();
     expect(screen.getByText('Shopify return requests')).toBeInTheDocument();
     expect(screen.getByText('Refund-derived return evidence')).toBeInTheDocument();
     expect(screen.getByText('Shopify refund records')).toBeInTheDocument();
     expect(screen.getByText('Paid evidence')).toBeInTheDocument();
     expect(screen.getAllByText('No').length).toBeGreaterThan(0);
-    expect(screen.getByText('Projection explanation')).toBeInTheDocument();
-    expect(screen.getByText(/Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt/)).toBeInTheDocument();
+    expect(screen.getByText('Lifecycle conclusions')).toBeInTheDocument();
+    expect(screen.getByText('Allocation and shipping evidence')).toBeInTheDocument();
     expect(screen.getByText('ShopifyOrder.cancelledAt is the canonical full-order cancellation source.')).toBeInTheDocument();
     expect(screen.getByText('Repair readiness')).toBeInTheDocument();
 
@@ -835,7 +835,7 @@ describe('AdminDiagnosticsPage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
 
     expect(await screen.findByText('This order is cancelled with no persisted conflict evidence.')).toBeInTheDocument();
-    expect(screen.getByText('No conflict evidence')).toBeInTheDocument();
+    expect(screen.getByText('No conflict')).toBeInTheDocument();
     expect(screen.getByText('No action required.')).toBeInTheDocument();
     expect(screen.getByText('No Shopify return request')).toBeInTheDocument();
     expect(screen.getByText('No refund-derived return evidence')).toBeInTheDocument();

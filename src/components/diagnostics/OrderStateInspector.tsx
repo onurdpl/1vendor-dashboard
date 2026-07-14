@@ -286,9 +286,8 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
       <div className="order-state-inspector-heading">
         <div>
           <h3 id="order-state-inspector-title">Order State Inspector</h3>
-          <p>Inspect persisted lifecycle evidence for one order. Inspection is read-only; a missing local order can continue into guarded current-state repair.</p>
+          <p>One order, its related records, and the guarded missing-order repair path.</p>
         </div>
-        <StatusBadge tone="info">Tier-1 operational tool</StatusBadge>
       </div>
       <form className="order-state-inspector-form" onSubmit={handleSubmit}>
         <label htmlFor="order-state-inspector-number">
@@ -312,12 +311,12 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
       {!normalizedOrderNumber ? (
         <EmptyStatePanel
           title="Enter an order number"
-          description="The inspector reads only the requested order and its directly related operational records."
+          description="Related records appear after inspection."
         />
       ) : null}
 
       {inspectorQuery.isLoading ? (
-        <SectionSkeleton title="Inspecting order state" description="Collecting persisted evidence for the requested order." />
+        <SectionSkeleton title="Inspecting order state" description="Collecting persisted evidence." />
       ) : null}
 
       {inspectorQuery.isError && !isMissingLocalOrder ? (
@@ -331,7 +330,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
       {isMissingLocalOrder ? (
         <OperationalSection
           title="Repair Missing Shopify Order"
-          description="Fetch current Shopify truth for this one order. The first request is always a dry run and performs no local mutation."
+          description="Starts with a dry run; execution stays separate."
         >
           <div className="current-state-repair-actions">
             <button
@@ -390,7 +389,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 </MetadataGroup>
               </div>
 
-              <OperationalSection title="Planned mutations" description="The execute step will use this reviewed one-order plan.">
+              <OperationalSection title="Planned mutations">
                 <div className="order-state-action-grid">
                   {[
                     ['ShopifyOrder and line items', plannedAction(dryRunResult.summary.shopifyOrder)],
@@ -403,13 +402,12 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                     <div key={entity} className="order-state-action-row">
                       <span>{entity}</span>
                       <StatusBadge tone={action === 'SKIP' ? 'neutral' : 'attention'}>{action}</StatusBadge>
-                      <small>Current-state repair transaction</small>
                     </div>
                   ))}
                 </div>
               </OperationalSection>
 
-              <OperationalSection title="Warnings" description="Execution should stop if the backend reports an unsafe or unsupported state.">
+              <OperationalSection title="Warnings">
                 <EvidenceList items={dryRunResult.summary.warnings} />
               </OperationalSection>
 
@@ -431,23 +429,11 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
 
       {result ? (
         <div className="order-state-inspector-results">
-          <OperationalSection title="Current state" description="Summary from the current order inspection.">
+          <OperationalSection title="Current state">
             <article className="order-state-summary">
               <div>
-                <p className="eyebrow">Current state summary</p>
                 <h3>{result.orderIdentity.orderNumber}</h3>
                 <p>{result.currentStateSummary}</p>
-              </div>
-              <div className="order-state-summary-badges">
-                <StatusBadge tone={result.localOrderState.isCancelled ? 'warning' : 'success'}>
-                  {result.projectionExplanation.orderStatus.label}
-                </StatusBadge>
-                <StatusBadge tone={financeTone(result.financeState.financeReviewRequired)}>
-                  {result.financeState.financeReviewRequired ? 'Finance review required' : 'Finance review clear'}
-                </StatusBadge>
-                <StatusBadge tone={conflictTone(result.localOrderState.hasOperationalConflict)}>
-                  {result.localOrderState.hasOperationalConflict ? 'Conflict evidence' : 'No conflict evidence'}
-                </StatusBadge>
               </div>
             </article>
 
@@ -461,7 +447,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
               <SummaryCard
                 label="Finance"
                 value={result.projectionExplanation.finance.label}
-                detail={result.financeState.financeReviewRequired ? 'Review required by existing finance state' : 'No finance review required'}
+                detail={result.financeState.financeReviewRequired ? 'Existing finance state' : 'Clear'}
                 tone={financeTone(result.financeState.financeReviewRequired)}
               />
               <SummaryCard
@@ -507,7 +493,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Finance and payment safety" description="Order-scoped ledger, settlement, payout, and paid-evidence checks from the current inspection.">
+          <OperationalSection title="Finance and payment safety">
             <div className="order-state-overview-grid order-state-finance-metrics">
               <SummaryCard label="Ledgers" value={String(result.financeState.ledgerCount)} detail={countLabel(result.financeState.saleLedgerCount, 'sale ledger')} />
               <SummaryCard
@@ -522,30 +508,13 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                 {result.financeState.ledgers.map((ledger) => <LedgerCard key={ledger.id} ledger={ledger} />)}
               </div>
             ) : (
-              <DiagnosticsEmptyState title="No finance ledger rows" description="No order-scoped ledger rows were returned for this order." status="No ledger rows" />
+              <DiagnosticsEmptyState title="No finance ledger rows" description="No ledger rows were returned." status="No ledger rows" />
             )}
           </OperationalSection>
 
           <OperationalSection
-            title="Operational evidence"
-            description="Canonical operational conclusion first, followed by preserved allocation and shipping evidence. Full-order cancellation eligibility comes from ShopifyOrder.cancelledAt."
+            title="Allocation and shipping evidence"
           >
-            <div className="order-state-projection-grid">
-              <ProjectionCard title="Fulfillment" projection={result.projectionExplanation.fulfillment} />
-              <ProjectionCard title="Shipment" projection={result.projectionExplanation.shipment} />
-              <ProjectionCard title="Tracking" projection={result.projectionExplanation.tracking} />
-              <article className="order-state-record order-state-projection-card">
-                <small>Queue</small>
-                <strong>{result.projectionExplanation.queueState.included ? 'Included' : 'Excluded'}</strong>
-                <p>{result.projectionExplanation.queueState.reasons[0] ?? 'No deterministic reason recorded.'}</p>
-                {result.projectionExplanation.queueState.reasons.length > 1 ? (
-                  <DiagnosticsTechnicalDetails label="Preserved supporting evidence">
-                    <EvidenceList items={result.projectionExplanation.queueState.reasons.slice(1)} />
-                  </DiagnosticsTechnicalDetails>
-                ) : null}
-              </article>
-            </div>
-
             <div className="order-state-section-stack">
               <div>
                 <h4>Allocations</h4>
@@ -576,7 +545,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No local allocations" description="The local order exists without a vendor allocation." status="No allocations" />}
+                ) : <DiagnosticsEmptyState title="No local allocations" description="No vendor allocation was returned." status="No allocations" />}
               </div>
 
               <div>
@@ -618,12 +587,12 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No shipment records" description="No vendor allocation exists for shipping inspection." status="No shipment records" />}
+                ) : <DiagnosticsEmptyState title="No shipment records" description="No shipment evidence was returned." status="No shipment records" />}
               </div>
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Returns and refunds" description="Shopify return requests, refund-derived return evidence, and Shopify refund records remain separate.">
+          <OperationalSection title="Returns and refunds">
             <div className="order-state-record-grid">
               <article className="order-state-record">
                 <div className="order-state-record-heading">
@@ -644,7 +613,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No Shopify return request" description="No Shopify return request evidence was returned for this order." status="No return request" />}
+                )) : <DiagnosticsEmptyState title="No Shopify return request" description="None returned for this order." status="No return request" />}
               </article>
               <article className="order-state-record">
                 <div className="order-state-record-heading">
@@ -666,7 +635,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No refund-derived return evidence" description="No refund-derived return evidence was returned for this order." status="No refund-derived return" />}
+                )) : <DiagnosticsEmptyState title="No refund-derived return evidence" description="None returned for this order." status="No refund-derived return" />}
               </article>
               <article className="order-state-record">
                 <div className="order-state-record-heading">
@@ -685,12 +654,12 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </MetadataGroup>
                     </DiagnosticsTechnicalDetails>
                   </div>
-                )) : <DiagnosticsEmptyState title="No Shopify refund record" description="No Shopify refund record evidence was returned for this order." status="No refund record" />}
+                )) : <DiagnosticsEmptyState title="No Shopify refund record" description="None returned for this order." status="No refund record" />}
               </article>
             </div>
           </OperationalSection>
 
-          <OperationalSection title="History and signals" description="Current unresolved signals first, followed by repair and webhook history.">
+          <OperationalSection title="History and signals">
             <div className="order-state-section-stack">
               <div>
                 <h4>Current operational signals</h4>
@@ -719,7 +688,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No signals" description="No unresolved signal records were found for this order." status="No active signals" />}
+                ) : <DiagnosticsEmptyState title="No signals" description="No active signal records were returned." status="No active signals" />}
               </div>
 
               {historicalSignals.length ? (
@@ -763,7 +732,7 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No repair history" description="No executed current-state repair was recorded for this order. Dry runs never persist data." status="No repair history" />}
+                ) : <DiagnosticsEmptyState title="No repair history" description="No executed repair was recorded." status="No repair history" />}
               </div>
 
               <div>
@@ -793,12 +762,12 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
                       </article>
                     ))}
                   </div>
-                ) : <DiagnosticsEmptyState title="No webhook history" description={`No stored webhook event matched this order. Limit: ${result.limits.webhookHistory}.`} status="No webhook history" />}
+                ) : <DiagnosticsEmptyState title="No webhook history" description={`No stored webhook event matched. Limit: ${result.limits.webhookHistory}.`} status="No webhook history" />}
               </div>
             </div>
           </OperationalSection>
 
-          <OperationalSection title="Projection explanation" description="Domain conclusions keep the primary reason visible; detailed action eligibility remains accessible below.">
+          <OperationalSection title="Lifecycle conclusions">
             <div className="order-state-projection-grid">
               <ProjectionCard title="Order" projection={result.projectionExplanation.orderStatus} />
               <ProjectionCard title="Fulfillment" projection={result.projectionExplanation.fulfillment} />
@@ -831,17 +800,16 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
             </DiagnosticsTechnicalDetails>
           </OperationalSection>
 
-          <OperationalSection title="Repair readiness" description="Read-only classification for an existing local order; missing-order repair is not offered here.">
+          <OperationalSection title="Repair readiness">
             <div className="order-state-overview-grid">
               <SummaryCard label="Repair needed" value={yesNo(result.repairReadiness.repairNeeded)} tone={result.repairReadiness.repairNeeded ? 'attention' : 'success'} />
               <SummaryCard label="Repair supported" value={yesNo(result.repairReadiness.repairSupported)} tone={result.repairReadiness.repairSupported ? 'attention' : 'neutral'} />
               <SummaryCard label="Classification" value={toTitleCaseLabel(result.repairReadiness.repairClassification)} />
-              <SummaryCard label="Recommended next step" value="Shown in current state" detail="Single visible recommendation is kept at the top." />
             </div>
             <EvidenceList items={result.repairReadiness.blockers} />
           </OperationalSection>
 
-          <OperationalSection title="Advanced technical details" description="Low-level identifiers and raw timestamps remain available without competing with operational status.">
+          <OperationalSection title="Advanced technical details">
             <DiagnosticsTechnicalDetails label="Order identity and timestamps">
               <MetadataGroup>
                 <MetadataRow label="Local order ID" value={<code className="diagnostics-id-block">{result.orderIdentity.localOrderId}</code>} />
