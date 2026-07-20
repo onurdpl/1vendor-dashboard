@@ -13626,6 +13626,24 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.82rem;
 }
 
+.attention-preview-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 251, 235, 0.72);
+  padding: 8px 10px;
+}
+
+.attention-preview-note span {
+  color: #92400e;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .provider-card-list {
   display: grid;
   gap: 10px;
@@ -14335,6 +14353,10 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+.vendor-blocked-mini-row {
+  align-items: flex-start;
+}
+
 .attention-risk-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
@@ -14370,6 +14392,24 @@ summary.provider-response-heading::-webkit-details-marker {
 .attention-activity-row span {
   color: #64748b;
   font-size: 0.76rem;
+}
+
+.vendor-blocked-detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.vendor-blocked-detail-chip {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: #fff7ed;
+  padding: 2px 7px;
+  color: #9a3412;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .attention-dot {

@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OperationsAttentionDashboard } from '../lib/api/contracts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OperationsAttentionDashboard, OperationsAttentionItem } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminOperationsQueuePage } from './AdminOperationsQueuePage';
 
@@ -219,6 +219,65 @@ const dashboard: OperationsAttentionDashboard = {
   ],
 };
 
+function buildVendorBlockedItem(orderNumber: string, index: number): OperationsAttentionItem {
+  const numericOrder = orderNumber.replace(/\D/g, '') || String(index);
+  return {
+    id: `vendor-blocked-${numericOrder}`,
+    type: 'vendor_blocked',
+    severity: 'warning',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    objectType: 'vendor_blocked',
+    objectReference: `Order ${orderNumber}`,
+    objectId: `alloc-${numericOrder}`,
+    status: 'vendor_blocked',
+    ageHours: index + 1,
+    title: `Vendor rejected allocation ${orderNumber}`,
+    description: `Sporjinal rejected Order ${orderNumber}. Reason: OUT_OF_STOCK. Reassignment required: yes.`,
+    recommendedAction: 'Review allocation',
+    destinationPath: `/admin/orders/${7800000000000 + index}`,
+    createdAt: `2026-05-17T0${Math.min(index + 1, 9)}:00:00.000Z`,
+    reassignmentRequired: true,
+    sourceShopifyOrderId: String(7800000000000 + index),
+    sourceShopifyOrderNumber: orderNumber,
+    cancellationReason: 'OUT_OF_STOCK',
+  };
+}
+
+function buildVendorBlockedPreviewDashboard(orderNumbers: string[]): OperationsAttentionDashboard {
+  const vendorBlockedItems = orderNumbers.map((orderNumber, index) => buildVendorBlockedItem(orderNumber, index));
+
+  return {
+    ...dashboard,
+    summary: {
+      ...dashboard.summary,
+      total: vendorBlockedItems.length,
+      critical: 0,
+      warning: vendorBlockedItems.length,
+      overdueSupport: 0,
+      shipmentIssues: 0,
+      returnBacklog: 0,
+      financeReview: 0,
+      vendorBlocked: vendorBlockedItems.length,
+      vendorRisks: 1,
+    },
+    queue: vendorBlockedItems,
+    sections: [
+      {
+        key: 'vendor_blocked',
+        title: 'Vendor blocked allocations',
+        count: vendorBlockedItems.length,
+        critical: 0,
+        warning: vendorBlockedItems.length,
+        items: vendorBlockedItems.slice(0, 5),
+      },
+    ],
+    recommendations: [],
+    vendorRisks: [],
+    recentActivity: [],
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -253,6 +312,10 @@ describe('AdminOperationsQueuePage attention center', () => {
     attentionMock.mockReset();
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it('renders critical attention queue, vendor risk, and cross-links', async () => {
     attentionMock.mockResolvedValueOnce(dashboard);
 
@@ -266,16 +329,18 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Review allocation').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Review order').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
-    expect(screen.getByText('Vendor blocked allocations')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    expect(screen.getByText('1 shown • 1 active')).toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
     expect(screen.getByText('Escalate overdue support request')).toBeInTheDocument();
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
-    expect(screen.getAllByRole('link', { name: 'Review allocation' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByRole('link', { name: 'Review order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
   });
 
   it('renders split child vendor-blocked items with split-aware copy', async () => {
@@ -355,6 +420,35 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await screen.findAllByText('Split allocation awaiting admin resolution')).toHaveLength(2);
     expect(screen.getAllByText(/Vendor rejected selected line items/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('link', { name: 'Review allocation' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Split allocation').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: 'Review order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+  });
+
+  it('discloses that Vendor Blocked cards are a five-item preview when six active allocations exist', async () => {
+    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1201', '#1202', '#1203', '#1204', '#1205', '#1206']));
+
+    renderPage();
+
+    expect(await screen.findByText('5 shown • 6 active')).toBeInTheDocument();
+    expect(screen.getByText('Showing first 5 active allocations.')).toBeInTheDocument();
+
+    const preview = screen.getByLabelText('Vendor Blocked Allocations preview');
+    expect(within(preview).getAllByText(/Vendor rejected allocation #120/)).toHaveLength(5);
+    expect(within(preview).queryByText('Order #1206')).not.toBeInTheDocument();
+    expect(screen.getByText('Order #1206')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open queue' })).toHaveAttribute('href', '#operations-unified-queue');
+  });
+
+  it('keeps a #1109-like active vendor-blocked allocation discoverable from the returned unified queue when it is outside the preview', async () => {
+    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1104', '#1105', '#1106', '#1107', '#1108', '#1109']));
+
+    renderPage();
+
+    const preview = await screen.findByLabelText('Vendor Blocked Allocations preview');
+    expect(within(preview).queryByText('Order #1109')).not.toBeInTheDocument();
+    expect(screen.getByText('Order #1109')).toBeInTheDocument();
+    expect(screen.getByText('5 shown • 6 active')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open queue' })).toHaveAttribute('href', '#operations-unified-queue');
   });
 });

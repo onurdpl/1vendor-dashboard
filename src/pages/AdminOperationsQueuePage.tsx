@@ -93,7 +93,15 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
 }
 
 function getActionLabel(item: OperationsAttentionItem) {
-  return item.type === 'vendor_blocked' ? 'Review allocation' : 'Open';
+  if (item.type === 'vendor_blocked' && item.destinationPath?.startsWith('/admin/orders/')) {
+    return 'Review order';
+  }
+
+  return 'Open';
+}
+
+function getVendorBlockedPreviewLabel(visibleCount: number, activeCount: number) {
+  return `${visibleCount} shown • ${activeCount} active`;
 }
 
 export function AdminOperationsQueuePage() {
@@ -129,6 +137,7 @@ export function AdminOperationsQueuePage() {
   const sections = safeArray(dataView.sections);
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
+  const vendorBlockedQueueCount = queue.filter((item) => item.type === 'vendor_blocked').length;
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -185,7 +194,7 @@ export function AdminOperationsQueuePage() {
             emptyMessage="No operational recommendations right now."
           />
 
-          <article className="attention-card">
+          <article className="attention-card" id="operations-unified-queue">
             <div className="attention-card-heading">
               <div>
                 <p className="eyebrow">Critical queue</p>
@@ -230,44 +239,86 @@ export function AdminOperationsQueuePage() {
           </article>
 
           <div className="attention-sections-grid">
-            {sections.map((section) => (
-              <article key={section.key} className="attention-card">
-                <div className="attention-card-heading">
-                  <div>
-                    <p className="eyebrow">{formatType(section.key)}</p>
-                    <h3>{section.title}</h3>
-                    <span>
-                      {section.count} active · {section.critical} critical · {section.warning} warning
-                    </span>
+            {sections.map((section) => {
+              const sectionItems = safeArray(section.items);
+              const isVendorBlockedSection = section.key === 'vendor_blocked';
+              const visibleCount = sectionItems.length;
+              const hasHiddenPreviewItems = isVendorBlockedSection && visibleCount < section.count;
+              const queueContainsAllActiveVendorBlocked = isVendorBlockedSection && vendorBlockedQueueCount >= section.count;
+
+              return (
+                <article key={section.key} className="attention-card">
+                  <div className="attention-card-heading">
+                    <div>
+                      <p className="eyebrow">{formatType(section.key)}</p>
+                      <h3>{isVendorBlockedSection ? 'Vendor Blocked Allocations' : section.title}</h3>
+                      <span>
+                        {isVendorBlockedSection ? (
+                          getVendorBlockedPreviewLabel(visibleCount, section.count)
+                        ) : (
+                          `${section.count} active · ${section.critical} critical · ${section.warning} warning`
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="attention-mini-list">
-                  {safeArray(section.items).length ? (
-                    safeArray(section.items).map((item) => (
-                      <div key={item.id} className="attention-mini-row">
-                        <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
-                        <div>
-                          <strong>{item.title}</strong>
-                          {item.type === 'vendor_blocked' ? (
-                            <>
-                              <small>{item.vendorName} · {item.objectReference}</small>
-                              <span>{item.cancellationReason ? `Reason: ${item.cancellationReason}` : item.description}</span>
-                              <span>{item.recommendedAction}</span>
-                              {attentionLink(item, 'Review allocation')}
-                            </>
-                          ) : (
-                            <small>{item.vendorName} · {formatAge(item.ageHours)}</small>
-                          )}
+                  {hasHiddenPreviewItems ? (
+                    <div className="attention-preview-note">
+                      <span>Showing first {visibleCount} active allocations.</span>
+                      {queueContainsAllActiveVendorBlocked ? (
+                        <a className="button button-secondary button-link button-compact" href="#operations-unified-queue">
+                          Open queue
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div
+                    className="attention-mini-list"
+                    aria-label={isVendorBlockedSection ? 'Vendor Blocked Allocations preview' : undefined}
+                  >
+                    {sectionItems.length ? (
+                      sectionItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`attention-mini-row${item.type === 'vendor_blocked' ? ' vendor-blocked-mini-row' : ''}`}
+                        >
+                          <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
+                          <div>
+                            <strong>{item.title}</strong>
+                            {item.type === 'vendor_blocked' ? (
+                              <>
+                                <small>
+                                  {item.objectReference} · {item.vendorName} · {formatAge(item.ageHours)}
+                                </small>
+                                <span className="vendor-blocked-detail-list">
+                                  <span className="vendor-blocked-detail-chip">Status: {safeStatusLabel(item.status)}</span>
+                                  {item.cancellationReason ? (
+                                    <span className="vendor-blocked-detail-chip">Reason: {item.cancellationReason}</span>
+                                  ) : null}
+                                  {item.reassignmentRequired ? (
+                                    <span className="vendor-blocked-detail-chip">Reassignment required</span>
+                                  ) : null}
+                                  {item.splitChildAllocation ? (
+                                    <span className="vendor-blocked-detail-chip">Split allocation</span>
+                                  ) : null}
+                                </span>
+                                {!item.cancellationReason ? <span>{item.description}</span> : null}
+                                <span>{item.recommendedAction}</span>
+                                {attentionLink(item, getActionLabel(item))}
+                              </>
+                            ) : (
+                              <small>{item.vendorName} · {formatAge(item.ageHours)}</small>
+                            )}
+                          </div>
+                          <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
                         </div>
-                        <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="page-description">No current items.</p>
-                  )}
-                </div>
-              </article>
-            ))}
+                      ))
+                    ) : (
+                      <p className="page-description">No current items.</p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </main>
 
