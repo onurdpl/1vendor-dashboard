@@ -154,13 +154,17 @@ Webhook processing lifecycle states:
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
 - Expected `404` behavior: not used for this route.
+- Optional filters:
+  - `type=vendor_blocked`: returns only Vendor Blocked allocation queue rows.
+  - Unsupported `type` values return `400`.
 - Queue item semantics:
   - `pending_reassignment`: allocation requires reassignment (`reassignmentRequired` or pending reassignment status)
   - `vendor_blocked`: allocation blocked by vendor state
   - `awaiting_shipment`: allocation in shipping wait state
   - `refund_attention`: return/refund records requiring review
 - Count semantics: queue and summary counts are generated attention rows and are not guaranteed to be unique business incidents.
-- Vendor Blocked full-list UI behavior: the Operations Control Center may page through this route and filter only the currently fetched page. No server-side `vendor_blocked` search/filter contract exists for this route.
+- Filtered pagination semantics: when `type=vendor_blocked` is supplied, filtering occurs before pagination, `summary.total` represents matching Vendor Blocked rows, and returned `items` contain only Vendor Blocked rows. Without `type`, the endpoint preserves the mixed queue behavior and mixed `summary.total`.
+- Vendor Blocked full-list UI behavior: the Operations Control Center uses `type=vendor_blocked` with `limit` and `offset` so Previous/Next page through Vendor Blocked rows rather than mixed queue rows.
 
 ### GET /admin/operations/attention
 
@@ -172,6 +176,7 @@ Webhook processing lifecycle states:
   - `sections[].items` are capped preview rows; `sections[].count` is the generated active row count for the section.
   - Recommendations and vendor risk rows are preview summaries, not exhaustive inventories.
   - `recentActivity` is projected operational activity, not an immutable audit history.
+- Vendor Blocked preview limitation: the attention projection is derived from a capped Operations queue projection; the full-list panel should use `GET /admin/operations?type=vendor_blocked` for filtered pagination and total counts.
 - Count semantics: dashboard summary and section counts are generated attention rows and are not guaranteed to be unique business incidents.
 
 ### GET /admin/diagnostics/webhooks

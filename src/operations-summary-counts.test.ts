@@ -298,6 +298,115 @@ describe('admin operations summary counts', () => {
     ]);
   });
 
+  it('filters vendor-blocked queue rows before pagination and returns a matching filtered total', async () => {
+    const vendorBlockedAllocations = Array.from({ length: 7 }, (_unused, index) =>
+      buildAllocation({
+        id: `alloc-filtered-${index + 1}`,
+        assignedVendorId: 'sporjinal',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        updatedAt: new Date(`2026-05-17T0${8 - index}:00:00.000Z`),
+        assignedVendor: {
+          name: 'Sporjinal',
+        },
+        order: {
+          sourceShopifyOrderId: String(7900000000000 + index),
+          sourceShopifyOrderNumber: `#12${index + 1}`,
+          cancelledAt: null,
+        },
+      }),
+    );
+    prismaMock.vendorAllocation.count.mockResolvedValueOnce(7);
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce(vendorBlockedAllocations.slice(0, 5));
+
+    const dashboard = await getAdminOperationsQueue({ type: 'vendor_blocked', limit: 5, offset: 0 });
+
+    expect(dashboard.summary).toMatchObject({
+      total: 7,
+      vendorBlocked: 7,
+      warning: 7,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    });
+    expect(dashboard.items).toHaveLength(5);
+    expect(dashboard.items.map((item) => item.type)).toEqual(['vendor_blocked', 'vendor_blocked', 'vendor_blocked', 'vendor_blocked', 'vendor_blocked']);
+    expect(dashboard.items.map((item) => item.relatedShopifyOrderNumber)).toEqual(['#121', '#122', '#123', '#124', '#125']);
+    expect(prismaMock.vendorAllocation.count).toHaveBeenCalledWith({
+      where: {
+        order: {
+          cancelledAt: null,
+        },
+        allocationStatus: 'VENDOR_BLOCKED',
+        NOT: expect.any(Object),
+      },
+    });
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        order: {
+          cancelledAt: null,
+        },
+        allocationStatus: 'VENDOR_BLOCKED',
+        NOT: expect.any(Object),
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      skip: 0,
+      take: 5,
+    }));
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('pages through the filtered vendor-blocked population without unrelated rows consuming page slots', async () => {
+    const secondPageVendorBlockedAllocations = [6, 7].map((orderIndex) =>
+      buildAllocation({
+        id: `alloc-filtered-${orderIndex}`,
+        assignedVendorId: 'sporjinal',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        updatedAt: new Date(`2026-05-17T0${8 - orderIndex}:00:00.000Z`),
+        assignedVendor: {
+          name: 'Sporjinal',
+        },
+        order: {
+          sourceShopifyOrderId: String(7900000000000 + orderIndex),
+          sourceShopifyOrderNumber: orderIndex === 7 ? '#1109' : '#126',
+          cancelledAt: null,
+        },
+      }),
+    );
+    prismaMock.vendorAllocation.count.mockResolvedValueOnce(7);
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce(secondPageVendorBlockedAllocations);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'vendor_blocked', limit: 5, offset: 5 });
+
+    expect(dashboard.summary.total).toBe(7);
+    expect(dashboard.items).toHaveLength(2);
+    expect(dashboard.items.map((item) => item.relatedShopifyOrderNumber)).toEqual(['#126', '#1109']);
+    expect(dashboard.items[1]).toEqual(expect.objectContaining({
+      type: 'vendor_blocked',
+      destinationPath: '/admin/orders/7900000000007',
+      relatedOrderId: 'alloc-filtered-7',
+      relatedShopifyOrderId: '7900000000007',
+    }));
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      skip: 5,
+      take: 5,
+    }));
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
   it('uses split-aware copy for vendor-blocked child allocations created by line-item split', async () => {
     prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
       buildAllocation({

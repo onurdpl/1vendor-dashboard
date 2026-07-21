@@ -40,6 +40,7 @@ import type {
   LogoIsbasiProductServiceDiscoveryResult,
   OperationsQueueDashboard,
   OperationsQueueItem,
+  OperationsQueueTypeFilter,
   SupportAnalytics,
   SupportTicket,
   SupportTicketCategory,
@@ -78,6 +79,7 @@ function getCurrentVendorId() {
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
+type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter };
 
 const mockSupportTickets: SupportTicket[] = [];
 
@@ -2812,21 +2814,22 @@ export const runtimeServices = {
         : Promise.resolve(getMockAutomationDashboard(vendorId)),
   },
   operations: {
-    list: (options: ReadRequestOptions = {}) =>
+    list: (options: OperationsReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
-        : Promise.resolve(listMockAdminOperationsQueue()),
-    dashboard: (options: ReadRequestOptions = {}) => {
+        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset, type: options.type })
+        : Promise.resolve(listMockAdminOperationsQueue().filter((item) => !options.type || item.type === options.type)),
+    dashboard: (options: OperationsReadRequestOptions = {}) => {
       if (runtimeConfig.apiMode === 'real') {
         return realOperations.getAdminOperationsQueueDashboard({
           signal: options.signal,
           headers: options.headers,
           limit: options.limit,
           offset: options.offset,
+          type: options.type,
         });
       }
 
-      const items = listMockAdminOperationsQueue();
+      const items = listMockAdminOperationsQueue().filter((item) => !options.type || item.type === options.type);
       return Promise.resolve({
         summary: buildOperationsQueueSummary(items),
         items,

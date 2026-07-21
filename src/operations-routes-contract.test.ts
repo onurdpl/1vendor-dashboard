@@ -71,6 +71,45 @@ describe('operations route contract', () => {
     const allowed = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: {} }, {});
 
     expect(allowed).toEqual({ summary: { total: 0 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 100, offset: 0, type: undefined });
+  });
+
+  it('passes the supported vendor-blocked queue type filter to the operations service', async () => {
+    getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 7 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const allowed = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'vendor_blocked', limit: '5', offset: '5' } }, {});
+
+    expect(allowed).toEqual({ summary: { total: 7 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 5, offset: 5, type: 'vendor_blocked' });
+  });
+
+  it('rejects unsupported operations queue type filters', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const response = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'awaiting_shipment' } }, reply);
+
+    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked.' } });
+    expect(getAdminOperationsQueueMock).not.toHaveBeenCalled();
   });
 
   it('serves summary-only operations counts to admins without loading queue items', async () => {

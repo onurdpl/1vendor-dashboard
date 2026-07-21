@@ -7,6 +7,7 @@ import {
   type OperationalSignal,
   OperationalSignalSeverity,
   OperationalSignalStatus,
+  type Prisma,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type {
@@ -19,6 +20,7 @@ import type {
   OperationsQueueDashboardDto,
   OperationsQueueItemDto,
   OperationsQueueSeverity,
+  OperationsQueueTypeFilter,
   OperationsVendorRiskDto,
 } from './operations.types.js';
 import { evaluateOperationalSignals } from '../rules/rules.service.js';
@@ -49,6 +51,73 @@ const NORMALIZED_RESOLVED_CANCEL_REFUND_REVIEW_STATUSES = new Set(
 const NORMALIZED_RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES = new Set(
   RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES.map((status) => status.toLowerCase()),
 );
+
+const operationsAllocationSelect = {
+  id: true,
+  assignedVendorId: true,
+  allocationStatus: true,
+  cancellationReason: true,
+  cancelRefundReviewStatus: true,
+  fulfillmentStatus: true,
+  shippingStatus: true,
+  reassignmentRequired: true,
+  updatedAt: true,
+  assignedVendor: {
+    select: {
+      name: true,
+    },
+  },
+  returnRecords: {
+    select: {
+      id: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 1,
+  },
+  refundRecords: {
+    select: {
+      sourceShopifyRefundId: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 1,
+  },
+  outboundShopifyRefundAttempts: {
+    select: {
+      status: true,
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 1,
+  },
+  childAllocationSplitEvents: {
+    select: {
+      id: true,
+    },
+    take: 1,
+  },
+  order: {
+    select: {
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      cancelledAt: true,
+    },
+  },
+} satisfies Prisma.VendorAllocationSelect;
+
+type OperationsAllocationRow = Prisma.VendorAllocationGetPayload<{
+  select: typeof operationsAllocationSelect;
+}>;
+
+type AdminOperationsQueueOptions = {
+  limit?: number;
+  offset?: number;
+  type?: OperationsQueueTypeFilter;
+};
 
 function hoursSince(value: Date, now = new Date()) {
   return Math.max(0, Math.round(((now.getTime() - value.getTime()) / ONE_HOUR_MS) * 10) / 10);
@@ -750,67 +819,104 @@ function mapFinanceIntegrityAlertToQueueItem(
   };
 }
 
-export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
-  const offset = options.offset ?? 0;
-  const limit = options.limit ?? 100;
-  const candidateTake = offset + limit;
-  const allocations = await withDashboardTiming('operations.allocation_fetch', () => prisma.vendorAllocation.findMany({
-    select: {
-      id: true,
-      assignedVendorId: true,
-      allocationStatus: true,
-      cancellationReason: true,
-      cancelRefundReviewStatus: true,
-      fulfillmentStatus: true,
-      shippingStatus: true,
-      reassignmentRequired: true,
-      updatedAt: true,
-      assignedVendor: {
-        select: {
-          name: true,
-        },
-      },
-      returnRecords: {
-        select: {
-          id: true,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 1,
-      },
-      refundRecords: {
-        select: {
-          sourceShopifyRefundId: true,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        take: 1,
-      },
-      outboundShopifyRefundAttempts: {
-        select: {
-          status: true,
-        },
+function mapVendorBlockedAllocationToQueueItem(allocation: OperationsAllocationRow): OperationsQueueItemDto | null {
+  if (isFullOrderCancelled(allocation.order)) {
+    return null;
+  }
+
+  const resolvedByRefund = isVendorBlockedAllocationResolvedByRefund(allocation);
+  if (allocation.allocationStatus !== AllocationStatus.VENDOR_BLOCKED || resolvedByRefund) {
+    return null;
+  }
+
+  const vendorName = allocation.assignedVendor.name;
+  const orderReference = formatOrderReference(allocation.order.sourceShopifyOrderNumber, allocation.order.sourceShopifyOrderId) ?? `allocation ${allocation.id}`;
+  const splitChildAllocation = (allocation.childAllocationSplitEvents ?? []).length > 0;
+  const description = splitChildAllocation
+    ? `Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return.${allocation.cancellationReason ? ` Reason: ${allocation.cancellationReason}.` : ''}`
+    : allocation.cancellationReason
+      ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
+      : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
+
+  return {
+    id: `op-blocked-${allocation.id}`,
+    type: 'vendor_blocked',
+    severity: 'warning',
+    title: splitChildAllocation ? 'Split allocation awaiting admin resolution' : 'Vendor rejected allocation',
+    description,
+    vendorId: allocation.assignedVendorId,
+    vendorName,
+    relatedOrderId: allocation.id,
+    relatedShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    relatedShopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
+    relatedReturnId: allocation.returnRecords[0]?.id ?? null,
+    relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
+    status: allocation.allocationStatus.toLowerCase(),
+    createdAt: allocation.updatedAt.toISOString(),
+    actionLabel: 'Review allocation',
+    destinationPath: `/admin/orders/${allocation.order.sourceShopifyOrderId}`,
+    reassignmentRequired: allocation.reassignmentRequired,
+    splitChildAllocation,
+  };
+}
+
+function buildVendorBlockedFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: 0,
+    warning: total,
+    attention: 0,
+    normal: 0,
+    pendingReassignment: 0,
+    vendorBlocked: total,
+    awaitingShipment: 0,
+    refundAttention: 0,
+    financeIntegrityAlerts: 0,
+    operationalSignals: 0,
+    automationActions: 0,
+  };
+}
+
+async function getVendorBlockedOperationsQueue(options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>): Promise<OperationsQueueDashboardDto> {
+  const where = {
+    ...fullOrderOperationalAllocationWhere,
+    ...getUnresolvedVendorBlockedWhere(),
+  };
+  const [total, allocations] = await Promise.all([
+    withDashboardTiming('operations.vendor_blocked_filtered_count', () =>
+      prisma.vendorAllocation.count({
+        where,
+      }),
+    ),
+    withDashboardTiming('operations.vendor_blocked_filtered_fetch', () =>
+      prisma.vendorAllocation.findMany({
+        where,
+        select: operationsAllocationSelect,
         orderBy: {
           updatedAt: 'desc',
         },
-        take: 1,
-      },
-      childAllocationSplitEvents: {
-        select: {
-          id: true,
-        },
-        take: 1,
-      },
-      order: {
-        select: {
-          sourceShopifyOrderId: true,
-          sourceShopifyOrderNumber: true,
-          cancelledAt: true,
-        },
-      },
-    },
+        skip: options.offset,
+        take: options.limit,
+      }),
+    ),
+  ]);
+
+  return {
+    summary: buildVendorBlockedFilteredSummary(total),
+    items: allocations.map(mapVendorBlockedAllocationToQueueItem).filter((item): item is OperationsQueueItemDto => Boolean(item)),
+  };
+}
+
+export async function getAdminOperationsQueue(options: AdminOperationsQueueOptions = {}): Promise<OperationsQueueDashboardDto> {
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 100;
+  if (options.type === 'vendor_blocked') {
+    return getVendorBlockedOperationsQueue({ limit, offset });
+  }
+
+  const candidateTake = offset + limit;
+  const allocations = await withDashboardTiming('operations.allocation_fetch', () => prisma.vendorAllocation.findMany({
+    select: operationsAllocationSelect,
     orderBy: {
       createdAt: 'desc',
     },
@@ -825,41 +931,15 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     const orderId = allocation.id;
     const shopifyOrderId = allocation.order.sourceShopifyOrderId;
     const shopifyOrderNumber = allocation.order.sourceShopifyOrderNumber;
-    const orderReference = formatOrderReference(shopifyOrderNumber, shopifyOrderId) ?? `allocation ${allocation.id}`;
     const resolvedByRefund = isVendorBlockedAllocationResolvedByRefund(allocation);
-    const splitChildAllocation = (allocation.childAllocationSplitEvents ?? []).length > 0;
 
     if (isFullOrderCancelled(allocation.order)) {
       continue;
     }
 
-    if (allocation.allocationStatus === AllocationStatus.VENDOR_BLOCKED && !resolvedByRefund) {
-      const description = splitChildAllocation
-        ? `Vendor rejected selected line items. Review the split allocation and choose transfer, refund, or return.${allocation.cancellationReason ? ` Reason: ${allocation.cancellationReason}.` : ''}`
-        : allocation.cancellationReason
-          ? `${vendorName} rejected ${orderReference}. Reason: ${allocation.cancellationReason}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`
-          : `${vendorName} rejected ${orderReference}. Reassignment required: ${allocation.reassignmentRequired ? 'yes' : 'no'}.`;
-
-      items.push({
-        id: `op-blocked-${allocation.id}`,
-        type: 'vendor_blocked',
-        severity: 'warning',
-        title: splitChildAllocation ? 'Split allocation awaiting admin resolution' : 'Vendor rejected allocation',
-        description,
-        vendorId: allocation.assignedVendorId,
-        vendorName,
-        relatedOrderId: orderId,
-        relatedShopifyOrderId: shopifyOrderId,
-        relatedShopifyOrderNumber: shopifyOrderNumber,
-        relatedReturnId: allocation.returnRecords[0]?.id ?? null,
-        relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
-        status: allocation.allocationStatus.toLowerCase(),
-        createdAt: allocation.updatedAt.toISOString(),
-        actionLabel: 'Review allocation',
-        destinationPath: `/admin/orders/${shopifyOrderId}`,
-        reassignmentRequired: allocation.reassignmentRequired,
-        splitChildAllocation,
-      });
+    const vendorBlockedItem = mapVendorBlockedAllocationToQueueItem(allocation);
+    if (vendorBlockedItem) {
+      items.push(vendorBlockedItem);
     } else if (!resolvedByRefund && (allocation.reassignmentRequired || allocation.allocationStatus === AllocationStatus.PENDING_REASSIGNMENT)) {
       items.push({
         id: `op-pending-${allocation.id}`,

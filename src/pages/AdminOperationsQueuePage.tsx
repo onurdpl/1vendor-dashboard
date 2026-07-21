@@ -197,7 +197,7 @@ function getQueueAdminOrderPath(item: OperationsQueueItem) {
   return item.relatedShopifyOrderId ? `/admin/orders/${item.relatedShopifyOrderId}` : null;
 }
 
-function matchesVendorBlockedFilter(item: OperationsQueueItem, filter: string) {
+function matchesVendorBlockedPageSearch(item: OperationsQueueItem, filter: string) {
   const normalizedFilter = filter.trim().toLowerCase();
   if (!normalizedFilter) {
     return true;
@@ -253,12 +253,13 @@ export function AdminOperationsQueuePage() {
     error: vendorBlockedQueueError,
     refetch: refetchVendorBlockedQueue,
   } = useQueryResource(
-    queryKeys.admin.operations.queuePage(VENDOR_BLOCKED_QUEUE_PAGE_SIZE, vendorBlockedQueueOffset),
+    queryKeys.admin.operations.queuePage(VENDOR_BLOCKED_QUEUE_PAGE_SIZE, vendorBlockedQueueOffset, 'vendor_blocked'),
     ({ signal }) =>
       runtimeServices.operations.dashboard({
         signal,
         limit: VENDOR_BLOCKED_QUEUE_PAGE_SIZE,
         offset: vendorBlockedQueueOffset,
+        type: 'vendor_blocked',
       }),
     {
       enabled: pageReadiness.ready && vendorBlockedListOpen,
@@ -291,10 +292,9 @@ export function AdminOperationsQueuePage() {
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
   const paginatedQueueItems = safeArray(vendorBlockedQueueDashboard?.items);
-  const vendorBlockedQueuePageItems = paginatedQueueItems.filter((item) => item.type === 'vendor_blocked');
-  const filteredVendorBlockedQueueItems = useMemo(
-    () => vendorBlockedQueuePageItems.filter((item) => matchesVendorBlockedFilter(item, vendorBlockedFilter)),
-    [vendorBlockedFilter, vendorBlockedQueuePageItems],
+  const displayedVendorBlockedQueueItems = useMemo(
+    () => paginatedQueueItems.filter((item) => matchesVendorBlockedPageSearch(item, vendorBlockedFilter)),
+    [vendorBlockedFilter, paginatedQueueItems],
   );
   const totalPaginatedQueueRows = vendorBlockedQueueDashboard?.summary.total ?? 0;
   const queuePageStart = totalPaginatedQueueRows > 0 ? vendorBlockedQueueOffset + 1 : 0;
@@ -518,7 +518,7 @@ export function AdminOperationsQueuePage() {
                   <p className="eyebrow">Vendor blocked</p>
                   <h3>Vendor-blocked allocations in queue pages</h3>
                   <span>
-                    Read-only paginated queue view. Filter applies only to the currently fetched page.
+                    Read-only paginated Vendor Blocked results from the Operations queue.
                   </span>
                 </div>
                 <button
@@ -532,7 +532,7 @@ export function AdminOperationsQueuePage() {
 
               <div className="vendor-blocked-list-controls">
                 <label>
-                  <span>Filter current page</span>
+                  <span>Search this Vendor Blocked page</span>
                   <input
                     type="search"
                     value={vendorBlockedFilter}
@@ -542,7 +542,7 @@ export function AdminOperationsQueuePage() {
                 </label>
                 <div className="vendor-blocked-page-controls">
                   <span>
-                    Queue rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
+                    Vendor Blocked rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
                   </span>
                   <button
                     type="button"
@@ -574,12 +574,12 @@ export function AdminOperationsQueuePage() {
                   title="Loading vendor-blocked queue page"
                   description="Fetching the next paginated operations queue page."
                 />
-              ) : filteredVendorBlockedQueueItems.length ? (
+              ) : displayedVendorBlockedQueueItems.length ? (
                 <OperationalTable
                   columns={['Severity', 'Reference', 'Vendor', 'Status', 'Age', 'Action']}
                   className="vendor-blocked-full-table"
                 >
-                  {filteredVendorBlockedQueueItems.map((item) => {
+                  {displayedVendorBlockedQueueItems.map((item) => {
                     const adminOrderPath = getQueueAdminOrderPath(item);
 
                     return (
@@ -609,8 +609,8 @@ export function AdminOperationsQueuePage() {
                 </OperationalTable>
               ) : (
                 <EmptyStatePanel
-                  title="No vendor-blocked allocations on this queue page"
-                  description="Use pagination to continue through generated attention rows, or clear the current-page filter."
+                  title="No vendor-blocked allocations match this page"
+                  description="Use pagination to continue through Vendor Blocked results, or clear this page search."
                 />
               )}
             </article>

@@ -12,6 +12,27 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+import type { OperationsQueueTypeFilter } from './operations.types.js';
+
+function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFilter | undefined {
+  const rawType = (query as { type?: unknown } | undefined)?.type;
+  if (rawType === undefined || rawType === null || rawType === '') {
+    return undefined;
+  }
+  if (typeof rawType !== 'string') {
+    throw new Error('type must be vendor_blocked.');
+  }
+
+  const normalized = rawType.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized !== 'vendor_blocked') {
+    throw new Error('type must be vendor_blocked.');
+  }
+
+  return 'vendor_blocked';
+}
 
 export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -27,8 +48,16 @@ export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
+      let type: OperationsQueueTypeFilter | undefined;
+      try {
+        type = resolveOperationsQueueTypeFilter(request.query);
+      } catch (error) {
+        return reply.code(400).send({ message: error instanceof Error ? error.message : 'Unsupported operations queue type filter.' });
+      }
+      const pagination = resolvePagination(request.query);
+
       return withDashboardRouteTiming('GET /admin/operations', () =>
-        withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue(resolvePagination(request.query))),
+        withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue({ ...pagination, type })),
       );
     },
   );

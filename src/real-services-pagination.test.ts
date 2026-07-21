@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
 import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
 import { listOrders } from './services/real/orders';
-import { listAdminOperationsQueue } from './services/real/operations';
+import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
+import { queryKeys } from './lib/api/queryKeys';
 import { listDashboardReturns, listReturns } from './services/real/returns';
 
 const apiClientGet = vi.hoisted(() => vi.fn());
@@ -34,6 +35,23 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenNthCalledWith(2, '/returns?limit=25&offset=50');
     expect(apiClientGet).toHaveBeenNthCalledWith(3, '/admin/diagnostics/webhooks?limit=25&offset=50', expect.any(Object));
     expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?limit=25&offset=50', expect.any(Object));
+  });
+
+  it('passes the operations queue type filter only when requested', async () => {
+    apiClientGet
+      .mockResolvedValueOnce({ summary: {}, items: [] })
+      .mockResolvedValueOnce({ summary: {}, items: [] });
+
+    await getAdminOperationsQueueDashboard({ limit: 5, offset: 5, type: 'vendor_blocked' });
+    await getAdminOperationsQueueDashboard({ limit: 5, offset: 0 });
+
+    expect(apiClientGet).toHaveBeenNthCalledWith(1, '/admin/operations?type=vendor_blocked&limit=5&offset=5', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(2, '/admin/operations?limit=5', expect.any(Object));
+  });
+
+  it('keeps filtered and unfiltered operations queue pages in separate query-key buckets', () => {
+    expect(queryKeys.admin.operations.queuePage(5, 0)).toEqual(['admin', 'operations', 'queue', 'all', 5, 0]);
+    expect(queryKeys.admin.operations.queuePage(5, 0, 'vendor_blocked')).toEqual(['admin', 'operations', 'queue', 'vendor_blocked', 5, 0]);
   });
 
   it('passes limit and offset to dashboard return projection endpoint', async () => {
