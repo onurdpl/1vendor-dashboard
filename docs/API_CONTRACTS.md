@@ -150,6 +150,7 @@ Webhook processing lifecycle states:
 - Required auth: yes.
 - Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
 - Expected success response shape: `{ summary, items }`.
+- Pagination: supports `limit` and `offset`; consumers must not treat one returned page as the complete queue when summary/count values exceed the returned `items.length`.
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
 - Expected `404` behavior: not used for this route.
@@ -158,6 +159,20 @@ Webhook processing lifecycle states:
   - `vendor_blocked`: allocation blocked by vendor state
   - `awaiting_shipment`: allocation in shipping wait state
   - `refund_attention`: return/refund records requiring review
+- Count semantics: queue and summary counts are generated attention rows and are not guaranteed to be unique business incidents.
+- Vendor Blocked full-list UI behavior: the Operations Control Center may page through this route and filter only the currently fetched page. No server-side `vendor_blocked` search/filter contract exists for this route.
+
+### GET /admin/operations/attention
+
+- Purpose: return the admin Operations Control Center attention projection.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: `OperationsAttentionDashboard`.
+- Dashboard section semantics:
+  - `sections[].items` are capped preview rows; `sections[].count` is the generated active row count for the section.
+  - Recommendations and vendor risk rows are preview summaries, not exhaustive inventories.
+  - `recentActivity` is projected operational activity, not an immutable audit history.
+- Count semantics: dashboard summary and section counts are generated attention rows and are not guaranteed to be unique business incidents.
 
 ### GET /admin/diagnostics/webhooks
 

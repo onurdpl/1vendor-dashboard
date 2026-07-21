@@ -13644,6 +13644,24 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 800;
 }
 
+.attention-stale-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.26);
+  border-radius: 14px;
+  background: rgba(255, 251, 235, 0.78);
+  padding: 10px 12px;
+}
+
+.attention-stale-warning span {
+  color: #92400e;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .provider-card-list {
   display: grid;
   gap: 10px;
@@ -14275,6 +14293,76 @@ summary.provider-response-heading::-webkit-details-marker {
 .attention-op-table .button-compact {
   min-height: 28px;
   padding: 4px 10px;
+}
+
+.vendor-blocked-full-list {
+  scroll-margin-top: 16px;
+}
+
+.vendor-blocked-list-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vendor-blocked-list-controls label {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 6px;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vendor-blocked-list-controls input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 7px 10px;
+  color: #0f172a;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.vendor-blocked-page-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.vendor-blocked-page-controls > span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.vendor-blocked-full-table {
+  --op-table-min-width: 0;
+  box-shadow: none;
+}
+
+.vendor-blocked-full-table .op-table-head,
+.vendor-blocked-full-table .op-table-row {
+  grid-template-columns: 90px minmax(160px, 1.3fr) minmax(130px, 1fr) minmax(120px, 0.9fr) 64px minmax(100px, auto);
+}
+
+.vendor-blocked-full-table .op-table-row {
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.vendor-blocked-full-table .op-table-row > span,
+.vendor-blocked-full-table .op-table-row > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 760px) {

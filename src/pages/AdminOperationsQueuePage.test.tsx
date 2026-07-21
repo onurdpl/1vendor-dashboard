@@ -1,17 +1,24 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OperationsAttentionDashboard, OperationsAttentionItem } from '../lib/api/contracts';
+import type {
+  OperationsAttentionDashboard,
+  OperationsAttentionItem,
+  OperationsQueueDashboard,
+  OperationsQueueItem,
+} from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminOperationsQueuePage } from './AdminOperationsQueuePage';
 
 const attentionMock = vi.fn<() => Promise<OperationsAttentionDashboard>>();
+const queueDashboardMock = vi.fn<(options?: { limit?: number; offset?: number }) => Promise<OperationsQueueDashboard>>();
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     operations: {
       attention: () => attentionMock(),
+      dashboard: (options?: { limit?: number; offset?: number }) => queueDashboardMock(options),
     },
   },
 }));
@@ -42,8 +49,8 @@ const dashboard: OperationsAttentionDashboard = {
       objectId: 'ticket-1',
       status: 'OPEN',
       ageHours: 30,
-      title: 'Overdue support ticket',
-      description: 'Overdue by 6h',
+      title: 'High-priority support ticket',
+      description: 'Priority: high',
       recommendedAction: 'Assign and respond',
       destinationPath: '/admin/support/ticket-1',
       createdAt: '2026-05-17T08:00:00.000Z',
@@ -124,7 +131,25 @@ const dashboard: OperationsAttentionDashboard = {
       count: 1,
       critical: 1,
       warning: 0,
-      items: [],
+      items: [
+        {
+          id: 'support-1',
+          type: 'support',
+          severity: 'critical',
+          vendorId: 'sporjinal',
+          vendorName: 'Sporjinal',
+          objectType: 'Support ticket',
+          objectReference: 'Order #1029',
+          objectId: 'ticket-1',
+          status: 'OPEN',
+          ageHours: 30,
+          title: 'High-priority support ticket',
+          description: 'High-priority support request needs an admin response.',
+          recommendedAction: 'Assign and respond',
+          destinationPath: '/admin/support/ticket-1',
+          createdAt: '2026-05-17T08:00:00.000Z',
+        },
+      ],
     },
     {
       key: 'shipment',
@@ -174,7 +199,7 @@ const dashboard: OperationsAttentionDashboard = {
       id: 'recommendation-support-1',
       type: 'support_escalation',
       severity: 'critical',
-      title: 'Escalate overdue support request',
+      title: 'Escalate support request',
       description: 'Order #1029 needs an admin response.',
       recommendedAction: 'Review owner, respond, or move the ticket to the correct waiting state',
       relatedObjectType: 'Support ticket',
@@ -278,6 +303,48 @@ function buildVendorBlockedPreviewDashboard(orderNumbers: string[]): OperationsA
   };
 }
 
+function buildVendorBlockedQueueItem(orderNumber: string, index: number): OperationsQueueItem {
+  const numericOrder = orderNumber.replace(/\D/g, '') || String(index);
+
+  return {
+    id: `op-blocked-alloc-${numericOrder}`,
+    type: 'vendor_blocked',
+    severity: 'high',
+    title: `Vendor rejected allocation ${orderNumber}`,
+    description: `Sporjinal rejected Order ${orderNumber}. Reason: OUT_OF_STOCK. Reassignment required: yes.`,
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderId: `alloc-${numericOrder}`,
+    relatedShopifyOrderId: String(7900000000000 + index),
+    relatedShopifyOrderNumber: orderNumber,
+    status: 'vendor_blocked',
+    createdAt: `2026-05-17T0${Math.min(index + 1, 9)}:00:00.000Z`,
+    actionLabel: 'Review allocation',
+    actionTo: `/admin/orders/${7900000000000 + index}`,
+    reassignmentRequired: true,
+  };
+}
+
+function buildQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
+  return {
+    summary: {
+      total,
+      critical: 0,
+      warning: items.length,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: total,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    },
+    items,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -310,6 +377,7 @@ describe('AdminOperationsQueuePage attention center', () => {
       defaultVendorId: 'sporjinal',
     });
     attentionMock.mockReset();
+    queueDashboardMock.mockReset();
   });
 
   afterEach(() => {
@@ -322,25 +390,29 @@ describe('AdminOperationsQueuePage attention center', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: /operational attention center/i })).toBeInTheDocument();
-    expect((await screen.findAllByText('Overdue support ticket')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('High-priority support ticket')).length).toBeGreaterThan(0);
     expect(screen.getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
     expect(screen.getByText('Tracking is not available yet.')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Review order').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Open order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
-    expect(screen.getByText('1 shown • 1 active')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1 of 1 active · 0 critical · 1 warning')).toBeInTheDocument();
+    expect(screen.getByText('Critical support')).toBeInTheDocument();
+    expect(screen.queryByText('Overdue support')).not.toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
-    expect(screen.getByText('Escalate overdue support request')).toBeInTheDocument();
+    expect(screen.getByText('Escalate support request')).toBeInTheDocument();
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'Open' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
-    expect(screen.getAllByRole('link', { name: 'Review order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByRole('link', { name: 'Open ticket' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
+    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Recent projected activity' })).toBeInTheDocument();
+    expect(screen.getByText('Latest projected activity rows, not a full audit history.')).toBeInTheDocument();
   });
 
   it('renders split child vendor-blocked items with split-aware copy', async () => {
@@ -422,33 +494,143 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Split allocation').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('link', { name: 'Review order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
   });
 
   it('discloses that Vendor Blocked cards are a five-item preview when six active allocations exist', async () => {
     attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1201', '#1202', '#1203', '#1204', '#1205', '#1206']));
+    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard(['#1201', '#1202', '#1203', '#1204', '#1205'].map(buildVendorBlockedQueueItem), 6));
 
     renderPage();
 
-    expect(await screen.findByText('5 shown • 6 active')).toBeInTheDocument();
-    expect(screen.getByText('Showing first 5 active allocations.')).toBeInTheDocument();
+    expect(await screen.findByText('Showing 5 of 6 active · 0 critical · 6 warning')).toBeInTheDocument();
+    expect(screen.getByText('Showing 5 of 6. This section is a preview.')).toBeInTheDocument();
 
     const preview = screen.getByLabelText('Vendor Blocked Allocations preview');
     expect(within(preview).getAllByText(/Vendor rejected allocation #120/)).toHaveLength(5);
     expect(within(preview).queryByText('Order #1206')).not.toBeInTheDocument();
     expect(screen.getByText('Order #1206')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open queue' })).toHaveAttribute('href', '#operations-unified-queue');
+
+    fireEvent.click(screen.getByRole('button', { name: 'View all vendor-blocked allocations' }));
+
+    expect(await screen.findByRole('heading', { name: 'Vendor-blocked allocations in queue pages' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_content, element) =>
+            element?.tagName.toLowerCase() === 'span' &&
+            element.textContent?.replace(/\s+/g, ' ').trim() === 'Queue rows 1-5 of 6',
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 5, offset: 0 }));
   });
 
   it('keeps a #1109-like active vendor-blocked allocation discoverable from the returned unified queue when it is outside the preview', async () => {
     attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1104', '#1105', '#1106', '#1107', '#1108', '#1109']));
+    queueDashboardMock.mockImplementation(async (options) => {
+      const offset = options?.offset ?? 0;
+      if (offset === 0) {
+        return buildQueueDashboard(['#1104', '#1105', '#1106', '#1107', '#1108'].map(buildVendorBlockedQueueItem), 6);
+      }
+
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1109', 5)], 6);
+    });
 
     renderPage();
 
     const preview = await screen.findByLabelText('Vendor Blocked Allocations preview');
     expect(within(preview).queryByText('Order #1109')).not.toBeInTheDocument();
     expect(screen.getByText('Order #1109')).toBeInTheDocument();
-    expect(screen.getByText('5 shown • 6 active')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open queue' })).toHaveAttribute('href', '#operations-unified-queue');
+    expect(screen.getByText('Showing 5 of 6 active · 0 critical · 6 warning')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View all vendor-blocked allocations' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_content, element) =>
+            element?.tagName.toLowerCase() === 'span' &&
+            element.textContent?.replace(/\s+/g, ' ').trim() === 'Queue rows 1-5 of 6',
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryAllByText('Order #1109')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          (_content, element) =>
+            element?.tagName.toLowerCase() === 'span' &&
+            element.textContent?.replace(/\s+/g, ' ').trim() === 'Queue rows 6-6 of 6',
+        ),
+      ).toBeInTheDocument();
+    });
+    const fullList = screen.getByRole('heading', { name: 'Vendor-blocked allocations in queue pages' }).closest('article');
+    expect(fullList).not.toBeNull();
+    expect(await within(fullList as HTMLElement).findByText('Order #1109')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000005')).toBe(true);
+    expect(queueDashboardMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 5, offset: 5 }));
+  });
+
+  it('discloses capped non-vendor sections without implying complete inventory', async () => {
+    const sectionDisclosureDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: [
+        {
+          key: 'support',
+          title: 'Support attention',
+          count: 3,
+          critical: 2,
+          warning: 1,
+          items: [
+            {
+              id: 'support-current-page',
+              type: 'support',
+              severity: 'critical',
+              vendorId: 'sporjinal',
+              vendorName: 'Sporjinal',
+              objectType: 'Support ticket',
+              objectReference: 'Order #1301',
+              objectId: 'ticket-1301',
+              status: 'OPEN',
+              ageHours: 2,
+              title: 'High-priority support ticket',
+              description: 'Priority: high',
+              recommendedAction: 'Assign and respond',
+              destinationPath: '/admin/support/ticket-1301',
+              createdAt: '2026-05-17T08:00:00.000Z',
+            },
+          ],
+        },
+      ],
+      recommendations: [],
+      vendorRisks: [],
+      recentActivity: [],
+    };
+    attentionMock.mockResolvedValueOnce(sectionDisclosureDashboard);
+
+    renderPage();
+
+    expect(await screen.findByText('Showing 1 of 3 active · 2 critical · 1 warning')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1 of 3. This section is a preview.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View all vendor-blocked allocations' })).not.toBeInTheDocument();
+  });
+
+  it('keeps stale attention data visible and shows a warning when background refresh fails', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+
+    renderPage();
+
+    expect(await screen.findByText('Order #1091')).toBeInTheDocument();
+    attentionMock.mockRejectedValueOnce(new Error('Backend temporarily unavailable'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByText(/Could not refresh/i)).toBeInTheDocument();
+    expect(screen.getByText('Order #1091')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });
