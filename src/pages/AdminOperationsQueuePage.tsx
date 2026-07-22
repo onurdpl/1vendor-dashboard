@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -27,8 +27,9 @@ import type {
 } from '../lib/api/contracts';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
-const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = 5;
-const SUPPORT_ATTENTION_PAGE_SIZE = 20;
+const AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE = 10;
+const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -210,33 +211,8 @@ function getSupportSlaLabel(ticket: SupportAttentionTicket) {
   return `Waiting since ${formatDate(ticket.waitingSince)}`;
 }
 
-function matchesVendorBlockedPageSearch(item: OperationsQueueItem, filter: string) {
-  const normalizedFilter = filter.trim().toLowerCase();
-  if (!normalizedFilter) {
-    return true;
-  }
-
-  return [
-    item.id,
-    item.title,
-    item.description,
-    item.vendorId,
-    item.vendorName,
-    item.status,
-    item.relatedOrderId,
-    item.relatedShopifyOrderId,
-    item.relatedShopifyOrderNumber,
-    formatQueueType(item.type),
-    getQueueItemReference(item),
-  ]
-    .filter((value): value is string => Boolean(value))
-    .some((value) => value.toLowerCase().includes(normalizedFilter));
-}
-
 export function AdminOperationsQueuePage() {
-  const [vendorBlockedListOpen, setVendorBlockedListOpen] = useState(false);
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
-  const [vendorBlockedFilter, setVendorBlockedFilter] = useState('');
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -276,7 +252,7 @@ export function AdminOperationsQueuePage() {
         type: 'vendor_blocked',
       }),
     {
-      enabled: pageReadiness.ready && vendorBlockedListOpen,
+      enabled: pageReadiness.ready,
       routeName: 'AdminOperationsQueuePage',
       endpoint: '/admin/operations',
     },
@@ -324,7 +300,7 @@ export function AdminOperationsQueuePage() {
   const recommendations = safeArray(dataView.recommendations);
   const queue = safeArray(dataView.queue);
   const sections = safeArray(dataView.sections);
-  const displaySections = sections.filter((section) => section.key !== 'support');
+  const displaySections = sections.filter((section) => section.key !== 'support' && section.key !== 'vendor_blocked');
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
   const supportAttentionItems = safeArray(supportAttentionPage?.items);
@@ -334,10 +310,6 @@ export function AdminOperationsQueuePage() {
   const canPageSupportBack = supportAttentionOffset > 0;
   const canPageSupportForward = supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE < totalSupportAttentionRows;
   const paginatedQueueItems = safeArray(vendorBlockedQueueDashboard?.items);
-  const displayedVendorBlockedQueueItems = useMemo(
-    () => paginatedQueueItems.filter((item) => matchesVendorBlockedPageSearch(item, vendorBlockedFilter)),
-    [vendorBlockedFilter, paginatedQueueItems],
-  );
   const totalPaginatedQueueRows = vendorBlockedQueueDashboard?.summary.total ?? 0;
   const queuePageStart = totalPaginatedQueueRows > 0 ? vendorBlockedQueueOffset + 1 : 0;
   const queuePageEnd = Math.min(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE, totalPaginatedQueueRows);
@@ -459,7 +431,7 @@ export function AdminOperationsQueuePage() {
             )}
           </article>
 
-          <div className="attention-sections-grid">
+          <div className="attention-sections-stack">
             <article className="attention-card support-attention-full-list" id="support-attention-full-list">
               <div className="attention-card-heading">
                 <div>
@@ -546,168 +518,56 @@ export function AdminOperationsQueuePage() {
               )}
             </article>
 
-            {displaySections.map((section) => {
-              const sectionItems = safeArray(section.items);
-              const isVendorBlockedSection = section.key === 'vendor_blocked';
-              const visibleCount = sectionItems.length;
-              const hasHiddenPreviewItems = visibleCount < section.count;
-              const canOpenVendorBlockedWorkflow = isVendorBlockedSection && hasHiddenPreviewItems;
-
-              return (
-                <article key={section.key} className="attention-card">
-                  <div className="attention-card-heading">
-                    <div>
-                      <p className="eyebrow">{formatType(section.key)}</p>
-                      <h3>{isVendorBlockedSection ? 'Vendor Blocked Allocations' : section.title}</h3>
-                      <span>
-                        {getPreviewLabel(visibleCount, section.count)} · {section.critical} critical · {section.warning} warning
-                      </span>
-                    </div>
-                  </div>
-                  {hasHiddenPreviewItems ? (
-                    <div className="attention-preview-note">
-                      <span>
-                        Showing {visibleCount} of {section.count}. This section is a preview.
-                      </span>
-                      {canOpenVendorBlockedWorkflow ? (
-                        <button
-                          type="button"
-                          className="button button-secondary button-link button-compact"
-                          onClick={() => {
-                            setVendorBlockedListOpen(true);
-                            setVendorBlockedQueueOffset(0);
-                          }}
-                        >
-                          View all vendor-blocked allocations
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <div
-                    className="attention-mini-list"
-                    aria-label={isVendorBlockedSection ? 'Vendor Blocked Allocations preview' : undefined}
-                  >
-                    {sectionItems.length ? (
-                      sectionItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`attention-mini-row${item.type === 'vendor_blocked' ? ' vendor-blocked-mini-row' : ''}`}
-                        >
-                          <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
-                          <div>
-                            <strong>{item.title}</strong>
-                            {item.type === 'vendor_blocked' ? (
-                              <>
-                                <small>
-                                  {item.objectReference} · {item.vendorName} · {formatAge(item.ageHours)}
-                                </small>
-                                <span className="vendor-blocked-detail-list">
-                                  <span className="vendor-blocked-detail-chip">Status: {safeStatusLabel(item.status)}</span>
-                                  {item.cancellationReason ? (
-                                    <span className="vendor-blocked-detail-chip">Reason: {item.cancellationReason}</span>
-                                  ) : null}
-                                  {item.reassignmentRequired ? (
-                                    <span className="vendor-blocked-detail-chip">Reassignment required</span>
-                                  ) : null}
-                                  {item.splitChildAllocation ? (
-                                    <span className="vendor-blocked-detail-chip">Split allocation</span>
-                                  ) : null}
-                                </span>
-                                {!item.cancellationReason ? <span>{item.description}</span> : null}
-                                <span>{item.recommendedAction}</span>
-                                {attentionLink(item, getActionLabel(item))}
-                              </>
-                            ) : (
-                              <>
-                                <small>
-                                  {item.objectReference} · {item.vendorName} · {formatAge(item.ageHours)}
-                                </small>
-                                <span>Status: {safeStatusLabel(item.status)}</span>
-                                {attentionLink(item, getActionLabel(item))}
-                              </>
-                            )}
-                          </div>
-                          <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="page-description">No current items.</p>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          {vendorBlockedListOpen ? (
-            <article className="attention-card vendor-blocked-full-list" id="vendor-blocked-full-list">
+            <article className="attention-card vendor-blocked-attention-list" id="vendor-blocked-attention-list">
               <div className="attention-card-heading">
                 <div>
                   <p className="eyebrow">Vendor blocked</p>
-                  <h3>Vendor-blocked allocations in queue pages</h3>
+                  <h3>Vendor Blocked Allocations</h3>
                   <span>
-                    Read-only paginated Vendor Blocked results from the Operations queue.
+                    Authoritative vendor-blocked allocations · {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
                   </span>
                 </div>
+              </div>
+
+              <div className="vendor-blocked-page-controls">
+                <span>
+                  Vendor Blocked rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
+                </span>
                 <button
                   type="button"
                   className="button button-secondary button-link button-compact"
-                  onClick={() => setVendorBlockedListOpen(false)}
+                  onClick={() => setVendorBlockedQueueOffset(Math.max(0, vendorBlockedQueueOffset - VENDOR_BLOCKED_QUEUE_PAGE_SIZE))}
+                  disabled={!canPageVendorBlockedBack}
                 >
-                  Close
+                  Previous
                 </button>
-              </div>
-
-              <div className="vendor-blocked-list-controls">
-                <label>
-                  <span>Search this Vendor Blocked page</span>
-                  <input
-                    type="search"
-                    value={vendorBlockedFilter}
-                    onChange={(event) => setVendorBlockedFilter(event.target.value)}
-                    placeholder="Order, vendor, status, or type"
-                  />
-                </label>
-                <div className="vendor-blocked-page-controls">
-                  <span>
-                    Vendor Blocked rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
-                  </span>
-                  <button
-                    type="button"
-                    className="button button-secondary button-link button-compact"
-                    onClick={() => setVendorBlockedQueueOffset(Math.max(0, vendorBlockedQueueOffset - VENDOR_BLOCKED_QUEUE_PAGE_SIZE))}
-                    disabled={!canPageVendorBlockedBack}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary button-link button-compact"
-                    onClick={() => setVendorBlockedQueueOffset(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE)}
-                    disabled={!canPageVendorBlockedForward}
-                  >
-                    Next
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="button button-secondary button-link button-compact"
+                  onClick={() => setVendorBlockedQueueOffset(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE)}
+                  disabled={!canPageVendorBlockedForward}
+                >
+                  Next
+                </button>
               </div>
 
               {isVendorBlockedQueueError ? (
                 <SectionErrorRetry
-                  title="Vendor-blocked queue page unavailable"
-                  description={vendorBlockedQueueError ?? 'The paginated operations queue could not be loaded.'}
+                  title="Vendor-blocked allocations unavailable"
+                  description={vendorBlockedQueueError ?? 'The paginated vendor-blocked allocation table could not be loaded.'}
                   onRetry={() => void refetchVendorBlockedQueue()}
                 />
               ) : isVendorBlockedQueueLoading || isVendorBlockedQueueFetching ? (
                 <SectionSkeleton
-                  title="Loading vendor-blocked queue page"
-                  description="Fetching the next paginated operations queue page."
+                  title="Loading vendor-blocked allocations"
+                  description="Fetching vendor-blocked allocations with server-side pagination."
                 />
-              ) : displayedVendorBlockedQueueItems.length ? (
+              ) : paginatedQueueItems.length ? (
                 <OperationalTable
                   columns={['Severity', 'Reference', 'Vendor', 'Status', 'Age', 'Action']}
-                  className="vendor-blocked-full-table"
+                  className="vendor-blocked-attention-table"
                 >
-                  {displayedVendorBlockedQueueItems.map((item) => {
+                  {paginatedQueueItems.map((item) => {
                     const adminOrderPath = getQueueAdminOrderPath(item);
 
                     return (
@@ -737,12 +597,64 @@ export function AdminOperationsQueuePage() {
                 </OperationalTable>
               ) : (
                 <EmptyStatePanel
-                  title="No vendor-blocked allocations match this page"
-                  description="Use pagination to continue through Vendor Blocked results, or clear this page search."
+                  title="No vendor-blocked allocations"
+                  description="No active vendor-blocked allocation rows need operator attention."
                 />
               )}
             </article>
-          ) : null}
+
+            {displaySections.map((section) => {
+              const sectionItems = safeArray(section.items);
+              const visibleCount = sectionItems.length;
+              const hasHiddenPreviewItems = visibleCount < section.count;
+
+              return (
+                <article key={section.key} className="attention-card">
+                  <div className="attention-card-heading">
+                    <div>
+                      <p className="eyebrow">{formatType(section.key)}</p>
+                      <h3>{section.title}</h3>
+                      <span>
+                        {getPreviewLabel(visibleCount, section.count)} · {section.critical} critical · {section.warning} warning
+                      </span>
+                    </div>
+                  </div>
+                  {hasHiddenPreviewItems ? (
+                    <div className="attention-preview-note">
+                      <span>
+                        Showing {visibleCount} of {section.count}. This section is a preview.
+                      </span>
+                    </div>
+                  ) : null}
+                  <div
+                    className="attention-mini-list"
+                  >
+                    {sectionItems.length ? (
+                      sectionItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`attention-mini-row${item.type === 'vendor_blocked' ? ' vendor-blocked-mini-row' : ''}`}
+                        >
+                          <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
+                          <div>
+                            <strong>{item.title}</strong>
+                            <small>
+                              {item.objectReference} · {item.vendorName} · {formatAge(item.ageHours)}
+                            </small>
+                            <span>Status: {safeStatusLabel(item.status)}</span>
+                            {attentionLink(item, getActionLabel(item))}
+                          </div>
+                          <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="page-description">No current items.</p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </main>
 
         <aside className="attention-side-column">

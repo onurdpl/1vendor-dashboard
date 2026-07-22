@@ -390,7 +390,7 @@ function buildSupportAttentionPage(
   return {
     generatedAt: '2026-05-17T10:00:00.000Z',
     total,
-    limit: 20,
+    limit: 10,
     offset,
     sort: 'updatedAt_asc_id_asc',
     items,
@@ -431,6 +431,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     attentionMock.mockReset();
     queueDashboardMock.mockReset();
     supportAttentionMock.mockReset();
+    queueDashboardMock.mockResolvedValue(buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]));
     supportAttentionMock.mockResolvedValue(buildSupportAttentionPage([buildSupportAttentionTicket()]));
   });
 
@@ -450,13 +451,12 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Reason: OUT_OF_STOCK/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Open order').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
-    expect(screen.getByText('Showing 1 of 1 active · 0 critical · 1 warning')).toBeInTheDocument();
+    expect(await screen.findByText('Vendor Blocked rows 1-1 of 1')).toBeInTheDocument();
     expect(screen.getByText('Critical support')).toBeInTheDocument();
     expect(screen.queryByText('Overdue support')).not.toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
@@ -484,15 +484,42 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     expect(await screen.findByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
     expect(await screen.findByText('Table support ticket')).toBeInTheDocument();
-    expect(screen.getByText('Authoritative unresolved support tickets · 1-20 of 21')).toBeInTheDocument();
-    expect(screen.getByText('Support rows 1-20 of 21')).toBeInTheDocument();
+    expect(screen.getByText('Authoritative unresolved support tickets · 1-10 of 21')).toBeInTheDocument();
+    expect(screen.getByText('Support rows 1-10 of 21')).toBeInTheDocument();
     expect(screen.getByText('SLA / Waiting')).toBeInTheDocument();
     expect(screen.queryByText('Showing 1 of 1 active · 1 critical · 0 warning')).not.toBeInTheDocument();
     expect(screen.queryByText('Showing 1 of 1. This section is a preview.')).not.toBeInTheDocument();
     expect(screen.getAllByText('High-priority support ticket').length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Open ticket' }).some((link) => link.getAttribute('href') === '/admin/support/ticket-table-1')).toBe(true);
     expect(document.querySelector('.support-attention-table')).not.toBeNull();
-    expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 20, offset: 0 }));
+    expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0 }));
+  });
+
+  it('stacks operational sections in the main column while preserving right sidebar cards', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(await screen.findByText('Support rows 1-1 of 1')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    expect(await screen.findByText('Vendor Blocked rows 1-1 of 1')).toBeInTheDocument();
+
+    const operationalStack = document.querySelector('.attention-sections-stack');
+    expect(operationalStack).not.toBeNull();
+    expect(document.querySelector('.attention-sections-grid')).toBeNull();
+    expect(within(operationalStack as HTMLElement).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
+      'Support attention',
+      'Vendor Blocked Allocations',
+      'Shipment attention',
+      'Return backlog',
+      'Finance review',
+    ]);
+
+    const sidebar = document.querySelector('.attention-side-column');
+    expect(sidebar).not.toBeNull();
+    expect(within(sidebar as HTMLElement).getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).getByRole('heading', { name: 'Recent projected activity' })).toBeInTheDocument();
   });
 
   it('pages Support attention with server offsets and keeps resolved tickets out of the table', async () => {
@@ -520,15 +547,15 @@ describe('AdminOperationsQueuePage attention center', () => {
 
       return buildSupportAttentionPage([
         buildSupportAttentionTicket({
-          id: 'ticket-page-21',
-          ticketReference: 'ticket-page-21',
+          id: 'ticket-page-11',
+          ticketReference: 'ticket-page-11',
           subject: 'Second page support ticket',
           status: 'WAITING_FOR_VENDOR',
           priority: 'normal',
           severity: 'warning',
-          destinationPath: '/admin/support/ticket-page-21',
+          destinationPath: '/admin/support/ticket-page-11',
         }),
-      ], 21, 20);
+      ], 21, 10);
     });
 
     renderPage();
@@ -542,9 +569,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     fireEvent.click(within(supportList as HTMLElement).getByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText('Second page support ticket')).toBeInTheDocument();
-    expect(screen.getByText('Support rows 21-21 of 21')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open ticket' })).toHaveAttribute('href', '/admin/support/ticket-page-21');
-    expect(supportAttentionMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 20, offset: 20 }));
+    expect(screen.getByText('Support rows 11-20 of 21')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open ticket' })).toHaveAttribute('href', '/admin/support/ticket-page-11');
+    expect(supportAttentionMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10 }));
   });
 
   it('renders split child vendor-blocked items with split-aware copy', async () => {
@@ -618,99 +645,86 @@ describe('AdminOperationsQueuePage attention center', () => {
       recentActivity: [],
     };
     attentionMock.mockResolvedValueOnce(splitDashboard);
+    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard([
+      {
+        ...buildVendorBlockedQueueItem('#1091', 0),
+        title: 'Split allocation awaiting admin resolution',
+        splitChildAllocation: true,
+      },
+    ]));
 
     renderPage();
 
     expect(await screen.findAllByText('Split allocation awaiting admin resolution')).toHaveLength(2);
     expect(screen.getAllByText(/Vendor rejected selected line items/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Reason: OUT_OF_STOCK').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Reassignment required').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Split allocation').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Reason: OUT_OF_STOCK/).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
   });
 
-  it('discloses that Vendor Blocked cards are a five-item preview when six active allocations exist', async () => {
-    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1201', '#1202', '#1203', '#1204', '#1205', '#1206']));
-    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard(['#1201', '#1202', '#1203', '#1204', '#1205'].map(buildVendorBlockedQueueItem), 6));
+  it('renders Vendor Blocked as a 10-row server-paginated table without preview controls', async () => {
+    const orderNumbers = Array.from({ length: 12 }, (_unused, index) => `#12${String(index + 1).padStart(2, '0')}`);
+    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(orderNumbers));
+    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12));
 
     renderPage();
 
-    expect(await screen.findByText('Showing 5 of 6 active · 0 critical · 6 warning')).toBeInTheDocument();
-    expect(screen.getByText('Showing 5 of 6. This section is a preview.')).toBeInTheDocument();
-
-    const preview = screen.getByLabelText('Vendor Blocked Allocations preview');
-    expect(within(preview).getAllByText(/Vendor rejected allocation #120/)).toHaveLength(5);
-    expect(within(preview).queryByText('Order #1206')).not.toBeInTheDocument();
-    expect(screen.getByText('Order #1206')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'View all vendor-blocked allocations' }));
-
-    expect(await screen.findByRole('heading', { name: 'Vendor-blocked allocations in queue pages' })).toBeInTheDocument();
-    expect(screen.getByText('Read-only paginated Vendor Blocked results from the Operations queue.')).toBeInTheDocument();
-    expect(screen.queryByText('Filter current page')).not.toBeInTheDocument();
-    expect(screen.queryByText('No vendor-blocked allocations on this queue page')).not.toBeInTheDocument();
+    const vendorBlockedList = await screen.findByRole('heading', { name: 'Vendor Blocked Allocations' }).then((heading) => heading.closest('article'));
+    expect(vendorBlockedList).not.toBeNull();
     await waitFor(() => {
       expect(
-        screen.getByText(
+        within(vendorBlockedList as HTMLElement).getByText(
           (_content, element) =>
-            element?.tagName.toLowerCase() === 'span' &&
-            element.textContent?.replace(/\s+/g, ' ').trim() === 'Vendor Blocked rows 1-5 of 6',
+            element?.textContent?.replace(/\s+/g, ' ').trim() ===
+            'Authoritative vendor-blocked allocations · 1-10 of 12',
         ),
       ).toBeInTheDocument();
     });
-    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 5, offset: 0, type: 'vendor_blocked' }));
+    expect(within(vendorBlockedList as HTMLElement).getByText('Vendor Blocked rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getAllByRole('row')).toHaveLength(11);
+    expect(within(vendorBlockedList as HTMLElement).getByText('Order #1201')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getByText('Order #1210')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).queryByText('Order #1211')).not.toBeInTheDocument();
+    expect(document.querySelector('.vendor-blocked-attention-table')).not.toBeNull();
+    expect(screen.queryByLabelText('Vendor Blocked Allocations preview')).not.toBeInTheDocument();
+    expect(screen.queryByText('Showing 5 of 12. This section is a preview.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View all vendor-blocked allocations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vendor-blocked allocations in queue pages' })).not.toBeInTheDocument();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0, type: 'vendor_blocked' }));
   });
 
-  it('keeps a #1109-like active vendor-blocked allocation discoverable from the returned unified queue when it is outside the preview', async () => {
-    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(['#1104', '#1105', '#1106', '#1107', '#1108', '#1109']));
+  it('pages Vendor Blocked independently so a #1109-like active allocation remains discoverable outside the first table page', async () => {
+    const firstPageOrders = ['#1201', '#1202', '#1203', '#1204', '#1205', '#1206', '#1207', '#1208', '#1209', '#1210'];
+    attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard([...firstPageOrders, '#1109', '#1212']));
     queueDashboardMock.mockImplementation(async (options) => {
       const offset = options?.offset ?? 0;
       if (offset === 0) {
-        return buildQueueDashboard(['#1104', '#1105', '#1106', '#1107', '#1108'].map(buildVendorBlockedQueueItem), 6);
+        return buildQueueDashboard(firstPageOrders.map(buildVendorBlockedQueueItem), 12);
       }
 
-      return buildQueueDashboard([buildVendorBlockedQueueItem('#1109', 5)], 6);
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1109', 10), buildVendorBlockedQueueItem('#1212', 11)], 12);
     });
 
     renderPage();
 
-    const preview = await screen.findByLabelText('Vendor Blocked Allocations preview');
-    expect(within(preview).queryByText('Order #1109')).not.toBeInTheDocument();
-    expect(screen.getByText('Order #1109')).toBeInTheDocument();
-    expect(screen.getByText('Showing 5 of 6 active · 0 critical · 6 warning')).toBeInTheDocument();
+    const vendorBlockedList = await screen.findByRole('heading', { name: 'Vendor Blocked Allocations' }).then((heading) => heading.closest('article'));
+    expect(vendorBlockedList).not.toBeNull();
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Vendor Blocked rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).queryByText('Order #1109')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'View all vendor-blocked allocations' }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          (_content, element) =>
-            element?.tagName.toLowerCase() === 'span' &&
-            element.textContent?.replace(/\s+/g, ' ').trim() === 'Vendor Blocked rows 1-5 of 6',
-        ),
-      ).toBeInTheDocument();
-    });
-    expect(screen.queryAllByText('Order #1109')).toHaveLength(1);
-
-    const openedVendorBlockedList = screen.getByRole('heading', { name: 'Vendor-blocked allocations in queue pages' }).closest('article');
-    expect(openedVendorBlockedList).not.toBeNull();
-
-    fireEvent.click(within(openedVendorBlockedList as HTMLElement).getByRole('button', { name: 'Next' }));
+    fireEvent.click(within(vendorBlockedList as HTMLElement).getByRole('button', { name: 'Next' }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(
+        within(vendorBlockedList as HTMLElement).getByText(
           (_content, element) =>
             element?.tagName.toLowerCase() === 'span' &&
-            element.textContent?.replace(/\s+/g, ' ').trim() === 'Vendor Blocked rows 6-6 of 6',
+            element.textContent?.replace(/\s+/g, ' ').trim() === 'Vendor Blocked rows 11-12 of 12',
         ),
       ).toBeInTheDocument();
     });
-    const fullList = screen.getByRole('heading', { name: 'Vendor-blocked allocations in queue pages' }).closest('article');
-    expect(fullList).not.toBeNull();
-    expect(await within(fullList as HTMLElement).findByText('Order #1109')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000005')).toBe(true);
-    expect(queueDashboardMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 5, offset: 5, type: 'vendor_blocked' }));
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Order #1109')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000010')).toBe(true);
+    expect(queueDashboardMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10, type: 'vendor_blocked' }));
   });
 
   it('discloses capped non-vendor sections without implying complete inventory', async () => {
@@ -762,13 +776,13 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Order #1091')).toBeInTheDocument();
+    expect((await screen.findAllByText('Order #1091')).length).toBeGreaterThan(0);
     attentionMock.mockRejectedValueOnce(new Error('Backend temporarily unavailable'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     expect(await screen.findByText(/Could not refresh/i)).toBeInTheDocument();
-    expect(screen.getByText('Order #1091')).toBeInTheDocument();
+    expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });
