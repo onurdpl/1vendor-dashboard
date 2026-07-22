@@ -1556,6 +1556,38 @@ export type SupportTicket = {
   replies?: SupportTicketReply[];
 };
 
+export type SupportAttentionSeverity = 'info' | 'warning' | 'critical';
+
+export type SupportAttentionTicket = {
+  id: string;
+  ticketReference: string;
+  subject: string;
+  status: SupportTicketStatus;
+  priority: SupportTicketPriority;
+  category: SupportTicketCategory;
+  vendorId: VendorId | string;
+  vendorName: string | null;
+  relatedOrderReference: string | null;
+  contextType: SupportTicketContextType;
+  contextId: string | null;
+  sla: SupportTicketSla;
+  severity: SupportAttentionSeverity;
+  createdAt: string;
+  updatedAt: string;
+  waitingSince: string;
+  ageHours: number;
+  destinationPath: string;
+};
+
+export type SupportAttentionTicketsPage = {
+  generatedAt: string;
+  total: number;
+  limit: number;
+  offset: number;
+  sort: 'updatedAt_asc_id_asc';
+  items: SupportAttentionTicket[];
+};
+
 export type SupportAnalyticsKpis = {
   openTickets: number;
   overdueTickets: number;

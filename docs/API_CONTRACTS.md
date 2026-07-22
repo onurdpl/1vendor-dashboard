@@ -177,7 +177,33 @@ Webhook processing lifecycle states:
   - Recommendations and vendor risk rows are preview summaries, not exhaustive inventories.
   - `recentActivity` is projected operational activity, not an immutable audit history.
 - Vendor Blocked preview limitation: the attention projection is derived from a capped Operations queue projection; the full-list panel should use `GET /admin/operations?type=vendor_blocked` for filtered pagination and total counts.
+- Support section full-list behavior: the standalone Support attention table must use `GET /admin/support/tickets?attention=true` for authoritative unresolved-ticket pagination. Support rows may still appear in this projection for the unified queue and summary cards, but projection counts must not be treated as the standalone Support table total.
 - Count semantics: dashboard summary and section counts are generated attention rows and are not guaranteed to be unique business incidents.
+
+### GET /admin/support/tickets
+
+- Purpose: return admin support tickets. Without `attention=true`, the route preserves the existing Support workspace list behavior and returns a `SupportTicket[]`.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; authenticated vendor users receive `403`.
+- Optional attention mode:
+  - `attention=true`: returns the authoritative Operations Support attention page instead of the legacy array response.
+  - Supported pagination parameters in attention mode: `limit`, `offset`.
+  - Unsupported `attention` values return `400`.
+- Attention response shape: `{ generatedAt, total, limit, offset, sort, items }`.
+- Attention qualification semantics: unresolved support ticket statuses only: `OPEN`, `IN_REVIEW`, `WAITING_FOR_VENDOR`.
+- SLA and severity semantics: each returned row includes canonical Support SLA state derived by the Support module. Severity is `critical` when the SLA is overdue or the ticket priority is `high`; `warning` when the ticket is at least 24h old or still `OPEN`; otherwise `info`.
+- Filtering/count/pagination order in attention mode:
+  1. filter unresolved SupportTicket rows in the database;
+  2. calculate `total` from that same unresolved population;
+  3. sort deterministically by `updatedAt asc`, then `id asc`;
+  4. apply `offset`;
+  5. apply `limit`.
+- Total semantics: `total` is the complete matching unresolved support-ticket count, not the current page count, all support tickets, or a projection cap.
+- Sort order: `updatedAt_asc_id_asc`, oldest waiting ticket first with stable id tie-breaker.
+- Page-size limits: `limit` and `offset` use the repository pagination resolver. The default attention page size is 20 at the Operations UI call site, and the backend resolver caps `limit` at the repository maximum.
+- Action route: each attention item includes `destinationPath: /admin/support/:ticketId`.
+- Backward compatibility: existing admin Support workspace calls without `attention=true` continue to use the existing array response.
+- Projection distinction: `/admin/operations/attention` can still include Support preview/projection rows for unified queue and summary context; `GET /admin/support/tickets?attention=true` is the authoritative standalone Support full-list source.
 
 ### GET /admin/diagnostics/webhooks
 

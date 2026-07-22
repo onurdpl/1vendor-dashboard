@@ -19,6 +19,9 @@ export type SupportTicketFilters = {
   priority?: unknown;
   unresolvedOnly?: unknown;
   search?: unknown;
+  attention?: unknown;
+  limit?: unknown;
+  offset?: unknown;
 };
 
 export type UpdateSupportTicketStatusInput = {
@@ -105,6 +108,38 @@ export type SupportTicketDto = {
   closedAt: string | null;
   notes?: SupportTicketNoteDto[];
   replies?: SupportTicketReplyDto[];
+};
+
+export type SupportAttentionSeverityDto = 'info' | 'warning' | 'critical';
+
+export type SupportAttentionTicketDto = {
+  id: string;
+  ticketReference: string;
+  subject: string;
+  status: SupportTicketStatus;
+  priority: SupportTicketPriority;
+  category: SupportTicketCategory;
+  vendorId: string;
+  vendorName: string | null;
+  relatedOrderReference: string | null;
+  contextType: SupportTicketContextType;
+  contextId: string | null;
+  sla: SupportTicketSlaDto;
+  severity: SupportAttentionSeverityDto;
+  createdAt: string;
+  updatedAt: string;
+  waitingSince: string;
+  ageHours: number;
+  destinationPath: string;
+};
+
+export type SupportAttentionTicketsPageDto = {
+  generatedAt: string;
+  total: number;
+  limit: number;
+  offset: number;
+  sort: 'updatedAt_asc_id_asc';
+  items: SupportAttentionTicketDto[];
 };
 
 export type SupportAnalyticsKpisDto = {

@@ -9,6 +9,7 @@ export {
   getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
+  listAdminSupportAttentionTickets,
   listAdminSupportTickets,
   listVendorSupportTickets,
   unassignAdminSupportTicket,
@@ -17,6 +18,8 @@ export {
 export type {
   CreateSupportTicketInput,
   SupportAnalytics,
+  SupportAttentionTicket,
+  SupportAttentionTicketsPage,
   SupportAnalyticsCategoryInsight,
   SupportTicket,
   SupportTicketCategory,

@@ -26,7 +26,7 @@ import type {
 import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
 import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
-import { deriveSupportSlaState } from '../support/support.service.js';
+import { deriveSupportAttentionSeverity, deriveSupportSlaState } from '../support/support.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 import {
@@ -1238,11 +1238,11 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
   for (const ticket of supportTickets) {
     const sla = deriveSupportSlaState(ticket, now);
     const ageHours = hoursSince(ticket.updatedAt, now);
-    const severity = deriveOperationalSeverity({
+    const severity = deriveSupportAttentionSeverity({
       ageHours,
-      overdue: sla.isOverdue,
       priority: ticket.priority,
       status: ticket.status,
+      sla,
     });
     const needsResponse = ticket.adminUnreadCount > 0 || (ticket.status === 'OPEN' && !ticket.assigneeName);
     attentionItems.push({

@@ -1,5 +1,12 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketNote, SupportTicketStatus } from './contracts';
+import type {
+  CreateSupportTicketInput,
+  SupportAnalytics,
+  SupportAttentionTicketsPage,
+  SupportTicket,
+  SupportTicketNote,
+  SupportTicketStatus,
+} from './contracts';
 
 export async function createSupportTicket(
   input: CreateSupportTicketInput,
@@ -17,6 +24,18 @@ export async function createAdminVendorSupportTicket(
 
 export async function listAdminSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
   return runtimeServices.support.listAdmin({ signal: options.signal });
+}
+
+export async function listAdminSupportAttentionTickets(options: {
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+} = {}): Promise<SupportAttentionTicketsPage> {
+  return runtimeServices.support.listAdminAttention({
+    limit: options.limit,
+    offset: options.offset,
+    signal: options.signal,
+  });
 }
 
 export async function getAdminSupportAnalytics(options: { signal?: AbortSignal } = {}): Promise<SupportAnalytics> {

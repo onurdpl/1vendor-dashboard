@@ -42,6 +42,7 @@ import type {
   OperationsQueueItem,
   OperationsQueueTypeFilter,
   SupportAnalytics,
+  SupportAttentionTicketsPage,
   SupportTicket,
   SupportTicketCategory,
   SupportTicketContextSummary,
@@ -3032,6 +3033,72 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realSupport.listAdminSupportTickets({ signal: options.signal, headers: options.headers })
         : Promise.resolve(mockSupportTickets),
+    listAdminAttention: (options: ReadRequestOptions = {}): Promise<SupportAttentionTicketsPage> => {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.listAdminSupportAttentionTickets({
+          signal: options.signal,
+          headers: options.headers,
+          limit: options.limit,
+          offset: options.offset,
+        });
+      }
+
+      const now = new Date();
+      const limit = options.limit ?? 20;
+      const offset = options.offset ?? 0;
+      const unresolvedStatuses = new Set<SupportTicketStatus>(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+      const tickets = mockSupportTickets
+        .filter((ticket) => unresolvedStatuses.has(ticket.status))
+        .sort((left, right) => {
+          const updatedDelta = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
+          return updatedDelta || left.id.localeCompare(right.id);
+        });
+      const page = tickets.slice(offset, offset + limit);
+
+      return Promise.resolve({
+        generatedAt: now.toISOString(),
+        total: tickets.length,
+        limit,
+        offset,
+        sort: 'updatedAt_asc_id_asc',
+        items: page.map((ticket) => {
+          const ageHours = Math.max(0, Math.round(((now.getTime() - new Date(ticket.updatedAt).getTime()) / 36e5) * 10) / 10);
+          const sla = ticket.sla ?? {
+            isOverdue: false,
+            dueLabel: 'No active SLA',
+            escalationLevel: 'none' as const,
+            dueAt: null,
+            overdueByHours: null,
+          };
+          const severity = sla.isOverdue || ticket.priority === 'high'
+            ? 'critical'
+            : ageHours >= 24 || ticket.status === 'OPEN'
+              ? 'warning'
+              : 'info';
+
+          return {
+            id: ticket.id,
+            ticketReference: ticket.id,
+            subject: ticket.subject,
+            status: ticket.status,
+            priority: ticket.priority,
+            category: ticket.category,
+            vendorId: ticket.vendorId,
+            vendorName: ticket.vendorName,
+            relatedOrderReference: ticket.contextSummary?.orderNumber ?? (ticket.contextType === 'order' ? ticket.contextId : null),
+            contextType: ticket.contextType,
+            contextId: ticket.contextId,
+            sla,
+            severity,
+            createdAt: ticket.createdAt,
+            updatedAt: ticket.updatedAt,
+            waitingSince: ticket.updatedAt,
+            ageHours,
+            destinationPath: `/admin/support/${ticket.id}`,
+          };
+        }),
+      });
+    },
     analytics: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realSupport.getAdminSupportAnalytics({ signal: options.signal })

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn((queries: Array<Promise<unknown>>) => Promise.all(queries)),
   supportTicket: {
+    count: vi.fn(),
     create: vi.fn(),
     findMany: vi.fn(),
     findFirst: vi.fn(),
@@ -39,9 +41,11 @@ const {
   assignSupportTicketToSelf,
   createSupportTicket,
   deriveSupportSlaState,
+  deriveSupportAttentionSeverity,
   getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
+  listAdminSupportAttentionTickets,
   listAdminSupportTickets,
   listVendorSupportTickets,
   sanitizeSupportContextSnapshot,
@@ -102,6 +106,7 @@ function ticketRecord(overrides: Record<string, unknown> = {}) {
 describe('support tickets', () => {
   beforeEach(() => {
     prismaMock.supportTicket.create.mockReset();
+    prismaMock.supportTicket.count.mockReset();
     prismaMock.supportTicket.findMany.mockReset();
     prismaMock.supportTicket.findFirst.mockReset();
     prismaMock.supportTicket.findUnique.mockReset();
@@ -109,6 +114,8 @@ describe('support tickets', () => {
     prismaMock.supportTicket.updateMany.mockReset();
     prismaMock.supportTicketNote.create.mockReset();
     prismaMock.supportTicketReply.create.mockReset();
+    prismaMock.$transaction.mockReset();
+    prismaMock.$transaction.mockImplementation((queries: Array<Promise<unknown>>) => Promise.all(queries));
     prismaMock.vendorAllocation.findFirst.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
@@ -227,6 +234,107 @@ describe('support tickets', () => {
     const result = await listAdminSupportTickets({ unresolvedOnly: 'true', category: 'RETURN', search: 'return' });
 
     expect(result.map((ticket) => ticket.id)).toEqual(['ticket-open']);
+  });
+
+  it('lists support attention tickets with database filtering before pagination and authoritative total', async () => {
+    const now = new Date('2026-05-17T12:00:00Z');
+    prismaMock.supportTicket.count.mockResolvedValueOnce(23);
+    prismaMock.supportTicket.findMany.mockResolvedValueOnce([
+      ticketRecord({
+        id: 'ticket-oldest-open',
+        status: 'OPEN',
+        priority: 'normal',
+        updatedAt: new Date('2026-05-16T08:00:00Z'),
+        firstResponseDueAt: new Date('2026-05-17T08:00:00Z'),
+        contextType: 'order',
+        contextId: 'order-1',
+        contextSnapshot: { orderNumber: '#1001' },
+      }),
+      ticketRecord({
+        id: 'ticket-high',
+        status: 'IN_REVIEW',
+        priority: 'high',
+        updatedAt: new Date('2026-05-16T09:00:00Z'),
+        firstResponseDueAt: new Date('2026-05-18T08:00:00Z'),
+        vendorId: 'vendor-b',
+        vendor: { name: 'Vendor B' },
+      }),
+    ]);
+
+    const result = await listAdminSupportAttentionTickets({ limit: 2, offset: 20 }, now);
+
+    expect(result.total).toBe(23);
+    expect(result.limit).toBe(2);
+    expect(result.offset).toBe(20);
+    expect(result.sort).toBe('updatedAt_asc_id_asc');
+    expect(result.items.map((ticket) => ticket.id)).toEqual(['ticket-oldest-open', 'ticket-high']);
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      relatedOrderReference: '#1001',
+      severity: 'critical',
+      destinationPath: '/admin/support/ticket-oldest-open',
+    }));
+    expect(result.items[1]).toEqual(expect.objectContaining({
+      vendorId: 'vendor-b',
+      severity: 'critical',
+      status: 'IN_REVIEW',
+    }));
+    expect(prismaMock.supportTicket.count).toHaveBeenCalledWith({
+      where: {
+        status: {
+          in: ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'],
+        },
+      },
+    });
+    expect(prismaMock.supportTicket.findMany).toHaveBeenCalledWith({
+      where: {
+        status: {
+          in: ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'],
+        },
+      },
+      include: {
+        vendor: {
+          select: { name: true },
+        },
+      },
+      orderBy: [
+        { updatedAt: 'asc' },
+        { id: 'asc' },
+      ],
+      skip: 20,
+      take: 2,
+    });
+  });
+
+  it('derives support attention severity from the canonical SLA helper inputs', () => {
+    const overdue = deriveSupportSlaState({
+      status: 'OPEN',
+      firstResponseDueAt: new Date('2026-05-17T08:00:00Z'),
+      nextResponseDueAt: null,
+    }, new Date('2026-05-17T12:00:00Z'));
+    const active = deriveSupportSlaState({
+      status: 'IN_REVIEW',
+      firstResponseDueAt: new Date('2026-05-18T08:00:00Z'),
+      nextResponseDueAt: null,
+    }, new Date('2026-05-17T12:00:00Z'));
+
+    expect(deriveSupportAttentionSeverity({
+      ageHours: 1,
+      priority: 'normal',
+      status: 'OPEN',
+      sla: overdue,
+    })).toBe('critical');
+    expect(deriveSupportAttentionSeverity({
+      ageHours: 2,
+      priority: 'high',
+      status: 'IN_REVIEW',
+      sla: active,
+    })).toBe('critical');
+    expect(deriveSupportAttentionSeverity({
+      ageHours: 25,
+      priority: 'normal',
+      status: 'WAITING_FOR_VENDOR',
+      sla: active,
+    })).toBe('warning');
   });
 
   it('updates lifecycle status and resolution timestamps', async () => {

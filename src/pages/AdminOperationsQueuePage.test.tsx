@@ -8,18 +8,24 @@ import type {
   OperationsQueueDashboard,
   OperationsQueueItem,
   OperationsQueueTypeFilter,
+  SupportAttentionTicket,
+  SupportAttentionTicketsPage,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminOperationsQueuePage } from './AdminOperationsQueuePage';
 
 const attentionMock = vi.fn<() => Promise<OperationsAttentionDashboard>>();
 const queueDashboardMock = vi.fn<(options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) => Promise<OperationsQueueDashboard>>();
+const supportAttentionMock = vi.fn<(options?: { limit?: number; offset?: number }) => Promise<SupportAttentionTicketsPage>>();
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     operations: {
       attention: () => attentionMock(),
       dashboard: (options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) => queueDashboardMock(options),
+    },
+    support: {
+      listAdminAttention: (options?: { limit?: number; offset?: number }) => supportAttentionMock(options),
     },
   },
 }));
@@ -346,6 +352,51 @@ function buildQueueDashboard(items: OperationsQueueItem[], total = items.length)
   };
 }
 
+function buildSupportAttentionTicket(overrides: Partial<SupportAttentionTicket> = {}): SupportAttentionTicket {
+  return {
+    id: 'ticket-1',
+    ticketReference: 'ticket-1',
+    subject: 'High-priority support ticket',
+    status: 'OPEN',
+    priority: 'high',
+    category: 'ORDER',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderReference: '#1029',
+    contextType: 'order',
+    contextId: '1029',
+    sla: {
+      isOverdue: true,
+      dueLabel: 'Overdue by 6h',
+      escalationLevel: 'overdue',
+      dueAt: '2026-05-17T02:00:00.000Z',
+      overdueByHours: 6,
+    },
+    severity: 'critical',
+    createdAt: '2026-05-16T08:00:00.000Z',
+    updatedAt: '2026-05-17T08:00:00.000Z',
+    waitingSince: '2026-05-17T08:00:00.000Z',
+    ageHours: 30,
+    destinationPath: '/admin/support/ticket-1',
+    ...overrides,
+  };
+}
+
+function buildSupportAttentionPage(
+  items: SupportAttentionTicket[],
+  total = items.length,
+  offset = 0,
+): SupportAttentionTicketsPage {
+  return {
+    generatedAt: '2026-05-17T10:00:00.000Z',
+    total,
+    limit: 20,
+    offset,
+    sort: 'updatedAt_asc_id_asc',
+    items,
+  };
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -379,6 +430,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     });
     attentionMock.mockReset();
     queueDashboardMock.mockReset();
+    supportAttentionMock.mockReset();
+    supportAttentionMock.mockResolvedValue(buildSupportAttentionPage([buildSupportAttentionTicket()]));
   });
 
   afterEach(() => {
@@ -414,6 +467,84 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
     expect(screen.getByRole('heading', { name: 'Recent projected activity' })).toBeInTheDocument();
     expect(screen.getByText('Latest projected activity rows, not a full audit history.')).toBeInTheDocument();
+  });
+
+  it('renders Support attention as a server-paginated table while preserving unified queue support rows', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    supportAttentionMock.mockResolvedValueOnce(buildSupportAttentionPage([
+      buildSupportAttentionTicket({
+        id: 'ticket-table-1',
+        ticketReference: 'ticket-table-1',
+        subject: 'Table support ticket',
+        destinationPath: '/admin/support/ticket-table-1',
+      }),
+    ], 21));
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(await screen.findByText('Table support ticket')).toBeInTheDocument();
+    expect(screen.getByText('Authoritative unresolved support tickets · 1-20 of 21')).toBeInTheDocument();
+    expect(screen.getByText('Support rows 1-20 of 21')).toBeInTheDocument();
+    expect(screen.getByText('SLA / Waiting')).toBeInTheDocument();
+    expect(screen.queryByText('Showing 1 of 1 active · 1 critical · 0 warning')).not.toBeInTheDocument();
+    expect(screen.queryByText('Showing 1 of 1. This section is a preview.')).not.toBeInTheDocument();
+    expect(screen.getAllByText('High-priority support ticket').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: 'Open ticket' }).some((link) => link.getAttribute('href') === '/admin/support/ticket-table-1')).toBe(true);
+    expect(document.querySelector('.support-attention-table')).not.toBeNull();
+    expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 20, offset: 0 }));
+  });
+
+  it('pages Support attention with server offsets and keeps resolved tickets out of the table', async () => {
+    attentionMock.mockResolvedValueOnce({
+      ...dashboard,
+      queue: [],
+      sections: [],
+      recommendations: [],
+      vendorRisks: [],
+      recentActivity: [],
+    });
+    supportAttentionMock.mockImplementation(async (options) => {
+      const offset = options?.offset ?? 0;
+      if (offset === 0) {
+        return buildSupportAttentionPage([
+          buildSupportAttentionTicket({
+            id: 'ticket-page-1',
+            ticketReference: 'ticket-page-1',
+            subject: 'First page support ticket',
+            status: 'OPEN',
+            destinationPath: '/admin/support/ticket-page-1',
+          }),
+        ], 21, 0);
+      }
+
+      return buildSupportAttentionPage([
+        buildSupportAttentionTicket({
+          id: 'ticket-page-21',
+          ticketReference: 'ticket-page-21',
+          subject: 'Second page support ticket',
+          status: 'WAITING_FOR_VENDOR',
+          priority: 'normal',
+          severity: 'warning',
+          destinationPath: '/admin/support/ticket-page-21',
+        }),
+      ], 21, 20);
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('First page support ticket')).toBeInTheDocument();
+    expect(screen.queryByText('Resolved support ticket')).not.toBeInTheDocument();
+
+    const supportList = screen.getByRole('heading', { name: 'Support attention' }).closest('article');
+    expect(supportList).not.toBeNull();
+
+    fireEvent.click(within(supportList as HTMLElement).getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Second page support ticket')).toBeInTheDocument();
+    expect(screen.getByText('Support rows 21-21 of 21')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open ticket' })).toHaveAttribute('href', '/admin/support/ticket-page-21');
+    expect(supportAttentionMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 20, offset: 20 }));
   });
 
   it('renders split child vendor-blocked items with split-aware copy', async () => {
@@ -561,7 +692,10 @@ describe('AdminOperationsQueuePage attention center', () => {
     });
     expect(screen.queryAllByText('Order #1109')).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const openedVendorBlockedList = screen.getByRole('heading', { name: 'Vendor-blocked allocations in queue pages' }).closest('article');
+    expect(openedVendorBlockedList).not.toBeNull();
+
+    fireEvent.click(within(openedVendorBlockedList as HTMLElement).getByRole('button', { name: 'Next' }));
 
     await waitFor(() => {
       expect(
@@ -584,27 +718,27 @@ describe('AdminOperationsQueuePage attention center', () => {
       ...dashboard,
       sections: [
         {
-          key: 'support',
-          title: 'Support attention',
+          key: 'shipment',
+          title: 'Shipment attention',
           count: 3,
           critical: 2,
           warning: 1,
           items: [
             {
-              id: 'support-current-page',
-              type: 'support',
+              id: 'shipment-current-page',
+              type: 'shipment',
               severity: 'critical',
               vendorId: 'sporjinal',
               vendorName: 'Sporjinal',
-              objectType: 'Support ticket',
+              objectType: 'Shipment',
               objectReference: 'Order #1301',
-              objectId: 'ticket-1301',
-              status: 'OPEN',
+              objectId: 'shipment-1301',
+              status: 'failed',
               ageHours: 2,
-              title: 'High-priority support ticket',
-              description: 'Priority: high',
-              recommendedAction: 'Assign and respond',
-              destinationPath: '/admin/support/ticket-1301',
+              title: 'Shipment execution failed',
+              description: 'Carrier identifiers were not assigned.',
+              recommendedAction: 'Review shipment status',
+              destinationPath: '/orders/alloc-1301',
               createdAt: '2026-05-17T08:00:00.000Z',
             },
           ],

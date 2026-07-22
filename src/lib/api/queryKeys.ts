@@ -41,6 +41,7 @@ export const queryKeys = {
     },
     support: {
       tickets: () => ['admin', 'support', 'tickets'] as const,
+      attentionTickets: (limit: number, offset: number) => ['admin', 'support', 'tickets', 'attention', limit, offset] as const,
       analytics: () => ['admin', 'support', 'analytics'] as const,
       detail: (ticketId: string) => ['admin', 'support', 'tickets', ticketId] as const,
     },

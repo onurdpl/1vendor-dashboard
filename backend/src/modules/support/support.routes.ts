@@ -14,6 +14,7 @@ import {
   getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
+  listAdminSupportAttentionTickets,
   listAdminSupportTickets,
   listVendorSupportTickets,
   SupportTicketError,
@@ -28,6 +29,7 @@ import type {
   UpdateSupportTicketStatusInput,
 } from './support.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 function sendSupportError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof SupportTicketError) {
@@ -35,6 +37,16 @@ function sendSupportError(error: unknown, reply: { code: (status: number) => { s
   }
 
   throw error;
+}
+
+function readAdminSupportAttentionMode(value: unknown) {
+  if (value === undefined || value === null || value === false || value === 'false' || value === '0') {
+    return false;
+  }
+  if (value === true || value === 'true' || value === '1') {
+    return true;
+  }
+  throw new SupportTicketError('Unsupported support ticket attention filter.', 400);
 }
 
 export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
@@ -191,7 +203,17 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      return withDashboardRouteTiming('GET /admin/support/tickets', () => listAdminSupportTickets(request.query ?? {}));
+      try {
+        if (readAdminSupportAttentionMode(request.query?.attention)) {
+          return await withDashboardRouteTiming('GET /admin/support/tickets?attention=true', () =>
+            listAdminSupportAttentionTickets(resolvePagination(request.query, { limit: 20, offset: 0 })),
+          );
+        }
+
+        return await withDashboardRouteTiming('GET /admin/support/tickets', () => listAdminSupportTickets(request.query ?? {}));
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
     },
   );
 

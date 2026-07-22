@@ -5,6 +5,7 @@ import { listOrders } from './services/real/orders';
 import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
 import { queryKeys } from './lib/api/queryKeys';
 import { listDashboardReturns, listReturns } from './services/real/returns';
+import { listAdminSupportAttentionTickets, listAdminSupportTickets } from './services/real/support';
 
 const apiClientGet = vi.hoisted(() => vi.fn());
 
@@ -52,6 +53,24 @@ describe('real service pagination plumbing', () => {
   it('keeps filtered and unfiltered operations queue pages in separate query-key buckets', () => {
     expect(queryKeys.admin.operations.queuePage(5, 0)).toEqual(['admin', 'operations', 'queue', 'all', 5, 0]);
     expect(queryKeys.admin.operations.queuePage(5, 0, 'vendor_blocked')).toEqual(['admin', 'operations', 'queue', 'vendor_blocked', 5, 0]);
+  });
+
+  it('passes the support attention filter with limit and offset without changing the unfiltered admin support list', async () => {
+    apiClientGet
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ total: 30, items: [] });
+
+    await listAdminSupportTickets();
+    await listAdminSupportAttentionTickets({ limit: 20, offset: 20 });
+
+    expect(apiClientGet).toHaveBeenNthCalledWith(1, '/admin/support/tickets', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(2, '/admin/support/tickets?attention=true&limit=20&offset=20', expect.any(Object));
+  });
+
+  it('keeps support attention and normal admin support tickets in separate query-key buckets', () => {
+    expect(queryKeys.admin.support.tickets()).toEqual(['admin', 'support', 'tickets']);
+    expect(queryKeys.admin.support.attentionTickets(20, 0)).toEqual(['admin', 'support', 'tickets', 'attention', 20, 0]);
+    expect(queryKeys.admin.support.attentionTickets(20, 20)).toEqual(['admin', 'support', 'tickets', 'attention', 20, 20]);
   });
 
   it('passes limit and offset to dashboard return projection endpoint', async () => {

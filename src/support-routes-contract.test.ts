@@ -8,6 +8,7 @@ const prismaMock = vi.hoisted(() => ({
 }));
 const createSupportTicketMock = vi.hoisted(() => vi.fn());
 const listAdminSupportTicketsMock = vi.hoisted(() => vi.fn());
+const listAdminSupportAttentionTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportAnalyticsMock = vi.hoisted(() => vi.fn());
 const listVendorSupportTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportTicketMock = vi.hoisted(() => vi.fn());
@@ -28,6 +29,7 @@ vi.mock('../backend/src/modules/support/support.service.js', () => ({
   assignSupportTicketToSelf: assignSupportTicketToSelfMock,
   getAdminSupportTicket: getAdminSupportTicketMock,
   getVendorSupportTicket: getVendorSupportTicketMock,
+  listAdminSupportAttentionTickets: listAdminSupportAttentionTicketsMock,
   listAdminSupportTickets: listAdminSupportTicketsMock,
   listVendorSupportTickets: listVendorSupportTicketsMock,
   unassignSupportTicket: unassignSupportTicketMock,
@@ -206,6 +208,61 @@ describe('support route contract', () => {
 
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual([{ id: 'ticket-1' }]);
+  });
+
+  it('lists paginated support attention tickets for admins through the opt-in filter', async () => {
+    listAdminSupportTicketsMock.mockClear();
+    listAdminSupportAttentionTicketsMock.mockClear();
+    listAdminSupportAttentionTicketsMock.mockResolvedValueOnce({ total: 21, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn(),
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const allowed = await gets.get('/admin/support/tickets')?.({
+      authUser: { role: 'admin' },
+      query: { attention: 'true', limit: '20', offset: '20' },
+    }, reply);
+
+    expect(allowed).toEqual({ total: 21, items: [] });
+    expect(listAdminSupportAttentionTicketsMock).toHaveBeenCalledWith({ limit: 20, offset: 20 });
+    expect(listAdminSupportTicketsMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported support attention filter values', async () => {
+    listAdminSupportTicketsMock.mockClear();
+    listAdminSupportAttentionTicketsMock.mockClear();
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn(),
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const response = await gets.get('/admin/support/tickets')?.({
+      authUser: { role: 'admin' },
+      query: { attention: 'queue' },
+    }, reply);
+
+    expect(response).toEqual({ status: 400, body: { message: 'Unsupported support ticket attention filter.' } });
+    expect(listAdminSupportAttentionTicketsMock).not.toHaveBeenCalled();
+    expect(listAdminSupportTicketsMock).not.toHaveBeenCalled();
   });
 
   it('serves support analytics for admins only', async () => {

@@ -1,5 +1,12 @@
 import { apiClient } from '../../lib/api-client';
-import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketNote, SupportTicketStatus } from '../../lib/api/contracts';
+import type {
+  CreateSupportTicketInput,
+  SupportAnalytics,
+  SupportAttentionTicketsPage,
+  SupportTicket,
+  SupportTicketNote,
+  SupportTicketStatus,
+} from '../../lib/api/contracts';
 
 export async function createSupportTicket(
   input: CreateSupportTicketInput,
@@ -23,6 +30,23 @@ export async function createAdminVendorSupportTicket(
 
 export async function listAdminSupportTickets(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<SupportTicket[]> {
   return apiClient.get<SupportTicket[]>('/admin/support/tickets', { signal: options.signal, headers: options.headers });
+}
+
+export async function listAdminSupportAttentionTickets(options: {
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}): Promise<SupportAttentionTicketsPage> {
+  const params = new URLSearchParams();
+  params.set('attention', 'true');
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+
+  return apiClient.get<SupportAttentionTicketsPage>(`/admin/support/tickets?${params.toString()}`, {
+    signal: options.signal,
+    headers: options.headers,
+  });
 }
 
 export async function getAdminSupportAnalytics(options: { signal?: AbortSignal } = {}): Promise<SupportAnalytics> {

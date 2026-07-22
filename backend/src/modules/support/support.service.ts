@@ -3,10 +3,14 @@ import { prisma } from '../../db/prisma.js';
 import type { AuthUserContext } from '../auth/auth.types.js';
 import type { RequestVendorContext } from '../vendor-access/vendor-access.types.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
+import type { PaginationOptions } from '../../lib/pagination.js';
 import type {
   AddSupportTicketReplyInput,
   AddSupportTicketNoteInput,
   CreateSupportTicketInput,
+  SupportAttentionSeverityDto,
+  SupportAttentionTicketDto,
+  SupportAttentionTicketsPageDto,
   SupportTicketCategory,
   SupportTicketContextType,
   SupportTicketContextSummaryDto,
@@ -35,6 +39,7 @@ const VALID_CATEGORIES = new Set<SupportTicketCategory>([
   'OTHER',
 ]);
 const UNRESOLVED_STATUSES = new Set<SupportTicketStatus>(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+const UNRESOLVED_STATUS_VALUES = Array.from(UNRESOLVED_STATUSES);
 const SENSITIVE_KEY_PATTERN = /(address|phone|email|token|secret|password|payload|hmac|authorization|customer)/i;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const DUE_SOON_WINDOW_MS = 2 * ONE_HOUR_MS;
@@ -227,6 +232,23 @@ export function deriveSupportSlaState(ticket: {
     dueAt: dueAt.toISOString(),
     overdueByHours,
   };
+}
+
+export function deriveSupportAttentionSeverity(input: {
+  ageHours: number;
+  priority?: string | null;
+  status?: string | null;
+  sla: SupportTicketSlaDto;
+}): SupportAttentionSeverityDto {
+  const priority = input.priority?.trim().toLowerCase();
+  const status = input.status?.trim().toLowerCase();
+  if (input.sla.isOverdue || priority === 'high') {
+    return 'critical';
+  }
+  if (input.ageHours >= 24 || status === 'open') {
+    return 'warning';
+  }
+  return 'info';
 }
 
 type SupportAnalyticsRecord = {
@@ -751,6 +773,49 @@ function mapAdminTicket(
   return mapTicket(ticket, { ...options, includeContextSnapshot: true });
 }
 
+function readRelatedOrderReference(ticket: Parameters<typeof mapTicket>[0]) {
+  const summary = buildContextSummary(ticket.contextSnapshot);
+  if (summary?.orderNumber) {
+    return summary.orderNumber;
+  }
+  if (ticket.contextType === 'order' && ticket.contextId) {
+    return ticket.contextId;
+  }
+  return null;
+}
+
+function mapSupportAttentionTicket(ticket: Parameters<typeof mapTicket>[0], now: Date): SupportAttentionTicketDto {
+  const sla = deriveSupportSlaState(ticket, now);
+  const ageHours = roundHours(hoursBetween(ticket.updatedAt, now));
+  const severity = deriveSupportAttentionSeverity({
+    ageHours,
+    priority: ticket.priority,
+    status: ticket.status,
+    sla,
+  });
+
+  return {
+    id: ticket.id,
+    ticketReference: ticket.id,
+    subject: ticket.subject,
+    status: normalizeStatus(ticket.status),
+    priority: ticket.priority as SupportTicketPriority,
+    category: normalizeCategory(ticket.category),
+    vendorId: ticket.vendorId,
+    vendorName: ticket.vendor?.name ?? null,
+    relatedOrderReference: readRelatedOrderReference(ticket),
+    contextType: ticket.contextType as SupportTicketContextType,
+    contextId: ticket.contextId,
+    sla,
+    severity,
+    createdAt: ticket.createdAt.toISOString(),
+    updatedAt: ticket.updatedAt.toISOString(),
+    waitingSince: ticket.updatedAt.toISOString(),
+    ageHours,
+    destinationPath: `/admin/support/${ticket.id}`,
+  };
+}
+
 function mapVendorTicket(
   ticket: Parameters<typeof mapTicket>[0],
   options: Omit<Parameters<typeof mapTicket>[1], 'includeContextSnapshot' | 'includeNotes'> = {},
@@ -884,6 +949,46 @@ export async function listAdminSupportTickets(filters: SupportTicketFilters = {}
     });
   logDashboardTiming('support.admin_ticket_aggregation', aggregationStartedAt);
   return result;
+}
+
+export async function listAdminSupportAttentionTickets(
+  pagination: PaginationOptions,
+  now = new Date(),
+): Promise<SupportAttentionTicketsPageDto> {
+  const where = {
+    status: {
+      in: UNRESOLVED_STATUS_VALUES,
+    },
+  };
+
+  const [total, tickets] = await withDashboardTiming('support.admin_attention_ticket_fetch', () =>
+    prisma.$transaction([
+      prisma.supportTicket.count({ where }),
+      prisma.supportTicket.findMany({
+        where,
+        include: {
+          vendor: {
+            select: { name: true },
+          },
+        },
+        orderBy: [
+          { updatedAt: 'asc' },
+          { id: 'asc' },
+        ],
+        skip: pagination.offset,
+        take: pagination.limit,
+      }),
+    ]),
+  );
+
+  return {
+    generatedAt: now.toISOString(),
+    total,
+    limit: pagination.limit,
+    offset: pagination.offset,
+    sort: 'updatedAt_asc_id_asc',
+    items: tickets.map((ticket) => mapSupportAttentionTicket(ticket, now)),
+  };
 }
 
 export async function getAdminSupportAnalytics(): Promise<SupportAnalyticsDto> {

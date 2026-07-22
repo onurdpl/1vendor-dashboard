@@ -23,10 +23,12 @@ import type {
   OperationsAttentionType,
   OperationsQueueItem,
   OperationsVendorRisk,
+  SupportAttentionTicket,
 } from '../lib/api/contracts';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = 5;
+const SUPPORT_ATTENTION_PAGE_SIZE = 20;
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -197,6 +199,17 @@ function getQueueAdminOrderPath(item: OperationsQueueItem) {
   return item.relatedShopifyOrderId ? `/admin/orders/${item.relatedShopifyOrderId}` : null;
 }
 
+function getSupportOrderReference(ticket: SupportAttentionTicket) {
+  return ticket.relatedOrderReference ?? (ticket.contextType === 'order' ? ticket.contextId : null);
+}
+
+function getSupportSlaLabel(ticket: SupportAttentionTicket) {
+  if (ticket.sla.dueLabel) {
+    return ticket.sla.dueLabel;
+  }
+  return `Waiting since ${formatDate(ticket.waitingSince)}`;
+}
+
 function matchesVendorBlockedPageSearch(item: OperationsQueueItem, filter: string) {
   const normalizedFilter = filter.trim().toLowerCase();
   if (!normalizedFilter) {
@@ -224,6 +237,7 @@ export function AdminOperationsQueuePage() {
   const [vendorBlockedListOpen, setVendorBlockedListOpen] = useState(false);
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [vendorBlockedFilter, setVendorBlockedFilter] = useState('');
+  const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
     requiresVendorContext: false,
@@ -267,6 +281,27 @@ export function AdminOperationsQueuePage() {
       endpoint: '/admin/operations',
     },
   );
+  const {
+    data: supportAttentionPage,
+    isLoading: isSupportAttentionLoading,
+    isFetching: isSupportAttentionFetching,
+    isError: isSupportAttentionError,
+    error: supportAttentionError,
+    refetch: refetchSupportAttention,
+  } = useQueryResource(
+    queryKeys.admin.support.attentionTickets(SUPPORT_ATTENTION_PAGE_SIZE, supportAttentionOffset),
+    ({ signal }) =>
+      runtimeServices.support.listAdminAttention({
+        signal,
+        limit: SUPPORT_ATTENTION_PAGE_SIZE,
+        offset: supportAttentionOffset,
+      }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/support/tickets?attention=true',
+    },
+  );
 
   const dataView = data ?? {
     generatedAt: new Date().toISOString(),
@@ -289,8 +324,15 @@ export function AdminOperationsQueuePage() {
   const recommendations = safeArray(dataView.recommendations);
   const queue = safeArray(dataView.queue);
   const sections = safeArray(dataView.sections);
+  const displaySections = sections.filter((section) => section.key !== 'support');
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
+  const supportAttentionItems = safeArray(supportAttentionPage?.items);
+  const totalSupportAttentionRows = supportAttentionPage?.total ?? 0;
+  const supportPageStart = totalSupportAttentionRows > 0 ? supportAttentionOffset + 1 : 0;
+  const supportPageEnd = Math.min(supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE, totalSupportAttentionRows);
+  const canPageSupportBack = supportAttentionOffset > 0;
+  const canPageSupportForward = supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE < totalSupportAttentionRows;
   const paginatedQueueItems = safeArray(vendorBlockedQueueDashboard?.items);
   const displayedVendorBlockedQueueItems = useMemo(
     () => paginatedQueueItems.filter((item) => matchesVendorBlockedPageSearch(item, vendorBlockedFilter)),
@@ -418,7 +460,93 @@ export function AdminOperationsQueuePage() {
           </article>
 
           <div className="attention-sections-grid">
-            {sections.map((section) => {
+            <article className="attention-card support-attention-full-list" id="support-attention-full-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Support</p>
+                  <h3>Support attention</h3>
+                  <span>
+                    Authoritative unresolved support tickets · {supportPageStart}-{supportPageEnd} of {totalSupportAttentionRows}
+                  </span>
+                </div>
+              </div>
+
+              <div className="vendor-blocked-page-controls support-attention-page-controls">
+                <span>
+                  Support rows {supportPageStart}-{supportPageEnd} of {totalSupportAttentionRows}
+                </span>
+                <button
+                  type="button"
+                  className="button button-secondary button-link button-compact"
+                  onClick={() => setSupportAttentionOffset(Math.max(0, supportAttentionOffset - SUPPORT_ATTENTION_PAGE_SIZE))}
+                  disabled={!canPageSupportBack}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-link button-compact"
+                  onClick={() => setSupportAttentionOffset(supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE)}
+                  disabled={!canPageSupportForward}
+                >
+                  Next
+                </button>
+              </div>
+
+              {isSupportAttentionError ? (
+                <SectionErrorRetry
+                  title="Support attention unavailable"
+                  description={supportAttentionError ?? 'The paginated support attention table could not be loaded.'}
+                  onRetry={() => void refetchSupportAttention()}
+                />
+              ) : isSupportAttentionLoading || isSupportAttentionFetching ? (
+                <SectionSkeleton
+                  title="Loading support attention"
+                  description="Fetching unresolved support tickets with server-side pagination."
+                />
+              ) : supportAttentionItems.length ? (
+                <OperationalTable
+                  columns={['Severity', 'Ticket', 'Vendor', 'Order', 'Status', 'SLA / Waiting', 'Age', 'Action']}
+                  className="support-attention-table"
+                >
+                  {supportAttentionItems.map((ticket) => (
+                    <OperationalTableRow key={ticket.id}>
+                      <span>
+                        <StatusBadge tone={getSeverityTone(ticket.severity)}>{ticket.severity}</StatusBadge>
+                      </span>
+                      <span title={`${ticket.ticketReference} · ${ticket.subject}`}>
+                        <strong>{ticket.subject}</strong>
+                        <small>{ticket.ticketReference}</small>
+                      </span>
+                      <span title={`${ticket.vendorName ?? ticket.vendorId} · ${ticket.vendorId}`}>
+                        <strong>{ticket.vendorName ?? ticket.vendorId}</strong>
+                        <small>{ticket.vendorId}</small>
+                      </span>
+                      <span>
+                        <strong>{getSupportOrderReference(ticket) ?? 'No order link'}</strong>
+                        <small>{safeStatusLabel(ticket.contextType)}</small>
+                      </span>
+                      <span>
+                        <strong>{safeStatusLabel(ticket.status)}</strong>
+                        <small>{safeStatusLabel(ticket.priority)} · {safeStatusLabel(ticket.category)}</small>
+                      </span>
+                      <span title={getSupportSlaLabel(ticket)}>
+                        <strong>{ticket.sla.escalationLevel === 'none' ? 'SLA active' : safeStatusLabel(ticket.sla.escalationLevel)}</strong>
+                        <small>{getSupportSlaLabel(ticket)}</small>
+                      </span>
+                      <strong>{formatAge(ticket.ageHours)}</strong>
+                      <OperationalActionGroup>
+                        {actionLink(ticket.destinationPath, 'Open ticket')}
+                      </OperationalActionGroup>
+                    </OperationalTableRow>
+                  ))}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel title="No support attention tickets" description="No unresolved support tickets need operator attention." />
+              )}
+            </article>
+
+            {displaySections.map((section) => {
               const sectionItems = safeArray(section.items);
               const isVendorBlockedSection = section.key === 'vendor_blocked';
               const visibleCount = sectionItems.length;
