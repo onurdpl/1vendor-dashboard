@@ -192,6 +192,46 @@ type ReturnReviewOperationsQueueRow = Prisma.ReturnRecordGetPayload<{
   select: typeof returnReviewOperationsQueueSelect;
 }>;
 
+const financeIntegrityAlertOperationsQueueWhere = {
+  status: {
+    in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES],
+  },
+  severity: {
+    in: [...OPERATIONS_FINANCE_ALERT_SEVERITIES],
+  },
+} satisfies Prisma.FinanceIntegrityAlertWhereInput;
+
+const financeIntegrityAlertOperationsQueueSelect = {
+  id: true,
+  dedupeKey: true,
+  severity: true,
+  category: true,
+  reason: true,
+  status: true,
+  detectedAt: true,
+  vendorAllocationId: true,
+  allocationEconomicTransferId: true,
+  vendorAllocation: {
+    select: {
+      assignedVendorId: true,
+      assignedVendor: {
+        select: {
+          name: true,
+        },
+      },
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.FinanceIntegrityAlertSelect;
+
+type FinanceIntegrityAlertOperationsQueueRow = Prisma.FinanceIntegrityAlertGetPayload<{
+  select: typeof financeIntegrityAlertOperationsQueueSelect;
+}>;
+
 type AdminOperationsQueueOptions = {
   limit?: number;
   offset?: number;
@@ -1115,6 +1155,23 @@ function buildReturnReviewFilteredSummary(total: number): OperationsQueueDashboa
   };
 }
 
+function buildFinanceIntegrityAlertFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: 0,
+    warning: 0,
+    attention: 0,
+    normal: 0,
+    pendingReassignment: 0,
+    vendorBlocked: 0,
+    awaitingShipment: 0,
+    refundAttention: 0,
+    financeIntegrityAlerts: total,
+    operationalSignals: 0,
+    automationActions: 0,
+  };
+}
+
 async function getReturnReviewOperationsQueue(
   options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>,
 ): Promise<OperationsQueueDashboardDto> {
@@ -1148,6 +1205,44 @@ async function getReturnReviewOperationsQueue(
   };
 }
 
+async function getFinanceIntegrityAlertOperationsQueue(
+  options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>,
+): Promise<OperationsQueueDashboardDto> {
+  const [total, alerts] = await Promise.all([
+    withDashboardTiming('operations.finance_integrity_alert_filtered_count', () =>
+      prisma.financeIntegrityAlert.count({
+        where: financeIntegrityAlertOperationsQueueWhere,
+      }),
+    ),
+    withDashboardTiming('operations.finance_integrity_alert_filtered_fetch', () =>
+      prisma.financeIntegrityAlert.findMany({
+        where: financeIntegrityAlertOperationsQueueWhere,
+        select: financeIntegrityAlertOperationsQueueSelect,
+        orderBy: [
+          {
+            severity: 'asc',
+          },
+          {
+            detectedAt: 'desc',
+          },
+          {
+            id: 'asc',
+          },
+        ],
+        skip: options.offset,
+        take: options.limit,
+      }),
+    ),
+  ]);
+
+  return {
+    summary: buildFinanceIntegrityAlertFilteredSummary(total),
+    items: alerts
+      .map((alert: FinanceIntegrityAlertOperationsQueueRow) => mapFinanceIntegrityAlertToQueueItem(alert))
+      .filter((item): item is OperationsQueueItemDto => Boolean(item)),
+  };
+}
+
 export async function getAdminOperationsQueue(options: AdminOperationsQueueOptions = {}): Promise<OperationsQueueDashboardDto> {
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
@@ -1159,6 +1254,9 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   }
   if (options.type === 'return_review') {
     return getReturnReviewOperationsQueue({ limit, offset });
+  }
+  if (options.type === 'finance_integrity_alert') {
+    return getFinanceIntegrityAlertOperationsQueue({ limit, offset });
   }
 
   const candidateTake = offset + limit;

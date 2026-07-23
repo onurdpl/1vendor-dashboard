@@ -139,6 +139,30 @@ function buildReturnRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildFinanceIntegrityAlert(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'alert-1',
+    dedupeKey: 'finance:alert-1',
+    severity: 'critical',
+    category: 'multiple_active_sale_ledgers',
+    reason: 'Two active sale ledgers exist.',
+    status: 'open',
+    detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+    vendorAllocationId: 'alloc-1',
+    allocationEconomicTransferId: 'transfer-1',
+    vendorAllocation: {
+      assignedVendorId: 'vendor-1',
+      assignedVendor: {
+        name: 'Vendor 1',
+      },
+      order: {
+        sourceShopifyOrderId: '7709129507153',
+      },
+    },
+    ...overrides,
+  };
+}
+
 function mockQueueSummaryCounts({
   pendingReassignment = 0,
   vendorBlocked = 0,
@@ -1238,6 +1262,162 @@ describe('admin operations summary counts', () => {
         },
       },
     }));
+  });
+
+  it('filters finance integrity alerts before pagination and returns an authoritative matching total', async () => {
+    prismaMock.financeIntegrityAlert.count.mockResolvedValueOnce(4);
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
+      buildFinanceIntegrityAlert({
+        id: 'alert-open-critical',
+        dedupeKey: 'finance:open-critical',
+        severity: 'critical',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T10:00:00.000Z'),
+      }),
+      buildFinanceIntegrityAlert({
+        id: 'alert-acknowledged-critical',
+        dedupeKey: 'finance:acknowledged-critical',
+        severity: 'critical',
+        status: 'acknowledged',
+        detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: null,
+      }),
+      buildFinanceIntegrityAlert({
+        id: 'alert-open-warning',
+        dedupeKey: 'finance:open-warning',
+        severity: 'warning',
+        status: 'open',
+        detectedAt: new Date('2026-06-21T08:00:00.000Z'),
+        vendorAllocationId: 'alloc-2',
+        vendorAllocation: null,
+      }),
+      buildFinanceIntegrityAlert({
+        id: 'alert-acknowledged-warning',
+        dedupeKey: 'finance:acknowledged-warning',
+        severity: 'warning',
+        status: 'acknowledged',
+        detectedAt: new Date('2026-06-21T07:00:00.000Z'),
+        vendorAllocationId: 'alloc-2',
+        vendorAllocation: null,
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'finance_integrity_alert', limit: 10, offset: 0 });
+
+    expect(dashboard.summary).toEqual({
+      total: 4,
+      critical: 0,
+      warning: 0,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeIntegrityAlerts: 4,
+      operationalSignals: 0,
+      automationActions: 0,
+    });
+    expect(dashboard.items.map((item) => item.id)).toEqual([
+      'op-finance-integrity-alert-open-critical',
+      'op-finance-integrity-alert-acknowledged-critical',
+      'op-finance-integrity-alert-open-warning',
+      'op-finance-integrity-alert-acknowledged-warning',
+    ]);
+    expect(dashboard.items.map((item) => item.type)).toEqual([
+      'finance_integrity_alert',
+      'finance_integrity_alert',
+      'finance_integrity_alert',
+      'finance_integrity_alert',
+    ]);
+    expect(dashboard.items.map((item) => item.status)).toEqual(['open', 'acknowledged', 'open', 'acknowledged']);
+    expect(dashboard.items.map((item) => item.severity)).toEqual(['critical', 'critical', 'warning', 'warning']);
+
+    const totalWhere = prismaMock.financeIntegrityAlert.count.mock.calls[0]?.[0]?.where;
+    const itemsWhere = prismaMock.financeIntegrityAlert.findMany.mock.calls[0]?.[0]?.where;
+    expect(itemsWhere).toEqual(totalWhere);
+    expect(totalWhere).toEqual({
+      status: {
+        in: ['open', 'acknowledged'],
+      },
+      severity: {
+        in: ['critical', 'warning'],
+      },
+    });
+    expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: totalWhere,
+      orderBy: [
+        { severity: 'asc' },
+        { detectedAt: 'desc' },
+        { id: 'asc' },
+      ],
+      skip: 0,
+      take: 10,
+    }));
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps finance integrity alert totals stable across pages and uses a unique ordering tie-breaker', async () => {
+    prismaMock.financeIntegrityAlert.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(12);
+    prismaMock.financeIntegrityAlert.findMany
+      .mockResolvedValueOnce([
+        buildFinanceIntegrityAlert({
+          id: 'alert-page-one',
+          severity: 'critical',
+          detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildFinanceIntegrityAlert({
+          id: 'alert-page-two',
+          severity: 'critical',
+          detectedAt: new Date('2026-06-21T09:00:00.000Z'),
+        }),
+      ]);
+
+    const firstPage = await getAdminOperationsQueue({ type: 'finance_integrity_alert', limit: 10, offset: 0 });
+    const secondPage = await getAdminOperationsQueue({ type: 'finance_integrity_alert', limit: 10, offset: 10 });
+
+    expect(firstPage.summary.total).toBe(12);
+    expect(secondPage.summary.total).toBe(12);
+    expect(firstPage.items.map((item) => item.id)).toEqual(['op-finance-integrity-alert-page-one']);
+    expect(secondPage.items.map((item) => item.id)).toEqual(['op-finance-integrity-alert-page-two']);
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id)).size).toBe(2);
+    expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }, { id: 'asc' }],
+      skip: 0,
+      take: 10,
+    }));
+    expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }, { id: 'asc' }],
+      skip: 10,
+      take: 10,
+    }));
+  });
+
+  it('returns an empty authoritative finance integrity alert page without loading the generic queue', async () => {
+    prismaMock.financeIntegrityAlert.count.mockResolvedValueOnce(0);
+    prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'finance_integrity_alert', limit: 10, offset: 20 });
+
+    expect(dashboard.summary.total).toBe(0);
+    expect(dashboard.summary.financeIntegrityAlerts).toBe(0);
+    expect(dashboard.items).toEqual([]);
+    expect(prismaMock.financeIntegrityAlert.count).toHaveBeenCalledTimes(1);
+    expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
   });
 
   it('computes operations summary counts before candidate slicing', async () => {

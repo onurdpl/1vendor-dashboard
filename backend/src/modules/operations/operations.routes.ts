@@ -14,21 +14,29 @@ import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type { OperationsQueueTypeFilter } from './operations.types.js';
 
+const OPERATIONS_QUEUE_TYPE_FILTER_ERROR =
+  'type must be vendor_blocked, awaiting_shipment, return_review, or finance_integrity_alert.';
+
 function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFilter | undefined {
   const rawType = (query as { type?: unknown } | undefined)?.type;
   if (rawType === undefined || rawType === null || rawType === '') {
     return undefined;
   }
   if (typeof rawType !== 'string') {
-    throw new Error('type must be vendor_blocked, awaiting_shipment, or return_review.');
+    throw new Error(OPERATIONS_QUEUE_TYPE_FILTER_ERROR);
   }
 
   const normalized = rawType.trim().toLowerCase();
   if (!normalized) {
     return undefined;
   }
-  if (normalized !== 'vendor_blocked' && normalized !== 'awaiting_shipment' && normalized !== 'return_review') {
-    throw new Error('type must be vendor_blocked, awaiting_shipment, or return_review.');
+  if (
+    normalized !== 'vendor_blocked' &&
+    normalized !== 'awaiting_shipment' &&
+    normalized !== 'return_review' &&
+    normalized !== 'finance_integrity_alert'
+  ) {
+    throw new Error(OPERATIONS_QUEUE_TYPE_FILTER_ERROR);
   }
 
   return normalized;

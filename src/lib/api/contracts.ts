@@ -2806,7 +2806,7 @@ export type OperationsQueueItemType =
   | 'finance_integrity_alert'
   | 'operational_signal'
   | 'automation_action';
-export type OperationsQueueTypeFilter = 'vendor_blocked' | 'awaiting_shipment' | 'return_review';
+export type OperationsQueueTypeFilter = 'vendor_blocked' | 'awaiting_shipment' | 'return_review' | 'finance_integrity_alert';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export type OperationsQueueItem = {
