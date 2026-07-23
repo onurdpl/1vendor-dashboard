@@ -34,6 +34,7 @@ import {
   fullOrderOperationalAllocationWhere,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
@@ -151,6 +152,44 @@ const shipmentOperationsQueueSelect = {
 
 type ShipmentOperationsQueueRow = Prisma.ShipmentExecutionGetPayload<{
   select: typeof shipmentOperationsQueueSelect;
+}>;
+
+const returnReviewOperationsQueueWhere = {
+  ...buildReturnReviewAttentionWhere(),
+} satisfies Prisma.ReturnRecordWhereInput;
+
+const returnReviewOperationsQueueSelect = {
+  id: true,
+  status: true,
+  returnLifecycleStatus: true,
+  sourceShopifyOrderId: true,
+  sourceShopifyOrderNumber: true,
+  sourceShopifyRefundId: true,
+  createdAt: true,
+  vendorAllocation: {
+    select: {
+      id: true,
+      assignedVendorId: true,
+      assignedVendor: {
+        select: {
+          name: true,
+        },
+      },
+      refundRecords: {
+        select: {
+          sourceShopifyRefundId: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
+      },
+    },
+  },
+} satisfies Prisma.ReturnRecordSelect;
+
+type ReturnReviewOperationsQueueRow = Prisma.ReturnRecordGetPayload<{
+  select: typeof returnReviewOperationsQueueSelect;
 }>;
 
 type AdminOperationsQueueOptions = {
@@ -1035,6 +1074,80 @@ async function getShipmentOperationsQueue(
   };
 }
 
+function mapReturnReviewToQueueItem(returnRecord: ReturnReviewOperationsQueueRow): OperationsQueueItemDto {
+  const status = (returnRecord.returnLifecycleStatus || returnRecord.status).trim().toLowerCase();
+  return {
+    id: `op-refund-${returnRecord.id}`,
+    type: 'refund_attention',
+    severity: 'attention',
+    title: 'Return requires review',
+    description: `Return ${returnRecord.id} is waiting for review.`,
+    vendorId: returnRecord.vendorAllocation.assignedVendorId,
+    vendorName: returnRecord.vendorAllocation.assignedVendor.name,
+    relatedOrderId: returnRecord.vendorAllocation.id,
+    relatedShopifyOrderId: returnRecord.sourceShopifyOrderId,
+    relatedShopifyOrderNumber: returnRecord.sourceShopifyOrderNumber,
+    relatedReturnId: returnRecord.id,
+    relatedRefundId: returnRecord.sourceShopifyRefundId
+      ?? returnRecord.vendorAllocation.refundRecords[0]?.sourceShopifyRefundId
+      ?? null,
+    status,
+    createdAt: returnRecord.createdAt.toISOString(),
+    actionLabel: 'Review return',
+    destinationPath: `/returns/${returnRecord.id}`,
+  };
+}
+
+function buildReturnReviewFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: 0,
+    warning: 0,
+    attention: total,
+    normal: 0,
+    pendingReassignment: 0,
+    vendorBlocked: 0,
+    awaitingShipment: 0,
+    refundAttention: total,
+    financeIntegrityAlerts: 0,
+    operationalSignals: 0,
+    automationActions: 0,
+  };
+}
+
+async function getReturnReviewOperationsQueue(
+  options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>,
+): Promise<OperationsQueueDashboardDto> {
+  const [total, returnRecords] = await Promise.all([
+    withDashboardTiming('operations.return_review_filtered_count', () =>
+      prisma.returnRecord.count({
+        where: returnReviewOperationsQueueWhere,
+      }),
+    ),
+    withDashboardTiming('operations.return_review_filtered_fetch', () =>
+      prisma.returnRecord.findMany({
+        where: returnReviewOperationsQueueWhere,
+        select: returnReviewOperationsQueueSelect,
+        orderBy: [
+          {
+            createdAt: 'asc',
+          },
+          {
+            id: 'asc',
+          },
+        ],
+        skip: options.offset,
+        take: options.limit,
+      }),
+    ),
+  ]);
+
+  return {
+    summary: buildReturnReviewFilteredSummary(total),
+    items: returnRecords.map(mapReturnReviewToQueueItem),
+  };
+}
+
 export async function getAdminOperationsQueue(options: AdminOperationsQueueOptions = {}): Promise<OperationsQueueDashboardDto> {
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
@@ -1043,6 +1156,9 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   }
   if (options.type === 'awaiting_shipment') {
     return getShipmentOperationsQueue({ limit, offset });
+  }
+  if (options.type === 'return_review') {
+    return getReturnReviewOperationsQueue({ limit, offset });
   }
 
   const candidateTake = offset + limit;

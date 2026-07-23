@@ -64,6 +64,10 @@ const {
   getAdminOperationsAttentionCenter,
   getAdminOperationsQueueSummary,
 } = await import('../backend/src/modules/operations/operations.service.js');
+const {
+  buildReturnReviewAttentionWhere,
+  isReturnReviewAttentionStatus,
+} = await import('../backend/src/modules/returns/return-review-status.js');
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
   return {
@@ -109,6 +113,27 @@ function buildShipmentExecution(overrides: Record<string, unknown> = {}) {
         sourceShopifyOrderId: '7709129507153',
         sourceShopifyOrderNumber: '#1091',
       },
+    },
+    ...overrides,
+  };
+}
+
+function buildReturnRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'return-1',
+    status: 'pending',
+    returnLifecycleStatus: null,
+    sourceShopifyOrderId: '7709129507153',
+    sourceShopifyOrderNumber: '#1091',
+    sourceShopifyRefundId: null,
+    createdAt: new Date('2026-05-13T10:00:00.000Z'),
+    vendorAllocation: {
+      id: 'alloc-1',
+      assignedVendorId: 'vendor-1',
+      assignedVendor: {
+        name: 'Vendor 1',
+      },
+      refundRecords: [],
     },
     ...overrides,
   };
@@ -560,6 +585,194 @@ describe('admin operations summary counts', () => {
     expect(dashboard.summary.total).toBe(0);
     expect(dashboard.summary.awaitingShipment).toBe(0);
     expect(dashboard.items).toEqual([]);
+  });
+
+  it('filters return-review records before pagination and returns an authoritative matching total', async () => {
+    prismaMock.returnRecord.count.mockResolvedValueOnce(12);
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([
+      buildReturnRecord({
+        id: 'return-requested-oldest',
+        status: 'requested',
+        returnLifecycleStatus: 'requested',
+        createdAt: new Date('2026-05-10T08:00:00.000Z'),
+      }),
+      buildReturnRecord({
+        id: 'return-pending-next',
+        status: 'legacy-status',
+        returnLifecycleStatus: 'pending',
+        sourceShopifyRefundId: 'refund-safe-id',
+        createdAt: new Date('2026-05-10T09:00:00.000Z'),
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'return_review', limit: 10, offset: 0 });
+
+    expect(dashboard.summary).toEqual({
+      total: 12,
+      critical: 0,
+      warning: 0,
+      attention: 12,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: 12,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    });
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-refund-return-requested-oldest',
+        type: 'refund_attention',
+        relatedReturnId: 'return-requested-oldest',
+        status: 'requested',
+        destinationPath: '/returns/return-requested-oldest',
+      }),
+      expect.objectContaining({
+        id: 'op-refund-return-pending-next',
+        type: 'refund_attention',
+        relatedRefundId: 'refund-safe-id',
+        status: 'pending',
+      }),
+    ]);
+
+    const totalWhere = prismaMock.returnRecord.count.mock.calls[0]?.[0]?.where;
+    const itemsWhere = prismaMock.returnRecord.findMany.mock.calls[0]?.[0]?.where;
+    expect(itemsWhere).toEqual(totalWhere);
+    expect(totalWhere).toEqual(buildReturnReviewAttentionWhere());
+    expect(prismaMock.returnRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: totalWhere,
+      orderBy: [
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+      skip: 0,
+      take: 10,
+    }));
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps return-review totals stable across pages and uses a unique ordering tie-breaker', async () => {
+    prismaMock.returnRecord.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(12);
+    prismaMock.returnRecord.findMany
+      .mockResolvedValueOnce([
+        buildReturnRecord({
+          id: 'return-page-one',
+          createdAt: new Date('2026-05-10T08:00:00.000Z'),
+        }),
+      ])
+      .mockResolvedValueOnce([
+        buildReturnRecord({
+          id: 'return-page-two',
+          createdAt: new Date('2026-05-10T08:00:00.000Z'),
+        }),
+      ]);
+
+    const firstPage = await getAdminOperationsQueue({ type: 'return_review', limit: 10, offset: 0 });
+    const secondPage = await getAdminOperationsQueue({ type: 'return_review', limit: 10, offset: 10 });
+
+    expect(firstPage.summary.total).toBe(12);
+    expect(secondPage.summary.total).toBe(12);
+    expect(firstPage.items.map((item) => item.id)).toEqual(['op-refund-return-page-one']);
+    expect(secondPage.items.map((item) => item.id)).toEqual(['op-refund-return-page-two']);
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id)).size).toBe(2);
+    expect(prismaMock.returnRecord.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      skip: 0,
+      take: 10,
+    }));
+    expect(prismaMock.returnRecord.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      skip: 10,
+      take: 10,
+    }));
+  });
+
+  it('uses one ReturnRecord as one stable queue row without multiplying shared order relations', async () => {
+    prismaMock.returnRecord.count.mockResolvedValueOnce(2);
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([
+      buildReturnRecord({ id: 'return-line-a' }),
+      buildReturnRecord({ id: 'return-line-b' }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'return_review', limit: 10, offset: 0 });
+
+    expect(dashboard.items.map((item) => item.relatedReturnId)).toEqual(['return-line-a', 'return-line-b']);
+    expect(new Set(dashboard.items.map((item) => item.id)).size).toBe(2);
+    expect(prismaMock.returnRecord.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an empty authoritative return-review page and preserves canonical status eligibility', async () => {
+    prismaMock.returnRecord.count.mockResolvedValueOnce(0);
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'return_review', limit: 10, offset: 20 });
+
+    expect(dashboard.summary.total).toBe(0);
+    expect(dashboard.summary.refundAttention).toBe(0);
+    expect(dashboard.items).toEqual([]);
+    expect(isReturnReviewAttentionStatus('requested')).toBe(true);
+    expect(isReturnReviewAttentionStatus('awaiting review')).toBe(true);
+    expect(isReturnReviewAttentionStatus('pending')).toBe(true);
+    expect(isReturnReviewAttentionStatus('in_review')).toBe(true);
+    expect(isReturnReviewAttentionStatus('approved')).toBe(false);
+    expect(isReturnReviewAttentionStatus('processed')).toBe(false);
+    expect(isReturnReviewAttentionStatus('refunded')).toBe(false);
+    expect(isReturnReviewAttentionStatus('closed')).toBe(false);
+    expect(isReturnReviewAttentionStatus('cancelled')).toBe(false);
+    expect(isReturnReviewAttentionStatus('declined')).toBe(false);
+    expect(isReturnReviewAttentionStatus('rejected')).toBe(false);
+  });
+
+  it('keeps the existing Return Attention projection unchanged', async () => {
+    mockQueueSummaryCounts();
+    prismaMock.returnRecord.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          ...buildReturnRecord({
+            id: 'return-attention-approved',
+            status: 'approved',
+          }),
+          requestUpdatedAt: new Date('2026-05-13T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-13T10:00:00.000Z'),
+          vendorAllocation: {
+            id: 'alloc-1',
+            assignedVendorId: 'vendor-1',
+            assignedVendor: {
+              name: 'Vendor 1',
+            },
+            order: {
+              sourceShopifyOrderId: '7709129507153',
+              sourceShopifyOrderNumber: '#1091',
+            },
+          },
+        },
+      ]);
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+
+    expect(dashboard.sections).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'return',
+        title: 'Return backlog',
+        count: 1,
+        items: [
+          expect.objectContaining({
+            id: 'attention-return-return-attention-approved',
+            type: 'return',
+            status: 'approved',
+          }),
+        ],
+      }),
+    ]));
   });
 
   it('keeps the existing shipment attention projection unchanged', async () => {

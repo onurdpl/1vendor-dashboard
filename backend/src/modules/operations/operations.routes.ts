@@ -20,15 +20,15 @@ function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFi
     return undefined;
   }
   if (typeof rawType !== 'string') {
-    throw new Error('type must be vendor_blocked or awaiting_shipment.');
+    throw new Error('type must be vendor_blocked, awaiting_shipment, or return_review.');
   }
 
   const normalized = rawType.trim().toLowerCase();
   if (!normalized) {
     return undefined;
   }
-  if (normalized !== 'vendor_blocked' && normalized !== 'awaiting_shipment') {
-    throw new Error('type must be vendor_blocked or awaiting_shipment.');
+  if (normalized !== 'vendor_blocked' && normalized !== 'awaiting_shipment' && normalized !== 'return_review') {
+    throw new Error('type must be vendor_blocked, awaiting_shipment, or return_review.');
   }
 
   return normalized;
