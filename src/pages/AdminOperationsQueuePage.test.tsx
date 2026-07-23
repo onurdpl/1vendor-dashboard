@@ -332,6 +332,30 @@ function buildVendorBlockedQueueItem(orderNumber: string, index: number): Operat
   };
 }
 
+function buildShipmentQueueItem(
+  orderNumber: string,
+  index: number,
+  overrides: Partial<OperationsQueueItem> = {},
+): OperationsQueueItem {
+  return {
+    id: `op-shipment-shipment-${index}`,
+    type: 'awaiting_shipment',
+    severity: index % 2 === 0 ? 'critical' : 'high',
+    title: index % 2 === 0 ? 'Shipment execution failed' : 'Shipment pending carrier identifiers',
+    description: index % 2 === 0 ? 'Tracking is not available yet.' : 'Carrier record exists; tracking should be reviewed.',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderId: `alloc-shipment-${index}`,
+    relatedShopifyOrderId: String(7950000000000 + index),
+    relatedShopifyOrderNumber: orderNumber,
+    status: index % 2 === 0 ? 'failed' : 'pending',
+    createdAt: `2026-05-${String(Math.min(index + 1, 28)).padStart(2, '0')}T08:00:00.000Z`,
+    actionLabel: index % 2 === 0 ? 'Review provider response' : 'Review shipment status',
+    actionTo: `/admin/orders/${7950000000000 + index}`,
+    ...overrides,
+  };
+}
+
 function buildQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
   return {
     summary: {
@@ -343,6 +367,26 @@ function buildQueueDashboard(items: OperationsQueueItem[], total = items.length)
       pendingReassignment: 0,
       vendorBlocked: total,
       awaitingShipment: 0,
+      refundAttention: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    },
+    items,
+  };
+}
+
+function buildShipmentQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
+  return {
+    summary: {
+      total,
+      critical: items.filter((item) => item.severity === 'critical').length,
+      warning: total - items.filter((item) => item.severity === 'critical').length,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: total,
       refundAttention: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
@@ -431,7 +475,11 @@ describe('AdminOperationsQueuePage attention center', () => {
     attentionMock.mockReset();
     queueDashboardMock.mockReset();
     supportAttentionMock.mockReset();
-    queueDashboardMock.mockResolvedValue(buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]));
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
+        : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
+    );
     supportAttentionMock.mockResolvedValue(buildSupportAttentionPage([buildSupportAttentionTicket()]));
   });
 
@@ -447,7 +495,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await screen.findByRole('heading', { name: /operational attention center/i })).toBeInTheDocument();
     expect((await screen.findAllByText('High-priority support ticket')).length).toBeGreaterThan(0);
     expect(screen.getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
-    expect(screen.getByText('Tracking is not available yet.')).toBeInTheDocument();
+    expect(screen.getAllByText('Tracking is not available yet.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
@@ -504,6 +552,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await screen.findByText('Support rows 1-1 of 1')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
     expect(await screen.findByText('Vendor Blocked rows 1-1 of 1')).toBeInTheDocument();
+    expect(await screen.findByText('Shipment rows 1-1 of 1')).toBeInTheDocument();
 
     const operationalStack = document.querySelector('.attention-sections-stack');
     expect(operationalStack).not.toBeNull();
@@ -645,13 +694,17 @@ describe('AdminOperationsQueuePage attention center', () => {
       recentActivity: [],
     };
     attentionMock.mockResolvedValueOnce(splitDashboard);
-    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard([
-      {
-        ...buildVendorBlockedQueueItem('#1091', 0),
-        title: 'Split allocation awaiting admin resolution',
-        splitChildAllocation: true,
-      },
-    ]));
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
+        : buildQueueDashboard([
+            {
+              ...buildVendorBlockedQueueItem('#1091', 0),
+              title: 'Split allocation awaiting admin resolution',
+              splitChildAllocation: true,
+            },
+          ]),
+    );
 
     renderPage();
 
@@ -664,7 +717,11 @@ describe('AdminOperationsQueuePage attention center', () => {
   it('renders Vendor Blocked as a 10-row server-paginated table without preview controls', async () => {
     const orderNumbers = Array.from({ length: 12 }, (_unused, index) => `#12${String(index + 1).padStart(2, '0')}`);
     attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard(orderNumbers));
-    queueDashboardMock.mockResolvedValueOnce(buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12));
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
+        : buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12),
+    );
 
     renderPage();
 
@@ -696,6 +753,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     const firstPageOrders = ['#1201', '#1202', '#1203', '#1204', '#1205', '#1206', '#1207', '#1208', '#1209', '#1210'];
     attentionMock.mockResolvedValueOnce(buildVendorBlockedPreviewDashboard([...firstPageOrders, '#1109', '#1212']));
     queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
       const offset = options?.offset ?? 0;
       if (offset === 0) {
         return buildQueueDashboard(firstPageOrders.map(buildVendorBlockedQueueItem), 12);
@@ -727,35 +787,205 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(queueDashboardMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10, type: 'vendor_blocked' }));
   });
 
-  it('discloses capped non-vendor sections without implying complete inventory', async () => {
+  it('renders Shipment as an authoritative table without using the attention preview rows', async () => {
+    const authoritativeItems = [
+      buildShipmentQueueItem('#1302', 2),
+      buildShipmentQueueItem('#1301', 1),
+    ];
+    const shipmentPreviewDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'shipment'
+          ? {
+              ...section,
+              count: 3,
+              critical: 2,
+              warning: 1,
+              items: [
+                {
+                  id: 'shipment-preview-only',
+                  type: 'shipment',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Shipment',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'shipment-preview-only',
+                  status: 'failed',
+                  ageHours: 2,
+                  title: 'Preview-only shipment row',
+                  description: 'This attention row must not render in the Shipment section.',
+                  recommendedAction: 'Review shipment status',
+                  destinationPath: '/orders/preview-allocation',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+    };
+    attentionMock.mockResolvedValueOnce(shipmentPreviewDashboard);
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? buildShipmentQueueDashboard(authoritativeItems, 12)
+        : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
+    );
+
+    renderPage();
+
+    const shipmentList = await screen.findByRole('heading', { name: 'Shipment attention' }).then((heading) => heading.closest('article'));
+    expect(shipmentList).not.toBeNull();
+    expect(await within(shipmentList as HTMLElement).findByText('Authoritative shipment items · 1-10 of 12')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Shipment rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getAllByRole('row')).toHaveLength(3);
+    expect(within(shipmentList as HTMLElement).getByText('Order #1302')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Order #1301')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('Preview-only shipment row')).not.toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
+    expect(document.querySelector('.shipment-attention-table')).not.toBeNull();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 0,
+      type: 'awaiting_shipment',
+    }));
+
+    const dataRows = within(shipmentList as HTMLElement).getAllByRole('row').slice(1);
+    expect(dataRows[0]).toHaveTextContent('Order #1302');
+    expect(dataRows[1]).toHaveTextContent('Order #1301');
+  });
+
+  it('pages Shipment independently in both directions and disables controls at page boundaries', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    const firstPage = Array.from({ length: 10 }, (_unused, index) => buildShipmentQueueItem(`#13${String(index + 1).padStart(2, '0')}`, index));
+    const secondPage = [
+      buildShipmentQueueItem('#1311', 10),
+      buildShipmentQueueItem('#1312', 11),
+    ];
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const shipmentList = await screen.findByRole('heading', { name: 'Shipment attention' }).then((heading) => heading.closest('article'));
+    expect(shipmentList).not.toBeNull();
+    expect(await within(shipmentList as HTMLElement).findByText('Shipment rows 1-10 of 12')).toBeInTheDocument();
+    const previous = within(shipmentList as HTMLElement).getByRole('button', { name: 'Previous' });
+    const next = within(shipmentList as HTMLElement).getByRole('button', { name: 'Next' });
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+
+    fireEvent.click(next);
+
+    expect(await within(shipmentList as HTMLElement).findByText('Shipment rows 11-12 of 12')).toBeInTheDocument();
+    expect(await within(shipmentList as HTMLElement).findByText('Order #1311')).toBeInTheDocument();
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 10,
+      type: 'awaiting_shipment',
+    }));
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'vendor_blocked').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(supportAttentionMock.mock.calls.every(([options]) => options?.offset === 0)).toBe(true);
+
+    fireEvent.click(previous);
+
+    expect(await within(shipmentList as HTMLElement).findByText('Shipment rows 1-10 of 12')).toBeInTheDocument();
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'awaiting_shipment').at(-1)?.[0]).toEqual(
+      expect.objectContaining({ limit: 10, offset: 0, type: 'awaiting_shipment' }),
+    );
+  });
+
+  it('renders section-scoped Shipment empty, loading, and error states without preview fallback', async () => {
+    attentionMock.mockResolvedValue(dashboard);
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? buildShipmentQueueDashboard([], 0)
+        : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
+    );
+
+    const emptyRender = renderPage();
+    const emptyShipmentList = await screen.findByRole('heading', { name: 'Shipment attention' }).then((heading) => heading.closest('article'));
+    expect(emptyShipmentList).not.toBeNull();
+    expect(await within(emptyShipmentList as HTMLElement).findByText('No shipment attention items')).toBeInTheDocument();
+    expect(within(emptyShipmentList as HTMLElement).queryByText(/Shipment rows 0-0/)).not.toBeInTheDocument();
+    expect(within(emptyShipmentList as HTMLElement).queryByText('Shipment pending carrier identifiers')).not.toBeInTheDocument();
+    emptyRender.unmount();
+
+    let resolveShipment: ((value: OperationsQueueDashboard) => void) | undefined;
+    const pendingShipment = new Promise<OperationsQueueDashboard>((resolve) => {
+      resolveShipment = resolve;
+    });
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'awaiting_shipment'
+        ? pendingShipment
+        : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
+    );
+
+    const loadingRender = renderPage();
+    expect(await screen.findByText('Loading shipment attention')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    resolveShipment?.(buildShipmentQueueDashboard([], 0));
+    loadingRender.unmount();
+
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        throw new Error('Shipment queue unavailable');
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+    const errorShipmentList = await screen.findByRole('heading', { name: 'Shipment attention' }).then((heading) => heading.closest('article'));
+    expect(errorShipmentList).not.toBeNull();
+    expect(await within(errorShipmentList as HTMLElement).findByText('Shipment attention unavailable')).toBeInTheDocument();
+    expect(within(errorShipmentList as HTMLElement).getByText('Shipment queue unavailable')).toBeInTheDocument();
+    expect(within(errorShipmentList as HTMLElement).queryByText('Shipment pending carrier identifiers')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
+  });
+
+  it('keeps Return and Finance as honest projection previews', async () => {
     const sectionDisclosureDashboard: OperationsAttentionDashboard = {
       ...dashboard,
       sections: [
         {
-          key: 'shipment',
-          title: 'Shipment attention',
+          key: 'return',
+          title: 'Return backlog',
           count: 3,
           critical: 2,
           warning: 1,
           items: [
             {
-              id: 'shipment-current-page',
-              type: 'shipment',
+              id: 'return-current-page',
+              type: 'return',
               severity: 'critical',
               vendorId: 'sporjinal',
               vendorName: 'Sporjinal',
-              objectType: 'Shipment',
+              objectType: 'Return',
               objectReference: 'Order #1301',
-              objectId: 'shipment-1301',
-              status: 'failed',
+              objectId: 'return-1301',
+              status: 'open',
               ageHours: 2,
-              title: 'Shipment execution failed',
-              description: 'Carrier identifiers were not assigned.',
-              recommendedAction: 'Review shipment status',
-              destinationPath: '/orders/alloc-1301',
+              title: 'Return needs review',
+              description: 'Return review is pending.',
+              recommendedAction: 'Open return',
+              destinationPath: '/returns/return-1301',
               createdAt: '2026-05-17T08:00:00.000Z',
             },
           ],
+        },
+        {
+          key: 'finance',
+          title: 'Finance review',
+          count: 0,
+          critical: 0,
+          warning: 0,
+          items: [],
         },
       ],
       recommendations: [],
@@ -768,6 +998,7 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     expect(await screen.findByText('Showing 1 of 3 active · 2 critical · 1 warning')).toBeInTheDocument();
     expect(screen.getByText('Showing 1 of 3. This section is a preview.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance review' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'View all vendor-blocked allocations' })).not.toBeInTheDocument();
   });
 

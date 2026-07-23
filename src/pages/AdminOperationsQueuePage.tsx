@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   EmptyStatePanel,
@@ -29,6 +29,7 @@ import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/for
 
 const AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE = 10;
 const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const SHIPMENT_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
 function formatDate(value: string) {
@@ -213,6 +214,7 @@ function getSupportSlaLabel(ticket: SupportAttentionTicket) {
 
 export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
+  const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -233,6 +235,28 @@ export function AdminOperationsQueuePage() {
       enabled: pageReadiness.ready,
       routeName: 'AdminOperationsQueuePage',
       endpoint: '/admin/operations/attention',
+    },
+  );
+  const {
+    data: shipmentQueueDashboard,
+    isLoading: isShipmentQueueLoading,
+    isFetching: isShipmentQueueFetching,
+    isError: isShipmentQueueError,
+    error: shipmentQueueError,
+    refetch: refetchShipmentQueue,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(SHIPMENT_QUEUE_PAGE_SIZE, shipmentQueueOffset, 'awaiting_shipment'),
+    ({ signal }) =>
+      runtimeServices.operations.dashboard({
+        signal,
+        limit: SHIPMENT_QUEUE_PAGE_SIZE,
+        offset: shipmentQueueOffset,
+        type: 'awaiting_shipment',
+      }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations',
     },
   );
   const {
@@ -300,7 +324,9 @@ export function AdminOperationsQueuePage() {
   const recommendations = safeArray(dataView.recommendations);
   const queue = safeArray(dataView.queue);
   const sections = safeArray(dataView.sections);
-  const displaySections = sections.filter((section) => section.key !== 'support' && section.key !== 'vendor_blocked');
+  const displaySections = sections.filter(
+    (section) => section.key !== 'support' && section.key !== 'vendor_blocked' && section.key !== 'shipment',
+  );
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
   const supportAttentionItems = safeArray(supportAttentionPage?.items);
@@ -315,6 +341,24 @@ export function AdminOperationsQueuePage() {
   const queuePageEnd = Math.min(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE, totalPaginatedQueueRows);
   const canPageVendorBlockedBack = vendorBlockedQueueOffset > 0;
   const canPageVendorBlockedForward = vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE < totalPaginatedQueueRows;
+  const shipmentQueueItems = safeArray(shipmentQueueDashboard?.items);
+  const totalShipmentQueueRows = shipmentQueueDashboard?.summary.total ?? 0;
+  const shipmentPageStart = totalShipmentQueueRows > 0 ? shipmentQueueOffset + 1 : 0;
+  const shipmentPageEnd = Math.min(shipmentQueueOffset + SHIPMENT_QUEUE_PAGE_SIZE, totalShipmentQueueRows);
+  const canPageShipmentBack = shipmentQueueOffset > 0;
+  const canPageShipmentForward = shipmentQueueOffset + SHIPMENT_QUEUE_PAGE_SIZE < totalShipmentQueueRows;
+
+  useEffect(() => {
+    if (!shipmentQueueDashboard || shipmentQueueOffset === 0 || shipmentQueueOffset < totalShipmentQueueRows) {
+      return;
+    }
+
+    const lastPageOffset = Math.max(
+      0,
+      Math.floor((Math.max(totalShipmentQueueRows, 1) - 1) / SHIPMENT_QUEUE_PAGE_SIZE) * SHIPMENT_QUEUE_PAGE_SIZE,
+    );
+    setShipmentQueueOffset(lastPageOffset);
+  }, [shipmentQueueDashboard, shipmentQueueOffset, totalShipmentQueueRows]);
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -599,6 +643,100 @@ export function AdminOperationsQueuePage() {
                 <EmptyStatePanel
                   title="No vendor-blocked allocations"
                   description="No active vendor-blocked allocation rows need operator attention."
+                />
+              )}
+            </article>
+
+            <article className="attention-card shipment-attention-list" id="shipment-attention-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Shipment</p>
+                  <h3>Shipment attention</h3>
+                  <span>
+                    Authoritative shipment items
+                    {totalShipmentQueueRows > 0
+                      ? ` · ${shipmentPageStart}-${shipmentPageEnd} of ${totalShipmentQueueRows}`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+
+              {totalShipmentQueueRows > 0 ? (
+                <div className="vendor-blocked-page-controls shipment-attention-page-controls">
+                  <span>
+                    Shipment rows {shipmentPageStart}-{shipmentPageEnd} of {totalShipmentQueueRows}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setShipmentQueueOffset(Math.max(0, shipmentQueueOffset - SHIPMENT_QUEUE_PAGE_SIZE))}
+                    disabled={!canPageShipmentBack}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setShipmentQueueOffset(shipmentQueueOffset + SHIPMENT_QUEUE_PAGE_SIZE)}
+                    disabled={!canPageShipmentForward}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+
+              {isShipmentQueueError ? (
+                <SectionErrorRetry
+                  title="Shipment attention unavailable"
+                  description={shipmentQueueError ?? 'The paginated shipment attention table could not be loaded.'}
+                  onRetry={() => void refetchShipmentQueue()}
+                />
+              ) : isShipmentQueueLoading || isShipmentQueueFetching ? (
+                <SectionSkeleton
+                  title="Loading shipment attention"
+                  description="Fetching shipment attention with server-side pagination."
+                />
+              ) : shipmentQueueItems.length ? (
+                <OperationalTable
+                  columns={['Severity', 'Order', 'Vendor', 'Status', 'Waiting', 'Age', 'Action']}
+                  className="shipment-attention-table"
+                >
+                  {shipmentQueueItems.map((item) => {
+                    const adminOrderPath = getQueueAdminOrderPath(item);
+
+                    return (
+                      <OperationalTableRow key={item.id}>
+                        <span>
+                          <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                        </span>
+                        <span title={`${getQueueItemReference(item)} · ${item.title}`}>
+                          <strong>{getQueueItemReference(item)}</strong>
+                          <small>{item.relatedOrderId ?? item.id}</small>
+                        </span>
+                        <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
+                          <strong>{item.vendorName ?? item.vendorId}</strong>
+                          <small>{item.vendorId}</small>
+                        </span>
+                        <span>
+                          <strong>{safeStatusLabel(item.status)}</strong>
+                          <small>{formatQueueType(item.type)}</small>
+                        </span>
+                        <span title={`${item.title} · ${item.description}`}>
+                          <strong>{item.title}</strong>
+                          <small>{item.description}</small>
+                        </span>
+                        <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                        <OperationalActionGroup>
+                          {adminOrderPath ? actionLink(adminOrderPath, 'Open order') : <span className="queue-muted-action">No admin order</span>}
+                        </OperationalActionGroup>
+                      </OperationalTableRow>
+                    );
+                  })}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel
+                  title="No shipment attention items"
+                  description="No active shipment rows need operator attention."
                 />
               )}
             </article>
