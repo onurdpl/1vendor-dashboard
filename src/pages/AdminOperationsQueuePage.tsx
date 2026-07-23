@@ -223,6 +223,14 @@ function getFinanceIntegrityOrderReference(item: OperationsQueueItem) {
   return 'No order link';
 }
 
+function getReturnReviewWaitingText(item: OperationsQueueItem) {
+  const description = item.description?.trim();
+  if (item.title === 'Return requires review' && description && /^Return [^ ]+ is waiting for review\.$/.test(description)) {
+    return item.title;
+  }
+  return description || item.title;
+}
+
 function getFinanceReviewReason(item: OperationsQueueItem) {
   return item.financeReviewReason?.trim() || item.description || 'Finance row requires admin review.';
 }
@@ -936,12 +944,7 @@ export function AdminOperationsQueuePage() {
                 <div>
                   <p className="eyebrow">Return</p>
                   <h3>Return review</h3>
-                  <span>
-                    Authoritative return review items
-                    {totalReturnReviewQueueRows > 0
-                      ? ` · ${returnReviewPageStart}-${returnReviewPageEnd} of ${totalReturnReviewQueueRows}`
-                      : ''}
-                  </span>
+                  <span>Authoritative return review items</span>
                 </div>
               </div>
 
@@ -982,40 +985,30 @@ export function AdminOperationsQueuePage() {
                 />
               ) : returnReviewQueueItems.length ? (
                 <OperationalTable
-                  columns={['Severity', 'Return', 'Order', 'Vendor', 'Status', 'Waiting', 'Age', 'Action']}
+                  columns={['Severity', 'Order', 'Vendor', 'Status', 'Waiting', 'Age', 'Action']}
                   className="return-review-attention-table"
                 >
-                  {returnReviewQueueItems.map((item) => (
-                    <OperationalTableRow key={item.id}>
-                      <span>
-                        <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
-                      </span>
-                      <span title={`${item.id} · ${item.title}`}>
-                        <strong>{item.id}</strong>
-                        <small>{item.title}</small>
-                      </span>
-                      <span>
+                  {returnReviewQueueItems.map((item) => {
+                    const waitingText = getReturnReviewWaitingText(item);
+
+                    return (
+                      <OperationalTableRow key={item.id}>
+                        <span>
+                          <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                        </span>
                         <strong>{getQueueItemReference(item)}</strong>
-                        <small>{item.relatedOrderId ?? 'No allocation link'}</small>
-                      </span>
-                      <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
-                        <strong>{item.vendorName ?? item.vendorId}</strong>
-                        <small>{item.vendorId}</small>
-                      </span>
-                      <span>
+                        <strong title={item.vendorName ?? item.vendorId}>{item.vendorName ?? item.vendorId}</strong>
                         <strong>{safeStatusLabel(item.status)}</strong>
-                        <small>{formatQueueType(item.type)}</small>
-                      </span>
-                      <span title={`${item.title} · ${item.description}`}>
-                        <strong>{item.title}</strong>
-                        <small>{item.description}</small>
-                      </span>
-                      <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
-                      <OperationalActionGroup>
-                        {item.actionTo ? actionLink(item.actionTo, 'Open return') : <span className="queue-muted-action">No return link</span>}
-                      </OperationalActionGroup>
-                    </OperationalTableRow>
-                  ))}
+                        <span className="return-review-waiting-cell" title={`${waitingText} · ${item.description} · ${item.id}`}>
+                          <strong>{waitingText}</strong>
+                        </span>
+                        <strong title={formatDate(item.createdAt)}>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                        <OperationalActionGroup>
+                          {item.actionTo ? actionLink(item.actionTo, 'Open return') : <span className="queue-muted-action">No return link</span>}
+                        </OperationalActionGroup>
+                      </OperationalTableRow>
+                    );
+                  })}
                 </OperationalTable>
               ) : (
                 <EmptyStatePanel

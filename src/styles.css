@@ -14447,14 +14447,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .return-review-attention-table .op-table-head,
 .return-review-attention-table .op-table-row {
   grid-template-columns:
-    90px
-    minmax(150px, 1fr)
-    minmax(130px, 0.85fr)
-    minmax(130px, 0.85fr)
-    minmax(110px, 0.72fr)
-    minmax(190px, 1.35fr)
+    84px
+    minmax(122px, 0.82fr)
+    minmax(112px, 0.76fr)
+    minmax(92px, 0.62fr)
+    minmax(250px, 1.75fr)
     56px
-    minmax(98px, auto);
+    minmax(104px, auto);
 }
 
 .return-review-attention-table .op-table-row {
@@ -14474,6 +14473,14 @@ summary.provider-response-heading::-webkit-details-marker {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.return-review-attention-table .return-review-waiting-cell strong {
+  display: -webkit-box;
+  max-width: 100%;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .return-review-attention-table .op-action-group {

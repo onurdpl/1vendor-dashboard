@@ -1170,8 +1170,13 @@ describe('AdminOperationsQueuePage attention center', () => {
 
   it('renders Return as an authoritative table without using the attention preview rows', async () => {
     const authoritativeItems = [
-      buildReturnReviewQueueItem('return-2', '#1402', 2),
-      buildReturnReviewQueueItem('return-1', '#1401', 1),
+      buildReturnReviewQueueItem('return-2', '#1402', 2, {
+        description: 'Customer return is waiting for admin review.',
+        status: 'pending',
+      }),
+      buildReturnReviewQueueItem('return-1', '#1401', 1, {
+        status: 'requested',
+      }),
     ];
     const sectionDisclosureDashboard: OperationsAttentionDashboard = {
       ...dashboard,
@@ -1229,13 +1234,42 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     const returnList = await screen.findByRole('heading', { name: 'Return review' }).then((heading) => heading.closest('article'));
     expect(returnList).not.toBeNull();
-    expect(await within(returnList as HTMLElement).findByText('Authoritative return review items · 1-10 of 12')).toBeInTheDocument();
+    expect(await within(returnList as HTMLElement).findByText('Authoritative return review items')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('Authoritative return review items · 1-10 of 12')).not.toBeInTheDocument();
     expect(within(returnList as HTMLElement).getByText('Return rows 1-10 of 12')).toBeInTheDocument();
     expect(within(returnList as HTMLElement).getAllByRole('row')).toHaveLength(3);
-    expect(within(returnList as HTMLElement).getByText('op-refund-return-2')).toBeInTheDocument();
-    expect(within(returnList as HTMLElement).getByText('op-refund-return-1')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Severity')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByRole('columnheader', { name: 'Return' })).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Order')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Vendor')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Status')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Waiting')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Age')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Action')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('op-refund-return-2')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('op-refund-return-1')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('return-2')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('return-1')).not.toBeInTheDocument();
     expect(within(returnList as HTMLElement).queryByText('Preview-only return row')).not.toBeInTheDocument();
     expect(within(returnList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getAllByText('medium')).toHaveLength(2);
+    expect(within(returnList as HTMLElement).getByText('Order #1402')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Order #1401')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('alloc-return-2')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('alloc-return-1')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getAllByText('Sporjinal')).toHaveLength(2);
+    expect(within(returnList as HTMLElement).queryByText('sporjinal')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Pending')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Requested')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('Refund attention')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Customer return is waiting for admin review.')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getAllByText('Return requires review')).toHaveLength(1);
+    expect(within(returnList as HTMLElement).queryByText('Return return-2 is waiting for review.')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('Return return-1 is waiting for review.')).not.toBeInTheDocument();
+    expect((returnList as HTMLElement).querySelector('[title*="Customer return is waiting for admin review."]')).not.toBeNull();
+    expect((returnList as HTMLElement).querySelector('[title*="op-refund-return-1"]')).not.toBeNull();
+    expect((returnList as HTMLElement).querySelector('[title*="May "]')).not.toBeNull();
+    expect(within(returnList as HTMLElement).queryByText(/May \d+, 2026/)).not.toBeInTheDocument();
     expect(document.querySelector('.return-review-attention-table')).not.toBeNull();
     expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
       limit: 10,
@@ -1247,8 +1281,10 @@ describe('AdminOperationsQueuePage attention center', () => {
       '/returns/return-1',
     ]);
     const dataRows = within(returnList as HTMLElement).getAllByRole('row').slice(1);
-    expect(dataRows[0]).toHaveTextContent('op-refund-return-2');
-    expect(dataRows[1]).toHaveTextContent('op-refund-return-1');
+    expect(dataRows[0]).toHaveTextContent('Order #1402');
+    expect(dataRows[0]).toHaveTextContent('Customer return is waiting for admin review.');
+    expect(dataRows[1]).toHaveTextContent('Order #1401');
+    expect(dataRows[1]).toHaveTextContent('Return requires review');
   });
 
   it('pages Return independently while preserving one row per ReturnRecord', async () => {
@@ -1259,8 +1295,14 @@ describe('AdminOperationsQueuePage attention center', () => {
       }),
     );
     const secondPage = [
-      buildReturnReviewQueueItem('return-11', '#1450', 10, { relatedShopifyOrderNumber: '#1450' }),
-      buildReturnReviewQueueItem('return-12', '#1450', 11, { relatedShopifyOrderNumber: '#1450' }),
+      buildReturnReviewQueueItem('return-11', '#1450', 10, {
+        description: 'Second page return requires review.',
+        relatedShopifyOrderNumber: '#1450',
+      }),
+      buildReturnReviewQueueItem('return-12', '#1450', 11, {
+        description: 'Second page return is pending inspection.',
+        relatedShopifyOrderNumber: '#1450',
+      }),
     ];
     queueDashboardMock.mockImplementation(async (options) => {
       if (options?.type === 'awaiting_shipment') {
@@ -1293,8 +1335,10 @@ describe('AdminOperationsQueuePage attention center', () => {
     fireEvent.click(next);
 
     expect(await within(returnList as HTMLElement).findByText('Return rows 11-12 of 12')).toBeInTheDocument();
-    expect(await within(returnList as HTMLElement).findByText('op-refund-return-11')).toBeInTheDocument();
-    expect(await within(returnList as HTMLElement).findByText('op-refund-return-12')).toBeInTheDocument();
+    expect(await within(returnList as HTMLElement).findByText('Second page return requires review.')).toBeInTheDocument();
+    expect(await within(returnList as HTMLElement).findByText('Second page return is pending inspection.')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('op-refund-return-11')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('op-refund-return-12')).not.toBeInTheDocument();
     expect(previous).toBeEnabled();
     expect(next).toBeDisabled();
     expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
