@@ -356,6 +356,31 @@ function buildShipmentQueueItem(
   };
 }
 
+function buildReturnReviewQueueItem(
+  returnId: string,
+  orderNumber: string,
+  index: number,
+  overrides: Partial<OperationsQueueItem> = {},
+): OperationsQueueItem {
+  return {
+    id: `op-refund-${returnId}`,
+    type: 'refund_attention',
+    severity: 'medium',
+    title: 'Return requires review',
+    description: `Return ${returnId} is waiting for review.`,
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderId: `alloc-return-${index}`,
+    relatedShopifyOrderId: String(7960000000000 + index),
+    relatedShopifyOrderNumber: orderNumber,
+    status: 'awaiting_review',
+    createdAt: `2026-05-${String(Math.min(index + 1, 28)).padStart(2, '0')}T07:00:00.000Z`,
+    actionLabel: 'Review return',
+    actionTo: `/returns/${returnId}`,
+    ...overrides,
+  };
+}
+
 function buildQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
   return {
     summary: {
@@ -368,6 +393,26 @@ function buildQueueDashboard(items: OperationsQueueItem[], total = items.length)
       vendorBlocked: total,
       awaitingShipment: 0,
       refundAttention: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    },
+    items,
+  };
+}
+
+function buildReturnReviewQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
+  return {
+    summary: {
+      total,
+      critical: 0,
+      warning: 0,
+      attention: total,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: total,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -478,7 +523,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
-        : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
+          : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
     supportAttentionMock.mockResolvedValue(buildSupportAttentionPage([buildSupportAttentionTicket()]));
   });
@@ -557,11 +604,13 @@ describe('AdminOperationsQueuePage attention center', () => {
     const operationalStack = document.querySelector('.attention-sections-stack');
     expect(operationalStack).not.toBeNull();
     expect(document.querySelector('.attention-sections-grid')).toBeNull();
-    expect(within(operationalStack as HTMLElement).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
+    expect(
+      Array.from((operationalStack as HTMLElement).querySelectorAll('.attention-card-heading h3')).map((heading) => heading.textContent),
+    ).toEqual([
       'Support attention',
       'Vendor Blocked Allocations',
       'Shipment attention',
-      'Return backlog',
+      'Return review',
       'Finance review',
     ]);
 
@@ -697,6 +746,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
         : buildQueueDashboard([
             {
               ...buildVendorBlockedQueueItem('#1091', 0),
@@ -720,6 +771,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
         : buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12),
     );
 
@@ -755,6 +808,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) => {
       if (options?.type === 'awaiting_shipment') {
         return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
       }
       const offset = options?.offset ?? 0;
       if (offset === 0) {
@@ -828,6 +884,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? buildShipmentQueueDashboard(authoritativeItems, 12)
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -864,6 +922,9 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) => {
       if (options?.type === 'awaiting_shipment') {
         return buildShipmentQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
       }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
@@ -905,6 +966,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? buildShipmentQueueDashboard([], 0)
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -923,6 +986,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     queueDashboardMock.mockImplementation(async (options) =>
       options?.type === 'awaiting_shipment'
         ? pendingShipment
+        : options?.type === 'return_review'
+          ? buildReturnReviewQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -937,6 +1002,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'awaiting_shipment') {
         throw new Error('Shipment queue unavailable');
       }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
 
@@ -949,43 +1017,262 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
   });
 
-  it('keeps Return and Finance as honest projection previews', async () => {
+  it('renders Return as an authoritative table without using the attention preview rows', async () => {
+    const authoritativeItems = [
+      buildReturnReviewQueueItem('return-2', '#1402', 2),
+      buildReturnReviewQueueItem('return-1', '#1401', 1),
+    ];
+    const sectionDisclosureDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'return'
+          ? {
+              ...section,
+              count: 3,
+              critical: 2,
+              warning: 1,
+              items: [
+                {
+                  id: 'return-preview-only',
+                  type: 'return',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Return',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'return-preview-only',
+                  status: 'open',
+                  ageHours: 2,
+                  title: 'Preview-only return row',
+                  description: 'This attention row must not render in the Return section.',
+                  recommendedAction: 'Open return',
+                  destinationPath: '/returns/preview-return',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+      recommendations: [],
+      vendorRisks: [],
+      recentActivity: [],
+    };
+    attentionMock.mockResolvedValueOnce(sectionDisclosureDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard(authoritativeItems, 12);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const returnList = await screen.findByRole('heading', { name: 'Return review' }).then((heading) => heading.closest('article'));
+    expect(returnList).not.toBeNull();
+    expect(await within(returnList as HTMLElement).findByText('Authoritative return review items · 1-10 of 12')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('Return rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getAllByRole('row')).toHaveLength(3);
+    expect(within(returnList as HTMLElement).getByText('op-refund-return-2')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getByText('op-refund-return-1')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText('Preview-only return row')).not.toBeInTheDocument();
+    expect(within(returnList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
+    expect(document.querySelector('.return-review-attention-table')).not.toBeNull();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 0,
+      type: 'return_review',
+    }));
+    expect(within(returnList as HTMLElement).getAllByRole('link', { name: 'Open return' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/returns/return-2',
+      '/returns/return-1',
+    ]);
+    const dataRows = within(returnList as HTMLElement).getAllByRole('row').slice(1);
+    expect(dataRows[0]).toHaveTextContent('op-refund-return-2');
+    expect(dataRows[1]).toHaveTextContent('op-refund-return-1');
+  });
+
+  it('pages Return independently while preserving one row per ReturnRecord', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    const firstPage = Array.from({ length: 10 }, (_unused, index) =>
+      buildReturnReviewQueueItem(`return-${index + 1}`, `#14${String(index + 1).padStart(2, '0')}`, index, {
+        relatedShopifyOrderNumber: '#1450',
+      }),
+    );
+    const secondPage = [
+      buildReturnReviewQueueItem('return-11', '#1450', 10, { relatedShopifyOrderNumber: '#1450' }),
+      buildReturnReviewQueueItem('return-12', '#1450', 11, { relatedShopifyOrderNumber: '#1450' }),
+    ];
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const returnList = await screen.findByRole('heading', { name: 'Return review' }).then((heading) => heading.closest('article'));
+    expect(returnList).not.toBeNull();
+    expect(await within(returnList as HTMLElement).findByText('Return rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(returnList as HTMLElement).getAllByRole('row')).toHaveLength(11);
+    expect(within(returnList as HTMLElement).getAllByText('Order #1450').length).toBe(10);
+    const previous = within(returnList as HTMLElement).getByRole('button', { name: 'Previous' });
+    const next = within(returnList as HTMLElement).getByRole('button', { name: 'Next' });
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+
+    fireEvent.click(next);
+
+    expect(await within(returnList as HTMLElement).findByText('Return rows 11-12 of 12')).toBeInTheDocument();
+    expect(await within(returnList as HTMLElement).findByText('op-refund-return-11')).toBeInTheDocument();
+    expect(await within(returnList as HTMLElement).findByText('op-refund-return-12')).toBeInTheDocument();
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 10,
+      type: 'return_review',
+    }));
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'vendor_blocked').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'awaiting_shipment').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(supportAttentionMock.mock.calls.every(([options]) => options?.offset === 0)).toBe(true);
+
+    fireEvent.click(previous);
+
+    expect(await within(returnList as HTMLElement).findByText('Return rows 1-10 of 12')).toBeInTheDocument();
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'return_review').at(-1)?.[0]).toEqual(
+      expect.objectContaining({ limit: 10, offset: 0, type: 'return_review' }),
+    );
+  });
+
+  it('renders section-scoped Return empty, loading, and error states without preview fallback', async () => {
+    const returnPreviewDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'return'
+          ? {
+              ...section,
+              count: 1,
+              critical: 1,
+              warning: 0,
+              items: [
+                {
+                  id: 'return-preview-only',
+                  type: 'return',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Return',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'return-preview-only',
+                  status: 'open',
+                  ageHours: 2,
+                  title: 'Preview-only return row',
+                  description: 'This attention row must not render in the Return section.',
+                  recommendedAction: 'Open return',
+                  destinationPath: '/returns/preview-return',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+    };
+    attentionMock.mockResolvedValue(returnPreviewDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const emptyRender = renderPage();
+    const emptyReturnList = await screen.findByRole('heading', { name: 'Return review' }).then((heading) => heading.closest('article'));
+    expect(emptyReturnList).not.toBeNull();
+    expect(await within(emptyReturnList as HTMLElement).findByText('No return review items')).toBeInTheDocument();
+    expect(within(emptyReturnList as HTMLElement).queryByText(/Return rows 0-0/)).not.toBeInTheDocument();
+    expect(within(emptyReturnList as HTMLElement).queryByText('Preview-only return row')).not.toBeInTheDocument();
+    emptyRender.unmount();
+
+    let resolveReturnReview: ((value: OperationsQueueDashboard) => void) | undefined;
+    const pendingReturnReview = new Promise<OperationsQueueDashboard>((resolve) => {
+      resolveReturnReview = resolve;
+    });
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return pendingReturnReview;
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const loadingRender = renderPage();
+    expect(await screen.findByText('Loading return review')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment attention' })).toBeInTheDocument();
+    resolveReturnReview?.(buildReturnReviewQueueDashboard([], 0));
+    loadingRender.unmount();
+
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        throw new Error('Return queue unavailable');
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+    const errorReturnList = await screen.findByRole('heading', { name: 'Return review' }).then((heading) => heading.closest('article'));
+    expect(errorReturnList).not.toBeNull();
+    expect(await within(errorReturnList as HTMLElement).findByText('Return review unavailable')).toBeInTheDocument();
+    expect(within(errorReturnList as HTMLElement).getByText('Return queue unavailable')).toBeInTheDocument();
+    expect(within(errorReturnList as HTMLElement).queryByText('Preview-only return row')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
+  });
+
+  it('keeps Finance as an honest projection preview', async () => {
     const sectionDisclosureDashboard: OperationsAttentionDashboard = {
       ...dashboard,
       sections: [
         {
-          key: 'return',
-          title: 'Return backlog',
+          key: 'finance',
+          title: 'Finance review',
           count: 3,
           critical: 2,
           warning: 1,
           items: [
             {
-              id: 'return-current-page',
-              type: 'return',
+              id: 'finance-current-page',
+              type: 'finance',
               severity: 'critical',
               vendorId: 'sporjinal',
               vendorName: 'Sporjinal',
-              objectType: 'Return',
-              objectReference: 'Order #1301',
-              objectId: 'return-1301',
-              status: 'open',
+              objectType: 'Finance',
+              objectReference: 'Order #1501',
+              objectId: 'finance-1501',
+              status: 'review',
               ageHours: 2,
-              title: 'Return needs review',
-              description: 'Return review is pending.',
-              recommendedAction: 'Open return',
-              destinationPath: '/returns/return-1301',
+              title: 'Finance needs review',
+              description: 'Finance review is pending.',
+              recommendedAction: 'Review finance',
+              destinationPath: '/admin/finance',
               createdAt: '2026-05-17T08:00:00.000Z',
             },
           ],
-        },
-        {
-          key: 'finance',
-          title: 'Finance review',
-          count: 0,
-          critical: 0,
-          warning: 0,
-          items: [],
         },
       ],
       recommendations: [],
@@ -999,6 +1286,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await screen.findByText('Showing 1 of 3 active · 2 critical · 1 warning')).toBeInTheDocument();
     expect(screen.getByText('Showing 1 of 3. This section is a preview.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Finance review' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return review' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'View all vendor-blocked allocations' })).not.toBeInTheDocument();
   });
 

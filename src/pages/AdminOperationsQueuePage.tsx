@@ -30,6 +30,7 @@ import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/for
 const AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE = 10;
 const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SHIPMENT_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const RETURN_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
 function formatDate(value: string) {
@@ -215,6 +216,7 @@ function getSupportSlaLabel(ticket: SupportAttentionTicket) {
 export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
+  const [returnReviewQueueOffset, setReturnReviewQueueOffset] = useState(0);
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -282,6 +284,28 @@ export function AdminOperationsQueuePage() {
     },
   );
   const {
+    data: returnReviewQueueDashboard,
+    isLoading: isReturnReviewQueueLoading,
+    isFetching: isReturnReviewQueueFetching,
+    isError: isReturnReviewQueueError,
+    error: returnReviewQueueError,
+    refetch: refetchReturnReviewQueue,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(RETURN_REVIEW_QUEUE_PAGE_SIZE, returnReviewQueueOffset, 'return_review'),
+    ({ signal }) =>
+      runtimeServices.operations.dashboard({
+        signal,
+        limit: RETURN_REVIEW_QUEUE_PAGE_SIZE,
+        offset: returnReviewQueueOffset,
+        type: 'return_review',
+      }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations',
+    },
+  );
+  const {
     data: supportAttentionPage,
     isLoading: isSupportAttentionLoading,
     isFetching: isSupportAttentionFetching,
@@ -325,7 +349,11 @@ export function AdminOperationsQueuePage() {
   const queue = safeArray(dataView.queue);
   const sections = safeArray(dataView.sections);
   const displaySections = sections.filter(
-    (section) => section.key !== 'support' && section.key !== 'vendor_blocked' && section.key !== 'shipment',
+    (section) =>
+      section.key !== 'support' &&
+      section.key !== 'vendor_blocked' &&
+      section.key !== 'shipment' &&
+      section.key !== 'return',
   );
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
@@ -347,6 +375,12 @@ export function AdminOperationsQueuePage() {
   const shipmentPageEnd = Math.min(shipmentQueueOffset + SHIPMENT_QUEUE_PAGE_SIZE, totalShipmentQueueRows);
   const canPageShipmentBack = shipmentQueueOffset > 0;
   const canPageShipmentForward = shipmentQueueOffset + SHIPMENT_QUEUE_PAGE_SIZE < totalShipmentQueueRows;
+  const returnReviewQueueItems = safeArray(returnReviewQueueDashboard?.items);
+  const totalReturnReviewQueueRows = returnReviewQueueDashboard?.summary.total ?? 0;
+  const returnReviewPageStart = totalReturnReviewQueueRows > 0 ? returnReviewQueueOffset + 1 : 0;
+  const returnReviewPageEnd = Math.min(returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE, totalReturnReviewQueueRows);
+  const canPageReturnReviewBack = returnReviewQueueOffset > 0;
+  const canPageReturnReviewForward = returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE < totalReturnReviewQueueRows;
 
   useEffect(() => {
     if (!shipmentQueueDashboard || shipmentQueueOffset === 0 || shipmentQueueOffset < totalShipmentQueueRows) {
@@ -359,6 +393,18 @@ export function AdminOperationsQueuePage() {
     );
     setShipmentQueueOffset(lastPageOffset);
   }, [shipmentQueueDashboard, shipmentQueueOffset, totalShipmentQueueRows]);
+
+  useEffect(() => {
+    if (!returnReviewQueueDashboard || returnReviewQueueOffset === 0 || returnReviewQueueOffset < totalReturnReviewQueueRows) {
+      return;
+    }
+
+    const lastPageOffset = Math.max(
+      0,
+      Math.floor((Math.max(totalReturnReviewQueueRows, 1) - 1) / RETURN_REVIEW_QUEUE_PAGE_SIZE) * RETURN_REVIEW_QUEUE_PAGE_SIZE,
+    );
+    setReturnReviewQueueOffset(lastPageOffset);
+  }, [returnReviewQueueDashboard, returnReviewQueueOffset, totalReturnReviewQueueRows]);
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -737,6 +783,100 @@ export function AdminOperationsQueuePage() {
                 <EmptyStatePanel
                   title="No shipment attention items"
                   description="No active shipment rows need operator attention."
+                />
+              )}
+            </article>
+
+            <article className="attention-card return-review-attention-list" id="return-review-attention-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Return</p>
+                  <h3>Return review</h3>
+                  <span>
+                    Authoritative return review items
+                    {totalReturnReviewQueueRows > 0
+                      ? ` · ${returnReviewPageStart}-${returnReviewPageEnd} of ${totalReturnReviewQueueRows}`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+
+              {totalReturnReviewQueueRows > 0 ? (
+                <div className="vendor-blocked-page-controls return-review-page-controls">
+                  <span>
+                    Return rows {returnReviewPageStart}-{returnReviewPageEnd} of {totalReturnReviewQueueRows}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setReturnReviewQueueOffset(Math.max(0, returnReviewQueueOffset - RETURN_REVIEW_QUEUE_PAGE_SIZE))}
+                    disabled={!canPageReturnReviewBack}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setReturnReviewQueueOffset(returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE)}
+                    disabled={!canPageReturnReviewForward}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+
+              {isReturnReviewQueueError ? (
+                <SectionErrorRetry
+                  title="Return review unavailable"
+                  description={returnReviewQueueError ?? 'The paginated return review table could not be loaded.'}
+                  onRetry={() => void refetchReturnReviewQueue()}
+                />
+              ) : isReturnReviewQueueLoading || isReturnReviewQueueFetching ? (
+                <SectionSkeleton
+                  title="Loading return review"
+                  description="Fetching return review items with server-side pagination."
+                />
+              ) : returnReviewQueueItems.length ? (
+                <OperationalTable
+                  columns={['Severity', 'Return', 'Order', 'Vendor', 'Status', 'Waiting', 'Age', 'Action']}
+                  className="return-review-attention-table"
+                >
+                  {returnReviewQueueItems.map((item) => (
+                    <OperationalTableRow key={item.id}>
+                      <span>
+                        <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                      </span>
+                      <span title={`${item.id} · ${item.title}`}>
+                        <strong>{item.id}</strong>
+                        <small>{item.title}</small>
+                      </span>
+                      <span>
+                        <strong>{getQueueItemReference(item)}</strong>
+                        <small>{item.relatedOrderId ?? 'No allocation link'}</small>
+                      </span>
+                      <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
+                        <strong>{item.vendorName ?? item.vendorId}</strong>
+                        <small>{item.vendorId}</small>
+                      </span>
+                      <span>
+                        <strong>{safeStatusLabel(item.status)}</strong>
+                        <small>{formatQueueType(item.type)}</small>
+                      </span>
+                      <span title={`${item.title} · ${item.description}`}>
+                        <strong>{item.title}</strong>
+                        <small>{item.description}</small>
+                      </span>
+                      <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                      <OperationalActionGroup>
+                        {item.actionTo ? actionLink(item.actionTo, 'Open return') : <span className="queue-muted-action">No return link</span>}
+                      </OperationalActionGroup>
+                    </OperationalTableRow>
+                  ))}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel
+                  title="No return review items"
+                  description="No active return review rows need operator attention."
                 />
               )}
             </article>
