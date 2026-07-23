@@ -74,6 +74,59 @@ describe('real service pagination plumbing', () => {
     ]);
   });
 
+  it('preserves structured finance integrity alert diagnostics from operations queue responses', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      summary: {
+        total: 1,
+        financeIntegrityAlerts: 1,
+      },
+      items: [
+        {
+          id: 'op-finance-integrity-alert-1',
+          type: 'finance_integrity_alert',
+          severity: 'critical',
+          title: 'Finance integrity alert',
+          description: 'Category: multiple_active_sale_ledgers. Reason: Two active sale ledgers exist.',
+          vendorId: 'vendor-1',
+          vendorName: 'Vendor 1',
+          relatedOrderId: 'alloc-1',
+          relatedShopifyOrderId: '7709129507153',
+          relatedShopifyOrderNumber: '#1091',
+          relatedReturnId: null,
+          relatedRefundId: null,
+          status: 'open',
+          createdAt: '2026-06-21T09:00:00.000Z',
+          actionLabel: 'Investigate finance alert',
+          destinationPath: '/admin/orders/7709129507153',
+          financeIntegrityAlertId: 'alert-1',
+          financeIntegrityCategory: 'multiple_active_sale_ledgers',
+          financeIntegrityReason: 'Two active sale ledgers exist.',
+          vendorAllocationId: 'alloc-1',
+          allocationEconomicTransferId: 'transfer-1',
+        },
+      ],
+    });
+
+    const dashboard = await getAdminOperationsQueueDashboard({
+      limit: 10,
+      offset: 0,
+      type: 'finance_integrity_alert',
+    });
+
+    expect(dashboard.items[0]).toMatchObject({
+      id: 'op-finance-integrity-alert-1',
+      type: 'finance_integrity_alert',
+      severity: 'critical',
+      relatedShopifyOrderNumber: '#1091',
+      financeIntegrityAlertId: 'alert-1',
+      financeIntegrityCategory: 'multiple_active_sale_ledgers',
+      financeIntegrityReason: 'Two active sale ledgers exist.',
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: 'transfer-1',
+      actionTo: '/admin/orders/7709129507153',
+    });
+  });
+
   it('passes the support attention filter with limit and offset without changing the unfiltered admin support list', async () => {
     apiClientGet
       .mockResolvedValueOnce([])

@@ -222,6 +222,7 @@ const financeIntegrityAlertOperationsQueueSelect = {
       order: {
         select: {
           sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
         },
       },
     },
@@ -897,6 +898,7 @@ function mapFinanceIntegrityAlertToQueueItem(
       };
       order: {
         sourceShopifyOrderId: string;
+        sourceShopifyOrderNumber: string;
       };
     } | null;
   },
@@ -912,6 +914,7 @@ function mapFinanceIntegrityAlertToQueueItem(
   }
 
   const relatedShopifyOrderId = alert.vendorAllocation?.order.sourceShopifyOrderId ?? null;
+  const relatedShopifyOrderNumber = alert.vendorAllocation?.order.sourceShopifyOrderNumber ?? null;
   const descriptionParts = [
     formatQueueDescriptionPart('Category', alert.category),
     formatQueueDescriptionPart('Reason', alert.reason),
@@ -929,12 +932,18 @@ function mapFinanceIntegrityAlertToQueueItem(
     vendorName: alert.vendorAllocation?.assignedVendor.name ?? 'Platform',
     relatedOrderId: alert.vendorAllocationId,
     relatedShopifyOrderId,
+    relatedShopifyOrderNumber,
     relatedReturnId: null,
     relatedRefundId: null,
     status,
     createdAt: alert.detectedAt.toISOString(),
     actionLabel: 'Investigate finance alert',
     destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
+    financeIntegrityAlertId: alert.id,
+    financeIntegrityCategory: alert.category,
+    financeIntegrityReason: alert.reason,
+    vendorAllocationId: alert.vendorAllocationId,
+    allocationEconomicTransferId: alert.allocationEconomicTransferId,
   };
 }
 
@@ -1423,6 +1432,7 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
           order: {
             select: {
               sourceShopifyOrderId: true,
+              sourceShopifyOrderNumber: true,
             },
           },
         },

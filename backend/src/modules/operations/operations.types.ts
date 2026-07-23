@@ -30,6 +30,11 @@ export type OperationsQueueItemDto = {
   destinationPath: string | null;
   reassignmentRequired?: boolean;
   splitChildAllocation?: boolean;
+  financeIntegrityAlertId?: string;
+  financeIntegrityCategory?: string;
+  financeIntegrityReason?: string | null;
+  vendorAllocationId?: string | null;
+  allocationEconomicTransferId?: string | null;
 };
 
 export type OperationsQueueSummaryDto = {

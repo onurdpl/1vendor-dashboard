@@ -2826,6 +2826,11 @@ export type OperationsQueueItem = {
   actionTo?: string;
   reassignmentRequired?: boolean;
   splitChildAllocation?: boolean;
+  financeIntegrityAlertId?: string;
+  financeIntegrityCategory?: string;
+  financeIntegrityReason?: string | null;
+  vendorAllocationId?: string | null;
+  allocationEconomicTransferId?: string | null;
 };
 
 export type OperationsQueueSummary = {

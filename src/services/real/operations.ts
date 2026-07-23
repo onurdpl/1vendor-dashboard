@@ -22,6 +22,11 @@ type OperationsResponseDto = {
     destinationPath: string | null;
     reassignmentRequired?: boolean;
     splitChildAllocation?: boolean;
+    financeIntegrityAlertId?: string;
+    financeIntegrityCategory?: string;
+    financeIntegrityReason?: string | null;
+    vendorAllocationId?: string | null;
+    allocationEconomicTransferId?: string | null;
   }>;
 };
 
@@ -91,6 +96,11 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
       actionTo: item.destinationPath ?? undefined,
       reassignmentRequired: item.reassignmentRequired,
       splitChildAllocation: item.splitChildAllocation,
+      financeIntegrityAlertId: item.financeIntegrityAlertId,
+      financeIntegrityCategory: item.financeIntegrityCategory,
+      financeIntegrityReason: item.financeIntegrityReason,
+      vendorAllocationId: item.vendorAllocationId,
+      allocationEconomicTransferId: item.allocationEconomicTransferId,
     })),
   };
 }

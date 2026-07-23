@@ -157,6 +157,7 @@ function buildFinanceIntegrityAlert(overrides: Record<string, unknown> = {}) {
       },
       order: {
         sourceShopifyOrderId: '7709129507153',
+        sourceShopifyOrderNumber: '#1091',
       },
     },
     ...overrides,
@@ -1175,6 +1176,7 @@ describe('admin operations summary counts', () => {
           },
           order: {
             sourceShopifyOrderId: '7709129507153',
+            sourceShopifyOrderNumber: '#1091',
           },
         },
       },
@@ -1203,6 +1205,12 @@ describe('admin operations summary counts', () => {
         description: 'Category: multiple_active_sale_ledgers. Reason: Two active sale ledgers exist. Vendor allocation: alloc-1. Economic transfer: transfer-1.',
         actionLabel: 'Investigate finance alert',
         destinationPath: '/admin/orders/7709129507153',
+        relatedShopifyOrderNumber: '#1091',
+        financeIntegrityAlertId: 'alert-critical',
+        financeIntegrityCategory: 'multiple_active_sale_ledgers',
+        financeIntegrityReason: 'Two active sale ledgers exist.',
+        vendorAllocationId: 'alloc-1',
+        allocationEconomicTransferId: 'transfer-1',
       }),
       expect.objectContaining({
         id: 'op-finance-integrity-alert-acknowledged-warning',
@@ -1210,6 +1218,11 @@ describe('admin operations summary counts', () => {
         severity: 'warning',
         description: 'Category: no_active_sale_ledger. Reason: No active sale ledger exists. Vendor allocation: alloc-2.',
         destinationPath: '/admin/operations',
+        financeIntegrityAlertId: 'alert-acknowledged-warning',
+        financeIntegrityCategory: 'no_active_sale_ledger',
+        financeIntegrityReason: 'No active sale ledger exists.',
+        vendorAllocationId: 'alloc-2',
+        allocationEconomicTransferId: null,
       }),
     ]);
     expect(dashboard.summary).toMatchObject({
@@ -1333,6 +1346,36 @@ describe('admin operations summary counts', () => {
     ]);
     expect(dashboard.items.map((item) => item.status)).toEqual(['open', 'acknowledged', 'open', 'acknowledged']);
     expect(dashboard.items.map((item) => item.severity)).toEqual(['critical', 'critical', 'warning', 'warning']);
+    expect(dashboard.items[0]).toMatchObject({
+      financeIntegrityAlertId: 'alert-open-critical',
+      financeIntegrityCategory: 'multiple_active_sale_ledgers',
+      financeIntegrityReason: 'Two active sale ledgers exist.',
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: 'transfer-1',
+      relatedShopifyOrderNumber: '#1091',
+    });
+    expect(dashboard.items[1]).toMatchObject({
+      financeIntegrityAlertId: 'alert-acknowledged-critical',
+      financeIntegrityCategory: 'multiple_active_sale_ledgers',
+      financeIntegrityReason: 'Two active sale ledgers exist.',
+      vendorAllocationId: 'alloc-1',
+      allocationEconomicTransferId: null,
+      relatedShopifyOrderNumber: '#1091',
+    });
+    expect(dashboard.items[2]).toMatchObject({
+      financeIntegrityAlertId: 'alert-open-warning',
+      financeIntegrityCategory: 'multiple_active_sale_ledgers',
+      financeIntegrityReason: 'Two active sale ledgers exist.',
+      vendorAllocationId: 'alloc-2',
+      allocationEconomicTransferId: 'transfer-1',
+    });
+    expect(dashboard.items[3]).toMatchObject({
+      financeIntegrityAlertId: 'alert-acknowledged-warning',
+      financeIntegrityCategory: 'multiple_active_sale_ledgers',
+      financeIntegrityReason: 'Two active sale ledgers exist.',
+      vendorAllocationId: 'alloc-2',
+      allocationEconomicTransferId: 'transfer-1',
+    });
 
     const totalWhere = prismaMock.financeIntegrityAlert.count.mock.calls[0]?.[0]?.where;
     const itemsWhere = prismaMock.financeIntegrityAlert.findMany.mock.calls[0]?.[0]?.where;
@@ -1347,6 +1390,22 @@ describe('admin operations summary counts', () => {
     });
     expect(prismaMock.financeIntegrityAlert.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: totalWhere,
+      select: expect.objectContaining({
+        category: true,
+        reason: true,
+        vendorAllocationId: true,
+        allocationEconomicTransferId: true,
+        vendorAllocation: expect.objectContaining({
+          select: expect.objectContaining({
+            order: expect.objectContaining({
+              select: expect.objectContaining({
+                sourceShopifyOrderId: true,
+                sourceShopifyOrderNumber: true,
+              }),
+            }),
+          }),
+        }),
+      }),
       orderBy: [
         { severity: 'asc' },
         { detectedAt: 'desc' },
