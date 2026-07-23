@@ -31,6 +31,7 @@ const AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE = 10;
 const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SHIPMENT_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const RETURN_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const FINANCE_INTEGRITY_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
 function formatDate(value: string) {
@@ -202,6 +203,32 @@ function getQueueAdminOrderPath(item: OperationsQueueItem) {
   return item.relatedShopifyOrderId ? `/admin/orders/${item.relatedShopifyOrderId}` : null;
 }
 
+function getFinanceIntegrityAlertReference(item: OperationsQueueItem) {
+  const alertId = item.financeIntegrityAlertId?.trim();
+  return alertId || item.id;
+}
+
+function getFinanceIntegrityOrderReference(item: OperationsQueueItem) {
+  const orderNumber = item.relatedShopifyOrderNumber?.trim();
+  if (orderNumber) {
+    return orderNumber.startsWith('#') ? `Order ${orderNumber}` : `Order #${orderNumber}`;
+  }
+  if (item.relatedShopifyOrderId) {
+    return `Shopify order ${item.relatedShopifyOrderId}`;
+  }
+  return 'No order link';
+}
+
+function joinPresentParts(...parts: Array<string | null | undefined>) {
+  const presentParts: string[] = [];
+  parts.forEach((part) => {
+    if (part) {
+      presentParts.push(part);
+    }
+  });
+  return presentParts.join(' · ');
+}
+
 function getSupportOrderReference(ticket: SupportAttentionTicket) {
   return ticket.relatedOrderReference ?? (ticket.contextType === 'order' ? ticket.contextId : null);
 }
@@ -217,6 +244,7 @@ export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
   const [returnReviewQueueOffset, setReturnReviewQueueOffset] = useState(0);
+  const [financeIntegrityQueueOffset, setFinanceIntegrityQueueOffset] = useState(0);
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -306,6 +334,28 @@ export function AdminOperationsQueuePage() {
     },
   );
   const {
+    data: financeIntegrityQueueDashboard,
+    isLoading: isFinanceIntegrityQueueLoading,
+    isFetching: isFinanceIntegrityQueueFetching,
+    isError: isFinanceIntegrityQueueError,
+    error: financeIntegrityQueueError,
+    refetch: refetchFinanceIntegrityQueue,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(FINANCE_INTEGRITY_QUEUE_PAGE_SIZE, financeIntegrityQueueOffset, 'finance_integrity_alert'),
+    ({ signal }) =>
+      runtimeServices.operations.dashboard({
+        signal,
+        limit: FINANCE_INTEGRITY_QUEUE_PAGE_SIZE,
+        offset: financeIntegrityQueueOffset,
+        type: 'finance_integrity_alert',
+      }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations',
+    },
+  );
+  const {
     data: supportAttentionPage,
     isLoading: isSupportAttentionLoading,
     isFetching: isSupportAttentionFetching,
@@ -353,7 +403,8 @@ export function AdminOperationsQueuePage() {
       section.key !== 'support' &&
       section.key !== 'vendor_blocked' &&
       section.key !== 'shipment' &&
-      section.key !== 'return',
+      section.key !== 'return' &&
+      section.key !== 'finance',
   );
   const vendorRisks = safeArray(dataView.vendorRisks);
   const recentActivity = safeArray(dataView.recentActivity);
@@ -381,6 +432,16 @@ export function AdminOperationsQueuePage() {
   const returnReviewPageEnd = Math.min(returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE, totalReturnReviewQueueRows);
   const canPageReturnReviewBack = returnReviewQueueOffset > 0;
   const canPageReturnReviewForward = returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE < totalReturnReviewQueueRows;
+  const financeIntegrityQueueItems = safeArray(financeIntegrityQueueDashboard?.items);
+  const totalFinanceIntegrityQueueRows = financeIntegrityQueueDashboard?.summary.total ?? 0;
+  const financeIntegrityPageStart = totalFinanceIntegrityQueueRows > 0 ? financeIntegrityQueueOffset + 1 : 0;
+  const financeIntegrityPageEnd = Math.min(
+    financeIntegrityQueueOffset + FINANCE_INTEGRITY_QUEUE_PAGE_SIZE,
+    totalFinanceIntegrityQueueRows,
+  );
+  const canPageFinanceIntegrityBack = financeIntegrityQueueOffset > 0;
+  const canPageFinanceIntegrityForward =
+    financeIntegrityQueueOffset + FINANCE_INTEGRITY_QUEUE_PAGE_SIZE < totalFinanceIntegrityQueueRows;
 
   useEffect(() => {
     if (!shipmentQueueDashboard || shipmentQueueOffset === 0 || shipmentQueueOffset < totalShipmentQueueRows) {
@@ -405,6 +466,23 @@ export function AdminOperationsQueuePage() {
     );
     setReturnReviewQueueOffset(lastPageOffset);
   }, [returnReviewQueueDashboard, returnReviewQueueOffset, totalReturnReviewQueueRows]);
+
+  useEffect(() => {
+    if (
+      !financeIntegrityQueueDashboard ||
+      financeIntegrityQueueOffset === 0 ||
+      financeIntegrityQueueOffset < totalFinanceIntegrityQueueRows
+    ) {
+      return;
+    }
+
+    const lastPageOffset = Math.max(
+      0,
+      Math.floor((Math.max(totalFinanceIntegrityQueueRows, 1) - 1) / FINANCE_INTEGRITY_QUEUE_PAGE_SIZE) *
+        FINANCE_INTEGRITY_QUEUE_PAGE_SIZE,
+    );
+    setFinanceIntegrityQueueOffset(lastPageOffset);
+  }, [financeIntegrityQueueDashboard, financeIntegrityQueueOffset, totalFinanceIntegrityQueueRows]);
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -877,6 +955,122 @@ export function AdminOperationsQueuePage() {
                 <EmptyStatePanel
                   title="No return review items"
                   description="No active return review rows need operator attention."
+                />
+              )}
+            </article>
+
+            <article className="attention-card finance-integrity-attention-list" id="finance-integrity-attention-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Finance</p>
+                  <h3>Finance Integrity</h3>
+                  <span>
+                    Authoritative finance integrity alerts
+                    {totalFinanceIntegrityQueueRows > 0
+                      ? ` · ${financeIntegrityPageStart}-${financeIntegrityPageEnd} of ${totalFinanceIntegrityQueueRows}`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+
+              {totalFinanceIntegrityQueueRows > 0 ? (
+                <div className="vendor-blocked-page-controls finance-integrity-page-controls">
+                  <span>
+                    Finance rows {financeIntegrityPageStart}-{financeIntegrityPageEnd} of {totalFinanceIntegrityQueueRows}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() =>
+                      setFinanceIntegrityQueueOffset(Math.max(0, financeIntegrityQueueOffset - FINANCE_INTEGRITY_QUEUE_PAGE_SIZE))
+                    }
+                    disabled={!canPageFinanceIntegrityBack}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setFinanceIntegrityQueueOffset(financeIntegrityQueueOffset + FINANCE_INTEGRITY_QUEUE_PAGE_SIZE)}
+                    disabled={!canPageFinanceIntegrityForward}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+
+              {isFinanceIntegrityQueueError ? (
+                <SectionErrorRetry
+                  title="Finance integrity unavailable"
+                  description={financeIntegrityQueueError ?? 'The paginated finance integrity table could not be loaded.'}
+                  onRetry={() => void refetchFinanceIntegrityQueue()}
+                />
+              ) : isFinanceIntegrityQueueLoading || isFinanceIntegrityQueueFetching ? (
+                <SectionSkeleton
+                  title="Loading finance integrity"
+                  description="Fetching finance integrity alerts with server-side pagination."
+                />
+              ) : financeIntegrityQueueItems.length ? (
+                <OperationalTable
+                  columns={['Severity', 'Alert', 'Category', 'Order', 'Vendor', 'Status', 'Detected', 'Action']}
+                  className="finance-integrity-attention-table"
+                >
+                  {financeIntegrityQueueItems.map((item) => {
+                    const alertReference = getFinanceIntegrityAlertReference(item);
+                    const categoryLabel = item.financeIntegrityCategory
+                      ? safeStatusLabel(item.financeIntegrityCategory)
+                      : 'No category';
+                    const reason = item.financeIntegrityReason?.trim() || 'No reason recorded';
+                    const allocationReference = item.vendorAllocationId?.trim() || item.relatedOrderId;
+                    const transferReference = item.allocationEconomicTransferId?.trim();
+
+                    return (
+                      <OperationalTableRow key={item.id}>
+                        <span>
+                          <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                        </span>
+                        <span title={`${alertReference} · ${reason}`}>
+                          <strong>{alertReference}</strong>
+                          <small>{reason}</small>
+                        </span>
+                        <span title={item.financeIntegrityCategory ?? categoryLabel}>
+                          <strong>{categoryLabel}</strong>
+                          <small>{item.financeIntegrityCategory ?? 'Structured category unavailable'}</small>
+                        </span>
+                        <span
+                          title={joinPresentParts(
+                            getFinanceIntegrityOrderReference(item),
+                            allocationReference ? `Allocation ${allocationReference}` : null,
+                            transferReference ? `Transfer ${transferReference}` : null,
+                          )}
+                        >
+                          <strong>{getFinanceIntegrityOrderReference(item)}</strong>
+                          <small>{allocationReference ? `Allocation ${allocationReference}` : 'No allocation link'}</small>
+                          {transferReference ? <small>Transfer {transferReference}</small> : null}
+                        </span>
+                        <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
+                          <strong>{item.vendorName ?? item.vendorId}</strong>
+                          <small>{item.vendorId}</small>
+                        </span>
+                        <span>
+                          <strong>{safeStatusLabel(item.status)}</strong>
+                          <small>{formatQueueType(item.type)}</small>
+                        </span>
+                        <span title={formatDate(item.createdAt)}>
+                          <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                          <small>{formatDate(item.createdAt)}</small>
+                        </span>
+                        <OperationalActionGroup>
+                          {item.actionTo ? actionLink(item.actionTo, 'Review') : <span className="queue-muted-action">No review link</span>}
+                        </OperationalActionGroup>
+                      </OperationalTableRow>
+                    );
+                  })}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel
+                  title="No finance integrity alerts"
+                  description="No active finance integrity alert rows need operator attention."
                 />
               )}
             </article>

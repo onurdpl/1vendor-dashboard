@@ -381,6 +381,36 @@ function buildReturnReviewQueueItem(
   };
 }
 
+function buildFinanceIntegrityQueueItem(
+  alertId: string,
+  orderNumber: string | null,
+  index: number,
+  overrides: Partial<OperationsQueueItem> = {},
+): OperationsQueueItem {
+  return {
+    id: `op-finance-integrity-${alertId}`,
+    type: 'finance_integrity_alert',
+    severity: index % 2 === 0 ? 'critical' : 'high',
+    title: 'Finance integrity alert',
+    description: `Category: missing_active_sale_ledger. Reason: finance_integrity_${index}.`,
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderId: `alloc-finance-${index}`,
+    relatedShopifyOrderId: String(7970000000000 + index),
+    relatedShopifyOrderNumber: orderNumber ?? undefined,
+    status: index % 2 === 0 ? 'open' : 'acknowledged',
+    createdAt: `2026-05-${String(Math.min(index + 1, 28)).padStart(2, '0')}T06:00:00.000Z`,
+    actionLabel: 'Investigate finance alert',
+    actionTo: `/admin/orders/${7970000000000 + index}`,
+    financeIntegrityAlertId: alertId,
+    financeIntegrityCategory: index % 2 === 0 ? 'missing_active_sale_ledger' : 'voided_sale_ledger_without_successor',
+    financeIntegrityReason: index % 2 === 0 ? 'no_active_sale_ledger' : 'voided_sale_ledger_without_successor',
+    vendorAllocationId: `alloc-finance-${index}`,
+    allocationEconomicTransferId: `transfer-finance-${index}`,
+    ...overrides,
+  };
+}
+
 function buildQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
   return {
     summary: {
@@ -394,6 +424,26 @@ function buildQueueDashboard(items: OperationsQueueItem[], total = items.length)
       awaitingShipment: 0,
       refundAttention: 0,
       financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    },
+    items,
+  };
+}
+
+function buildFinanceIntegrityQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
+  return {
+    summary: {
+      total,
+      critical: items.filter((item) => item.severity === 'critical').length,
+      warning: total - items.filter((item) => item.severity === 'critical').length,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeIntegrityAlerts: total,
       operationalSignals: 0,
       automationActions: 0,
     },
@@ -486,6 +536,19 @@ function buildSupportAttentionPage(
   };
 }
 
+function buildDefaultQueueDashboardForOptions(options?: { type?: OperationsQueueTypeFilter }): OperationsQueueDashboard {
+  if (options?.type === 'awaiting_shipment') {
+    return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+  }
+  if (options?.type === 'return_review') {
+    return buildReturnReviewQueueDashboard([], 0);
+  }
+  if (options?.type === 'finance_integrity_alert') {
+    return buildFinanceIntegrityQueueDashboard([], 0);
+  }
+  return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -520,13 +583,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     attentionMock.mockReset();
     queueDashboardMock.mockReset();
     supportAttentionMock.mockReset();
-    queueDashboardMock.mockImplementation(async (options) =>
-      options?.type === 'awaiting_shipment'
-        ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
-        : options?.type === 'return_review'
-          ? buildReturnReviewQueueDashboard([], 0)
-          : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
-    );
+    queueDashboardMock.mockImplementation(async (options) => buildDefaultQueueDashboardForOptions(options));
     supportAttentionMock.mockResolvedValue(buildSupportAttentionPage([buildSupportAttentionTicket()]));
   });
 
@@ -611,7 +668,7 @@ describe('AdminOperationsQueuePage attention center', () => {
       'Vendor Blocked Allocations',
       'Shipment attention',
       'Return review',
-      'Finance review',
+      'Finance Integrity',
     ]);
 
     const sidebar = document.querySelector('.attention-side-column');
@@ -748,6 +805,8 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
+          : options?.type === 'finance_integrity_alert'
+            ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([
             {
               ...buildVendorBlockedQueueItem('#1091', 0),
@@ -773,6 +832,8 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
+          : options?.type === 'finance_integrity_alert'
+            ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12),
     );
 
@@ -811,6 +872,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
       }
       const offset = options?.offset ?? 0;
       if (offset === 0) {
@@ -886,6 +950,8 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard(authoritativeItems, 12)
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
+          : options?.type === 'finance_integrity_alert'
+            ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -925,6 +991,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
       }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
@@ -988,6 +1057,8 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? pendingShipment
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
+          : options?.type === 'finance_integrity_alert'
+            ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -1004,6 +1075,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
       }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
@@ -1065,6 +1139,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard(authoritativeItems, 12);
       }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
 
@@ -1111,6 +1188,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
       }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
@@ -1192,6 +1272,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
       }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
 
@@ -1214,6 +1297,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return pendingReturnReview;
       }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
 
@@ -1232,6 +1318,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         throw new Error('Return queue unavailable');
       }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
       return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
     });
 
@@ -1244,7 +1333,34 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
   });
 
-  it('keeps Finance as an honest projection preview', async () => {
+  it('renders Finance Integrity as an authoritative table using structured diagnostic fields', async () => {
+    const authoritativeItems = [
+      buildFinanceIntegrityQueueItem('fin-alert-2', '#1501', 2, {
+        financeIntegrityCategory: 'missing_active_sale_ledger',
+        financeIntegrityReason: 'no_active_sale_ledger',
+        vendorAllocationId: 'alloc-finance-same-order-a',
+        allocationEconomicTransferId: 'transfer-finance-same-order-a',
+        relatedShopifyOrderId: '7970000001501',
+        relatedShopifyOrderNumber: '#1501',
+        actionTo: '/admin/orders/7970000001501',
+      }),
+      buildFinanceIntegrityQueueItem('fin-alert-1', '#1501', 1, {
+        financeIntegrityCategory: 'voided_sale_ledger_without_successor',
+        financeIntegrityReason: 'voided_sale_ledger_without_successor',
+        vendorAllocationId: 'alloc-finance-same-order-b',
+        allocationEconomicTransferId: 'transfer-finance-same-order-b',
+        relatedShopifyOrderId: '7970000001501',
+        relatedShopifyOrderNumber: '#1501',
+        actionTo: '/admin/orders/7970000001501',
+      }),
+      buildFinanceIntegrityQueueItem('fin-alert-no-number', null, 3, {
+        relatedShopifyOrderId: '7970000001503',
+        relatedShopifyOrderNumber: undefined,
+        vendorAllocationId: 'alloc-finance-fallback',
+        allocationEconomicTransferId: null,
+        actionTo: '/admin/orders/7970000001503',
+      }),
+    ];
     const sectionDisclosureDashboard: OperationsAttentionDashboard = {
       ...dashboard,
       sections: [
@@ -1266,7 +1382,7 @@ describe('AdminOperationsQueuePage attention center', () => {
               objectId: 'finance-1501',
               status: 'review',
               ageHours: 2,
-              title: 'Finance needs review',
+              title: 'Preview-only finance row',
               description: 'Finance review is pending.',
               recommendedAction: 'Review finance',
               destinationPath: '/admin/finance',
@@ -1280,14 +1396,222 @@ describe('AdminOperationsQueuePage attention center', () => {
       recentActivity: [],
     };
     attentionMock.mockResolvedValueOnce(sectionDisclosureDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard(authoritativeItems, 12);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
 
     renderPage();
 
-    expect(await screen.findByText('Showing 1 of 3 active · 2 critical · 1 warning')).toBeInTheDocument();
-    expect(screen.getByText('Showing 1 of 3. This section is a preview.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Finance review' })).toBeInTheDocument();
+    const financeList = await screen.findByRole('heading', { name: 'Finance Integrity' }).then((heading) => heading.closest('article'));
+    expect(financeList).not.toBeNull();
+    expect(await within(financeList as HTMLElement).findByText('Authoritative finance integrity alerts · 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('Finance rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByRole('row')).toHaveLength(4);
+    expect(within(financeList as HTMLElement).getByText('fin-alert-2')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('fin-alert-1')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('fin-alert-no-number')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('Missing Active Sale Ledger')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByText('voided_sale_ledger_without_successor').length).toBeGreaterThan(0);
+    expect(within(financeList as HTMLElement).getByText('no_active_sale_ledger')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByText('Order #1501')).toHaveLength(2);
+    expect(within(financeList as HTMLElement).getByText('Shopify order 7970000001503')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('Allocation alloc-finance-same-order-a')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getByText('Transfer transfer-finance-same-order-a')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByText('Sporjinal').length).toBeGreaterThan(0);
+    expect(within(financeList as HTMLElement).getByText('Open')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByText('Acknowledged').length).toBeGreaterThan(0);
+    expect(within(financeList as HTMLElement).getAllByRole('link', { name: 'Review' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/admin/orders/7970000001501',
+      '/admin/orders/7970000001501',
+      '/admin/orders/7970000001503',
+    ]);
+    expect(document.querySelector('.finance-integrity-attention-table')).not.toBeNull();
+    expect(document.querySelector('.finance-integrity-mobile-card')).toBeNull();
+    expect(within(financeList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    expect(within(financeList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Return review' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'View all vendor-blocked allocations' })).not.toBeInTheDocument();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 0,
+      type: 'finance_integrity_alert',
+    }));
+
+    const dataRows = within(financeList as HTMLElement).getAllByRole('row').slice(1);
+    expect(dataRows[0]).toHaveTextContent('fin-alert-2');
+    expect(dataRows[1]).toHaveTextContent('fin-alert-1');
+    expect(dataRows[2]).toHaveTextContent('fin-alert-no-number');
+  });
+
+  it('pages Finance Integrity independently with authoritative totals and boundary controls', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    const firstPage = Array.from({ length: 10 }, (_unused, index) =>
+      buildFinanceIntegrityQueueItem(`finance-page-${index + 1}`, '#1501', index, {
+        relatedShopifyOrderNumber: '#1501',
+      }),
+    );
+    const secondPage = [
+      buildFinanceIntegrityQueueItem('finance-page-11', '#1501', 10),
+      buildFinanceIntegrityQueueItem('finance-page-12', '#1501', 11),
+    ];
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const financeList = await screen.findByRole('heading', { name: 'Finance Integrity' }).then((heading) => heading.closest('article'));
+    expect(financeList).not.toBeNull();
+    expect(await within(financeList as HTMLElement).findByText('Finance rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeList as HTMLElement).getAllByRole('row')).toHaveLength(11);
+    const previous = within(financeList as HTMLElement).getByRole('button', { name: 'Previous' });
+    const next = within(financeList as HTMLElement).getByRole('button', { name: 'Next' });
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+
+    fireEvent.click(next);
+
+    expect(await within(financeList as HTMLElement).findByText('Finance rows 11-12 of 12')).toBeInTheDocument();
+    expect(await within(financeList as HTMLElement).findByText('finance-page-11')).toBeInTheDocument();
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 10,
+      type: 'finance_integrity_alert',
+    }));
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'vendor_blocked').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'awaiting_shipment').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'return_review').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(supportAttentionMock.mock.calls.every(([options]) => options?.offset === 0)).toBe(true);
+
+    fireEvent.click(previous);
+
+    expect(await within(financeList as HTMLElement).findByText('Finance rows 1-10 of 12')).toBeInTheDocument();
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'finance_integrity_alert').at(-1)?.[0]).toEqual(
+      expect.objectContaining({ limit: 10, offset: 0, type: 'finance_integrity_alert' }),
+    );
+  });
+
+  it('renders section-scoped Finance empty, loading, and error states without preview fallback', async () => {
+    const financePreviewDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'finance'
+          ? {
+              ...section,
+              count: 1,
+              critical: 1,
+              warning: 0,
+              items: [
+                {
+                  id: 'finance-preview-only',
+                  type: 'finance',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Finance',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'finance-preview-only',
+                  status: 'review',
+                  ageHours: 2,
+                  title: 'Preview-only finance row',
+                  description: 'This attention row must not render in the Finance section.',
+                  recommendedAction: 'Review finance',
+                  destinationPath: '/admin/finance',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+    };
+    attentionMock.mockResolvedValue(financePreviewDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const emptyRender = renderPage();
+    const emptyFinanceList = await screen.findByRole('heading', { name: 'Finance Integrity' }).then((heading) => heading.closest('article'));
+    expect(emptyFinanceList).not.toBeNull();
+    expect(await within(emptyFinanceList as HTMLElement).findByText('No finance integrity alerts')).toBeInTheDocument();
+    expect(within(emptyFinanceList as HTMLElement).queryByText(/Finance rows 0-0/)).not.toBeInTheDocument();
+    expect(within(emptyFinanceList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    emptyRender.unmount();
+
+    let resolveFinanceIntegrity: ((value: OperationsQueueDashboard) => void) | undefined;
+    const pendingFinanceIntegrity = new Promise<OperationsQueueDashboard>((resolve) => {
+      resolveFinanceIntegrity = resolve;
+    });
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return pendingFinanceIntegrity;
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const loadingRender = renderPage();
+    expect(await screen.findByText('Loading finance integrity')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return review' })).toBeInTheDocument();
+    resolveFinanceIntegrity?.(buildFinanceIntegrityQueueDashboard([], 0));
+    loadingRender.unmount();
+
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        throw new Error('Finance queue unavailable');
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+    const errorFinanceList = await screen.findByRole('heading', { name: 'Finance Integrity' }).then((heading) => heading.closest('article'));
+    expect(errorFinanceList).not.toBeNull();
+    expect(await within(errorFinanceList as HTMLElement).findByText('Finance integrity unavailable')).toBeInTheDocument();
+    expect(within(errorFinanceList as HTMLElement).getByText('Finance queue unavailable')).toBeInTheDocument();
+    expect(within(errorFinanceList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
   });
 
   it('keeps stale attention data visible and shows a warning when background refresh fails', async () => {

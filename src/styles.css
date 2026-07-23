@@ -14480,6 +14480,55 @@ summary.provider-response-heading::-webkit-details-marker {
   justify-content: flex-end;
 }
 
+.finance-integrity-attention-list {
+  scroll-margin-top: 16px;
+}
+
+.finance-integrity-page-controls {
+  justify-content: flex-end;
+}
+
+.finance-integrity-attention-table {
+  --op-table-min-width: 0;
+  box-shadow: none;
+}
+
+.finance-integrity-attention-table .op-table-head,
+.finance-integrity-attention-table .op-table-row {
+  grid-template-columns:
+    90px
+    minmax(180px, 1.4fr)
+    minmax(150px, 1.05fr)
+    minmax(160px, 1.05fr)
+    minmax(130px, 0.9fr)
+    minmax(110px, 0.72fr)
+    minmax(110px, 0.72fr)
+    minmax(90px, auto);
+}
+
+.finance-integrity-attention-table .op-table-row {
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.finance-integrity-attention-table .op-table-row > span,
+.finance-integrity-attention-table .op-table-row > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finance-integrity-attention-table .op-table-row small,
+.finance-integrity-attention-table .op-table-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-integrity-attention-table .op-action-group {
+  justify-content: flex-end;
+}
+
 @media (max-width: 760px) {
   .attention-op-table .op-table-head {
     display: none;
@@ -14528,7 +14577,8 @@ summary.provider-response-heading::-webkit-details-marker {
 
   .support-attention-table,
   .shipment-attention-table,
-  .return-review-attention-table {
+  .return-review-attention-table,
+  .finance-integrity-attention-table {
     overflow-x: auto;
   }
 
@@ -14539,6 +14589,11 @@ summary.provider-response-heading::-webkit-details-marker {
   .return-review-attention-table .op-table-head,
   .return-review-attention-table .op-table-row {
     min-width: 840px;
+  }
+
+  .finance-integrity-attention-table .op-table-head,
+  .finance-integrity-attention-table .op-table-row {
+    min-width: 920px;
   }
 }
 
