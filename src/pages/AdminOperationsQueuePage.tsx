@@ -229,7 +229,19 @@ function getFinanceReviewReason(item: OperationsQueueItem) {
 
 function getFinanceReviewAmount(item: OperationsQueueItem) {
   const amount = item.financeReviewAmount?.trim();
-  return amount || '—';
+  if (!amount) {
+    return '—';
+  }
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) {
+    return amount;
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericAmount);
 }
 
 function joinPresentParts(...parts: Array<string | null | undefined>) {
@@ -1018,12 +1030,7 @@ export function AdminOperationsQueuePage() {
                 <div>
                   <p className="eyebrow">Finance</p>
                   <h3>Finance Review</h3>
-                  <span>
-                    Held and disputed finance entries requiring operator review
-                    {totalFinanceReviewQueueRows > 0
-                      ? ` · ${financeReviewPageStart}-${financeReviewPageEnd} of ${totalFinanceReviewQueueRows}`
-                      : ''}
-                  </span>
+                  <span>Held and disputed finance entries requiring operator review</span>
                 </div>
               </div>
 
@@ -1064,43 +1071,27 @@ export function AdminOperationsQueuePage() {
                 />
               ) : financeReviewQueueItems.length ? (
                 <OperationalTable
-                  columns={['Payout', 'Settlement', 'Order', 'Vendor', 'Reason', 'Amount', 'Age', 'Action']}
+                  columns={['Payout', 'Settlement', 'Order', 'Vendor', 'Reason', 'Amount', 'Age']}
                   className="finance-review-attention-table"
                 >
                   {financeReviewQueueItems.map((item) => {
                     const reason = getFinanceReviewReason(item);
-                    const ledgerReference = item.financeLedgerEntryId?.trim() || item.id;
 
                     return (
                       <OperationalTableRow key={item.id}>
-                        <span title={`Payout ${item.payoutStatus ?? item.status} · Ledger ${ledgerReference}`}>
-                          <strong>{safeStatusLabel(item.payoutStatus ?? item.status)}</strong>
-                          <small>{ledgerReference}</small>
-                        </span>
-                        <span title={`Settlement ${item.settlementStatus ?? item.status}`}>
-                          <strong>{safeStatusLabel(item.settlementStatus ?? item.status)}</strong>
-                          <small>{formatQueueType(item.type)}</small>
-                        </span>
-                        <span>
-                          <strong>{getQueueItemReference(item)}</strong>
-                          <small>{item.vendorAllocationId ?? item.relatedOrderId ?? 'No allocation link'}</small>
-                        </span>
-                        <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
-                          <strong>{item.vendorName ?? item.vendorId}</strong>
-                          <small>{item.vendorId}</small>
-                        </span>
-                        <span title={reason}>
+                        <strong title={`Payout ${safeStatusLabel(item.payoutStatus ?? item.status)}`}>
+                          {safeStatusLabel(item.payoutStatus ?? item.status)}
+                        </strong>
+                        <strong title={`Settlement ${safeStatusLabel(item.settlementStatus ?? item.status)}`}>
+                          {safeStatusLabel(item.settlementStatus ?? item.status)}
+                        </strong>
+                        <strong>{getQueueItemReference(item)}</strong>
+                        <strong title={item.vendorName ?? item.vendorId}>{item.vendorName ?? item.vendorId}</strong>
+                        <span className="finance-review-reason-cell" title={reason}>
                           <strong>{reason}</strong>
-                          <small>{item.title}</small>
                         </span>
                         <strong>{getFinanceReviewAmount(item)}</strong>
-                        <span title={formatDate(item.createdAt)}>
-                          <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
-                          <small>{formatDate(item.createdAt)}</small>
-                        </span>
-                        <OperationalActionGroup>
-                          {item.actionTo ? actionLink(item.actionTo, 'Review finance') : <span className="queue-muted-action">No finance link</span>}
-                        </OperationalActionGroup>
+                        <strong title={formatDate(item.createdAt)}>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
                       </OperationalTableRow>
                     );
                   })}

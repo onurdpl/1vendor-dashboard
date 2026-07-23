@@ -1495,21 +1495,42 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     const financeReviewList = await screen.findByRole('heading', { name: 'Finance Review' }).then((heading) => heading.closest('article'));
     expect(financeReviewList).not.toBeNull();
-    expect(await within(financeReviewList as HTMLElement).findByText('Held and disputed finance entries requiring operator review · 1-10 of 12')).toBeInTheDocument();
+    expect(await within(financeReviewList as HTMLElement).findByText('Held and disputed finance entries requiring operator review')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('Held and disputed finance entries requiring operator review · 1-10 of 12')).not.toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getByText('Finance Review rows 1-10 of 12')).toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getAllByRole('row')).toHaveLength(3);
-    expect(within(financeReviewList as HTMLElement).getByText('ledger-review-2')).toBeInTheDocument();
-    expect(within(financeReviewList as HTMLElement).getByText('ledger-review-1')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Payout' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Settlement' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Vendor' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Reason' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Amount' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByRole('columnheader', { name: 'Action' })).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('ledger-review-2')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('ledger-review-1')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Pending')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Hold')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Disputed')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Held')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('Finance review')).not.toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getByText('Disputed settlement needs operator review.')).toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getByText('Vendor payout is on hold.')).toBeInTheDocument();
-    expect(within(financeReviewList as HTMLElement).getByText('2400.00')).toBeInTheDocument();
-    expect(within(financeReviewList as HTMLElement).getByText('4584.35')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByTitle('Disputed settlement needs operator review.')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('Payout review needed')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('2,400.00')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('4,584.35')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText(/TRY|TL|₺/)).not.toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getByText('Order #1602')).toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).getByText('Order #1601')).toBeInTheDocument();
-    expect(within(financeReviewList as HTMLElement).getAllByRole('link', { name: 'Review finance' }).map((link) => link.getAttribute('href'))).toEqual([
-      '/finance',
-      '/finance',
-    ]);
+    expect(within(financeReviewList as HTMLElement).queryByText('alloc-finance-review-2')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('alloc-finance-review-1')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getAllByText('Sporjinal').length).toBeGreaterThan(0);
+    expect(within(financeReviewList as HTMLElement).queryByText('sporjinal')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getAllByText(/\d+d|<1h|\d+h/).length).toBeGreaterThan(0);
+    expect(within(financeReviewList as HTMLElement).queryByText(/May \d+, 2026/)).not.toBeInTheDocument();
+    expect((financeReviewList as HTMLElement).querySelector('[title*="May "]')).not.toBeNull();
+    expect(within(financeReviewList as HTMLElement).queryByRole('link', { name: 'Review finance' })).not.toBeInTheDocument();
     expect(document.querySelector('.finance-review-attention-table')).not.toBeNull();
     expect(within(financeReviewList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
     expect(within(financeReviewList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
@@ -1562,7 +1583,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     fireEvent.click(next);
 
     expect(await within(financeReviewList as HTMLElement).findByText('Finance Review rows 11-12 of 12')).toBeInTheDocument();
-    expect(await within(financeReviewList as HTMLElement).findByText('ledger-page-11')).toBeInTheDocument();
+    expect(await within(financeReviewList as HTMLElement).findByText('Ledger is disputed.')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText('ledger-page-11')).not.toBeInTheDocument();
     expect(previous).toBeEnabled();
     expect(next).toBeDisabled();
     expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
