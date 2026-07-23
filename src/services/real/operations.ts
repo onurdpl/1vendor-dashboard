@@ -25,6 +25,11 @@ type OperationsResponseDto = {
     financeIntegrityAlertId?: string;
     financeIntegrityCategory?: string;
     financeIntegrityReason?: string | null;
+    financeLedgerEntryId?: string;
+    financeReviewReason?: string | null;
+    financeReviewAmount?: string | null;
+    payoutStatus?: string | null;
+    settlementStatus?: string | null;
     vendorAllocationId?: string | null;
     allocationEconomicTransferId?: string | null;
   }>;
@@ -40,6 +45,7 @@ type OperationsSummaryDto = {
   vendorBlocked: number;
   awaitingShipment: number;
   refundAttention: number;
+  financeReview?: number;
   financeIntegrityAlerts?: number;
   operationalSignals?: number;
   automationActions?: number;
@@ -68,10 +74,11 @@ function buildOperationsQueuePath(options: { limit?: number; offset?: number; ty
 }
 
 function mapOperationsSummary(summary: OperationsSummaryDto): OperationsQueueDashboard['summary'] {
-  return {
-    ...summary,
-    financeIntegrityAlerts: summary.financeIntegrityAlerts ?? 0,
-    operationalSignals: summary.operationalSignals ?? 0,
+    return {
+      ...summary,
+      financeReview: summary.financeReview ?? 0,
+      financeIntegrityAlerts: summary.financeIntegrityAlerts ?? 0,
+      operationalSignals: summary.operationalSignals ?? 0,
     automationActions: summary.automationActions ?? 0,
   };
 }
@@ -99,6 +106,11 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
       financeIntegrityAlertId: item.financeIntegrityAlertId,
       financeIntegrityCategory: item.financeIntegrityCategory,
       financeIntegrityReason: item.financeIntegrityReason,
+      financeLedgerEntryId: item.financeLedgerEntryId,
+      financeReviewReason: item.financeReviewReason,
+      financeReviewAmount: item.financeReviewAmount,
+      payoutStatus: item.payoutStatus,
+      settlementStatus: item.settlementStatus,
       vendorAllocationId: item.vendorAllocationId,
       allocationEconomicTransferId: item.allocationEconomicTransferId,
     })),

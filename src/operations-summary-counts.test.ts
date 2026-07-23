@@ -30,6 +30,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   financeLedgerEntry: {
     findMany: vi.fn(),
+    count: vi.fn(),
   },
 }));
 const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
@@ -164,11 +165,41 @@ function buildFinanceIntegrityAlert(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildFinanceReviewEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ledger-review-1',
+    vendorAllocationId: 'alloc-1',
+    vendorId: 'vendor-1',
+    entryType: 'SALE',
+    amount: {
+      toString: () => '4584.35',
+    },
+    payoutStatus: 'HOLD',
+    description: 'Vendor payout is on hold.',
+    settlementStatus: 'HELD',
+    settlementHoldReason: 'Vendor blocked finance hold active.',
+    createdAt: new Date('2026-06-20T09:00:00.000Z'),
+    updatedAt: new Date('2026-06-21T09:00:00.000Z'),
+    vendor: {
+      name: 'Vendor 1',
+    },
+    vendorAllocation: {
+      id: 'alloc-1',
+      order: {
+        sourceShopifyOrderId: '7709129507153',
+        sourceShopifyOrderNumber: '#1091',
+      },
+    },
+    ...overrides,
+  };
+}
+
 function mockQueueSummaryCounts({
   pendingReassignment = 0,
   vendorBlocked = 0,
   awaitingShipment = 0,
   refundAttention = 0,
+  financeReview = 0,
   financeIntegrityAlerts = 0,
   financeIntegrityCriticalAlerts = 0,
   signalGroups = [],
@@ -179,6 +210,7 @@ function mockQueueSummaryCounts({
   vendorBlocked?: number;
   awaitingShipment?: number;
   refundAttention?: number;
+  financeReview?: number;
   financeIntegrityAlerts?: number;
   financeIntegrityCriticalAlerts?: number;
   signalGroups?: unknown[];
@@ -187,9 +219,10 @@ function mockQueueSummaryCounts({
 } = {}) {
   prismaMock.vendorAllocation.count
     .mockResolvedValueOnce(pendingReassignment)
-    .mockResolvedValueOnce(vendorBlocked)
-    .mockResolvedValueOnce(awaitingShipment);
+      .mockResolvedValueOnce(vendorBlocked)
+      .mockResolvedValueOnce(awaitingShipment);
   prismaMock.returnRecord.count.mockResolvedValueOnce(refundAttention);
+  prismaMock.financeLedgerEntry.count.mockResolvedValueOnce(financeReview);
   prismaMock.financeIntegrityAlert.count
     .mockResolvedValueOnce(financeIntegrityAlerts)
     .mockResolvedValueOnce(financeIntegrityCriticalAlerts);
@@ -215,6 +248,7 @@ describe('admin operations summary counts', () => {
     prismaMock.shipmentExecution.findMany.mockReset();
     prismaMock.shipmentExecution.count.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
+    prismaMock.financeLedgerEntry.count.mockReset();
     evaluateOperationalSignalsMock.mockReset();
     generateAutomationActionsForSignalsMock.mockReset();
 
@@ -228,6 +262,7 @@ describe('admin operations summary counts', () => {
     prismaMock.shipmentExecution.findMany.mockResolvedValue([]);
     prismaMock.shipmentExecution.count.mockResolvedValue(0);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
+    prismaMock.financeLedgerEntry.count.mockResolvedValue(0);
     evaluateOperationalSignalsMock.mockResolvedValue([]);
     generateAutomationActionsForSignalsMock.mockResolvedValue([]);
   });
@@ -404,6 +439,7 @@ describe('admin operations summary counts', () => {
       warning: 7,
       awaitingShipment: 0,
       refundAttention: 0,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -516,6 +552,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 0,
       awaitingShipment: 12,
       refundAttention: 0,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -642,6 +679,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 0,
       awaitingShipment: 0,
       refundAttention: 12,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -1277,6 +1315,130 @@ describe('admin operations summary counts', () => {
     }));
   });
 
+  it('returns authoritative finance review rows from held and disputed finance ledgers', async () => {
+    prismaMock.financeLedgerEntry.count.mockResolvedValueOnce(3);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValueOnce([
+      buildFinanceReviewEntry({
+        id: 'ledger-hold',
+        payoutStatus: 'HOLD',
+        settlementStatus: 'PENDING',
+        settlementHoldReason: null,
+        description: 'Payout status is held.',
+        amount: { toString: () => '100.00' },
+      }),
+      buildFinanceReviewEntry({
+        id: 'ledger-held',
+        payoutStatus: 'PENDING',
+        settlementStatus: 'HELD',
+        settlementHoldReason: 'Settlement is held.',
+        amount: { toString: () => '200.00' },
+      }),
+      buildFinanceReviewEntry({
+        id: 'ledger-disputed',
+        payoutStatus: 'PENDING',
+        settlementStatus: 'DISPUTED',
+        settlementHoldReason: null,
+        description: null,
+        amount: { toString: () => '300.00' },
+        vendorAllocation: null,
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'finance_review', limit: 10, offset: 0 });
+
+    expect(dashboard.summary).toEqual({
+      total: 3,
+      critical: 3,
+      warning: 0,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeReview: 3,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    });
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-finance-review-ledger-hold',
+        type: 'finance_review',
+        financeLedgerEntryId: 'ledger-hold',
+        payoutStatus: 'HOLD',
+        settlementStatus: 'PENDING',
+        financeReviewReason: 'Payout status is held.',
+        financeReviewAmount: '100.00',
+        relatedShopifyOrderNumber: '#1091',
+        destinationPath: '/finance',
+      }),
+      expect.objectContaining({
+        id: 'op-finance-review-ledger-held',
+        type: 'finance_review',
+        financeLedgerEntryId: 'ledger-held',
+        payoutStatus: 'PENDING',
+        settlementStatus: 'HELD',
+        financeReviewReason: 'Settlement is held.',
+        financeReviewAmount: '200.00',
+      }),
+      expect.objectContaining({
+        id: 'op-finance-review-ledger-disputed',
+        type: 'finance_review',
+        financeLedgerEntryId: 'ledger-disputed',
+        payoutStatus: 'PENDING',
+        settlementStatus: 'DISPUTED',
+        financeReviewReason: 'Finance row is disputed.',
+        financeReviewAmount: '300.00',
+        relatedShopifyOrderId: null,
+        relatedShopifyOrderNumber: null,
+      }),
+    ]);
+  });
+
+  it('filters finance review before pagination and keeps count and item predicates identical', async () => {
+    prismaMock.financeLedgerEntry.count.mockResolvedValueOnce(12);
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValueOnce([
+      buildFinanceReviewEntry({ id: 'ledger-page-11', updatedAt: new Date('2026-06-21T09:00:00.000Z') }),
+      buildFinanceReviewEntry({ id: 'ledger-page-12', updatedAt: new Date('2026-06-21T09:00:00.000Z') }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'finance_review', limit: 2, offset: 10 });
+
+    expect(dashboard.summary.total).toBe(12);
+    expect(dashboard.summary.financeReview).toBe(12);
+    expect(dashboard.items.map((item) => item.id)).toEqual([
+      'op-finance-review-ledger-page-11',
+      'op-finance-review-ledger-page-12',
+    ]);
+    const totalWhere = prismaMock.financeLedgerEntry.count.mock.calls[0]?.[0]?.where;
+    const itemsWhere = prismaMock.financeLedgerEntry.findMany.mock.calls[0]?.[0]?.where;
+    expect(itemsWhere).toEqual(totalWhere);
+    expect(itemsWhere).toEqual({
+      OR: [
+        { payoutStatus: { in: ['HOLD'] } },
+        { settlementStatus: { in: ['HELD', 'DISPUTED'] } },
+      ],
+    });
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      skip: 10,
+      take: 2,
+      orderBy: [
+        { updatedAt: 'desc' },
+        { id: 'asc' },
+      ],
+      select: expect.objectContaining({
+        id: true,
+        payoutStatus: true,
+        settlementStatus: true,
+        vendor: { select: { name: true } },
+        vendorAllocation: expect.any(Object),
+      }),
+    }));
+    expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+  });
+
   it('filters finance integrity alerts before pagination and returns an authoritative matching total', async () => {
     prismaMock.financeIntegrityAlert.count.mockResolvedValueOnce(4);
     prismaMock.financeIntegrityAlert.findMany.mockResolvedValueOnce([
@@ -1328,6 +1490,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 0,
       awaitingShipment: 0,
       refundAttention: 0,
+      financeReview: 0,
       financeIntegrityAlerts: 4,
       operationalSignals: 0,
       automationActions: 0,
@@ -1511,6 +1674,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 12,
       awaitingShipment: 31,
       refundAttention: 22,
+      financeReview: 0,
       financeIntegrityAlerts: 3,
       operationalSignals: 22,
       automationActions: 9,
@@ -1548,6 +1712,7 @@ describe('admin operations summary counts', () => {
       vendorBlocked: 2,
       awaitingShipment: 3,
       refundAttention: 4,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 5,

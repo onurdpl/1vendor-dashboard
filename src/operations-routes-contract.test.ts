@@ -163,6 +163,30 @@ describe('operations route contract', () => {
     });
   });
 
+  it('passes the supported finance review queue type filter to the operations service', async () => {
+    getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 6 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const response = await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'finance_review', limit: '10', offset: '40' },
+    }, {});
+
+    expect(response).toEqual({ summary: { total: 6 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({
+      limit: 10,
+      offset: 40,
+      type: 'finance_review',
+    });
+  });
+
   it('preserves shared pagination validation for the return-review queue', async () => {
     getAdminOperationsQueueMock
       .mockResolvedValueOnce({ summary: { total: 0 }, items: [] })
@@ -231,6 +255,40 @@ describe('operations route contract', () => {
     });
   });
 
+  it('preserves shared pagination validation for the finance review queue', async () => {
+    getAdminOperationsQueueMock
+      .mockResolvedValueOnce({ summary: { total: 0 }, items: [] })
+      .mockResolvedValueOnce({ summary: { total: 0 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'finance_review', limit: '0', offset: '-1' },
+    }, {});
+    await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'finance_review', limit: '1000', offset: 'invalid' },
+    }, {});
+
+    expect(getAdminOperationsQueueMock).toHaveBeenNthCalledWith(1, {
+      limit: 1,
+      offset: 0,
+      type: 'finance_review',
+    });
+    expect(getAdminOperationsQueueMock).toHaveBeenNthCalledWith(2, {
+      limit: 250,
+      offset: 0,
+      type: 'finance_review',
+    });
+  });
+
   it('preserves shared pagination validation for the shipment queue', async () => {
     getAdminOperationsQueueMock
       .mockResolvedValueOnce({ summary: { total: 0 }, items: [] })
@@ -292,7 +350,7 @@ describe('operations route contract', () => {
     registerOperationsRoutes(app as never, {} as never);
     const response = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'shipment' } }, reply);
 
-    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked, awaiting_shipment, return_review, or finance_integrity_alert.' } });
+    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, or finance_integrity_alert.' } });
     expect(getAdminOperationsQueueMock).not.toHaveBeenCalled();
   });
 

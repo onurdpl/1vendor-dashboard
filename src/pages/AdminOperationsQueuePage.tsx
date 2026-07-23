@@ -31,6 +31,7 @@ const AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE = 10;
 const VENDOR_BLOCKED_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SHIPMENT_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const RETURN_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const FINANCE_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const FINANCE_INTEGRITY_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
@@ -163,6 +164,9 @@ function formatQueueType(value: OperationsQueueItem['type']) {
   if (value === 'refund_attention') {
     return 'Refund attention';
   }
+  if (value === 'finance_review') {
+    return 'Finance review';
+  }
   if (value === 'finance_integrity_alert') {
     return 'Finance integrity';
   }
@@ -219,6 +223,15 @@ function getFinanceIntegrityOrderReference(item: OperationsQueueItem) {
   return 'No order link';
 }
 
+function getFinanceReviewReason(item: OperationsQueueItem) {
+  return item.financeReviewReason?.trim() || item.description || 'Finance row requires admin review.';
+}
+
+function getFinanceReviewAmount(item: OperationsQueueItem) {
+  const amount = item.financeReviewAmount?.trim();
+  return amount || '—';
+}
+
 function joinPresentParts(...parts: Array<string | null | undefined>) {
   const presentParts: string[] = [];
   parts.forEach((part) => {
@@ -244,6 +257,7 @@ export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
   const [returnReviewQueueOffset, setReturnReviewQueueOffset] = useState(0);
+  const [financeReviewQueueOffset, setFinanceReviewQueueOffset] = useState(0);
   const [financeIntegrityQueueOffset, setFinanceIntegrityQueueOffset] = useState(0);
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
@@ -326,6 +340,28 @@ export function AdminOperationsQueuePage() {
         limit: RETURN_REVIEW_QUEUE_PAGE_SIZE,
         offset: returnReviewQueueOffset,
         type: 'return_review',
+      }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations',
+    },
+  );
+  const {
+    data: financeReviewQueueDashboard,
+    isLoading: isFinanceReviewQueueLoading,
+    isFetching: isFinanceReviewQueueFetching,
+    isError: isFinanceReviewQueueError,
+    error: financeReviewQueueError,
+    refetch: refetchFinanceReviewQueue,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(FINANCE_REVIEW_QUEUE_PAGE_SIZE, financeReviewQueueOffset, 'finance_review'),
+    ({ signal }) =>
+      runtimeServices.operations.dashboard({
+        signal,
+        limit: FINANCE_REVIEW_QUEUE_PAGE_SIZE,
+        offset: financeReviewQueueOffset,
+        type: 'finance_review',
       }),
     {
       enabled: pageReadiness.ready,
@@ -432,6 +468,12 @@ export function AdminOperationsQueuePage() {
   const returnReviewPageEnd = Math.min(returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE, totalReturnReviewQueueRows);
   const canPageReturnReviewBack = returnReviewQueueOffset > 0;
   const canPageReturnReviewForward = returnReviewQueueOffset + RETURN_REVIEW_QUEUE_PAGE_SIZE < totalReturnReviewQueueRows;
+  const financeReviewQueueItems = safeArray(financeReviewQueueDashboard?.items);
+  const totalFinanceReviewQueueRows = financeReviewQueueDashboard?.summary.total ?? 0;
+  const financeReviewPageStart = totalFinanceReviewQueueRows > 0 ? financeReviewQueueOffset + 1 : 0;
+  const financeReviewPageEnd = Math.min(financeReviewQueueOffset + FINANCE_REVIEW_QUEUE_PAGE_SIZE, totalFinanceReviewQueueRows);
+  const canPageFinanceReviewBack = financeReviewQueueOffset > 0;
+  const canPageFinanceReviewForward = financeReviewQueueOffset + FINANCE_REVIEW_QUEUE_PAGE_SIZE < totalFinanceReviewQueueRows;
   const financeIntegrityQueueItems = safeArray(financeIntegrityQueueDashboard?.items);
   const totalFinanceIntegrityQueueRows = financeIntegrityQueueDashboard?.summary.total ?? 0;
   const financeIntegrityPageStart = totalFinanceIntegrityQueueRows > 0 ? financeIntegrityQueueOffset + 1 : 0;
@@ -466,6 +508,18 @@ export function AdminOperationsQueuePage() {
     );
     setReturnReviewQueueOffset(lastPageOffset);
   }, [returnReviewQueueDashboard, returnReviewQueueOffset, totalReturnReviewQueueRows]);
+
+  useEffect(() => {
+    if (!financeReviewQueueDashboard || financeReviewQueueOffset === 0 || financeReviewQueueOffset < totalFinanceReviewQueueRows) {
+      return;
+    }
+
+    const lastPageOffset = Math.max(
+      0,
+      Math.floor((Math.max(totalFinanceReviewQueueRows, 1) - 1) / FINANCE_REVIEW_QUEUE_PAGE_SIZE) * FINANCE_REVIEW_QUEUE_PAGE_SIZE,
+    );
+    setFinanceReviewQueueOffset(lastPageOffset);
+  }, [financeReviewQueueDashboard, financeReviewQueueOffset, totalFinanceReviewQueueRows]);
 
   useEffect(() => {
     if (
@@ -955,6 +1009,106 @@ export function AdminOperationsQueuePage() {
                 <EmptyStatePanel
                   title="No return review items"
                   description="No active return review rows need operator attention."
+                />
+              )}
+            </article>
+
+            <article className="attention-card finance-review-attention-list" id="finance-review-attention-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Finance</p>
+                  <h3>Finance Review</h3>
+                  <span>
+                    Held and disputed finance entries requiring operator review
+                    {totalFinanceReviewQueueRows > 0
+                      ? ` · ${financeReviewPageStart}-${financeReviewPageEnd} of ${totalFinanceReviewQueueRows}`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+
+              {totalFinanceReviewQueueRows > 0 ? (
+                <div className="vendor-blocked-page-controls finance-review-page-controls">
+                  <span>
+                    Finance Review rows {financeReviewPageStart}-{financeReviewPageEnd} of {totalFinanceReviewQueueRows}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setFinanceReviewQueueOffset(Math.max(0, financeReviewQueueOffset - FINANCE_REVIEW_QUEUE_PAGE_SIZE))}
+                    disabled={!canPageFinanceReviewBack}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-link button-compact"
+                    onClick={() => setFinanceReviewQueueOffset(financeReviewQueueOffset + FINANCE_REVIEW_QUEUE_PAGE_SIZE)}
+                    disabled={!canPageFinanceReviewForward}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+
+              {isFinanceReviewQueueError ? (
+                <SectionErrorRetry
+                  title="Finance review unavailable"
+                  description={financeReviewQueueError ?? 'The paginated finance review table could not be loaded.'}
+                  onRetry={() => void refetchFinanceReviewQueue()}
+                />
+              ) : isFinanceReviewQueueLoading || isFinanceReviewQueueFetching ? (
+                <SectionSkeleton
+                  title="Loading finance review"
+                  description="Fetching held and disputed finance entries with server-side pagination."
+                />
+              ) : financeReviewQueueItems.length ? (
+                <OperationalTable
+                  columns={['Payout', 'Settlement', 'Order', 'Vendor', 'Reason', 'Amount', 'Age', 'Action']}
+                  className="finance-review-attention-table"
+                >
+                  {financeReviewQueueItems.map((item) => {
+                    const reason = getFinanceReviewReason(item);
+                    const ledgerReference = item.financeLedgerEntryId?.trim() || item.id;
+
+                    return (
+                      <OperationalTableRow key={item.id}>
+                        <span title={`Payout ${item.payoutStatus ?? item.status} · Ledger ${ledgerReference}`}>
+                          <strong>{safeStatusLabel(item.payoutStatus ?? item.status)}</strong>
+                          <small>{ledgerReference}</small>
+                        </span>
+                        <span title={`Settlement ${item.settlementStatus ?? item.status}`}>
+                          <strong>{safeStatusLabel(item.settlementStatus ?? item.status)}</strong>
+                          <small>{formatQueueType(item.type)}</small>
+                        </span>
+                        <span>
+                          <strong>{getQueueItemReference(item)}</strong>
+                          <small>{item.vendorAllocationId ?? item.relatedOrderId ?? 'No allocation link'}</small>
+                        </span>
+                        <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
+                          <strong>{item.vendorName ?? item.vendorId}</strong>
+                          <small>{item.vendorId}</small>
+                        </span>
+                        <span title={reason}>
+                          <strong>{reason}</strong>
+                          <small>{item.title}</small>
+                        </span>
+                        <strong>{getFinanceReviewAmount(item)}</strong>
+                        <span title={formatDate(item.createdAt)}>
+                          <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                          <small>{formatDate(item.createdAt)}</small>
+                        </span>
+                        <OperationalActionGroup>
+                          {item.actionTo ? actionLink(item.actionTo, 'Review finance') : <span className="queue-muted-action">No finance link</span>}
+                        </OperationalActionGroup>
+                      </OperationalTableRow>
+                    );
+                  })}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel
+                  title="No finance review items"
+                  description="No held or disputed finance ledger rows need operator attention."
                 />
               )}
             </article>

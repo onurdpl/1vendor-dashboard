@@ -2803,10 +2803,16 @@ export type OperationsQueueItemType =
   | 'vendor_blocked'
   | 'awaiting_shipment'
   | 'refund_attention'
+  | 'finance_review'
   | 'finance_integrity_alert'
   | 'operational_signal'
   | 'automation_action';
-export type OperationsQueueTypeFilter = 'vendor_blocked' | 'awaiting_shipment' | 'return_review' | 'finance_integrity_alert';
+export type OperationsQueueTypeFilter =
+  | 'vendor_blocked'
+  | 'awaiting_shipment'
+  | 'return_review'
+  | 'finance_review'
+  | 'finance_integrity_alert';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export type OperationsQueueItem = {
@@ -2829,6 +2835,11 @@ export type OperationsQueueItem = {
   financeIntegrityAlertId?: string;
   financeIntegrityCategory?: string;
   financeIntegrityReason?: string | null;
+  financeLedgerEntryId?: string;
+  financeReviewReason?: string | null;
+  financeReviewAmount?: string | null;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
   vendorAllocationId?: string | null;
   allocationEconomicTransferId?: string | null;
 };
@@ -2843,6 +2854,7 @@ export type OperationsQueueSummary = {
   vendorBlocked: number;
   awaitingShipment: number;
   refundAttention: number;
+  financeReview: number;
   financeIntegrityAlerts: number;
   operationalSignals: number;
   automationActions: number;

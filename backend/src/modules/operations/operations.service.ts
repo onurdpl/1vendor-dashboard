@@ -1,5 +1,6 @@
 import {
   AllocationStatus,
+  PayoutStatus,
   ShipmentExecutionStatus,
   type AutomationAction,
   AutomationActionStatus,
@@ -8,6 +9,7 @@ import {
   type OperationalSignal,
   OperationalSignalSeverity,
   OperationalSignalStatus,
+  SettlementStatus,
   type Prisma,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
@@ -45,6 +47,8 @@ const ACTIVE_AUTOMATION_ACTION_STATUSES = [
   AutomationActionStatus.FAILED,
 ];
 const OPERATIONS_FINANCE_ALERT_SEVERITIES = ['critical', 'warning'] as const;
+const FINANCE_REVIEW_PAYOUT_STATUSES = [PayoutStatus.HOLD] as const;
+const FINANCE_REVIEW_SETTLEMENT_STATUSES = [SettlementStatus.HELD, SettlementStatus.DISPUTED] as const;
 const RESOLVED_CANCEL_REFUND_REVIEW_STATUSES = ['RESOLVED', 'COMPLETED', 'REFUND_COMPLETED'];
 const RESOLVED_OUTBOUND_REFUND_ATTEMPT_STATUSES = ['RESOLVED'];
 const NORMALIZED_RESOLVED_CANCEL_REFUND_REVIEW_STATUSES = new Set(
@@ -190,6 +194,55 @@ const returnReviewOperationsQueueSelect = {
 
 type ReturnReviewOperationsQueueRow = Prisma.ReturnRecordGetPayload<{
   select: typeof returnReviewOperationsQueueSelect;
+}>;
+
+const financeReviewOperationsQueueWhere = {
+  OR: [
+    {
+      payoutStatus: {
+        in: [...FINANCE_REVIEW_PAYOUT_STATUSES],
+      },
+    },
+    {
+      settlementStatus: {
+        in: [...FINANCE_REVIEW_SETTLEMENT_STATUSES],
+      },
+    },
+  ],
+} satisfies Prisma.FinanceLedgerEntryWhereInput;
+
+const financeReviewOperationsQueueSelect = {
+  id: true,
+  vendorAllocationId: true,
+  vendorId: true,
+  entryType: true,
+  amount: true,
+  payoutStatus: true,
+  description: true,
+  settlementStatus: true,
+  settlementHoldReason: true,
+  createdAt: true,
+  updatedAt: true,
+  vendor: {
+    select: {
+      name: true,
+    },
+  },
+  vendorAllocation: {
+    select: {
+      id: true,
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.FinanceLedgerEntrySelect;
+
+type FinanceReviewOperationsQueueRow = Prisma.FinanceLedgerEntryGetPayload<{
+  select: typeof financeReviewOperationsQueueSelect;
 }>;
 
 const financeIntegrityAlertOperationsQueueWhere = {
@@ -650,6 +703,7 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
     vendorBlocked,
     awaitingShipment,
     refundAttention,
+    financeReview,
     financeIntegrityAlerts,
     financeIntegrityCriticalAlerts,
     signalSeverityGroups,
@@ -703,6 +757,11 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
             in: ['pending', 'open', 'needs_review'],
           },
         },
+      }),
+    ),
+    withDashboardTiming('operations.summary.finance_review_count', () =>
+      prisma.financeLedgerEntry.count({
+        where: financeReviewOperationsQueueWhere,
       }),
     ),
     withDashboardTiming('operations.summary.finance_integrity_alert_count', () =>
@@ -768,15 +827,24 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
   const financeIntegrityWarningAlerts = Math.max(0, financeIntegrityAlerts - financeIntegrityCriticalAlerts);
 
   return {
-    total: pendingReassignment + vendorBlocked + awaitingShipment + refundAttention + financeIntegrityAlerts + operationalSignals + automationActions,
+    total:
+      pendingReassignment +
+      vendorBlocked +
+      awaitingShipment +
+      refundAttention +
+      financeReview +
+      financeIntegrityAlerts +
+      operationalSignals +
+      automationActions,
     critical: pendingReassignment + financeIntegrityCriticalAlerts + criticalSignals,
-    warning: vendorBlocked + financeIntegrityWarningAlerts + highSignals,
+    warning: vendorBlocked + financeReview + financeIntegrityWarningAlerts + highSignals,
     attention: awaitingShipment + refundAttention + warningSignals + automationAutoSafe,
     normal: infoSignals + manualAutomationActions,
     pendingReassignment,
     vendorBlocked,
     awaitingShipment,
     refundAttention,
+    financeReview,
     financeIntegrityAlerts,
     operationalSignals,
     automationActions,
@@ -999,6 +1067,7 @@ function buildVendorBlockedFilteredSummary(total: number): OperationsQueueDashbo
     vendorBlocked: total,
     awaitingShipment: 0,
     refundAttention: 0,
+    financeReview: 0,
     financeIntegrityAlerts: 0,
     operationalSignals: 0,
     automationActions: 0,
@@ -1073,6 +1142,7 @@ function buildShipmentFilteredSummary(total: number, failed: number): Operations
     vendorBlocked: 0,
     awaitingShipment: total,
     refundAttention: 0,
+    financeReview: 0,
     financeIntegrityAlerts: 0,
     operationalSignals: 0,
     automationActions: 0,
@@ -1158,9 +1228,103 @@ function buildReturnReviewFilteredSummary(total: number): OperationsQueueDashboa
     vendorBlocked: 0,
     awaitingShipment: 0,
     refundAttention: total,
+    financeReview: 0,
     financeIntegrityAlerts: 0,
     operationalSignals: 0,
     automationActions: 0,
+  };
+}
+
+function mapFinanceReviewToQueueItem(entry: FinanceReviewOperationsQueueRow): OperationsQueueItemDto {
+  const heldByPayout = entry.payoutStatus === PayoutStatus.HOLD;
+  const disputed = entry.settlementStatus === SettlementStatus.DISPUTED;
+  const reason =
+    entry.settlementHoldReason?.trim() ||
+    entry.description?.trim() ||
+    (heldByPayout
+      ? 'Finance row is on payout hold.'
+      : disputed
+        ? 'Finance row is disputed.'
+        : 'Finance row requires admin review.');
+  const order = entry.vendorAllocation?.order ?? null;
+  const relatedShopifyOrderId = order?.sourceShopifyOrderId ?? null;
+  const relatedShopifyOrderNumber = order?.sourceShopifyOrderNumber ?? null;
+  const status = heldByPayout ? 'hold' : entry.settlementStatus.toLowerCase();
+
+  return {
+    id: `op-finance-review-${entry.id}`,
+    type: 'finance_review',
+    severity: 'critical',
+    title: 'Payout review needed',
+    description: reason,
+    vendorId: entry.vendorId,
+    vendorName: entry.vendor.name,
+    relatedOrderId: entry.vendorAllocationId,
+    relatedShopifyOrderId,
+    relatedShopifyOrderNumber,
+    relatedReturnId: null,
+    relatedRefundId: null,
+    status,
+    createdAt: entry.updatedAt.toISOString(),
+    actionLabel: 'Review finance',
+    destinationPath: '/finance',
+    financeLedgerEntryId: entry.id,
+    financeReviewReason: reason,
+    financeReviewAmount: entry.amount.toString(),
+    payoutStatus: entry.payoutStatus,
+    settlementStatus: entry.settlementStatus,
+    vendorAllocationId: entry.vendorAllocationId,
+  };
+}
+
+function buildFinanceReviewFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: total,
+    warning: 0,
+    attention: 0,
+    normal: 0,
+    pendingReassignment: 0,
+    vendorBlocked: 0,
+    awaitingShipment: 0,
+    refundAttention: 0,
+    financeReview: total,
+    financeIntegrityAlerts: 0,
+    operationalSignals: 0,
+    automationActions: 0,
+  };
+}
+
+async function getFinanceReviewOperationsQueue(
+  options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>,
+): Promise<OperationsQueueDashboardDto> {
+  const [total, entries] = await Promise.all([
+    withDashboardTiming('operations.finance_review_filtered_count', () =>
+      prisma.financeLedgerEntry.count({
+        where: financeReviewOperationsQueueWhere,
+      }),
+    ),
+    withDashboardTiming('operations.finance_review_filtered_fetch', () =>
+      prisma.financeLedgerEntry.findMany({
+        where: financeReviewOperationsQueueWhere,
+        select: financeReviewOperationsQueueSelect,
+        orderBy: [
+          {
+            updatedAt: 'desc',
+          },
+          {
+            id: 'asc',
+          },
+        ],
+        skip: options.offset,
+        take: options.limit,
+      }),
+    ),
+  ]);
+
+  return {
+    summary: buildFinanceReviewFilteredSummary(total),
+    items: entries.map(mapFinanceReviewToQueueItem),
   };
 }
 
@@ -1175,6 +1339,7 @@ function buildFinanceIntegrityAlertFilteredSummary(total: number): OperationsQue
     vendorBlocked: 0,
     awaitingShipment: 0,
     refundAttention: 0,
+    financeReview: 0,
     financeIntegrityAlerts: total,
     operationalSignals: 0,
     automationActions: 0,
@@ -1263,6 +1428,9 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   }
   if (options.type === 'return_review') {
     return getReturnReviewOperationsQueue({ limit, offset });
+  }
+  if (options.type === 'finance_review') {
+    return getFinanceReviewOperationsQueue({ limit, offset });
   }
   if (options.type === 'finance_integrity_alert') {
     return getFinanceIntegrityAlertOperationsQueue({ limit, offset });
@@ -1401,6 +1569,25 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
     });
   }
   logDashboardTiming('operations.return_aggregation', returnAggregationStartedAt);
+
+  const financeReviewEntries = await withDashboardTiming('operations.finance_review_fetch', () => prisma.financeLedgerEntry.findMany({
+    where: financeReviewOperationsQueueWhere,
+    select: financeReviewOperationsQueueSelect,
+    orderBy: [
+      {
+        updatedAt: 'desc',
+      },
+      {
+        id: 'asc',
+      },
+    ],
+    take: candidateTake,
+  }));
+  const financeReviewAggregationStartedAt = startDashboardTimer();
+  for (const entry of financeReviewEntries) {
+    items.push(mapFinanceReviewToQueueItem(entry));
+  }
+  logDashboardTiming('operations.finance_review_aggregation', financeReviewAggregationStartedAt);
 
   const financeIntegrityAlerts = await withDashboardTiming('operations.finance_integrity_alert_fetch', () => prisma.financeIntegrityAlert.findMany({
     where: {

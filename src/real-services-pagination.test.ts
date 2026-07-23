@@ -44,19 +44,22 @@ describe('real service pagination plumbing', () => {
       .mockResolvedValueOnce({ summary: {}, items: [] })
       .mockResolvedValueOnce({ summary: {}, items: [] })
       .mockResolvedValueOnce({ summary: {}, items: [] })
+      .mockResolvedValueOnce({ summary: {}, items: [] })
       .mockResolvedValueOnce({ summary: {}, items: [] });
 
     await getAdminOperationsQueueDashboard({ limit: 5, offset: 5, type: 'vendor_blocked' });
     await getAdminOperationsQueueDashboard({ limit: 10, offset: 20, type: 'awaiting_shipment' });
     await getAdminOperationsQueueDashboard({ limit: 10, offset: 30, type: 'return_review' });
-    await getAdminOperationsQueueDashboard({ limit: 10, offset: 40, type: 'finance_integrity_alert' });
+    await getAdminOperationsQueueDashboard({ limit: 10, offset: 40, type: 'finance_review' });
+    await getAdminOperationsQueueDashboard({ limit: 10, offset: 50, type: 'finance_integrity_alert' });
     await getAdminOperationsQueueDashboard({ limit: 5, offset: 0 });
 
     expect(apiClientGet).toHaveBeenNthCalledWith(1, '/admin/operations?type=vendor_blocked&limit=5&offset=5', expect.any(Object));
     expect(apiClientGet).toHaveBeenNthCalledWith(2, '/admin/operations?type=awaiting_shipment&limit=10&offset=20', expect.any(Object));
     expect(apiClientGet).toHaveBeenNthCalledWith(3, '/admin/operations?type=return_review&limit=10&offset=30', expect.any(Object));
-    expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?type=finance_integrity_alert&limit=10&offset=40', expect.any(Object));
-    expect(apiClientGet).toHaveBeenNthCalledWith(5, '/admin/operations?limit=5', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?type=finance_review&limit=10&offset=40', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(5, '/admin/operations?type=finance_integrity_alert&limit=10&offset=50', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(6, '/admin/operations?limit=5', expect.any(Object));
   });
 
   it('keeps filtered and unfiltered operations queue pages in separate query-key buckets', () => {
@@ -64,14 +67,74 @@ describe('real service pagination plumbing', () => {
     expect(queryKeys.admin.operations.queuePage(5, 0, 'vendor_blocked')).toEqual(['admin', 'operations', 'queue', 'vendor_blocked', 5, 0]);
     expect(queryKeys.admin.operations.queuePage(10, 20, 'awaiting_shipment')).toEqual(['admin', 'operations', 'queue', 'awaiting_shipment', 10, 20]);
     expect(queryKeys.admin.operations.queuePage(10, 30, 'return_review')).toEqual(['admin', 'operations', 'queue', 'return_review', 10, 30]);
-    expect(queryKeys.admin.operations.queuePage(10, 40, 'finance_integrity_alert')).toEqual([
+    expect(queryKeys.admin.operations.queuePage(10, 40, 'finance_review')).toEqual([
+      'admin',
+      'operations',
+      'queue',
+      'finance_review',
+      10,
+      40,
+    ]);
+    expect(queryKeys.admin.operations.queuePage(10, 50, 'finance_integrity_alert')).toEqual([
       'admin',
       'operations',
       'queue',
       'finance_integrity_alert',
       10,
-      40,
+      50,
     ]);
+  });
+
+  it('preserves structured finance review fields from operations queue responses', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      summary: {
+        total: 1,
+        financeReview: 1,
+      },
+      items: [
+        {
+          id: 'op-finance-review-ledger-1',
+          type: 'finance_review',
+          severity: 'critical',
+          title: 'Payout review needed',
+          description: 'Settlement hold requires admin review.',
+          vendorId: 'vendor-1',
+          vendorName: 'Vendor 1',
+          relatedOrderId: 'alloc-1',
+          relatedShopifyOrderId: '7709129507153',
+          relatedShopifyOrderNumber: '#1091',
+          status: 'hold',
+          createdAt: '2026-06-21T09:00:00.000Z',
+          actionLabel: 'Review finance',
+          destinationPath: '/finance',
+          financeLedgerEntryId: 'ledger-1',
+          financeReviewReason: 'Settlement hold requires admin review.',
+          financeReviewAmount: '4584.35',
+          payoutStatus: 'HOLD',
+          settlementStatus: 'HELD',
+          vendorAllocationId: 'alloc-1',
+        },
+      ],
+    });
+
+    const dashboard = await getAdminOperationsQueueDashboard({
+      limit: 10,
+      offset: 0,
+      type: 'finance_review',
+    });
+
+    expect(dashboard.summary.financeReview).toBe(1);
+    expect(dashboard.items[0]).toMatchObject({
+      id: 'op-finance-review-ledger-1',
+      type: 'finance_review',
+      financeLedgerEntryId: 'ledger-1',
+      financeReviewReason: 'Settlement hold requires admin review.',
+      financeReviewAmount: '4584.35',
+      payoutStatus: 'HOLD',
+      settlementStatus: 'HELD',
+      vendorAllocationId: 'alloc-1',
+      actionTo: '/finance',
+    });
   });
 
   it('preserves structured finance integrity alert diagnostics from operations queue responses', async () => {

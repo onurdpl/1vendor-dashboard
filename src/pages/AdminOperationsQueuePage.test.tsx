@@ -411,6 +411,37 @@ function buildFinanceIntegrityQueueItem(
   };
 }
 
+function buildFinanceReviewQueueItem(
+  ledgerId: string,
+  orderNumber: string | null,
+  index: number,
+  overrides: Partial<OperationsQueueItem> = {},
+): OperationsQueueItem {
+  return {
+    id: `op-finance-review-${ledgerId}`,
+    type: 'finance_review',
+    severity: 'critical',
+    title: 'Payout review needed',
+    description: index % 2 === 0 ? 'Settlement hold requires admin review.' : 'Ledger is disputed.',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedOrderId: `alloc-finance-review-${index}`,
+    relatedShopifyOrderId: String(7980000000000 + index),
+    relatedShopifyOrderNumber: orderNumber ?? undefined,
+    status: index % 2 === 0 ? 'hold' : 'disputed',
+    createdAt: `2026-05-${String(Math.min(index + 1, 28)).padStart(2, '0')}T05:00:00.000Z`,
+    actionLabel: 'Review finance',
+    actionTo: '/finance',
+    financeLedgerEntryId: ledgerId,
+    financeReviewReason: index % 2 === 0 ? 'Settlement hold requires admin review.' : 'Ledger is disputed.',
+    financeReviewAmount: `${1000 + index}.00`,
+    payoutStatus: index % 2 === 0 ? 'HOLD' : 'PENDING',
+    settlementStatus: index % 2 === 0 ? 'HELD' : 'DISPUTED',
+    vendorAllocationId: `alloc-finance-review-${index}`,
+    ...overrides,
+  };
+}
+
 function buildQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
   return {
     summary: {
@@ -423,6 +454,7 @@ function buildQueueDashboard(items: OperationsQueueItem[], total = items.length)
       vendorBlocked: total,
       awaitingShipment: 0,
       refundAttention: 0,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -443,6 +475,7 @@ function buildFinanceIntegrityQueueDashboard(items: OperationsQueueItem[], total
       vendorBlocked: 0,
       awaitingShipment: 0,
       refundAttention: 0,
+      financeReview: 0,
       financeIntegrityAlerts: total,
       operationalSignals: 0,
       automationActions: 0,
@@ -463,6 +496,7 @@ function buildReturnReviewQueueDashboard(items: OperationsQueueItem[], total = i
       vendorBlocked: 0,
       awaitingShipment: 0,
       refundAttention: total,
+      financeReview: 0,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -483,6 +517,28 @@ function buildShipmentQueueDashboard(items: OperationsQueueItem[], total = items
       vendorBlocked: 0,
       awaitingShipment: total,
       refundAttention: 0,
+      financeReview: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    },
+    items,
+  };
+}
+
+function buildFinanceReviewQueueDashboard(items: OperationsQueueItem[], total = items.length): OperationsQueueDashboard {
+  return {
+    summary: {
+      total,
+      critical: total,
+      warning: 0,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 0,
+      refundAttention: 0,
+      financeReview: total,
       financeIntegrityAlerts: 0,
       operationalSignals: 0,
       automationActions: 0,
@@ -542,6 +598,9 @@ function buildDefaultQueueDashboardForOptions(options?: { type?: OperationsQueue
   }
   if (options?.type === 'return_review') {
     return buildReturnReviewQueueDashboard([], 0);
+  }
+  if (options?.type === 'finance_review') {
+    return buildFinanceReviewQueueDashboard([], 0);
   }
   if (options?.type === 'finance_integrity_alert') {
     return buildFinanceIntegrityQueueDashboard([], 0);
@@ -668,6 +727,7 @@ describe('AdminOperationsQueuePage attention center', () => {
       'Vendor Blocked Allocations',
       'Shipment attention',
       'Return review',
+      'Finance Review',
       'Finance Integrity',
     ]);
 
@@ -805,8 +865,10 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
-          : options?.type === 'finance_integrity_alert'
-            ? buildFinanceIntegrityQueueDashboard([], 0)
+          : options?.type === 'finance_review'
+            ? buildFinanceReviewQueueDashboard([], 0)
+            : options?.type === 'finance_integrity_alert'
+              ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([
             {
               ...buildVendorBlockedQueueItem('#1091', 0),
@@ -832,8 +894,10 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)])
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
-          : options?.type === 'finance_integrity_alert'
-            ? buildFinanceIntegrityQueueDashboard([], 0)
+          : options?.type === 'finance_review'
+            ? buildFinanceReviewQueueDashboard([], 0)
+            : options?.type === 'finance_integrity_alert'
+              ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard(orderNumbers.slice(0, 10).map(buildVendorBlockedQueueItem), 12),
     );
 
@@ -872,6 +936,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
@@ -950,8 +1017,10 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? buildShipmentQueueDashboard(authoritativeItems, 12)
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
-          : options?.type === 'finance_integrity_alert'
-            ? buildFinanceIntegrityQueueDashboard([], 0)
+          : options?.type === 'finance_review'
+            ? buildFinanceReviewQueueDashboard([], 0)
+            : options?.type === 'finance_integrity_alert'
+              ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -991,6 +1060,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
@@ -1057,8 +1129,10 @@ describe('AdminOperationsQueuePage attention center', () => {
         ? pendingShipment
         : options?.type === 'return_review'
           ? buildReturnReviewQueueDashboard([], 0)
-          : options?.type === 'finance_integrity_alert'
-            ? buildFinanceIntegrityQueueDashboard([], 0)
+          : options?.type === 'finance_review'
+            ? buildFinanceReviewQueueDashboard([], 0)
+            : options?.type === 'finance_integrity_alert'
+              ? buildFinanceIntegrityQueueDashboard([], 0)
         : buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]),
     );
 
@@ -1075,6 +1149,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
@@ -1139,6 +1216,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard(authoritativeItems, 12);
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
       }
@@ -1188,6 +1268,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
@@ -1272,6 +1355,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
       }
@@ -1297,6 +1383,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return pendingReturnReview;
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
       }
@@ -1318,6 +1407,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         throw new Error('Return queue unavailable');
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
       }
@@ -1331,6 +1423,277 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(within(errorReturnList as HTMLElement).getByText('Return queue unavailable')).toBeInTheDocument();
     expect(within(errorReturnList as HTMLElement).queryByText('Preview-only return row')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Operational health' })).toBeInTheDocument();
+  });
+
+  it('renders Finance Review as an authoritative table without using the attention preview rows', async () => {
+    const authoritativeItems = [
+      buildFinanceReviewQueueItem('ledger-review-2', '#1602', 2, {
+        financeReviewReason: 'Disputed settlement needs operator review.',
+        financeReviewAmount: '2400.00',
+        payoutStatus: 'PENDING',
+        settlementStatus: 'DISPUTED',
+        status: 'disputed',
+      }),
+      buildFinanceReviewQueueItem('ledger-review-1', '#1601', 1, {
+        financeReviewReason: 'Vendor payout is on hold.',
+        financeReviewAmount: '4584.35',
+        payoutStatus: 'HOLD',
+        settlementStatus: 'HELD',
+        status: 'hold',
+      }),
+    ];
+    const financePreviewDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'finance'
+          ? {
+              ...section,
+              count: 3,
+              critical: 2,
+              warning: 1,
+              items: [
+                {
+                  id: 'finance-preview-only',
+                  type: 'finance',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Finance',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'finance-preview-only',
+                  status: 'review',
+                  ageHours: 2,
+                  title: 'Preview-only finance row',
+                  description: 'This attention row must not render in the Finance Review section.',
+                  recommendedAction: 'Review finance',
+                  destinationPath: '/admin/finance',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+    };
+    attentionMock.mockResolvedValueOnce(financePreviewDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard(authoritativeItems, 12);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const financeReviewList = await screen.findByRole('heading', { name: 'Finance Review' }).then((heading) => heading.closest('article'));
+    expect(financeReviewList).not.toBeNull();
+    expect(await within(financeReviewList as HTMLElement).findByText('Held and disputed finance entries requiring operator review · 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Finance Review rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getAllByRole('row')).toHaveLength(3);
+    expect(within(financeReviewList as HTMLElement).getByText('ledger-review-2')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('ledger-review-1')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Disputed settlement needs operator review.')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Vendor payout is on hold.')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('2400.00')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('4584.35')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Order #1602')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getByText('Order #1601')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getAllByRole('link', { name: 'Review finance' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/finance',
+      '/finance',
+    ]);
+    expect(document.querySelector('.finance-review-attention-table')).not.toBeNull();
+    expect(within(financeReviewList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance Integrity' })).toBeInTheDocument();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 0,
+      type: 'finance_review',
+    }));
+  });
+
+  it('pages Finance Review independently with authoritative totals and boundary controls', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    const firstPage = Array.from({ length: 10 }, (_unused, index) =>
+      buildFinanceReviewQueueItem(`ledger-page-${index + 1}`, '#1601', index, {
+        relatedShopifyOrderNumber: '#1601',
+      }),
+    );
+    const secondPage = [
+      buildFinanceReviewQueueItem('ledger-page-11', '#1601', 10),
+      buildFinanceReviewQueueItem('ledger-page-12', '#1601', 11),
+    ];
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+
+    const financeReviewList = await screen.findByRole('heading', { name: 'Finance Review' }).then((heading) => heading.closest('article'));
+    expect(financeReviewList).not.toBeNull();
+    expect(await within(financeReviewList as HTMLElement).findByText('Finance Review rows 1-10 of 12')).toBeInTheDocument();
+    expect(within(financeReviewList as HTMLElement).getAllByRole('row')).toHaveLength(11);
+    const previous = within(financeReviewList as HTMLElement).getByRole('button', { name: 'Previous' });
+    const next = within(financeReviewList as HTMLElement).getByRole('button', { name: 'Next' });
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+
+    fireEvent.click(next);
+
+    expect(await within(financeReviewList as HTMLElement).findByText('Finance Review rows 11-12 of 12')).toBeInTheDocument();
+    expect(await within(financeReviewList as HTMLElement).findByText('ledger-page-11')).toBeInTheDocument();
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 10,
+      type: 'finance_review',
+    }));
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'vendor_blocked').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'awaiting_shipment').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'return_review').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'finance_integrity_alert').every(([options]) => options?.offset === 0)).toBe(true);
+    expect(supportAttentionMock.mock.calls.every(([options]) => options?.offset === 0)).toBe(true);
+
+    fireEvent.click(previous);
+
+    expect(await within(financeReviewList as HTMLElement).findByText('Finance Review rows 1-10 of 12')).toBeInTheDocument();
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'finance_review').at(-1)?.[0]).toEqual(
+      expect.objectContaining({ limit: 10, offset: 0, type: 'finance_review' }),
+    );
+  });
+
+  it('renders section-scoped Finance Review empty, loading, and error states without preview fallback', async () => {
+    const financePreviewDashboard: OperationsAttentionDashboard = {
+      ...dashboard,
+      sections: dashboard.sections.map((section) =>
+        section.key === 'finance'
+          ? {
+              ...section,
+              count: 1,
+              critical: 1,
+              warning: 0,
+              items: [
+                {
+                  id: 'finance-preview-only',
+                  type: 'finance',
+                  severity: 'critical',
+                  vendorId: 'preview-vendor',
+                  vendorName: 'Preview Vendor',
+                  objectType: 'Finance',
+                  objectReference: 'Order #PREVIEW',
+                  objectId: 'finance-preview-only',
+                  status: 'review',
+                  ageHours: 2,
+                  title: 'Preview-only finance row',
+                  description: 'This attention row must not render in the Finance Review section.',
+                  recommendedAction: 'Review finance',
+                  destinationPath: '/admin/finance',
+                  createdAt: '2026-05-17T08:00:00.000Z',
+                },
+              ],
+            }
+          : section,
+      ),
+    };
+    attentionMock.mockResolvedValue(financePreviewDashboard);
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const emptyRender = renderPage();
+    const emptyFinanceReviewList = await screen.findByRole('heading', { name: 'Finance Review' }).then((heading) => heading.closest('article'));
+    expect(emptyFinanceReviewList).not.toBeNull();
+    expect(await within(emptyFinanceReviewList as HTMLElement).findByText('No finance review items')).toBeInTheDocument();
+    expect(within(emptyFinanceReviewList as HTMLElement).queryByText(/Finance Review rows 0-0/)).not.toBeInTheDocument();
+    expect(within(emptyFinanceReviewList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    emptyRender.unmount();
+
+    let resolveFinanceReview: ((value: OperationsQueueDashboard) => void) | undefined;
+    const pendingFinanceReview = new Promise<OperationsQueueDashboard>((resolve) => {
+      resolveFinanceReview = resolve;
+    });
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return pendingFinanceReview;
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    const loadingRender = renderPage();
+    expect(await screen.findByText('Loading finance review')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Blocked Allocations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return review' })).toBeInTheDocument();
+    resolveFinanceReview?.(buildFinanceReviewQueueDashboard([], 0));
+    loadingRender.unmount();
+
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'awaiting_shipment') {
+        return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
+      }
+      if (options?.type === 'return_review') {
+        return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        throw new Error('Finance review queue unavailable');
+      }
+      if (options?.type === 'finance_integrity_alert') {
+        return buildFinanceIntegrityQueueDashboard([], 0);
+      }
+      return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
+    });
+
+    renderPage();
+    const errorFinanceReviewList = await screen.findByRole('heading', { name: 'Finance Review' }).then((heading) => heading.closest('article'));
+    expect(errorFinanceReviewList).not.toBeNull();
+    expect(await within(errorFinanceReviewList as HTMLElement).findByText('Finance review unavailable')).toBeInTheDocument();
+    expect(within(errorFinanceReviewList as HTMLElement).getByText('Finance review queue unavailable')).toBeInTheDocument();
+    expect(within(errorFinanceReviewList as HTMLElement).queryByText('Preview-only finance row')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance Integrity' })).toBeInTheDocument();
   });
 
   it('renders Finance Integrity as an authoritative table using structured diagnostic fields', async () => {
@@ -1403,6 +1766,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard(authoritativeItems, 12);
       }
@@ -1469,6 +1835,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard((options.offset ?? 0) === 0 ? firstPage : secondPage, 12);
@@ -1552,6 +1921,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return buildFinanceIntegrityQueueDashboard([], 0);
       }
@@ -1577,6 +1949,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
       }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
+      }
       if (options?.type === 'finance_integrity_alert') {
         return pendingFinanceIntegrity;
       }
@@ -1598,6 +1973,9 @@ describe('AdminOperationsQueuePage attention center', () => {
       }
       if (options?.type === 'return_review') {
         return buildReturnReviewQueueDashboard([], 0);
+      }
+      if (options?.type === 'finance_review') {
+        return buildFinanceReviewQueueDashboard([], 0);
       }
       if (options?.type === 'finance_integrity_alert') {
         throw new Error('Finance queue unavailable');

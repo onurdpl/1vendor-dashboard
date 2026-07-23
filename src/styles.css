@@ -14480,6 +14480,55 @@ summary.provider-response-heading::-webkit-details-marker {
   justify-content: flex-end;
 }
 
+.finance-review-attention-list {
+  scroll-margin-top: 16px;
+}
+
+.finance-review-page-controls {
+  justify-content: flex-end;
+}
+
+.finance-review-attention-table {
+  --op-table-min-width: 0;
+  box-shadow: none;
+}
+
+.finance-review-attention-table .op-table-head,
+.finance-review-attention-table .op-table-row {
+  grid-template-columns:
+    minmax(112px, 0.78fr)
+    minmax(124px, 0.82fr)
+    minmax(150px, 1fr)
+    minmax(130px, 0.85fr)
+    minmax(210px, 1.45fr)
+    minmax(76px, 0.48fr)
+    minmax(110px, 0.72fr)
+    minmax(116px, auto);
+}
+
+.finance-review-attention-table .op-table-row {
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.finance-review-attention-table .op-table-row > span,
+.finance-review-attention-table .op-table-row > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finance-review-attention-table .op-table-row small,
+.finance-review-attention-table .op-table-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-review-attention-table .op-action-group {
+  justify-content: flex-end;
+}
+
 .finance-integrity-attention-list {
   scroll-margin-top: 16px;
 }
@@ -14578,6 +14627,7 @@ summary.provider-response-heading::-webkit-details-marker {
   .support-attention-table,
   .shipment-attention-table,
   .return-review-attention-table,
+  .finance-review-attention-table,
   .finance-integrity-attention-table {
     overflow-x: auto;
   }
@@ -14587,7 +14637,9 @@ summary.provider-response-heading::-webkit-details-marker {
   .shipment-attention-table .op-table-head,
   .shipment-attention-table .op-table-row,
   .return-review-attention-table .op-table-head,
-  .return-review-attention-table .op-table-row {
+  .return-review-attention-table .op-table-row,
+  .finance-review-attention-table .op-table-head,
+  .finance-review-attention-table .op-table-row {
     min-width: 840px;
   }
 
