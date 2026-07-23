@@ -26,6 +26,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   shipmentExecution: {
     findMany: vi.fn(),
+    count: vi.fn(),
   },
   financeLedgerEntry: {
     findMany: vi.fn(),
@@ -90,6 +91,29 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildShipmentExecution(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'shipment-1',
+    allocationId: 'alloc-1',
+    vendorId: 'vendor-1',
+    sourceShopifyOrderId: '7709129507153',
+    sourceShopifyOrderNumber: '#1091',
+    shipmentStatus: 'PENDING',
+    trackingNumber: null,
+    updatedAt: new Date('2026-05-13T10:00:00.000Z'),
+    vendor: {
+      name: 'Vendor 1',
+    },
+    allocation: {
+      order: {
+        sourceShopifyOrderId: '7709129507153',
+        sourceShopifyOrderNumber: '#1091',
+      },
+    },
+    ...overrides,
+  };
+}
+
 function mockQueueSummaryCounts({
   pendingReassignment = 0,
   vendorBlocked = 0,
@@ -139,6 +163,7 @@ describe('admin operations summary counts', () => {
     prismaMock.automationAction.count.mockReset();
     prismaMock.supportTicket.findMany.mockReset();
     prismaMock.shipmentExecution.findMany.mockReset();
+    prismaMock.shipmentExecution.count.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     evaluateOperationalSignalsMock.mockReset();
     generateAutomationActionsForSignalsMock.mockReset();
@@ -151,6 +176,7 @@ describe('admin operations summary counts', () => {
     prismaMock.automationAction.findMany.mockResolvedValue([]);
     prismaMock.supportTicket.findMany.mockResolvedValue([]);
     prismaMock.shipmentExecution.findMany.mockResolvedValue([]);
+    prismaMock.shipmentExecution.count.mockResolvedValue(0);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
     evaluateOperationalSignalsMock.mockResolvedValue([]);
     generateAutomationActionsForSignalsMock.mockResolvedValue([]);
@@ -405,6 +431,180 @@ describe('admin operations summary counts', () => {
     expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
     expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('filters shipment executions before pagination and returns an authoritative matching total', async () => {
+    const shipments = [
+      buildShipmentExecution({
+        id: 'shipment-failed-oldest',
+        shipmentStatus: 'FAILED',
+        updatedAt: new Date('2026-05-12T08:00:00.000Z'),
+      }),
+      buildShipmentExecution({
+        id: 'shipment-pending-oldest',
+        shipmentStatus: 'PENDING',
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        trackingNumber: 'TRACK-1',
+        updatedAt: new Date('2026-05-12T09:00:00.000Z'),
+      }),
+    ];
+    prismaMock.shipmentExecution.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(3);
+    prismaMock.shipmentExecution.findMany.mockResolvedValueOnce(shipments);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'awaiting_shipment', limit: 10, offset: 0 });
+
+    expect(dashboard.summary).toEqual({
+      total: 12,
+      critical: 3,
+      warning: 9,
+      attention: 0,
+      normal: 0,
+      pendingReassignment: 0,
+      vendorBlocked: 0,
+      awaitingShipment: 12,
+      refundAttention: 0,
+      financeIntegrityAlerts: 0,
+      operationalSignals: 0,
+      automationActions: 0,
+    });
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-shipment-shipment-failed-oldest',
+        type: 'awaiting_shipment',
+        severity: 'critical',
+        status: 'failed',
+        title: 'Shipment execution failed',
+        actionLabel: 'Review provider response',
+        destinationPath: '/admin/orders/7709129507153',
+      }),
+      expect.objectContaining({
+        id: 'op-shipment-shipment-pending-oldest',
+        type: 'awaiting_shipment',
+        severity: 'warning',
+        status: 'pending',
+        title: 'Shipment pending carrier identifiers',
+        description: 'Carrier record exists; tracking should be reviewed.',
+        relatedShopifyOrderId: '7709129507153',
+      }),
+    ]);
+
+    const totalWhere = prismaMock.shipmentExecution.count.mock.calls[0]?.[0]?.where;
+    const itemsWhere = prismaMock.shipmentExecution.findMany.mock.calls[0]?.[0]?.where;
+    expect(itemsWhere).toEqual(totalWhere);
+    expect(totalWhere).toEqual({
+      shipmentStatus: {
+        in: ['PENDING', 'FAILED'],
+      },
+      allocation: {
+        order: {
+          cancelledAt: null,
+        },
+      },
+    });
+    expect(prismaMock.shipmentExecution.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: totalWhere,
+      orderBy: [
+        { shipmentStatus: 'desc' },
+        { updatedAt: 'asc' },
+        { id: 'asc' },
+      ],
+      skip: 0,
+      take: 10,
+    }));
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('uses shipment offsets to separate pages without generic queue work', async () => {
+    prismaMock.shipmentExecution.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(3);
+    prismaMock.shipmentExecution.findMany.mockResolvedValueOnce([
+      buildShipmentExecution({
+        id: 'shipment-page-two',
+        sourceShopifyOrderNumber: '#1109',
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'awaiting_shipment', limit: 10, offset: 10 });
+
+    expect(dashboard.summary.total).toBe(12);
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-shipment-shipment-page-two',
+        relatedShopifyOrderNumber: '#1109',
+      }),
+    ]);
+    expect(prismaMock.shipmentExecution.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      skip: 10,
+      take: 10,
+    }));
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.supportTicket.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty authoritative shipment result', async () => {
+    prismaMock.shipmentExecution.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    prismaMock.shipmentExecution.findMany.mockResolvedValueOnce([]);
+
+    const dashboard = await getAdminOperationsQueue({ type: 'awaiting_shipment', limit: 10, offset: 0 });
+
+    expect(dashboard.summary.total).toBe(0);
+    expect(dashboard.summary.awaitingShipment).toBe(0);
+    expect(dashboard.items).toEqual([]);
+  });
+
+  it('keeps the existing shipment attention projection unchanged', async () => {
+    mockQueueSummaryCounts();
+    prismaMock.shipmentExecution.findMany.mockResolvedValueOnce([
+      buildShipmentExecution({
+        id: 'shipment-attention-existing',
+        shipmentStatus: 'FAILED',
+      }),
+    ]);
+
+    const dashboard = await getAdminOperationsAttentionCenter();
+
+    expect(dashboard.sections).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'shipment',
+        title: 'Shipment attention',
+        count: 1,
+        items: [
+          expect.objectContaining({
+            id: 'attention-shipment-shipment-attention-existing',
+            type: 'shipment',
+            severity: 'critical',
+            status: 'failed',
+          }),
+        ],
+      }),
+    ]));
+    expect(prismaMock.shipmentExecution.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        shipmentStatus: {
+          in: ['PENDING', 'FAILED'],
+        },
+        allocation: {
+          order: {
+            cancelledAt: null,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      take: 100,
+    }));
+    expect(prismaMock.shipmentExecution.count).not.toHaveBeenCalled();
   });
 
   it('uses split-aware copy for vendor-blocked child allocations created by line-item split', async () => {

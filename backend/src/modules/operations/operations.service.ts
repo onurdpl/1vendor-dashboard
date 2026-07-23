@@ -1,5 +1,6 @@
 import {
   AllocationStatus,
+  ShipmentExecutionStatus,
   type AutomationAction,
   AutomationActionStatus,
   AutomationExecutionMode,
@@ -111,6 +112,45 @@ const operationsAllocationSelect = {
 
 type OperationsAllocationRow = Prisma.VendorAllocationGetPayload<{
   select: typeof operationsAllocationSelect;
+}>;
+
+const shipmentOperationsQueueWhere = {
+  shipmentStatus: {
+    in: [ShipmentExecutionStatus.PENDING, ShipmentExecutionStatus.FAILED],
+  },
+  allocation: {
+    ...fullOrderOperationalAllocationWhere,
+  },
+} satisfies Prisma.ShipmentExecutionWhereInput;
+
+const shipmentOperationsQueueSelect = {
+  id: true,
+  allocationId: true,
+  vendorId: true,
+  sourceShopifyOrderId: true,
+  sourceShopifyOrderNumber: true,
+  shipmentStatus: true,
+  trackingNumber: true,
+  updatedAt: true,
+  vendor: {
+    select: {
+      name: true,
+    },
+  },
+  allocation: {
+    select: {
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ShipmentExecutionSelect;
+
+type ShipmentOperationsQueueRow = Prisma.ShipmentExecutionGetPayload<{
+  select: typeof shipmentOperationsQueueSelect;
 }>;
 
 type AdminOperationsQueueOptions = {
@@ -907,11 +947,102 @@ async function getVendorBlockedOperationsQueue(options: Required<Pick<AdminOpera
   };
 }
 
+function mapShipmentExecutionToQueueItem(shipment: ShipmentOperationsQueueRow): OperationsQueueItemDto {
+  const failed = shipment.shipmentStatus === ShipmentExecutionStatus.FAILED;
+  const sourceShopifyOrderId = shipment.sourceShopifyOrderId ?? shipment.allocation.order.sourceShopifyOrderId;
+  const sourceShopifyOrderNumber = shipment.sourceShopifyOrderNumber ?? shipment.allocation.order.sourceShopifyOrderNumber;
+
+  return {
+    id: `op-shipment-${shipment.id}`,
+    type: 'awaiting_shipment',
+    severity: failed ? 'critical' : 'warning',
+    title: failed ? 'Shipment execution failed' : 'Shipment pending carrier identifiers',
+    description: shipment.trackingNumber
+      ? 'Carrier record exists; tracking should be reviewed.'
+      : 'Tracking is not available yet.',
+    vendorId: shipment.vendorId,
+    vendorName: shipment.vendor.name,
+    relatedOrderId: shipment.allocationId,
+    relatedShopifyOrderId: sourceShopifyOrderId,
+    relatedShopifyOrderNumber: sourceShopifyOrderNumber,
+    relatedReturnId: null,
+    relatedRefundId: null,
+    status: shipment.shipmentStatus.toLowerCase(),
+    createdAt: shipment.updatedAt.toISOString(),
+    actionLabel: failed ? 'Review provider response' : 'Review shipment status',
+    destinationPath: sourceShopifyOrderId ? `/admin/orders/${sourceShopifyOrderId}` : null,
+  };
+}
+
+function buildShipmentFilteredSummary(total: number, failed: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: failed,
+    warning: total - failed,
+    attention: 0,
+    normal: 0,
+    pendingReassignment: 0,
+    vendorBlocked: 0,
+    awaitingShipment: total,
+    refundAttention: 0,
+    financeIntegrityAlerts: 0,
+    operationalSignals: 0,
+    automationActions: 0,
+  };
+}
+
+async function getShipmentOperationsQueue(
+  options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>,
+): Promise<OperationsQueueDashboardDto> {
+  const [total, failed, shipments] = await Promise.all([
+    withDashboardTiming('operations.shipment_filtered_count', () =>
+      prisma.shipmentExecution.count({
+        where: shipmentOperationsQueueWhere,
+      }),
+    ),
+    withDashboardTiming('operations.shipment_filtered_failed_count', () =>
+      prisma.shipmentExecution.count({
+        where: {
+          ...shipmentOperationsQueueWhere,
+          shipmentStatus: ShipmentExecutionStatus.FAILED,
+        },
+      }),
+    ),
+    withDashboardTiming('operations.shipment_filtered_fetch', () =>
+      prisma.shipmentExecution.findMany({
+        where: shipmentOperationsQueueWhere,
+        select: shipmentOperationsQueueSelect,
+        orderBy: [
+          {
+            shipmentStatus: 'desc',
+          },
+          {
+            updatedAt: 'asc',
+          },
+          {
+            id: 'asc',
+          },
+        ],
+        skip: options.offset,
+        take: options.limit,
+      }),
+    ),
+  ]);
+
+  return {
+    summary: buildShipmentFilteredSummary(total, failed),
+    items: shipments.map(mapShipmentExecutionToQueueItem),
+  };
+}
+
 export async function getAdminOperationsQueue(options: AdminOperationsQueueOptions = {}): Promise<OperationsQueueDashboardDto> {
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
   if (options.type === 'vendor_blocked') {
     return getVendorBlockedOperationsQueue({ limit, offset });
+  }
+  if (options.type === 'awaiting_shipment') {
+    return getShipmentOperationsQueue({ limit, offset });
   }
 
   const candidateTake = offset + limit;

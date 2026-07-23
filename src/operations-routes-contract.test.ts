@@ -91,6 +91,74 @@ describe('operations route contract', () => {
     expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 5, offset: 5, type: 'vendor_blocked' });
   });
 
+  it('passes the supported shipment queue type filter and normalized pagination to the operations service', async () => {
+    getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 12 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const response = await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'awaiting_shipment', limit: '10', offset: '20' },
+    }, {});
+
+    expect(response).toEqual({ summary: { total: 12 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({
+      limit: 10,
+      offset: 20,
+      type: 'awaiting_shipment',
+    });
+  });
+
+  it('preserves shared pagination validation for the shipment queue', async () => {
+    getAdminOperationsQueueMock
+      .mockResolvedValueOnce({ summary: { total: 0 }, items: [] })
+      .mockResolvedValueOnce({ summary: { total: 0 }, items: [] })
+      .mockResolvedValueOnce({ summary: { total: 0 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'awaiting_shipment', limit: '0', offset: '-5' },
+    }, {});
+    await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'awaiting_shipment', limit: '1000', offset: '10.5' },
+    }, {});
+    await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'awaiting_shipment', limit: 'invalid', offset: 'invalid' },
+    }, {});
+
+    expect(getAdminOperationsQueueMock).toHaveBeenNthCalledWith(1, {
+      limit: 1,
+      offset: 0,
+      type: 'awaiting_shipment',
+    });
+    expect(getAdminOperationsQueueMock).toHaveBeenNthCalledWith(2, {
+      limit: 250,
+      offset: 10,
+      type: 'awaiting_shipment',
+    });
+    expect(getAdminOperationsQueueMock).toHaveBeenNthCalledWith(3, {
+      limit: 100,
+      offset: 0,
+      type: 'awaiting_shipment',
+    });
+  });
+
   it('rejects unsupported operations queue type filters', async () => {
     const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
     const app = {
@@ -106,9 +174,9 @@ describe('operations route contract', () => {
     };
 
     registerOperationsRoutes(app as never, {} as never);
-    const response = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'awaiting_shipment' } }, reply);
+    const response = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'shipment' } }, reply);
 
-    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked.' } });
+    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked or awaiting_shipment.' } });
     expect(getAdminOperationsQueueMock).not.toHaveBeenCalled();
   });
 

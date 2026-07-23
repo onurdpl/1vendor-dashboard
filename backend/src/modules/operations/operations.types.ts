@@ -7,7 +7,7 @@ export type OperationsQueueItemType =
   | 'operational_signal'
   | 'automation_action';
 
-export type OperationsQueueTypeFilter = 'vendor_blocked';
+export type OperationsQueueTypeFilter = 'vendor_blocked' | 'awaiting_shipment';
 
 export type OperationsQueueSeverity = 'critical' | 'warning' | 'attention' | 'normal';
 

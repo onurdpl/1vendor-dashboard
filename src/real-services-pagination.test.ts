@@ -41,18 +41,22 @@ describe('real service pagination plumbing', () => {
   it('passes the operations queue type filter only when requested', async () => {
     apiClientGet
       .mockResolvedValueOnce({ summary: {}, items: [] })
+      .mockResolvedValueOnce({ summary: {}, items: [] })
       .mockResolvedValueOnce({ summary: {}, items: [] });
 
     await getAdminOperationsQueueDashboard({ limit: 5, offset: 5, type: 'vendor_blocked' });
+    await getAdminOperationsQueueDashboard({ limit: 10, offset: 20, type: 'awaiting_shipment' });
     await getAdminOperationsQueueDashboard({ limit: 5, offset: 0 });
 
     expect(apiClientGet).toHaveBeenNthCalledWith(1, '/admin/operations?type=vendor_blocked&limit=5&offset=5', expect.any(Object));
-    expect(apiClientGet).toHaveBeenNthCalledWith(2, '/admin/operations?limit=5', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(2, '/admin/operations?type=awaiting_shipment&limit=10&offset=20', expect.any(Object));
+    expect(apiClientGet).toHaveBeenNthCalledWith(3, '/admin/operations?limit=5', expect.any(Object));
   });
 
   it('keeps filtered and unfiltered operations queue pages in separate query-key buckets', () => {
     expect(queryKeys.admin.operations.queuePage(5, 0)).toEqual(['admin', 'operations', 'queue', 'all', 5, 0]);
     expect(queryKeys.admin.operations.queuePage(5, 0, 'vendor_blocked')).toEqual(['admin', 'operations', 'queue', 'vendor_blocked', 5, 0]);
+    expect(queryKeys.admin.operations.queuePage(10, 20, 'awaiting_shipment')).toEqual(['admin', 'operations', 'queue', 'awaiting_shipment', 10, 20]);
   });
 
   it('passes the support attention filter with limit and offset without changing the unfiltered admin support list', async () => {

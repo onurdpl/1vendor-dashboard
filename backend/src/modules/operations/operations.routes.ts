@@ -20,18 +20,18 @@ function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFi
     return undefined;
   }
   if (typeof rawType !== 'string') {
-    throw new Error('type must be vendor_blocked.');
+    throw new Error('type must be vendor_blocked or awaiting_shipment.');
   }
 
   const normalized = rawType.trim().toLowerCase();
   if (!normalized) {
     return undefined;
   }
-  if (normalized !== 'vendor_blocked') {
-    throw new Error('type must be vendor_blocked.');
+  if (normalized !== 'vendor_blocked' && normalized !== 'awaiting_shipment') {
+    throw new Error('type must be vendor_blocked or awaiting_shipment.');
   }
 
-  return 'vendor_blocked';
+  return normalized;
 }
 
 export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
