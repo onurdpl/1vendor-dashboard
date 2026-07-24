@@ -650,15 +650,15 @@ describe('AdminOperationsQueuePage attention center', () => {
     cleanup();
   });
 
-  it('renders critical attention queue, vendor risk, and cross-links', async () => {
+  it('renders recommendations, authoritative queues, vendor risk, and cross-links without the unified queue', async () => {
     attentionMock.mockResolvedValueOnce(dashboard);
 
     renderPage();
 
     expect(await screen.findByRole('heading', { name: /operational attention center/i })).toBeInTheDocument();
     expect((await screen.findAllByText('High-priority support ticket')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
-    expect(screen.getAllByText('Tracking is not available yet.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Shipment execution failed')).toBeInTheDocument();
+    expect(screen.queryByText('Tracking is not available yet.')).not.toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
@@ -672,15 +672,42 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.queryByText('Overdue support')).not.toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
     expect(screen.getByText('Escalate support request')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Unified attention queue' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Critical queue')).not.toBeInTheDocument();
+    expect(screen.queryByText('Preview of generated attention rows sorted by severity and unresolved age.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No active attention items')).not.toBeInTheDocument();
+    expect(document.querySelector('#operations-unified-queue')).toBeNull();
+    expect(document.querySelector('.attention-op-table')).toBeNull();
+    expect(document.querySelector('.attention-queue-severity')).toBeNull();
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open ticket' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
-    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000000')).toBe(true);
     expect(screen.getByRole('heading', { name: 'Recent projected activity' })).toBeInTheDocument();
     expect(screen.getByText('Latest projected activity rows, not a full audit history.')).toBeInTheDocument();
+    expect(attentionMock).toHaveBeenCalledTimes(1);
+    expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0 }));
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'awaiting_shipment', limit: 10, offset: 0 }));
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'return_review', limit: 10, offset: 0 }));
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'finance_review', limit: 10, offset: 0 }));
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'finance_integrity_alert', limit: 10, offset: 0 }));
+
+    const recommendedActionsHeading = screen.getByRole('heading', { name: 'Recommended actions' });
+    const supportHeading = screen.getByRole('heading', { name: 'Support attention' });
+    expect(Boolean(recommendedActionsHeading.compareDocumentPosition(supportHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(
+      Array.from(document.querySelectorAll('.attention-main-column .attention-card-heading h3')).map((heading) => heading.textContent),
+    ).toEqual([
+      'Support attention',
+      'Vendor Blocked Allocations',
+      'Shipment attention',
+      'Return review',
+      'Finance Review',
+      'Finance Integrity',
+    ]);
   });
 
-  it('renders Support attention as a server-paginated table while preserving unified queue support rows', async () => {
+  it('renders Support attention as a server-paginated table while preserving recommendation support rows', async () => {
     attentionMock.mockResolvedValueOnce(dashboard);
     supportAttentionMock.mockResolvedValueOnce(buildSupportAttentionPage([
       buildSupportAttentionTicket({
@@ -939,10 +966,10 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     renderPage();
 
-    expect(await screen.findAllByText('Split allocation awaiting admin resolution')).toHaveLength(2);
-    expect(screen.getAllByText(/Vendor rejected selected line items/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Reason: OUT_OF_STOCK/).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7817723773265')).toBe(true);
+    expect(await screen.findAllByText('Split allocation awaiting admin resolution')).toHaveLength(1);
+    expect(screen.queryByText(/Vendor rejected selected line items/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reason: OUT_OF_STOCK/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000000')).toBe(true);
   });
 
   it('renders Vendor Blocked as a 10-row server-paginated table without preview controls', async () => {

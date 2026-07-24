@@ -14227,74 +14227,6 @@ summary.provider-response-heading::-webkit-details-marker {
   padding: 9px 10px;
 }
 
-.attention-op-table {
-  --op-table-min-width: 0;
-  box-shadow: none;
-}
-
-.attention-op-table .op-table-head,
-.attention-op-table .op-table-row {
-  grid-template-columns: 92px minmax(150px, 1.35fr) minmax(120px, 0.9fr) minmax(120px, 0.9fr) 54px minmax(150px, 1.25fr) minmax(96px, auto);
-}
-
-.attention-op-table .op-table-row {
-  min-height: 44px;
-  padding: 8px 10px;
-  cursor: default;
-}
-
-.attention-op-table .op-table-row > span {
-  gap: 1px;
-}
-
-.attention-queue-severity {
-  display: flex;
-  align-items: center;
-}
-
-.attention-queue-type small,
-.attention-queue-vendor small,
-.attention-queue-reference small {
-  white-space: nowrap;
-}
-
-.attention-queue-type small:last-child {
-  color: #64748b;
-  font-size: 0.72rem;
-}
-
-.attention-queue-type strong,
-.attention-queue-type small,
-.attention-queue-vendor strong,
-.attention-queue-vendor small,
-.attention-queue-reference strong,
-.attention-queue-reference small,
-.attention-queue-action-copy {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.attention-queue-type strong,
-.attention-queue-vendor strong,
-.attention-queue-reference strong,
-.attention-queue-action-copy {
-  white-space: nowrap;
-}
-
-.attention-queue-age {
-  font-size: 0.82rem;
-  white-space: nowrap;
-}
-
-.attention-op-table .op-action-group {
-  justify-content: flex-end;
-}
-
-.attention-op-table .button-compact {
-  min-height: 28px;
-  padding: 4px 10px;
-}
-
 .vendor-blocked-attention-list {
   scroll-margin-top: 16px;
 }
@@ -14591,51 +14523,6 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 @media (max-width: 760px) {
-  .attention-op-table .op-table-head {
-    display: none;
-  }
-
-  .attention-op-table .op-table-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "type severity"
-      "vendor age"
-      "reference reference"
-      "actionCopy action";
-    gap: 6px 10px;
-    padding: 10px;
-  }
-
-  .attention-queue-severity {
-    grid-area: severity;
-    justify-content: flex-end;
-  }
-
-  .attention-queue-type {
-    grid-area: type;
-  }
-
-  .attention-queue-vendor {
-    grid-area: vendor;
-  }
-
-  .attention-queue-reference {
-    grid-area: reference;
-  }
-
-  .attention-queue-age {
-    grid-area: age;
-    justify-self: end;
-  }
-
-  .attention-queue-action-copy {
-    grid-area: actionCopy;
-  }
-
-  .attention-op-table .op-action-group {
-    grid-area: action;
-  }
-
   .support-attention-table,
   .shipment-attention-table,
   .return-review-attention-table,

@@ -456,7 +456,6 @@ export function AdminOperationsQueuePage() {
     recentActivity: [],
   };
   const recommendations = safeArray(dataView.recommendations);
-  const queue = safeArray(dataView.queue);
   const sections = safeArray(dataView.sections);
   const displaySections = sections.filter(
     (section) =>
@@ -632,50 +631,6 @@ export function AdminOperationsQueuePage() {
             audience="admin"
             emptyMessage="No operational recommendations right now."
           />
-
-          <article className="attention-card" id="operations-unified-queue">
-            <div className="attention-card-heading">
-              <div>
-                <p className="eyebrow">Critical queue</p>
-                <h3>Unified attention queue</h3>
-                <span>Preview of generated attention rows sorted by severity and unresolved age.</span>
-              </div>
-            </div>
-            {queue.length ? (
-              <OperationalTable
-                columns={['Severity', 'Type', 'Vendor', 'Reference', 'Age', 'Recommended action', 'Action']}
-                className="attention-op-table"
-              >
-	                {queue.map((item) => (
-	                  <OperationalTableRow key={item.id}>
-	                    <span className="attention-queue-severity">
-	                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
-	                    </span>
-	                    <span className="attention-queue-type" title={`${formatType(item.type)} · ${item.title}`}>
-	                      <strong>{formatType(item.type)}</strong>
-	                      <small>{item.title}</small>
-	                      <small>{item.description}</small>
-	                    </span>
-	                    <span className="attention-queue-vendor" title={`${item.vendorName} · ${item.vendorId}`}>
-	                      <strong>{item.vendorName}</strong>
-	                      <small>{item.vendorId}</small>
-	                    </span>
-	                    <span className="attention-queue-reference" title={`${item.objectReference} · ${item.status}`}>
-	                      <strong>{item.objectReference}</strong>
-	                      <small>{item.status}</small>
-	                    </span>
-	                    <strong className="attention-queue-age">{formatAge(item.ageHours)}</strong>
-	                    <span className="attention-queue-action-copy" title={item.recommendedAction}>{item.recommendedAction}</span>
-	                    <OperationalActionGroup>
-	                      {attentionLink(item, getActionLabel(item))}
-	                    </OperationalActionGroup>
-	                  </OperationalTableRow>
-                ))}
-              </OperationalTable>
-            ) : (
-              <EmptyStatePanel title="No active attention items" description="Current operational queues are clear." />
-            )}
-          </article>
 
           <div className="attention-sections-stack">
             <article className="attention-card support-attention-full-list" id="support-attention-full-list">
