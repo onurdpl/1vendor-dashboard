@@ -13224,6 +13224,11 @@ summary.provider-response-heading::-webkit-details-marker {
   text-decoration: none;
 }
 
+.attention-main-column .operational-recommendation-row {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0.58rem 0.65rem;
+}
+
 .return-review-side .operational-recommendation-row {
   gap: 0.5rem;
   padding: 0.52rem 0.6rem;
@@ -14582,6 +14587,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .attention-risk-row {
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: flex-start;
 }
 
 .attention-activity-row {
@@ -14594,6 +14600,30 @@ summary.provider-response-heading::-webkit-details-marker {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.attention-risk-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attention-risk-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: #64748b;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.attention-risk-breakdown strong {
+  color: #334155;
+  font-size: inherit;
+  font-weight: 700;
 }
 
 .attention-mini-row strong,

@@ -18,12 +18,14 @@ export function OperationalRecommendations({
   recommendations,
   audience = 'admin',
   emptyMessage,
+  presentation = 'default',
 }: {
   title?: string;
   subtitle?: string;
   recommendations: OperationsRecommendation[];
   audience?: 'admin' | 'vendor';
   emptyMessage?: string;
+  presentation?: 'default' | 'summary';
 }) {
   const visibleRecommendations = recommendations.filter((recommendation) => audience === 'admin' || recommendation.vendorVisible);
 
@@ -43,6 +45,8 @@ export function OperationalRecommendations({
       {visibleRecommendations.length ? (
         <div className="operational-recommendation-list">
           {visibleRecommendations.map((recommendation) => {
+            const orderMatch = recommendation.description.match(/\bOrder\s+#[\w-]+/i);
+            const summaryContext = `${orderMatch?.[0] ?? recommendation.relatedObjectType} · ${recommendation.vendor.name}`;
             const body = (
               <>
                 <div className="operational-recommendation-copy">
@@ -50,10 +54,10 @@ export function OperationalRecommendations({
                     <strong>{recommendation.title}</strong>
                     <StatusBadge tone={getSeverityTone(recommendation.severity)}>{recommendation.severity}</StatusBadge>
                   </div>
-                  <p>{recommendation.description}</p>
+                  <p>{presentation === 'summary' ? summaryContext : recommendation.description}</p>
                   <span>{recommendation.recommendedAction}</span>
                 </div>
-                <small>{recommendation.vendor.name}</small>
+                {presentation === 'summary' ? null : <small>{recommendation.vendor.name}</small>}
               </>
             );
 

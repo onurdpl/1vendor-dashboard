@@ -248,6 +248,17 @@ const dashboard: OperationsAttentionDashboard = {
       occurredAt: '2026-05-17T08:00:00.000Z',
       destinationPath: '/admin/support/ticket-1',
     },
+    {
+      id: 'activity-vendor-blocked-1',
+      type: 'vendor_blocked',
+      severity: 'warning',
+      vendorId: 'sporjinal',
+      vendorName: 'Sporjinal',
+      title: 'Vendor rejected allocation',
+      description: 'alloc-sporjinal-794494123',
+      occurredAt: '2026-05-17T07:30:00.000Z',
+      destinationPath: '/admin/orders/7817723773265',
+    },
   ],
 };
 
@@ -661,8 +672,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.queryByText('Tracking is not available yet.')).not.toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected allocation').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Order #1091').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/OUT_OF_STOCK/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Reason: OUT_OF_STOCK/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/OUT_OF_STOCK/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Reason: OUT_OF_STOCK/)).not.toBeInTheDocument();
     expect(screen.getAllByText('Open order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review transfer, cancel/refund, or return to vendor.').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
@@ -672,6 +683,20 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(screen.queryByText('Overdue support')).not.toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
     expect(screen.getByText('Escalate support request')).toBeInTheDocument();
+    const recommendationsCard = screen.getByRole('heading', { name: 'Recommended actions' }).closest('article');
+    expect(recommendationsCard).not.toBeNull();
+    expect(within(recommendationsCard as HTMLElement).getByText('Highest-priority operational recommendations')).toBeInTheDocument();
+    expect(within(recommendationsCard as HTMLElement).queryByText('Preview of 2 generated recommendations.')).not.toBeInTheDocument();
+    expect(within(recommendationsCard as HTMLElement).getByText('Order #1091 · Sporjinal')).toBeInTheDocument();
+    expect(within(recommendationsCard as HTMLElement).getByText('Order #1029 · Sporjinal')).toBeInTheDocument();
+    expect(within(recommendationsCard as HTMLElement).queryByText('Sporjinal rejected Order #1091. Reason: OUT_OF_STOCK.')).not.toBeInTheDocument();
+    expect(within(recommendationsCard as HTMLElement).getAllByText('Review transfer, cancel/refund, or return to vendor.')).toHaveLength(1);
+    expect(
+      within(recommendationsCard as HTMLElement).getAllByRole('link').map((link) => link.textContent),
+    ).toEqual([
+      expect.stringContaining('Vendor rejected allocation'),
+      expect.stringContaining('Escalate support request'),
+    ]);
     expect(screen.queryByRole('heading', { name: 'Unified attention queue' })).not.toBeInTheDocument();
     expect(screen.queryByText('Critical queue')).not.toBeInTheDocument();
     expect(screen.queryByText('Preview of generated attention rows sorted by severity and unresolved age.')).not.toBeInTheDocument();
@@ -680,11 +705,33 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(document.querySelector('.attention-op-table')).toBeNull();
     expect(document.querySelector('.attention-queue-severity')).toBeNull();
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
-    expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
+    const vendorRiskCard = screen.getByRole('heading', { name: 'Operational health' }).closest('article');
+    expect(vendorRiskCard).not.toBeNull();
+    expect(within(vendorRiskCard as HTMLElement).queryByText('Showing 1 vendor risk preview rows.')).not.toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('Vendors with active operational attention.')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('2 active operational items')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('Support')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('Shipment')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('Return')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getByText('Finance')).toBeInTheDocument();
+    expect(within(vendorRiskCard as HTMLElement).getAllByText('1')).toHaveLength(2);
+    expect(within(vendorRiskCard as HTMLElement).getAllByText('0')).toHaveLength(2);
+    expect(within(vendorRiskCard as HTMLElement).queryByText('1 support item · 1 shipment item')).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open ticket' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');
     expect(screen.getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000000')).toBe(true);
     expect(screen.getByRole('heading', { name: 'Recent projected activity' })).toBeInTheDocument();
     expect(screen.getByText('Latest projected activity rows, not a full audit history.')).toBeInTheDocument();
+    const activityCard = screen.getByRole('heading', { name: 'Recent projected activity' }).closest('article');
+    expect(activityCard).not.toBeNull();
+    expect(within(activityCard as HTMLElement).getByText('Overdue support ticket')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getByText('Sporjinal · Order #1029')).toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).queryByText(/alloc-sporjinal-794494123/)).not.toBeInTheDocument();
+    expect(within(activityCard as HTMLElement).getAllByText('May 17, 2026, 10:00 AM')).toHaveLength(1);
+    expect(within(activityCard as HTMLElement).getAllByText('May 17, 2026, 09:30 AM')).toHaveLength(1);
+    const activityRows = Array.from((activityCard as HTMLElement).querySelectorAll('.attention-activity-row'));
+    expect(activityRows[0]).toHaveTextContent('Overdue support ticket');
+    expect(activityRows[1]).toHaveTextContent('Vendor rejected allocation');
     expect(attentionMock).toHaveBeenCalledTimes(1);
     expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0 }));
     expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'awaiting_shipment', limit: 10, offset: 0 }));

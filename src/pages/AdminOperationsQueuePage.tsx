@@ -277,6 +277,15 @@ function getSupportSlaStateLabel(ticket: SupportAttentionTicket) {
   return ticket.sla.escalationLevel === 'none' ? 'SLA active' : safeStatusLabel(ticket.sla.escalationLevel);
 }
 
+function getActivityContext(item: OperationsActivity) {
+  const description = item.description.trim();
+  const isInternalReference = /^(alloc|allocation|op-|gid:\/\/|[a-z]+-[a-z0-9-]{12,})/i.test(description);
+  if (!description || isInternalReference || description === item.vendorName) {
+    return item.vendorName;
+  }
+  return `${item.vendorName} · ${description}`;
+}
+
 export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
@@ -626,10 +635,11 @@ export function AdminOperationsQueuePage() {
         <main className="attention-main-column">
           <OperationalRecommendations
             title="Recommended actions"
-            subtitle={`Preview of ${recommendations.length} generated recommendations.`}
+            subtitle="Highest-priority operational recommendations"
             recommendations={recommendations}
             audience="admin"
             emptyMessage="No operational recommendations right now."
+            presentation="summary"
           />
 
           <div className="attention-sections-stack">
@@ -1200,7 +1210,7 @@ export function AdminOperationsQueuePage() {
               <div>
                 <p className="eyebrow">Vendor risk</p>
                 <h3>Operational health</h3>
-                <span>Showing {vendorRisks.length} vendor risk preview rows.</span>
+                <span>Vendors with active operational attention.</span>
               </div>
             </div>
             <div className="attention-risk-list">
@@ -1209,7 +1219,13 @@ export function AdminOperationsQueuePage() {
                   <div key={vendor.vendorId} className="attention-risk-row">
                     <div>
                       <strong>{vendor.vendorName}</strong>
-                      <span>{vendor.drivers.length ? vendor.drivers.join(' · ') : 'No dominant driver'}</span>
+                      <span>{vendor.totalAttentionItems} active operational items</span>
+                      <ul className="attention-risk-breakdown" aria-label={`${vendor.vendorName} attention breakdown`}>
+                        <li>Support <strong>{vendor.supportItems}</strong></li>
+                        <li>Shipment <strong>{vendor.shipmentItems}</strong></li>
+                        <li>Return <strong>{vendor.returnItems}</strong></li>
+                        <li>Finance <strong>{vendor.financeItems}</strong></li>
+                      </ul>
                     </div>
                     <StatusBadge tone={getRiskTone(vendor)}>{vendor.riskLevel}</StatusBadge>
                   </div>
@@ -1235,8 +1251,8 @@ export function AdminOperationsQueuePage() {
                     <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                     <div>
                       {item.destinationPath ? <Link to={item.destinationPath}>{item.title}</Link> : <strong>{item.title}</strong>}
-                      <small>{item.vendorName} · {item.description} · {formatDate(item.occurredAt)}</small>
-                      <span>{item.description}</span>
+                      <small>{getActivityContext(item)}</small>
+                      <span>{formatDate(item.occurredAt)}</span>
                     </div>
                     <StatusBadge tone={getActivityTone(item)}>{item.severity}</StatusBadge>
                   </div>
