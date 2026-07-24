@@ -850,12 +850,7 @@ export function AdminOperationsQueuePage() {
                 <div>
                   <p className="eyebrow">Shipment</p>
                   <h3>Shipment attention</h3>
-                  <span>
-                    Authoritative shipment items
-                    {totalShipmentQueueRows > 0
-                      ? ` · ${shipmentPageStart}-${shipmentPageEnd} of ${totalShipmentQueueRows}`
-                      : ''}
-                  </span>
+                  <span>Authoritative shipment items</span>
                 </div>
               </div>
 
@@ -907,23 +902,13 @@ export function AdminOperationsQueuePage() {
                         <span>
                           <StatusBadge tone={getQueueSeverityTone(item.severity)}>{item.severity}</StatusBadge>
                         </span>
-                        <span title={`${getQueueItemReference(item)} · ${item.title}`}>
-                          <strong>{getQueueItemReference(item)}</strong>
-                          <small>{item.relatedOrderId ?? item.id}</small>
-                        </span>
-                        <span title={`${item.vendorName ?? item.vendorId} · ${item.vendorId}`}>
-                          <strong>{item.vendorName ?? item.vendorId}</strong>
-                          <small>{item.vendorId}</small>
-                        </span>
-                        <span>
-                          <strong>{safeStatusLabel(item.status)}</strong>
-                          <small>{formatQueueType(item.type)}</small>
-                        </span>
-                        <span title={`${item.title} · ${item.description}`}>
+                        <strong title={`${getQueueItemReference(item)} · ${item.relatedOrderId ?? item.id}`}>{getQueueItemReference(item)}</strong>
+                        <strong title={item.vendorName ?? item.vendorId}>{item.vendorName ?? item.vendorId}</strong>
+                        <strong>{safeStatusLabel(item.status)}</strong>
+                        <span className="shipment-waiting-cell" title={`${item.title} · ${item.description}`}>
                           <strong>{item.title}</strong>
-                          <small>{item.description}</small>
                         </span>
-                        <strong>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
+                        <strong title={formatDate(item.createdAt)}>{formatAge((Date.now() - new Date(item.createdAt).getTime()) / 36e5)}</strong>
                         <OperationalActionGroup>
                           {adminOrderPath ? actionLink(adminOrderPath, 'Open order') : <span className="queue-muted-action">No admin order</span>}
                         </OperationalActionGroup>

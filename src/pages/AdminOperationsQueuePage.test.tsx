@@ -1028,11 +1028,34 @@ describe('AdminOperationsQueuePage attention center', () => {
 
     const shipmentList = await screen.findByRole('heading', { name: 'Shipment attention' }).then((heading) => heading.closest('article'));
     expect(shipmentList).not.toBeNull();
-    expect(await within(shipmentList as HTMLElement).findByText('Authoritative shipment items · 1-10 of 12')).toBeInTheDocument();
+    expect(await within(shipmentList as HTMLElement).findByText('Authoritative shipment items')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('Authoritative shipment items · 1-10 of 12')).not.toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).getByText('Shipment rows 1-10 of 12')).toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).getAllByRole('row')).toHaveLength(3);
+    expect(within(shipmentList as HTMLElement).getByText('Severity')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Order')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Vendor')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Status')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Waiting')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Age')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Action')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('critical')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('high')).toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).getByText('Order #1302')).toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).getByText('Order #1301')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('alloc-shipment-2')).not.toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('alloc-shipment-1')).not.toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getAllByText('Sporjinal')).toHaveLength(2);
+    expect(within(shipmentList as HTMLElement).queryByText('sporjinal')).not.toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Failed')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Pending')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('Awaiting shipment')).not.toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Shipment execution failed')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
+    expect(within(shipmentList as HTMLElement).queryByText('Tracking is not available yet.')).not.toBeInTheDocument();
+    expect((shipmentList as HTMLElement).querySelector('[title*="Tracking is not available yet."]')).not.toBeNull();
+    expect((shipmentList as HTMLElement).querySelector('[title*="May "]')).not.toBeNull();
+    expect(within(shipmentList as HTMLElement).queryByText(/May \d+, 2026/)).not.toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).queryByText('Preview-only shipment row')).not.toBeInTheDocument();
     expect(within(shipmentList as HTMLElement).queryByText(/This section is a preview/)).not.toBeInTheDocument();
     expect(document.querySelector('.shipment-attention-table')).not.toBeNull();
@@ -1041,10 +1064,16 @@ describe('AdminOperationsQueuePage attention center', () => {
       offset: 0,
       type: 'awaiting_shipment',
     }));
+    expect(within(shipmentList as HTMLElement).getAllByRole('link', { name: 'Open order' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/admin/orders/7950000000002',
+      '/admin/orders/7950000000001',
+    ]);
 
     const dataRows = within(shipmentList as HTMLElement).getAllByRole('row').slice(1);
     expect(dataRows[0]).toHaveTextContent('Order #1302');
     expect(dataRows[1]).toHaveTextContent('Order #1301');
+    expect(dataRows[0]).toHaveTextContent('Shipment execution failed');
+    expect(dataRows[1]).toHaveTextContent('Shipment pending carrier identifiers');
   });
 
   it('pages Shipment independently in both directions and disables controls at page boundaries', async () => {
