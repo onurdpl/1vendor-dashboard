@@ -273,6 +273,10 @@ function getSupportSlaLabel(ticket: SupportAttentionTicket) {
   return `Waiting since ${formatDate(ticket.waitingSince)}`;
 }
 
+function getSupportSlaStateLabel(ticket: SupportAttentionTicket) {
+  return ticket.sla.escalationLevel === 'none' ? 'SLA active' : safeStatusLabel(ticket.sla.escalationLevel);
+}
+
 export function AdminOperationsQueuePage() {
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
@@ -679,9 +683,7 @@ export function AdminOperationsQueuePage() {
                 <div>
                   <p className="eyebrow">Support</p>
                   <h3>Support attention</h3>
-                  <span>
-                    Authoritative unresolved support tickets · {supportPageStart}-{supportPageEnd} of {totalSupportAttentionRows}
-                  </span>
+                  <span>Authoritative unresolved support tickets</span>
                 </div>
               </div>
 
@@ -720,7 +722,7 @@ export function AdminOperationsQueuePage() {
                 />
               ) : supportAttentionItems.length ? (
                 <OperationalTable
-                  columns={['Severity', 'Ticket', 'Vendor', 'Order', 'Status', 'SLA / Waiting', 'Age', 'Action']}
+                  columns={['Severity', 'Ticket', 'Vendor', 'Order', 'Status', 'Waiting', 'Age', 'Action']}
                   className="support-attention-table"
                 >
                   {supportAttentionItems.map((ticket) => (
@@ -728,27 +730,12 @@ export function AdminOperationsQueuePage() {
                       <span>
                         <StatusBadge tone={getSeverityTone(ticket.severity)}>{ticket.severity}</StatusBadge>
                       </span>
-                      <span title={`${ticket.ticketReference} · ${ticket.subject}`}>
-                        <strong>{ticket.subject}</strong>
-                        <small>{ticket.ticketReference}</small>
-                      </span>
-                      <span title={`${ticket.vendorName ?? ticket.vendorId} · ${ticket.vendorId}`}>
-                        <strong>{ticket.vendorName ?? ticket.vendorId}</strong>
-                        <small>{ticket.vendorId}</small>
-                      </span>
-                      <span>
-                        <strong>{getSupportOrderReference(ticket) ?? 'No order link'}</strong>
-                        <small>{safeStatusLabel(ticket.contextType)}</small>
-                      </span>
-                      <span>
-                        <strong>{safeStatusLabel(ticket.status)}</strong>
-                        <small>{safeStatusLabel(ticket.priority)} · {safeStatusLabel(ticket.category)}</small>
-                      </span>
-                      <span title={getSupportSlaLabel(ticket)}>
-                        <strong>{ticket.sla.escalationLevel === 'none' ? 'SLA active' : safeStatusLabel(ticket.sla.escalationLevel)}</strong>
-                        <small>{getSupportSlaLabel(ticket)}</small>
-                      </span>
-                      <strong>{formatAge(ticket.ageHours)}</strong>
+                      <strong title={`${ticket.subject} · ${ticket.ticketReference}`}>{ticket.subject}</strong>
+                      <strong title={ticket.vendorName ?? ticket.vendorId}>{ticket.vendorName ?? ticket.vendorId}</strong>
+                      <strong title={`Context: ${safeStatusLabel(ticket.contextType)}`}>{getSupportOrderReference(ticket) ?? 'No order link'}</strong>
+                      <strong title={`Priority: ${safeStatusLabel(ticket.priority)} · Category: ${safeStatusLabel(ticket.category)}`}>{safeStatusLabel(ticket.status)}</strong>
+                      <strong title={`${getSupportSlaStateLabel(ticket)} · ${getSupportSlaLabel(ticket)}`}>{getSupportSlaLabel(ticket)}</strong>
+                      <strong title={formatDate(ticket.createdAt)}>{formatAge(ticket.ageHours)}</strong>
                       <OperationalActionGroup>
                         {actionLink(ticket.destinationPath, 'Open ticket')}
                       </OperationalActionGroup>

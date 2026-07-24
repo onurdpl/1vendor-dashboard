@@ -684,24 +684,83 @@ describe('AdminOperationsQueuePage attention center', () => {
     attentionMock.mockResolvedValueOnce(dashboard);
     supportAttentionMock.mockResolvedValueOnce(buildSupportAttentionPage([
       buildSupportAttentionTicket({
-        id: 'ticket-table-1',
-        ticketReference: 'ticket-table-1',
-        subject: 'Table support ticket',
+        id: 'cmp-ticket-table-1',
+        ticketReference: 'cmp-ticket-table-1',
+        subject: 'Table support ticket needing a detailed operator response',
+        priority: 'normal',
+        category: 'RETURN',
+        contextType: 'return',
+        relatedOrderReference: '#1029',
+        sla: {
+          isOverdue: true,
+          dueLabel: 'Overdue by 1603h',
+          escalationLevel: 'overdue',
+          dueAt: '2026-03-11T13:00:00.000Z',
+          overdueByHours: 1603,
+        },
+        ageHours: 1603,
         destinationPath: '/admin/support/ticket-table-1',
+      }),
+      buildSupportAttentionTicket({
+        id: 'cmp-ticket-table-2',
+        ticketReference: 'cmp-ticket-table-2',
+        subject: 'General support ticket without order',
+        category: 'OTHER',
+        contextType: 'general',
+        contextId: null,
+        relatedOrderReference: null,
+        status: 'IN_REVIEW',
+        priority: 'high',
+        severity: 'warning',
+        destinationPath: '/admin/support/ticket-table-2',
       }),
     ], 21));
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Support attention' })).toBeInTheDocument();
-    expect(await screen.findByText('Table support ticket')).toBeInTheDocument();
-    expect(screen.getByText('Authoritative unresolved support tickets · 1-10 of 21')).toBeInTheDocument();
-    expect(screen.getByText('Support rows 1-10 of 21')).toBeInTheDocument();
-    expect(screen.getByText('SLA / Waiting')).toBeInTheDocument();
-    expect(screen.queryByText('Showing 1 of 1 active · 1 critical · 0 warning')).not.toBeInTheDocument();
-    expect(screen.queryByText('Showing 1 of 1. This section is a preview.')).not.toBeInTheDocument();
-    expect(screen.getAllByText('High-priority support ticket').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('link', { name: 'Open ticket' }).some((link) => link.getAttribute('href') === '/admin/support/ticket-table-1')).toBe(true);
+    const supportList = await screen.findByRole('heading', { name: 'Support attention' }).then((heading) => heading.closest('article'));
+    expect(supportList).not.toBeNull();
+    expect(await within(supportList as HTMLElement).findByText('Table support ticket needing a detailed operator response')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Authoritative unresolved support tickets')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Authoritative unresolved support tickets · 1-10 of 21')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Support rows 1-10 of 21')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Severity')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Ticket')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Vendor')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Order')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Status')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Waiting')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('SLA / Waiting')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Age')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('Action')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('critical')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('warning')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('cmp-ticket-table-1')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('cmp-ticket-table-2')).not.toBeInTheDocument();
+    expect((supportList as HTMLElement).querySelector('[title*="Table support ticket needing a detailed operator response"]')).not.toBeNull();
+    expect((supportList as HTMLElement).querySelector('[title*="cmp-ticket-table-1"]')).not.toBeNull();
+    expect(within(supportList as HTMLElement).getAllByText('Sporjinal')).toHaveLength(2);
+    expect(within(supportList as HTMLElement).queryByText('sporjinal')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('#1029')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('No order link')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Return')).not.toBeInTheDocument();
+    expect((supportList as HTMLElement).querySelector('[title*="Context: Return"]')).not.toBeNull();
+    expect(within(supportList as HTMLElement).getByText('Open')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getByText('In Review')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Normal · Return')).not.toBeInTheDocument();
+    expect((supportList as HTMLElement).querySelector('[title*="Priority: Normal · Category: Return"]')).not.toBeNull();
+    expect(within(supportList as HTMLElement).getByText('Overdue by 1603h')).toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Overdue')).not.toBeInTheDocument();
+    expect((supportList as HTMLElement).querySelector('[title*="Overdue · Overdue by 1603h"]')).not.toBeNull();
+    expect(within(supportList as HTMLElement).getByText('67d')).toBeInTheDocument();
+    expect((supportList as HTMLElement).querySelector('[title*="May "]')).not.toBeNull();
+    expect(within(supportList as HTMLElement).queryByText(/May \d+, 2026/)).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Showing 1 of 1 active · 1 critical · 0 warning')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).queryByText('Showing 1 of 1. This section is a preview.')).not.toBeInTheDocument();
+    expect(within(supportList as HTMLElement).getAllByRole('link', { name: 'Open ticket' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/admin/support/ticket-table-1',
+      '/admin/support/ticket-table-2',
+    ]);
     expect(document.querySelector('.support-attention-table')).not.toBeNull();
     expect(supportAttentionMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0 }));
   });

@@ -14350,14 +14350,14 @@ summary.provider-response-heading::-webkit-details-marker {
 .support-attention-table .op-table-head,
 .support-attention-table .op-table-row {
   grid-template-columns:
-    90px
-    minmax(170px, 1.2fr)
-    minmax(130px, 0.9fr)
-    minmax(110px, 0.7fr)
-    minmax(116px, 0.72fr)
-    minmax(144px, 0.95fr)
+    84px
+    minmax(190px, 1.45fr)
+    minmax(112px, 0.72fr)
+    minmax(88px, 0.56fr)
+    minmax(78px, 0.48fr)
+    minmax(124px, 0.82fr)
     56px
-    minmax(98px, auto);
+    minmax(104px, auto);
 }
 
 .support-attention-table .op-table-row {
