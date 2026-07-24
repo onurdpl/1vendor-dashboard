@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -133,6 +133,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const activeLoginAttemptRef = useRef<string | null>(null);
   const from = normalizeLoginDestination(
     expiredSessionNotice?.intendedPath ?? buildRouteFromLocationState(locationState?.from),
   );
@@ -153,11 +154,13 @@ export function LoginPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSubmitting(true);
-    setErrorMessage(null);
 
     const abortController = new AbortController();
     const authAttemptId = createAuthAttemptId();
+    activeLoginAttemptRef.current = authAttemptId;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
     const authFlowId = authAttemptId;
     const readinessRequestId = createAuthDiagnosticId('req');
     const loginRequestId = createAuthDiagnosticId('req');
@@ -166,8 +169,13 @@ export function LoginPage() {
     let responseReceived = false;
     let currentStage: 'readiness' | 'login_post' | 'post_response' = 'readiness';
     let timeoutId: number | null = null;
+    const isCurrentLoginAttempt = () => activeLoginAttemptRef.current === authAttemptId;
     const startLoginPostTimeout = () => {
       timeoutId = window.setTimeout(() => {
+        if (!isCurrentLoginAttempt()) {
+          return;
+        }
+
         timeoutTriggered = true;
         recordAuthDiagnostic('REQUEST_ABORT', {
           flowId: authFlowId,
@@ -238,6 +246,16 @@ export function LoginPage() {
       responseReceived = true;
       currentStage = 'post_response';
       clearLoginTimeout();
+      if (!isCurrentLoginAttempt()) {
+        recordAuthDiagnostic('STALE_RESULT_IGNORED', {
+          flowId: authFlowId,
+          requestId: loginRequestId,
+          source: 'LoginPage.handleSubmit.staleSuccess',
+          resultCategory: 'stale',
+          staleResult: true,
+        });
+        return;
+      }
 
       recordAuthDiagnostic('LOGIN_RESPONSE', {
         flowId: authFlowId,
@@ -263,6 +281,17 @@ export function LoginPage() {
         nextAuthState: 'authenticated',
       });
     } catch (error) {
+      if (!isCurrentLoginAttempt()) {
+        recordAuthDiagnostic('STALE_RESULT_IGNORED', {
+          flowId: authFlowId,
+          requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
+          source: 'LoginPage.handleSubmit.staleFailure',
+          resultCategory: 'stale',
+          staleResult: true,
+        });
+        return;
+      }
+
       if (responseReceived) {
         recordAuthDiagnostic('LOGIN_RESPONSE', {
           flowId: authFlowId,
@@ -282,7 +311,10 @@ export function LoginPage() {
       setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authAttemptId }));
     } finally {
       clearLoginTimeout();
-      setIsSubmitting(false);
+      if (isCurrentLoginAttempt()) {
+        setIsSubmitting(false);
+        activeLoginAttemptRef.current = null;
+      }
     }
   }
 

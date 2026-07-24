@@ -305,6 +305,126 @@ describe('LoginPage expired session flow', () => {
     debugSpy.mockRestore();
   });
 
+  it('keeps a fast successful login authenticated when the delayed timeout window later elapses', async () => {
+    vi.useFakeTimers();
+    loginMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          window.setTimeout(() => {
+            resolve({
+              token: null,
+              user: testUser,
+            });
+          }, 1_000);
+        }),
+    );
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(screen.getByTestId('current-route')).toHaveTextContent('/');
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
+  });
+
+  it('ignores an older login attempt timeout after a newer attempt succeeds', async () => {
+    vi.useFakeTimers();
+    loginMock
+      .mockImplementationOnce(
+        (_email: string, _password: string, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => {
+                reject(new Error('Old request aborted'));
+              },
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValueOnce({
+        token: null,
+        user: testUser,
+      });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+    const form = screen.getByRole('button', { name: 'Signing in…' }).closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('current-route')).toHaveTextContent('/');
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+    expect((loginMock.mock.calls[0][2] as { signal?: AbortSignal }).signal?.aborted).toBe(false);
+    expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
+  });
+
+  it('clears an existing timeout error when a new login attempt succeeds', async () => {
+    vi.useFakeTimers();
+    loginMock
+      .mockImplementationOnce(
+        (_email: string, _password: string, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => {
+                reject(new Error('Request aborted'));
+              },
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValueOnce({
+        token: null,
+        user: testUser,
+      });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(
+      screen.getByText(/^Sign-in is taking longer than expected\. Please try again\. Reference: auth-[a-z0-9]{10}$/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('current-route')).toHaveTextContent('/');
+    expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
+  });
+
   it('does not report a timeout when local session setup fails after backend success', async () => {
     vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
