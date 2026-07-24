@@ -100,6 +100,7 @@ describe('LoginPage expired session flow', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     Object.assign(runtimeConfig, originalRuntimeConfig);
   });
 
@@ -225,6 +226,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('logs safe POST dispatch diagnostics without credentials', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     renderStandaloneLogin();
 
@@ -233,19 +235,15 @@ describe('LoginPage expired session flow', () => {
     expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
     const events = debugSpy.mock.calls
       .map((call) => call[1])
-      .filter((entry): entry is { event?: string; authAttemptId?: string } => Boolean(entry) && typeof entry === 'object');
+      .filter((entry): entry is { operation?: string; flowId?: string } => Boolean(entry) && typeof entry === 'object');
 
     expect(events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ event: 'auth request start', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'fetch dispatch started', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'fetch promise created', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'fetch resolved', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'response parsed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'auth request completed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'setSession completed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'vendor selected', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ event: 'navigate called', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'LOGIN_SUBMIT', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'LOGIN_REQUEST_START', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'LOGIN_RESPONSE', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i), resultCategory: 'success' }),
+        expect.objectContaining({ operation: 'CACHE_USER_SET', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'AUTH_STATE_CHANGE', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
       ]),
     );
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
@@ -287,6 +285,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('clears the login timeout after a successful backend response', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
     renderStandaloneLogin();
@@ -295,12 +294,10 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
 
-    const events = debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event);
-    expect(events).toContain('fetch resolved');
-    expect(events).toContain('response parsed');
-    expect(events).toContain('navigate called');
-    expect(events).not.toContain('auth timeout triggered');
-    expect(events).not.toContain('abort fired');
+    const events = debugSpy.mock.calls.map((call) => (call[1] as { operation?: string })?.operation);
+    expect(events).toContain('LOGIN_RESPONSE');
+    expect(events).toContain('AUTH_STATE_CHANGE');
+    expect(events).not.toContain('REQUEST_ABORT');
     expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
 
@@ -309,6 +306,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('does not report a timeout when local session setup fails after backend success', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
     loginMock.mockResolvedValueOnce({
@@ -324,12 +322,9 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByText(/serialize a BigInt/i)).toBeInTheDocument();
 
-    const events = debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event);
-    expect(events).toContain('fetch resolved');
-    expect(events).toContain('response parsed');
-    expect(events).toContain('post-response failed');
-    expect(events).not.toContain('auth timeout triggered');
-    expect(events).not.toContain('abort fired');
+    const events = debugSpy.mock.calls.map((call) => (call[1] as { operation?: string })?.operation);
+    expect(events).toContain('LOGIN_RESPONSE');
+    expect(events).not.toContain('REQUEST_ABORT');
     expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
@@ -339,6 +334,7 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('aborts a hanging login request and shows a retryable timeout error', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     vi.useFakeTimers();
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     loginMock.mockImplementation(
@@ -373,8 +369,8 @@ describe('LoginPage expired session flow', () => {
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
       expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
     );
-    expect(debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event)).toEqual(
-      expect.arrayContaining(['auth timeout triggered', 'abort fired', 'fetch rejected', 'auth request completed']),
+    expect(debugSpy.mock.calls.map((call) => (call[1] as { operation?: string })?.operation)).toEqual(
+      expect.arrayContaining(['REQUEST_ABORT', 'LOGIN_RESPONSE']),
     );
     debugSpy.mockRestore();
   });

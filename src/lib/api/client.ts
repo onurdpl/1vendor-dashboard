@@ -3,6 +3,7 @@ import { clearToken } from '../auth';
 import { apiConfig } from './config';
 import { ApiError } from './errors';
 import { MockRequestError, mockRequest } from './mockTransport';
+import { recordAuthDiagnostic } from '../auth/diagnostics';
 
 export type RequestOptions = Omit<RequestInit, 'body' | 'headers'> & {
   headers?: HeadersInit;
@@ -19,9 +20,26 @@ function getCurrentRouteForAuthRedirect() {
 }
 
 function handleUnauthorized() {
-  clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+  recordAuthDiagnostic('CACHE_USER_CLEAR', {
+    flowId: null,
+    requestId: null,
+    source: 'legacy-api-client.handleUnauthorized',
+    resultCategory: 'unauthorized',
+  });
+  clearToken({
+    reason: 'expired',
+    intendedPath: getCurrentRouteForAuthRedirect(),
+    source: 'legacy-api-client.handleUnauthorized',
+  });
 
   if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    recordAuthDiagnostic('REDIRECT_LOGIN', {
+      flowId: null,
+      requestId: null,
+      source: 'legacy-api-client.handleUnauthorized',
+      resultCategory: 'unauthorized',
+      nextAuthState: 'unauthenticated',
+    });
     window.location.assign('/login');
   }
 }

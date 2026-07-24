@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { recordAuthDiagnostic } from './diagnostics';
 
 const AUTH_RESTORE_STATE_EVENT = 'vendor-dashboard:auth-restore-state';
 const AUTH_RESTORE_RETRY_EVENT = 'vendor-dashboard:auth-restore-retry';
@@ -36,10 +37,24 @@ export function getAuthRestoreSnapshot() {
 }
 
 export function setAuthRestoreSnapshot(next: Partial<AuthRestoreSnapshot>) {
+  const previous = authRestoreSnapshot;
   authRestoreSnapshot = {
     ...authRestoreSnapshot,
     ...next,
   };
+  if (
+    previous.phase !== authRestoreSnapshot.phase ||
+    previous.authConfirmed !== authRestoreSnapshot.authConfirmed
+  ) {
+    recordAuthDiagnostic('AUTH_STATE_CHANGE', {
+      flowId: authRestoreSnapshot.restoreAttemptId,
+      requestId: null,
+      source: 'auth.restoreState.setAuthRestoreSnapshot',
+      previousAuthState: `${previous.phase}:${previous.authConfirmed ? 'confirmed' : 'unconfirmed'}`,
+      nextAuthState: `${authRestoreSnapshot.phase}:${authRestoreSnapshot.authConfirmed ? 'confirmed' : 'unconfirmed'}`,
+      authConfirmed: authRestoreSnapshot.authConfirmed,
+    });
+  }
   emitAuthRestoreStateChange();
 }
 
@@ -54,6 +69,7 @@ export function markAuthConfirmed(input: { restoreAttemptId?: string | null } = 
 }
 
 export function clearAuthRestoreState() {
+  const previous = authRestoreSnapshot;
   authRestoreSnapshot = {
     phase: 'unconfirmed',
     authConfirmed: false,
@@ -62,6 +78,16 @@ export function clearAuthRestoreState() {
     delayed: false,
     errorMessage: null,
   };
+  if (previous.phase !== 'unconfirmed' || previous.authConfirmed) {
+    recordAuthDiagnostic('AUTH_STATE_CHANGE', {
+      flowId: previous.restoreAttemptId,
+      requestId: null,
+      source: 'auth.restoreState.clearAuthRestoreState',
+      previousAuthState: `${previous.phase}:${previous.authConfirmed ? 'confirmed' : 'unconfirmed'}`,
+      nextAuthState: 'unconfirmed:unconfirmed',
+      authConfirmed: false,
+    });
+  }
   emitAuthRestoreStateChange();
 }
 

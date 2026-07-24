@@ -43,10 +43,12 @@ describe('runtimeServices real-mode auth', () => {
       authAttemptId: 'auth-test123',
     });
 
-    expect(backendLoginMock).toHaveBeenCalledWith('vendor@example.com', 'demo123', {
+    expect(backendLoginMock).toHaveBeenCalledWith('vendor@example.com', 'demo123', expect.objectContaining({
       authAttemptId: 'auth-test123',
+      authFlowId: undefined,
+      authRequestId: undefined,
       signal: undefined,
-    });
+    }));
     expect(backendMeMock).not.toHaveBeenCalled();
     expect(result).toEqual({
       token: null,

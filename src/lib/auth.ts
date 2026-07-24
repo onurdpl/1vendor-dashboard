@@ -1,4 +1,17 @@
 export {
+  clearAuthDiagnosticEvents,
+  createAuthDiagnosticId,
+  getAuthDiagnosticBrowserSessionId,
+  getAuthDiagnosticEvents,
+  isAuthDiagnosticsEnabled,
+  printAuthDiagnosticTimeline,
+  recordAuthDiagnostic,
+  type AuthDiagnosticEvent,
+  type AuthDiagnosticOperation,
+  type AuthDiagnosticResultCategory,
+} from './auth/diagnostics';
+
+export {
   clearToken,
   clearCurrentUser,
   clearExpiredSessionNotice,

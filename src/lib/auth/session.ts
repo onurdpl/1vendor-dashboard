@@ -1,6 +1,7 @@
 import type { UserRole } from './permissions';
 import type { VendorId } from './vendorContext';
 import { clearAuthRestoreState } from './restoreState';
+import { recordAuthDiagnostic } from './diagnostics';
 
 const TOKEN_KEY = 'vendor-dashboard.session-token';
 const CURRENT_USER_KEY = 'vendor-dashboard.current-user';
@@ -36,6 +37,12 @@ export type DemoUser = {
 };
 
 export type CurrentUser = Omit<DemoUser, 'password'>;
+
+type AuthDiagnosticContext = {
+  flowId?: string | null;
+  requestId?: string | null;
+  source?: string;
+};
 
 const defaultVendorDirectory: readonly UserVendorAccess[] = [
   {
@@ -151,17 +158,26 @@ export function setToken(token: string) {
   dispatchSessionReset();
 }
 
-export function setSession(token: string | null | undefined, user: CurrentUser) {
+export function setSession(token: string | null | undefined, user: CurrentUser, diagnostics: AuthDiagnosticContext = {}) {
   if (typeof window === 'undefined') {
     return;
   }
 
+  const previousUserPresent = Boolean(getCurrentUser());
   if (token) {
     window.localStorage.setItem(TOKEN_KEY, token);
   } else {
     window.localStorage.removeItem(TOKEN_KEY);
   }
   window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  recordAuthDiagnostic('CACHE_USER_SET', {
+    flowId: diagnostics.flowId ?? null,
+    requestId: diagnostics.requestId ?? null,
+    source: diagnostics.source ?? 'auth.session.setSession',
+    cachedUserPresent: true,
+    previousAuthState: previousUserPresent ? 'cached_user_present' : 'anonymous',
+    nextAuthState: 'cached_user_present',
+  });
   dispatchSessionReset();
 }
 
@@ -240,11 +256,12 @@ export function clearExpiredSessionNotice() {
   window.localStorage.removeItem(EXPIRED_SESSION_NOTICE_KEY);
 }
 
-export function clearToken(options: { reason?: 'expired'; intendedPath?: string } = {}) {
+export function clearToken(options: { reason?: 'expired'; intendedPath?: string } & AuthDiagnosticContext = {}) {
   if (typeof window === 'undefined') {
     return;
   }
 
+  const previousUserPresent = Boolean(getCurrentUser());
   if (options.reason === 'expired') {
     rememberExpiredSession(options.intendedPath);
   } else {
@@ -253,7 +270,19 @@ export function clearToken(options: { reason?: 'expired'; intendedPath?: string 
 
   window.localStorage.removeItem(TOKEN_KEY);
   clearAuthRestoreState();
-  clearCurrentUser();
+  clearCurrentUser({
+    flowId: options.flowId ?? null,
+    requestId: options.requestId ?? null,
+    source: options.source ?? 'auth.session.clearToken',
+  });
+  recordAuthDiagnostic('AUTH_STATE_CHANGE', {
+    flowId: options.flowId ?? null,
+    requestId: options.requestId ?? null,
+    source: options.source ?? 'auth.session.clearToken',
+    previousAuthState: previousUserPresent ? 'cached_user_present' : 'anonymous',
+    nextAuthState: 'anonymous',
+    resultCategory: options.reason === 'expired' ? 'unauthorized' : 'unknown',
+  });
 }
 
 export function getCurrentUser() {
@@ -276,8 +305,17 @@ export function getCurrentUser() {
   }
 }
 
-export function setCurrentUser(user: CurrentUser) {
+export function setCurrentUser(user: CurrentUser, diagnostics: AuthDiagnosticContext = {}) {
+  const previousUserPresent = Boolean(getCurrentUser());
   window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  recordAuthDiagnostic('CACHE_USER_SET', {
+    flowId: diagnostics.flowId ?? null,
+    requestId: diagnostics.requestId ?? null,
+    source: diagnostics.source ?? 'auth.session.setCurrentUser',
+    cachedUserPresent: true,
+    previousAuthState: previousUserPresent ? 'cached_user_present' : 'anonymous',
+    nextAuthState: 'cached_user_present',
+  });
   dispatchSessionReset();
 }
 
@@ -318,9 +356,18 @@ export function createCurrentUserFromVendorAccess(input: {
   } satisfies CurrentUser;
 }
 
-export function clearCurrentUser() {
+export function clearCurrentUser(diagnostics: AuthDiagnosticContext = {}) {
+  const previousUserPresent = Boolean(getCurrentUser());
   window.localStorage.removeItem(CURRENT_USER_KEY);
   clearAuthRestoreState();
+  recordAuthDiagnostic('CACHE_USER_CLEAR', {
+    flowId: diagnostics.flowId ?? null,
+    requestId: diagnostics.requestId ?? null,
+    source: diagnostics.source ?? 'auth.session.clearCurrentUser',
+    cachedUserPresent: false,
+    previousAuthState: previousUserPresent ? 'cached_user_present' : 'anonymous',
+    nextAuthState: 'anonymous',
+  });
   dispatchSessionReset();
 }
 

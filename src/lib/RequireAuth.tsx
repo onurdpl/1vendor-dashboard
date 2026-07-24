@@ -2,11 +2,14 @@ import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import {
   clearToken,
+  createAuthDiagnosticId,
   getCurrentUser,
   getAuthRestoreSnapshot,
+  isAuthDiagnosticsEnabled,
   isAuthenticated,
   markAuthConfirmed,
   onAuthRestoreRetryRequest,
+  recordAuthDiagnostic,
   onSessionReset,
   setAuthRestoreSnapshot,
   setSession,
@@ -66,6 +69,10 @@ function getSafeRouteDiagnostics() {
 }
 
 function logAuthRestoreInfo(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.info({
     event,
     ...getSafeRouteDiagnostics(),
@@ -74,6 +81,10 @@ function logAuthRestoreInfo(event: string, details: Record<string, unknown> = {}
 }
 
 function logAuthRestoreWarn(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.warn({
     event,
     ...getSafeRouteDiagnostics(),
@@ -143,9 +154,18 @@ function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>, pare
   };
 }
 
-async function restoreCurrentSessionWithTimeout(input: { parentSignal?: AbortSignal; restoreAttemptId: string }) {
+async function restoreCurrentSessionWithTimeout(input: {
+  parentSignal?: AbortSignal;
+  restoreAttemptId: string;
+  authRequestId: string;
+}) {
   const restore = withRestoreTimeout(
-    (signal) => runtimeServices.auth.me({ authAttemptId: input.restoreAttemptId, signal }),
+    (signal) => runtimeServices.auth.me({
+      authAttemptId: input.restoreAttemptId,
+      authFlowId: input.restoreAttemptId,
+      authRequestId: input.authRequestId,
+      signal,
+    }),
     input.parentSignal,
   );
   try {
@@ -179,11 +199,27 @@ export function RequireAuth() {
   const activeRestoreControllerRef = useRef<AbortController | null>(null);
 
   function clearSessionAndNavigateToLogin() {
+    recordAuthDiagnostic('LOGOUT_TRIGGER', {
+      flowId: latestRestoreAttemptIdRef.current,
+      requestId: null,
+      source: 'RequireAuth.clearSessionAndNavigateToLogin',
+      resultCategory: 'started',
+    });
     activeRestoreControllerRef.current?.abort();
     activeRestoreControllerRef.current = null;
     setRestoreErrorMessage(null);
-    clearToken();
+    clearToken({
+      flowId: latestRestoreAttemptIdRef.current,
+      requestId: null,
+      source: 'RequireAuth.clearSessionAndNavigateToLogin',
+    });
     setAuthGateStatus('unauthenticated');
+    recordAuthDiagnostic('REDIRECT_LOGIN', {
+      flowId: latestRestoreAttemptIdRef.current,
+      requestId: null,
+      source: 'RequireAuth.clearSessionAndNavigateToLogin',
+      nextAuthState: 'unauthenticated',
+    });
     navigate('/login', { replace: true });
   }
 
@@ -203,18 +239,58 @@ export function RequireAuth() {
     }
 
     function abortActiveRestore() {
+      if (activeRestoreControllerRef.current) {
+        recordAuthDiagnostic('REQUEST_ABORT', {
+          flowId: latestRestoreAttemptIdRef.current,
+          requestId: null,
+          source: 'RequireAuth.abortActiveRestore',
+          resultCategory: 'aborted',
+        });
+      }
       activeRestoreControllerRef.current?.abort();
       activeRestoreControllerRef.current = null;
     }
 
     async function runRestoreRequest(restoreAttemptId: string) {
       const controller = new AbortController();
+      const authRequestId = createAuthDiagnosticId('req');
       activeRestoreControllerRef.current = controller;
+      recordAuthDiagnostic('SESSION_RESTORE_START', {
+        flowId: restoreAttemptId,
+        requestId: authRequestId,
+        source: 'RequireAuth.runRestoreRequest',
+        resultCategory: 'started',
+        cachedUserPresent: Boolean(getCurrentUser()),
+        authConfirmed: getAuthRestoreSnapshot().authConfirmed,
+      });
       try {
-        return await restoreCurrentSessionWithTimeout({
+        const result = await restoreCurrentSessionWithTimeout({
           parentSignal: controller.signal,
           restoreAttemptId,
+          authRequestId,
         });
+        recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+          flowId: restoreAttemptId,
+          requestId: authRequestId,
+          source: 'RequireAuth.runRestoreRequest',
+          resultCategory: 'success',
+          cachedUserPresent: Boolean(getCurrentUser()),
+        });
+        return result;
+      } catch (error) {
+        recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+          flowId: restoreAttemptId,
+          requestId: authRequestId,
+          source: 'RequireAuth.runRestoreRequest',
+          resultCategory: controller.signal.aborted
+            ? 'aborted'
+            : isUnauthorizedRestoreFailure(error)
+              ? 'unauthorized'
+              : didRestoreTimeout(error)
+                ? 'timeout'
+                : 'failure',
+        });
+        throw error;
       } finally {
         if (activeRestoreControllerRef.current === controller) {
           activeRestoreControllerRef.current = null;
@@ -225,6 +301,12 @@ export function RequireAuth() {
     async function restoreSession() {
       if (runtimeConfig.apiMode !== 'real' && !isAuthenticated()) {
         setAuthGateStatus('unauthenticated');
+        recordAuthDiagnostic('REDIRECT_LOGIN', {
+          flowId: null,
+          requestId: null,
+          source: 'RequireAuth.restoreSession.mockUnauthenticated',
+          nextAuthState: 'unauthenticated',
+        });
         return;
       }
 
@@ -244,6 +326,14 @@ export function RequireAuth() {
       const cachedUser = getCurrentUser();
       const restoreAttemptId = createRestoreAttemptId();
       latestRestoreAttemptIdRef.current = restoreAttemptId;
+      recordAuthDiagnostic('SESSION_RESTORE_START', {
+        flowId: restoreAttemptId,
+        requestId: null,
+        source: 'RequireAuth.restoreSession',
+        resultCategory: 'started',
+        cachedUserPresent: Boolean(cachedUser),
+        authConfirmed: getAuthRestoreSnapshot().authConfirmed,
+      });
       setAuthGateStatus(cachedUser ? 'authenticated_unconfirmed' : 'restoring');
       setRestoreErrorMessage(null);
       const startedAt = Date.now();
@@ -269,11 +359,23 @@ export function RequireAuth() {
             throw new Error('Session restore did not return a user.');
           }
           suppressNextSessionReset = true;
-          setSession(null, user);
+          setSession(null, user, {
+            flowId: restoreAttemptId,
+            requestId: null,
+            source: 'RequireAuth.restoreSession.success',
+          });
           markAuthConfirmed({ restoreAttemptId });
           clearDelayedUiTimer();
           logAuthRestoreInfo('AUTH_RESTORE_SUCCESS', { restoreAttemptId, durationMs: Date.now() - startedAt });
           setAuthGateStatus('authenticated');
+        } else {
+          recordAuthDiagnostic('STALE_RESULT_IGNORED', {
+            flowId: restoreAttemptId,
+            requestId: null,
+            source: 'RequireAuth.restoreSession.success',
+            resultCategory: 'stale',
+            staleResult: true,
+          });
         }
       } catch (error) {
         if (isLatestRestore(restoreAttemptId)) {
@@ -286,8 +388,21 @@ export function RequireAuth() {
           });
           suppressNextSessionReset = true;
           if (isUnauthorized) {
-            clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+            clearToken({
+              reason: 'expired',
+              intendedPath: getCurrentRouteForAuthRedirect(),
+              flowId: restoreAttemptId,
+              requestId: null,
+              source: 'RequireAuth.restoreSession.unauthorized',
+            });
             setAuthGateStatus('unauthenticated');
+            recordAuthDiagnostic('REDIRECT_LOGIN', {
+              flowId: restoreAttemptId,
+              requestId: null,
+              source: 'RequireAuth.restoreSession.unauthorized',
+              resultCategory: 'unauthorized',
+              nextAuthState: 'unauthenticated',
+            });
             navigate('/login', { replace: true });
           } else {
             for (let attempt = 1; attempt <= AUTH_RESTORE_RECOVERY_RETRY_LIMIT; attempt += 1) {
@@ -306,7 +421,11 @@ export function RequireAuth() {
                   throw new Error('Session restore did not return a user.');
                 }
                 suppressNextSessionReset = true;
-                setSession(null, user);
+                setSession(null, user, {
+                  flowId: restoreAttemptId,
+                  requestId: null,
+                  source: 'RequireAuth.restoreSession.recoverySuccess',
+                });
                 markAuthConfirmed({ restoreAttemptId });
                 clearDelayedUiTimer();
                 logAuthRestoreInfo('AUTH_RESTORE_RECOVERY_RETRY_SUCCESS', {
@@ -330,8 +449,21 @@ export function RequireAuth() {
                 });
                 suppressNextSessionReset = true;
                 if (retryIsUnauthorized) {
-                  clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+                  clearToken({
+                    reason: 'expired',
+                    intendedPath: getCurrentRouteForAuthRedirect(),
+                    flowId: restoreAttemptId,
+                    requestId: null,
+                    source: 'RequireAuth.restoreSession.recoveryUnauthorized',
+                  });
                   setAuthGateStatus('unauthenticated');
+                  recordAuthDiagnostic('REDIRECT_LOGIN', {
+                    flowId: restoreAttemptId,
+                    requestId: null,
+                    source: 'RequireAuth.restoreSession.recoveryUnauthorized',
+                    resultCategory: 'unauthorized',
+                    nextAuthState: 'unauthenticated',
+                  });
                   navigate('/login', { replace: true });
                   return;
                 }
@@ -339,7 +471,11 @@ export function RequireAuth() {
             }
             clearDelayedUiTimer();
             if (!getCurrentUser()) {
-              clearToken();
+              clearToken({
+                flowId: restoreAttemptId,
+                requestId: null,
+                source: 'RequireAuth.restoreSession.nonUnauthorizedFailure',
+              });
             }
             setRestoreErrorMessage(AUTH_RESTORE_RECOVERABLE_MESSAGE);
             setAuthRestoreSnapshot({
@@ -351,6 +487,14 @@ export function RequireAuth() {
             });
             setAuthGateStatus('restore-error');
           }
+        } else {
+          recordAuthDiagnostic('STALE_RESULT_IGNORED', {
+            flowId: restoreAttemptId,
+            requestId: null,
+            source: 'RequireAuth.restoreSession.failure',
+            resultCategory: 'stale',
+            staleResult: true,
+          });
         }
       }
     }
@@ -376,6 +520,13 @@ export function RequireAuth() {
         clearDelayedUiTimer();
         setRestoreErrorMessage(null);
         setAuthGateStatus('unauthenticated');
+        recordAuthDiagnostic('AUTH_STATE_CHANGE', {
+          flowId: latestRestoreAttemptIdRef.current,
+          requestId: null,
+          source: 'RequireAuth.onSessionReset.noCachedUser',
+          nextAuthState: 'unauthenticated',
+          cachedUserPresent: false,
+        });
         return;
       }
       void restoreSession();

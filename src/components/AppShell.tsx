@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
-import { clearToken } from '../lib/auth';
+import { clearToken, recordAuthDiagnostic } from '../lib/auth';
 import {
   getAvailableVendors,
   getCurrentVendorContext,
@@ -214,11 +214,24 @@ function useShellContext() {
     }
 
     logoutRequestedRef.current = true;
+    recordAuthDiagnostic('LOGOUT_TRIGGER', {
+      flowId: null,
+      requestId: null,
+      source: 'AppShell.handleLogout',
+      resultCategory: 'started',
+      cachedUserPresent: Boolean(currentUser),
+    });
     setLogoutRequested(true);
     clearCsrfToken();
-    clearToken();
+    clearToken({ source: 'AppShell.handleLogout' });
     queryClient.clear();
     showFeedback('Signed out successfully.', 'success');
+    recordAuthDiagnostic('REDIRECT_LOGIN', {
+      flowId: null,
+      requestId: null,
+      source: 'AppShell.handleLogout',
+      nextAuthState: 'unauthenticated',
+    });
     navigate('/login', { replace: true });
 
     void runtimeServices.auth.logout().catch(() => {
@@ -227,7 +240,20 @@ function useShellContext() {
   }
 
   function handleSignInAgain() {
-    clearToken();
+    recordAuthDiagnostic('LOGOUT_TRIGGER', {
+      flowId: null,
+      requestId: null,
+      source: 'AppShell.handleSignInAgain',
+      resultCategory: 'started',
+      cachedUserPresent: Boolean(currentUser),
+    });
+    clearToken({ source: 'AppShell.handleSignInAgain' });
+    recordAuthDiagnostic('REDIRECT_LOGIN', {
+      flowId: null,
+      requestId: null,
+      source: 'AppShell.handleSignInAgain',
+      nextAuthState: 'unauthenticated',
+    });
     navigate('/login', { replace: true });
   }
 

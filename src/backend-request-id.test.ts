@@ -46,12 +46,16 @@ describe('backend request id diagnostics', () => {
         url: '/auth/login',
         headers: {
           'x-auth-attempt-id': 'auth-test123',
+          'x-auth-flow-id': 'auth-flow123',
+          'x-auth-request-id': 'req-test123',
         },
         payload: {},
       });
 
       expect(response.statusCode).toBe(400);
       expect(response.headers['x-auth-attempt-id']).toBe('auth-test123');
+      expect(response.headers['x-auth-flow-id']).toBe('auth-flow123');
+      expect(response.headers['x-auth-request-id']).toBe('req-test123');
       expect(response.body).not.toContain('token');
       expect(response.body).not.toContain('@');
     } finally {
@@ -92,7 +96,7 @@ describe('backend request id diagnostics', () => {
         headers: {
           origin: 'http://localhost:5173',
           'access-control-request-method': 'POST',
-          'access-control-request-headers': 'content-type,x-auth-attempt-id',
+          'access-control-request-headers': 'content-type,x-auth-attempt-id,x-auth-flow-id,x-auth-request-id',
         },
       });
 
@@ -100,6 +104,8 @@ describe('backend request id diagnostics', () => {
       expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
       expect(response.headers['access-control-allow-credentials']).toBe('true');
       expect(String(response.headers['access-control-allow-headers']).toLowerCase()).toContain('x-auth-attempt-id');
+      expect(String(response.headers['access-control-allow-headers']).toLowerCase()).toContain('x-auth-flow-id');
+      expect(String(response.headers['access-control-allow-headers']).toLowerCase()).toContain('x-auth-request-id');
     } finally {
       await app.close();
     }

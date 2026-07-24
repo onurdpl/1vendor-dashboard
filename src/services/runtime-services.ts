@@ -847,11 +847,13 @@ export const runtimeServices = {
     async login(
       email: string,
       password: string,
-      options: { authAttemptId?: string; signal?: AbortSignal } = {},
+      options: { authAttemptId?: string; authFlowId?: string; authRequestId?: string; signal?: AbortSignal } = {},
     ): Promise<{ token: string | null; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
         const loginResponse = await backendAuth.login(email, password, {
           authAttemptId: options.authAttemptId,
+          authFlowId: options.authFlowId,
+          authRequestId: options.authRequestId,
           signal: options.signal,
         });
         return {
@@ -884,9 +886,14 @@ export const runtimeServices = {
         },
       };
     },
-    async me(options: { authAttemptId?: string; signal?: AbortSignal } = {}) {
+    async me(options: { authAttemptId?: string; authFlowId?: string; authRequestId?: string; signal?: AbortSignal } = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        const user = await backendAuth.me({ authAttemptId: options.authAttemptId, signal: options.signal });
+        const user = await backendAuth.me({
+          authAttemptId: options.authAttemptId,
+          authFlowId: options.authFlowId,
+          authRequestId: options.authRequestId,
+          signal: options.signal,
+        });
         return createCurrentUserFromVendorAccess({
           email: user.email,
           name: user.name,

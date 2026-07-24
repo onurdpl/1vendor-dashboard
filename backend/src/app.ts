@@ -259,6 +259,8 @@ export function createApp() {
       'Content-Type',
       'X-CSRF-Token',
       'X-Request-Id',
+      'X-Auth-Flow-Id',
+      'X-Auth-Request-Id',
       DASHBOARD_INITIAL_LOAD_HEADER,
       DASHBOARD_DEFERRED_LOAD_HEADER,
       'X-Auth-Attempt-Id',
@@ -270,7 +272,7 @@ export function createApp() {
       'X-Admin-Probe-Token',
       'X-Auth-Rate-Limit-Reset-Token',
     ],
-    exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id', 'X-Auth-Flow-Id', 'X-Auth-Request-Id'],
   });
 
   app.addHook('onResponse', async (request, reply) => {
@@ -284,6 +286,8 @@ export function createApp() {
         event: 'AUTH_LOGIN_CORS_DIAGNOSTICS',
         requestId: request.requestId ?? request.id ?? null,
         authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
+        authFlowId: normalizeAuthAttemptId(request.headers['x-auth-flow-id']),
+        authRequestId: normalizeAuthAttemptId(request.headers['x-auth-request-id']),
         method: request.method,
         path: '/auth/login',
         origin: origin ?? null,

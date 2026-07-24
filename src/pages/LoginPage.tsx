@@ -7,7 +7,9 @@ import {
   getDemoUsers,
   isAuthenticated,
   markAuthConfirmed,
+  recordAuthDiagnostic,
   sanitizeInternalPath,
+  createAuthDiagnosticId,
   setCurrentVendorId,
   setSession,
 } from '../lib/auth';
@@ -33,20 +35,22 @@ const LOGIN_TIMEOUT_MS = 15_000;
 const LOGIN_READINESS_TIMEOUT_MS = 3_000;
 const LOGIN_TIMEOUT_MESSAGE = 'Sign-in is taking longer than expected. Please try again.';
 
-// Temporary diagnostic for correlating intermittent production login timeouts with backend logs.
 function createAuthAttemptId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `auth-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
-  }
-
-  return `auth-${Math.random().toString(36).slice(2, 12).padEnd(10, '0')}`;
+  return createAuthDiagnosticId('auth');
 }
 
 function formatLoginTimeoutMessage(authAttemptId: string) {
   return `${LOGIN_TIMEOUT_MESSAGE} Reference: ${authAttemptId}`;
 }
 
-function getLoginRequestDiagnostics() {
+function getLoginRequestDiagnostics(): {
+  apiBaseOrigin: string;
+  requestPath: string;
+  timeoutMs: number;
+  credentialsMode: RequestCredentials;
+  setCookieReadableFromJs: boolean;
+  setCookieReadAttempted: boolean;
+} {
   let path = '/auth/login';
   try {
     path = new URL('/auth/login', runtimeConfig.apiBaseUrl).pathname;
@@ -96,37 +100,6 @@ function getLoginErrorMessage(error: unknown, input: { timeoutTriggered: boolean
   }
 
   return error instanceof Error ? error.message : 'Unable to sign in.';
-}
-
-function shouldLogAuthDiagnostics() {
-  return true;
-}
-
-function logAuthDiagnostic(
-  event:
-    | 'auth request start'
-    | 'fetch dispatch started'
-    | 'fetch promise created'
-    | 'abort fired'
-    | 'auth timeout triggered'
-    | 'fetch resolved'
-    | 'fetch rejected'
-    | 'response parsed'
-    | 'setSession completed'
-    | 'vendor selected'
-    | 'navigate called'
-    | 'post-response failed'
-    | 'auth request completed',
-  details: Record<string, unknown> = {},
-) {
-  if (!shouldLogAuthDiagnostics()) {
-    return;
-  }
-
-  console.debug('[auth-login]', {
-    event,
-    ...details,
-  });
 }
 
 function buildRouteFromLocationState(from: LoginRedirectState['from']) {
@@ -185,6 +158,9 @@ export function LoginPage() {
 
     const abortController = new AbortController();
     const authAttemptId = createAuthAttemptId();
+    const authFlowId = authAttemptId;
+    const readinessRequestId = createAuthDiagnosticId('req');
+    const loginRequestId = createAuthDiagnosticId('req');
     const startedAt = Date.now();
     let timeoutTriggered = false;
     let responseReceived = false;
@@ -193,15 +169,12 @@ export function LoginPage() {
     const startLoginPostTimeout = () => {
       timeoutId = window.setTimeout(() => {
         timeoutTriggered = true;
-        logAuthDiagnostic('auth timeout triggered', {
-          authAttemptId,
-          stage: currentStage,
-          elapsedMs: Date.now() - startedAt,
-        });
-        logAuthDiagnostic('abort fired', {
-          authAttemptId,
-          stage: currentStage,
-          elapsedMs: Date.now() - startedAt,
+        recordAuthDiagnostic('REQUEST_ABORT', {
+          flowId: authFlowId,
+          requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
+          source: 'LoginPage.handleSubmit.timeout',
+          resultCategory: 'timeout',
+          abortReason: currentStage,
         });
         abortController.abort();
       }, LOGIN_TIMEOUT_MS);
@@ -215,116 +188,97 @@ export function LoginPage() {
       timeoutId = null;
     };
 
-    logAuthDiagnostic('auth request start', {
-      authAttemptId,
-      startedAt: new Date(startedAt).toISOString(),
-      ...getLoginRequestDiagnostics(),
+    recordAuthDiagnostic('LOGIN_SUBMIT', {
+      flowId: authFlowId,
+      requestId: loginRequestId,
+      source: 'LoginPage.handleSubmit',
+      resultCategory: 'started',
+      cachedUserPresent: isAuthenticated(),
     });
 
     try {
       if (runtimeConfig.apiMode === 'real' && runtimeConfig.appEnvironment === 'production') {
-        logAuthDiagnostic('fetch dispatch started', {
-          authAttemptId,
-          stage: 'readiness',
-          requestPath: '/auth/diagnostics/public-login-readiness',
-          timeoutMs: LOGIN_READINESS_TIMEOUT_MS,
-          credentialsMode: 'include',
-          elapsedMs: Date.now() - startedAt,
+        recordAuthDiagnostic('LOGIN_REQUEST_START', {
+          flowId: authFlowId,
+          requestId: readinessRequestId,
+          source: 'LoginPage.handleSubmit.readiness',
+          resultCategory: 'started',
         });
         const readiness = await probePublicLoginReadiness({
           authAttemptId,
+          authFlowId,
+          authRequestId: readinessRequestId,
           timeoutMs: LOGIN_READINESS_TIMEOUT_MS,
         });
-        logAuthDiagnostic(readiness.ok ? 'fetch resolved' : 'fetch rejected', {
-          authAttemptId,
-          stage: readiness.ok ? 'readiness_completed' : readiness.failureStage,
-          responseStatus: readiness.status,
-          responseElapsedMs: readiness.elapsedMs,
-          elapsedMs: Date.now() - startedAt,
+        recordAuthDiagnostic('LOGIN_RESPONSE', {
+          flowId: authFlowId,
+          requestId: readinessRequestId,
+          source: 'LoginPage.handleSubmit.readiness',
+          httpStatus: readiness.status,
+          resultCategory: readiness.ok ? 'success' : 'failure',
         });
       }
 
       currentStage = 'login_post';
       startLoginPostTimeout();
-      logAuthDiagnostic('fetch dispatch started', {
-        authAttemptId,
-        stage: 'login_post',
+      recordAuthDiagnostic('LOGIN_REQUEST_START', {
+        flowId: authFlowId,
+        requestId: loginRequestId,
+        source: 'LoginPage.handleSubmit.login',
+        resultCategory: 'started',
         ...getLoginRequestDiagnostics(),
-        elapsedMs: Date.now() - startedAt,
       });
       const loginPromise = runtimeServices.auth.login(email, password, {
         authAttemptId,
+        authFlowId,
+        authRequestId: loginRequestId,
         signal: abortController.signal,
-      });
-      logAuthDiagnostic('fetch promise created', {
-        authAttemptId,
-        elapsedMs: Date.now() - startedAt,
       });
       const { token, user } = await loginPromise;
       responseReceived = true;
       currentStage = 'post_response';
       clearLoginTimeout();
 
-      logAuthDiagnostic('fetch resolved', {
-        authAttemptId,
-        stage: 'login_post',
-        elapsedMs: Date.now() - startedAt,
-      });
-      logAuthDiagnostic('response parsed', {
-        authAttemptId,
-        stage: 'post_response',
-        elapsedMs: Date.now() - startedAt,
-      });
-
-      logAuthDiagnostic('auth request completed', {
-        authAttemptId,
-        elapsedMs: Date.now() - startedAt,
-        timedOut: false,
+      recordAuthDiagnostic('LOGIN_RESPONSE', {
+        flowId: authFlowId,
+        requestId: loginRequestId,
+        source: 'LoginPage.handleSubmit.login',
+        resultCategory: 'success',
       });
 
       setErrorMessage(null);
-      setSession(token, user);
+      setSession(token, user, {
+        flowId: authFlowId,
+        requestId: loginRequestId,
+        source: 'LoginPage.handleSubmit.setSession',
+      });
       markAuthConfirmed();
-      logAuthDiagnostic('setSession completed', {
-        authAttemptId,
-        elapsedMs: Date.now() - startedAt,
-      });
       setCurrentVendorId(user.defaultVendorId as VendorId);
-      logAuthDiagnostic('vendor selected', {
-        authAttemptId,
-        vendorIdPresent: Boolean(user.defaultVendorId),
-        elapsedMs: Date.now() - startedAt,
-      });
       navigate(from, { replace: true });
-      logAuthDiagnostic('navigate called', {
-        authAttemptId,
-        destination: from,
-        elapsedMs: Date.now() - startedAt,
+      recordAuthDiagnostic('AUTH_STATE_CHANGE', {
+        flowId: authFlowId,
+        requestId: loginRequestId,
+        source: 'LoginPage.handleSubmit.navigateAfterLogin',
+        resultCategory: 'success',
+        nextAuthState: 'authenticated',
       });
     } catch (error) {
       if (responseReceived) {
-        logAuthDiagnostic('post-response failed', {
-          authAttemptId,
-          stage: 'post_response',
-          elapsedMs: Date.now() - startedAt,
-          message: error instanceof Error ? error.message : 'unknown',
+        recordAuthDiagnostic('LOGIN_RESPONSE', {
+          flowId: authFlowId,
+          requestId: loginRequestId,
+          source: 'LoginPage.handleSubmit.postResponse',
+          resultCategory: 'failure',
         });
       }
       if (!responseReceived) {
-        logAuthDiagnostic('fetch rejected', {
-          authAttemptId,
-          stage: timeoutTriggered ? currentStage : 'login_post',
-          elapsedMs: Date.now() - startedAt,
-          timedOut: timeoutTriggered,
-          networkError: !timeoutTriggered,
+        recordAuthDiagnostic('LOGIN_RESPONSE', {
+          flowId: authFlowId,
+          requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
+          source: 'LoginPage.handleSubmit.login',
+          resultCategory: timeoutTriggered ? 'timeout' : 'failure',
         });
       }
-      logAuthDiagnostic('auth request completed', {
-        authAttemptId,
-        stage: currentStage,
-        elapsedMs: Date.now() - startedAt,
-        timedOut: timeoutTriggered,
-      });
       setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authAttemptId }));
     } finally {
       clearLoginTimeout();

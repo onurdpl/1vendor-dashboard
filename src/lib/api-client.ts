@@ -2,6 +2,7 @@ import { clearToken, getCurrentVendorContext, getToken } from './auth';
 import { ApiError, type ApiErrorDiagnostics } from './api/errors';
 import { getAppReadinessSnapshot } from './appReadiness';
 import { runtimeConfig } from '../config/runtime';
+import { isAuthDiagnosticsEnabled, recordAuthDiagnostic } from './auth/diagnostics';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
@@ -70,6 +71,11 @@ function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   return headers;
 }
 
+function getAuthCorrelationHeader(headers: Headers, name: string) {
+  const value = headers.get(name);
+  return value?.trim() || null;
+}
+
 function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
 }
@@ -89,6 +95,10 @@ function getSafeAuthRouteDiagnostics() {
 }
 
 function logAuthClientInfo(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.info({
     event,
     ...getSafeAuthRouteDiagnostics(),
@@ -97,6 +107,10 @@ function logAuthClientInfo(event: string, details: Record<string, unknown> = {})
 }
 
 function logAuthClientWarn(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.warn({
     event,
     ...getSafeAuthRouteDiagnostics(),
@@ -294,12 +308,26 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     const parseDiagnostics = createApiDiagnostics(path, headers, response);
     const payload = await parseResponse(response, parseDiagnostics);
 
-    if (!response.ok) {
+      if (!response.ok) {
       const diagnostics = createApiDiagnostics(path, headers, response, payload);
 
       if (response.status === 401 && !isSessionRestoreEndpoint(path)) {
+        recordAuthDiagnostic('CACHE_USER_CLEAR', {
+          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
+          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? diagnostics.requestId,
+          source: 'api-client.request.401-handler',
+          httpStatus: response.status,
+          resultCategory: 'unauthorized',
+          cachedUserPresent: Boolean(getAppReadinessSnapshot().currentUser),
+        });
         clearCsrfToken();
-        clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+        clearToken({
+          reason: 'expired',
+          intendedPath: getCurrentRouteForAuthRedirect(),
+          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
+          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? diagnostics.requestId,
+          source: 'api-client.request.401-handler',
+        });
       }
 
       const backendMessage =
@@ -325,8 +353,22 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.kind === 'unauthorized' && !isSessionRestoreEndpoint(path)) {
+        recordAuthDiagnostic('CACHE_USER_CLEAR', {
+          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
+          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? error.diagnostics?.requestId ?? null,
+          source: 'api-client.request.ApiError-unauthorized-handler',
+          httpStatus: error.status ?? null,
+          resultCategory: error.status === 403 ? 'forbidden' : 'unauthorized',
+          cachedUserPresent: Boolean(getAppReadinessSnapshot().currentUser),
+        });
         clearCsrfToken();
-        clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+        clearToken({
+          reason: 'expired',
+          intendedPath: getCurrentRouteForAuthRedirect(),
+          flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
+          requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? error.diagnostics?.requestId ?? null,
+          source: 'api-client.request.ApiError-unauthorized-handler',
+        });
       }
       throw error;
     }

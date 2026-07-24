@@ -39,9 +39,17 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     const requestReceivedAt = new Date().toISOString();
     const routeEnteredAt = requestReceivedAt;
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    const authFlowId = normalizeAuthAttemptId(request.headers['x-auth-flow-id']);
+    const authRequestId = normalizeAuthAttemptId(request.headers['x-auth-request-id']);
     const normalizedEmail = normalizeLoginEmail((request.body as Partial<Record<keyof LoginBody, unknown>> | undefined)?.email);
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
+    }
+    if (authFlowId) {
+      reply.header('X-Auth-Flow-Id', authFlowId);
+    }
+    if (authRequestId) {
+      reply.header('X-Auth-Request-Id', authRequestId);
     }
     logAuthLoginRequestStart(app, request, {
       authAttemptId,
@@ -240,8 +248,16 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
   app.get('/auth/diagnostics/public-login-readiness', async (request, reply) => {
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    const authFlowId = normalizeAuthAttemptId(request.headers['x-auth-flow-id']);
+    const authRequestId = normalizeAuthAttemptId(request.headers['x-auth-request-id']);
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
+    }
+    if (authFlowId) {
+      reply.header('X-Auth-Flow-Id', authFlowId);
+    }
+    if (authRequestId) {
+      reply.header('X-Auth-Request-Id', authRequestId);
     }
     const secure = shouldUseSecureSessionCookie(request, env);
     const diagnostics = {
@@ -263,6 +279,8 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
           event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
           requestId: request.requestId ?? request.id ?? null,
           authAttemptId,
+          authFlowId,
+          authRequestId,
           method: request.method ?? 'GET',
           path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-readiness',
           responseStatus: 200,
@@ -293,6 +311,8 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
         requestId: request.requestId ?? request.id ?? null,
         authAttemptId,
+        authFlowId,
+        authRequestId,
         method: request.method ?? 'GET',
         path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-readiness',
         responseStatus: 200,
@@ -350,7 +370,26 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   });
 
   app.post('/auth/logout', async (request, reply) => {
+    const authFlowId = normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']);
+    const authRequestId = normalizeAuthAttemptId(request.headers?.['x-auth-request-id']);
+    if (authFlowId) {
+      reply.header('X-Auth-Flow-Id', authFlowId);
+    }
+    if (authRequestId) {
+      reply.header('X-Auth-Request-Id', authRequestId);
+    }
     reply.header('Set-Cookie', createClearSessionCookie(shouldUseSecureSessionCookie(request, env)));
+    app.log.info(
+      {
+        event: 'AUTH_LOGOUT_DIAGNOSTICS',
+        requestId: request.requestId ?? request.id ?? null,
+        authFlowId,
+        authRequestId,
+        sessionCookieClearAttempted: true,
+        responseStatus: 200,
+      },
+      'auth logout diagnostics',
+    );
     return { ok: true };
   });
 
@@ -473,6 +512,7 @@ function logAuthLoginRequestStart(
     method?: string;
     routeOptions?: { url?: string };
     url?: string;
+    headers?: Record<string, string | string[] | undefined>;
   },
   input: {
     authAttemptId: string | null;
@@ -484,6 +524,8 @@ function logAuthLoginRequestStart(
       event: 'AUTH_LOGIN_REQUEST_START',
       requestId: request.requestId ?? request.id ?? null,
       authAttemptId: input.authAttemptId,
+      authFlowId: normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']),
+      authRequestId: normalizeAuthAttemptId(request.headers?.['x-auth-request-id']),
       normalizedEmail: input.normalizedEmail,
       method: request.method ?? 'POST',
       path: request.routeOptions?.url ?? request.url ?? '/auth/login',
@@ -522,6 +564,8 @@ function logAuthLoginDiagnostics(
       event: 'AUTH_LOGIN_DIAGNOSTICS',
       requestId: request.requestId ?? request.id ?? null,
       authAttemptId: normalizeAuthAttemptId(request.headers?.['x-auth-attempt-id']),
+      authFlowId: normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']),
+      authRequestId: normalizeAuthAttemptId(request.headers?.['x-auth-request-id']),
       email: input.email,
       success: input.success,
       requestReceivedAt: input.requestReceivedAt ?? null,

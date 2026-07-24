@@ -146,10 +146,12 @@ describe('RequireAuth', () => {
     expect(screen.getByText('Protected data locked')).toBeInTheDocument();
     expect(protectedLoader).not.toHaveBeenCalled();
     expect(meMock).toHaveBeenCalledTimes(1);
-    expect(meMock).toHaveBeenCalledWith({
+    expect(meMock).toHaveBeenCalledWith(expect.objectContaining({
       authAttemptId: expect.stringMatching(/^restore-/),
+      authFlowId: expect.stringMatching(/^restore-/),
+      authRequestId: expect.stringMatching(/^req-/),
       signal: expect.any(AbortSignal),
-    });
+    }));
 
     await act(async () => {
       deferred.resolve(buildTestUser());
@@ -193,10 +195,12 @@ describe('RequireAuth', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Checking your session');
     await waitFor(() => expect(screen.getByText('Orders workspace')).toBeInTheDocument());
-    expect(meMock).toHaveBeenCalledWith({
+    expect(meMock).toHaveBeenCalledWith(expect.objectContaining({
       authAttemptId: expect.stringMatching(/^restore-/),
+      authFlowId: expect.stringMatching(/^restore-/),
+      authRequestId: expect.stringMatching(/^req-/),
       signal: expect.any(AbortSignal),
-    });
+    }));
   });
 
   it('preserves a deep order URL after real-mode session restore', async () => {

@@ -73,6 +73,8 @@ function logAuthMeRestoreDiagnostics(
       event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
       requestId: request.requestId ?? null,
       authAttemptId: normalizeAuthAttemptId(request.headers['x-auth-attempt-id']),
+      authFlowId: normalizeAuthAttemptId(request.headers['x-auth-flow-id']),
+      authRequestId: normalizeAuthAttemptId(request.headers['x-auth-request-id']),
       cookiePresent: diagnostics?.cookiePresent ?? false,
       authFailureStage: diagnostics?.authFailureStage ?? null,
       authFailureReason: request.authFailureReason ?? (diagnostics ? getAuthFailureReason(diagnostics) : 'unknown'),

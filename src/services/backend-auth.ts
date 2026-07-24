@@ -1,6 +1,7 @@
 import { apiClient, buildApiUrl, clearCsrfToken, setCsrfToken } from '../lib/api-client';
 import { ApiError } from '../lib/api/errors';
 import { runtimeConfig } from '../config/runtime';
+import { createAuthDiagnosticId, isAuthDiagnosticsEnabled, recordAuthDiagnostic } from '../lib/auth/diagnostics';
 
 export type BackendAuthVendorAccess = {
   vendorId: string;
@@ -95,7 +96,17 @@ function getErrorDiagnostics(error: unknown) {
   };
 }
 
+type AuthCorrelationOptions = {
+  authAttemptId?: string;
+  authFlowId?: string;
+  authRequestId?: string;
+};
+
 function logAuthClientInfo(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.info({
     event,
     ...getSafeRouteDiagnostics(),
@@ -103,7 +114,29 @@ function logAuthClientInfo(event: string, details: Record<string, unknown> = {})
   });
 }
 
+function buildAuthCorrelationHeaders(options: AuthCorrelationOptions) {
+  const headers: Record<string, string> = {};
+  const authFlowId = options.authFlowId ?? options.authAttemptId;
+  const authRequestId = options.authRequestId;
+
+  if (options.authAttemptId) {
+    headers['X-Auth-Attempt-Id'] = options.authAttemptId;
+  }
+  if (authFlowId) {
+    headers['X-Auth-Flow-Id'] = authFlowId;
+  }
+  if (authRequestId) {
+    headers['X-Auth-Request-Id'] = authRequestId;
+  }
+
+  return Object.keys(headers).length ? headers : undefined;
+}
+
 function logAuthClientWarn(event: string, details: Record<string, unknown> = {}) {
+  if (!isAuthDiagnosticsEnabled()) {
+    return;
+  }
+
   console.warn({
     event,
     ...getSafeRouteDiagnostics(),
@@ -114,24 +147,55 @@ function logAuthClientWarn(event: string, details: Record<string, unknown> = {})
 export async function login(
   email: string,
   password: string,
-  options: { authAttemptId?: string; signal?: AbortSignal } = {},
+  options: AuthCorrelationOptions & { signal?: AbortSignal } = {},
 ) {
   const startedAt = Date.now();
   logAuthClientInfo('AUTH_LOGIN_START', { authAttemptId: options.authAttemptId ?? null });
+  const authFlowId = options.authFlowId ?? options.authAttemptId ?? createAuthDiagnosticId('auth');
+  const authRequestId = options.authRequestId ?? createAuthDiagnosticId('req');
+  recordAuthDiagnostic('LOGIN_REQUEST_START', {
+    flowId: authFlowId,
+    requestId: authRequestId,
+    source: 'backend-auth.login',
+    resultCategory: 'started',
+  });
 
   try {
     const response = await apiClient.post<BackendLoginResponse>('/auth/login', { email, password }, {
-      headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
+      headers: buildAuthCorrelationHeaders({
+        authAttemptId: options.authAttemptId,
+        authFlowId,
+        authRequestId,
+      }),
       skipVendorContext: true,
       signal: options.signal,
     });
     setCsrfToken(response.csrfToken);
+    recordAuthDiagnostic('LOGIN_RESPONSE', {
+      flowId: authFlowId,
+      requestId: authRequestId,
+      source: 'backend-auth.login',
+      resultCategory: 'success',
+    });
     logAuthClientInfo('AUTH_LOGIN_SUCCESS', {
       authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
     });
     return response;
   } catch (error) {
+    recordAuthDiagnostic('LOGIN_RESPONSE', {
+      flowId: authFlowId,
+      requestId: authRequestId,
+      source: 'backend-auth.login',
+      httpStatus: error instanceof ApiError ? error.status ?? null : null,
+      resultCategory: error instanceof ApiError && error.status === 401
+        ? 'unauthorized'
+        : error instanceof ApiError && error.status === 403
+          ? 'forbidden'
+          : options.signal?.aborted
+            ? 'aborted'
+            : 'failure',
+    });
     logAuthClientWarn('AUTH_LOGIN_FAILURE', {
       authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
@@ -142,7 +206,7 @@ export async function login(
 }
 
 export async function probePublicLoginReadiness(
-  options: { authAttemptId?: string; timeoutMs?: number } = {},
+  options: AuthCorrelationOptions & { timeoutMs?: number } = {},
 ): Promise<PublicLoginReadinessResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -152,7 +216,7 @@ export async function probePublicLoginReadiness(
     const response = await fetch(buildApiUrl('/auth/diagnostics/public-login-readiness'), {
       method: 'GET',
       credentials: getRequestCredentials(),
-      headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
+      headers: buildAuthCorrelationHeaders(options),
       signal: controller.signal,
     });
     const elapsedMs = Date.now() - startedAt;
@@ -194,17 +258,35 @@ export async function probePublicLoginReadiness(
   }
 }
 
-export async function me(options: { authAttemptId?: string; signal?: AbortSignal } = {}) {
+export async function me(options: AuthCorrelationOptions & { signal?: AbortSignal } = {}) {
   const startedAt = Date.now();
   logAuthClientInfo('AUTH_SESSION_CHECK_START', { authAttemptId: options.authAttemptId ?? null });
+  const authFlowId = options.authFlowId ?? options.authAttemptId ?? createAuthDiagnosticId('restore');
+  const authRequestId = options.authRequestId ?? createAuthDiagnosticId('req');
+  recordAuthDiagnostic('SESSION_RESTORE_START', {
+    flowId: authFlowId,
+    requestId: authRequestId,
+    source: 'backend-auth.me',
+    resultCategory: 'started',
+  });
 
   try {
     const response = await apiClient.get<{ user: BackendAuthUser; csrfToken?: string | null }>('/auth/me', {
-      headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
+      headers: buildAuthCorrelationHeaders({
+        authAttemptId: options.authAttemptId,
+        authFlowId,
+        authRequestId,
+      }),
       vendorId: null,
       signal: options.signal,
     });
     setCsrfToken(response.csrfToken);
+    recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+      flowId: authFlowId,
+      requestId: authRequestId,
+      source: 'backend-auth.me',
+      resultCategory: 'success',
+    });
     logAuthClientInfo('AUTH_SESSION_CHECK_SUCCESS', {
       authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
@@ -212,6 +294,19 @@ export async function me(options: { authAttemptId?: string; signal?: AbortSignal
 
     return response.user;
   } catch (error) {
+    recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+      flowId: authFlowId,
+      requestId: authRequestId,
+      source: 'backend-auth.me',
+      httpStatus: error instanceof ApiError ? error.status ?? null : null,
+      resultCategory: error instanceof ApiError && error.status === 401
+        ? 'unauthorized'
+        : error instanceof ApiError && error.status === 403
+          ? 'forbidden'
+          : options.signal?.aborted
+            ? 'aborted'
+            : 'failure',
+    });
     logAuthClientWarn('AUTH_SESSION_CHECK_FAILURE', {
       authAttemptId: options.authAttemptId ?? null,
       durationMs: Date.now() - startedAt,
@@ -222,8 +317,16 @@ export async function me(options: { authAttemptId?: string; signal?: AbortSignal
 }
 
 export async function logout() {
+  const authRequestId = createAuthDiagnosticId('req');
+  recordAuthDiagnostic('LOGOUT_TRIGGER', {
+    flowId: null,
+    requestId: authRequestId,
+    source: 'backend-auth.logout',
+    resultCategory: 'started',
+  });
   try {
     await apiClient.post<{ ok: true }>('/auth/logout', undefined, {
+      headers: buildAuthCorrelationHeaders({ authRequestId }),
       skipVendorContext: true,
     });
   } finally {
