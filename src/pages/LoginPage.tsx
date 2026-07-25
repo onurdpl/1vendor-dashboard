@@ -16,7 +16,11 @@ import {
 import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
-import { probePublicLoginReadiness } from '../services/backend-auth';
+import {
+  probePublicLoginPostTransport,
+  probePublicLoginReadiness,
+  type PublicLoginPostTransportResult,
+} from '../services/backend-auth';
 import { runtimeServices } from '../services/runtime-services';
 
 type LoginRedirectState = {
@@ -33,6 +37,7 @@ type LoginLocationState = LoginRedirectState | null;
 
 const LOGIN_TIMEOUT_MS = 15_000;
 const LOGIN_READINESS_TIMEOUT_MS = 3_000;
+const LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS = 5_000;
 const LOGIN_TIMEOUT_MESSAGE = 'Sign-in is taking longer than expected. Please try again.';
 
 function createAuthAttemptId() {
@@ -102,6 +107,31 @@ function getLoginErrorMessage(error: unknown, input: { timeoutTriggered: boolean
   return error instanceof Error ? error.message : 'Unable to sign in.';
 }
 
+function isTransportLevelLoginFailure(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.kind === 'network' && !error.status;
+  }
+
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function getPostTransportDiagnosticMessage(result: PublicLoginPostTransportResult) {
+  if (result.result === 'ready') {
+    return 'POST transport diagnostic: Ready';
+  }
+  if (result.result === 'timeout') {
+    return 'POST transport diagnostic: Timed out';
+  }
+  if (result.result === 'http_error') {
+    return `POST transport diagnostic: HTTP ${result.status ?? 'error'}`;
+  }
+  if (result.result === 'network_error') {
+    return 'POST transport diagnostic: Network error';
+  }
+
+  return 'POST transport diagnostic: Invalid response';
+}
+
 function buildRouteFromLocationState(from: LoginRedirectState['from']) {
   if (typeof from === 'string') {
     return from;
@@ -132,6 +162,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [postTransportDiagnosticMessage, setPostTransportDiagnosticMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const activeLoginAttemptRef = useRef<string | null>(null);
   const from = normalizeLoginDestination(
@@ -160,6 +191,7 @@ export function LoginPage() {
     activeLoginAttemptRef.current = authAttemptId;
     setIsSubmitting(true);
     setErrorMessage(null);
+    setPostTransportDiagnosticMessage(null);
 
     const authFlowId = authAttemptId;
     const readinessRequestId = createAuthDiagnosticId('req');
@@ -308,6 +340,38 @@ export function LoginPage() {
           resultCategory: timeoutTriggered ? 'timeout' : 'failure',
         });
       }
+      if (!responseReceived && currentStage === 'login_post' && (timeoutTriggered || isTransportLevelLoginFailure(error))) {
+        const postTransportRequestId = createAuthDiagnosticId('req');
+        recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+          flowId: authFlowId,
+          requestId: postTransportRequestId,
+          source: 'LoginPage.handleSubmit.postTransportProbe',
+          resultCategory: 'started',
+          timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
+        });
+        const postTransportResult = await probePublicLoginPostTransport({
+          authAttemptId,
+          authFlowId,
+          authRequestId: postTransportRequestId,
+          timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
+        });
+        recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+          flowId: authFlowId,
+          requestId: postTransportRequestId,
+          source: 'LoginPage.handleSubmit.postTransportProbe',
+          httpStatus: postTransportResult.status,
+          resultCategory: postTransportResult.result === 'ready'
+            ? 'success'
+            : postTransportResult.result === 'timeout'
+              ? 'timeout'
+              : postTransportResult.result === 'network_error'
+                ? 'network_error'
+                : 'failure',
+        });
+        if (isCurrentLoginAttempt()) {
+          setPostTransportDiagnosticMessage(getPostTransportDiagnosticMessage(postTransportResult));
+        }
+      }
       setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authAttemptId }));
     } finally {
       clearLoginTimeout();
@@ -340,6 +404,9 @@ export function LoginPage() {
                 if (errorMessage) {
                   setErrorMessage(null);
                 }
+                if (postTransportDiagnosticMessage) {
+                  setPostTransportDiagnosticMessage(null);
+                }
               }}
               autoComplete="email"
               required
@@ -358,6 +425,9 @@ export function LoginPage() {
                 if (errorMessage) {
                   setErrorMessage(null);
                 }
+                if (postTransportDiagnosticMessage) {
+                  setPostTransportDiagnosticMessage(null);
+                }
               }}
               autoComplete="current-password"
               required
@@ -371,6 +441,7 @@ export function LoginPage() {
 
         {sessionMessage ? <ActionFeedback tone="info" message={sessionMessage} /> : null}
         {errorMessage ? <ActionFeedback tone="error" message={errorMessage} /> : null}
+        {postTransportDiagnosticMessage ? <ActionFeedback tone="info" message={postTransportDiagnosticMessage} /> : null}
 
         <div className="demo-credentials">
           <div className="session-label">Demo credentials</div>

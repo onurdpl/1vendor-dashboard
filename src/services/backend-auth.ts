@@ -62,6 +62,18 @@ export type PublicLoginReadinessResult =
       failureStage: 'readiness_timeout' | 'readiness_network_error' | 'readiness_http_error' | 'readiness_parse_error';
     };
 
+export type PublicLoginPostTransportResult =
+  | {
+      result: 'ready';
+      status: number;
+      elapsedMs: number;
+    }
+  | {
+      result: 'timeout' | 'network_error' | 'http_error' | 'invalid_response';
+      status: number | null;
+      elapsedMs: number;
+    };
+
 function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
 }
@@ -252,6 +264,70 @@ export async function probePublicLoginReadiness(
       failureStage: error instanceof DOMException && error.name === 'AbortError'
         ? 'readiness_timeout'
         : 'readiness_network_error',
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function probePublicLoginPostTransport(
+  options: AuthCorrelationOptions & { timeoutMs?: number } = {},
+): Promise<PublicLoginPostTransportResult> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timeout = window.setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, options.timeoutMs ?? 5_000);
+
+  try {
+    const response = await fetch(buildApiUrl('/auth/diagnostics/public-login-transport'), {
+      method: 'POST',
+      credentials: getRequestCredentials(),
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthCorrelationHeaders(options),
+      },
+      body: JSON.stringify({ probe: 'login-post-transport' }),
+      signal: controller.signal,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      return {
+        result: 'http_error',
+        status: response.status,
+        elapsedMs,
+      };
+    }
+
+    try {
+      const payload = await response.json() as { ok?: unknown; status?: unknown };
+      if (payload.ok === true && payload.status === 'post_transport_ready') {
+        return {
+          result: 'ready',
+          status: response.status,
+          elapsedMs,
+        };
+      }
+      return {
+        result: 'invalid_response',
+        status: response.status,
+        elapsedMs,
+      };
+    } catch {
+      return {
+        result: 'invalid_response',
+        status: response.status,
+        elapsedMs,
+      };
+    }
+  } catch {
+    return {
+      result: didTimeout ? 'timeout' : 'network_error',
+      status: null,
+      elapsedMs: Date.now() - startedAt,
     };
   } finally {
     window.clearTimeout(timeout);

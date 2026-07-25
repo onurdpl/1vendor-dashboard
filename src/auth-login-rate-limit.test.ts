@@ -514,6 +514,111 @@ describe('auth login rate limiting', () => {
     expect(serializedLogs).not.toContain('csrf-token');
   });
 
+  it('accepts the public login POST transport probe without authentication, cookies, or database access', async () => {
+    const handlers = createAuthRouteHandlers(buildEnv({
+      NODE_ENV: 'production',
+      JWT_SECRET: 'super-secret-jwt-value',
+      JWT_EXPIRES_IN: '12h',
+      CORS_ORIGIN: ['https://app.example.com'],
+    }));
+    const reply = createReply();
+
+    const result = await handlers.post['/auth/diagnostics/public-login-transport']?.(
+      {
+        requestId: 'transport-request',
+        method: 'POST',
+        routeOptions: { url: '/auth/diagnostics/public-login-transport' },
+        headers: {
+          'x-auth-attempt-id': 'auth-transport123',
+          'x-auth-flow-id': 'auth-flow123',
+          'x-auth-request-id': 'req-transport123',
+        },
+        body: {
+          probe: 'login-post-transport',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      status: 'post_transport_ready',
+    });
+    expect(reply.sent).toBe(false);
+    expect(reply.headers['X-Auth-Attempt-Id']).toBe('auth-transport123');
+    expect(reply.headers['X-Auth-Flow-Id']).toBe('auth-flow123');
+    expect(reply.headers['X-Auth-Request-Id']).toBe('req-transport123');
+    expect(JSON.stringify(reply.headers)).not.toContain(SESSION_COOKIE_NAME);
+    expect(findUniqueMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_START',
+        requestId: 'transport-request',
+        authAttemptId: 'auth-transport123',
+        method: 'POST',
+        path: '/auth/diagnostics/public-login-transport',
+      }),
+      'auth login post transport probe start',
+    );
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
+        requestId: 'transport-request',
+        authAttemptId: 'auth-transport123',
+        responseStatus: 200,
+        payloadAccepted: true,
+      }),
+      'auth login post transport probe complete',
+    );
+    const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('super-secret-jwt-value');
+    expect(serializedLogs).not.toContain('sporgym_session=');
+    expect(serializedLogs).not.toContain('csrf-token');
+    expect(serializedLogs).not.toContain('password');
+  });
+
+  it('rejects unexpected or oversized public login POST transport probe payloads', async () => {
+    const handlers = createAuthRouteHandlers();
+    const unexpectedReply = createReply();
+    const oversizedReply = createReply();
+
+    await handlers.post['/auth/diagnostics/public-login-transport']?.(
+      {
+        requestId: 'bad-transport-request',
+        method: 'POST',
+        routeOptions: { url: '/auth/diagnostics/public-login-transport' },
+        headers: {},
+        body: {
+          probe: 'login-post-transport',
+          email: 'vendor@example.com',
+        },
+      },
+      unexpectedReply,
+    );
+
+    await handlers.post['/auth/diagnostics/public-login-transport']?.(
+      {
+        requestId: 'oversized-transport-request',
+        method: 'POST',
+        routeOptions: { url: '/auth/diagnostics/public-login-transport' },
+        headers: {},
+        body: {
+          probe: 'login-post-transport',
+          padding: 'x'.repeat(256),
+        },
+      },
+      oversizedReply,
+    );
+
+    expect(unexpectedReply.statusCode).toBe(400);
+    expect(unexpectedReply.payload).toEqual({ message: 'Invalid transport probe payload.' });
+    expect(oversizedReply.statusCode).toBe(400);
+    expect(oversizedReply.payload).toEqual({ message: 'Invalid transport probe payload.' });
+    expect(findUniqueMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
   it('rejects missing email or password with the existing generic response', async () => {
     const missingEmail = await injectLogin({ omitEmail: true });
     const missingPassword = await injectLogin({ omitPassword: true });

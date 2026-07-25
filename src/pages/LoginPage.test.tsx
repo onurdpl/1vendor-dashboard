@@ -15,6 +15,7 @@ import { LoginPage } from './LoginPage';
 
 const loginMock = vi.hoisted(() => vi.fn());
 const probePublicLoginReadinessMock = vi.hoisted(() => vi.fn());
+const probePublicLoginPostTransportMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
@@ -25,6 +26,7 @@ vi.mock('../services/runtime-services', () => ({
 }));
 
 vi.mock('../services/backend-auth', () => ({
+  probePublicLoginPostTransport: probePublicLoginPostTransportMock,
   probePublicLoginReadiness: probePublicLoginReadinessMock,
 }));
 
@@ -82,9 +84,15 @@ describe('LoginPage expired session flow', () => {
     window.localStorage.clear();
     loginMock.mockReset();
     probePublicLoginReadinessMock.mockReset();
+    probePublicLoginPostTransportMock.mockReset();
     loginMock.mockResolvedValue({
       token: null,
       user: testUser,
+    });
+    probePublicLoginPostTransportMock.mockResolvedValue({
+      result: 'ready',
+      status: 200,
+      elapsedMs: 20,
     });
     probePublicLoginReadinessMock.mockResolvedValue({
       ok: true,
@@ -206,6 +214,7 @@ describe('LoginPage expired session flow', () => {
     expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.queryByText('Sign-in is taking longer than expected. Please try again.')).not.toBeInTheDocument();
+    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
   });
 
   it('shows the retry window when login is temporarily rate limited', async () => {
@@ -223,6 +232,7 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByText('Too many login attempts. Please try again in 10 minutes.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
   });
 
   it('logs safe POST dispatch diagnostics without credentials', async () => {
@@ -300,6 +310,7 @@ describe('LoginPage expired session flow', () => {
     expect(events).not.toContain('REQUEST_ABORT');
     expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
 
     clearTimeoutSpy.mockRestore();
     debugSpy.mockRestore();
@@ -479,19 +490,66 @@ describe('LoginPage expired session flow', () => {
       vi.advanceTimersByTime(15_000);
       await Promise.resolve();
       await Promise.resolve();
+      await Promise.resolve();
     });
 
     expect(
       screen.getByText(/^Sign-in is taking longer than expected\. Please try again\. Reference: auth-[a-z0-9]{10}$/i),
     ).toBeInTheDocument();
+    expect(screen.getByText('POST transport diagnostic: Ready')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect((loginMock.mock.calls[0][2] as { signal?: AbortSignal }).signal?.aborted).toBe(true);
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
       expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
     );
     expect(debugSpy.mock.calls.map((call) => (call[1] as { operation?: string })?.operation)).toEqual(
-      expect.arrayContaining(['REQUEST_ABORT', 'LOGIN_RESPONSE']),
+      expect.arrayContaining(['REQUEST_ABORT', 'LOGIN_RESPONSE', 'LOGIN_POST_TRANSPORT_PROBE']),
+    );
+    expect(probePublicLoginPostTransportMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        timeoutMs: 5_000,
+      }),
     );
     debugSpy.mockRestore();
+  });
+
+  it('runs the POST transport probe after a network-level login failure without replacing the original error', async () => {
+    loginMock.mockRejectedValueOnce(new ApiError('Unable to reach the backend.', 'network'));
+    probePublicLoginPostTransportMock.mockResolvedValueOnce({
+      result: 'network_error',
+      status: null,
+      elapsedMs: 5000,
+    });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByText('Unable to reach the backend.')).toBeInTheDocument();
+    expect(screen.getByText('POST transport diagnostic: Network error')).toBeInTheDocument();
+    expect(probePublicLoginPostTransportMock).toHaveBeenCalledTimes(1);
+    expect(loginMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not run the POST transport probe after HTTP 401 or successful login', async () => {
+    loginMock.mockRejectedValueOnce(new ApiError('Invalid email or password.', 'unauthorized', { status: 401 }));
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
+    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    cleanup();
+
+    loginMock.mockResolvedValueOnce({
+      token: null,
+      user: testUser,
+    });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
   });
 });

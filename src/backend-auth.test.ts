@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
-import { login, me, probePublicLoginReadiness } from './services/backend-auth';
+import { login, me, probePublicLoginPostTransport, probePublicLoginReadiness } from './services/backend-auth';
 
 describe('backend auth client diagnostics', () => {
   const fetchMock = vi.fn();
@@ -31,6 +31,7 @@ describe('backend auth client diagnostics', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -128,5 +129,91 @@ describe('backend auth client diagnostics', () => {
     expect(headers.get('X-Auth-Request-Id')).toBe('req-restore123');
     expect(JSON.stringify(init)).not.toContain('sporgym_session=');
     expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('posts the fixed login transport probe payload without credentials', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          status: 'post_transport_ready',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await probePublicLoginPostTransport({
+      authAttemptId: 'auth-probe123',
+      authFlowId: 'auth-flow123',
+      authRequestId: 'req-post123',
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({
+      result: 'ready',
+      status: 200,
+    });
+    const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const headers = new Headers((init as RequestInit).headers);
+
+    expect(url).toBe('/api/auth/diagnostics/public-login-transport');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).credentials).toBe('same-origin');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-probe123');
+    expect(headers.get('X-Auth-Flow-Id')).toBe('auth-flow123');
+    expect(headers.get('X-Auth-Request-Id')).toBe('req-post123');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ probe: 'login-post-transport' });
+    expect(JSON.stringify(init)).not.toContain('vendor@example.com');
+    expect(JSON.stringify(init)).not.toContain('demo123');
+    expect(JSON.stringify(init)).not.toContain('sporgym_session=');
+    expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('classifies login transport probe timeout independently', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementationOnce(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+            once: true,
+          });
+        }),
+    );
+
+    const resultPromise = probePublicLoginPostTransport({ timeoutMs: 1000 });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(resultPromise).resolves.toMatchObject({
+      result: 'timeout',
+      status: null,
+    });
+    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    vi.useRealTimers();
+  });
+
+  it('classifies login transport probe network, HTTP, and invalid response failures', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(probePublicLoginPostTransport({ timeoutMs: 1000 })).resolves.toMatchObject({
+      result: 'network_error',
+      status: null,
+    });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'bad probe' }), { status: 400 }));
+    await expect(probePublicLoginPostTransport({ timeoutMs: 1000 })).resolves.toMatchObject({
+      result: 'http_error',
+      status: 400,
+    });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, status: 'wrong' }), { status: 200 }));
+    await expect(probePublicLoginPostTransport({ timeoutMs: 1000 })).resolves.toMatchObject({
+      result: 'invalid_response',
+      status: 200,
+    });
   });
 });

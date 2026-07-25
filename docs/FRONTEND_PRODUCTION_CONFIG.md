@@ -62,3 +62,32 @@ VITE_API_BASE_URL=https://vendor-dashboard-backend-398h.onrender.com
 ```
 
 Then remove the `/api/*` Static Site rewrite and keep the SPA fallback.
+
+## Temporary login POST transport diagnostic
+
+While the production same-origin `/api` auth transport issue is being isolated, the backend exposes:
+
+```txt
+POST /auth/diagnostics/public-login-transport
+```
+
+Through the same-origin frontend rewrite this is reached as:
+
+```txt
+POST /api/auth/diagnostics/public-login-transport
+```
+
+The request body is fixed and contains no credentials:
+
+```json
+{ "probe": "login-post-transport" }
+```
+
+The endpoint is public, does not authenticate, does not query the database, does not create a session, and does not set cookies. The frontend invokes it only after a login request fails before receiving an HTTP response, such as a login timeout or network-level failure.
+
+Interpretation:
+
+- login fails and the transport probe succeeds: the general JSON POST path through `/api` works; investigate `/auth/login` route-specific or intermittent behavior next.
+- login fails and the transport probe also times out or has a network failure: browser/front-end origin/Render proxy POST transport failure is strongly supported.
+
+Remove this temporary diagnostic after the production auth transport root cause is confirmed and no longer needs field verification.

@@ -23,6 +23,10 @@ export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 type LoginFailureStage = 'body_validation' | 'rate_limit' | 'user_lookup' | 'password_verify' | 'user_status' | 'unknown' | null;
 type LoginFailureReason = 'missing_credentials' | 'user_not_found' | 'invalid_password' | 'inactive_user' | 'unknown' | null;
 
+type LoginPostTransportProbeBody = {
+  probe?: unknown;
+};
+
 type LoginRateLimitResetBody = {
   email?: unknown;
   ip?: unknown;
@@ -323,6 +327,87 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         jwtExpiresConfigPresent: diagnostics.jwt.expiresConfigPresent,
       },
       'auth login readiness diagnostics',
+    );
+
+    return response;
+  });
+
+  app.post<{ Body: LoginPostTransportProbeBody }>('/auth/diagnostics/public-login-transport', async (request, reply) => {
+    const requestReceivedAt = new Date().toISOString();
+    const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    const authFlowId = normalizeAuthAttemptId(request.headers['x-auth-flow-id']);
+    const authRequestId = normalizeAuthAttemptId(request.headers['x-auth-request-id']);
+    if (authAttemptId) {
+      reply.header('X-Auth-Attempt-Id', authAttemptId);
+    }
+    if (authFlowId) {
+      reply.header('X-Auth-Flow-Id', authFlowId);
+    }
+    if (authRequestId) {
+      reply.header('X-Auth-Request-Id', authRequestId);
+    }
+
+    app.log.info(
+      {
+        event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_START',
+        requestId: request.requestId ?? request.id ?? null,
+        authAttemptId,
+        authFlowId,
+        authRequestId,
+        method: request.method ?? 'POST',
+        path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-transport',
+        timestamp: requestReceivedAt,
+      },
+      'auth login post transport probe start',
+    );
+
+    const body = request.body as LoginPostTransportProbeBody | undefined;
+    const bodyKeys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : [];
+    const serializedBodyLength = Buffer.byteLength(JSON.stringify(body ?? null));
+    const validPayload =
+      body &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      bodyKeys.length === 1 &&
+      body.probe === 'login-post-transport' &&
+      serializedBodyLength <= 128;
+
+    if (!validPayload) {
+      app.log.info(
+        {
+          event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
+          requestId: request.requestId ?? request.id ?? null,
+          authAttemptId,
+          authFlowId,
+          authRequestId,
+          method: request.method ?? 'POST',
+          path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-transport',
+          responseStatus: 400,
+          payloadAccepted: false,
+        },
+        'auth login post transport probe complete',
+      );
+      return reply.code(400).send({ message: 'Invalid transport probe payload.' });
+    }
+
+    const response = {
+      ok: true,
+      status: 'post_transport_ready',
+    };
+
+    app.log.info(
+      {
+        event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
+        requestId: request.requestId ?? request.id ?? null,
+        authAttemptId,
+        authFlowId,
+        authRequestId,
+        method: request.method ?? 'POST',
+        path: request.routeOptions?.url ?? request.url ?? '/auth/diagnostics/public-login-transport',
+        responseStatus: 200,
+        payloadAccepted: true,
+      },
+      'auth login post transport probe complete',
     );
 
     return response;
