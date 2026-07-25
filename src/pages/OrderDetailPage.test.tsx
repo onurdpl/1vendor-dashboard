@@ -3581,12 +3581,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(returnReceiverPhoneInput).toHaveValue('');
     expect(returnReceiverAddressInput).toHaveValue('');
     expect(screen.getByText('Provider basics')).toBeInTheDocument();
-    expect(screen.getByText('Warehouse sync')).toBeInTheDocument();
+    expect(screen.getByText('Warehouse synchronization')).toBeInTheDocument();
     expect(screen.getByText('Return receiver override / fallback')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' })).toBeInTheDocument();
     expect(screen.getByText('Phone missing')).toBeInTheDocument();
     expect(screen.getByText(/-1 means automatic cheapest provider selection/)).toBeInTheDocument();
-    expect(screen.getAllByText('Only used when synced warehouse data is missing or intentionally overridden.').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText('Only used when synced warehouse data is missing or intentionally overridden.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     await user.clear(warehouseInput);

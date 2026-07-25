@@ -9216,13 +9216,49 @@ summary.provider-response-heading::-webkit-details-marker {
   background: #ffffff;
 }
 
-.shipping-config-editor {
+.vendor-profile-shipping-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.vendor-profile-shipping-health {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.92), rgba(255, 255, 255, 0.96));
+}
+
+.vendor-profile-shipping-health h3,
+.vendor-profile-shipping-subsection-heading h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.96rem;
+}
+
+.vendor-profile-shipping-health p,
+.vendor-profile-shipping-subsection-heading p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.vendor-profile-shipping-subsection {
   display: grid;
   gap: 10px;
-  padding: 12px;
+}
+
+.shipping-config-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid rgba(37, 99, 235, 0.16);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(239, 246, 255, 0.5);
 }
 
 .shipping-config-editor-heading {
@@ -9257,7 +9293,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .shipping-config-kargonomi-layout {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: stretch;
 }
@@ -9271,6 +9307,11 @@ summary.provider-response-heading::-webkit-details-marker {
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 8px;
   background: #ffffff;
+}
+
+.shipping-config-kargonomi-layout .shipping-config-section-card:first-child,
+.shipping-config-kargonomi-layout .shipping-config-diagnostics {
+  grid-column: 1 / -1;
 }
 
 .shipping-config-section-heading {
@@ -9338,6 +9379,37 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 10px;
 }
 
+.shipping-config-state-pill {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.shipping-config-state-pill.ready {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.shipping-config-state-pill.review {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.shipping-config-state-pill.unknown {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: #f8fafc;
+  color: #64748b;
+}
+
 .shipping-config-sync-heading span,
 .shipping-config-sync-heading small {
   display: block;
@@ -9358,6 +9430,11 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #334155;
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.shipping-config-sync-actions {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .shipping-config-status-chip {
@@ -9471,6 +9548,10 @@ summary.provider-response-heading::-webkit-details-marker {
 @media (max-width: 720px) {
   .shipping-config-editor-heading,
   .shipping-config-sync-heading {
+    flex-direction: column;
+  }
+
+  .vendor-profile-shipping-health {
     flex-direction: column;
   }
 

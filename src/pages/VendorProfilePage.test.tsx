@@ -1034,6 +1034,70 @@ describe('VendorProfilePage', () => {
     );
   });
 
+  it('renders shipping operations as a state-driven operator workflow', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      preferredProvider: 'kargonomi',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      providerMetadata: {
+        kargonomiShippingProviderId: '5',
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+      warehouses: [
+        {
+          id: 'warehouse-kargonomi',
+          vendorId: 'demo-vendor-a',
+          provider: 'kargonomi',
+          warehouseId: '112668',
+          name: 'Default warehouse',
+          address: 'Izmir warehouse',
+          isDefault: true,
+          syncStatus: {
+            contactNamePresent: true,
+            phonePresent: true,
+            addressPresent: true,
+            stateIdPresent: true,
+            cityIdPresent: true,
+            stateName: 'İzmir',
+            cityName: 'Bornova',
+            syncedAt: '2026-06-08T12:42:00.000Z',
+            lookupStatus: 'synced',
+            lookupError: null,
+          },
+        },
+      ],
+    });
+
+    renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
+
+    await screen.findByText('Edit Shipping Configuration');
+    const shippingHeading = screen.getByRole('heading', { name: 'Shipping operations' });
+    const shippingSection = shippingHeading.closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(within(shippingSection!).getByRole('heading', { name: 'Shipping health' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Shipment creation can use this vendor configuration.')).toBeInTheDocument();
+    expect(within(shippingSection!).getByRole('heading', { name: 'Current configuration' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Current provider configuration')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Edit Shipping Configuration')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Warehouse synchronization')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Warehouse synchronization is ready.')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Diagnostics')).toBeInTheDocument();
+    expect(within(shippingSection!).getByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByRole('button', { name: 'Sync Kargonomi warehouse details' })).toBeInTheDocument();
+    expect(screen.queryByText('Provider configuration')).not.toBeInTheDocument();
+  });
+
   it('keeps route vendor data authoritative when the selected workspace vendor changes', async () => {
     setCurrentUser({
       email: 'admin@demo.com',

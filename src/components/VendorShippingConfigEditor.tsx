@@ -595,11 +595,25 @@ export function VendorShippingConfigEditor({
   const kargonomiWarehouseSyncStatus = kargonomiDefaultWarehouse?.syncStatus;
   const kargonomiWarehouseIdForSync = kargonomiDefaultWarehouse?.warehouseId ?? '';
   const canSyncKargonomiWarehouse = isKargonomiConfigDraft && /^\d+$/.test(kargonomiWarehouseIdForSync);
-  const renderKargonomiReadinessChip = (label: string, present: boolean | null | undefined) => (
-    <span className={`shipping-config-status-chip ${present ? 'present' : 'missing'}`}>
-      {label} {present ? 'present' : 'missing'}
-    </span>
-  );
+  const kargonomiWarehouseReadinessItems = [
+    { label: 'Contact name', present: kargonomiWarehouseSyncStatus?.contactNamePresent },
+    { label: 'Phone', present: kargonomiWarehouseSyncStatus?.phonePresent },
+    { label: 'Address', present: kargonomiWarehouseSyncStatus?.addressPresent },
+    { label: 'State ID', present: kargonomiWarehouseSyncStatus?.stateIdPresent },
+    { label: 'City ID', present: kargonomiWarehouseSyncStatus?.cityIdPresent },
+  ];
+  const missingKargonomiWarehouseItems = kargonomiWarehouseReadinessItems.filter((item) => !item.present);
+  const kargonomiWarehouseSyncLabel = !kargonomiWarehouseSyncStatus
+    ? 'Unknown'
+    : kargonomiWarehouseSyncStatus.lookupError || missingKargonomiWarehouseItems.length > 0
+      ? 'Needs review'
+      : 'Ready';
+  const kargonomiWarehouseSyncDescription =
+    kargonomiWarehouseSyncLabel === 'Ready'
+      ? 'Warehouse synchronization is ready.'
+      : kargonomiWarehouseSyncLabel === 'Needs review'
+        ? 'Warehouse synchronization needs review before return receiver data is trusted.'
+        : 'Warehouse synchronization has not been confirmed.';
   const shippingProviderSelectField = (
     <label className="field">
       <span>Provider</span>
@@ -645,8 +659,8 @@ export function VendorShippingConfigEditor({
     >
       <div className="shipping-config-editor-heading">
         <div>
-          <strong>Provider configuration</strong>
-          <span>Shipment settings for {vendorName ?? vendorId}</span>
+          <strong>Edit Shipping Configuration</strong>
+          <span>Update provider, warehouse, carrier, and fallback return receiver settings.</span>
         </div>
         <span>
           Last updated: {shippingConfig?.updatedAt ? formatOptionalDate(shippingConfig.updatedAt) : 'not configured'}
@@ -726,23 +740,40 @@ export function VendorShippingConfigEditor({
                         }
                       />
                     </label>
-                    <div className="shipping-config-readonly">
-                      <span>Sandbox</span>
-                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
-                    </div>
-                    <div className="shipping-config-readonly">
-                      <span>Webhook ingest</span>
-                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
-                    </div>
                   </div>
                 </section>
 
-                <section className="shipping-config-section-card" aria-label="Warehouse sync">
+                <section className="shipping-config-section-card shipping-config-sync-panel" aria-label="Warehouse synchronization">
                   <div className="shipping-config-sync-heading">
                     <div>
-                      <strong>Warehouse sync</strong>
-                      <span>Read-only sync from Kargonomi for return receiver buyer fields.</span>
+                      <strong>Warehouse synchronization</strong>
+                      <span>{kargonomiWarehouseSyncDescription}</span>
                     </div>
+                    <span
+                      className={`shipping-config-state-pill ${
+                        kargonomiWarehouseSyncLabel === 'Ready'
+                          ? 'ready'
+                          : kargonomiWarehouseSyncLabel === 'Needs review'
+                            ? 'review'
+                            : 'unknown'
+                      }`}
+                    >
+                      {kargonomiWarehouseSyncLabel}
+                    </span>
+                  </div>
+                  {missingKargonomiWarehouseItems.length > 0 ? (
+                    <div className="shipping-config-sync-grid" aria-label="Missing Kargonomi warehouse fields">
+                      {missingKargonomiWarehouseItems.map((item) => (
+                        <span key={item.label} className={`shipping-config-status-chip ${item.present ? 'present' : 'missing'}`}>
+                          {item.label} {item.present ? 'present' : 'missing'}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {kargonomiWarehouseSyncStatus?.lookupError ? (
+                    <small className="shipping-config-note">{kargonomiWarehouseSyncStatus.lookupError}</small>
+                  ) : null}
+                  <div className="shipping-config-sync-actions">
                     <button
                       type="button"
                       className="button button-secondary"
@@ -752,34 +783,36 @@ export function VendorShippingConfigEditor({
                       {isSyncingKargonomiWarehouse ? 'Syncing...' : 'Sync Kargonomi warehouse details'}
                     </button>
                   </div>
-                  <div className="shipping-config-sync-grid" aria-label="Kargonomi warehouse readiness">
-                    {renderKargonomiReadinessChip('Contact name', kargonomiWarehouseSyncStatus?.contactNamePresent)}
-                    {renderKargonomiReadinessChip('Phone', kargonomiWarehouseSyncStatus?.phonePresent)}
-                    {renderKargonomiReadinessChip('Address', kargonomiWarehouseSyncStatus?.addressPresent)}
-                    {renderKargonomiReadinessChip('State ID', kargonomiWarehouseSyncStatus?.stateIdPresent)}
-                    {renderKargonomiReadinessChip('City ID', kargonomiWarehouseSyncStatus?.cityIdPresent)}
-                  </div>
-                  <div className="shipping-config-section-grid">
-                    <div className="shipping-config-readonly">
-                      <span>Last sync</span>
-                      <strong>
-                        {kargonomiWarehouseSyncStatus?.syncedAt
-                          ? formatOptionalDate(kargonomiWarehouseSyncStatus.syncedAt)
-                          : kargonomiWarehouseSyncStatus?.lookupStatus ?? 'not synced'}
-                      </strong>
+                  <details className="shipping-config-advanced">
+                    <summary>Warehouse sync details</summary>
+                    {kargonomiWarehouseSyncLabel === 'Ready' ? (
+                      <div className="shipping-config-sync-grid" aria-label="Kargonomi warehouse readiness">
+                        {kargonomiWarehouseReadinessItems.map((item) => (
+                          <span key={item.label} className={`shipping-config-status-chip ${item.present ? 'present' : 'missing'}`}>
+                            {item.label} {item.present ? 'present' : 'missing'}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="shipping-config-section-grid">
+                      <div className="shipping-config-readonly">
+                        <span>Last sync</span>
+                        <strong>
+                          {kargonomiWarehouseSyncStatus?.syncedAt
+                            ? formatOptionalDate(kargonomiWarehouseSyncStatus.syncedAt)
+                            : kargonomiWarehouseSyncStatus?.lookupStatus ?? 'not synced'}
+                        </strong>
+                      </div>
+                      <div className="shipping-config-readonly">
+                        <span>Resolved location</span>
+                        <strong>
+                          {[kargonomiWarehouseSyncStatus?.stateName, kargonomiWarehouseSyncStatus?.cityName]
+                            .filter(Boolean)
+                            .join(' / ') || '—'}
+                        </strong>
+                      </div>
                     </div>
-                    <div className="shipping-config-readonly">
-                      <span>Resolved location</span>
-                      <strong>
-                        {[kargonomiWarehouseSyncStatus?.stateName, kargonomiWarehouseSyncStatus?.cityName]
-                          .filter(Boolean)
-                          .join(' / ') || '—'}
-                      </strong>
-                    </div>
-                  </div>
-                  {kargonomiWarehouseSyncStatus?.lookupError ? (
-                    <small className="shipping-config-note">{kargonomiWarehouseSyncStatus.lookupError}</small>
-                  ) : null}
+                  </details>
                 </section>
 
                 <section className="shipping-config-section-card" aria-label="Return receiver override fallback">
@@ -800,7 +833,6 @@ export function VendorShippingConfigEditor({
                           }))
                         }
                       />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
                     </label>
                     <label className="field">
                       <span>Return receiver fallback phone</span>
@@ -814,7 +846,6 @@ export function VendorShippingConfigEditor({
                           }))
                         }
                       />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
                     </label>
                     <label className="field field-full">
                       <span>Return receiver fallback address</span>
@@ -829,7 +860,6 @@ export function VendorShippingConfigEditor({
                           }))
                         }
                       />
-                      <small>Only used when synced warehouse data is missing or intentionally overridden.</small>
                     </label>
                   </div>
                   {kargonomiWarehouseSyncStatus?.stateName || kargonomiWarehouseSyncStatus?.cityName ? (
@@ -838,6 +868,20 @@ export function VendorShippingConfigEditor({
                     </p>
                   ) : null}
                 </section>
+                <details className="shipping-config-advanced shipping-config-diagnostics" aria-label="Shipping diagnostics">
+                  <summary>Diagnostics</summary>
+                  <p>Provider probes and technical flags for investigation.</p>
+                  <div className="shipping-config-section-grid">
+                    <div className="shipping-config-readonly">
+                      <span>Sandbox</span>
+                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
+                    </div>
+                    <div className="shipping-config-readonly">
+                      <span>Webhook ingest</span>
+                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
+                    </div>
+                  </div>
+                </details>
               </div>
             ) : null}
           </>

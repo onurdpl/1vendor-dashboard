@@ -1241,6 +1241,29 @@ export function VendorProfilePage() {
   const warehouseConfigured = Boolean(defaultWarehouse?.warehouseId || shippingConfig?.defaultWarehouseId || navlungoSenderAddressId);
   const shippingConfigured = Boolean(shippingConfig?.shippingEnabled && providerConfigured && warehouseConfigured);
   const returnsConfigured = Boolean(navlungoReturnRecipientAddressId);
+  const shippingHealth = !shippingDataLoaded
+    ? {
+        label: 'Unknown',
+        tone: 'neutral' as const,
+        description: 'Shipping readiness cannot be confirmed until provider and warehouse configuration loads.',
+      }
+    : shippingConfigured
+      ? {
+          label: 'Ready',
+          tone: 'success' as const,
+          description: 'Shipment creation can use this vendor configuration.',
+        }
+      : shippingConfig?.shippingEnabled === false
+        ? {
+            label: 'Blocked',
+            tone: 'danger' as const,
+            description: 'Shipping is disabled, so shipment work cannot start for this vendor.',
+          }
+        : {
+            label: 'Needs review',
+            tone: 'warning' as const,
+            description: 'Provider or warehouse configuration needs review before shipment work is trusted.',
+          };
   const supportWorkflowReady = Boolean(canLoadProfile && supportDataLoaded && !supportQuery.isError);
   const marketplaceTermsActive = financeProfile?.active === true;
   const financePreviewAvailable = Boolean(financeDataLoaded && financeProfile);
@@ -3777,17 +3800,33 @@ export function VendorProfilePage() {
           ) : shippingQuery.isInitialLoading || !shippingConfig ? (
             <SectionSkeleton title="Loading shipping setup" description="Fetching provider and warehouse configuration." />
           ) : (
-            <>
-              <MetadataGroup>
-                <MetadataRow label="Preferred provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
-                <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
-                <MetadataRow label="Managed by" value={formatSource(shippingConfig.source)} />
-                <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
-                <MetadataRow label="Cargo integration ID" value={formatValue(shippingConfig.cargoIntegrationId)} />
-                <MetadataRow label="Default warehouse ID" value={formatValue(shippingConfig.defaultWarehouseId)} />
-                <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
-                <MetadataRow label="Provider configuration status" value={metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'} />
-              </MetadataGroup>
+            <div className="vendor-profile-shipping-layout">
+              <section className="vendor-profile-shipping-health" aria-label="Shipping health">
+                <div>
+                  <h3>Shipping health</h3>
+                  <p>{shippingHealth.description}</p>
+                </div>
+                <StatusBadge tone={shippingHealth.tone}>{shippingHealth.label}</StatusBadge>
+              </section>
+              <section className="vendor-profile-shipping-subsection" aria-label="Current shipping configuration">
+                <div className="vendor-profile-shipping-subsection-heading">
+                  <h3>Current configuration</h3>
+                  <p>Read-only shipment configuration currently used for this vendor.</p>
+                </div>
+                <MetadataGroup>
+                  <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
+                  <MetadataRow label="Provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
+                  <MetadataRow label="Default warehouse ID" value={formatValue(shippingConfig.defaultWarehouseId)} />
+                  <MetadataRow
+                    label="Return destination"
+                    value={<LocationValue id={navlungoReturnRecipientAddressId} location={returnDestinationLocation} />}
+                  />
+                  <MetadataRow label="Carrier / integration ID" value={formatValue(shippingConfig.cargoIntegrationId)} />
+                  <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
+                  <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
+                  <MetadataRow label="Current provider configuration" value={metadataConfigured(shippingConfig) ? 'Ready' : 'Needs review'} />
+                </MetadataGroup>
+              </section>
               <VendorProfileAuditMetadata
                 title="Shipping Operations last changed"
                 log={latestShippingAudit}
@@ -3803,7 +3842,7 @@ export function VendorProfilePage() {
                   onSynced={() => void shippingQuery.refetch()}
                 />
               ) : null}
-            </>
+            </div>
           )}
         </OperationalSection>
 
