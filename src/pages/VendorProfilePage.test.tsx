@@ -955,7 +955,7 @@ describe('VendorProfilePage', () => {
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
 
-  it('shows admin-owned profile badges without rendering a broad editor before billing edit is opened', async () => {
+  it('hides safe cleanup placeholders without rendering a broad editor before billing edit is opened', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -973,8 +973,17 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage();
 
     expect(await screen.findByText('Admin view')).toBeInTheDocument();
-    expect(screen.getByText('Admin-owned configuration')).toBeInTheDocument();
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Store identity' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance Policy' })).toBeInTheDocument();
+    expect(screen.queryByText('Store contact')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Admin note' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Admin-owned configuration')).not.toBeInTheDocument();
+    expect(screen.queryByText(/not executed in Phase 4A/)).not.toBeInTheDocument();
+    expect(screen.getByText('Seller of record')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Additional seller profile fields' })).toBeInTheDocument();
+    expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Automation visibility ready' })).toBeInTheDocument();
+    expect(screen.getByText('Alerts visible')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save billing profile' })).not.toBeInTheDocument();
 
     const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });

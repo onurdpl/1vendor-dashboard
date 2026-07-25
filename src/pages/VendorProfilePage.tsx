@@ -2245,7 +2245,6 @@ export function VendorProfilePage() {
             <MetadataRow label="Display name" value={formatValue(profileVendorName, 'Vendor unavailable')} />
             <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
             <MetadataRow label="Legal name" value={isAdmin ? formatValue(billingProfile?.legalCompanyName) : 'Admin-managed billing profile'} />
-            <MetadataRow label="Store contact" value="Not modeled yet" />
             <MetadataRow label="Signed-in user" value={currentUser?.email ?? 'Unknown'} />
             <MetadataRow label="Seller of record" value="Not configured" />
           </MetadataGroup>
@@ -3571,8 +3570,8 @@ export function VendorProfilePage() {
                 <MetadataRow label="Settlement delay" value={`${financeProfile.settlementDelayDays} days`} />
                 <MetadataRow label="Settlement frequency" value={formatSettlementSchedule(financeProfile)} />
                 <MetadataRow label="Auto draft" value={formatBoolean(financeProfile.autoSettlementDraftEnabled)} />
-                <MetadataRow label="Auto approve" value={`${formatBoolean(financeProfile.autoSettlementApproveEnabled)} (not executed in Phase 4A)`} />
-                <MetadataRow label="Auto invoice" value={`${formatBoolean(financeProfile.autoSettlementInvoiceEnabled)} (not executed in Phase 4A)`} />
+                <MetadataRow label="Auto approve" value={formatBoolean(financeProfile.autoSettlementApproveEnabled)} />
+                <MetadataRow label="Auto invoice" value={formatBoolean(financeProfile.autoSettlementInvoiceEnabled)} />
                 <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
                 <MetadataRow label="Policy active" value={formatBoolean(financeProfile.active)} />
               </MetadataGroup>
@@ -4070,15 +4069,6 @@ export function VendorProfilePage() {
           </ul>
         </details>
       </OperationalSection>
-
-      {isAdmin ? (
-        <OperationalSection
-          title="Admin note"
-          description="This foundation intentionally avoids a broad editor. Use existing order/shipping or finance admin controls for supported configuration changes."
-        >
-          <StatusBadge tone="info">Admin-owned configuration</StatusBadge>
-        </OperationalSection>
-      ) : null}
         </>
       )}
 
