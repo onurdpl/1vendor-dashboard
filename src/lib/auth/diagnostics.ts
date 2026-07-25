@@ -32,9 +32,12 @@ export type AuthDiagnosticEvent = {
   route: string;
   operation: AuthDiagnosticOperation;
   flowId: string | null;
+  stage?: string;
+  outcome?: string;
   requestId: string | null;
   source: string;
   httpStatus?: number | null;
+  durationMs?: number | null;
   resultCategory?: AuthDiagnosticResultCategory;
   previousAuthState?: string | null;
   nextAuthState?: string | null;
@@ -145,8 +148,11 @@ export function printAuthDiagnosticTimeline() {
       event.timestamp,
       event.operation,
       event.flowId ? `flow=${event.flowId}` : null,
+      event.stage ? `stage=${event.stage}` : null,
       event.requestId ? `req=${event.requestId}` : null,
       event.httpStatus ? `status=${event.httpStatus}` : null,
+      typeof event.durationMs === 'number' ? `duration=${event.durationMs}ms` : null,
+      event.outcome ? `outcome=${event.outcome}` : null,
       event.resultCategory ? `result=${event.resultCategory}` : null,
       `source=${event.source}`,
     ].filter(Boolean).join(' '))

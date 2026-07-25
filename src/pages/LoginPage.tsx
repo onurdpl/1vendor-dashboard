@@ -44,8 +44,8 @@ function createAuthAttemptId() {
   return createAuthDiagnosticId('auth');
 }
 
-function formatLoginTimeoutMessage(authAttemptId: string) {
-  return `${LOGIN_TIMEOUT_MESSAGE} Reference: ${authAttemptId}`;
+function formatLoginTimeoutMessage(authFlowId: string) {
+  return `${LOGIN_TIMEOUT_MESSAGE} Reference: ${authFlowId}`;
 }
 
 function getLoginRequestDiagnostics(): {
@@ -92,9 +92,9 @@ function formatRetryWindow(seconds: number) {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
-function getLoginErrorMessage(error: unknown, input: { timeoutTriggered: boolean; responseReceived: boolean; authAttemptId: string }) {
+function getLoginErrorMessage(error: unknown, input: { timeoutTriggered: boolean; responseReceived: boolean; authFlowId: string }) {
   if (input.timeoutTriggered && !input.responseReceived) {
-    return formatLoginTimeoutMessage(input.authAttemptId);
+    return formatLoginTimeoutMessage(input.authFlowId);
   }
 
   if (error instanceof ApiError && error.status === 429) {
@@ -202,6 +202,7 @@ export function LoginPage() {
     let currentStage: 'readiness' | 'login_post' | 'post_response' = 'readiness';
     let timeoutId: number | null = null;
     const isCurrentLoginAttempt = () => activeLoginAttemptRef.current === authAttemptId;
+    const elapsedMs = () => Date.now() - startedAt;
     const startLoginPostTimeout = () => {
       timeoutId = window.setTimeout(() => {
         if (!isCurrentLoginAttempt()) {
@@ -211,10 +212,13 @@ export function LoginPage() {
         timeoutTriggered = true;
         recordAuthDiagnostic('REQUEST_ABORT', {
           flowId: authFlowId,
+          stage: currentStage,
+          outcome: 'timeout',
           requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
           source: 'LoginPage.handleSubmit.timeout',
           resultCategory: 'timeout',
           abortReason: currentStage,
+          durationMs: elapsedMs(),
         });
         abortController.abort();
       }, LOGIN_TIMEOUT_MS);
@@ -230,19 +234,25 @@ export function LoginPage() {
 
     recordAuthDiagnostic('LOGIN_SUBMIT', {
       flowId: authFlowId,
+      stage: 'submit',
+      outcome: 'started',
       requestId: loginRequestId,
       source: 'LoginPage.handleSubmit',
       resultCategory: 'started',
       cachedUserPresent: isAuthenticated(),
+      durationMs: 0,
     });
 
     try {
       if (runtimeConfig.apiMode === 'real' && runtimeConfig.appEnvironment === 'production') {
         recordAuthDiagnostic('LOGIN_REQUEST_START', {
           flowId: authFlowId,
+          stage: 'public_login_readiness',
+          outcome: 'started',
           requestId: readinessRequestId,
           source: 'LoginPage.handleSubmit.readiness',
           resultCategory: 'started',
+          durationMs: elapsedMs(),
         });
         const readiness = await probePublicLoginReadiness({
           authAttemptId,
@@ -252,10 +262,13 @@ export function LoginPage() {
         });
         recordAuthDiagnostic('LOGIN_RESPONSE', {
           flowId: authFlowId,
+          stage: 'public_login_readiness',
+          outcome: readiness.ok ? 'success' : 'failure',
           requestId: readinessRequestId,
           source: 'LoginPage.handleSubmit.readiness',
           httpStatus: readiness.status,
           resultCategory: readiness.ok ? 'success' : 'failure',
+          durationMs: readiness.elapsedMs,
         });
       }
 
@@ -263,9 +276,12 @@ export function LoginPage() {
       startLoginPostTimeout();
       recordAuthDiagnostic('LOGIN_REQUEST_START', {
         flowId: authFlowId,
+        stage: 'login_post',
+        outcome: 'started',
         requestId: loginRequestId,
         source: 'LoginPage.handleSubmit.login',
         resultCategory: 'started',
+        durationMs: elapsedMs(),
         ...getLoginRequestDiagnostics(),
       });
       const loginPromise = runtimeServices.auth.login(email, password, {
@@ -281,19 +297,25 @@ export function LoginPage() {
       if (!isCurrentLoginAttempt()) {
         recordAuthDiagnostic('STALE_RESULT_IGNORED', {
           flowId: authFlowId,
+          stage: 'login_post',
+          outcome: 'stale',
           requestId: loginRequestId,
           source: 'LoginPage.handleSubmit.staleSuccess',
           resultCategory: 'stale',
           staleResult: true,
+          durationMs: elapsedMs(),
         });
         return;
       }
 
       recordAuthDiagnostic('LOGIN_RESPONSE', {
         flowId: authFlowId,
+        stage: 'login_post',
+        outcome: 'success',
         requestId: loginRequestId,
         source: 'LoginPage.handleSubmit.login',
         resultCategory: 'success',
+        durationMs: elapsedMs(),
       });
 
       setErrorMessage(null);
@@ -307,47 +329,72 @@ export function LoginPage() {
       navigate(from, { replace: true });
       recordAuthDiagnostic('AUTH_STATE_CHANGE', {
         flowId: authFlowId,
+        stage: 'final_success',
+        outcome: 'success',
         requestId: loginRequestId,
         source: 'LoginPage.handleSubmit.navigateAfterLogin',
         resultCategory: 'success',
         nextAuthState: 'authenticated',
+        durationMs: elapsedMs(),
       });
     } catch (error) {
       if (!isCurrentLoginAttempt()) {
         recordAuthDiagnostic('STALE_RESULT_IGNORED', {
           flowId: authFlowId,
+          stage: currentStage,
+          outcome: 'stale',
           requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
           source: 'LoginPage.handleSubmit.staleFailure',
           resultCategory: 'stale',
           staleResult: true,
+          durationMs: elapsedMs(),
         });
         return;
       }
 
+      const httpStatus = error instanceof ApiError ? error.status ?? null : null;
+      const failureOutcome = timeoutTriggered
+        ? 'timeout'
+        : httpStatus === 401
+          ? 'unauthorized'
+          : httpStatus === 403
+            ? 'forbidden'
+            : 'failure';
       if (responseReceived) {
         recordAuthDiagnostic('LOGIN_RESPONSE', {
           flowId: authFlowId,
+          stage: 'post_response',
+          outcome: failureOutcome,
           requestId: loginRequestId,
           source: 'LoginPage.handleSubmit.postResponse',
-          resultCategory: 'failure',
+          httpStatus,
+          resultCategory: failureOutcome,
+          durationMs: elapsedMs(),
         });
       }
       if (!responseReceived) {
         recordAuthDiagnostic('LOGIN_RESPONSE', {
           flowId: authFlowId,
+          stage: currentStage,
+          outcome: failureOutcome,
           requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
           source: 'LoginPage.handleSubmit.login',
-          resultCategory: timeoutTriggered ? 'timeout' : 'failure',
+          httpStatus,
+          resultCategory: failureOutcome,
+          durationMs: elapsedMs(),
         });
       }
       if (!responseReceived && currentStage === 'login_post' && (timeoutTriggered || isTransportLevelLoginFailure(error))) {
         const postTransportRequestId = createAuthDiagnosticId('req');
         recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
           flowId: authFlowId,
+          stage: 'public_login_post_transport_probe',
+          outcome: 'started',
           requestId: postTransportRequestId,
           source: 'LoginPage.handleSubmit.postTransportProbe',
           resultCategory: 'started',
           timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
+          durationMs: 0,
         });
         const postTransportResult = await probePublicLoginPostTransport({
           authAttemptId,
@@ -355,24 +402,28 @@ export function LoginPage() {
           authRequestId: postTransportRequestId,
           timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
         });
+        const postTransportOutcome = postTransportResult.result === 'ready'
+          ? 'success'
+          : postTransportResult.result === 'timeout'
+            ? 'timeout'
+            : postTransportResult.result === 'network_error'
+              ? 'network_error'
+              : 'failure';
         recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
           flowId: authFlowId,
+          stage: 'public_login_post_transport_probe',
+          outcome: postTransportOutcome,
           requestId: postTransportRequestId,
           source: 'LoginPage.handleSubmit.postTransportProbe',
           httpStatus: postTransportResult.status,
-          resultCategory: postTransportResult.result === 'ready'
-            ? 'success'
-            : postTransportResult.result === 'timeout'
-              ? 'timeout'
-              : postTransportResult.result === 'network_error'
-                ? 'network_error'
-                : 'failure',
+          resultCategory: postTransportOutcome,
+          durationMs: postTransportResult.elapsedMs,
         });
         if (isCurrentLoginAttempt()) {
           setPostTransportDiagnosticMessage(getPostTransportDiagnosticMessage(postTransportResult));
         }
       }
-      setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authAttemptId }));
+      setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authFlowId }));
     } finally {
       clearLoginTimeout();
       if (isCurrentLoginAttempt()) {

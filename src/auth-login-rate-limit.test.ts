@@ -292,7 +292,7 @@ describe('auth login rate limiting', () => {
         requestId: 'login-success-request',
         method: 'POST',
         routeOptions: { url: '/auth/login' },
-        headers: { 'x-auth-attempt-id': 'auth-success123' },
+        headers: { 'x-auth-attempt-id': 'auth-success123', 'x-auth-flow-id': 'auth-success123', 'x-auth-request-id': 'req-success123' },
         body: {
           email: ' Vendor@Example.COM ',
           password: 'demo123',
@@ -307,8 +307,14 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_REQUEST_START',
         requestId: 'login-success-request',
+        flowId: 'auth-success123',
+        stage: 'login_route_entry',
+        outcome: 'started',
+        durationMs: expect.any(Number),
         authAttemptId: 'auth-success123',
-        normalizedEmail: 'vendor@example.com',
+        authFlowId: 'auth-success123',
+        authRequestId: 'req-success123',
+        emailPresent: true,
         method: 'POST',
         path: '/auth/login',
         timestamp: expect.any(String),
@@ -319,8 +325,15 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_DIAGNOSTICS',
         requestId: 'login-success-request',
+        flowId: 'auth-success123',
+        stage: 'login_complete',
+        outcome: 'success',
+        durationMs: expect.any(Number),
+        httpStatus: 200,
         authAttemptId: 'auth-success123',
-        email: 'vendor@example.com',
+        authFlowId: 'auth-success123',
+        authRequestId: 'req-success123',
+        emailPresent: true,
         success: true,
         failureStage: null,
         failureReason: null,
@@ -343,6 +356,7 @@ describe('auth login rate limiting', () => {
       'auth login diagnostics',
     );
     const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('vendor@example.com');
     expect(serializedLogs).not.toContain('demo123');
     expect(serializedLogs).not.toContain('csrf-token');
     expect(serializedLogs).not.toContain(SESSION_COOKIE_NAME);
@@ -357,7 +371,7 @@ describe('auth login rate limiting', () => {
         requestId: 'login-failure-request',
         method: 'POST',
         routeOptions: { url: '/auth/login' },
-        headers: { 'x-auth-attempt-id': 'auth-failure123' },
+        headers: { 'x-auth-attempt-id': 'auth-failure123', 'x-auth-flow-id': 'auth-failure123', 'x-auth-request-id': 'req-failure123' },
         body: {
           email: 'Vendor@Example.COM',
           password: 'wrong-password',
@@ -373,8 +387,15 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_DIAGNOSTICS',
         requestId: 'login-failure-request',
+        flowId: 'auth-failure123',
+        stage: 'login_complete',
+        outcome: 'unauthorized',
+        durationMs: expect.any(Number),
+        httpStatus: 401,
         authAttemptId: 'auth-failure123',
-        email: 'vendor@example.com',
+        authFlowId: 'auth-failure123',
+        authRequestId: 'req-failure123',
+        emailPresent: true,
         success: false,
         failureStage: 'password_verify',
         failureReason: 'invalid_password',
@@ -390,6 +411,7 @@ describe('auth login rate limiting', () => {
       'auth login diagnostics',
     );
     const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('vendor@example.com');
     expect(serializedLogs).not.toContain('wrong-password');
   });
 
@@ -484,6 +506,8 @@ describe('auth login rate limiting', () => {
         routeOptions: { url: '/auth/diagnostics/public-login-readiness' },
         headers: {
           'x-auth-attempt-id': 'auth-readiness123',
+          'x-auth-flow-id': 'auth-readiness123',
+          'x-auth-request-id': 'req-readiness123',
           'x-forwarded-proto': 'https',
         },
         protocol: 'https',
@@ -492,11 +516,20 @@ describe('auth login rate limiting', () => {
     );
 
     expect(reply.headers['X-Auth-Attempt-Id']).toBe('auth-readiness123');
+    expect(reply.headers['X-Auth-Flow-Id']).toBe('auth-readiness123');
+    expect(reply.headers['X-Auth-Request-Id']).toBe('req-readiness123');
     expect(handlers.logInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
         requestId: 'readiness-correlated-request',
+        flowId: 'auth-readiness123',
+        stage: 'public_login_readiness',
+        outcome: 'success',
+        durationMs: expect.any(Number),
+        httpStatus: 200,
         authAttemptId: 'auth-readiness123',
+        authFlowId: 'auth-readiness123',
+        authRequestId: 'req-readiness123',
         method: 'GET',
         path: '/auth/diagnostics/public-login-readiness',
         responseStatus: 200,
@@ -555,7 +588,13 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_START',
         requestId: 'transport-request',
+        flowId: 'auth-flow123',
+        stage: 'public_login_post_transport_probe',
+        outcome: 'started',
+        durationMs: 0,
         authAttemptId: 'auth-transport123',
+        authFlowId: 'auth-flow123',
+        authRequestId: 'req-transport123',
         method: 'POST',
         path: '/auth/diagnostics/public-login-transport',
       }),
@@ -565,7 +604,14 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
         requestId: 'transport-request',
+        flowId: 'auth-flow123',
+        stage: 'public_login_post_transport_probe',
+        outcome: 'success',
+        durationMs: expect.any(Number),
+        httpStatus: 200,
         authAttemptId: 'auth-transport123',
+        authFlowId: 'auth-flow123',
+        authRequestId: 'req-transport123',
         responseStatus: 200,
         payloadAccepted: true,
       }),
@@ -576,6 +622,7 @@ describe('auth login rate limiting', () => {
     expect(serializedLogs).not.toContain('sporgym_session=');
     expect(serializedLogs).not.toContain('csrf-token');
     expect(serializedLogs).not.toContain('password');
+    expect(serializedLogs).not.toContain('vendor@example.com');
   });
 
   it('rejects unexpected or oversized public login POST transport probe payloads', async () => {

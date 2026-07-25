@@ -162,14 +162,23 @@ export async function login(
   options: AuthCorrelationOptions & { signal?: AbortSignal } = {},
 ) {
   const startedAt = Date.now();
-  logAuthClientInfo('AUTH_LOGIN_START', { authAttemptId: options.authAttemptId ?? null });
   const authFlowId = options.authFlowId ?? options.authAttemptId ?? createAuthDiagnosticId('auth');
   const authRequestId = options.authRequestId ?? createAuthDiagnosticId('req');
+  logAuthClientInfo('AUTH_LOGIN_START', {
+    authAttemptId: options.authAttemptId ?? null,
+    flowId: authFlowId,
+    stage: 'login_post',
+    outcome: 'started',
+    durationMs: 0,
+  });
   recordAuthDiagnostic('LOGIN_REQUEST_START', {
     flowId: authFlowId,
+    stage: 'login_post',
+    outcome: 'started',
     requestId: authRequestId,
     source: 'backend-auth.login',
     resultCategory: 'started',
+    durationMs: 0,
   });
 
   try {
@@ -185,31 +194,46 @@ export async function login(
     setCsrfToken(response.csrfToken);
     recordAuthDiagnostic('LOGIN_RESPONSE', {
       flowId: authFlowId,
+      stage: 'login_post',
+      outcome: 'success',
       requestId: authRequestId,
       source: 'backend-auth.login',
       resultCategory: 'success',
+      durationMs: Date.now() - startedAt,
     });
     logAuthClientInfo('AUTH_LOGIN_SUCCESS', {
       authAttemptId: options.authAttemptId ?? null,
+      flowId: authFlowId,
+      stage: 'login_post',
+      outcome: 'success',
       durationMs: Date.now() - startedAt,
     });
     return response;
   } catch (error) {
+    const httpStatus = error instanceof ApiError ? error.status ?? null : null;
+    const outcome = error instanceof ApiError && error.status === 401
+      ? 'unauthorized'
+      : error instanceof ApiError && error.status === 403
+        ? 'forbidden'
+        : options.signal?.aborted
+          ? 'aborted'
+          : 'failure';
     recordAuthDiagnostic('LOGIN_RESPONSE', {
       flowId: authFlowId,
+      stage: 'login_post',
+      outcome,
       requestId: authRequestId,
       source: 'backend-auth.login',
-      httpStatus: error instanceof ApiError ? error.status ?? null : null,
-      resultCategory: error instanceof ApiError && error.status === 401
-        ? 'unauthorized'
-        : error instanceof ApiError && error.status === 403
-          ? 'forbidden'
-          : options.signal?.aborted
-            ? 'aborted'
-            : 'failure',
+      httpStatus,
+      durationMs: Date.now() - startedAt,
+      resultCategory: outcome,
     });
     logAuthClientWarn('AUTH_LOGIN_FAILURE', {
       authAttemptId: options.authAttemptId ?? null,
+      flowId: authFlowId,
+      stage: 'login_post',
+      outcome,
+      httpStatus,
       durationMs: Date.now() - startedAt,
       ...getErrorDiagnostics(error),
     });

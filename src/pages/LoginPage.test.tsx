@@ -71,6 +71,21 @@ function fillAndSubmitLogin() {
   fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 }
 
+function getAuthDiagnosticDebugEvents(debugSpy: ReturnType<typeof vi.spyOn>) {
+  return debugSpy.mock.calls
+    .map((call) => call[1])
+    .filter((entry): entry is {
+      operation?: string;
+      flowId?: string;
+      stage?: string;
+      outcome?: string;
+      resultCategory?: string;
+      httpStatus?: number | null;
+      durationMs?: number | null;
+      source?: string;
+    } => Boolean(entry) && typeof entry === 'object');
+}
+
 describe('LoginPage expired session flow', () => {
   const originalRuntimeConfig = {
     apiMode: runtimeConfig.apiMode,
@@ -243,26 +258,26 @@ describe('LoginPage expired session flow', () => {
     fillAndSubmitLogin();
 
     expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
-    const events = debugSpy.mock.calls
-      .map((call) => call[1])
-      .filter((entry): entry is { operation?: string; flowId?: string } => Boolean(entry) && typeof entry === 'object');
+    const events = getAuthDiagnosticDebugEvents(debugSpy);
+    const flowIds = new Set(events.map((event) => event.flowId).filter(Boolean));
 
     expect(events).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ operation: 'LOGIN_SUBMIT', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ operation: 'LOGIN_REQUEST_START', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ operation: 'LOGIN_RESPONSE', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i), resultCategory: 'success' }),
+        expect.objectContaining({ operation: 'LOGIN_SUBMIT', stage: 'submit', outcome: 'started', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'LOGIN_REQUEST_START', stage: 'login_post', outcome: 'started', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'LOGIN_RESPONSE', stage: 'login_post', outcome: 'success', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i), resultCategory: 'success', durationMs: expect.any(Number) }),
         expect.objectContaining({ operation: 'CACHE_USER_SET', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
-        expect.objectContaining({ operation: 'AUTH_STATE_CHANGE', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'AUTH_STATE_CHANGE', stage: 'final_success', outcome: 'success', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
       ]),
     );
+    expect(flowIds.size).toBe(1);
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
 
     debugSpy.mockRestore();
   });
 
-  it('sends the same auth attempt id to readiness and login requests', async () => {
+  it('uses one submission flow id across readiness and login requests', async () => {
     Object.assign(runtimeConfig, {
       apiMode: 'real',
       apiBaseUrl: 'https://api.example.com',
@@ -277,6 +292,7 @@ describe('LoginPage expired session flow', () => {
     expect(probePublicLoginReadinessMock).toHaveBeenCalledWith(
       expect.objectContaining({
         authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        authFlowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
         timeoutMs: 3_000,
       }),
     );
@@ -285,13 +301,18 @@ describe('LoginPage expired session flow', () => {
       'demo123',
       expect.objectContaining({
         authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        authFlowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
         signal: expect.any(AbortSignal),
       }),
     );
 
     const readinessAuthAttemptId = probePublicLoginReadinessMock.mock.calls[0][0].authAttemptId;
+    const readinessAuthFlowId = probePublicLoginReadinessMock.mock.calls[0][0].authFlowId;
     const loginAuthAttemptId = (loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId;
+    const loginAuthFlowId = (loginMock.mock.calls[0][2] as { authFlowId?: string }).authFlowId;
     expect(readinessAuthAttemptId).toBe(loginAuthAttemptId);
+    expect(readinessAuthFlowId).toBe(loginAuthFlowId);
+    expect(readinessAuthFlowId).toBe(loginAuthAttemptId);
   });
 
   it('clears the login timeout after a successful backend response', async () => {
@@ -394,7 +415,9 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('clears an existing timeout error when a new login attempt succeeds', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
     vi.useFakeTimers();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     loginMock
       .mockImplementationOnce(
         (_email: string, _password: string, options?: { signal?: AbortSignal }) =>
@@ -423,6 +446,7 @@ describe('LoginPage expired session flow', () => {
     expect(
       screen.getByText(/^Sign-in is taking longer than expected\. Please try again\. Reference: auth-[a-z0-9]{10}$/i),
     ).toBeInTheDocument();
+    const firstReference = screen.getByText(/^Sign-in is taking longer than expected/i).textContent?.match(/Reference: (auth-[a-z0-9]{10})/i)?.[1];
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
@@ -434,6 +458,22 @@ describe('LoginPage expired session flow', () => {
     expect(screen.getByTestId('current-route')).toHaveTextContent('/');
     expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
     expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
+
+    const events = getAuthDiagnosticDebugEvents(debugSpy);
+    const submittedFlowIds = events
+      .filter((event) => event.operation === 'LOGIN_SUBMIT')
+      .map((event) => event.flowId);
+    expect(submittedFlowIds).toHaveLength(2);
+    expect(firstReference).toBe(submittedFlowIds[0]);
+    expect(submittedFlowIds[0]).not.toBe(submittedFlowIds[1]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ flowId: firstReference, operation: 'LOGIN_RESPONSE', outcome: 'timeout' }),
+        expect.objectContaining({ flowId: firstReference, operation: 'LOGIN_POST_TRANSPORT_PROBE', outcome: 'success' }),
+        expect.objectContaining({ flowId: submittedFlowIds[1], operation: 'AUTH_STATE_CHANGE', outcome: 'success' }),
+      ]),
+    );
+    debugSpy.mockRestore();
   });
 
   it('does not report a timeout when local session setup fails after backend success', async () => {
@@ -502,12 +542,26 @@ describe('LoginPage expired session flow', () => {
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
       expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
     );
+    const reference = screen.getByText(/^Sign-in is taking longer than expected/i).textContent?.match(/Reference: (auth-[a-z0-9]{10})/i)?.[1];
+    const loginOptions = loginMock.mock.calls[0][2] as { authAttemptId?: string; authFlowId?: string };
+    const events = getAuthDiagnosticDebugEvents(debugSpy);
+    expect(reference).toBe(loginOptions.authFlowId);
+    expect(loginOptions.authAttemptId).toBe(loginOptions.authFlowId);
     expect(debugSpy.mock.calls.map((call) => (call[1] as { operation?: string })?.operation)).toEqual(
       expect.arrayContaining(['REQUEST_ABORT', 'LOGIN_RESPONSE', 'LOGIN_POST_TRANSPORT_PROBE']),
     );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ flowId: reference, operation: 'REQUEST_ABORT', stage: 'login_post', outcome: 'timeout' }),
+        expect.objectContaining({ flowId: reference, operation: 'LOGIN_RESPONSE', stage: 'login_post', outcome: 'timeout' }),
+        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'public_login_post_transport_probe', outcome: 'started' }),
+        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'public_login_post_transport_probe', outcome: 'success', httpStatus: 200, durationMs: 20 }),
+      ]),
+    );
     expect(probePublicLoginPostTransportMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        authAttemptId: reference,
+        authFlowId: reference,
         timeoutMs: 5_000,
       }),
     );
@@ -532,6 +586,8 @@ describe('LoginPage expired session flow', () => {
   });
 
   it('does not run the POST transport probe after HTTP 401 or successful login', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     loginMock.mockRejectedValueOnce(new ApiError('Invalid email or password.', 'unauthorized', { status: 401 }));
     renderStandaloneLogin();
 
@@ -539,6 +595,17 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
     expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(getAuthDiagnosticDebugEvents(debugSpy)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: 'LOGIN_RESPONSE',
+          stage: 'login_post',
+          outcome: 'unauthorized',
+          httpStatus: 401,
+          flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        }),
+      ]),
+    );
     cleanup();
 
     loginMock.mockResolvedValueOnce({
@@ -551,5 +618,18 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
     expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(getAuthDiagnosticDebugEvents(debugSpy)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: 'AUTH_STATE_CHANGE',
+          stage: 'final_success',
+          outcome: 'success',
+          flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+    debugSpy.mockRestore();
   });
 });

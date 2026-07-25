@@ -91,3 +91,9 @@ Interpretation:
 - login fails and the transport probe also times out or has a network failure: browser/front-end origin/Render proxy POST transport failure is strongly supported.
 
 Remove this temporary diagnostic after the production auth transport root cause is confirmed and no longer needs field verification.
+
+## Auth flow Reference correlation
+
+When the login screen shows a retryable error with a `Reference: auth-...` value, that reference is the auth flow ID for that single login submission. Search frontend diagnostics and backend logs for the exact value as `flowId`.
+
+The same `flowId` is sent on the public login readiness probe, login POST, optional safe POST transport probe, backend auth route entry, backend auth completion/failure, and frontend final success/error state. Logs include stage, outcome, duration, and HTTP status when available. They must not include passwords, email values, cookies, tokens, authorization headers, CSRF values, or full request bodies.

@@ -57,7 +57,8 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     }
     logAuthLoginRequestStart(app, request, {
       authAttemptId,
-      normalizedEmail,
+      emailPresent: Boolean(normalizedEmail),
+      routeStartedAt,
     });
 
     const body = request.body as Partial<Record<keyof LoginBody, unknown>> | undefined;
@@ -216,9 +217,16 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     app.log.info(
       {
         routeName: 'POST /auth/login',
+        flowId: authFlowId ?? authAttemptId,
+        stage: 'login_complete',
+        outcome: 'success',
+        durationMs: timing.routeHandlerMs,
+        httpStatus: 200,
         statusCode: 200,
         success: true,
         authAttemptId,
+        authFlowId,
+        authRequestId,
         role: loginResult.user.role,
         vendorAccessCount: loginResult.user.vendorAccess.length,
         responseBytes,
@@ -251,9 +259,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   });
 
   app.get('/auth/diagnostics/public-login-readiness', async (request, reply) => {
+    const routeStartedAt = process.hrtime.bigint();
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
     const authFlowId = normalizeAuthAttemptId(request.headers['x-auth-flow-id']);
     const authRequestId = normalizeAuthAttemptId(request.headers['x-auth-request-id']);
+    const flowId = authFlowId ?? authAttemptId;
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
@@ -282,6 +292,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         {
           event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
           requestId: request.requestId ?? request.id ?? null,
+          flowId,
+          stage: 'public_login_readiness',
+          outcome: 'success',
+          durationMs: elapsedMs(routeStartedAt),
+          httpStatus: 200,
           authAttemptId,
           authFlowId,
           authRequestId,
@@ -314,6 +329,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       {
         event: 'AUTH_LOGIN_READINESS_DIAGNOSTICS',
         requestId: request.requestId ?? request.id ?? null,
+        flowId,
+        stage: 'public_login_readiness',
+        outcome: 'success',
+        durationMs: elapsedMs(routeStartedAt),
+        httpStatus: 200,
         authAttemptId,
         authFlowId,
         authRequestId,
@@ -333,10 +353,12 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   });
 
   app.post<{ Body: LoginPostTransportProbeBody }>('/auth/diagnostics/public-login-transport', async (request, reply) => {
+    const routeStartedAt = process.hrtime.bigint();
     const requestReceivedAt = new Date().toISOString();
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
     const authFlowId = normalizeAuthAttemptId(request.headers['x-auth-flow-id']);
     const authRequestId = normalizeAuthAttemptId(request.headers['x-auth-request-id']);
+    const flowId = authFlowId ?? authAttemptId;
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
@@ -351,6 +373,10 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       {
         event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_START',
         requestId: request.requestId ?? request.id ?? null,
+        flowId,
+        stage: 'public_login_post_transport_probe',
+        outcome: 'started',
+        durationMs: 0,
         authAttemptId,
         authFlowId,
         authRequestId,
@@ -377,6 +403,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         {
           event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
           requestId: request.requestId ?? request.id ?? null,
+          flowId,
+          stage: 'public_login_post_transport_probe',
+          outcome: 'failure',
+          durationMs: elapsedMs(routeStartedAt),
+          httpStatus: 400,
           authAttemptId,
           authFlowId,
           authRequestId,
@@ -399,6 +430,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       {
         event: 'AUTH_LOGIN_POST_TRANSPORT_PROBE_COMPLETE',
         requestId: request.requestId ?? request.id ?? null,
+        flowId,
+        stage: 'public_login_post_transport_probe',
+        outcome: 'success',
+        durationMs: elapsedMs(routeStartedAt),
+        httpStatus: 200,
         authAttemptId,
         authFlowId,
         authRequestId,
@@ -601,17 +637,24 @@ function logAuthLoginRequestStart(
   },
   input: {
     authAttemptId: string | null;
-    normalizedEmail: string | null;
+    emailPresent: boolean;
+    routeStartedAt: bigint;
   },
 ) {
+  const authFlowId = normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']);
+  const flowId = authFlowId ?? input.authAttemptId;
   app.log.info(
     {
       event: 'AUTH_LOGIN_REQUEST_START',
       requestId: request.requestId ?? request.id ?? null,
+      flowId,
+      stage: 'login_route_entry',
+      outcome: 'started',
+      durationMs: elapsedMs(input.routeStartedAt),
       authAttemptId: input.authAttemptId,
-      authFlowId: normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']),
+      authFlowId,
       authRequestId: normalizeAuthAttemptId(request.headers?.['x-auth-request-id']),
-      normalizedEmail: input.normalizedEmail,
+      emailPresent: input.emailPresent,
       method: request.method ?? 'POST',
       path: request.routeOptions?.url ?? request.url ?? '/auth/login',
       timestamp: new Date().toISOString(),
@@ -644,14 +687,22 @@ function logAuthLoginDiagnostics(
     csrfTokenGenerationAttempted?: boolean;
   },
 ) {
+  const authAttemptId = normalizeAuthAttemptId(request.headers?.['x-auth-attempt-id']);
+  const authFlowId = normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']);
+  const totalDurationMs = elapsedMs(input.routeStartedAt);
   app.log.info(
     {
       event: 'AUTH_LOGIN_DIAGNOSTICS',
       requestId: request.requestId ?? request.id ?? null,
-      authAttemptId: normalizeAuthAttemptId(request.headers?.['x-auth-attempt-id']),
-      authFlowId: normalizeAuthAttemptId(request.headers?.['x-auth-flow-id']),
+      flowId: authFlowId ?? authAttemptId,
+      stage: 'login_complete',
+      outcome: getAuthLoginOutcome(input.success, input.responseStatus),
+      durationMs: totalDurationMs,
+      httpStatus: input.responseStatus,
+      authAttemptId,
+      authFlowId,
       authRequestId: normalizeAuthAttemptId(request.headers?.['x-auth-request-id']),
-      email: input.email,
+      emailPresent: Boolean(input.email),
       success: input.success,
       requestReceivedAt: input.requestReceivedAt ?? null,
       routeEnteredAt: input.routeEnteredAt ?? null,
@@ -660,7 +711,7 @@ function logAuthLoginDiagnostics(
       validationDurationMs: input.validationDurationMs ?? null,
       failureStage: input.failureStage,
       failureReason: input.failureReason,
-      totalDurationMs: elapsedMs(input.routeStartedAt),
+      totalDurationMs,
       userLookupDurationMs: input.userLookupDurationMs ?? null,
       passwordVerifyDurationMs: input.passwordVerifyDurationMs ?? null,
       tokenIssueDurationMs: input.tokenIssueDurationMs ?? null,
@@ -677,6 +728,26 @@ function logAuthLoginDiagnostics(
 
 function elapsedMs(startedAt: bigint, endedAt: bigint = process.hrtime.bigint()) {
   return Math.max(0, Math.round((Number(endedAt - startedAt) / 1_000_000) * 10) / 10);
+}
+
+function getAuthLoginOutcome(success: boolean, responseStatus: number) {
+  if (success) {
+    return 'success';
+  }
+  if (responseStatus === 401) {
+    return 'unauthorized';
+  }
+  if (responseStatus === 403) {
+    return 'forbidden';
+  }
+  if (responseStatus === 429) {
+    return 'rate_limited';
+  }
+  if (responseStatus === 400) {
+    return 'validation_error';
+  }
+
+  return 'failure';
 }
 
 function getJwtMaxAgeSeconds(token: string) {
