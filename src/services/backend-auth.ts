@@ -67,12 +67,29 @@ export type PublicLoginPostTransportResult =
       result: 'ready';
       status: number;
       elapsedMs: number;
+      pathMode?: LoginTransportProbePathMode;
     }
   | {
-      result: 'timeout' | 'network_error' | 'http_error' | 'invalid_response';
+      result: 'timeout' | 'network_error' | 'http_error' | 'invalid_response' | 'not_configured';
       status: number | null;
       elapsedMs: number;
+      pathMode?: LoginTransportProbePathMode;
     };
+
+export type LoginTransportProbePathMode = 'same_origin_api' | 'direct_backend';
+
+export type DualPathTransportDiagnosticInterpretation =
+  | 'same_origin_path_suspected'
+  | 'shared_transport_failure'
+  | 'general_post_transport_ready'
+  | 'inconclusive'
+  | 'direct_probe_not_configured';
+
+export type DualPathTransportDiagnosticResult = {
+  sameOrigin: PublicLoginPostTransportResult;
+  directBackend: PublicLoginPostTransportResult;
+  interpretation: DualPathTransportDiagnosticInterpretation;
+};
 
 function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
@@ -142,6 +159,47 @@ function buildAuthCorrelationHeaders(options: AuthCorrelationOptions) {
   }
 
   return Object.keys(headers).length ? headers : undefined;
+}
+
+function classifyProbeOutcome(result: PublicLoginPostTransportResult) {
+  if (result.result === 'ready') {
+    return 'success';
+  }
+  if (result.result === 'timeout') {
+    return 'timeout';
+  }
+  if (result.result === 'network_error') {
+    return 'network_error';
+  }
+  if (result.result === 'not_configured') {
+    return 'not_configured';
+  }
+
+  return 'failure';
+}
+
+function isTransportFailure(result: PublicLoginPostTransportResult) {
+  return result.result === 'timeout' || result.result === 'network_error';
+}
+
+export function interpretDualPathTransportDiagnostic(
+  sameOrigin: PublicLoginPostTransportResult,
+  directBackend: PublicLoginPostTransportResult,
+): DualPathTransportDiagnosticInterpretation {
+  if (directBackend.result === 'not_configured') {
+    return 'direct_probe_not_configured';
+  }
+  if (isTransportFailure(sameOrigin) && directBackend.result === 'ready') {
+    return 'same_origin_path_suspected';
+  }
+  if (isTransportFailure(sameOrigin) && isTransportFailure(directBackend)) {
+    return 'shared_transport_failure';
+  }
+  if (sameOrigin.result === 'ready' && directBackend.result === 'ready') {
+    return 'general_post_transport_ready';
+  }
+
+  return 'inconclusive';
 }
 
 function logAuthClientWarn(event: string, details: Record<string, unknown> = {}) {
@@ -323,6 +381,7 @@ export async function probePublicLoginPostTransport(
         result: 'http_error',
         status: response.status,
         elapsedMs,
+        pathMode: 'same_origin_api',
       };
     }
 
@@ -333,18 +392,21 @@ export async function probePublicLoginPostTransport(
           result: 'ready',
           status: response.status,
           elapsedMs,
+          pathMode: 'same_origin_api',
         };
       }
       return {
         result: 'invalid_response',
         status: response.status,
         elapsedMs,
+        pathMode: 'same_origin_api',
       };
     } catch {
       return {
         result: 'invalid_response',
         status: response.status,
         elapsedMs,
+        pathMode: 'same_origin_api',
       };
     }
   } catch {
@@ -352,10 +414,168 @@ export async function probePublicLoginPostTransport(
       result: didTimeout ? 'timeout' : 'network_error',
       status: null,
       elapsedMs: Date.now() - startedAt,
+      pathMode: 'same_origin_api',
     };
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+export async function probeDirectBackendLoginPostTransport(
+  options: AuthCorrelationOptions & { timeoutMs?: number } = {},
+): Promise<PublicLoginPostTransportResult> {
+  const diagnosticBackendOrigin = runtimeConfig.diagnosticBackendOrigin;
+  if (!diagnosticBackendOrigin) {
+    return {
+      result: 'not_configured',
+      status: null,
+      elapsedMs: 0,
+      pathMode: 'direct_backend',
+    };
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timeout = window.setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, options.timeoutMs ?? 5_000);
+
+  try {
+    const response = await fetch(`${diagnosticBackendOrigin}/auth/diagnostics/public-login-transport`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthCorrelationHeaders(options),
+      },
+      body: JSON.stringify({ probe: 'login-post-transport' }),
+      signal: controller.signal,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      return {
+        result: 'http_error',
+        status: response.status,
+        elapsedMs,
+        pathMode: 'direct_backend',
+      };
+    }
+
+    try {
+      const payload = await response.json() as { ok?: unknown; status?: unknown };
+      if (payload.ok === true && payload.status === 'post_transport_ready') {
+        return {
+          result: 'ready',
+          status: response.status,
+          elapsedMs,
+          pathMode: 'direct_backend',
+        };
+      }
+      return {
+        result: 'invalid_response',
+        status: response.status,
+        elapsedMs,
+        pathMode: 'direct_backend',
+      };
+    } catch {
+      return {
+        result: 'invalid_response',
+        status: response.status,
+        elapsedMs,
+        pathMode: 'direct_backend',
+      };
+    }
+  } catch {
+    return {
+      result: didTimeout ? 'timeout' : 'network_error',
+      status: null,
+      elapsedMs: Date.now() - startedAt,
+      pathMode: 'direct_backend',
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function probeDualPathLoginPostTransport(
+  options: AuthCorrelationOptions & { timeoutMs?: number } = {},
+): Promise<DualPathTransportDiagnosticResult> {
+  const authFlowId = options.authFlowId ?? options.authAttemptId ?? createAuthDiagnosticId('auth');
+  const sameOriginRequestId = options.authRequestId ?? createAuthDiagnosticId('req');
+  const directBackendRequestId = createAuthDiagnosticId('req');
+  const startedAt = Date.now();
+
+  recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+    flowId: authFlowId,
+    stage: 'login_transport_dual_probe_start',
+    outcome: 'started',
+    requestId: sameOriginRequestId,
+    source: 'backend-auth.probeDualPathLoginPostTransport',
+    resultCategory: 'started',
+    method: 'POST',
+    timeoutMs: options.timeoutMs ?? 5_000,
+    durationMs: 0,
+  });
+
+  const [sameOrigin, directBackend] = await Promise.all([
+    probePublicLoginPostTransport({
+      authAttemptId: options.authAttemptId,
+      authFlowId,
+      authRequestId: sameOriginRequestId,
+      timeoutMs: options.timeoutMs,
+    }),
+    probeDirectBackendLoginPostTransport({
+      authAttemptId: options.authAttemptId,
+      authFlowId,
+      authRequestId: directBackendRequestId,
+      timeoutMs: options.timeoutMs,
+    }),
+  ]);
+  const interpretation = interpretDualPathTransportDiagnostic(sameOrigin, directBackend);
+
+  recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+    flowId: authFlowId,
+    stage: 'login_transport_probe_same_origin_complete',
+    pathMode: 'same_origin_api',
+    method: 'POST',
+    outcome: classifyProbeOutcome(sameOrigin),
+    requestId: sameOriginRequestId,
+    source: 'backend-auth.probeDualPathLoginPostTransport.sameOrigin',
+    httpStatus: sameOrigin.status,
+    resultCategory: classifyProbeOutcome(sameOrigin),
+    durationMs: sameOrigin.elapsedMs,
+  });
+  recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+    flowId: authFlowId,
+    stage: 'login_transport_probe_direct_backend_complete',
+    pathMode: 'direct_backend',
+    method: 'POST',
+    outcome: classifyProbeOutcome(directBackend),
+    requestId: directBackendRequestId,
+    source: 'backend-auth.probeDualPathLoginPostTransport.directBackend',
+    httpStatus: directBackend.status,
+    resultCategory: classifyProbeOutcome(directBackend),
+    durationMs: directBackend.elapsedMs,
+  });
+  recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
+    flowId: authFlowId,
+    stage: 'login_transport_dual_probe_complete',
+    outcome: interpretation,
+    requestId: sameOriginRequestId,
+    source: 'backend-auth.probeDualPathLoginPostTransport.complete',
+    resultCategory: interpretation === 'general_post_transport_ready' ? 'success' : 'unknown',
+    method: 'POST',
+    durationMs: Date.now() - startedAt,
+  });
+
+  return {
+    sameOrigin,
+    directBackend,
+    interpretation,
+  };
 }
 
 export async function me(options: AuthCorrelationOptions & { signal?: AbortSignal } = {}) {

@@ -85,10 +85,26 @@ The request body is fixed and contains no credentials:
 
 The endpoint is public, does not authenticate, does not query the database, does not create a session, and does not set cookies. The frontend invokes it only after a login request fails before receiving an HTTP response, such as a login timeout or network-level failure.
 
+The frontend can compare two safe POST paths when `VITE_DIAGNOSTIC_BACKEND_ORIGIN` is configured to an absolute HTTPS backend origin:
+
+```txt
+Same-origin path: /api/auth/diagnostics/public-login-transport
+Direct backend path: <VITE_DIAGNOSTIC_BACKEND_ORIGIN>/auth/diagnostics/public-login-transport
+```
+
+The direct backend probe uses `credentials: omit`, sends only the fixed diagnostic JSON body, and reuses the same auth `flowId` as the failed login attempt. If `VITE_DIAGNOSTIC_BACKEND_ORIGIN` is missing or invalid, the direct result is reported as `not_configured`; the frontend does not guess a backend URL.
+
 Interpretation:
 
-- login fails and the transport probe succeeds: the general JSON POST path through `/api` works; investigate `/auth/login` route-specific or intermittent behavior next.
-- login fails and the transport probe also times out or has a network failure: browser/front-end origin/Render proxy POST transport failure is strongly supported.
+- same-origin `/api` times out or has a network failure, direct backend is ready: the frontend `/api` rewrite/proxy path is the leading suspect, but not proven conclusively.
+- both same-origin `/api` and direct backend time out or have network failures: the failure is not isolated to `/api`; browser, device, network, DNS, TLS, Render edge, or shared transport remains likely.
+- both safe POST paths are ready: general JSON POST transport works; investigate `/auth/login` route-specific or intermittent behavior next.
+- same-origin `/api` is ready and direct backend fails: the result is inconclusive because the direct cross-origin path differs from the real login transport path.
+
+Limitations:
+
+- The two paths use different origins, DNS, TLS sessions, connection pools, CORS behavior, and cookie/credential modes.
+- A safe POST probe result narrows the failure domain; it does not prove real login correctness.
 
 Remove this temporary diagnostic after the production auth transport root cause is confirmed and no longer needs field verification.
 

@@ -3,6 +3,7 @@ type ApiMode = 'mock' | 'real';
 type RuntimeEnv = ImportMeta['env'] & {
   VITE_API_MODE?: string;
   VITE_API_BASE_URL?: string;
+  VITE_DIAGNOSTIC_BACKEND_ORIGIN?: string;
   VITE_APP_ENV?: string;
   VITE_APP_VERSION?: string;
   VITE_BUILD_TIMESTAMP?: string;
@@ -44,6 +45,24 @@ function resolveApiBaseOrigin(apiBaseUrl: string) {
     return new URL(apiBaseUrl, fallbackOrigin).origin;
   } catch {
     return 'unavailable';
+  }
+}
+
+function resolveDiagnosticBackendOrigin() {
+  const configured = env.VITE_DIAGNOSTIC_BACKEND_ORIGIN?.trim();
+  if (!configured) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(configured);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+      return null;
+    }
+
+    return parsed.origin;
+  } catch {
+    return null;
   }
 }
 
@@ -89,12 +108,14 @@ assertProductionApiMode();
 const apiMode = resolveApiMode();
 const apiBaseUrl = resolveApiBaseUrl(apiMode);
 const apiBaseOrigin = resolveApiBaseOrigin(apiBaseUrl);
+const diagnosticBackendOrigin = resolveDiagnosticBackendOrigin();
 const gitCommit = env.VITE_GIT_COMMIT?.trim() ? env.VITE_GIT_COMMIT.trim().slice(0, 12) : null;
 
 export const runtimeConfig = {
   apiMode,
   apiBaseUrl,
   apiBaseOrigin,
+  diagnosticBackendOrigin,
   appEnvironment: env.VITE_APP_ENV?.trim() || env.MODE || 'development',
   appVersion: env.VITE_APP_VERSION?.trim() || '0.1.0',
   buildTimestamp: env.VITE_BUILD_TIMESTAMP?.trim() || null,

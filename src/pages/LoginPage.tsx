@@ -17,8 +17,9 @@ import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
 import {
-  probePublicLoginPostTransport,
+  probeDualPathLoginPostTransport,
   probePublicLoginReadiness,
+  type DualPathTransportDiagnosticResult,
   type PublicLoginPostTransportResult,
 } from '../services/backend-auth';
 import { runtimeServices } from '../services/runtime-services';
@@ -115,21 +116,50 @@ function isTransportLevelLoginFailure(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-function getPostTransportDiagnosticMessage(result: PublicLoginPostTransportResult) {
+function formatPostTransportProbeResult(result: PublicLoginPostTransportResult) {
   if (result.result === 'ready') {
-    return 'POST transport diagnostic: Ready';
+    return 'Ready';
   }
   if (result.result === 'timeout') {
-    return 'POST transport diagnostic: Timed out';
+    return 'Timed out';
   }
   if (result.result === 'http_error') {
-    return `POST transport diagnostic: HTTP ${result.status ?? 'error'}`;
+    return `HTTP ${result.status ?? 'error'}`;
   }
   if (result.result === 'network_error') {
-    return 'POST transport diagnostic: Network error';
+    return 'Network error';
+  }
+  if (result.result === 'not_configured') {
+    return 'Not configured';
   }
 
-  return 'POST transport diagnostic: Invalid response';
+  return 'Invalid response';
+}
+
+function getPostTransportDiagnosticInterpretation(result: DualPathTransportDiagnosticResult) {
+  if (result.interpretation === 'same_origin_path_suspected') {
+    return 'Leading suspect: frontend /api transport path';
+  }
+  if (result.interpretation === 'shared_transport_failure') {
+    return 'Leading suspect: shared browser/network/backend-origin transport';
+  }
+  if (result.interpretation === 'general_post_transport_ready') {
+    return 'Both safe POST paths work; login route or intermittent behavior remains possible';
+  }
+  if (result.interpretation === 'direct_probe_not_configured') {
+    return 'Direct backend probe is not configured';
+  }
+
+  return 'Result inconclusive';
+}
+
+function getPostTransportDiagnosticMessage(result: DualPathTransportDiagnosticResult) {
+  return [
+    'POST transport:',
+    `Same-origin /api: ${formatPostTransportProbeResult(result.sameOrigin)}`,
+    `Direct backend: ${formatPostTransportProbeResult(result.directBackend)}`,
+    getPostTransportDiagnosticInterpretation(result),
+  ].join(' ');
 }
 
 function buildRouteFromLocationState(from: LoginRedirectState['from']) {
@@ -388,7 +418,7 @@ export function LoginPage() {
         const postTransportRequestId = createAuthDiagnosticId('req');
         recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
           flowId: authFlowId,
-          stage: 'public_login_post_transport_probe',
+          stage: 'login_transport_dual_probe_start',
           outcome: 'started',
           requestId: postTransportRequestId,
           source: 'LoginPage.handleSubmit.postTransportProbe',
@@ -396,28 +426,20 @@ export function LoginPage() {
           timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
           durationMs: 0,
         });
-        const postTransportResult = await probePublicLoginPostTransport({
+        const postTransportResult = await probeDualPathLoginPostTransport({
           authAttemptId,
           authFlowId,
           authRequestId: postTransportRequestId,
           timeoutMs: LOGIN_POST_TRANSPORT_PROBE_TIMEOUT_MS,
         });
-        const postTransportOutcome = postTransportResult.result === 'ready'
-          ? 'success'
-          : postTransportResult.result === 'timeout'
-            ? 'timeout'
-            : postTransportResult.result === 'network_error'
-              ? 'network_error'
-              : 'failure';
         recordAuthDiagnostic('LOGIN_POST_TRANSPORT_PROBE', {
           flowId: authFlowId,
-          stage: 'public_login_post_transport_probe',
-          outcome: postTransportOutcome,
+          stage: 'login_transport_dual_probe_complete',
+          outcome: postTransportResult.interpretation,
           requestId: postTransportRequestId,
           source: 'LoginPage.handleSubmit.postTransportProbe',
-          httpStatus: postTransportResult.status,
-          resultCategory: postTransportOutcome,
-          durationMs: postTransportResult.elapsedMs,
+          resultCategory: 'unknown',
+          durationMs: Math.max(postTransportResult.sameOrigin.elapsedMs, postTransportResult.directBackend.elapsedMs),
         });
         if (isCurrentLoginAttempt()) {
           setPostTransportDiagnosticMessage(getPostTransportDiagnosticMessage(postTransportResult));

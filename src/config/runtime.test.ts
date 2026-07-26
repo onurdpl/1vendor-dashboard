@@ -25,6 +25,7 @@ describe('runtime configuration diagnostics', () => {
       apiMode: 'real',
       apiBaseUrl: 'https://backend.example.com/api',
       apiBaseOrigin: 'https://backend.example.com',
+      diagnosticBackendOrigin: null,
       appEnvironment: 'production',
       appVersion: '1.2.3',
       buildTimestamp: '2026-05-17T10:00:00.000Z',
@@ -32,6 +33,27 @@ describe('runtime configuration diagnostics', () => {
       startupIssues: [],
     });
     expect(JSON.stringify(runtimeConfig)).not.toContain('Bearer');
+  });
+
+  it('accepts a diagnostic backend origin only when it is an absolute HTTPS origin', async () => {
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    vi.stubEnv('VITE_DIAGNOSTIC_BACKEND_ORIGIN', 'https://backend.example.com');
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig.diagnosticBackendOrigin).toBe('https://backend.example.com');
+  });
+
+  it('ignores invalid diagnostic backend origin values without changing API base URL', async () => {
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    vi.stubEnv('VITE_DIAGNOSTIC_BACKEND_ORIGIN', 'http://backend.example.com/auth');
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig.apiBaseUrl).toBe('/api');
+    expect(runtimeConfig.diagnosticBackendOrigin).toBeNull();
   });
 
   it('flags invalid real-mode startup configuration before operational pages boot', async () => {

@@ -1,9 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runtimeConfig } from './config/runtime';
 import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
-import { login, me, probePublicLoginPostTransport, probePublicLoginReadiness } from './services/backend-auth';
+import {
+  interpretDualPathTransportDiagnostic,
+  login,
+  me,
+  probeDirectBackendLoginPostTransport,
+  probeDualPathLoginPostTransport,
+  probePublicLoginPostTransport,
+  probePublicLoginReadiness,
+} from './services/backend-auth';
 
 describe('backend auth client diagnostics', () => {
   const fetchMock = vi.fn();
+  const originalRuntimeConfig = {
+    diagnosticBackendOrigin: runtimeConfig.diagnosticBackendOrigin,
+  };
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -31,6 +43,7 @@ describe('backend auth client diagnostics', () => {
   });
 
   afterEach(() => {
+    Object.assign(runtimeConfig, originalRuntimeConfig);
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -171,6 +184,134 @@ describe('backend auth client diagnostics', () => {
     expect(JSON.stringify(init)).not.toContain('demo123');
     expect(JSON.stringify(init)).not.toContain('sporgym_session=');
     expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('posts the direct backend login transport probe with credentials omitted', async () => {
+    Object.assign(runtimeConfig, {
+      diagnosticBackendOrigin: 'https://backend.example.com',
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          status: 'post_transport_ready',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await probeDirectBackendLoginPostTransport({
+      authAttemptId: 'auth-direct123',
+      authFlowId: 'auth-flow123',
+      authRequestId: 'req-direct123',
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({
+      result: 'ready',
+      status: 200,
+      pathMode: 'direct_backend',
+    });
+    const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const headers = new Headers((init as RequestInit).headers);
+
+    expect(url).toBe('https://backend.example.com/auth/diagnostics/public-login-transport');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).credentials).toBe('omit');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-direct123');
+    expect(headers.get('X-Auth-Flow-Id')).toBe('auth-flow123');
+    expect(headers.get('X-Auth-Request-Id')).toBe('req-direct123');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ probe: 'login-post-transport' });
+    expect(JSON.stringify(init)).not.toContain('vendor@example.com');
+    expect(JSON.stringify(init)).not.toContain('demo123');
+    expect(JSON.stringify(init)).not.toContain('sporgym_session=');
+    expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('classifies direct backend login transport probe as not configured when no HTTPS origin exists', async () => {
+    Object.assign(runtimeConfig, {
+      diagnosticBackendOrigin: null,
+    });
+
+    await expect(probeDirectBackendLoginPostTransport({ timeoutMs: 1000 })).resolves.toMatchObject({
+      result: 'not_configured',
+      status: null,
+      elapsedMs: 0,
+      pathMode: 'direct_backend',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('interprets dual-path login transport probe outcomes conservatively', () => {
+    const sameOriginTimeout = { result: 'timeout' as const, status: null, elapsedMs: 5000, pathMode: 'same_origin_api' as const };
+    const sameOriginReady = { result: 'ready' as const, status: 200, elapsedMs: 10, pathMode: 'same_origin_api' as const };
+    const directReady = { result: 'ready' as const, status: 200, elapsedMs: 12, pathMode: 'direct_backend' as const };
+    const directTimeout = { result: 'timeout' as const, status: null, elapsedMs: 5000, pathMode: 'direct_backend' as const };
+    const directNotConfigured = { result: 'not_configured' as const, status: null, elapsedMs: 0, pathMode: 'direct_backend' as const };
+
+    expect(interpretDualPathTransportDiagnostic(sameOriginTimeout, directReady)).toBe('same_origin_path_suspected');
+    expect(interpretDualPathTransportDiagnostic(sameOriginTimeout, directTimeout)).toBe('shared_transport_failure');
+    expect(interpretDualPathTransportDiagnostic(sameOriginReady, directReady)).toBe('general_post_transport_ready');
+    expect(interpretDualPathTransportDiagnostic(sameOriginReady, directTimeout)).toBe('inconclusive');
+    expect(interpretDualPathTransportDiagnostic(sameOriginTimeout, directNotConfigured)).toBe('direct_probe_not_configured');
+  });
+
+  it('runs same-origin and direct backend transport probes with one flow id and independent abort controllers', async () => {
+    Object.assign(runtimeConfig, {
+      diagnosticBackendOrigin: 'https://backend.example.com',
+    });
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          ok: true,
+          status: 'post_transport_ready',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )),
+    );
+
+    const result = await probeDualPathLoginPostTransport({
+      authAttemptId: 'auth-dual123',
+      authFlowId: 'auth-dual123',
+      authRequestId: 'req-same123',
+      timeoutMs: 1000,
+    });
+
+    expect(result).toMatchObject({
+      interpretation: 'general_post_transport_ready',
+      sameOrigin: {
+        result: 'ready',
+        pathMode: 'same_origin_api',
+      },
+      directBackend: {
+        result: 'ready',
+        pathMode: 'direct_backend',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [sameOriginUrl, sameOriginInit] = fetchMock.mock.calls[0];
+    const [directUrl, directInit] = fetchMock.mock.calls[1];
+    const sameOriginHeaders = new Headers((sameOriginInit as RequestInit).headers);
+    const directHeaders = new Headers((directInit as RequestInit).headers);
+
+    expect(sameOriginUrl).toBe('/api/auth/diagnostics/public-login-transport');
+    expect(directUrl).toBe('https://backend.example.com/auth/diagnostics/public-login-transport');
+    expect((sameOriginInit as RequestInit).credentials).toBe('same-origin');
+    expect((directInit as RequestInit).credentials).toBe('omit');
+    expect((sameOriginInit as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect((directInit as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    expect((sameOriginInit as RequestInit).signal).not.toBe((directInit as RequestInit).signal);
+    expect(sameOriginHeaders.get('X-Auth-Flow-Id')).toBe('auth-dual123');
+    expect(directHeaders.get('X-Auth-Flow-Id')).toBe('auth-dual123');
+    expect(JSON.parse((sameOriginInit as RequestInit).body as string)).toEqual({ probe: 'login-post-transport' });
+    expect(JSON.parse((directInit as RequestInit).body as string)).toEqual({ probe: 'login-post-transport' });
   });
 
   it('classifies login transport probe timeout independently', async () => {

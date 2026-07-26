@@ -15,7 +15,7 @@ import { LoginPage } from './LoginPage';
 
 const loginMock = vi.hoisted(() => vi.fn());
 const probePublicLoginReadinessMock = vi.hoisted(() => vi.fn());
-const probePublicLoginPostTransportMock = vi.hoisted(() => vi.fn());
+const probeDualPathLoginPostTransportMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
@@ -26,7 +26,7 @@ vi.mock('../services/runtime-services', () => ({
 }));
 
 vi.mock('../services/backend-auth', () => ({
-  probePublicLoginPostTransport: probePublicLoginPostTransportMock,
+  probeDualPathLoginPostTransport: probeDualPathLoginPostTransportMock,
   probePublicLoginReadiness: probePublicLoginReadinessMock,
 }));
 
@@ -99,15 +99,25 @@ describe('LoginPage expired session flow', () => {
     window.localStorage.clear();
     loginMock.mockReset();
     probePublicLoginReadinessMock.mockReset();
-    probePublicLoginPostTransportMock.mockReset();
+    probeDualPathLoginPostTransportMock.mockReset();
     loginMock.mockResolvedValue({
       token: null,
       user: testUser,
     });
-    probePublicLoginPostTransportMock.mockResolvedValue({
-      result: 'ready',
-      status: 200,
-      elapsedMs: 20,
+    probeDualPathLoginPostTransportMock.mockResolvedValue({
+      sameOrigin: {
+        result: 'ready',
+        status: 200,
+        elapsedMs: 20,
+        pathMode: 'same_origin_api',
+      },
+      directBackend: {
+        result: 'ready',
+        status: 200,
+        elapsedMs: 18,
+        pathMode: 'direct_backend',
+      },
+      interpretation: 'general_post_transport_ready',
     });
     probePublicLoginReadinessMock.mockResolvedValue({
       ok: true,
@@ -229,7 +239,7 @@ describe('LoginPage expired session flow', () => {
     expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.queryByText('Sign-in is taking longer than expected. Please try again.')).not.toBeInTheDocument();
-    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
   });
 
   it('shows the retry window when login is temporarily rate limited', async () => {
@@ -247,7 +257,7 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByText('Too many login attempts. Please try again in 10 minutes.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
-    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
   });
 
   it('logs safe POST dispatch diagnostics without credentials', async () => {
@@ -331,7 +341,7 @@ describe('LoginPage expired session flow', () => {
     expect(events).not.toContain('REQUEST_ABORT');
     expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
-    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
 
     clearTimeoutSpy.mockRestore();
     debugSpy.mockRestore();
@@ -469,7 +479,7 @@ describe('LoginPage expired session flow', () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ flowId: firstReference, operation: 'LOGIN_RESPONSE', outcome: 'timeout' }),
-        expect.objectContaining({ flowId: firstReference, operation: 'LOGIN_POST_TRANSPORT_PROBE', outcome: 'success' }),
+        expect.objectContaining({ flowId: firstReference, operation: 'LOGIN_POST_TRANSPORT_PROBE', outcome: 'general_post_transport_ready' }),
         expect.objectContaining({ flowId: submittedFlowIds[1], operation: 'AUTH_STATE_CHANGE', outcome: 'success' }),
       ]),
     );
@@ -536,7 +546,9 @@ describe('LoginPage expired session flow', () => {
     expect(
       screen.getByText(/^Sign-in is taking longer than expected\. Please try again\. Reference: auth-[a-z0-9]{10}$/i),
     ).toBeInTheDocument();
-    expect(screen.getByText('POST transport diagnostic: Ready')).toBeInTheDocument();
+    expect(screen.getByText(
+      'POST transport: Same-origin /api: Ready Direct backend: Ready Both safe POST paths work; login route or intermittent behavior remains possible',
+    )).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect((loginMock.mock.calls[0][2] as { signal?: AbortSignal }).signal?.aborted).toBe(true);
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
@@ -554,11 +566,11 @@ describe('LoginPage expired session flow', () => {
       expect.arrayContaining([
         expect.objectContaining({ flowId: reference, operation: 'REQUEST_ABORT', stage: 'login_post', outcome: 'timeout' }),
         expect.objectContaining({ flowId: reference, operation: 'LOGIN_RESPONSE', stage: 'login_post', outcome: 'timeout' }),
-        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'public_login_post_transport_probe', outcome: 'started' }),
-        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'public_login_post_transport_probe', outcome: 'success', httpStatus: 200, durationMs: 20 }),
+        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'login_transport_dual_probe_start', outcome: 'started' }),
+        expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'login_transport_dual_probe_complete', outcome: 'general_post_transport_ready', durationMs: 20 }),
       ]),
     );
-    expect(probePublicLoginPostTransportMock).toHaveBeenCalledWith(
+    expect(probeDualPathLoginPostTransportMock).toHaveBeenCalledWith(
       expect.objectContaining({
         authAttemptId: reference,
         authFlowId: reference,
@@ -570,18 +582,30 @@ describe('LoginPage expired session flow', () => {
 
   it('runs the POST transport probe after a network-level login failure without replacing the original error', async () => {
     loginMock.mockRejectedValueOnce(new ApiError('Unable to reach the backend.', 'network'));
-    probePublicLoginPostTransportMock.mockResolvedValueOnce({
-      result: 'network_error',
-      status: null,
-      elapsedMs: 5000,
+    probeDualPathLoginPostTransportMock.mockResolvedValueOnce({
+      sameOrigin: {
+        result: 'network_error',
+        status: null,
+        elapsedMs: 5000,
+        pathMode: 'same_origin_api',
+      },
+      directBackend: {
+        result: 'ready',
+        status: 200,
+        elapsedMs: 25,
+        pathMode: 'direct_backend',
+      },
+      interpretation: 'same_origin_path_suspected',
     });
     renderStandaloneLogin();
 
     fillAndSubmitLogin();
 
     expect(await screen.findByText('Unable to reach the backend.')).toBeInTheDocument();
-    expect(screen.getByText('POST transport diagnostic: Network error')).toBeInTheDocument();
-    expect(probePublicLoginPostTransportMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(
+      'POST transport: Same-origin /api: Network error Direct backend: Ready Leading suspect: frontend /api transport path',
+    )).toBeInTheDocument();
+    expect(probeDualPathLoginPostTransportMock).toHaveBeenCalledTimes(1);
     expect(loginMock).toHaveBeenCalledTimes(1);
   });
 
@@ -594,7 +618,7 @@ describe('LoginPage expired session flow', () => {
     fillAndSubmitLogin();
 
     expect(await screen.findByText('Invalid email or password.')).toBeInTheDocument();
-    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
     expect(getAuthDiagnosticDebugEvents(debugSpy)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -617,7 +641,7 @@ describe('LoginPage expired session flow', () => {
     fillAndSubmitLogin();
 
     expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
-    expect(probePublicLoginPostTransportMock).not.toHaveBeenCalled();
+    expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
     expect(getAuthDiagnosticDebugEvents(debugSpy)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

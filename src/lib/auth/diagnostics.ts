@@ -24,6 +24,7 @@ export type AuthDiagnosticResultCategory =
   | 'stale'
   | 'skipped'
   | 'started'
+  | 'not_configured'
   | 'unknown';
 
 export type AuthDiagnosticEvent = {
@@ -34,6 +35,8 @@ export type AuthDiagnosticEvent = {
   flowId: string | null;
   stage?: string;
   outcome?: string;
+  pathMode?: 'same_origin_api' | 'direct_backend' | null;
+  method?: string;
   requestId: string | null;
   source: string;
   httpStatus?: number | null;
@@ -149,6 +152,8 @@ export function printAuthDiagnosticTimeline() {
       event.operation,
       event.flowId ? `flow=${event.flowId}` : null,
       event.stage ? `stage=${event.stage}` : null,
+      event.pathMode ? `path=${event.pathMode}` : null,
+      event.method ? `method=${event.method}` : null,
       event.requestId ? `req=${event.requestId}` : null,
       event.httpStatus ? `status=${event.httpStatus}` : null,
       typeof event.durationMs === 'number' ? `duration=${event.durationMs}ms` : null,
