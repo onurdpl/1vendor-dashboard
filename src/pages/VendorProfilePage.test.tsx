@@ -425,6 +425,18 @@ async function openLogoDiagnostics(section: HTMLElement) {
   await userEvent.click(await within(section).findByText('Logo diagnostics'));
 }
 
+const ADMIN_VENDOR_PROFILE_SECTION_IDS = [
+  'vendor-profile-overview',
+  'vendor-profile-account',
+  'vendor-profile-billing-legal',
+  'vendor-profile-finance',
+  'vendor-profile-shipping-returns',
+  'vendor-profile-integrations',
+  'vendor-profile-diagnostics',
+  'vendor-profile-audit-history',
+  'vendor-profile-support',
+] as const;
+
 describe('VendorProfilePage', () => {
   beforeEach(() => {
     cleanup();
@@ -873,7 +885,8 @@ describe('VendorProfilePage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
-    expect(screen.getByText('Restricted account')).toBeInTheDocument();
+    expect(screen.getAllByText('Restricted account').length).toBeGreaterThan(0);
+    expect(within(screen.getByLabelText('Vendor workspace summary')).getByText('Operational review')).toBeInTheDocument();
     expect(screen.queryByText('Active workspace')).not.toBeInTheDocument();
     const accountSection = screen.getByRole('heading', { name: 'My Account' }).closest('section');
     expect(accountSection).not.toBeNull();
@@ -1016,10 +1029,46 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage(['/admin/vendors/created-vendor']);
 
     expect(await screen.findByRole('heading', { name: 'Created Vendor' })).toBeInTheDocument();
-    expect(screen.getByText('Managing vendor: Created Vendor')).toBeInTheDocument();
+    expect(screen.getByText('Vendor ID: created-vendor')).toBeInTheDocument();
+    expect(screen.getByText('Route-scoped vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Admin view')).toBeInTheDocument();
+    expect(screen.getByText('Integration token missing')).toBeInTheDocument();
     expect(screen.getAllByText('created-vendor').length).toBeGreaterThan(0);
+    const shell = screen.getByTestId('vendor-profile-shell');
+    expect(within(shell).getByRole('button', { name: 'Request profile correction' })).toBeInTheDocument();
+    expect(within(shell).getAllByRole('button', { name: 'Request profile correction' })).toHaveLength(1);
+    expect(within(screen.getByLabelText('Vendor workspace summary')).queryAllByText('Ready')).toHaveLength(0);
+    const sectionNavigation = screen.getByRole('navigation', { name: 'Vendor profile sections' });
+    for (const label of [
+      'Overview',
+      'Account',
+      'Billing & Legal',
+      'Finance',
+      'Shipping & Returns',
+      'Integrations',
+      'Diagnostics',
+      'Audit History',
+      'Support',
+    ]) {
+      expect(within(sectionNavigation).getByRole('link', { name: label })).toBeInTheDocument();
+    }
+    await waitFor(() => {
+      for (const targetId of ADMIN_VENDOR_PROFILE_SECTION_IDS) {
+        expect(document.querySelectorAll(`#${targetId}`)).toHaveLength(1);
+      }
+    });
+    expect(within(sectionNavigation).getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '#vendor-profile-overview');
+    expect(within(sectionNavigation).getByRole('link', { name: 'Support' })).toHaveAttribute('href', '#vendor-profile-support');
     expect(screen.queryByRole('heading', { name: 'Demo Vendor A' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational readiness' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Store identity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor account status' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance Policy' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipping operations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Integration status' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Configuration History' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support and correction workflow' })).toBeInTheDocument();
     await waitFor(() =>
       expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'created-vendor' })),
     );
@@ -1125,7 +1174,8 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage(['/admin/vendors/sporborsa']);
 
     expect(await screen.findByRole('heading', { name: 'Sporborsa' })).toBeInTheDocument();
-    expect(screen.getByText('Managing vendor: Sporborsa')).toBeInTheDocument();
+    expect(screen.getByText('Vendor ID: sporborsa')).toBeInTheDocument();
+    expect(screen.getByText('Route-scoped vendor profile')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Demo Vendor B' })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporborsa' })),
@@ -1204,6 +1254,8 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage(['/admin/vendors/demo-vendor-a']);
 
+    expect(await screen.findByText('Healthy workspace')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Vendor workspace summary')).queryAllByText('Ready')).toHaveLength(0);
     const integrationHeading = await screen.findByRole('heading', { name: 'Integration status' });
     const integrationSection = integrationHeading.closest('section');
     expect(integrationSection).not.toBeNull();

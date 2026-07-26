@@ -109,6 +109,12 @@ type ReadinessSection = {
   actionPath: string;
   items: ReadinessItem[];
 };
+type VendorProfileShellStatusItem = {
+  key: string;
+  label: string;
+  detail: string;
+  tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention' | 'stale';
+};
 type IntegrationTokenFormState = {
   providerName: string;
   scopes: VendorIntegrationScope[];
@@ -2108,6 +2114,81 @@ export function VendorProfilePage() {
     ? formatValue(vendorStatus.restrictionReason, 'Unknown')
     : null;
   const correctionTicketStatusLabel = existingProfileTicket ? 'Correction ticket open' : 'No correction ticket open';
+  const workspaceContextLabel = isAdminVendorRoute
+    ? 'Route-scoped vendor profile'
+    : isAdmin
+      ? 'Admin vendor workspace'
+      : 'Vendor workspace';
+  const shellStatusCandidates: Array<VendorProfileShellStatusItem | null> = [
+    !canLoadProfile
+      ? {
+          key: 'context',
+          label: 'Context loading',
+          detail: 'Vendor workspace context is still loading.',
+          tone: 'warning' as const,
+        }
+      : null,
+    vendorStatus.restricted
+      ? {
+          key: 'account',
+          label: 'Restricted account',
+          detail: formatValue(vendorStatus.restrictionReason, 'Restriction reason unknown'),
+          tone: 'attention' as const,
+        }
+      : null,
+    existingProfileTicket
+      ? {
+          key: 'correction',
+          label: 'Correction ticket open',
+          detail: safeStatusLabel(existingProfileTicket.status),
+          tone: 'attention' as const,
+        }
+      : null,
+    isAdminVendorRoute && !integrationProvidersQuery.isInitialLoading && !activeIntegrationProvider
+      ? {
+          key: 'integration',
+          label: 'Integration token missing',
+          detail: 'No active vendor integration client is available.',
+          tone: 'warning' as const,
+        }
+      : null,
+    shippingDataLoaded && !shippingConfigured
+      ? {
+          key: 'shipping',
+          label: 'Shipping needs review',
+          detail: shippingHealth.description,
+          tone: shippingHealth.tone,
+        }
+      : null,
+    isAdmin && !billingQuery.isInitialLoading && !billingProfile
+      ? {
+          key: 'billing',
+          label: 'Billing source missing',
+          detail: 'Commission invoice billing source is not configured.',
+          tone: 'warning' as const,
+        }
+      : null,
+    financeDataLoaded && !marketplaceTermsActive
+      ? {
+          key: 'finance',
+          label: 'Finance policy inactive',
+          detail: 'Finance policy requires verification before settlement visibility is trusted.',
+          tone: 'warning' as const,
+        }
+      : null,
+  ];
+  const shellStatusItems = shellStatusCandidates.filter((item): item is VendorProfileShellStatusItem => Boolean(item));
+  const sectionNavigation = [
+    { label: 'Overview', href: '#vendor-profile-overview' },
+    { label: 'Account', href: '#vendor-profile-account' },
+    { label: 'Billing & Legal', href: '#vendor-profile-billing-legal' },
+    { label: 'Finance', href: '#vendor-profile-finance' },
+    { label: 'Shipping & Returns', href: '#vendor-profile-shipping-returns' },
+    { label: 'Integrations', href: '#vendor-profile-integrations' },
+    { label: 'Diagnostics', href: '#vendor-profile-diagnostics' },
+    { label: 'Audit History', href: '#vendor-profile-audit-history' },
+    { label: 'Support', href: '#vendor-profile-support' },
+  ];
   const managedSettings = [
     {
       title: 'Shipping',
@@ -2149,46 +2230,69 @@ export function VendorProfilePage() {
 
   return (
     <section className="op-page vendor-profile-page">
-      <div className={`vendor-profile-hero operational-card ${isAdmin ? '' : 'vendor-profile-hero-compact'}`}>
-        <div className="vendor-profile-identity">
-          <div className="vendor-profile-avatar" aria-hidden="true">
-            {getVendorInitials(profileVendorName)}
-          </div>
-          <div>
-            <p className="eyebrow">Marketplace Seller Workspace</p>
-            <h1>{profileVendorName || 'Vendor profile'}</h1>
-            {isAdminVendorRoute ? (
-              <p className="vendor-profile-route-context">Managing vendor: {profileVendorName || currentVendor.vendorId}</p>
-            ) : null}
-            {isAdmin ? (
-              <p>
-                Review the seller identity, finance policy, shipping operations, and return destination currently managed
-                for this store. Marketplace-owned fields are read-only here.
+      <div className="vendor-profile-shell" data-testid="vendor-profile-shell">
+        <header className="vendor-profile-header operational-card">
+          <div className="vendor-profile-identity">
+            <div className="vendor-profile-avatar" aria-hidden="true">
+              {getVendorInitials(profileVendorName)}
+            </div>
+            <div className="vendor-profile-title">
+              <p className="eyebrow">Marketplace Seller Workspace</p>
+              <h1>{profileVendorName || 'Vendor profile'}</h1>
+              <p className="vendor-profile-header-meta">
+                <span>Vendor ID: {formatValue(currentVendor.vendorId, 'Missing vendor context')}</span>
+                <span>{workspaceContextLabel}</span>
               </p>
+            </div>
+          </div>
+          <div className="vendor-profile-header-actions">
+            <div className="vendor-profile-header-badges" aria-label="Vendor workspace state">
+              <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
+              <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
+                {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
+              </StatusBadge>
+              {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
+            </div>
+            {isAdmin ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={handleContactSupport}
+                disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
+              >
+                {existingProfileTicket
+                  ? 'Open correction ticket'
+                  : supportMutation.isPending
+                    ? 'Requesting correction...'
+                    : 'Request profile correction'}
+              </button>
             ) : null}
           </div>
+        </header>
+        <div className={`vendor-profile-status-strip ${shellStatusItems.length ? 'vendor-profile-status-strip-warning' : ''}`} aria-label="Vendor workspace summary">
+          {shellStatusItems.length ? (
+            shellStatusItems.map((item) => (
+              <div className="vendor-profile-status-strip-item" key={item.key}>
+                <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+                <span>{item.detail}</span>
+              </div>
+            ))
+          ) : (
+            <div className="vendor-profile-status-strip-item">
+              <StatusBadge tone="success">Healthy workspace</StatusBadge>
+              <span>Primary vendor profile signals are available with no high-level blockers shown.</span>
+            </div>
+          )}
         </div>
-        <div className="vendor-profile-actions">
-          <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
-          <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
-            {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
-          </StatusBadge>
-          {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
-          {isAdmin ? (
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={handleContactSupport}
-              disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
-            >
-              {existingProfileTicket
-                ? 'Open correction ticket'
-                : supportMutation.isPending
-                  ? 'Requesting correction...'
-                  : 'Request profile correction'}
-            </button>
-          ) : null}
-        </div>
+        {isAdmin ? (
+          <nav className="vendor-profile-section-nav" aria-label="Vendor profile sections">
+            {sectionNavigation.map((item) => (
+              <a key={item.href} href={item.href}>
+                {item.label}
+              </a>
+            ))}
+          </nav>
+        ) : null}
       </div>
 
       {!isAdmin ? (
@@ -2248,6 +2352,7 @@ export function VendorProfilePage() {
         </>
       ) : (
         <>
+      <div id="vendor-profile-overview" className="vendor-profile-anchor-section">
       <OperationalSection
         title="Operational readiness"
         description="A checklist view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility."
@@ -2258,8 +2363,10 @@ export function VendorProfilePage() {
           ))}
         </div>
       </OperationalSection>
+      </div>
 
       <div className="vendor-profile-grid">
+        <div id="vendor-profile-account" className="vendor-profile-anchor-section">
         <OperationalSection
           title="Store identity"
           description="Seller identity currently available to marketplace operations."
@@ -2272,7 +2379,9 @@ export function VendorProfilePage() {
             <MetadataRow label="Seller of record" value="Not configured" />
           </MetadataGroup>
         </OperationalSection>
+        </div>
 
+        <div className="vendor-profile-anchor-section">
         {isAdmin ? (
           <OperationalSection
             title="Vendor account status"
@@ -2354,7 +2463,9 @@ export function VendorProfilePage() {
             )}
           </OperationalSection>
         ) : null}
+        </div>
 
+        <div id="vendor-profile-billing-legal" className="vendor-profile-anchor-section">
         <OperationalSection
           title="Billing / Legal Profile"
           description="Seller legal billing identity used later as the billing source for Sporgym commission invoices."
@@ -2428,7 +2539,7 @@ export function VendorProfilePage() {
                   </button>
                 </div>
               </div>
-              <details className="vendor-profile-disclosure vendor-profile-logo-diagnostics">
+              <details id="vendor-profile-diagnostics" className="vendor-profile-disclosure vendor-profile-logo-diagnostics">
                 <summary>
                   <span>Logo diagnostics</span>
                   <small>Collapsed provider probes and test-only tools</small>
@@ -3566,7 +3677,9 @@ export function VendorProfilePage() {
             </>
           )}
         </OperationalSection>
+        </div>
 
+        <div id="vendor-profile-finance" className="vendor-profile-anchor-section">
         <OperationalSection
           title="Finance Policy"
           description="Admin-owned policy used for future finance ledger rows. It does not change existing ledger snapshots, approved settlements, invoices, or payouts."
@@ -3786,7 +3899,9 @@ export function VendorProfilePage() {
             </>
           )}
         </OperationalSection>
+        </div>
 
+        <div id="vendor-profile-shipping-returns" className="vendor-profile-anchor-section">
         <OperationalSection
           title="Shipping operations"
           description="Admin-owned shipping setup used by shipment creation and recovery workflows."
@@ -3845,7 +3960,9 @@ export function VendorProfilePage() {
             </div>
           )}
         </OperationalSection>
+        </div>
 
+        <div id="vendor-profile-integrations" className="vendor-profile-anchor-section">
         <OperationalSection
           title="Integration status"
           description="Marketplace systems connected to this seller workspace."
@@ -4004,6 +4121,7 @@ export function VendorProfilePage() {
             </form>
           ) : null}
         </OperationalSection>
+        </div>
 
         <OperationalSection
           title="Warehouse and returns"
@@ -4046,6 +4164,7 @@ export function VendorProfilePage() {
         </OperationalSection>
       </div>
 
+      <div id="vendor-profile-audit-history" className="vendor-profile-anchor-section">
       {isAdmin ? (
         <OperationalSection
           title="Vendor Configuration History"
@@ -4062,7 +4181,9 @@ export function VendorProfilePage() {
           </section>
         </OperationalSection>
       ) : null}
+      </div>
 
+      <div id="vendor-profile-support" className="vendor-profile-anchor-section">
       <OperationalSection
         title="Support and correction workflow"
         description="Vendors request corrections through support; admin-owned settings stay locked on this page."
@@ -4090,6 +4211,7 @@ export function VendorProfilePage() {
           </OperationalActionGroup>
         </div>
       </OperationalSection>
+      </div>
 
       <OperationalSection
         title="Additional seller profile fields"
