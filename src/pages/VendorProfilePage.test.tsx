@@ -986,6 +986,9 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage();
 
     expect(await screen.findByText('Admin view')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(screen.getByTestId('vendor-profile-shell')).getAllByText('Correction ticket open')).toHaveLength(1),
+    );
     expect(await screen.findByRole('heading', { name: 'Store identity' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Finance Policy' })).toBeInTheDocument();
     expect(screen.queryByText('Store contact')).not.toBeInTheDocument();
@@ -1070,6 +1073,12 @@ describe('VendorProfilePage', () => {
     expect(within(readiness).getByRole('button', { name: 'Open shipping workflow' })).toBeInTheDocument();
     expect(within(readiness).getByRole('button', { name: 'Open returns review' })).toBeInTheDocument();
     expect(within(readiness).getByRole('button', { name: 'Open settlement preview' })).toBeInTheDocument();
+    expect(within(readiness).queryByText('Open shipping workflow')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Open returns review')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Open settlement preview')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Open support workspace')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Open orders queue')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Open automation queue')).not.toBeInTheDocument();
     expect(within(readiness).queryByText('Shipping enabled')).not.toBeInTheDocument();
     expect(within(readiness).queryByText('Provider configured')).not.toBeInTheDocument();
     expect(within(readiness).queryByText('Warehouse configured')).not.toBeInTheDocument();

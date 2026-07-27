@@ -1055,8 +1055,14 @@ function ReadinessSummaryCard({
         </div>
         <p>{statusSummary}</p>
       </div>
-      <button type="button" className="button button-secondary vendor-readiness-action" onClick={() => onOpen(section.actionPath)}>
-        {section.actionLabel}
+      <button
+        type="button"
+        className="vendor-readiness-action"
+        onClick={() => onOpen(section.actionPath)}
+        aria-label={section.actionLabel}
+        title={section.actionLabel}
+      >
+        <span aria-hidden="true">›</span>
       </button>
     </article>
   );
@@ -2248,7 +2254,6 @@ export function VendorProfilePage() {
               <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
                 {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
               </StatusBadge>
-              {existingProfileTicket ? <StatusBadge tone="attention">Correction ticket open</StatusBadge> : null}
             </div>
             {isAdmin ? (
               <button

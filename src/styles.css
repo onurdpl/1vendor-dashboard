@@ -15298,8 +15298,39 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .vendor-readiness-action {
   align-self: center;
-  white-space: nowrap;
-  padding-inline: 12px;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.vendor-readiness-action:hover,
+.vendor-readiness-action:focus-visible {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.vendor-readiness-action:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 2px;
+}
+
+.vendor-readiness-action:active {
+  transform: translateX(1px);
 }
 
 .vendor-profile-grid {
@@ -15849,6 +15880,8 @@ summary.provider-response-heading::-webkit-details-marker {
   .vendor-readiness-action {
     grid-column: 2;
     justify-self: start;
+    width: 44px;
+    height: 44px;
   }
 
   .vendor-profile-identity {
