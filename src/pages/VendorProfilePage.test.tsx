@@ -996,8 +996,9 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByText('Admin-owned configuration')).not.toBeInTheDocument();
     expect(screen.queryByText(/not executed in Phase 4A/)).not.toBeInTheDocument();
     expect(screen.getByText('Seller of record')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Additional seller profile fields' })).toBeInTheDocument();
-    expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Additional seller profile fields' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Fields not modeled yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open for data-model notes')).not.toBeInTheDocument();
     const readiness = screen.getByLabelText('Vendor operational readiness');
     expect(within(readiness).getByLabelText('Automation visibility ready: Requires configuration review')).toBeInTheDocument();
     expect(within(readiness).getByText('Automation visibility exists, but this profile does not model vendor-specific automation readiness.')).toBeInTheDocument();

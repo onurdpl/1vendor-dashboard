@@ -4201,37 +4201,9 @@ export function VendorProfilePage() {
                   : 'Report a marketplace profile or configuration issue so operations can review the admin-owned data.'}
             </p>
           </div>
-          <OperationalActionGroup>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={handleContactSupport}
-              disabled={!pageReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
-            >
-              {existingProfileTicket ? 'Open correction ticket' : vendorStatus.restricted ? 'Open correction ticket' : 'Report configuration issue'}
-            </button>
-          </OperationalActionGroup>
         </div>
       </OperationalSection>
       </div>
-
-      <OperationalSection
-        title="Additional seller profile fields"
-        description="Compact reference for profile data that is intentionally not inferred until the model is confirmed."
-      >
-        <details className="vendor-profile-disclosure">
-          <summary>
-            <span>Fields not modeled yet</span>
-            <small>Open for data-model notes</small>
-          </summary>
-          <ul className="vendor-profile-missing-list">
-            <li>Dedicated store operations contact email and phone</li>
-            <li>Seller-of-record / commercial authority status</li>
-            <li>Public marketplace storefront profile content</li>
-            <li>Full provider address-book detail sync beyond configured IDs and safe metadata</li>
-          </ul>
-        </details>
-      </OperationalSection>
         </>
       )}
 

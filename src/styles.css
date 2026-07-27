@@ -15827,14 +15827,6 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 650;
 }
 
-.vendor-profile-missing-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0 14px 14px 1.8rem;
-  color: #475569;
-}
-
 @media (max-width: 980px) {
   .vendor-profile-header,
   .vendor-profile-support-panel {
