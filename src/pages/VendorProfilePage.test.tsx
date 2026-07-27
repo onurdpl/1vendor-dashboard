@@ -995,8 +995,10 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Seller of record')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Additional seller profile fields' })).toBeInTheDocument();
     expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Automation visibility ready' })).toBeInTheDocument();
-    expect(screen.getByText('Alerts visible')).toBeInTheDocument();
+    const readiness = screen.getByLabelText('Vendor operational readiness');
+    expect(within(readiness).getByLabelText('Automation visibility ready: Requires configuration review')).toBeInTheDocument();
+    expect(within(readiness).getByText('Automation visibility exists, but this profile does not model vendor-specific automation readiness.')).toBeInTheDocument();
+    expect(within(readiness).queryByText('Alerts visible')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save billing profile' })).not.toBeInTheDocument();
 
     const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
@@ -1061,6 +1063,16 @@ describe('VendorProfilePage', () => {
     expect(within(sectionNavigation).getByRole('link', { name: 'Support' })).toHaveAttribute('href', '#vendor-profile-support');
     expect(screen.queryByRole('heading', { name: 'Demo Vendor A' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Operational readiness' })).toBeInTheDocument();
+    expect(screen.getByText('Compact view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility.')).toBeInTheDocument();
+    const readiness = screen.getByLabelText('Vendor operational readiness');
+    expect(within(readiness).getAllByRole('article')).toHaveLength(6);
+    expect(within(readiness).getByLabelText('Shipping ready: Ready')).toBeInTheDocument();
+    expect(within(readiness).getByRole('button', { name: 'Open shipping workflow' })).toBeInTheDocument();
+    expect(within(readiness).getByRole('button', { name: 'Open returns review' })).toBeInTheDocument();
+    expect(within(readiness).getByRole('button', { name: 'Open settlement preview' })).toBeInTheDocument();
+    expect(within(readiness).queryByText('Shipping enabled')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Provider configured')).not.toBeInTheDocument();
+    expect(within(readiness).queryByText('Warehouse configured')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Store identity' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Vendor account status' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();

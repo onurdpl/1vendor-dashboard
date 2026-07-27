@@ -1031,36 +1031,33 @@ function combineReadinessStatus(items: ReadinessItem[]): ReadinessStatus {
   return 'ready';
 }
 
-function ReadinessChecklistCard({
+function getReadinessStatusSummary(section: ReadinessSection) {
+  const actionItem = section.items.find((item) => item.status === 'review' || item.status === 'unknown' || item.status === 'not_modeled');
+  return actionItem?.detail ?? section.summary;
+}
+
+function ReadinessSummaryCard({
   section,
   onOpen,
 }: {
   section: ReadinessSection;
   onOpen: (path: string) => void;
 }) {
+  const statusSummary = getReadinessStatusSummary(section);
+
   return (
-    <article className={`vendor-readiness-card readiness-${section.status}`}>
-      <div className="vendor-readiness-card-heading">
-        <div>
+    <article className={`vendor-readiness-card readiness-${section.status}`} aria-label={`${section.title}: ${getReadinessLabel(section.status)}`}>
+      <div className="vendor-readiness-status" aria-hidden="true" />
+      <div className="vendor-readiness-copy">
+        <div className="vendor-readiness-card-heading">
           <h3>{section.title}</h3>
-          <p>{section.summary}</p>
+          <StatusBadge tone={getReadinessTone(section.status)}>{getReadinessLabel(section.status)}</StatusBadge>
         </div>
-        <StatusBadge tone={getReadinessTone(section.status)}>{getReadinessLabel(section.status)}</StatusBadge>
+        <p>{statusSummary}</p>
       </div>
-      <ul className="vendor-readiness-checklist">
-        {section.items.map((item) => (
-          <li key={item.label}>
-            <span>{item.label}</span>
-            <StatusBadge tone={getReadinessTone(item.status)}>{getReadinessLabel(item.status)}</StatusBadge>
-            <small>{item.detail}</small>
-          </li>
-        ))}
-      </ul>
-      <OperationalActionGroup>
-        <button type="button" className="button button-secondary" onClick={() => onOpen(section.actionPath)}>
-          {section.actionLabel}
-        </button>
-      </OperationalActionGroup>
+      <button type="button" className="button button-secondary vendor-readiness-action" onClick={() => onOpen(section.actionPath)}>
+        {section.actionLabel}
+      </button>
     </article>
   );
 }
@@ -2355,11 +2352,11 @@ export function VendorProfilePage() {
       <div id="vendor-profile-overview" className="vendor-profile-anchor-section">
       <OperationalSection
         title="Operational readiness"
-        description="A checklist view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility."
+        description="Compact view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility."
       >
         <div className="vendor-profile-readiness-grid" aria-label="Vendor operational readiness">
           {readinessSections.map((section) => (
-            <ReadinessChecklistCard key={section.title} section={section} onOpen={handleOpenReadinessAction} />
+            <ReadinessSummaryCard key={section.title} section={section} onOpen={handleOpenReadinessAction} />
           ))}
         </div>
       </OperationalSection>
