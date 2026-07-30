@@ -6,6 +6,7 @@ import { SectionSkeleton } from './components/OperationalPrimitives';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { PostTransportDiagnosticPage } from './pages/PostTransportDiagnosticPage';
 import { RequirePermission } from './components/RequirePermission';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
@@ -109,6 +110,7 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/diagnostics/post-transport" element={<PostTransportDiagnosticPage />} />
       <Route element={<RedirectIfAuthed />}>
         <Route path="/login" element={<LoginPage />} />
       </Route>
