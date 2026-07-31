@@ -284,6 +284,184 @@ describe('apiClient real-mode cookie auth', () => {
     expect(headers.get('Authorization')).toBeNull();
   });
 
+  it('records real login fetch-boundary diagnostics while preserving the login request contract', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    window.localStorage.clear();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      user: {
+        email: 'admin@demo.com',
+        name: 'Demo Admin',
+        role: 'admin',
+        vendorAccess: [],
+      },
+      csrfToken: 'csrf-from-cookie-session',
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    await realApiClient.post('/auth/login', { email: 'admin@demo.com', password: 'demo123' }, {
+      headers: {
+        'X-Auth-Attempt-Id': 'auth-test123',
+        'X-Auth-Flow-Id': 'auth-flow123',
+        'X-Auth-Request-Id': 'req-login123',
+      },
+      skipVendorContext: true,
+      authStartedAtMs: Date.now() - 50,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    const headers = (init as RequestInit).headers as Headers;
+    expect(url).toBe('/api/auth/login');
+    expect((init as RequestInit).credentials).toBe('include');
+    expect((init as RequestInit).method).toBe('POST');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      email: 'admin@demo.com',
+      password: 'demo123',
+    });
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Auth-Flow-Id')).toBe('auth-flow123');
+
+    const events = debugSpy.mock.calls
+      .map((call) => call[1])
+      .filter((entry): entry is { operation?: string; httpStatus?: number; targetOrigin?: string; targetPathname?: string } =>
+        Boolean(entry) && typeof entry === 'object');
+    expect(events.map((event) => event.operation).filter((operation) =>
+      operation?.startsWith('AUTH_LOGIN') || operation === 'AUTH_API_CLIENT_LOGIN_POST_ENTER',
+    )).toEqual([
+      'AUTH_API_CLIENT_LOGIN_POST_ENTER',
+      'AUTH_LOGIN_BUILD_API_URL_COMPLETE',
+      'AUTH_LOGIN_FETCH_CALL_ENTER',
+      'AUTH_LOGIN_FETCH_PROMISE_CREATED',
+      'AUTH_LOGIN_FETCH_RESOLVED',
+    ]);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        operation: 'AUTH_LOGIN_FETCH_CALL_ENTER',
+        flowId: 'auth-flow123',
+        requestId: 'req-login123',
+        requestPath: '/auth/login',
+        requestMethod: 'POST',
+        credentialsMode: 'include',
+        signalExists: false,
+        signalAborted: false,
+        targetOrigin: window.location.origin,
+        targetPathname: '/api/auth/login',
+      }),
+      expect.objectContaining({
+        operation: 'AUTH_LOGIN_FETCH_PROMISE_CREATED',
+        flowId: 'auth-flow123',
+        requestId: 'req-login123',
+        targetOrigin: window.location.origin,
+        targetPathname: '/api/auth/login',
+      }),
+      expect.objectContaining({
+        operation: 'AUTH_LOGIN_FETCH_RESOLVED',
+        flowId: 'auth-flow123',
+        requestId: 'req-login123',
+        httpStatus: 200,
+      }),
+    ]));
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('admin@demo.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+
+    debugSpy.mockRestore();
+  });
+
+  it('records safe login fetch rejection diagnostics without leaking credentials', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    window.localStorage.clear();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const controller = new AbortController();
+
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal?.aborted) {
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+        return;
+      }
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), {
+        once: true,
+      });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    const request = realApiClient.post('/auth/login', { email: 'admin@demo.com', password: 'demo123' }, {
+      headers: {
+        'X-Auth-Flow-Id': 'auth-flow123',
+        'X-Auth-Request-Id': 'req-login123',
+      },
+      skipVendorContext: true,
+      authStartedAtMs: Date.now() - 50,
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({
+      kind: 'network',
+    });
+    expect(debugSpy).toHaveBeenCalledWith('[auth-flow]', expect.objectContaining({
+      operation: 'AUTH_LOGIN_FETCH_REJECTED',
+      flowId: 'auth-flow123',
+      requestId: 'req-login123',
+      stage: 'fetch_rejected',
+      outcome: 'aborted',
+      resultCategory: 'aborted',
+      errorName: 'AbortError',
+      signalExists: true,
+      signalAborted: true,
+      targetPathname: '/api/auth/login',
+    }));
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('admin@demo.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+
+    debugSpy.mockRestore();
+  });
+
+  it('redacts email-shaped text from login fetch rejection messages', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    window.localStorage.clear();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch admin@demo.com'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    await expect(realApiClient.post('/auth/login', { email: 'admin@demo.com', password: 'demo123' }, {
+      headers: {
+        'X-Auth-Flow-Id': 'auth-flow123',
+        'X-Auth-Request-Id': 'req-login123',
+      },
+      skipVendorContext: true,
+      authStartedAtMs: Date.now() - 50,
+    })).rejects.toMatchObject({
+      kind: 'network',
+    });
+
+    expect(debugSpy).toHaveBeenCalledWith('[auth-flow]', expect.objectContaining({
+      operation: 'AUTH_LOGIN_FETCH_REJECTED',
+      errorName: 'TypeError',
+      errorMessage: 'Failed to fetch [redacted-email]',
+      signalAborted: false,
+    }));
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('admin@demo.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+
+    debugSpy.mockRestore();
+  });
+
   it('sends credentials with /auth/me without attaching a localStorage bearer token in real mode', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_API_MODE', 'real');

@@ -1,5 +1,12 @@
 import { runtimeConfig } from '../config/runtime';
-import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser, getCurrentUser, getDemoUserByCredentials } from '../lib/auth';
+import {
+  createMockSession,
+  createCurrentUserFromVendorAccess,
+  type CurrentUser,
+  getCurrentUser,
+  getDemoUserByCredentials,
+  recordAuthDiagnostic,
+} from '../lib/auth';
 import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
@@ -847,13 +854,35 @@ export const runtimeServices = {
     async login(
       email: string,
       password: string,
-      options: { authAttemptId?: string; authFlowId?: string; authRequestId?: string; signal?: AbortSignal } = {},
+      options: {
+        authAttemptId?: string;
+        authFlowId?: string;
+        authRequestId?: string;
+        authStartedAtMs?: number;
+        signal?: AbortSignal;
+      } = {},
     ): Promise<{ token: string | null; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
+        const authFlowId = options.authFlowId ?? options.authAttemptId ?? null;
+        recordAuthDiagnostic('AUTH_RUNTIME_LOGIN_ENTER', {
+          flowId: authFlowId,
+          stage: 'runtime_services_auth_login_enter',
+          outcome: 'started',
+          requestId: options.authRequestId ?? null,
+          source: 'runtimeServices.auth.login',
+          resultCategory: 'started',
+          durationMs: typeof options.authStartedAtMs === 'number' ? Date.now() - options.authStartedAtMs : null,
+          requestPath: '/auth/login',
+          requestMethod: 'POST',
+          credentialsMode: 'include',
+          signalExists: Boolean(options.signal),
+          signalAborted: Boolean(options.signal?.aborted),
+        });
         const loginResponse = await backendAuth.login(email, password, {
           authAttemptId: options.authAttemptId,
           authFlowId: options.authFlowId,
           authRequestId: options.authRequestId,
+          authStartedAtMs: options.authStartedAtMs,
           signal: options.signal,
         });
         return {

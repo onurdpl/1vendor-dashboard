@@ -129,7 +129,40 @@ type AuthCorrelationOptions = {
   authAttemptId?: string;
   authFlowId?: string;
   authRequestId?: string;
+  authStartedAtMs?: number;
 };
+
+function getSafeBuiltUrlParts(path: string) {
+  try {
+    const fallbackOrigin = typeof window === 'undefined' ? 'https://vendor-dashboard.local' : window.location.origin;
+    const url = new URL(buildApiUrl(path), fallbackOrigin);
+    return {
+      targetOrigin: url.origin,
+      targetPathname: url.pathname,
+    };
+  } catch {
+    return {
+      targetOrigin: null,
+      targetPathname: null,
+    };
+  }
+}
+
+function getLoginBoundaryDiagnostics(input: {
+  authStartedAtMs?: number;
+  signal?: AbortSignal;
+}) {
+  const builtUrl = getSafeBuiltUrlParts('/auth/login');
+  return {
+    requestPath: '/auth/login',
+    requestMethod: 'POST',
+    credentialsMode: getRequestCredentials(),
+    signalExists: Boolean(input.signal),
+    signalAborted: Boolean(input.signal?.aborted),
+    durationMs: typeof input.authStartedAtMs === 'number' ? Date.now() - input.authStartedAtMs : null,
+    ...builtUrl,
+  };
+}
 
 function logAuthClientInfo(event: string, details: Record<string, unknown> = {}) {
   if (!isAuthDiagnosticsEnabled()) {
@@ -222,6 +255,18 @@ export async function login(
   const startedAt = Date.now();
   const authFlowId = options.authFlowId ?? options.authAttemptId ?? createAuthDiagnosticId('auth');
   const authRequestId = options.authRequestId ?? createAuthDiagnosticId('req');
+  recordAuthDiagnostic('AUTH_BACKEND_LOGIN_ENTER', {
+    flowId: authFlowId,
+    stage: 'backend_auth_login_enter',
+    outcome: 'started',
+    requestId: authRequestId,
+    source: 'backend-auth.login.enter',
+    resultCategory: 'started',
+    ...getLoginBoundaryDiagnostics({
+      authStartedAtMs: options.authStartedAtMs,
+      signal: options.signal,
+    }),
+  });
   logAuthClientInfo('AUTH_LOGIN_START', {
     authAttemptId: options.authAttemptId ?? null,
     flowId: authFlowId,
@@ -247,6 +292,7 @@ export async function login(
         authRequestId,
       }),
       skipVendorContext: true,
+      authStartedAtMs: options.authStartedAtMs,
       signal: options.signal,
     });
     setCsrfToken(response.csrfToken);

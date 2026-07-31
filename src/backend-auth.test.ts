@@ -84,6 +84,34 @@ describe('backend auth client diagnostics', () => {
     });
   });
 
+  it('records backend-auth login entry diagnostics without exposing credentials', async () => {
+    vi.stubEnv('VITE_AUTH_DIAGNOSTICS', 'true');
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    await login('vendor@example.com', 'demo123', {
+      authAttemptId: 'auth-test123',
+      authFlowId: 'auth-flow123',
+      authRequestId: 'req-login123',
+      authStartedAtMs: Date.now() - 25,
+    });
+
+    expect(debugSpy).toHaveBeenCalledWith('[auth-flow]', expect.objectContaining({
+      operation: 'AUTH_BACKEND_LOGIN_ENTER',
+      flowId: 'auth-flow123',
+      requestId: 'req-login123',
+      stage: 'backend_auth_login_enter',
+      outcome: 'started',
+      requestPath: '/auth/login',
+      requestMethod: 'POST',
+      signalExists: false,
+      signalAborted: false,
+    }));
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+
+    debugSpy.mockRestore();
+  });
+
   it('sends auth attempt id on public login readiness probe without exposing cookies or secrets', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(

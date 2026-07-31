@@ -82,6 +82,11 @@ function getAuthDiagnosticDebugEvents(debugSpy: ReturnType<typeof vi.spyOn>) {
       resultCategory?: string;
       httpStatus?: number | null;
       durationMs?: number | null;
+      requestPath?: string;
+      requestMethod?: string;
+      credentialsMode?: RequestCredentials;
+      signalExists?: boolean;
+      signalAborted?: boolean;
       source?: string;
     } => Boolean(entry) && typeof entry === 'object');
 }
@@ -273,14 +278,29 @@ describe('LoginPage expired session flow', () => {
 
     expect(events).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ operation: 'AUTH_LOGIN_FORM_SUBMIT_ENTER', stage: 'form_submit_enter', outcome: 'started', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'AUTH_LOGIN_PREVENT_DEFAULT_COMPLETE', stage: 'prevent_default_complete', outcome: 'complete', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ operation: 'LOGIN_SUBMIT', stage: 'submit', outcome: 'started', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ operation: 'LOGIN_REQUEST_START', stage: 'login_post', outcome: 'started', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ operation: 'LOGIN_RESPONSE', stage: 'login_post', outcome: 'success', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i), resultCategory: 'success', durationMs: expect.any(Number) }),
         expect.objectContaining({ operation: 'CACHE_USER_SET', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ operation: 'AUTH_STATE_CHANGE', stage: 'final_success', outcome: 'success', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ operation: 'AUTH_LOGIN_CLEANUP_COMPLETE', stage: 'cleanup_complete', outcome: 'complete', flowId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
       ]),
     );
     expect(flowIds.size).toBe(1);
+    expect(events.map((event) => event.operation).slice(0, 3)).toEqual([
+      'AUTH_LOGIN_FORM_SUBMIT_ENTER',
+      'AUTH_LOGIN_PREVENT_DEFAULT_COMPLETE',
+      'LOGIN_SUBMIT',
+    ]);
+    expect(events.find((event) => event.operation === 'AUTH_LOGIN_PREVENT_DEFAULT_COMPLETE')).toMatchObject({
+      requestPath: '/api/auth/login',
+      requestMethod: 'POST',
+      credentialsMode: 'same-origin',
+      signalExists: true,
+      signalAborted: false,
+    });
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
 
@@ -565,9 +585,22 @@ describe('LoginPage expired session flow', () => {
     expect(events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ flowId: reference, operation: 'REQUEST_ABORT', stage: 'login_post', outcome: 'timeout' }),
+        expect.objectContaining({
+          flowId: reference,
+          operation: 'AUTH_LOGIN_TIMEOUT_FIRED',
+          stage: 'login_post',
+          outcome: 'timeout',
+          signalAborted: false,
+        }),
         expect.objectContaining({ flowId: reference, operation: 'LOGIN_RESPONSE', stage: 'login_post', outcome: 'timeout' }),
         expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'login_transport_dual_probe_start', outcome: 'started' }),
         expect.objectContaining({ flowId: reference, operation: 'LOGIN_POST_TRANSPORT_PROBE', stage: 'login_transport_dual_probe_complete', outcome: 'general_post_transport_ready', durationMs: 20 }),
+        expect.objectContaining({
+          flowId: reference,
+          operation: 'AUTH_LOGIN_CLEANUP_COMPLETE',
+          stage: 'cleanup_complete',
+          signalAborted: true,
+        }),
       ]),
     );
     expect(probeDualPathLoginPostTransportMock).toHaveBeenCalledWith(

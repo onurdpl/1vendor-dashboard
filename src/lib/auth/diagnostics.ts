@@ -3,6 +3,18 @@ export type AuthDiagnosticOperation =
   | 'LOGIN_REQUEST_START'
   | 'LOGIN_POST_TRANSPORT_PROBE'
   | 'LOGIN_RESPONSE'
+  | 'AUTH_LOGIN_FORM_SUBMIT_ENTER'
+  | 'AUTH_LOGIN_PREVENT_DEFAULT_COMPLETE'
+  | 'AUTH_RUNTIME_LOGIN_ENTER'
+  | 'AUTH_BACKEND_LOGIN_ENTER'
+  | 'AUTH_API_CLIENT_LOGIN_POST_ENTER'
+  | 'AUTH_LOGIN_BUILD_API_URL_COMPLETE'
+  | 'AUTH_LOGIN_FETCH_CALL_ENTER'
+  | 'AUTH_LOGIN_FETCH_PROMISE_CREATED'
+  | 'AUTH_LOGIN_FETCH_RESOLVED'
+  | 'AUTH_LOGIN_FETCH_REJECTED'
+  | 'AUTH_LOGIN_TIMEOUT_FIRED'
+  | 'AUTH_LOGIN_CLEANUP_COMPLETE'
   | 'SESSION_RESTORE_START'
   | 'SESSION_RESTORE_RESPONSE'
   | 'AUTH_STATE_CHANGE'
@@ -49,9 +61,16 @@ export type AuthDiagnosticEvent = {
   cachedUserPresent?: boolean;
   authConfirmed?: boolean;
   requestPath?: string;
+  requestMethod?: string;
   apiBaseOrigin?: string;
+  targetOrigin?: string | null;
+  targetPathname?: string | null;
   timeoutMs?: number;
   credentialsMode?: RequestCredentials;
+  signalExists?: boolean;
+  signalAborted?: boolean;
+  errorName?: string | null;
+  errorMessage?: string | null;
   setCookieReadableFromJs?: boolean;
   setCookieReadAttempted?: boolean;
 };

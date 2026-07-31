@@ -14,6 +14,7 @@ type ApiClientRequestOptions = {
   vendorId?: string | null;
   skipVendorContext?: boolean;
   headers?: HeadersInit;
+  authStartedAtMs?: number;
   signal?: AbortSignal;
 };
 
@@ -78,6 +79,75 @@ function getAuthCorrelationHeader(headers: Headers, name: string) {
 
 function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
+}
+
+function getSafeBuiltUrlParts(url: string) {
+  try {
+    const fallbackOrigin = typeof window === 'undefined' ? 'https://vendor-dashboard.local' : window.location.origin;
+    const parsed = new URL(url, fallbackOrigin);
+    return {
+      targetOrigin: parsed.origin,
+      targetPathname: parsed.pathname,
+    };
+  } catch {
+    return {
+      targetOrigin: null,
+      targetPathname: null,
+    };
+  }
+}
+
+function sanitizeDiagnosticErrorText(value: unknown) {
+  if (typeof value !== 'string' || !value) {
+    return null;
+  }
+
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .slice(0, 200);
+}
+
+function getErrorName(error: unknown) {
+  if (error && typeof error === 'object' && 'name' in error) {
+    const name = Reflect.get(error, 'name');
+    return typeof name === 'string' && name ? name : null;
+  }
+
+  return null;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return sanitizeDiagnosticErrorText(Reflect.get(error, 'message'));
+  }
+
+  return sanitizeDiagnosticErrorText(String(error));
+}
+
+function isLoginPostRequest(method: HttpMethod, path: string) {
+  return method === 'POST' && getDiagnosticEndpoint(path) === '/auth/login';
+}
+
+function createLoginFetchBoundaryDiagnostics(input: {
+  method: HttpMethod;
+  path: string;
+  headers: Headers;
+  builtUrl?: string;
+  signal?: AbortSignal;
+  authStartedAtMs?: number;
+}) {
+  const builtUrl = input.builtUrl ?? buildApiUrl(input.path);
+  return {
+    flowId: getAuthCorrelationHeader(input.headers, 'X-Auth-Flow-Id'),
+    requestId: getAuthCorrelationHeader(input.headers, 'X-Auth-Request-Id'),
+    requestPath: getDiagnosticEndpoint(input.path),
+    requestMethod: input.method,
+    credentialsMode: getRequestCredentials(),
+    signalExists: Boolean(input.signal),
+    signalAborted: Boolean(input.signal?.aborted),
+    durationMs: typeof input.authStartedAtMs === 'number' ? Date.now() - input.authStartedAtMs : null,
+    ...getSafeBuiltUrlParts(builtUrl),
+  };
 }
 
 function getSafeAuthRouteDiagnostics() {
@@ -294,16 +364,82 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
   const hasBody = options.body !== undefined;
   const method = options.method ?? 'GET';
   const headers = createHeaders(options, hasBody);
+  const isLoginPost = isLoginPostRequest(method, path);
 
   try {
     await attachCsrfHeaderIfNeeded(method, path, headers, options.signal);
-    const response = await fetch(buildApiUrl(path), {
+    const builtUrl = buildApiUrl(path);
+    if (isLoginPost) {
+      recordAuthDiagnostic('AUTH_LOGIN_BUILD_API_URL_COMPLETE', {
+        stage: 'build_api_url_complete',
+        outcome: 'success',
+        source: 'api-client.request.buildApiUrl',
+        resultCategory: 'success',
+        ...createLoginFetchBoundaryDiagnostics({
+          method,
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+      recordAuthDiagnostic('AUTH_LOGIN_FETCH_CALL_ENTER', {
+        stage: 'fetch_call_enter',
+        outcome: 'started',
+        source: 'api-client.request.fetch',
+        resultCategory: 'started',
+        ...createLoginFetchBoundaryDiagnostics({
+          method,
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+    }
+    const fetchPromise = fetch(builtUrl, {
       method,
       headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
       credentials: getRequestCredentials(),
     });
+    if (isLoginPost) {
+      recordAuthDiagnostic('AUTH_LOGIN_FETCH_PROMISE_CREATED', {
+        stage: 'fetch_promise_created',
+        outcome: 'pending',
+        source: 'api-client.request.fetch',
+        resultCategory: 'started',
+        ...createLoginFetchBoundaryDiagnostics({
+          method,
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+    }
+    const response = await fetchPromise;
+    if (isLoginPost) {
+      recordAuthDiagnostic('AUTH_LOGIN_FETCH_RESOLVED', {
+        stage: 'fetch_resolved',
+        outcome: response.ok ? 'success' : 'http_error',
+        source: 'api-client.request.fetch',
+        resultCategory: response.ok ? 'success' : 'failure',
+        httpStatus: response.status,
+        ...createLoginFetchBoundaryDiagnostics({
+          method,
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+    }
 
     const parseDiagnostics = createApiDiagnostics(path, headers, response);
     const payload = await parseResponse(response, parseDiagnostics);
@@ -351,6 +487,25 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
 
     return payload as T;
   } catch (error) {
+    if (isLoginPost && !(error instanceof ApiError)) {
+      const builtUrl = buildApiUrl(path);
+      recordAuthDiagnostic('AUTH_LOGIN_FETCH_REJECTED', {
+        stage: 'fetch_rejected',
+        outcome: options.signal?.aborted ? 'aborted' : 'failure',
+        source: 'api-client.request.fetch',
+        resultCategory: options.signal?.aborted ? 'aborted' : 'network_error',
+        errorName: getErrorName(error),
+        errorMessage: getErrorMessage(error),
+        ...createLoginFetchBoundaryDiagnostics({
+          method,
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+    }
     if (error instanceof ApiError) {
       if (error.kind === 'unauthorized' && !isSessionRestoreEndpoint(path)) {
         recordAuthDiagnostic('CACHE_USER_CLEAR', {
@@ -392,6 +547,24 @@ export const apiClient = {
     return request<T>(path, { ...options, method: 'GET' });
   },
   post<T>(path: string, body?: unknown, options: Omit<ApiClientRequestOptions, 'method' | 'body'> = {}) {
+    const headers = new Headers(options.headers);
+    if (isLoginPostRequest('POST', path)) {
+      const builtUrl = buildApiUrl(path);
+      recordAuthDiagnostic('AUTH_API_CLIENT_LOGIN_POST_ENTER', {
+        stage: 'api_client_post_enter',
+        outcome: 'started',
+        source: 'apiClient.post',
+        resultCategory: 'started',
+        ...createLoginFetchBoundaryDiagnostics({
+          method: 'POST',
+          path,
+          headers,
+          builtUrl,
+          signal: options.signal,
+          authStartedAtMs: options.authStartedAtMs,
+        }),
+      });
+    }
     return request<T>(path, { ...options, method: 'POST', body });
   },
   put<T>(path: string, body?: unknown, options: Omit<ApiClientRequestOptions, 'method' | 'body'> = {}) {

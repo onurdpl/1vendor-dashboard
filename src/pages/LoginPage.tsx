@@ -16,6 +16,7 @@ import {
 import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
+import { buildApiUrl } from '../lib/api-client';
 import {
   probeDualPathLoginPostTransport,
   probePublicLoginReadiness,
@@ -52,14 +53,24 @@ function formatLoginTimeoutMessage(authFlowId: string) {
 function getLoginRequestDiagnostics(): {
   apiBaseOrigin: string;
   requestPath: string;
+  requestMethod: 'POST';
   timeoutMs: number;
   credentialsMode: RequestCredentials;
+  targetOrigin: string | null;
+  targetPathname: string | null;
+  signalExists: boolean;
+  signalAborted: boolean;
   setCookieReadableFromJs: boolean;
   setCookieReadAttempted: boolean;
 } {
   let path = '/auth/login';
+  let targetOrigin: string | null = null;
+  let targetPathname: string | null = null;
   try {
-    path = new URL('/auth/login', runtimeConfig.apiBaseUrl).pathname;
+    const url = new URL(buildApiUrl('/auth/login'), window.location.origin);
+    path = url.pathname;
+    targetOrigin = url.origin;
+    targetPathname = url.pathname;
   } catch {
     path = '/auth/login';
   }
@@ -67,8 +78,13 @@ function getLoginRequestDiagnostics(): {
   return {
     apiBaseOrigin: runtimeConfig.apiBaseOrigin,
     requestPath: path,
+    requestMethod: 'POST',
     timeoutMs: LOGIN_TIMEOUT_MS,
     credentialsMode: runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin',
+    targetOrigin,
+    targetPathname,
+    signalExists: true,
+    signalAborted: false,
     setCookieReadableFromJs: false,
     setCookieReadAttempted: false,
   };
@@ -214,25 +230,47 @@ export function LoginPage() {
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    const authAttemptId = createAuthAttemptId();
+    const authFlowId = authAttemptId;
+    const readinessRequestId = createAuthDiagnosticId('req');
+    const loginRequestId = createAuthDiagnosticId('req');
+    const startedAt = Date.now();
+    const elapsedMs = () => Date.now() - startedAt;
+    const baseLoginDiagnostics = getLoginRequestDiagnostics();
+
+    recordAuthDiagnostic('AUTH_LOGIN_FORM_SUBMIT_ENTER', {
+      flowId: authFlowId,
+      stage: 'form_submit_enter',
+      outcome: 'started',
+      requestId: loginRequestId,
+      source: 'LoginPage.handleSubmit.enter',
+      resultCategory: 'started',
+      durationMs: elapsedMs(),
+      ...baseLoginDiagnostics,
+    });
     event.preventDefault();
+    recordAuthDiagnostic('AUTH_LOGIN_PREVENT_DEFAULT_COMPLETE', {
+      flowId: authFlowId,
+      stage: 'prevent_default_complete',
+      outcome: 'complete',
+      requestId: loginRequestId,
+      source: 'LoginPage.handleSubmit.preventDefault',
+      resultCategory: 'success',
+      durationMs: elapsedMs(),
+      ...baseLoginDiagnostics,
+    });
 
     const abortController = new AbortController();
-    const authAttemptId = createAuthAttemptId();
     activeLoginAttemptRef.current = authAttemptId;
     setIsSubmitting(true);
     setErrorMessage(null);
     setPostTransportDiagnosticMessage(null);
 
-    const authFlowId = authAttemptId;
-    const readinessRequestId = createAuthDiagnosticId('req');
-    const loginRequestId = createAuthDiagnosticId('req');
-    const startedAt = Date.now();
     let timeoutTriggered = false;
     let responseReceived = false;
     let currentStage: 'readiness' | 'login_post' | 'post_response' = 'readiness';
     let timeoutId: number | null = null;
     const isCurrentLoginAttempt = () => activeLoginAttemptRef.current === authAttemptId;
-    const elapsedMs = () => Date.now() - startedAt;
     const startLoginPostTimeout = () => {
       timeoutId = window.setTimeout(() => {
         if (!isCurrentLoginAttempt()) {
@@ -249,6 +287,19 @@ export function LoginPage() {
           resultCategory: 'timeout',
           abortReason: currentStage,
           durationMs: elapsedMs(),
+          ...baseLoginDiagnostics,
+        });
+        recordAuthDiagnostic('AUTH_LOGIN_TIMEOUT_FIRED', {
+          flowId: authFlowId,
+          stage: currentStage,
+          outcome: 'timeout',
+          requestId: currentStage === 'readiness' ? readinessRequestId : loginRequestId,
+          source: 'LoginPage.handleSubmit.timeout',
+          resultCategory: 'timeout',
+          abortReason: currentStage,
+          durationMs: elapsedMs(),
+          ...baseLoginDiagnostics,
+          signalAborted: abortController.signal.aborted,
         });
         abortController.abort();
       }, LOGIN_TIMEOUT_MS);
@@ -268,10 +319,11 @@ export function LoginPage() {
       outcome: 'started',
       requestId: loginRequestId,
       source: 'LoginPage.handleSubmit',
-      resultCategory: 'started',
-      cachedUserPresent: isAuthenticated(),
-      durationMs: 0,
-    });
+        resultCategory: 'started',
+        cachedUserPresent: isAuthenticated(),
+        durationMs: 0,
+        ...baseLoginDiagnostics,
+      });
 
     try {
       if (runtimeConfig.apiMode === 'real' && runtimeConfig.appEnvironment === 'production') {
@@ -318,6 +370,7 @@ export function LoginPage() {
         authAttemptId,
         authFlowId,
         authRequestId: loginRequestId,
+        authStartedAtMs: startedAt,
         signal: abortController.signal,
       });
       const { token, user } = await loginPromise;
@@ -448,6 +501,17 @@ export function LoginPage() {
       setErrorMessage(getLoginErrorMessage(error, { timeoutTriggered, responseReceived, authFlowId }));
     } finally {
       clearLoginTimeout();
+      recordAuthDiagnostic('AUTH_LOGIN_CLEANUP_COMPLETE', {
+        flowId: authFlowId,
+        stage: 'cleanup_complete',
+        outcome: 'complete',
+        requestId: loginRequestId,
+        source: 'LoginPage.handleSubmit.cleanup',
+        resultCategory: 'success',
+        durationMs: elapsedMs(),
+        ...baseLoginDiagnostics,
+        signalAborted: abortController.signal.aborted,
+      });
       if (isCurrentLoginAttempt()) {
         setIsSubmitting(false);
         activeLoginAttemptRef.current = null;
