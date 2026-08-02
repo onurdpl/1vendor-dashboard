@@ -3,7 +3,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 import {
-  clearToken,
+  clearAuthRestoreState,
   createAuthDiagnosticId,
   getCurrentUser,
   isAuthenticated,
@@ -14,12 +14,9 @@ import {
 } from './auth';
 import { ApiError } from './api/errors';
 
-type PublicAuthGateStatus = 'restoring' | 'authenticated' | 'unauthenticated' | 'restore-error';
+type PublicAuthGateStatus = 'restoring' | 'authenticated' | 'unauthenticated';
 
-const AUTH_RESTORE_TIMEOUT_MS = 10_000;
-const AUTH_RESTORE_RECOVERY_RETRY_LIMIT = 1;
-const AUTH_RESTORE_RECOVERABLE_MESSAGE =
-  'Session restore is taking longer than expected. Please retry or sign in again.';
+const AUTH_RESTORE_TIMEOUT_MS = 2_000;
 
 function getInitialStatus(): PublicAuthGateStatus {
   if (isAuthenticated()) {
@@ -55,28 +52,32 @@ async function restoreCurrentSession(input: {
   restoreAttemptId: string;
   authRequestId: string;
 }) {
-  const timeoutController = new AbortController();
   let didTimeout = false;
-  const abortFromOwner = () => timeoutController.abort(input.controller.signal.reason);
+  let rejectOnAbort: ((error: DOMException) => void) | null = null;
+  const abortPromise = new Promise<never>((_, reject) => {
+    rejectOnAbort = reject;
+  });
+  const abortRequest = () => {
+    rejectOnAbort?.(new DOMException('Session restore aborted.', 'AbortError'));
+  };
 
-  if (input.controller.signal.aborted) {
-    abortFromOwner();
-  } else {
-    input.controller.signal.addEventListener('abort', abortFromOwner, { once: true });
-  }
+  input.controller.signal.addEventListener('abort', abortRequest, { once: true });
 
   const timeoutId = window.setTimeout(() => {
     didTimeout = true;
-    timeoutController.abort();
+    input.controller.abort();
   }, AUTH_RESTORE_TIMEOUT_MS);
 
   try {
-    return await runtimeServices.auth.me({
-      authAttemptId: input.restoreAttemptId,
-      authFlowId: input.restoreAttemptId,
-      authRequestId: input.authRequestId,
-      signal: timeoutController.signal,
-    });
+    return await Promise.race([
+      runtimeServices.auth.me({
+        authAttemptId: input.restoreAttemptId,
+        authFlowId: input.restoreAttemptId,
+        authRequestId: input.authRequestId,
+        signal: input.controller.signal,
+      }),
+      abortPromise,
+    ]);
   } catch (error) {
     if (error && typeof error === 'object') {
       Reflect.set(error, 'restoreDidTimeout', didTimeout);
@@ -84,7 +85,7 @@ async function restoreCurrentSession(input: {
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
-    input.controller.signal.removeEventListener('abort', abortFromOwner);
+    input.controller.signal.removeEventListener('abort', abortRequest);
   }
 }
 
@@ -111,98 +112,73 @@ export function RedirectIfAuthed() {
         errorMessage: null,
       });
 
-      for (let attempt = 0; attempt <= AUTH_RESTORE_RECOVERY_RETRY_LIMIT; attempt += 1) {
-        const controller = new AbortController();
-        const authRequestId = createAuthDiagnosticId('req');
-        activeRestoreControllerRef.current = controller;
-        recordAuthDiagnostic('SESSION_RESTORE_START', {
-          flowId: restoreAttemptId,
-          requestId: authRequestId,
-          source: 'RedirectIfAuthed.restoreCookieSession',
-          resultCategory: 'started',
-          cachedUserPresent: Boolean(getCurrentUser()),
-        });
+      const controller = new AbortController();
+      const authRequestId = createAuthDiagnosticId('req');
+      activeRestoreControllerRef.current = controller;
+      recordAuthDiagnostic('SESSION_RESTORE_START', {
+        flowId: restoreAttemptId,
+        requestId: authRequestId,
+        source: 'RedirectIfAuthed.restoreCookieSession',
+        resultCategory: 'started',
+        cachedUserPresent: Boolean(getCurrentUser()),
+      });
 
-        try {
-          const user = await restoreCurrentSession({ controller, restoreAttemptId, authRequestId });
-          if (cancelled || activeRestoreControllerRef.current !== controller) {
-            recordAuthDiagnostic('STALE_RESULT_IGNORED', {
-              flowId: restoreAttemptId,
-              requestId: authRequestId,
-              source: 'RedirectIfAuthed.restoreCookieSession.success',
-              resultCategory: 'stale',
-              staleResult: true,
-            });
-            return;
-          }
-          if (!user) {
-            throw new Error('Session restore did not return a user.');
-          }
-
-          setSession(null, user, {
+      try {
+        const user = await restoreCurrentSession({ controller, restoreAttemptId, authRequestId });
+        if (cancelled || activeRestoreControllerRef.current !== controller) {
+          recordAuthDiagnostic('STALE_RESULT_IGNORED', {
             flowId: restoreAttemptId,
             requestId: authRequestId,
             source: 'RedirectIfAuthed.restoreCookieSession.success',
+            resultCategory: 'stale',
+            staleResult: true,
           });
-          markAuthConfirmed({ restoreAttemptId });
-          recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
-            flowId: restoreAttemptId,
-            requestId: authRequestId,
-            source: 'RedirectIfAuthed.restoreCookieSession',
-            resultCategory: 'success',
-            durationMs: Date.now() - startedAt,
-          });
-          setStatus('authenticated');
           return;
-        } catch (error) {
-          if (cancelled || activeRestoreControllerRef.current !== controller) {
-            recordAuthDiagnostic('STALE_RESULT_IGNORED', {
-              flowId: restoreAttemptId,
-              requestId: authRequestId,
-              source: 'RedirectIfAuthed.restoreCookieSession.failure',
-              resultCategory: 'stale',
-              staleResult: true,
-            });
-            return;
-          }
+        }
+        if (!user) {
+          throw new Error('Session restore did not return a user.');
+        }
 
-          const unauthorized = isUnauthorizedRestoreFailure(error);
-          const didTimeout = Boolean(error && typeof error === 'object' && Reflect.get(error, 'restoreDidTimeout'));
-          recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+        setSession(null, user, {
+          flowId: restoreAttemptId,
+          requestId: authRequestId,
+          source: 'RedirectIfAuthed.restoreCookieSession.success',
+        });
+        markAuthConfirmed({ restoreAttemptId });
+        recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+          flowId: restoreAttemptId,
+          requestId: authRequestId,
+          source: 'RedirectIfAuthed.restoreCookieSession',
+          resultCategory: 'success',
+          durationMs: Date.now() - startedAt,
+        });
+        setStatus('authenticated');
+      } catch (error) {
+        if (cancelled || activeRestoreControllerRef.current !== controller) {
+          recordAuthDiagnostic('STALE_RESULT_IGNORED', {
             flowId: restoreAttemptId,
             requestId: authRequestId,
-            source: 'RedirectIfAuthed.restoreCookieSession',
-            resultCategory: unauthorized ? 'unauthorized' : didTimeout ? 'timeout' : 'failure',
-            durationMs: Date.now() - startedAt,
+            source: 'RedirectIfAuthed.restoreCookieSession.failure',
+            resultCategory: 'stale',
+            staleResult: true,
           });
+          return;
+        }
 
-          if (unauthorized) {
-            clearToken({
-              reason: 'expired',
-              intendedPath: '/login',
-              flowId: restoreAttemptId,
-              requestId: authRequestId,
-              source: 'RedirectIfAuthed.restoreCookieSession.unauthorized',
-            });
-            setStatus('unauthenticated');
-            return;
-          }
-
-          if (attempt === AUTH_RESTORE_RECOVERY_RETRY_LIMIT) {
-            setAuthRestoreSnapshot({
-              phase: 'restore_error',
-              authConfirmed: false,
-              restoreAttemptId,
-              delayed: true,
-              errorMessage: AUTH_RESTORE_RECOVERABLE_MESSAGE,
-            });
-            setStatus('restore-error');
-            return;
-          }
-        } finally {
-          if (activeRestoreControllerRef.current === controller) {
-            activeRestoreControllerRef.current = null;
-          }
+        const unauthorized = isUnauthorizedRestoreFailure(error);
+        const didTimeout = Boolean(error && typeof error === 'object' && Reflect.get(error, 'restoreDidTimeout'));
+        recordAuthDiagnostic('SESSION_RESTORE_RESPONSE', {
+          flowId: restoreAttemptId,
+          requestId: authRequestId,
+          source: 'RedirectIfAuthed.restoreCookieSession',
+          resultCategory: unauthorized ? 'unauthorized' : didTimeout ? 'timeout' : 'failure',
+          durationMs: Date.now() - startedAt,
+        });
+        clearAuthRestoreState();
+        setStatus('unauthenticated');
+      } finally {
+        if (activeRestoreControllerRef.current === controller) {
+          activeRestoreControllerRef.current = null;
         }
       }
     }
@@ -229,39 +205,7 @@ export function RedirectIfAuthed() {
   }
 
   if (status === 'restoring') {
-    return (
-      <div className="auth-page">
-        <section className="auth-panel" role="status">
-          <p className="eyebrow">Secure access</p>
-          <h1>Checking your session</h1>
-          <p className="page-description">We are confirming your session before showing sign in.</p>
-        </section>
-      </div>
-    );
-  }
-
-  if (status === 'restore-error') {
-    return (
-      <div className="auth-page">
-        <section className="auth-panel" role="alert">
-          <p className="eyebrow">Secure access</p>
-          <h1>Session restore needs attention</h1>
-          <p className="page-description">{AUTH_RESTORE_RECOVERABLE_MESSAGE}</p>
-          <div className="state-actions">
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => {
-                clearToken({ source: 'RedirectIfAuthed.continueToLogin' });
-                setStatus('unauthenticated');
-              }}
-            >
-              Retry sign in
-            </button>
-          </div>
-        </section>
-      </div>
-    );
+    return <div className="auth-page" aria-busy="true" />;
   }
 
   return <Outlet />;

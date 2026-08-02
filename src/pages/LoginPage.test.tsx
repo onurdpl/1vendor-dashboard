@@ -247,6 +247,32 @@ describe('LoginPage expired session flow', () => {
     expect(probeDualPathLoginPostTransportMock).not.toHaveBeenCalled();
   });
 
+  it('hides demo credentials and unfinished-product copy in real production mode', () => {
+    Object.assign(runtimeConfig, {
+      apiMode: 'real',
+      appEnvironment: 'production',
+    });
+
+    renderStandaloneLogin();
+
+    expect(screen.getByRole('heading', { name: 'Sign in to continue' })).toBeInTheDocument();
+    expect(screen.queryByText('Demo credentials')).not.toBeInTheDocument();
+    expect(screen.queryByText(/@demo\.com/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Built for future auth flow.')).not.toBeInTheDocument();
+  });
+
+  it('keeps demo assistance in mock development mode', () => {
+    Object.assign(runtimeConfig, {
+      apiMode: 'mock',
+      appEnvironment: 'development',
+    });
+
+    renderStandaloneLogin();
+
+    expect(screen.getByText('Demo credentials')).toBeInTheDocument();
+    expect(screen.getByText(/Built for future auth flow\./)).toBeInTheDocument();
+  });
+
   it('shows the retry window when login is temporarily rate limited', async () => {
     loginMock.mockRejectedValueOnce(new ApiError('Too many login attempts. Please try again later.', 'server', {
       status: 429,

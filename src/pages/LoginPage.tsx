@@ -217,13 +217,9 @@ export function LoginPage() {
   const sessionMessage =
     expiredSessionNotice?.message ??
     (locationState?.sessionExpired ? locationState.message ?? EXPIRED_SESSION_MESSAGE : null);
-  const demoUsers = getDemoUsers();
-  const realModeDemoUsers = [
-    'admin@demo.com / demo123',
-    'yalispor@demo.com / demo123',
-    'sporjinal@demo.com / demo123',
-    'sporvol@demo.com / demo123',
-  ];
+  const showDevelopmentAssistance =
+    runtimeConfig.apiMode === 'mock' && runtimeConfig.appEnvironment.trim().toLowerCase() !== 'production';
+  const demoUsers = showDevelopmentAssistance ? getDemoUsers() : [];
 
   if (isAuthenticated()) {
     return <Navigate to={from} replace />;
@@ -580,23 +576,24 @@ export function LoginPage() {
         {errorMessage ? <ActionFeedback tone="error" message={errorMessage} /> : null}
         {postTransportDiagnosticMessage ? <ActionFeedback tone="info" message={postTransportDiagnosticMessage} /> : null}
 
-        <div className="demo-credentials">
-          <div className="session-label">Demo credentials</div>
-          <ul className="demo-credentials-list">
-            {runtimeConfig.apiMode === 'real'
-              ? realModeDemoUsers.map((user) => <li key={user}>{user}</li>)
-              : demoUsers.map((user) => (
+        {showDevelopmentAssistance ? (
+          <>
+            <div className="demo-credentials">
+              <div className="session-label">Demo credentials</div>
+              <ul className="demo-credentials-list">
+                {demoUsers.map((user) => (
                   <li key={user.email}>
                     <strong>{user.email}</strong>
                     <span> / demo123</span>
                   </li>
                 ))}
-          </ul>
-        </div>
-
-        <p className="auth-footnote">
-          Built for future auth flow. Return to <Link to="/">dashboard</Link>.
-        </p>
+              </ul>
+            </div>
+            <p className="auth-footnote">
+              Built for future auth flow. Return to <Link to="/">dashboard</Link>.
+            </p>
+          </>
+        ) : null}
       </section>
     </div>
   );

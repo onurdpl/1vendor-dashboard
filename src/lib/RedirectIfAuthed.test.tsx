@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeConfig } from '../config/runtime';
@@ -94,7 +94,9 @@ describe('RedirectIfAuthed', () => {
 
     renderGuard();
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking your session');
+    expect(document.querySelector('.auth-page')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('Checking your session')).not.toBeInTheDocument();
+    expect(screen.queryByText('We are confirming your session before showing sign in.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Login form' })).not.toBeInTheDocument();
     expect(meMock).toHaveBeenCalledWith(expect.objectContaining({
       authAttemptId: expect.stringMatching(/^restore-/),
@@ -125,8 +127,55 @@ describe('RedirectIfAuthed', () => {
     renderGuard();
 
     expect(await screen.findByRole('button', { name: 'Login form' })).toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Session restore needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Retry sign in')).not.toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
+    expect(meMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back silently within two seconds when the restore request times out', async () => {
+    vi.useFakeTimers();
+    const restore = makeDeferred<CurrentUser>();
+    meMock.mockReturnValueOnce(restore.promise);
+
+    renderGuard();
+
+    expect(meMock).toHaveBeenCalledTimes(1);
+    const signal = (meMock.mock.calls[0]?.[0] as { signal?: AbortSignal }).signal;
+    expect(signal?.aborted).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(screen.getByRole('button', { name: 'Login form' })).toBeInTheDocument();
+    expect(signal?.aborted).toBe(true);
+    expect(meMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Session restore needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Retry sign in')).not.toBeInTheDocument();
+  });
+
+  it('ignores a late restore success after the two-second fallback', async () => {
+    vi.useFakeTimers();
+    const restore = makeDeferred<CurrentUser>();
+    meMock.mockReturnValueOnce(restore.promise);
+
+    renderGuard();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByRole('button', { name: 'Login form' })).toBeInTheDocument();
+
+    await act(async () => {
+      restore.resolve(testUser);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: 'Login form' })).toBeInTheDocument();
+    expect(screen.queryByTestId('current-route')).not.toBeInTheDocument();
+    expect(getCurrentUser()).toBeNull();
+    expect(getAuthRestoreSnapshot().authConfirmed).toBe(false);
     expect(meMock).toHaveBeenCalledTimes(1);
   });
 
@@ -150,17 +199,14 @@ describe('RedirectIfAuthed', () => {
     expect(getAuthRestoreSnapshot().authConfirmed).toBe(false);
   });
 
-  it('reuses the protected restore failure policy before allowing sign in', async () => {
+  it('falls back silently after a transport failure without retrying restore', async () => {
     meMock.mockRejectedValue(new ApiError('Unable to reach backend.', 'network'));
 
     renderGuard();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Session restore needs attention');
-    expect(meMock).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('button', { name: 'Login form' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry sign in' }));
-
     expect(await screen.findByRole('button', { name: 'Login form' })).toBeInTheDocument();
+    expect(meMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Session restore needs attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Retry sign in')).not.toBeInTheDocument();
   });
 });
