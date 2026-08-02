@@ -16,6 +16,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
+import { formatDateTime } from '../services/real/formatting';
 
 type VendorActionCard = {
   title: string;
@@ -252,6 +253,14 @@ function formatOrderDate(value: string | null | undefined) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(timestamp));
+}
+
+function formatPaymentDate(value: string | null | undefined) {
+  return formatDateTime(value, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }, 'Not available');
 }
 
 function getOrderTimestamp(order: OrderSummary) {
@@ -616,6 +625,7 @@ export function DashboardPage() {
   const upcomingPayment = hasMeaningfulMoneyValue(dashboardView.financeSnapshot?.payoutEstimate)
     ? dashboardView.financeSnapshot?.payoutEstimate
     : null;
+  const latestCompletedPayment = dashboardView.financeSnapshot?.latestCompletedPayment ?? null;
   const recentOrders = buildRecentOrderRows(vendorOrders ?? undefined);
   const recentChanges = buildRecentChanges(dashboardView, recentOrders);
   const vendorName = dashboardView.vendorName || currentVendor.vendorName;
@@ -864,10 +874,18 @@ export function DashboardPage() {
               <span>Payment timing will appear here when orders become eligible.</span>
             </div>
           )}
-          <div className="dashboard-vendor-payment-note">
-            <strong>No payment history available yet.</strong>
-            <span>Completed payments will appear in Finance after payment records exist.</span>
-          </div>
+          {latestCompletedPayment ? (
+            <div className="dashboard-vendor-payment-metric">
+              <span>Last Payment</span>
+              <strong>{latestCompletedPayment.netAmount}</strong>
+              <small>Paid {formatPaymentDate(latestCompletedPayment.paidAt)}</small>
+            </div>
+          ) : (
+            <div className="dashboard-vendor-payment-note">
+              <strong>Last Payment</strong>
+              <span>No completed payments yet</span>
+            </div>
+          )}
           <Link className="dashboard-vendor-payment-link" to="/finance">
             Payment History
             <ArrowIcon />

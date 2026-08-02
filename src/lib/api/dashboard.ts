@@ -406,6 +406,7 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
       refunds: finance.summary.refunds,
       netRevenue: finance.summary.netRevenue,
       payoutEstimate: finance.summary.payoutEstimate,
+      latestCompletedPayment: null,
     },
   };
 }
@@ -686,6 +687,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
         refunds: finance.summary.refunds,
         netRevenue: finance.summary.netRevenue,
         payoutEstimate: finance.summary.payoutEstimate,
+        latestCompletedPayment: finance.latestCompletedPayment,
       }
     : undefined;
   logDashboardClientTiming({

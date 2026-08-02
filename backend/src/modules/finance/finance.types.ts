@@ -38,6 +38,13 @@ export type PayoutBatchSummaryDto = {
   latestBatch: PayoutBatchDto | null;
 };
 
+export type LatestCompletedPaymentDto = {
+  id: string;
+  netAmount: string;
+  currency: string;
+  paidAt: string;
+};
+
 export type VendorDebtHistoryProductDto = {
   title: string | null;
   sku: string | null;
@@ -292,6 +299,7 @@ export type FinanceDashboardDto = {
 
 export type FinanceDashboardSummaryDto = {
   summary: Pick<FinanceSummaryDto, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+  latestCompletedPayment: LatestCompletedPaymentDto | null;
 };
 
 export type VendorFinancialProfileUpdateDto = {

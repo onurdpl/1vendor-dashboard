@@ -2457,6 +2457,7 @@ export const runtimeServices = {
               netRevenue: finance.summary.netRevenue,
               payoutEstimate: finance.summary.payoutEstimate,
             },
+            latestCompletedPayment: null,
           });
     },
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>

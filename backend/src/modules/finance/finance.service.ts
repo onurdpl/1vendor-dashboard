@@ -1861,45 +1861,66 @@ export async function getVendorFinanceDashboard(
 }
 
 export async function getVendorFinanceSummary(vendorId: string): Promise<FinanceDashboardSummaryDto> {
-  const summaryEntries = await withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
-    where: {
-      vendorId,
-      ...activeFinanceLedgerWhere,
-    },
-    select: {
-      entryType: true,
-      amount: true,
-      commissionPercentSnapshot: true,
-      commissionVatPercentSnapshot: true,
-      deductShippingEnabledSnapshot: true,
-      shippingModeSnapshot: true,
-      fixedShippingFeeSnapshot: true,
-      shippingCostSnapshot: true,
-      shippingVatAmountSnapshot: true,
-      shippingCostSourceSnapshot: true,
-      shippingCostProviderSnapshot: true,
-      settlementDelayDaysSnapshot: true,
-      vendorAllocation: {
-        select: {
-          allocationStatus: true,
-          cancelRefundReviewStatus: true,
-          fulfillmentStatus: true,
-          shippingStatus: true,
-          order: {
-            select: {
-              cancelledAt: true,
+  const [summaryEntries, latestCompletedPayment] = await Promise.all([
+    withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
+      where: {
+        vendorId,
+        ...activeFinanceLedgerWhere,
+      },
+      select: {
+        entryType: true,
+        amount: true,
+        commissionPercentSnapshot: true,
+        commissionVatPercentSnapshot: true,
+        deductShippingEnabledSnapshot: true,
+        shippingModeSnapshot: true,
+        fixedShippingFeeSnapshot: true,
+        shippingCostSnapshot: true,
+        shippingVatAmountSnapshot: true,
+        shippingCostSourceSnapshot: true,
+        shippingCostProviderSnapshot: true,
+        settlementDelayDaysSnapshot: true,
+        vendorAllocation: {
+          select: {
+            allocationStatus: true,
+            cancelRefundReviewStatus: true,
+            fulfillmentStatus: true,
+            shippingStatus: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
             },
-          },
-          fulfillment: {
-            select: {
-              fulfilledAt: true,
-              shipmentUpdatedAt: true,
+            fulfillment: {
+              select: {
+                fulfilledAt: true,
+                shipmentUpdatedAt: true,
+              },
             },
           },
         },
       },
-    },
-  }));
+    })),
+    withDashboardTiming('finance.latest_completed_payment_fetch', () => prisma.payoutBatch.findFirst({
+      where: {
+        vendorId,
+        status: 'PAID',
+        paidAt: {
+          not: null,
+        },
+      },
+      select: {
+        id: true,
+        netAmount: true,
+        currency: true,
+        paidAt: true,
+      },
+      orderBy: [
+        { paidAt: 'desc' },
+        { id: 'desc' },
+      ],
+    })),
+  ]);
   const defaultProfile = mapProfile(null, vendorId);
   const { grossSales, refunds, netRevenue, payoutEstimate } = calculateFinanceSummaryAmounts(
     summaryEntries,
@@ -1913,6 +1934,14 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
       netRevenue: toAmountString(netRevenue),
       payoutEstimate: toAmountString(payoutEstimate),
     },
+    latestCompletedPayment: latestCompletedPayment?.paidAt
+      ? {
+          id: latestCompletedPayment.id,
+          netAmount: toAmountString(toNumber(latestCompletedPayment.netAmount)),
+          currency: latestCompletedPayment.currency,
+          paidAt: latestCompletedPayment.paidAt.toISOString(),
+        }
+      : null,
   };
 }
 

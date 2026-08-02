@@ -63,6 +63,12 @@ type FinanceDashboardDto = {
 
 type FinanceDashboardSummaryDto = {
   summary: Pick<FinanceDashboardDto['summary'], 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+  latestCompletedPayment?: {
+    id: string;
+    netAmount: string;
+    currency: string;
+    paidAt: string;
+  } | null;
 };
 
 type ReturnFinanceRecordsResponseDto = {
@@ -288,6 +294,12 @@ export async function getFinanceSummary(options: { vendorId?: string | null; sig
       netRevenue: formatCurrency(response.summary.netRevenue),
       payoutEstimate: formatCurrency(response.summary.payoutEstimate),
     },
+    latestCompletedPayment: response.latestCompletedPayment
+      ? {
+          ...response.latestCompletedPayment,
+          netAmount: formatCurrency(response.latestCompletedPayment.netAmount, response.latestCompletedPayment.currency),
+        }
+      : null,
   };
 }
 

@@ -43,6 +43,7 @@ const dashboardOverview: DashboardOverview = {
     refunds: 'TRY 1,200',
     netRevenue: 'TRY 40,800',
     payoutEstimate: 'TRY 24,580',
+    latestCompletedPayment: null,
   },
 };
 
@@ -321,8 +322,37 @@ describe('DashboardPage vendor launchpad', () => {
     expect(within(paymentRegion).getByText('Upcoming Payment')).toBeInTheDocument();
     expect(within(paymentRegion).getByText('TRY 24,580')).toBeInTheDocument();
     expect(within(paymentRegion).getByText('Estimated from current payment preparation.')).toBeInTheDocument();
-    expect(within(paymentRegion).getByText('No payment history available yet.')).toBeInTheDocument();
-    expect(within(paymentRegion).getByText('Completed payments will appear in Finance after payment records exist.')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('Last Payment')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('No completed payments yet')).toBeInTheDocument();
+    expect(within(paymentRegion).queryByText('No payment history available yet.')).not.toBeInTheDocument();
+    expect(within(paymentRegion).queryByText('Completed payments will appear in Finance after payment records exist.')).not.toBeInTheDocument();
+    expect(within(paymentRegion).getByRole('link', { name: /payment history/i })).toHaveAttribute('href', '/finance');
+  });
+
+  it('renders the latest completed payment from the finance snapshot', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      financeSnapshot: {
+        ...dashboardOverview.financeSnapshot,
+        payoutEstimate: 'TRY 24,580',
+        latestCompletedPayment: {
+          id: 'payout-paid-1',
+          netAmount: 'TRY 9,875.50',
+          currency: 'TRY',
+          paidAt: '2026-07-14T11:25:00.000Z',
+        },
+      },
+    });
+
+    renderDashboardPage();
+
+    const paymentRegion = await screen.findByLabelText('Payment summary');
+    await within(paymentRegion).findByText('TRY 24,580');
+    expect(within(paymentRegion).getByText('Upcoming Payment')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('TRY 24,580')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('Last Payment')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('TRY 9,875.50')).toBeInTheDocument();
+    expect(within(paymentRegion).getByText('Paid Jul 14, 2026')).toBeInTheDocument();
     expect(within(paymentRegion).getByRole('link', { name: /payment history/i })).toHaveAttribute('href', '/finance');
   });
 

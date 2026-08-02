@@ -627,7 +627,7 @@ describe('persisted vendor finance calculations', () => {
     });
   });
 
-  it('builds dashboard finance summary without fetching records, profile, or payout batch', async () => {
+  it('builds dashboard finance summary without fetching records, profile, or unsafe latest payout batch', async () => {
     await upsertVendorFinancialProfile('sporjinal', {
       commissionPercent: 15,
       commissionVatPercent: 18,
@@ -669,10 +669,29 @@ describe('persisted vendor finance calculations', () => {
         netRevenue: '4799.00',
         payoutEstimate: '4232.10',
       },
+      latestCompletedPayment: null,
     });
     expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
-    expect(prismaMock.payoutBatch.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.findFirst).toHaveBeenCalledWith({
+      where: {
+        vendorId: 'sporjinal',
+        status: 'PAID',
+        paidAt: {
+          not: null,
+        },
+      },
+      select: {
+        id: true,
+        netAmount: true,
+        currency: true,
+        paidAt: true,
+      },
+      orderBy: [
+        { paidAt: 'desc' },
+        { id: 'desc' },
+      ],
+    });
     expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         select: expect.not.objectContaining({

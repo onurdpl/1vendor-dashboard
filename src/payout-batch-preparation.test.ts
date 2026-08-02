@@ -11,6 +11,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   payoutBatch: {
     create: vi.fn(),
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  getVendorFinanceSummary,
   PayoutBatchTransitionRevalidationError,
   markPayoutBatchPaid,
   markPayoutBatchReview,
@@ -233,6 +235,7 @@ describe('payout batch preparation', () => {
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.financeLedgerEntry.updateMany.mockReset();
     prismaMock.payoutBatch.create.mockReset();
+    prismaMock.payoutBatch.findFirst.mockReset();
     prismaMock.payoutBatch.findUnique.mockReset();
     prismaMock.payoutBatch.update.mockReset();
     prismaMock.payoutBatch.updateMany.mockReset();
@@ -243,6 +246,7 @@ describe('payout batch preparation', () => {
 
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     prismaMock.financeIntegrityAlert.findMany.mockResolvedValue([]);
+    prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
     prismaMock.financeLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.payoutBatch.updateMany.mockResolvedValue({ count: 0 });
     prismaMock.financeEvent.createMany.mockResolvedValue({ count: 0 });
@@ -263,6 +267,71 @@ describe('payout batch preparation', () => {
       settlementDelayDays: 21,
       active: true,
     });
+  });
+
+  it('reads latest completed vendor payment from paid payout batches only', async () => {
+    const paidAt = new Date('2026-07-14T11:25:00.000Z');
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
+    prismaMock.payoutBatch.findFirst.mockResolvedValue({
+      id: 'payout-paid-1',
+      netAmount: 9875.5,
+      currency: 'TRY',
+      paidAt,
+    });
+
+    const summary = await getVendorFinanceSummary('demo-vendor-a');
+
+    expect(prismaMock.payoutBatch.findFirst).toHaveBeenCalledWith({
+      where: {
+        vendorId: 'demo-vendor-a',
+        status: 'PAID',
+        paidAt: {
+          not: null,
+        },
+      },
+      select: {
+        id: true,
+        netAmount: true,
+        currency: true,
+        paidAt: true,
+      },
+      orderBy: [
+        { paidAt: 'desc' },
+        { id: 'desc' },
+      ],
+    });
+    expect(summary).toEqual({
+      summary: {
+        grossSales: '0.00',
+        refunds: '0.00',
+        netRevenue: '0.00',
+        payoutEstimate: '0.00',
+      },
+      latestCompletedPayment: {
+        id: 'payout-paid-1',
+        netAmount: '9875.50',
+        currency: 'TRY',
+        paidAt: paidAt.toISOString(),
+      },
+    });
+  });
+
+  it('does not return a completed payment when no paid payout batch with paidAt exists', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
+    prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
+
+    const summary = await getVendorFinanceSummary('demo-vendor-a');
+
+    expect(summary.latestCompletedPayment).toBeNull();
+    expect(prismaMock.payoutBatch.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        vendorId: 'demo-vendor-a',
+        status: 'PAID',
+        paidAt: {
+          not: null,
+        },
+      },
+    }));
   });
 
   it('prepares a draft batch from payable rows and refund reductions backed by approved settlement snapshots only', async () => {

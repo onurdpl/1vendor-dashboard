@@ -308,6 +308,12 @@ describe('real service pagination plumbing', () => {
         netRevenue: '75.00',
         payoutEstimate: '67.50',
       },
+      latestCompletedPayment: {
+        id: 'payout-paid-1',
+        netAmount: '50.25',
+        currency: 'TRY',
+        paidAt: '2026-07-14T11:25:00.000Z',
+      },
     });
 
     const summary = await getFinanceSummary({
@@ -328,6 +334,12 @@ describe('real service pagination plumbing', () => {
       refunds: 'TRY\u00a025.00',
       netRevenue: 'TRY\u00a075.00',
       payoutEstimate: 'TRY\u00a067.50',
+    });
+    expect(summary.latestCompletedPayment).toEqual({
+      id: 'payout-paid-1',
+      netAmount: 'TRY\u00a050.25',
+      currency: 'TRY',
+      paidAt: '2026-07-14T11:25:00.000Z',
     });
   });
 

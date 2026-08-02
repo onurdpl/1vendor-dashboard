@@ -1765,6 +1765,13 @@ export type PayoutBatchSummary = {
   latestBatch: PayoutBatch | null;
 };
 
+export type LatestCompletedPayment = {
+  id: string;
+  netAmount: string;
+  currency: string;
+  paidAt: string;
+};
+
 export type VendorDebtHistoryProduct = {
   title: string | null;
   sku: string | null;
@@ -2546,6 +2553,7 @@ export type FinanceDashboard = {
 
 export type FinanceDashboardSummary = {
   summary: Pick<FinanceSummary, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+  latestCompletedPayment: LatestCompletedPayment | null;
 };
 
 export type ReturnFinanceRecord = Pick<FinanceTransaction, 'id' | 'category' | 'amount' | 'status' | 'date' | 'settlementRefundAdjustments'>;
@@ -2608,6 +2616,7 @@ export type DashboardFinanceSnapshot = {
   refunds: string;
   netRevenue: string;
   payoutEstimate: string;
+  latestCompletedPayment?: LatestCompletedPayment | null;
 };
 
 export type DashboardDiagnosticsSummary = {
