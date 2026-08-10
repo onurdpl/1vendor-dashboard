@@ -1204,6 +1204,7 @@ model SettlementApprovalLine {
   appliedRefundAdjustments                SettlementRefundAdjustment[]           @relation("AppliedSettlementApprovalLineRefundAdjustments")
   refundAdjustmentApplication             SettlementRefundAdjustmentApplication? @relation("RefundAdjustmentApplicationLine")
   refundAdjustmentApplicationLink         SettlementRefundAdjustmentApplication? @relation("LineRefundAdjustmentApplicationLink", fields: [settlementRefundAdjustmentApplicationId], references: [id], onDelete: SetNull)
+  payoutBatchLines                        PayoutBatchLine[]
 
   @@unique([settlementApprovalId, financeLedgerEntryId])
   @@index([financeLedgerEntryId])
@@ -1461,16 +1462,19 @@ model PayoutBatch {
 }
 
 model PayoutBatchLine {
-  id                   String             @id @default(cuid())
-  payoutBatchId        String
-  financeLedgerEntryId String
-  amountSnapshot       Decimal            @db.Decimal(10, 2)
-  createdAt            DateTime           @default(now())
-  payoutBatch          PayoutBatch        @relation(fields: [payoutBatchId], references: [id], onDelete: Cascade)
-  financeLedgerEntry   FinanceLedgerEntry @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+  id                       String                  @id @default(cuid())
+  payoutBatchId            String
+  financeLedgerEntryId     String
+  settlementApprovalLineId String?
+  amountSnapshot           Decimal                 @db.Decimal(10, 2)
+  createdAt                DateTime                @default(now())
+  payoutBatch              PayoutBatch             @relation(fields: [payoutBatchId], references: [id], onDelete: Cascade)
+  financeLedgerEntry       FinanceLedgerEntry      @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+  settlementApprovalLine   SettlementApprovalLine? @relation(fields: [settlementApprovalLineId], references: [id], onDelete: Restrict)
 
-  @@unique([payoutBatchId, financeLedgerEntryId])
+  @@unique([payoutBatchId, settlementApprovalLineId])
   @@index([financeLedgerEntryId])
+  @@index([settlementApprovalLineId])
 }
 
 model VendorBalanceEvent {

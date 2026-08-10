@@ -78,7 +78,7 @@ const SUPPORTED_SETTLEMENT_WEEKDAYS = new Set(['MONDAY', 'TUESDAY', 'WEDNESDAY',
 
 type FinanceDbClient = Pick<
   Prisma.TransactionClient,
-  'payoutBatch' | 'vendorFinancialProfile' | 'vendorBalanceEvent' | 'financeIntegrityAlert'
+  'payoutBatch' | 'vendorBalanceEvent' | 'financeIntegrityAlert'
 >;
 type SettlementCommissionInvoiceReviewSnapshot = {
   id?: string | null;
@@ -135,6 +135,11 @@ export type PayoutBatchTransitionBlockerCode =
   | 'ledger_row_paid'
   | 'full_order_cancelled'
   | 'approved_settlement_snapshot_required'
+  | 'settlement_approval_line_missing'
+  | 'settlement_approval_not_approved'
+  | 'settlement_approval_scope_mismatch'
+  | 'settlement_approval_line_ledger_mismatch'
+  | 'settlement_approval_line_membership_conflict'
   | 'ledger_row_no_longer_eligible'
   | 'ledger_row_missing';
 
@@ -1072,6 +1077,97 @@ function calculateEntryBatchAmounts(
     refundAmount: 0,
     netAmount: calculation.estimatedPayout,
   };
+}
+
+type ApprovedPayoutLineSnapshot = {
+  id: string;
+  financeLedgerEntryId: string;
+  lineType: string;
+  amountMinor: number;
+  commissionMinor: number;
+  commissionVatMinor: number;
+  payableImpactMinor: number;
+  settlementApproval: {
+    id: string;
+    vendorId: string;
+    status: string;
+    currency: string;
+  };
+  payoutBatchLines?: Array<{
+    payoutBatch?: {
+      id?: string | null;
+      status?: string | null;
+    } | null;
+  }>;
+};
+
+function isRefundAdjustmentSettlementLine(line: ApprovedPayoutLineSnapshot) {
+  return line.lineType.trim().toUpperCase() === 'REFUND_ADJUSTMENT';
+}
+
+function isApprovedSettlementLineEligibleForPayout(
+  line: ApprovedPayoutLineSnapshot,
+  entry: Parameters<typeof isEntryEligibleForPayoutBatch>[0],
+) {
+  if (line.settlementApproval.status.trim().toUpperCase() !== 'APPROVED') {
+    return false;
+  }
+  if ((line.payoutBatchLines ?? []).some((batchLine) =>
+    ACTIVE_PAYOUT_BATCH_STATUSES.includes(
+      String(batchLine.payoutBatch?.status ?? '').toUpperCase() as typeof ACTIVE_PAYOUT_BATCH_STATUSES[number],
+    )
+  )) {
+    return false;
+  }
+
+  if (isRefundAdjustmentSettlementLine(line)) {
+    return !isFullOrderCancelled(entry.vendorAllocation?.order) &&
+      !hasActiveVendorBlockedFinanceHold(entry.vendorAllocation) &&
+      !hasBlockingCancelRefundReviewStatus(entry.vendorAllocation);
+  }
+
+  return isEntryEligibleForPayoutBatch({
+    ...entry,
+    payoutBatchLines: [],
+    settlementApprovalLines: [{ settlementApproval: line.settlementApproval }],
+  });
+}
+
+function approvedPayoutLineAmounts(line: ApprovedPayoutLineSnapshot) {
+  const lineType = line.lineType.trim().toUpperCase();
+  if (lineType === 'SALE') {
+    return {
+      grossAmountMinor: line.amountMinor,
+      commissionAmountMinor: line.commissionMinor,
+      commissionVatAmountMinor: line.commissionVatMinor,
+      shippingDeductionAmountMinor:
+        line.amountMinor - line.commissionMinor - line.commissionVatMinor - line.payableImpactMinor,
+      refundAmountMinor: 0,
+      netAmountMinor: line.payableImpactMinor,
+    };
+  }
+  if (lineType === 'REFUND') {
+    return {
+      grossAmountMinor: 0,
+      commissionAmountMinor: line.commissionMinor,
+      commissionVatAmountMinor: line.commissionVatMinor,
+      shippingDeductionAmountMinor: 0,
+      refundAmountMinor: line.amountMinor,
+      netAmountMinor: line.payableImpactMinor,
+    };
+  }
+  if (lineType === 'REFUND_ADJUSTMENT') {
+    return {
+      grossAmountMinor: 0,
+      commissionAmountMinor: 0,
+      commissionVatAmountMinor: 0,
+      shippingDeductionAmountMinor: 0,
+      refundAmountMinor: line.amountMinor,
+      netAmountMinor: line.payableImpactMinor,
+    };
+  }
+
+  throw new Error(`Unsupported approved settlement line type: ${line.lineType}.`);
 }
 
 function mapPayoutBatch(batch: {
@@ -2259,14 +2355,7 @@ export async function preparePayoutBatch(
   }
 
   return prisma.$transaction(async (tx) => {
-    const [storedProfile, entries, vendorBalance] = await Promise.all([
-      tx.vendorFinancialProfile.findFirst({
-        where: {
-          vendorId: input.vendorId,
-          active: true,
-        },
-      }),
-      tx.financeLedgerEntry.findMany({
+    const entries = await tx.financeLedgerEntry.findMany({
         where: {
           vendorId: input.vendorId,
           ...activeFinanceLedgerWhere,
@@ -2360,16 +2449,40 @@ export async function preparePayoutBatch(
           settlementApprovalLines: {
             where: {
               settlementApproval: {
-                status: {
-                  in: ['DRAFT', 'APPROVED'],
-                },
+                status: 'APPROVED',
               },
             },
             select: {
+              id: true,
+              financeLedgerEntryId: true,
+              lineType: true,
+              amountMinor: true,
+              commissionMinor: true,
+              commissionVatMinor: true,
+              payableImpactMinor: true,
               settlementApproval: {
                 select: {
                   id: true,
+                  vendorId: true,
                   status: true,
+                  currency: true,
+                },
+              },
+              payoutBatchLines: {
+                where: {
+                  payoutBatch: {
+                    status: {
+                      in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                    },
+                  },
+                },
+                select: {
+                  payoutBatch: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
                 },
               },
             },
@@ -2378,13 +2491,18 @@ export async function preparePayoutBatch(
         orderBy: {
           createdAt: 'asc',
         },
-      }),
-      getVendorBalanceSummary(tx, input.vendorId, 'TRY'),
-    ]);
-    const profile = mapProfile(storedProfile, input.vendorId);
+      });
     const fullOrderCancelledEntries = entries.filter((entry) =>
       isFullOrderCancelled(entry.vendorAllocation?.order));
-    const eligibleEntries = entries.filter((entry) => isEntryEligibleForPayoutBatch(entry));
+    const approvedCandidates = entries.flatMap((entry) =>
+      entry.settlementApprovalLines.map((settlementLine) => ({
+        entry,
+        settlementLine,
+      }))
+    );
+    const eligibleCandidates = approvedCandidates.filter(({ entry, settlementLine }) =>
+      isApprovedSettlementLineEligibleForPayout(settlementLine, entry)
+    );
     const approvedSettlementRequiredEntries = entries.filter(
       (entry) =>
         !hasApprovedSettlementSnapshot(entry) &&
@@ -2394,7 +2512,7 @@ export async function preparePayoutBatch(
       (entry) => getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required',
     );
 
-    if (eligibleEntries.length === 0) {
+    if (eligibleCandidates.length === 0) {
       if (fullOrderCancelledEntries.length > 0) {
         throw new Error(FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE);
       }
@@ -2407,52 +2525,65 @@ export async function preparePayoutBatch(
       throw new Error('No eligible payable ledger rows are available for payout batch preparation.');
     }
 
-    const totals = eligibleEntries.reduce(
-      (summary, entry) => {
-        const amounts = calculateEntryBatchAmounts(entry, profile);
+    const currencies = new Set(
+      eligibleCandidates.map(({ settlementLine }) => settlementLine.settlementApproval.currency),
+    );
+    if (currencies.size !== 1) {
+      throw new Error('Approved settlement lines with different currencies cannot share one payout batch.');
+    }
+    const currency = [...currencies][0];
+    if (!currency) {
+      throw new Error('Approved settlement currency is required for payout preparation.');
+    }
+    const vendorBalance = await getVendorBalanceSummary(tx, input.vendorId, currency);
+    const totalsMinor = eligibleCandidates.reduce(
+      (summary, { settlementLine }) => {
+        const amounts = approvedPayoutLineAmounts(settlementLine);
         return {
-          grossAmount: summary.grossAmount + amounts.grossAmount,
-          commissionAmount: summary.commissionAmount + amounts.commissionAmount,
-          commissionVatAmount: summary.commissionVatAmount + amounts.commissionVatAmount,
-          shippingDeductionAmount: summary.shippingDeductionAmount + amounts.shippingDeductionAmount,
-          refundAmount: summary.refundAmount + amounts.refundAmount,
-          netAmount: summary.netAmount + amounts.netAmount,
+          grossAmountMinor: summary.grossAmountMinor + amounts.grossAmountMinor,
+          commissionAmountMinor: summary.commissionAmountMinor + amounts.commissionAmountMinor,
+          commissionVatAmountMinor: summary.commissionVatAmountMinor + amounts.commissionVatAmountMinor,
+          shippingDeductionAmountMinor:
+            summary.shippingDeductionAmountMinor + amounts.shippingDeductionAmountMinor,
+          refundAmountMinor: summary.refundAmountMinor + amounts.refundAmountMinor,
+          netAmountMinor: summary.netAmountMinor + amounts.netAmountMinor,
         };
       },
       {
-        grossAmount: 0,
-        commissionAmount: 0,
-        commissionVatAmount: 0,
-        shippingDeductionAmount: 0,
-        refundAmount: 0,
-        netAmount: 0,
+        grossAmountMinor: 0,
+        commissionAmountMinor: 0,
+        commissionVatAmountMinor: 0,
+        shippingDeductionAmountMinor: 0,
+        refundAmountMinor: 0,
+        netAmountMinor: 0,
       },
     );
     const debtOffset = calculateVendorDebtOffset({
-      grossPayableMinor: Math.max(toMinorUnits(totals.netAmount), 0),
+      grossPayableMinor: Math.max(totalsMinor.netAmountMinor, 0),
       outstandingDebtMinor: vendorBalance.outstandingDebtMinor,
     });
-    const netAmountAfterDebtOffset =
-      totals.netAmount > 0
-        ? debtOffset.netPayableMinor / 100
-        : totals.netAmount;
+    const netAmountAfterDebtOffsetMinor =
+      totalsMinor.netAmountMinor > 0
+        ? debtOffset.netPayableMinor
+        : totalsMinor.netAmountMinor;
 
     const batch = await tx.payoutBatch.create({
       data: {
         vendorId: input.vendorId,
         status: 'DRAFT',
-        grossAmount: totals.grossAmount,
-        commissionAmount: totals.commissionAmount,
-        commissionVatAmount: totals.commissionVatAmount,
-        shippingDeductionAmount: totals.shippingDeductionAmount,
-        refundAmount: totals.refundAmount,
-        netAmount: netAmountAfterDebtOffset,
-        currency: 'TRY',
+        grossAmount: totalsMinor.grossAmountMinor / 100,
+        commissionAmount: totalsMinor.commissionAmountMinor / 100,
+        commissionVatAmount: totalsMinor.commissionVatAmountMinor / 100,
+        shippingDeductionAmount: totalsMinor.shippingDeductionAmountMinor / 100,
+        refundAmount: totalsMinor.refundAmountMinor / 100,
+        netAmount: netAmountAfterDebtOffsetMinor / 100,
+        currency,
         createdByUserId,
         lines: {
-          create: eligibleEntries.map((entry) => ({
-            financeLedgerEntryId: entry.id,
-            amountSnapshot: calculateEntryBatchAmounts(entry, profile).netAmount,
+          create: eligibleCandidates.map(({ settlementLine }) => ({
+            financeLedgerEntryId: settlementLine.financeLedgerEntryId,
+            settlementApprovalLineId: settlementLine.id,
+            amountSnapshot: settlementLine.payableImpactMinor / 100,
           })),
         },
       },
@@ -2481,6 +2612,8 @@ export async function preparePayoutBatch(
       ...batch,
       vendorBalanceEvents: debtOffsetEvent ? [debtOffsetEvent] : [],
     });
+  }, {
+    isolationLevel: 'Serializable',
   });
 }
 
@@ -2583,11 +2716,11 @@ function addPayoutAmountChangedBlocker(input: {
 
   input.blockers.push(buildPayoutBatchTransitionBlocker({
     code: 'payout_amount_changed_since_batch_creation',
-    reason: 'Payout amount changed since batch creation.',
+    reason: 'Payout line amount no longer matches the approved settlement line.',
     payoutBatchLineId: input.payoutBatchLineId,
     financeLedgerEntryId: input.financeLedgerEntryId,
     metadata: {
-      expectedAmount: toAmountString(expectedMinor / 100),
+      approvedSettlementAmount: toAmountString(expectedMinor / 100),
       amountSnapshot: toAmountString(snapshotMinor / 100),
     },
   }));
@@ -2607,6 +2740,36 @@ async function validatePayoutBatchBeforeTransitionWithClient(
           createdAt: 'asc',
         },
         include: {
+          settlementApprovalLine: {
+            include: {
+              settlementApproval: {
+                select: {
+                  id: true,
+                  vendorId: true,
+                  status: true,
+                  currency: true,
+                },
+              },
+              payoutBatchLines: {
+                where: {
+                  payoutBatch: {
+                    status: {
+                      in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                    },
+                  },
+                },
+                select: {
+                  id: true,
+                  payoutBatch: {
+                    select: {
+                      id: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           financeLedgerEntry: {
             include: {
               vendorAllocation: {
@@ -2719,16 +2882,87 @@ async function validatePayoutBatchBeforeTransitionWithClient(
     throw new Error('Payout batch not found.');
   }
 
-  const storedProfile = await db.vendorFinancialProfile.findFirst({
-    where: {
-      vendorId: batch.vendorId,
-      active: true,
-    },
-  });
-  const profile = mapProfile(storedProfile, batch.vendorId);
   const blockers: PayoutBatchTransitionBlocker[] = [];
 
   for (const line of batch.lines) {
+    const approvedLine = line.settlementApprovalLine;
+    const refundAdjustmentApprovedLine = approvedLine
+      ? isRefundAdjustmentSettlementLine(approvedLine)
+      : false;
+    if (!line.settlementApprovalLineId || !approvedLine) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'settlement_approval_line_missing',
+        reason: 'Payout line is not linked to an exact approved settlement line.',
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+      }));
+    } else {
+      const approval = approvedLine.settlementApproval;
+      if (approval.status !== 'APPROVED') {
+        blockers.push(buildPayoutBatchTransitionBlocker({
+          code: 'settlement_approval_not_approved',
+          reason: 'Linked settlement approval is not approved.',
+          payoutBatchLineId: line.id,
+          financeLedgerEntryId: line.financeLedgerEntryId,
+          metadata: {
+            settlementApprovalLineId: approvedLine.id,
+            settlementApprovalId: approval.id,
+            settlementApprovalStatus: approval.status,
+          },
+        }));
+      }
+      if (approval.vendorId !== batch.vendorId || approval.currency !== batch.currency) {
+        blockers.push(buildPayoutBatchTransitionBlocker({
+          code: 'settlement_approval_scope_mismatch',
+          reason: 'Linked settlement approval does not match the payout vendor and currency scope.',
+          payoutBatchLineId: line.id,
+          financeLedgerEntryId: line.financeLedgerEntryId,
+          metadata: {
+            settlementApprovalLineId: approvedLine.id,
+            settlementApprovalId: approval.id,
+            settlementVendorId: approval.vendorId,
+            payoutVendorId: batch.vendorId,
+            settlementCurrency: approval.currency,
+            payoutCurrency: batch.currency,
+          },
+        }));
+      }
+      if (approvedLine.financeLedgerEntryId !== line.financeLedgerEntryId) {
+        blockers.push(buildPayoutBatchTransitionBlocker({
+          code: 'settlement_approval_line_ledger_mismatch',
+          reason: 'Payout line ledger reference differs from its approved settlement line.',
+          payoutBatchLineId: line.id,
+          financeLedgerEntryId: line.financeLedgerEntryId,
+          metadata: {
+            settlementApprovalLineId: approvedLine.id,
+            settlementFinanceLedgerEntryId: approvedLine.financeLedgerEntryId,
+          },
+        }));
+      }
+      const conflictingMemberships = approvedLine.payoutBatchLines.filter(
+        (membership) => membership.payoutBatch.id !== batch.id,
+      );
+      if (conflictingMemberships.length > 0) {
+        blockers.push(buildPayoutBatchTransitionBlocker({
+          code: 'settlement_approval_line_membership_conflict',
+          reason: 'Approved settlement line already belongs to another active payout batch.',
+          payoutBatchLineId: line.id,
+          financeLedgerEntryId: line.financeLedgerEntryId,
+          metadata: {
+            settlementApprovalLineId: approvedLine.id,
+            payoutBatchIds: conflictingMemberships.map((membership) => membership.payoutBatch.id),
+          },
+        }));
+      }
+      addPayoutAmountChangedBlocker({
+        blockers,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: line.financeLedgerEntryId,
+        expectedAmount: approvedLine.payableImpactMinor / 100,
+        amountSnapshot: line.amountSnapshot,
+      });
+    }
+
     const ledgerEntry = line.financeLedgerEntry;
     if (!ledgerEntry) {
       blockers.push(buildPayoutBatchTransitionBlocker({
@@ -2790,7 +3024,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
-    if (payoutStatus === 'paid') {
+    if (payoutStatus === 'paid' && !refundAdjustmentApprovedLine) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_paid',
         reason: 'Ledger row already paid.',
@@ -2859,22 +3093,18 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
-    const approvedSettlementSnapshotMissing =
-      !hasApprovedSettlementSnapshot(transitionEntry) &&
-      isEntryEligibleForPayoutBatch(transitionEntry, { requireApprovedSettlementSnapshot: false });
-    if (approvedSettlementSnapshotMissing) {
-      blockers.push(buildPayoutBatchTransitionBlocker({
-        code: 'approved_settlement_snapshot_required',
-        reason: APPROVED_SETTLEMENT_SNAPSHOT_REQUIRED_REASON,
-        payoutBatchLineId: line.id,
-        financeLedgerEntryId: ledgerEntryId,
-      }));
-    }
+    const approvedSettlementSnapshotMissing = !approvedLine || approvedLine.settlementApproval.status !== 'APPROVED';
 
     if (
       (type !== 'sale' && type !== 'refund') ||
-      (payoutStatus === 'hold' && transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
-      (!fullOrderCancelled && !cancelRefundReviewActive && !approvedSettlementSnapshotMissing && !isEntryEligibleForPayoutBatch(transitionEntry))
+      (!refundAdjustmentApprovedLine &&
+        payoutStatus === 'hold' &&
+        transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
+      (!refundAdjustmentApprovedLine &&
+        !fullOrderCancelled &&
+        !cancelRefundReviewActive &&
+        !approvedSettlementSnapshotMissing &&
+        !isEntryEligibleForPayoutBatch(transitionEntry))
     ) {
       blockers.push(buildPayoutBatchTransitionBlocker({
         code: 'ledger_row_no_longer_eligible',
@@ -2890,15 +3120,6 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
-    if (type === 'sale' || type === 'refund') {
-      addPayoutAmountChangedBlocker({
-        blockers,
-        payoutBatchLineId: line.id,
-        financeLedgerEntryId: ledgerEntryId,
-        expectedAmount: calculateEntryBatchAmounts(transitionEntry, profile).netAmount,
-        amountSnapshot: line.amountSnapshot,
-      });
-    }
   }
 
   if (blockers.length > 0) {
@@ -2961,6 +3182,7 @@ function buildPayoutPaidEvents(input: {
     lines: Array<{
       id: string;
       financeLedgerEntryId: string;
+      settlementApprovalLineId: string | null;
       amountSnapshot: unknown;
     }>;
   };
@@ -2970,10 +3192,14 @@ function buildPayoutPaidEvents(input: {
   internalNote: string | null;
 }): CreateFinanceEventInput[] {
   return input.batch.lines.map((line) => {
+    if (!line.settlementApprovalLineId) {
+      throw new Error('Payout line is missing approved settlement traceability.');
+    }
     const metadata: Prisma.InputJsonObject = {
       paymentSource: 'manual_eft',
       payoutBatchId: input.batch.id,
       payoutBatchLineId: line.id,
+      settlementApprovalLineId: line.settlementApprovalLineId,
       paidAt: input.paidAt.toISOString(),
       paidByUserId: input.paidByUserId,
       batchNetAmount: toAmountString(toNumber(input.batch.netAmount)),
@@ -2992,7 +3218,7 @@ function buildPayoutPaidEvents(input: {
       referenceId: input.batch.id,
       metadataJson: metadata,
       createdBy: input.paidByUserId,
-      idempotencyKey: `payout-batch:${input.batch.id}:mark-paid:${line.financeLedgerEntryId}`,
+      idempotencyKey: `payout-batch:${input.batch.id}:mark-paid:${line.settlementApprovalLineId}`,
     };
   });
 }
@@ -3077,7 +3303,7 @@ export async function markPayoutBatchPaid(
       throw new Error('Payout batch could not be marked paid because its status changed.');
     }
 
-    const ledgerEntryIds = batch.lines.map((line) => line.financeLedgerEntryId);
+    const ledgerEntryIds = [...new Set(batch.lines.map((line) => line.financeLedgerEntryId))];
     const ledgerUpdate = await tx.financeLedgerEntry.updateMany({
       where: {
         id: {

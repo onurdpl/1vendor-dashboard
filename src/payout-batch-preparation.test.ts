@@ -59,6 +59,8 @@ function buildEntry(input: {
   relatedSaleActivePayoutBatch?: boolean;
   activeSettlementApproval?: boolean;
   settlementApprovalStatus?: 'DRAFT' | 'APPROVED' | 'CANCELLED' | null;
+  settlementLineType?: 'SALE' | 'REFUND' | 'REFUND_ADJUSTMENT';
+  settlementPayableImpactMinor?: number;
   approvedRefundOffsetRepresented?: boolean;
   voidedAt?: Date | null;
   allocationStatus?: string | null;
@@ -83,6 +85,20 @@ function buildEntry(input: {
   const eligibleAt = fulfilled && deliveredAt ? addDays(deliveredAt, settlementDelayDaysSnapshot) : null;
   const settlementApprovalStatus =
     input.settlementApprovalStatus ?? (input.activeSettlementApproval ? 'APPROVED' : null);
+  const settlementLineType = input.settlementLineType ?? (input.entryType === 'sale' ? 'SALE' : 'REFUND');
+  const amountMinor = Math.round(input.amount * 100);
+  const commissionMinor = settlementLineType === 'SALE'
+    ? Math.round(amountMinor * 0.1)
+    : settlementLineType === 'REFUND'
+      ? -Math.round(amountMinor * 0.1)
+      : 0;
+  const payableImpactMinor = input.settlementPayableImpactMinor ?? (
+    settlementLineType === 'SALE'
+      ? amountMinor - commissionMinor
+      : settlementLineType === 'REFUND'
+        ? -(amountMinor + commissionMinor)
+        : -amountMinor
+  );
   return {
     id: input.id,
     vendorId: 'demo-vendor-a',
@@ -163,7 +179,24 @@ function buildEntry(input: {
       ? [{ id: `line-${input.id}`, payoutBatch: { id: 'batch-review', status: 'DRAFT' } }]
       : [],
     settlementApprovalLines: settlementApprovalStatus
-      ? [{ settlementApproval: { id: `approval-${input.id}`, status: settlementApprovalStatus } }]
+      ? [{
+          id: `approval-line-${input.id}`,
+          financeLedgerEntryId: input.id,
+          lineType: settlementLineType,
+          amountMinor,
+          commissionMinor,
+          commissionVatMinor: 0,
+          payableImpactMinor,
+          settlementApproval: {
+            id: `approval-${input.id}`,
+            vendorId: 'demo-vendor-a',
+            status: settlementApprovalStatus,
+            currency: 'TRY',
+          },
+          payoutBatchLines: input.batched
+            ? [{ payoutBatch: { id: 'batch-review', status: 'DRAFT' } }]
+            : [],
+        }]
       : [],
   };
 }
@@ -174,12 +207,15 @@ function buildTransitionLine(input: {
   amountSnapshot?: number;
   financeLedgerEntryId?: string;
 }) {
+  const settlementApprovalLine = input.entry?.settlementApprovalLines[0] ?? null;
   return {
     id: input.id ?? `batch-line-${input.financeLedgerEntryId ?? input.entry?.id ?? 'missing'}`,
     financeLedgerEntryId: input.financeLedgerEntryId ?? input.entry?.id ?? 'missing-ledger',
-    amountSnapshot: input.amountSnapshot ?? 900,
+    settlementApprovalLineId: settlementApprovalLine?.id ?? null,
+    amountSnapshot: input.amountSnapshot ?? (settlementApprovalLine?.payableImpactMinor ?? 90000) / 100,
     createdAt: new Date('2026-05-13T11:00:00Z'),
     financeLedgerEntry: input.entry,
+    settlementApprovalLine,
   };
 }
 
@@ -215,6 +251,34 @@ function mockTransitionBatch(batch: ReturnType<typeof buildTransitionBatch>) {
   });
 }
 
+function mockPreparedBatchResponse(id = 'batch-approved-source') {
+  prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+    id,
+    vendorId: data.vendorId,
+    status: data.status,
+    grossAmount: data.grossAmount,
+    commissionAmount: data.commissionAmount,
+    commissionVatAmount: data.commissionVatAmount,
+    shippingDeductionAmount: data.shippingDeductionAmount,
+    refundAmount: data.refundAmount,
+    netAmount: data.netAmount,
+    currency: data.currency,
+    createdByUserId: data.createdByUserId,
+    createdAt: new Date('2026-05-13T11:00:00Z'),
+    updatedAt: new Date('2026-05-13T11:00:00Z'),
+    vendorBalanceEvents: [],
+    lines: data.lines.create.map((line: {
+      financeLedgerEntryId: string;
+      settlementApprovalLineId: string;
+      amountSnapshot: number;
+    }, index: number) => ({
+      id: `batch-line-approved-${index}`,
+      ...line,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+    })),
+  }));
+}
+
 function mockMarkPaidBatch(
   batch: ReturnType<typeof buildTransitionBatch>,
   paidBatch: ReturnType<typeof buildTransitionBatch>,
@@ -224,7 +288,9 @@ function mockMarkPaidBatch(
     .mockResolvedValueOnce(batch)
     .mockResolvedValueOnce(paidBatch);
   prismaMock.payoutBatch.updateMany.mockResolvedValue({ count: 1 });
-  prismaMock.financeLedgerEntry.updateMany.mockResolvedValue({ count: batch.lines.length });
+  prismaMock.financeLedgerEntry.updateMany.mockResolvedValue({
+    count: new Set(batch.lines.map((line) => line.financeLedgerEntryId)).size,
+  });
   prismaMock.financeEvent.createMany.mockResolvedValue({ count: batch.lines.length });
 }
 
@@ -354,9 +420,14 @@ describe('payout batch preparation', () => {
       createdByUserId: data.createdByUserId,
       createdAt: new Date('2026-05-13T11:00:00Z'),
       updatedAt: new Date('2026-05-13T11:00:00Z'),
-      lines: data.lines.create.map((line: { financeLedgerEntryId: string; amountSnapshot: number }, index: number) => ({
+      lines: data.lines.create.map((line: {
+        financeLedgerEntryId: string;
+        settlementApprovalLineId: string;
+        amountSnapshot: number;
+      }, index: number) => ({
         id: `batch-line-${index}`,
         financeLedgerEntryId: line.financeLedgerEntryId,
+        settlementApprovalLineId: line.settlementApprovalLineId,
         amountSnapshot: line.amountSnapshot,
         createdAt: new Date('2026-05-13T11:00:00Z'),
       })),
@@ -374,8 +445,16 @@ describe('payout batch preparation', () => {
           netAmount: 810,
           lines: {
             create: [
-              { financeLedgerEntryId: 'sale-payable', amountSnapshot: 900 },
-              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -90 },
+              {
+                financeLedgerEntryId: 'sale-payable',
+                settlementApprovalLineId: 'approval-line-sale-payable',
+                amountSnapshot: 900,
+              },
+              {
+                financeLedgerEntryId: 'refund-payable',
+                settlementApprovalLineId: 'approval-line-refund-payable',
+                amountSnapshot: -90,
+              },
             ],
           },
         }),
@@ -400,6 +479,244 @@ describe('payout batch preparation', () => {
         }),
       }),
     );
+  });
+
+  it('propagates a full approved refund adjustment without reconstructing the refund ledger amount', async () => {
+    const sale = buildEntry({
+      id: 'sale-full-adjustment',
+      entryType: 'sale',
+      amount: 1000,
+      activeSettlementApproval: true,
+      settlementPayableImpactMinor: 88000,
+    });
+    const adjustment = buildEntry({
+      id: 'refund-full-adjustment',
+      entryType: 'refund',
+      amount: 1000,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -40000,
+    });
+    adjustment.settlementApprovalLines[0].amountMinor = 40000;
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale, adjustment]);
+    mockPreparedBatchResponse('batch-full-adjustment');
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(batch.netAmount).toBe('480.00');
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        netAmount: 480,
+        lines: {
+          create: expect.arrayContaining([
+            expect.objectContaining({
+              settlementApprovalLineId: 'approval-line-sale-full-adjustment',
+              amountSnapshot: 880,
+            }),
+            expect.objectContaining({
+              settlementApprovalLineId: 'approval-line-refund-full-adjustment',
+              amountSnapshot: -400,
+            }),
+          ]),
+        },
+      }),
+    }));
+  });
+
+  it('uses the exact partial approved adjustment slice so an approved zero remains a zero payout base', async () => {
+    const sale = buildEntry({
+      id: 'sale-partial-adjustment',
+      entryType: 'sale',
+      amount: 100,
+      activeSettlementApproval: true,
+      settlementPayableImpactMinor: 8800,
+    });
+    const adjustment = buildEntry({
+      id: 'refund-partial-adjustment',
+      entryType: 'refund',
+      amount: 100,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -8800,
+    });
+    adjustment.settlementApprovalLines[0].amountMinor = 8800;
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale, adjustment]);
+    mockPreparedBatchResponse('batch-partial-adjustment');
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(batch.netAmount).toBe('0.00');
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        netAmount: 0,
+        lines: {
+          create: expect.arrayContaining([
+            expect.objectContaining({ amountSnapshot: 88 }),
+            expect.objectContaining({ amountSnapshot: -88 }),
+          ]),
+        },
+      }),
+    }));
+  });
+
+  it('preserves multiple exact approved adjustment lines instead of paying the ledger-derived 1500', async () => {
+    const sale = buildEntry({
+      id: 'sale-multiple-adjustments',
+      entryType: 'sale',
+      amount: 1500,
+      activeSettlementApproval: true,
+      settlementPayableImpactMinor: 150000,
+    });
+    sale.settlementApprovalLines[0].commissionMinor = 0;
+    const adjustmentA = buildEntry({
+      id: 'refund-adjustment-a',
+      entryType: 'refund',
+      amount: 400,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -40000,
+    });
+    const adjustmentB = buildEntry({
+      id: 'refund-adjustment-b',
+      entryType: 'refund',
+      amount: 600,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -60000,
+    });
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale, adjustmentA, adjustmentB]);
+    mockPreparedBatchResponse('batch-multiple-adjustments');
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(batch.netAmount).toBe('500.00');
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        netAmount: 500,
+        lines: {
+          create: expect.arrayContaining([
+            expect.objectContaining({ amountSnapshot: 1500 }),
+            expect.objectContaining({ amountSnapshot: -400 }),
+            expect.objectContaining({ amountSnapshot: -600 }),
+          ]),
+        },
+      }),
+    }));
+  });
+
+  it('keeps carried adjustment slices independently traceable even when they share one refund ledger', async () => {
+    const adjustment = buildEntry({
+      id: 'refund-carried-remainder',
+      entryType: 'refund',
+      amount: 100,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -8800,
+    });
+    const firstSlice = adjustment.settlementApprovalLines[0];
+    firstSlice.id = 'approval-line-carried-88';
+    firstSlice.amountMinor = 8800;
+    firstSlice.payableImpactMinor = -8800;
+    const remainderSlice = {
+      ...firstSlice,
+      id: 'approval-line-carried-12',
+      amountMinor: 1200,
+      payableImpactMinor: -1200,
+      settlementApproval: {
+        ...firstSlice.settlementApproval,
+        id: 'approval-carried-remainder-b',
+      },
+      payoutBatchLines: [],
+    };
+    adjustment.settlementApprovalLines = [firstSlice, remainderSlice];
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([adjustment]);
+    mockPreparedBatchResponse('batch-carried-remainder');
+
+    await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        netAmount: -100,
+        lines: {
+          create: [
+            {
+              financeLedgerEntryId: 'refund-carried-remainder',
+              settlementApprovalLineId: 'approval-line-carried-88',
+              amountSnapshot: -88,
+            },
+            {
+              financeLedgerEntryId: 'refund-carried-remainder',
+              settlementApprovalLineId: 'approval-line-carried-12',
+              amountSnapshot: -12,
+            },
+          ],
+        },
+      }),
+    }));
+  });
+
+  it('applies vendor debt only after summing the exact approved payout base', async () => {
+    const sale = buildEntry({
+      id: 'sale-approved-925',
+      entryType: 'sale',
+      amount: 1000,
+      activeSettlementApproval: true,
+      settlementPayableImpactMinor: 92500,
+    });
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale]);
+    prismaMock.vendorBalanceEvent.findMany.mockResolvedValue([{ amountMinor: -10000 }]);
+    mockPreparedBatchResponse('batch-approved-base-with-debt');
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(batch.payableBeforeDebtOffset).toBe('925.00');
+    expect(batch.debtOffsetAmount).toBe('100.00');
+    expect(batch.netAmount).toBe('825.00');
+  });
+
+  it('excludes an exact approved settlement line already owned by another active payout batch', async () => {
+    const sale = buildEntry({
+      id: 'sale-active-membership',
+      entryType: 'sale',
+      amount: 1000,
+      activeSettlementApproval: true,
+    });
+    sale.settlementApprovalLines[0].payoutBatchLines = [{
+      payoutBatch: { id: 'other-active-batch', status: 'REVIEW' },
+    }];
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'No eligible payable ledger rows are available for payout batch preparation.',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
+  it('allows an approved settlement line from a cancelled payout to be prepared again', async () => {
+    const sale = buildEntry({
+      id: 'sale-cancelled-membership',
+      entryType: 'sale',
+      amount: 1000,
+      activeSettlementApproval: true,
+    });
+    sale.settlementApprovalLines[0].payoutBatchLines = [{
+      payoutBatch: { id: 'cancelled-batch', status: 'CANCELLED' },
+    }];
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([sale]);
+    mockPreparedBatchResponse('batch-reprepared');
+
+    const batch = await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(batch.netAmount).toBe('900.00');
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lines: {
+          create: [expect.objectContaining({
+            settlementApprovalLineId: 'approval-line-sale-cancelled-membership',
+          })],
+        },
+      }),
+    }));
   });
 
   it('rejects payout preparation for a conflict-cancelled non-voided row', async () => {
@@ -576,7 +893,11 @@ describe('payout batch preparation', () => {
           netAmount: 450,
           lines: {
             create: [
-              { financeLedgerEntryId: 'unaffected-sale', amountSnapshot: 450 },
+              {
+                financeLedgerEntryId: 'unaffected-sale',
+                settlementApprovalLineId: 'approval-line-unaffected-sale',
+                amountSnapshot: 450,
+              },
             ],
           },
         }),
@@ -640,8 +961,16 @@ describe('payout batch preparation', () => {
           netAmount: 810,
           lines: {
             create: [
-              { financeLedgerEntryId: 'approved-sale-with-approved-refund', amountSnapshot: 900 },
-              { financeLedgerEntryId: 'approved-refund-offset', amountSnapshot: -90 },
+              {
+                financeLedgerEntryId: 'approved-sale-with-approved-refund',
+                settlementApprovalLineId: 'approval-line-approved-sale-with-approved-refund',
+                amountSnapshot: 900,
+              },
+              {
+                financeLedgerEntryId: 'approved-refund-offset',
+                settlementApprovalLineId: 'approval-line-approved-refund-offset',
+                amountSnapshot: -90,
+              },
             ],
           },
         }),
@@ -705,8 +1034,16 @@ describe('payout batch preparation', () => {
           netAmount: 360,
           lines: {
             create: [
-              { financeLedgerEntryId: 'sale-14-day-delay', amountSnapshot: 450 },
-              { financeLedgerEntryId: 'refund-payable', amountSnapshot: -90 },
+              {
+                financeLedgerEntryId: 'sale-14-day-delay',
+                settlementApprovalLineId: 'approval-line-sale-14-day-delay',
+                amountSnapshot: 450,
+              },
+              {
+                financeLedgerEntryId: 'refund-payable',
+                settlementApprovalLineId: 'approval-line-refund-payable',
+                amountSnapshot: -90,
+              },
             ],
           },
         }),
@@ -787,8 +1124,16 @@ describe('payout batch preparation', () => {
           netAmount: 360,
           lines: {
             create: [
-              { financeLedgerEntryId: 'sale-requested-return', amountSnapshot: 450 },
-              { financeLedgerEntryId: 'refund-row', amountSnapshot: -90 },
+              {
+                financeLedgerEntryId: 'sale-requested-return',
+                settlementApprovalLineId: 'approval-line-sale-requested-return',
+                amountSnapshot: 450,
+              },
+              {
+                financeLedgerEntryId: 'refund-row',
+                settlementApprovalLineId: 'approval-line-refund-row',
+                amountSnapshot: -90,
+              },
             ],
           },
         }),
@@ -847,7 +1192,11 @@ describe('payout batch preparation', () => {
         data: expect.objectContaining({
           lines: {
             create: [
-              { financeLedgerEntryId: 'sale-refund-processed', amountSnapshot: 900 },
+              {
+                financeLedgerEntryId: 'sale-refund-processed',
+                settlementApprovalLineId: 'approval-line-sale-refund-processed',
+                amountSnapshot: 900,
+              },
             ],
           },
         }),
@@ -902,7 +1251,11 @@ describe('payout batch preparation', () => {
           netAmount: 0,
           lines: {
             create: [
-              { financeLedgerEntryId: 'sale-payable-with-debt', amountSnapshot: 900 },
+              {
+                financeLedgerEntryId: 'sale-payable-with-debt',
+                settlementApprovalLineId: 'approval-line-sale-payable-with-debt',
+                amountSnapshot: 900,
+              },
             ],
           },
         }),
@@ -1087,8 +1440,8 @@ describe('payout batch preparation', () => {
     await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
       blockers: [
         expect.objectContaining({
-          code: 'approved_settlement_snapshot_required',
-          reason: 'Approved settlement snapshot is required before payout batch preparation.',
+          code: 'settlement_approval_line_missing',
+          reason: 'Payout line is not linked to an exact approved settlement line.',
           financeLedgerEntryId: 'sale-no-approved-review',
         }),
       ],
@@ -1102,6 +1455,7 @@ describe('payout batch preparation', () => {
       entryType: 'sale',
       amount: 1000,
       batched: true,
+      activeSettlementApproval: true,
       cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
     });
     const batch = buildTransitionBatch([
@@ -1110,13 +1464,13 @@ describe('payout batch preparation', () => {
     mockTransitionBatch(batch);
 
     await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
-      blockers: [
+      blockers: expect.arrayContaining([
         expect.objectContaining({
           code: 'cancel_refund_review_active',
           reason: 'Allocation is under cancel/refund review and cannot move through settlement or payout.',
           financeLedgerEntryId: 'sale-cancel-refund-review-transition',
         }),
-      ],
+      ]),
     });
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
@@ -1258,6 +1612,75 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
 
+  it('does not let reconstructed ledger economics override the approved payout amount', async () => {
+    const sale = buildEntry({
+      id: 'sale-ledger-economics-changed',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+      settlementPayableImpactMinor: 88000,
+    });
+    sale.amount = 5000;
+    sale.commissionPercentSnapshot = 35;
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 880 }),
+    ]);
+    mockTransitionBatch(batch);
+
+    await expect(markPayoutBatchReview('batch-review')).resolves.toMatchObject({
+      status: 'review',
+    });
+    expect(prismaMock.payoutBatch.update).toHaveBeenCalled();
+  });
+
+  it('blocks review when the exact settlement line is also linked to another active payout', async () => {
+    const sale = buildEntry({
+      id: 'sale-review-membership-conflict',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
+    sale.settlementApprovalLines[0].payoutBatchLines.push({
+      payoutBatch: { id: 'other-review-batch', status: 'REVIEW' },
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: [expect.objectContaining({
+        code: 'settlement_approval_line_membership_conflict',
+      })],
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks Mark Paid when the exact approved settlement amount no longer matches the payout line', async () => {
+    const sale = buildEntry({
+      id: 'sale-mark-paid-mismatch',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+    });
+    const batch = buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 899 }),
+    ], 'REVIEW');
+    prismaMock.payoutBatch.findUnique.mockResolvedValue(batch);
+
+    await expect(markPayoutBatchPaid(
+      'batch-review',
+      { paidAt: '2026-07-12T08:30:00.000Z' },
+      'admin-user',
+    )).rejects.toMatchObject({
+      blockers: [expect.objectContaining({ code: 'payout_amount_changed_since_batch_creation' })],
+    });
+    expect(prismaMock.payoutBatch.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.updateMany).not.toHaveBeenCalled();
+  });
+
   it('blocks review when an approved return hold is active', async () => {
     const sale = buildEntry({
       id: 'sale-active-return-hold',
@@ -1314,10 +1737,10 @@ describe('payout batch preparation', () => {
     ]));
 
     await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
-      blockers: [expect.objectContaining({
+      blockers: expect.arrayContaining([expect.objectContaining({
         code: 'ledger_row_missing',
         financeLedgerEntryId: 'missing-ledger',
-      })],
+      })]),
     });
     expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
   });
@@ -1497,10 +1920,11 @@ describe('payout batch preparation', () => {
           referenceType: 'payout_batch',
           referenceId: 'batch-review',
           createdBy: 'admin-user',
-          idempotencyKey: 'payout-batch:batch-review:mark-paid:sale-mark-paid',
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:approval-line-sale-mark-paid',
           metadataJson: expect.objectContaining({
             paymentSource: 'manual_eft',
             payoutBatchId: 'batch-review',
+            settlementApprovalLineId: 'approval-line-sale-mark-paid',
             paidAt,
             paidByUserId: 'admin-user',
             paymentReference: 'EFT-123',
@@ -1511,7 +1935,7 @@ describe('payout batch preparation', () => {
           financeLedgerEntryId: 'refund-mark-paid',
           eventType: 'PAYOUT_PAID',
           amountMinor: -9000,
-          idempotencyKey: 'payout-batch:batch-review:mark-paid:refund-mark-paid',
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:approval-line-refund-mark-paid',
         }),
       ],
       skipDuplicates: true,
@@ -1525,6 +1949,67 @@ describe('payout batch preparation', () => {
       internalNote: 'Paid from bank portal',
       lineCount: 2,
     });
+  });
+
+  it('marks two approved slices of one refund ledger paid without losing exact line identity', async () => {
+    const paidAt = '2026-06-02T08:30:00.000Z';
+    const adjustment = buildEntry({
+      id: 'refund-ledger-split-paid',
+      entryType: 'refund',
+      amount: 100,
+      batched: true,
+      activeSettlementApproval: true,
+      settlementLineType: 'REFUND_ADJUSTMENT',
+      settlementPayableImpactMinor: -8800,
+    });
+    const firstApprovedLine = adjustment.settlementApprovalLines[0];
+    firstApprovedLine.id = 'approved-slice-88';
+    firstApprovedLine.amountMinor = 8800;
+    const remainderApprovedLine = {
+      ...firstApprovedLine,
+      id: 'approved-slice-12',
+      amountMinor: 1200,
+      payableImpactMinor: -1200,
+      settlementApproval: {
+        ...firstApprovedLine.settlementApproval,
+        id: 'approval-slice-12',
+      },
+      payoutBatchLines: [{ payoutBatch: { id: 'batch-review', status: 'REVIEW' } }],
+    };
+    const firstLine = buildTransitionLine({ entry: adjustment, amountSnapshot: -88 });
+    const remainderLine = {
+      ...firstLine,
+      id: 'batch-line-approved-slice-12',
+      settlementApprovalLineId: remainderApprovedLine.id,
+      amountSnapshot: -12,
+      settlementApprovalLine: remainderApprovedLine,
+    };
+    const batch = buildTransitionBatch([firstLine, remainderLine], 'REVIEW');
+    const paidBatch = {
+      ...batch,
+      status: 'PAID',
+      paidAt: new Date(paidAt),
+      paidByUserId: 'admin-user',
+    };
+    mockMarkPaidBatch(batch, paidBatch);
+
+    await markPayoutBatchPaid('batch-review', { paidAt }, 'admin-user');
+
+    expect(prismaMock.financeLedgerEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: ['refund-ledger-split-paid'] } },
+    }));
+    expect(prismaMock.financeEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          amountMinor: -8800,
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:approved-slice-88',
+        }),
+        expect.objectContaining({
+          amountMinor: -1200,
+          idempotencyKey: 'payout-batch:batch-review:mark-paid:approved-slice-12',
+        }),
+      ]),
+    }));
   });
 
   it('rejects a payout batch that is already paid', async () => {

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the finance settlement foundation for marketplace-style vendor operations. It is a design and terminology document only. It does not add a payout engine, accounting integration, schema migration, provider behavior, or finance UI behavior.
+This document defines the finance settlement foundation for marketplace-style vendor operations. It documents the implemented settlement and Manual EFT payout evidence model; it does not make the platform a bank-transfer or accounting authority.
 
 The platform remains an operational control center. It records operational finance evidence, produces payout previews, prepares review workflows, and records Manual EFT payment confirmation evidence. It is not the authority for executing bank transfers, generating accounting documents, or deciding tax treatment.
 
@@ -44,7 +44,29 @@ The current backend already persists finance-relevant records:
   - vendor-scoped draft or review batch totals
   - gross, commission, VAT, shipping deduction, refund, and net amount snapshots
 - `PayoutBatchLine`
-  - links eligible finance ledger rows into payout batch drafts
+  - links each newly prepared payout line to its exact approved `SettlementApprovalLine`
+  - copies `SettlementApprovalLine.payableImpactMinor` into `amountSnapshot`
+  - retains the related finance ledger reference for existing operational evidence
+
+### Approved Settlement Monetary Authority
+
+An APPROVED `SettlementApprovalLine` is the monetary source of truth for payout. Payout preparation propagates its `payableImpactMinor` rather than recalculating the approved vendor amount from `FinanceLedgerEntry`.
+
+The implemented flow is:
+
+```text
+APPROVED SettlementApproval
+→ exact SettlementApprovalLine records
+→ exact payableImpactMinor snapshots
+→ PayoutBatchLine.amountSnapshot
+→ approved payout base
+→ vendor debt offset
+→ PayoutBatch.netAmount
+```
+
+`SALE`, `REFUND`, and `REFUND_ADJUSTMENT` lines propagate independently. A partial or carried refund adjustment therefore contributes only its exact approved application slice. The linked settlement line is also revalidated before REVIEW and Mark Paid.
+
+An approved settlement line already linked to an active payout is excluded from another payout. Under the current lifecycle, `CANCELLED` is not an active payout state, so cancellation permits re-preparation without changing settlement approval history. The database relation is transitional nullable for non-destructive compatibility, while application code requires it for every new payout line and rejects missing linkage during later transitions.
 
 ### Real Values Today
 
@@ -65,7 +87,7 @@ These values are calculations over current persisted evidence:
 
 - `payoutEstimate`
 - per-record `estimatedPayout`
-- payout batch `netAmount` before approval/payment execution
+- payout batch `netAmount`, composed from exact approved settlement line amounts and then reduced by any existing vendor debt offset
 - `accruedBalance`, `payableBalance`, `heldBalance`, and `pendingSettlement` as currently named legacy API fields
 - order detail finance ledger preview output
 - dashboard finance snapshots
@@ -83,7 +105,7 @@ The current implementation includes deterministic defaults and inferred readines
 - shipping deduction applies only after fulfillment/shipping lifecycle evidence exists.
 - refund impact fully reduces the vendor payout preview.
 - sale settlement readiness is inferred from fulfillment/shipping evidence.
-- draft payout batch eligibility is inferred from settlement status, payout status, vendor scope, and active batch membership.
+- draft payout batch eligibility requires an approved settlement line, vendor/currency scope, current independent safety checks, and no active payout membership for that exact settlement line.
 - missing provider shipping cost in external-provider mode remains pending evidence and must not be treated as a final zero unless policy confirms it.
 
 ### Missing Or Not Yet Finalized

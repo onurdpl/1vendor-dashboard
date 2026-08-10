@@ -63,6 +63,8 @@ Already implemented:
 - Payment review transition
 - Payment batch cancellation
 - Approved Settlement Guard before payout batching and mark-review
+- Exact approved-settlement-line payout traceability
+- Approved `SettlementApprovalLine.payableImpactMinor` propagation into payout lines
 - Manual EFT Mark Paid lifecycle
 - Payment confirmation evidence on payout batches
 - Paid timeline backed by payment confirmation evidence
@@ -79,7 +81,6 @@ Long-term future:
 - Bank/provider payment execution lifecycle
 - Expanded payment blocker aggregation and reporting
 - Payment reversal or rollback policy beyond idempotent Mark Paid rejection
-- Immutable payout traceability via `PayoutBatchLine.settlementApprovalLineId`
 - ERP payment automation
 
 ### Approved Settlement Guard Status and Rollout History
@@ -115,11 +116,11 @@ Historical rollout sequence:
 4. Soft warning mode
 5. Hard enforcement for new payout batch preparation
 6. Hard enforcement for mark-review/final release
-7. Future immutable traceability via `PayoutBatchLine.settlementApprovalLineId`
+7. Immutable traceability via `PayoutBatchLine.settlementApprovalLineId`
 
 Historical reason:
 
-Hard enforcement may block legacy production payout rows because `PayoutBatch` existed before `SettlementApproval`. Legacy rows may lack approved settlement linkage, `PayoutBatchLine` does not yet store `settlementApprovalLineId`, and production compatibility is `UNKNOWN` until verified.
+Hard enforcement may block legacy payout rows because `PayoutBatch` existed before `SettlementApproval`. `PayoutBatchLine.settlementApprovalLineId` is nullable at the database boundary for non-destructive migration compatibility, but every newly prepared payout line must populate it and REVIEW/Mark Paid reject a missing relationship. Legacy production compatibility remains `UNKNOWN` until verified.
 
 Rule:
 
@@ -130,6 +131,10 @@ Initial production launch assumption:
 - Initial production launch will use fresh vendor profiles and fresh finance data.
 - Legacy payout batch / settlement approval backfill is not required for launch if no historical finance rows are imported.
 - Approved-settlement guard is implemented as hard enforcement for new payout preparation and mark-review.
+- An APPROVED `SettlementApprovalLine` is the monetary source of truth for payout. Payout preparation propagates its `payableImpactMinor` rather than recalculating the approved vendor amount from `FinanceLedgerEntry`.
+- Each new `PayoutBatchLine` references the exact approved settlement line that supplied its `amountSnapshot`.
+- Active payout membership excludes an approved settlement line from another payout. A `CANCELLED` payout does not consume the line, so current cancellation semantics permit re-preparation.
+- Vendor debt remains a downstream offset applied after the exact approved line amounts are summed.
 - If historical finance data is ever imported later, the diagnostic/backfill flow becomes mandatory before enabling/importing payment preparation.
 
 ### Full Order Cancellation Safety
@@ -291,7 +296,7 @@ Future, not launch:
 - Bank integration
 - Automatic payment execution
 - ERP payment automation
-- Immutable payout traceability
+- Schema tightening of legacy-null payout traceability after production evidence confirms no incompatible rows
 - Payment reversal policy
 
 ## Primary Question
@@ -401,7 +406,7 @@ Payment Preparation does not execute bank transfers.
 
 Mark-paid behavior, payment confirmation evidence, paid timeline, vendor paid visibility, and payment history are implemented for the approved Manual EFT launch model.
 
-Automatic payment execution, bank integration, ERP payment automation, immutable payout traceability, and payment reversal policy are future work, not launch scope.
+Automatic payment execution, bank integration, ERP payment automation, and payment reversal policy are future work, not launch scope. Exact approved-settlement-line payout traceability is implemented.
 
 ### Evidence & Invoices
 
