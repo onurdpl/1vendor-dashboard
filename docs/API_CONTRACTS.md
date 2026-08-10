@@ -84,6 +84,8 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - `POST /webhooks/shopify/fulfillment-orders-cancelled` (inbound fulfillment cancellation sync)
 - `POST /fulfillments/:allocationId/tracking`
 
+Admin Vendor Reject refund review also exposes authenticated, admin-scoped `POST /admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview` and `POST /admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund`. The request keeps `refundShipping` non-authoritative: the backend decides order-level pre-shipment eligibility. Preview separates product refund, customer checkout shipping refund, and Shopify-suggested total. Execution acquires the durable order shipping claim, reads Shopify's current refundable shipping immediately before submission, and maps Shopify `suggestedTransactions`; it does not accept an operator-entered shipping amount.
+
 Webhook processing lifecycle states:
 - `RECEIVED`: webhook envelope persisted.
 - `PROCESSING`: ingestion/recovery execution started.

@@ -167,7 +167,7 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - Canonical refund reads request at most 250 refunds, transactions, and refund line items. Exactly 250 refunds, `hasNextPage` on either connection, malformed money, duplicate transaction conflicts, currency mismatch, or aggregate mismatch fail closed for review.
 - Live `refunds/create`, stored replay/recovery, canonical reconciliation, and Current-State Repair all use this shared canonical monetary-evidence gate before existing positive-refund ingestion.
 - Successful refund money movement and full customer refund completion are separate classifications. A positive `REFUND / SUCCESS` transaction proves money moved, but does not prove the customer's complete order-level monetary position was refunded.
-- Admin order reads derive customer refund completion from the same canonical refund transaction gate plus `Order.displayFinancialStatus`, `totalReceivedSet`, `totalRefundedSet`, `netPaymentSet`, and `totalOutstandingSet`. `totalRefundedShippingSet` is exposed as canonical diagnostic evidence; no shipping refund is initiated by this read.
+- Admin order reads derive customer refund completion from the same canonical refund transaction gate plus `Order.displayFinancialStatus`, `totalReceivedSet`, `totalRefundedSet`, `netPaymentSet`, and `totalOutstandingSet`. `totalRefundedShippingSet` is exposed as canonical diagnostic evidence; this read remains descriptive and does not itself initiate shipping refund execution.
 - Full completion requires mutually consistent `REFUNDED` status, equal received/refunded shop money, zero net payment, and zero outstanding shop money. `PARTIALLY_REFUNDED` with positive canonical net payment remains partial. Missing or conflicting evidence fails closed to review and never falls back to local refund records or refunded line items.
 - Fulfillment post-check completion remains independent from customer monetary completion. A selected allocation can require no further fulfillment while the order remains partially refunded.
 - Refund completion does not recalculate historical checkout totals from current shipping fees or free-shipping thresholds.
@@ -181,7 +181,15 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - The same `OutboundShopifyRefundAttempt` may resume its existing ownership and retains its stable Shopify refund idempotency identity.
 - A different attempt cannot take ownership while the original owner is nonterminal, pending, failed with ambiguous submission evidence, or otherwise unreconciled.
 - There is no timeout, TTL, age-based release, or automatic takeover. Canonical `RESOLVED` attempt state releases ownership; ambiguous money movement remains blocked for reconciliation.
-- This ownership primitive does not enable `RefundInput.shipping`, calculate a shipping amount, or execute a customer checkout shipping refund. Customer checkout shipping refund execution remains not implemented.
+- The Vendor Reject / Admin Refund flow now uses this ownership primitive before including pre-shipment customer checkout shipping in `refundCreate`.
+- Checkout-shipping eligibility is order-level: every customer-facing allocation must be vendor-blocked before shipment, and concrete shipment/fulfillment evidence prevents inclusion. Unknown fulfillment evidence fails closed for the shipping component.
+- Shopify `SuggestedRefund.shipping.maximumRefundableSet` is the current refundable shipping authority. The final `suggestedRefund` call receives that explicit `shippingAmount`, and its `suggestedTransactions` remain the refund transaction authority.
+- No checkout shipping fee, free-shipping threshold, VAT, tax, gross/net, or historical tariff is reconstructed locally.
+- `RefundInput.shipping.amount` is sent only from the fresh Shopify maximum. The client cannot force shipping inclusion.
+- A canonically verified partial product refund can use the same flow for shipping-only remediation without repeating product line items.
+- Mutation acceptance remains pending evidence: fresh shipping maximum and canonical customer monetary state are checked afterward, while the existing canonical ingestion path alone resolves the attempt and releases its ownership.
+- Customer checkout shipping is Sporgym-funded and does not alter vendor commission, payable, debt, settlement, payout, or carrier-cost accounting.
+- Delivered-return checkout-shipping refunds remain not implemented.
 
 ### Return Lifecycle Webhook Topics
 - Confirmed return lifecycle topics to support:

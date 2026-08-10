@@ -175,9 +175,13 @@ type ProductPanelDryRunFeedback = {
   skipped?: number;
 };
 
-function formatPreviewMoney(amount: string | null | undefined, currencyCode: string | null | undefined) {
+function formatPreviewMoney(
+  amount: string | null | undefined,
+  currencyCode: string | null | undefined,
+  emptyLabel = 'Not returned',
+) {
   if (!amount) {
-    return currencyCode ? `0.00 ${currencyCode}` : 'Not returned';
+    return emptyLabel;
   }
   return currencyCode ? `${amount} ${currencyCode}` : amount;
 }
@@ -270,6 +274,10 @@ function hasBlockingFinanceAlert(allocation: ShopifyOrderBreakdown['allocations'
 
 function isCustomerRefundCompleted(breakdown: ShopifyOrderBreakdown) {
   return breakdown.customerRefundCompletion?.status === 'VERIFIED_FULL_CUSTOMER_REFUND';
+}
+
+function isCustomerRefundPartial(breakdown: ShopifyOrderBreakdown) {
+  return breakdown.customerRefundCompletion?.status === 'VERIFIED_PARTIAL_CUSTOMER_REFUND';
 }
 
 function isCustomerRefundReviewRequired(breakdown: ShopifyOrderBreakdown) {
@@ -652,13 +660,15 @@ function canShowShopifyRefundExecutionAction(
   preview: ShopifyRefundPreviewResult | undefined,
   customerRefundBlocksNewExecution = false,
 ) {
+  const reviewStatus = normalizeStateToken(allocation.cancelRefundReview?.status);
+  const shippingOnlyRemediation = preview?.refundMode === 'SHIPPING_ONLY' && reviewStatus === 'resolved';
   return (
     !customerRefundBlocksNewExecution &&
-    isRefundReviewEligibleForShopifyExecution(allocation) &&
+    (isRefundReviewEligibleForShopifyExecution(allocation) || shippingOnlyRemediation) &&
     (hasExecutableShopifyRefundPreview(preview) || hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview)) &&
     !isOutboundRefundPending(allocation) &&
-    !hasVisibleTransferBlockerEvidence(allocation) &&
-    !hasBlockingFinanceAlert(allocation)
+    (!hasVisibleTransferBlockerEvidence(allocation) || shippingOnlyRemediation) &&
+    (!hasBlockingFinanceAlert(allocation) || shippingOnlyRemediation)
   );
 }
 
@@ -1050,7 +1060,10 @@ export function AdminShopifyOrderPage() {
     if (!canShowShopifyRefundExecutionAction(
       shopifyRefundAction.allocation,
       shopifyRefundAction.preview,
-      breakdown ? isCustomerRefundCompleted(breakdown) || isCustomerRefundReviewRequired(breakdown) : true,
+      breakdown
+        ? isCustomerRefundCompleted(breakdown) ||
+          (isCustomerRefundReviewRequired(breakdown) && shopifyRefundAction.preview.refundMode !== 'SHIPPING_ONLY')
+        : true,
     )) {
       showFeedback('Shopify refund execution is blocked by the current preview or allocation state.', 'error');
       return;
@@ -1357,6 +1370,7 @@ export function AdminShopifyOrderPage() {
         );
         const refundCompleted = isCustomerRefundCompleted(breakdown);
         const refundReviewRequired = isCustomerRefundReviewRequired(breakdown);
+        const partialCustomerRefund = isCustomerRefundPartial(breakdown);
         const customerRefundBlocksNewResolution = refundCompleted || refundReviewRequired;
         const showEconomicTransferAction = canShowEconomicTransferAction(allocation, customerRefundBlocksNewResolution);
         const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation, customerRefundBlocksNewResolution);
@@ -1364,7 +1378,7 @@ export function AdminShopifyOrderPage() {
         const showShopifyRefundExecutionAction = canShowShopifyRefundExecutionAction(
           allocation,
           shopifyRefundPreview,
-          customerRefundBlocksNewResolution,
+          refundCompleted || (refundReviewRequired && shopifyRefundPreview?.refundMode !== 'SHIPPING_ONLY'),
         );
         const outboundRefundPending = isOutboundRefundPending(allocation);
         const fulfillmentNotRequired = isAllocationFulfillmentNotRequired(allocation);
@@ -2034,7 +2048,7 @@ export function AdminShopifyOrderPage() {
                   ) : null}
                 </section>
               ) : null}
-              {!refundCompleted && !refundReviewRequired ? (
+              {!refundCompleted && (!refundReviewRequired || partialCustomerRefund) ? (
               <div className="support-modal-actions refund-preview-actions">
                 <button
                   className="button button-secondary"
@@ -2085,28 +2099,30 @@ export function AdminShopifyOrderPage() {
                   </div>
                   <div className="compact-meta-grid">
                     <div className="meta-item">
-                      <span>Total refund</span>
+                      <span>Product refund</span>
                       <strong>
                         {formatPreviewMoney(
-                          shopifyRefundPreview.suggestedRefund?.totalRefundAmount,
+                          shopifyRefundPreview.suggestedRefund?.productRefundAmount,
                           shopifyRefundPreview.suggestedRefund?.currencyCode,
+                          'Not included',
                         )}
                       </strong>
                     </div>
                     <div className="meta-item">
-                      <span>Tax</span>
-                      <strong>
-                        {formatPreviewMoney(
-                          shopifyRefundPreview.suggestedRefund?.totalTaxAmount,
-                          shopifyRefundPreview.suggestedRefund?.currencyCode,
-                        )}
-                      </strong>
-                    </div>
-                    <div className="meta-item">
-                      <span>Shipping refund</span>
+                      <span>Customer checkout shipping refund</span>
                       <strong>
                         {formatPreviewMoney(
                           shopifyRefundPreview.suggestedRefund?.shippingAmount,
+                          shopifyRefundPreview.suggestedRefund?.currencyCode,
+                          'Not included',
+                        )}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Shopify-suggested total refund</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          shopifyRefundPreview.suggestedRefund?.totalRefundAmount,
                           shopifyRefundPreview.suggestedRefund?.currencyCode,
                         )}
                       </strong>
@@ -2755,7 +2771,10 @@ export function AdminShopifyOrderPage() {
             canShowShopifyRefundExecutionAction(
               shopifyRefundAction.allocation,
               preview,
-              breakdown ? isCustomerRefundCompleted(breakdown) || isCustomerRefundReviewRequired(breakdown) : true,
+              breakdown
+                ? isCustomerRefundCompleted(breakdown) ||
+                  (isCustomerRefundReviewRequired(breakdown) && preview.refundMode !== 'SHIPPING_ONLY')
+                : true,
             ) &&
             !shopifyRefundExecutionMutation.isPending,
         );
@@ -2834,15 +2853,31 @@ export function AdminShopifyOrderPage() {
                       <strong>{preview.fulfillmentOrderCancellation.affectedFulfillmentOrders.length}</strong>
                     </div>
                     <div className="meta-item">
-                      <span>Shipping refund</span>
-                      <strong>No</strong>
+                      <span>Product refund</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          preview.suggestedRefund?.productRefundAmount,
+                          preview.suggestedRefund?.currencyCode,
+                          'Not included',
+                        )}
+                      </strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Customer checkout shipping refund</span>
+                      <strong>
+                        {formatPreviewMoney(
+                          preview.suggestedRefund?.shippingAmount,
+                          preview.suggestedRefund?.currencyCode,
+                          'Not included',
+                        )}
+                      </strong>
                     </div>
                     <div className="meta-item">
                       <span>Restock type</span>
                       <strong>{preview.refundLineItemsPreview[0]?.restockType ?? 'CANCEL'}</strong>
                     </div>
                   </div>
-                  <div className="refund-preview-message">
+                  {preview.refundLineItemsPreview.length > 0 ? <div className="refund-preview-message">
                     <strong>Line items</strong>
                     <ul>
                       {preview.refundLineItemsPreview.map((lineItem) => (
@@ -2851,7 +2886,7 @@ export function AdminShopifyOrderPage() {
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </div> : null}
                   {preview.warnings.length || preview.fulfillmentOrderCancellation.warnings.length ? (
                     <div className="refund-preview-message refund-preview-message-warning">
                       <strong>Warnings</strong>

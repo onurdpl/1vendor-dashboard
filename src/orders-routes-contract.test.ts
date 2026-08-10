@@ -958,7 +958,7 @@ describe('orders route contract', () => {
 
     expect(response).toEqual({
       statusCode: 400,
-      payload: { message: 'Refund shipping preview is not supported for allocation-scoped cancel/refund review.' },
+      payload: { message: 'Checkout shipping refund cannot be forced by the client; backend eligibility is authoritative.' },
     });
     expect(previewShopifyRefundForAdminOrderMock).not.toHaveBeenCalled();
   });

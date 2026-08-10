@@ -27,8 +27,14 @@ const prismaMock = vi.hoisted(() => ({
   },
   outboundShopifyRefundAttempt: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+  },
+  orderShippingRefundClaim: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    create: vi.fn(),
   },
 }));
 const transferAllocationEconomicsMock = vi.hoisted(() => vi.fn());
@@ -278,7 +284,57 @@ function buildShopifyRefundPreviewService(overrides: Record<string, unknown> = {
         },
       },
     }),
+    fetchCanonicalRefundsForOrder: vi.fn().mockResolvedValue(null),
     ...overrides,
+  };
+}
+
+function buildCanonicalCustomerRefund(input: {
+  financialStatus?: string;
+  received?: string;
+  refunded?: string;
+  net?: string;
+  refundedShipping?: string;
+} = {}) {
+  const refunded = input.refunded ?? '1000.00';
+  return {
+    orderGid: 'gid://shopify/Order/1088',
+    sourceShopifyOrderId: '1088',
+    displayFinancialStatus: input.financialStatus ?? 'PARTIALLY_REFUNDED',
+    orderTotalReceivedAmount: input.received ?? '1100.00',
+    orderTotalReceivedCurrencyCode: 'TRY',
+    orderTotalRefundedAmount: refunded,
+    orderTotalRefundedCurrencyCode: 'TRY',
+    orderNetPaymentAmount: input.net ?? '100.00',
+    orderNetPaymentCurrencyCode: 'TRY',
+    orderTotalOutstandingAmount: '0.00',
+    orderTotalOutstandingCurrencyCode: 'TRY',
+    orderTotalRefundedShippingAmount: input.refundedShipping ?? '0.00',
+    orderTotalRefundedShippingCurrencyCode: 'TRY',
+    refundsListComplete: true,
+    refunds: [{
+      refundGid: 'gid://shopify/Refund/1',
+      sourceShopifyRefundId: '1',
+      createdAt: '2026-06-21T08:00:00.000Z',
+      updatedAt: '2026-06-21T08:00:01.000Z',
+      note: null,
+      totalRefundedAmount: refunded,
+      totalRefundedCurrencyCode: 'TRY',
+      transactionPaginationComplete: true,
+      lineItemPaginationComplete: true,
+      transactions: [{
+        transactionGid: 'gid://shopify/OrderTransaction/refund-1',
+        kind: 'REFUND',
+        status: 'SUCCESS',
+        amount: refunded,
+        currencyCode: 'TRY',
+        parentTransactionGid: 'gid://shopify/OrderTransaction/sale-1',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        processedAt: '2026-06-21T08:00:01.000Z',
+      }],
+      refundLineItems: [],
+    }],
+    source: 'shopify_admin' as const,
   };
 }
 
@@ -324,6 +380,20 @@ describe('vendor order reject operational hold', () => {
     prismaMock.webhookEvent.findMany.mockResolvedValue([]);
     prismaMock.shopifyOrder.findUnique.mockResolvedValue(buildAdminOrderBreakdownDb());
     prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
+    prismaMock.outboundShopifyRefundAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1',
+      shopifyOrderId: 'gid://shopify/Order/1088',
+      status: 'READY_TO_SUBMIT',
+    });
+    prismaMock.orderShippingRefundClaim.findUnique.mockResolvedValue(null);
+    prismaMock.orderShippingRefundClaim.findFirst.mockResolvedValue(null);
+    prismaMock.orderShippingRefundClaim.create.mockResolvedValue({
+      id: 'shipping-claim-1',
+      shopifyOrderId: 'gid://shopify/Order/1088',
+      ownerAttemptId: 'attempt-1',
+      activeOrderKey: 'gid://shopify/Order/1088',
+      status: 'ACTIVE',
+    });
     prismaMock.outboundShopifyRefundAttempt.create.mockImplementation(async ({ data }) => ({
       id: 'attempt-1',
       createdAt: new Date('2026-06-21T08:10:00.000Z'),
@@ -1313,6 +1383,223 @@ describe('vendor order reject operational hold', () => {
     });
   });
 
+  it('uses Shopify current shipping maximum and suggested transactions for an eligible product plus shipping refund', async () => {
+    const eligibleAllocation = buildReturnableBlockedAllocation();
+    prismaMock.vendorAllocation.findMany.mockReset()
+      .mockResolvedValueOnce([eligibleAllocation])
+      .mockResolvedValueOnce([{
+        id: 'alloc-1088',
+        assignedVendorId: 'yalispor',
+        lineItems: [{ shopifyOrderLineItem: { sourceLineItemId: '20346971095377' } }],
+      }])
+      .mockResolvedValueOnce([eligibleAllocation]);
+
+    const previewSuggestedRefund = vi.fn()
+      .mockResolvedValueOnce({
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        refundLineItemsPreview: [],
+        suggestedRefund: {
+          totalRefundAmount: '137.42',
+          currencyCode: 'TRY',
+          subtotalAmount: '0.00',
+          totalTaxAmount: '0.00',
+          shippingAmount: '137.42',
+          shippingMaximumRefundableAmount: '137.42',
+          shippingCurrencyCode: 'TRY',
+          maximumRefundableAmount: '1137.42',
+          suggestedTransactions: [],
+          refundLineItems: [],
+        },
+        graphqlErrors: [],
+        source: 'shopify_admin',
+      })
+      .mockResolvedValueOnce({
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        refundLineItemsPreview: [{
+          lineItemId: 'gid://shopify/LineItem/20346971095377',
+          quantity: 1,
+          restockType: 'CANCEL',
+        }],
+        suggestedRefund: {
+          totalRefundAmount: '1137.42',
+          currencyCode: 'TRY',
+          subtotalAmount: '900.00',
+          totalTaxAmount: '100.00',
+          shippingAmount: '137.42',
+          shippingMaximumRefundableAmount: '137.42',
+          shippingCurrencyCode: 'TRY',
+          maximumRefundableAmount: '1137.42',
+          suggestedTransactions: [{
+            gateway: 'bogus',
+            formattedGateway: '(For Testing) Bogus Gateway',
+            amount: '1137.42',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          }],
+          refundLineItems: [],
+        },
+        graphqlErrors: [],
+        source: 'shopify_admin',
+      })
+      .mockResolvedValueOnce({
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        refundLineItemsPreview: [],
+        suggestedRefund: {
+          totalRefundAmount: '0.00',
+          currencyCode: 'TRY',
+          subtotalAmount: '0.00',
+          totalTaxAmount: '0.00',
+          shippingAmount: '0.00',
+          shippingMaximumRefundableAmount: '0.00',
+          shippingCurrencyCode: 'TRY',
+          maximumRefundableAmount: '0.00',
+          suggestedTransactions: [],
+          refundLineItems: [],
+        },
+        graphqlErrors: [],
+        source: 'shopify_admin',
+      });
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      previewSuggestedRefund,
+      fetchCanonicalRefundsForOrder: vi.fn().mockResolvedValue(buildCanonicalCustomerRefund({
+        financialStatus: 'REFUNDED',
+        received: '1137.42',
+        refunded: '1137.42',
+        net: '0.00',
+        refundedShipping: '137.42',
+      })),
+      fetchFulfillmentOrdersForCancellationClassification: vi.fn().mockResolvedValue({
+        source: 'shopify_admin',
+        fulfillmentOrders: [{
+          id: 'gid://shopify/FulfillmentOrder/1',
+          status: 'OPEN',
+          requestStatus: 'SUBMITTED',
+          supportedActions: ['CANCEL_FULFILLMENT_ORDER'],
+          assignedLocationId: 'gid://shopify/Location/1',
+          lineItems: [{
+            id: 'gid://shopify/FulfillmentOrderLineItem/1',
+            lineItemId: 'gid://shopify/LineItem/20346971095377',
+            remainingQuantity: 1,
+            totalQuantity: 1,
+          }],
+        }],
+      }),
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1088',
+        currency: 'TRY',
+      },
+    }));
+
+    await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Customer approved refund.',
+      confirmRefund: true,
+      shopifyAdminService,
+    });
+
+    expect(previewSuggestedRefund).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      refundLineItems: [],
+      refundShipping: false,
+    }));
+    expect(previewSuggestedRefund).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      shippingAmount: '137.42',
+    }));
+    expect(shopifyAdminService.createShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      shipping: { amount: '137.42' },
+      transactions: [{
+        parentTransactionId: 'gid://shopify/OrderTransaction/1',
+        amount: '1137.42',
+        gateway: 'bogus',
+      }],
+    }));
+    expect(prismaMock.orderShippingRefundClaim.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('remediates a verified partial customer refund with shipping only and no product line duplication', async () => {
+    const eligibleAllocation = buildReturnableBlockedAllocation();
+    prismaMock.vendorAllocation.findMany.mockReset()
+      .mockResolvedValueOnce([eligibleAllocation])
+      .mockResolvedValueOnce([eligibleAllocation]);
+    const shippingMaximum = (amount: string, transactions: Array<Record<string, unknown>> = []) => ({
+      orderGid: 'gid://shopify/Order/1088',
+      sourceShopifyOrderId: '1088',
+      refundLineItemsPreview: [],
+      suggestedRefund: {
+        totalRefundAmount: amount,
+        currencyCode: 'TRY',
+        subtotalAmount: '0.00',
+        totalTaxAmount: '0.00',
+        shippingAmount: amount,
+        shippingMaximumRefundableAmount: amount,
+        shippingCurrencyCode: 'TRY',
+        maximumRefundableAmount: amount,
+        suggestedTransactions: transactions,
+        refundLineItems: [],
+      },
+      graphqlErrors: [],
+      source: 'shopify_admin',
+    });
+    const previewSuggestedRefund = vi.fn()
+      .mockResolvedValueOnce(shippingMaximum('100.00'))
+      .mockResolvedValueOnce(shippingMaximum('100.00', [{
+        gateway: 'bogus',
+        formattedGateway: '(For Testing) Bogus Gateway',
+        amount: '100.00',
+        currencyCode: 'TRY',
+        parentTransactionId: 'gid://shopify/OrderTransaction/1',
+      }]))
+      .mockResolvedValueOnce(shippingMaximum('0.00'));
+    const fetchCanonicalRefundsForOrder = vi.fn()
+      .mockResolvedValueOnce(buildCanonicalCustomerRefund())
+      .mockResolvedValueOnce(buildCanonicalCustomerRefund({
+        financialStatus: 'REFUNDED',
+        received: '1100.00',
+        refunded: '1100.00',
+        net: '0.00',
+        refundedShipping: '100.00',
+      }));
+    const shopifyAdminService = buildShopifyRefundPreviewService({
+      previewSuggestedRefund,
+      fetchCanonicalRefundsForOrder,
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation({
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecords: [{ id: 'existing-product-refund' }],
+      order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1088',
+        currency: 'TRY',
+      },
+    }));
+
+    await executeShopifyRefundForAdminOrder('gid://shopify/Order/1088', 'alloc-1088', {
+      restockType: 'CANCEL',
+      refundShipping: false,
+      notifyCustomer: true,
+      note: 'Complete customer checkout shipping refund.',
+      confirmRefund: true,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.cancelFulfillmentOrder).not.toHaveBeenCalled();
+    expect(shopifyAdminService.createShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      refundLineItems: [],
+      shipping: { amount: '100.00' },
+      transactions: [{
+        parentTransactionId: 'gid://shopify/OrderTransaction/1',
+        amount: '100.00',
+        gateway: 'bogus',
+      }],
+    }));
+    expect(fetchCanonicalRefundsForOrder).toHaveBeenCalledTimes(2);
+  });
+
   it('blocks duplicate Shopify refund execution while an attempt is pending', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRefundPreviewAllocation());
     prismaMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValueOnce({
@@ -1696,6 +1983,7 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('exposes a controlled direct refundCreate probe for eligible split-child mixed fulfillment orders while keeping preview blocked', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([buildReturnableBlockedAllocation()]);
     prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
       {
         id: 'alloc-1088',
@@ -1773,6 +2061,7 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('requires explicit confirmation before running the split-child mixed fulfillment order direct refundCreate probe', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([buildReturnableBlockedAllocation()]);
     prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
       {
         id: 'alloc-1088',
@@ -1834,6 +2123,7 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('executes split-child mixed fulfillment order direct refundCreate probe and verifies child and source remaining quantities', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([buildReturnableBlockedAllocation()]);
     prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
       {
         id: 'alloc-1088',

@@ -412,7 +412,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         const shopifyOrderId = readRequiredRouteParam(request.params.shopifyOrderId, 'Shopify order id is required.');
         const allocationId = readRequiredRouteParam(request.params.allocationId, 'Allocation id is required.');
         if (request.body?.refundShipping !== false) {
-          throw new OrderRejectValidationError('Refund shipping preview is not supported for allocation-scoped cancel/refund review.', 400);
+          throw new OrderRejectValidationError('Checkout shipping refund cannot be forced by the client; backend eligibility is authoritative.', 400);
         }
 
         return await withSlowEndpointTiming('POST /admin/orders/:shopifyOrderId/allocations/:allocationId/shopify-refund-preview', () =>

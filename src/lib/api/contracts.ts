@@ -1146,9 +1146,11 @@ export type ShopifyRefundPreviewResult = {
   }>;
   suggestedRefund: {
     totalRefundAmount: string | null;
+    productRefundAmount: string | null;
     currencyCode: string | null;
     totalTaxAmount: string | null;
     shippingAmount: string | null;
+    shippingMaximumRefundableAmount: string | null;
     suggestedTransactions: Array<{
       gateway: string | null;
       amount: string | null;
@@ -1156,6 +1158,11 @@ export type ShopifyRefundPreviewResult = {
       parentTransactionId: string | null;
     }>;
   } | null;
+  refundMode: 'PRODUCT_ONLY' | 'PRODUCT_AND_SHIPPING' | 'SHIPPING_ONLY';
+  shippingEligibility: {
+    status: 'ELIGIBLE' | 'NOT_ELIGIBLE' | 'UNRESOLVED';
+    reasonCode: string;
+  };
   fulfillmentOrderCancellation: FulfillmentOrderCancellationPreview;
   warnings: string[];
   blockers: string[];

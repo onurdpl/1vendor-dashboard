@@ -69,6 +69,18 @@ function buildSuggestedRefundResponse(lineItemId: string) {
                 currencyCode: 'TRY',
               },
             },
+            maximumRefundableSet: {
+              shopMoney: {
+                amount: '137.42',
+                currencyCode: 'TRY',
+              },
+            },
+            taxSet: {
+              shopMoney: {
+                amount: '20.96',
+                currencyCode: 'TRY',
+              },
+            },
           },
           refundLineItems: [
             {
@@ -143,6 +155,7 @@ describe('Shopify suggested refund preview', () => {
         id: string;
         refundLineItems: Array<{ lineItemId: string; quantity: number; restockType: string }>;
         refundShipping: boolean;
+        shippingAmount: string | null;
       };
     };
     expect(requestBody.variables.id).toBe('gid://shopify/Order/1088');
@@ -153,11 +166,42 @@ describe('Shopify suggested refund preview', () => {
         restockType: 'CANCEL',
       },
     ]);
+    expect(requestBody.variables.shippingAmount).toBeNull();
+    expect(requestBody.query).toContain('shippingAmount: $shippingAmount');
+    expect(result.suggestedRefund).toMatchObject({
+      shippingMaximumRefundableAmount: '137.42',
+      shippingCurrencyCode: 'TRY',
+    });
     expect(result.suggestedRefund?.suggestedTransactions[0]).toMatchObject({
       gateway: 'bogus',
       amount: '1000.00',
       currencyCode: 'TRY',
       parentTransactionId: 'gid://shopify/OrderTransaction/1',
+    });
+  });
+
+  it('passes the explicit Shopify shipping amount without calculating it locally', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(buildSuggestedRefundResponse('gid://shopify/LineItem/20346971095377')), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const service = createShopifyAdminService(env);
+
+    await service.previewSuggestedRefund({
+      shopifyOrderId: '1088',
+      refundShipping: false,
+      shippingAmount: '137.42',
+      refundLineItems: [],
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      variables: { shippingAmount: string; refundLineItems: unknown[] };
+    };
+    expect(requestBody.variables).toMatchObject({
+      shippingAmount: '137.42',
+      refundLineItems: [],
     });
   });
 

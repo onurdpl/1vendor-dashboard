@@ -342,6 +342,7 @@ describe('Shopify fulfillment order lookup', () => {
       ],
       note: 'Customer approved refund.',
       notify: true,
+      shipping: { amount: '137.42' },
       idempotencyKey: 'shopify-refund:alloc-1:attempt-1',
     });
 
@@ -355,6 +356,7 @@ describe('Shopify fulfillment order lookup', () => {
           transactions: Array<{ orderId: string; kind: string; gateway: string; amount: string; parentId: string }>;
           note: string;
           notify: boolean;
+          shipping: { amount: string };
         };
       };
     };
@@ -385,6 +387,7 @@ describe('Shopify fulfillment order lookup', () => {
         ],
         note: 'Customer approved refund.',
         notify: true,
+        shipping: { amount: '137.42' },
       },
     });
     expect(result).toEqual({

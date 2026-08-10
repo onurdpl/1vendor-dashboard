@@ -8,12 +8,14 @@ import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
 
 const getAdminShopifyOrderBreakdownMock = vi.fn<() => Promise<ShopifyOrderBreakdown>>();
 const sendAdminProductPanelVariantDisableDryRunMock = vi.fn();
+const previewAdminShopifyRefundMock = vi.fn();
 
 vi.mock('../features/orders/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/orders/api')>();
   return {
     ...actual,
     getAdminShopifyOrderBreakdown: () => getAdminShopifyOrderBreakdownMock(),
+    previewAdminShopifyRefund: (...args: unknown[]) => previewAdminShopifyRefundMock(...args),
     sendAdminProductPanelVariantDisableDryRun: (shopifyOrderId: string) =>
       sendAdminProductPanelVariantDisableDryRunMock(shopifyOrderId),
   };
@@ -193,6 +195,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
     });
     getAdminShopifyOrderBreakdownMock.mockReset();
     sendAdminProductPanelVariantDisableDryRunMock.mockReset();
+    previewAdminShopifyRefundMock.mockReset();
   });
 
   it('loads admin order detail for an authenticated admin even when vendor context is missing', async () => {
@@ -802,6 +805,51 @@ describe('AdminShopifyOrderPage split visibility', () => {
     });
 
     it('keeps a resolved attempt and passed fulfillment post-check separate from a partial customer refund', async () => {
+      previewAdminShopifyRefundMock.mockResolvedValueOnce({
+        ok: true,
+        writesPerformed: false,
+        allocationId: 'alloc-child',
+        shopifyOrderId: '7817723773266',
+        refundLineItemsPreview: [],
+        suggestedRefund: {
+          totalRefundAmount: '100.00',
+          productRefundAmount: null,
+          currencyCode: 'TRY',
+          totalTaxAmount: '0.00',
+          shippingAmount: '100.00',
+          shippingMaximumRefundableAmount: '100.00',
+          suggestedTransactions: [{
+            gateway: 'bogus',
+            amount: '100.00',
+            currencyCode: 'TRY',
+            parentTransactionId: 'gid://shopify/OrderTransaction/1',
+          }],
+        },
+        refundMode: 'SHIPPING_ONLY',
+        shippingEligibility: {
+          status: 'ELIGIBLE',
+          reasonCode: 'all_allocations_vendor_blocked_pre_shipment',
+        },
+        fulfillmentOrderCancellation: {
+          affectedFulfillmentOrders: [],
+          overallClassification: 'no_cancellation_needed',
+          blockers: [],
+          warnings: [],
+        },
+        warnings: [],
+        blockers: [],
+        missingData: [],
+        mixedFulfillmentOrderDirectRefundProbe: {
+          eligible: false,
+          code: 'not_eligible',
+          message: 'Not required.',
+          affectedFulfillmentOrderId: null,
+          selectedLineItems: [],
+          sourceLineItems: [],
+          blockers: [],
+          warnings: [],
+        },
+      });
       getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
         sourceShopifyOrderId: '7817723773266',
         sourceShopifyOrderNumber: '#1113',
@@ -867,7 +915,20 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
       expect(screen.getByText('Customer refund review required')).toBeInTheDocument();
       expect(screen.getByText('Refund attempt resolved')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Preview Shopify refund' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Preview Shopify refund' }));
+      const refundPreview = await screen.findByLabelText('Shopify suggested refund preview');
+      expect(within(refundPreview).getByText('Product refund')).toBeInTheDocument();
+      expect(within(refundPreview).getByText('Customer checkout shipping refund')).toBeInTheDocument();
+      expect(within(refundPreview).getByText('Shopify-suggested total refund')).toBeInTheDocument();
+      expect(within(refundPreview).getAllByText('100.00 TRY')).toHaveLength(2);
+      expect(within(refundPreview).getByText('Not included')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Refund in Shopify' })).toBeInTheDocument();
+      expect(previewAdminShopifyRefundMock).toHaveBeenCalledWith(
+        '7817723773265',
+        'alloc-child',
+        { restockType: 'CANCEL', refundShipping: false },
+      );
       expect(screen.queryByText('No action required')).not.toBeInTheDocument();
     });
 

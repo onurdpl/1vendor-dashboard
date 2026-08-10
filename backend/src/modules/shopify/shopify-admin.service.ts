@@ -349,6 +349,8 @@ type SuggestedRefundQueryResponse = {
       totalTaxSet?: ShopifyMoneySetNode;
       shipping?: {
         amountSet?: ShopifyMoneySetNode;
+        maximumRefundableSet?: ShopifyMoneySetNode;
+        taxSet?: ShopifyMoneySetNode;
       } | null;
       refundLineItems: Array<{
         lineItem: {
@@ -2297,10 +2299,19 @@ export function createShopifyAdminService(env: AppEnv) {
         },
         body: JSON.stringify({
           query: `
-            query SuggestedRefundPreview($id: ID!, $refundLineItems: [RefundLineItemInput!], $refundShipping: Boolean) {
+            query SuggestedRefundPreview(
+              $id: ID!
+              $refundLineItems: [RefundLineItemInput!]
+              $refundShipping: Boolean
+              $shippingAmount: Money
+            ) {
               order(id: $id) {
                 id
-                suggestedRefund(refundLineItems: $refundLineItems, refundShipping: $refundShipping) {
+                suggestedRefund(
+                  refundLineItems: $refundLineItems
+                  refundShipping: $refundShipping
+                  shippingAmount: $shippingAmount
+                ) {
                   amountSet {
                     shopMoney {
                       amount
@@ -2327,6 +2338,18 @@ export function createShopifyAdminService(env: AppEnv) {
                   }
                   shipping {
                     amountSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    maximumRefundableSet {
+                      shopMoney {
+                        amount
+                        currencyCode
+                      }
+                    }
+                    taxSet {
                       shopMoney {
                         amount
                         currencyCode
@@ -2377,6 +2400,7 @@ export function createShopifyAdminService(env: AppEnv) {
               restockType: lineItem.restockType,
             })),
             refundShipping: input.refundShipping,
+            shippingAmount: input.shippingAmount?.trim() || null,
           },
         }),
       },
@@ -2397,6 +2421,7 @@ export function createShopifyAdminService(env: AppEnv) {
     const subtotal = mapShopifyMoney(suggestedRefund?.subtotalSet ?? null);
     const totalTax = mapShopifyMoney(suggestedRefund?.totalTaxSet ?? null);
     const shipping = mapShopifyMoney(suggestedRefund?.shipping?.amountSet ?? null);
+    const shippingMaximumRefundable = mapShopifyMoney(suggestedRefund?.shipping?.maximumRefundableSet ?? null);
     const maximumRefundable = mapShopifyMoney(suggestedRefund?.maximumRefundableSet ?? null);
 
     return {
@@ -2412,6 +2437,8 @@ export function createShopifyAdminService(env: AppEnv) {
             subtotalAmount: subtotal.amount,
             totalTaxAmount: totalTax.amount,
             shippingAmount: shipping.amount,
+            shippingMaximumRefundableAmount: shippingMaximumRefundable.amount,
+            shippingCurrencyCode: shippingMaximumRefundable.currencyCode ?? shipping.currencyCode,
             maximumRefundableAmount: maximumRefundable.amount,
             suggestedTransactions: suggestedRefund.suggestedTransactions.map((transaction) => {
               const transactionAmount = mapShopifyMoney(transaction.amountSet ?? null);
@@ -2973,6 +3000,7 @@ export function createShopifyAdminService(env: AppEnv) {
                 restockType: lineItem.restockType,
                 ...(lineItem.locationId ? { locationId: toShopifyGid('Location', lineItem.locationId) } : {}),
               })),
+              ...(input.shipping ? { shipping: { amount: input.shipping.amount } } : {}),
               transactions: input.transactions.map((transaction) => ({
                 orderId: orderGid,
                 kind: 'REFUND',

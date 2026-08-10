@@ -38,6 +38,7 @@ export type PreviewSuggestedRefundInput = {
   shopifyOrderId: string;
   refundLineItems: PreviewSuggestedRefundLineItemInput[];
   refundShipping: boolean;
+  shippingAmount?: string | null;
 };
 
 export type ShopifySuggestedRefundTransactionPreview = {
@@ -63,6 +64,8 @@ export type ShopifySuggestedRefundPreview = {
   subtotalAmount: string | null;
   totalTaxAmount: string | null;
   shippingAmount: string | null;
+  shippingMaximumRefundableAmount: string | null;
+  shippingCurrencyCode: string | null;
   maximumRefundableAmount: string | null;
   suggestedTransactions: ShopifySuggestedRefundTransactionPreview[];
   refundLineItems: ShopifySuggestedRefundLineItemPreview[];
@@ -94,6 +97,9 @@ export type CreateShopifyRefundInput = {
     amount: string;
     gateway: string;
   }>;
+  shipping?: {
+    amount: string;
+  } | null;
   note?: string | null;
   notify: boolean;
   idempotencyKey: string;
