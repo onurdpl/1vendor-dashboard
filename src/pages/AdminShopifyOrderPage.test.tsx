@@ -898,7 +898,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
       renderPage();
 
       const statusAxes = await findLatestStatusAxes();
-      expect(within(statusAxes).getByText('Partially Refunded')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Refund review required')).toBeInTheDocument();
       expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
       expect(within(statusAxes).queryByText('Fulfillment not required')).not.toBeInTheDocument();
     });

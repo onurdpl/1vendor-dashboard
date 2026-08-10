@@ -73,6 +73,12 @@ function formatStatusAxisLabel(value: string | null | undefined, fallback = 'Unk
   return formatTransferStatus(value);
 }
 
+function hasLocalRefundEvidence(breakdown: ShopifyOrderBreakdown) {
+  return breakdown.allocations.some((allocation) =>
+    allocation.refundedItems.length > 0 || Number.parseFloat(allocation.refundTotal.replace(/[^0-9.-]/g, '')) > 0
+  );
+}
+
 function getPaymentStatusLabel(breakdown: ShopifyOrderBreakdown) {
   if (breakdown.customerRefundCompletion?.status === 'VERIFIED_FULL_CUSTOMER_REFUND') {
     return 'Refund completed';
@@ -82,7 +88,8 @@ function getPaymentStatusLabel(breakdown: ShopifyOrderBreakdown) {
     return 'Partially refunded';
   }
 
-  if (breakdown.customerRefundCompletion?.status === 'UNRESOLVED') {
+  if (breakdown.customerRefundCompletion?.status === 'UNRESOLVED' ||
+      (!breakdown.customerRefundCompletion && hasLocalRefundEvidence(breakdown))) {
     return 'Refund review required';
   }
 
@@ -267,7 +274,9 @@ function isCustomerRefundCompleted(breakdown: ShopifyOrderBreakdown) {
 
 function isCustomerRefundReviewRequired(breakdown: ShopifyOrderBreakdown) {
   const status = breakdown.customerRefundCompletion?.status;
-  return status === 'VERIFIED_PARTIAL_CUSTOMER_REFUND' || status === 'UNRESOLVED';
+  return status === 'VERIFIED_PARTIAL_CUSTOMER_REFUND' ||
+    status === 'UNRESOLVED' ||
+    (!breakdown.customerRefundCompletion && hasLocalRefundEvidence(breakdown));
 }
 
 function isAllocationFulfillmentNotRequired(allocation: ShopifyOrderBreakdown['allocations'][number]) {
