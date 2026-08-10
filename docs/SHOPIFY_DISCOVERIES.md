@@ -173,6 +173,16 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - Refund completion does not recalculate historical checkout totals from current shipping fees or free-shipping thresholds.
 - FIN-VOID-1 prevents future false refund evidence. It does not correct the existing `#1105` production refund/return/ledger records; those remain a separate controlled correction. `#1106` is not repaired by this phase.
 
+### Order-Level Checkout Shipping Refund Ownership
+
+- Customer checkout shipping is order-level money; allocation-level refund-attempt protection alone cannot serialize it across vendors.
+- `OrderShippingRefundClaim` provides database-enforced ownership for one active logical checkout-shipping refund attempt per Shopify order.
+- The active-order key is nullable and unique: one active owner is allowed, while released claim rows remain retained audit history.
+- The same `OutboundShopifyRefundAttempt` may resume its existing ownership and retains its stable Shopify refund idempotency identity.
+- A different attempt cannot take ownership while the original owner is nonterminal, pending, failed with ambiguous submission evidence, or otherwise unreconciled.
+- There is no timeout, TTL, age-based release, or automatic takeover. Canonical `RESOLVED` attempt state releases ownership; ambiguous money movement remains blocked for reconciliation.
+- This ownership primitive does not enable `RefundInput.shipping`, calculate a shipping amount, or execute a customer checkout shipping refund. Customer checkout shipping refund execution remains not implemented.
+
 ### Return Lifecycle Webhook Topics
 - Confirmed return lifecycle topics to support:
   - `RETURNS_REQUEST` (fires first when customer starts self-serve return request)

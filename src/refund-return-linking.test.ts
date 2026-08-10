@@ -38,6 +38,9 @@ const txMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
+  orderShippingRefundClaim: {
+    updateMany: vi.fn(),
+  },
   financeLedgerEntry: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
@@ -444,6 +447,7 @@ describe('Shopify refund return linking', () => {
     txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
     txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
+    txMock.orderShippingRefundClaim.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {
@@ -650,6 +654,22 @@ describe('Shopify refund return linking', () => {
         status: 'RESOLVED',
         shopifyRefundId: '1074533826897',
         resolvedAt: expect.any(Date),
+      },
+    });
+    expect(txMock.orderShippingRefundClaim.updateMany).toHaveBeenCalledWith({
+      where: {
+        status: 'ACTIVE',
+        activeOrderKey: { not: null },
+        ownerAttempt: {
+          vendorAllocationId: 'alloc-1029-sporjinal',
+          status: 'RESOLVED',
+        },
+      },
+      data: {
+        status: 'RELEASED',
+        activeOrderKey: null,
+        releasedAt: expect.any(Date),
+        releaseReason: 'OWNER_ATTEMPT_RESOLVED',
       },
     });
   });

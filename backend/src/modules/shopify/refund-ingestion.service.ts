@@ -16,6 +16,7 @@ import {
 import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from '../orders/outbound-shopify-refund-attempt.service.js';
+import { releaseResolvedOrderShippingRefundClaimsForAllocation } from '../orders/order-shipping-refund-claim.service.js';
 import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-ownership-resolution.service.js';
 import type {
   ParsedShopifyRefundLineItem,
@@ -218,6 +219,10 @@ async function resolveCancelRefundReviewAfterRefundIngestion(
       shopifyRefundId: input.sourceShopifyRefundId,
       resolvedAt: input.resolvedAt,
     },
+  });
+  await releaseResolvedOrderShippingRefundClaimsForAllocation(tx, {
+    vendorAllocationId: input.vendorAllocationId,
+    releasedAt: input.resolvedAt,
   });
 }
 

@@ -684,16 +684,16 @@ model VendorAllocation {
 }
 
 model OutboundShopifyRefundAttempt {
-  id                               String           @id @default(cuid())
+  id                               String                    @id @default(cuid())
   vendorAllocationId               String
   shopifyOrderId                   String
   status                           String
   restockType                      String
-  refundShipping                   Boolean          @default(false)
-  notifyCustomer                   Boolean          @default(false)
+  refundShipping                   Boolean                   @default(false)
+  notifyCustomer                   Boolean                   @default(false)
   note                             String?
   requestedByUserId                String?
-  requestedAt                      DateTime         @default(now())
+  requestedAt                      DateTime                  @default(now())
   refundLineItemsJson              Json?
   suggestedTransactionsJson        Json?
   fulfillmentOrderCancellationJson Json?
@@ -708,16 +708,34 @@ model OutboundShopifyRefundAttempt {
   resolvedAt                       DateTime?
   failedAt                         DateTime?
   failureReason                    String?
-  createdAt                        DateTime         @default(now())
-  updatedAt                        DateTime         @updatedAt
-  vendorAllocation                 VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  requestedByUser                  User?            @relation("outboundShopifyRefundAttemptRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  createdAt                        DateTime                  @default(now())
+  updatedAt                        DateTime                  @updatedAt
+  vendorAllocation                 VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  requestedByUser                  User?                     @relation("outboundShopifyRefundAttemptRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  orderShippingRefundClaim         OrderShippingRefundClaim?
 
   @@index([vendorAllocationId])
   @@index([shopifyOrderId])
   @@index([status])
   @@index([shopifyRefundId])
   @@index([previewHash])
+}
+
+model OrderShippingRefundClaim {
+  id             String                       @id @default(cuid())
+  shopifyOrderId String
+  ownerAttemptId String                       @unique
+  activeOrderKey String?                      @unique
+  status         String                       @default("ACTIVE")
+  acquiredAt     DateTime                     @default(now())
+  releasedAt     DateTime?
+  releaseReason  String?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  ownerAttempt   OutboundShopifyRefundAttempt @relation(fields: [ownerAttemptId], references: [id], onDelete: Restrict)
+
+  @@index([shopifyOrderId])
+  @@index([status])
 }
 
 model VendorIntegrationInvoiceEvent {

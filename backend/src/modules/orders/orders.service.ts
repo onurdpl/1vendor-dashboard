@@ -57,6 +57,7 @@ import {
   mapOutboundShopifyRefundAttemptSummary,
   OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES,
 } from './outbound-shopify-refund-attempt.service.js';
+import { buildShopifyRefundIdempotencyKey } from './order-shipping-refund-claim.service.js';
 import {
   planAllocationSplitForLineItemReject,
   type AllocationSplitPlannerResult,
@@ -3435,7 +3436,10 @@ export async function executeShopifyRefundForAdminOrder(
     })),
     note,
     notify: notifyCustomer,
-    idempotencyKey: `shopify-refund:${allocation.id}:${attempt.id}`,
+    idempotencyKey: buildShopifyRefundIdempotencyKey({
+      allocationId: allocation.id,
+      attemptId: attempt.id,
+    }),
   });
 
   if (refundCreateResult.userErrors.length > 0) {
