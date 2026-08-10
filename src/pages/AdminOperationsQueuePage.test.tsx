@@ -12,7 +12,18 @@ import type {
   SupportAttentionTicketsPage,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
+import { formatDateTime } from '../services/real/formatting';
 import { AdminOperationsQueuePage } from './AdminOperationsQueuePage';
+
+function formatOperationsTimestamp(value: string) {
+  return formatDateTime(value, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 const attentionMock = vi.fn<() => Promise<OperationsAttentionDashboard>>();
 const queueDashboardMock = vi.fn<(options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) => Promise<OperationsQueueDashboard>>();
@@ -727,8 +738,12 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(within(activityCard as HTMLElement).getByText('Vendor rejected allocation')).toBeInTheDocument();
     expect(within(activityCard as HTMLElement).getByText('Sporjinal · Order #1029')).toBeInTheDocument();
     expect(within(activityCard as HTMLElement).queryByText(/alloc-sporjinal-794494123/)).not.toBeInTheDocument();
-    expect(within(activityCard as HTMLElement).getAllByText('May 17, 2026, 10:00 AM')).toHaveLength(1);
-    expect(within(activityCard as HTMLElement).getAllByText('May 17, 2026, 09:30 AM')).toHaveLength(1);
+    expect(within(activityCard as HTMLElement).getAllByText(
+      formatOperationsTimestamp('2026-05-17T08:00:00.000Z'),
+    )).toHaveLength(1);
+    expect(within(activityCard as HTMLElement).getAllByText(
+      formatOperationsTimestamp('2026-05-17T07:30:00.000Z'),
+    )).toHaveLength(1);
     const activityRows = Array.from((activityCard as HTMLElement).querySelectorAll('.attention-activity-row'));
     expect(activityRows[0]).toHaveTextContent('Overdue support ticket');
     expect(activityRows[1]).toHaveTextContent('Vendor rejected allocation');
