@@ -166,6 +166,11 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - `PENDING`, `FAILURE`, `ERROR`, `AWAITING_RESPONSE`, or unknown refund transaction states are non-final and create no finance mutation.
 - Canonical refund reads request at most 250 refunds, transactions, and refund line items. Exactly 250 refunds, `hasNextPage` on either connection, malformed money, duplicate transaction conflicts, currency mismatch, or aggregate mismatch fail closed for review.
 - Live `refunds/create`, stored replay/recovery, canonical reconciliation, and Current-State Repair all use this shared canonical monetary-evidence gate before existing positive-refund ingestion.
+- Successful refund money movement and full customer refund completion are separate classifications. A positive `REFUND / SUCCESS` transaction proves money moved, but does not prove the customer's complete order-level monetary position was refunded.
+- Admin order reads derive customer refund completion from the same canonical refund transaction gate plus `Order.displayFinancialStatus`, `totalReceivedSet`, `totalRefundedSet`, `netPaymentSet`, and `totalOutstandingSet`. `totalRefundedShippingSet` is exposed as canonical diagnostic evidence; no shipping refund is initiated by this read.
+- Full completion requires mutually consistent `REFUNDED` status, equal received/refunded shop money, zero net payment, and zero outstanding shop money. `PARTIALLY_REFUNDED` with positive canonical net payment remains partial. Missing or conflicting evidence fails closed to review and never falls back to local refund records or refunded line items.
+- Fulfillment post-check completion remains independent from customer monetary completion. A selected allocation can require no further fulfillment while the order remains partially refunded.
+- Refund completion does not recalculate historical checkout totals from current shipping fees or free-shipping thresholds.
 - FIN-VOID-1 prevents future false refund evidence. It does not correct the existing `#1105` production refund/return/ledger records; those remain a separate controlled correction. `#1106` is not repaired by this phase.
 
 ### Return Lifecycle Webhook Topics

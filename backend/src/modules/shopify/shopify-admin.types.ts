@@ -243,8 +243,17 @@ export type CanonicalShopifyRefundSnapshot = {
 export type FetchCanonicalShopifyRefundsForOrderResult = {
   orderGid: string;
   sourceShopifyOrderId: string;
+  displayFinancialStatus?: string | null;
+  orderTotalReceivedAmount?: string | null;
+  orderTotalReceivedCurrencyCode?: string | null;
   orderTotalRefundedAmount: string | null;
   orderTotalRefundedCurrencyCode: string | null;
+  orderNetPaymentAmount?: string | null;
+  orderNetPaymentCurrencyCode?: string | null;
+  orderTotalOutstandingAmount?: string | null;
+  orderTotalOutstandingCurrencyCode?: string | null;
+  orderTotalRefundedShippingAmount?: string | null;
+  orderTotalRefundedShippingCurrencyCode?: string | null;
   refundsListComplete: boolean;
   refunds: CanonicalShopifyRefundSnapshot[];
   source: 'mock' | 'shopify_admin';

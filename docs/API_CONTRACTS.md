@@ -141,6 +141,9 @@ Webhook processing lifecycle states:
   - assignment history entries with actor, role, reason, and timestamps
   - per-allocation tracking metadata
   - per-allocation refunded items and totals when present
+  - structured order-level `customerRefundCompletion` with canonical statuses for no verified monetary refund, verified partial customer refund, verified full customer refund, or unresolved evidence
+- `customerRefundCompletion` is derived from a live canonical Shopify refund/order read. Local refund records and refunded line items remain descriptive and cannot independently authorize full-customer-refund completion.
+- Missing, unavailable, or conflicting canonical completion evidence fails closed and must not be presented as a completed customer refund.
 - Backend implementation note: route is auth-protected and admin-only; authenticated vendor users receive `403`.
 - Missing Shopify orders return `404`.
 

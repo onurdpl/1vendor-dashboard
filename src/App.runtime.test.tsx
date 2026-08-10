@@ -450,6 +450,18 @@ describe('App startup runtime safety', () => {
           sourceShopifyOrderId: '7693738639697',
           sourceShopifyOrderNumber: '#1069',
           customer: 'Shopify Customer',
+          financialStatus: 'refunded',
+          customerRefundCompletion: {
+            status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+            reasonCode: 'canonical_full_customer_refund_verified',
+            displayFinancialStatus: 'REFUNDED',
+            currency: 'TRY',
+            totalReceivedAmount: '1000.00',
+            totalRefundedAmount: '1000.00',
+            netPaymentAmount: '0.00',
+            totalOutstandingAmount: '0.00',
+            totalRefundedShippingAmount: '0.00',
+          },
           createdAt: '2026-06-02T12:00:00.000Z',
           allocations: [
             {

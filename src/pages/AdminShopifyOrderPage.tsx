@@ -73,12 +73,17 @@ function formatStatusAxisLabel(value: string | null | undefined, fallback = 'Unk
   return formatTransferStatus(value);
 }
 
-function getPaymentStatusLabel(
-  breakdown: ShopifyOrderBreakdown,
-  refundCompleted: boolean,
-) {
-  if (refundCompleted) {
+function getPaymentStatusLabel(breakdown: ShopifyOrderBreakdown) {
+  if (breakdown.customerRefundCompletion?.status === 'VERIFIED_FULL_CUSTOMER_REFUND') {
     return 'Refund completed';
+  }
+
+  if (breakdown.customerRefundCompletion?.status === 'VERIFIED_PARTIAL_CUSTOMER_REFUND') {
+    return 'Partially refunded';
+  }
+
+  if (breakdown.customerRefundCompletion?.status === 'UNRESOLVED') {
+    return 'Refund review required';
   }
 
   return formatStatusAxisLabel(breakdown.financialStatus, 'Not synced');
@@ -256,8 +261,18 @@ function hasBlockingFinanceAlert(allocation: ShopifyOrderBreakdown['allocations'
   }) ?? false;
 }
 
-function isAllocationRefundCompleted(allocation: ShopifyOrderBreakdown['allocations'][number]) {
-  return allocation.refundedItems.length > 0 || Number.parseFloat(allocation.refundTotal.replace(/[^0-9.-]/g, '')) > 0;
+function isCustomerRefundCompleted(breakdown: ShopifyOrderBreakdown) {
+  return breakdown.customerRefundCompletion?.status === 'VERIFIED_FULL_CUSTOMER_REFUND';
+}
+
+function isCustomerRefundReviewRequired(breakdown: ShopifyOrderBreakdown) {
+  const status = breakdown.customerRefundCompletion?.status;
+  return status === 'VERIFIED_PARTIAL_CUSTOMER_REFUND' || status === 'UNRESOLVED';
+}
+
+function isAllocationFulfillmentNotRequired(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+  return normalizeStateToken(allocation.fulfillmentStatus) === 'not_required' ||
+    normalizeStateToken(allocation.outboundRefundAttemptSummary?.postRefundFulfillmentCheckStatus) === 'passed';
 }
 
 function getLatestRefundedAt(allocation: ShopifyOrderBreakdown['allocations'][number]) {
@@ -543,9 +558,12 @@ function hasVisibleTransferBlockerEvidence(allocation: ShopifyOrderBreakdown['al
   );
 }
 
-function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+function canShowEconomicTransferAction(
+  allocation: ShopifyOrderBreakdown['allocations'][number],
+  customerRefundBlocksNewResolution: boolean,
+) {
   return (
-    !isAllocationRefundCompleted(allocation) &&
+    !customerRefundBlocksNewResolution &&
     normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
     allocation.reassignmentRequired &&
     !hasBlockingFinanceAlert(allocation) &&
@@ -553,9 +571,12 @@ function canShowEconomicTransferAction(allocation: ShopifyOrderBreakdown['alloca
   );
 }
 
-function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allocations'][number]) {
+function canShowCancelRefundReviewAction(
+  allocation: ShopifyOrderBreakdown['allocations'][number],
+  customerRefundBlocksNewResolution: boolean,
+) {
   return (
-    !isAllocationRefundCompleted(allocation) &&
+    !customerRefundBlocksNewResolution &&
     normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' &&
     allocation.reassignmentRequired &&
     !allocation.transferSummary &&
@@ -565,9 +586,6 @@ function canShowCancelRefundReviewAction(allocation: ShopifyOrderBreakdown['allo
 }
 
 function isRefundReviewEligibleForShopifyExecution(allocation: ShopifyOrderBreakdown['allocations'][number]) {
-  if (isAllocationRefundCompleted(allocation)) {
-    return false;
-  }
   const reviewStatus = normalizeStateToken(allocation.cancelRefundReview?.status);
   return reviewStatus === 'pending_review' || reviewStatus === 'customer_contacted';
 }
@@ -623,8 +641,10 @@ function requiresMixedFulfillmentOrderDirectRefundProbeConfirmation(preview: Sho
 function canShowShopifyRefundExecutionAction(
   allocation: ShopifyOrderBreakdown['allocations'][number],
   preview: ShopifyRefundPreviewResult | undefined,
+  customerRefundBlocksNewExecution = false,
 ) {
   return (
+    !customerRefundBlocksNewExecution &&
     isRefundReviewEligibleForShopifyExecution(allocation) &&
     (hasExecutableShopifyRefundPreview(preview) || hasExecutableMixedFulfillmentOrderDirectRefundProbe(preview)) &&
     !isOutboundRefundPending(allocation) &&
@@ -1018,7 +1038,11 @@ export function AdminShopifyOrderPage() {
       showFeedback('Mixed fulfillment order direct refundCreate probe confirmation is required.', 'error');
       return;
     }
-    if (!canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, shopifyRefundAction.preview)) {
+    if (!canShowShopifyRefundExecutionAction(
+      shopifyRefundAction.allocation,
+      shopifyRefundAction.preview,
+      breakdown ? isCustomerRefundCompleted(breakdown) || isCustomerRefundReviewRequired(breakdown) : true,
+    )) {
       showFeedback('Shopify refund execution is blocked by the current preview or allocation state.', 'error');
       return;
     }
@@ -1322,21 +1346,28 @@ export function AdminShopifyOrderPage() {
         const replacementVendorOptions = (appReadiness.currentUser?.vendorDetails ?? []).filter(
           (vendor) => vendor.vendorId !== allocation.assignedVendorId,
         );
-        const showEconomicTransferAction = canShowEconomicTransferAction(allocation);
-        const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation);
+        const refundCompleted = isCustomerRefundCompleted(breakdown);
+        const refundReviewRequired = isCustomerRefundReviewRequired(breakdown);
+        const customerRefundBlocksNewResolution = refundCompleted || refundReviewRequired;
+        const showEconomicTransferAction = canShowEconomicTransferAction(allocation, customerRefundBlocksNewResolution);
+        const showCancelRefundReviewAction = canShowCancelRefundReviewAction(allocation, customerRefundBlocksNewResolution);
         const shopifyRefundPreview = shopifyRefundPreviews[allocation.allocationOrderId];
-        const showShopifyRefundExecutionAction = canShowShopifyRefundExecutionAction(allocation, shopifyRefundPreview);
+        const showShopifyRefundExecutionAction = canShowShopifyRefundExecutionAction(
+          allocation,
+          shopifyRefundPreview,
+          customerRefundBlocksNewResolution,
+        );
         const outboundRefundPending = isOutboundRefundPending(allocation);
-        const refundCompleted = isAllocationRefundCompleted(allocation);
+        const fulfillmentNotRequired = isAllocationFulfillmentNotRequired(allocation);
         const latestRefundedAt = getLatestRefundedAt(allocation);
         const timelineEvents = buildAllocationTimelineEvents(allocation);
         const operationalStatusLabel = refundCompleted
           ? 'Refunded'
           : formatStatusAxisLabel(allocation.allocationStatus);
-        const fulfillmentStatusLabel = refundCompleted
+        const fulfillmentStatusLabel = fulfillmentNotRequired
           ? 'Fulfillment not required'
           : formatStatusAxisLabel(allocation.shippingStatus);
-        const paymentStatusLabel = getPaymentStatusLabel(breakdown, refundCompleted);
+        const paymentStatusLabel = getPaymentStatusLabel(breakdown);
         const productPanelEvents = allocation.productPanelVariantDisableEvents ?? [];
         const productPanelDryRunSummary = summarizeProductPanelDryRunEvents(productPanelEvents);
         const hasRetryableProductPanelDryRunEvent = productPanelEvents.some(isRetryableProductPanelDryRunEvent);
@@ -1368,7 +1399,7 @@ export function AdminShopifyOrderPage() {
               </div>
               <div className="order-status-axis">
                 <span>Fulfillment Status</span>
-                <span className={`status-badge status-${refundCompleted ? 'fulfillment-not-required' : getClassToken(allocation.shippingStatus)}`}>
+                <span className={`status-badge status-${fulfillmentNotRequired ? 'fulfillment-not-required' : getClassToken(allocation.shippingStatus)}`}>
                   {fulfillmentStatusLabel}
                 </span>
               </div>
@@ -1699,7 +1730,7 @@ export function AdminShopifyOrderPage() {
             </div>
             <div className="summary-row">
               <span>Fulfillment</span>
-              <strong>{refundCompleted ? 'Fulfillment not required' : allocation.fulfillmentStatus}</strong>
+              <strong>{fulfillmentNotRequired ? 'Fulfillment not required' : allocation.fulfillmentStatus}</strong>
             </div>
           </div>
 
@@ -1868,18 +1899,22 @@ export function AdminShopifyOrderPage() {
                   <h3>
                     {refundCompleted
                       ? 'Refund completed'
+                      : refundReviewRequired
+                        ? 'Customer refund review required'
                       : allocation.cancelRefundReview.status === 'PENDING_REVIEW'
                       ? 'Cancel / Refund Review Pending'
                       : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
                   </h3>
                 </div>
                 <span className={`status-badge status-${getClassToken(allocation.cancelRefundReview.status)}`}>
-                  {refundCompleted ? 'Resolved' : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
+                  {refundCompleted ? 'Resolved' : refundReviewRequired ? 'Review required' : formatCancelRefundReviewStatus(allocation.cancelRefundReview.status)}
                 </span>
               </div>
               <p className="page-description">
                 {refundCompleted
                   ? 'Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.'
+                  : refundReviewRequired
+                    ? 'Shopify refund evidence does not prove that the customer was fully refunded. Monetary review remains required.'
                   : 'This is a local admin review hold. It does not mean the Shopify order was cancelled or refunded.'}
               </p>
               <div className="compact-meta-grid">
@@ -1927,7 +1962,7 @@ export function AdminShopifyOrderPage() {
                       <p className="eyebrow">Outbound refund attempt</p>
                       <h4>
                         {normalizeStateToken(allocation.outboundRefundAttemptSummary.status) === 'resolved'
-                          ? 'Refund completed'
+                          ? 'Refund attempt resolved'
                           : formatTransferStatus(allocation.outboundRefundAttemptSummary.status)}
                       </h4>
                     </div>
@@ -1990,7 +2025,7 @@ export function AdminShopifyOrderPage() {
                   ) : null}
                 </section>
               ) : null}
-              {!refundCompleted ? (
+              {!refundCompleted && !refundReviewRequired ? (
               <div className="support-modal-actions refund-preview-actions">
                 <button
                   className="button button-secondary"
@@ -2226,7 +2261,7 @@ export function AdminShopifyOrderPage() {
             </section>
           ) : null}
 
-          {normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' && !refundCompleted ? (
+          {normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked' && !customerRefundBlocksNewResolution ? (
             <section className="action-row">
               <p className="page-description">
                 Admin resolution is required. Return keeps the same vendor and does not reassign, refund, mutate Shopify, or change finance.
@@ -2285,7 +2320,7 @@ export function AdminShopifyOrderPage() {
                 ) : null}
               </div>
             </section>
-          ) : allocation.reassignmentRequired && !refundCompleted ? (
+          ) : allocation.reassignmentRequired && !customerRefundBlocksNewResolution ? (
             <section className="action-row">
               <p className="page-description">
                 Manual reassignment is not implemented in this phase. Review the allocation state before taking external action.
@@ -2311,9 +2346,9 @@ export function AdminShopifyOrderPage() {
                 <span>{item.quantity}</span>
                 <span>{item.price}</span>
                 <span className="order-state-stack">
-                  {refundCompleted ? (
+                  {fulfillmentNotRequired ? (
                     <>
-                      <span className="status-badge status-refunded">Refunded</span>
+                      {refundCompleted ? <span className="status-badge status-refunded">Refunded</span> : null}
                       <span className="status-badge status-fulfillment-not-required">Fulfillment not required</span>
                     </>
                   ) : (
@@ -2708,7 +2743,11 @@ export function AdminShopifyOrderPage() {
             shopifyRefundWebhookConfirmed &&
             (!postCheckRequired || shopifyRefundPostCheckConfirmed) &&
             (!mixedProbeRequired || shopifyRefundMixedProbeConfirmed) &&
-            canShowShopifyRefundExecutionAction(shopifyRefundAction.allocation, preview) &&
+            canShowShopifyRefundExecutionAction(
+              shopifyRefundAction.allocation,
+              preview,
+              breakdown ? isCustomerRefundCompleted(breakdown) || isCustomerRefundReviewRequired(breakdown) : true,
+            ) &&
             !shopifyRefundExecutionMutation.isPending,
         );
 

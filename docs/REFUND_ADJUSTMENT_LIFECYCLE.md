@@ -7,6 +7,7 @@ Phase 3.5A adds the refund adjustment foundation for refunds that arrive after a
 - Refund adjustment and vendor-debt lifecycles begin only after canonical Shopify monetary evidence proves at least one unique positive `REFUND / SUCCESS` transaction and the transaction, refund, order, currency, and completeness checks agree.
 - `ZERO_VALUE_VOID` is payment cancellation evidence, not a monetary refund. It creates no `RefundRecord`, refund-derived `ReturnRecord`, refund ledger/events, settlement refund adjustment, or vendor debt.
 - Non-final, incomplete, malformed, duplicate-conflicting, currency-mismatched, or amount-mismatched evidence fails closed before finance mutation.
+- Successful refund money movement does not imply full customer refund completion. The Admin Order projection separately classifies canonical order-level customer money as partial, full, or unresolved; this classification does not change the refund adjustment or vendor finance formulas in this document.
 - After monetary verification succeeds, the existing `calculateRefundOffsetAmounts`, adjustment, and paid-refund vendor-debt formulas remain unchanged.
 - Existing Logo commission invoices remain unchanged.
 - No automatic Logo credit invoice is created.

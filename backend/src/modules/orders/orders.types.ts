@@ -1,6 +1,7 @@
 import type { FinanceLedgerPreviewDto } from '../finance/finance-ledger-preview.types.js';
 import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import type { NavlungoCreatePostRequestSummaryDto } from '../shipping/shipping-execution.types.js';
+import type { CustomerRefundCompletion } from '../shopify/shopify-refund-monetary-evidence.js';
 
 export type OrderSummaryDto = {
   id: string;
@@ -769,6 +770,7 @@ export type AdminOrderBreakdownDto = {
     totalAmount: string;
     createdAt: string;
     updatedAt: string;
+    customerRefundCompletion: CustomerRefundCompletion;
   };
   productPanelVariantDisableMode: {
     enabled: boolean;

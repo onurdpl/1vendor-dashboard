@@ -5,6 +5,7 @@ import type {
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
 import {
   classifyCanonicalRefundMonetaryEvidence,
+  classifyCustomerRefundCompletion,
   requiresRefundMonetaryEvidenceClassification,
 } from '../backend/src/modules/shopify/shopify-refund-monetary-evidence.js';
 import { ingestVerifiedShopifyRefund } from '../backend/src/modules/shopify/refund-ingestion.service.js';
@@ -69,14 +70,28 @@ function refund(input: {
 function collection(input: {
   orderTotal?: string;
   orderCurrency?: string;
+  financialStatus?: string;
+  totalReceived?: string;
+  netPayment?: string;
+  totalOutstanding?: string;
+  totalRefundedShipping?: string;
   refunds?: CanonicalShopifyRefundSnapshot[];
   refundsListComplete?: boolean;
 } = {}): CanonicalCollection {
   return {
     orderGid: 'gid://shopify/Order/7856043819345',
     sourceShopifyOrderId: '7856043819345',
+    displayFinancialStatus: input.financialStatus ?? 'PARTIALLY_REFUNDED',
+    orderTotalReceivedAmount: input.totalReceived ?? '200.00',
+    orderTotalReceivedCurrencyCode: input.orderCurrency ?? 'TRY',
     orderTotalRefundedAmount: input.orderTotal ?? '100.00',
     orderTotalRefundedCurrencyCode: input.orderCurrency ?? 'TRY',
+    orderNetPaymentAmount: input.netPayment ?? '100.00',
+    orderNetPaymentCurrencyCode: input.orderCurrency ?? 'TRY',
+    orderTotalOutstandingAmount: input.totalOutstanding ?? '0.00',
+    orderTotalOutstandingCurrencyCode: input.orderCurrency ?? 'TRY',
+    orderTotalRefundedShippingAmount: input.totalRefundedShipping ?? '0.00',
+    orderTotalRefundedShippingCurrencyCode: input.orderCurrency ?? 'TRY',
     refundsListComplete: input.refundsListComplete ?? true,
     refunds: input.refunds ?? [refund()],
     source: 'shopify_admin',
@@ -84,6 +99,96 @@ function collection(input: {
 }
 
 describe('Shopify canonical refund monetary evidence', () => {
+  it('classifies a complete empty canonical refund collection as no verified monetary refund', () => {
+    const canonical = collection({
+      financialStatus: 'PAID',
+      totalReceived: '200.00',
+      orderTotal: '0.00',
+      netPayment: '200.00',
+      refunds: [],
+    });
+    expect(classifyCustomerRefundCompletion(canonical)).toMatchObject({
+      status: 'NO_VERIFIED_MONETARY_REFUND',
+      reasonCode: 'no_verified_monetary_refund',
+    });
+  });
+
+  it('separates successful refund money from partial customer completion', () => {
+    const canonical = collection({
+      financialStatus: 'PARTIALLY_REFUNDED',
+      totalReceived: '2499.50',
+      orderTotal: '2399.50',
+      netPayment: '100.00',
+      refunds: [refund({ total: '2399.50', transactions: [transaction({ amount: '2399.50' })] })],
+    });
+
+    expect(classifyCanonicalRefundMonetaryEvidence(canonical).classification).toBe('MONETARY_REFUND');
+    expect(classifyCustomerRefundCompletion(canonical)).toMatchObject({
+      status: 'VERIFIED_PARTIAL_CUSTOMER_REFUND',
+      netPaymentAmount: '100.00',
+      reasonCode: 'canonical_partial_customer_refund_verified',
+    });
+  });
+
+  it('requires consistent canonical full-refund evidence', () => {
+    const canonical = collection({
+      financialStatus: 'REFUNDED',
+      totalReceived: '2499.50',
+      orderTotal: '2499.50',
+      netPayment: '0.00',
+      totalOutstanding: '0.00',
+      totalRefundedShipping: '0.00',
+      refunds: [refund({ total: '2499.50', transactions: [transaction({ amount: '2499.50' })] })],
+    });
+
+    expect(classifyCustomerRefundCompletion(canonical)).toMatchObject({
+      status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+      totalRefundedShippingAmount: '0.00',
+    });
+  });
+
+  it.each([
+    { received: '2500.00', refunded: '2350.00', remaining: '150.00' },
+    { received: '100.00', refunded: '75.00', remaining: '25.00' },
+  ])('classifies canonical remaining money without shipping-policy assumptions: $remaining', ({ received, refunded, remaining }) => {
+    const canonical = collection({
+      financialStatus: 'PARTIALLY_REFUNDED',
+      totalReceived: received,
+      orderTotal: refunded,
+      netPayment: remaining,
+      refunds: [refund({ total: refunded, transactions: [transaction({ amount: refunded })] })],
+    });
+    expect(classifyCustomerRefundCompletion(canonical).status).toBe('VERIFIED_PARTIAL_CUSTOMER_REFUND');
+  });
+
+  it('fails closed when canonical customer money is missing or conflicts with financial status', () => {
+    const missing = collection();
+    delete missing.orderNetPaymentAmount;
+    expect(classifyCustomerRefundCompletion(missing).status).toBe('UNRESOLVED');
+
+    const conflict = collection({
+      financialStatus: 'REFUNDED',
+      totalReceived: '200.00',
+      orderTotal: '100.00',
+      netPayment: '100.00',
+    });
+    expect(classifyCustomerRefundCompletion(conflict)).toMatchObject({
+      status: 'UNRESOLVED',
+      reasonCode: 'canonical_customer_refund_state_conflict',
+    });
+  });
+
+  it.each(['PENDING', 'FAILURE', 'ERROR', 'AWAITING_RESPONSE']) (
+    'does not promote non-final transaction %s to customer refund completion',
+    (status) => {
+      const canonical = collection({
+        orderTotal: '0.00',
+        refunds: [refund({ total: '0.00', transactions: [transaction({ status })] })],
+      });
+      expect(classifyCustomerRefundCompletion(canonical).status).toBe('UNRESOLVED');
+    },
+  );
+
   it('classifies the verified #1105 shape as a zero-value void', () => {
     const result = classifyCanonicalRefundMonetaryEvidence(collection({
       orderTotal: '0.00',

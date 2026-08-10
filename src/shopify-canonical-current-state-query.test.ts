@@ -89,7 +89,12 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
         order: {
           id: 'gid://shopify/Order/7856043819345',
           legacyResourceId: '7856043819345',
+          displayFinancialStatus: 'PARTIALLY_REFUNDED',
+          totalReceivedSet: { shopMoney: { amount: '200.00', currencyCode: 'TRY' } },
           totalRefundedSet: { shopMoney: { amount: '100.00', currencyCode: 'TRY' } },
+          netPaymentSet: { shopMoney: { amount: '100.00', currencyCode: 'TRY' } },
+          totalOutstandingSet: { shopMoney: { amount: '0.00', currencyCode: 'TRY' } },
+          totalRefundedShippingSet: { shopMoney: { amount: '0.00', currencyCode: 'TRY' } },
           refunds: [refundNode('1083708080465', '20754005197137', 'HJ5228-001-46')],
         },
       },
@@ -102,6 +107,19 @@ describe('Shopify API 2026-01 canonical current-state queries', () => {
     expect(request.query).toContain('transactions(first: 250)');
     expect(request.query).toContain('refundLineItems(first: 250)');
     expect(request.query).toContain('totalRefundedSet');
+    expect(request.query).toContain('displayFinancialStatus');
+    expect(request.query).toContain('totalReceivedSet');
+    expect(request.query).toContain('netPaymentSet');
+    expect(request.query).toContain('totalOutstandingSet');
+    expect(request.query).toContain('totalRefundedShippingSet');
+    expect(result).toMatchObject({
+      displayFinancialStatus: 'PARTIALLY_REFUNDED',
+      orderTotalReceivedAmount: '200.00',
+      orderTotalRefundedAmount: '100.00',
+      orderNetPaymentAmount: '100.00',
+      orderTotalOutstandingAmount: '0.00',
+      orderTotalRefundedShippingAmount: '0.00',
+    });
     expect(result?.refunds).toHaveLength(1);
     expect(result?.refunds[0].sourceShopifyRefundId).toBe('1083708080465');
   });

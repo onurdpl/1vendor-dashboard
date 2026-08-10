@@ -738,6 +738,17 @@ describe('AdminShopifyOrderPage split visibility', () => {
         sourceShopifyOrderNumber: '#1099',
         customer: 'Customer',
         financialStatus: 'refunded',
+        customerRefundCompletion: {
+          status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+          reasonCode: 'canonical_full_customer_refund_verified',
+          displayFinancialStatus: 'REFUNDED',
+          currency: 'TRY',
+          totalReceivedAmount: '250.00',
+          totalRefundedAmount: '250.00',
+          netPaymentAmount: '0.00',
+          totalOutstandingAmount: '0.00',
+          totalRefundedShippingAmount: '0.00',
+        },
         createdAt: '2026-06-21T08:00:00.000Z',
         allocations: [
           buildAllocation({
@@ -788,5 +799,107 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(statusAxes).getByText('Historical Context')).toBeInTheDocument();
       expect(within(statusAxes).getByText('Vendor blocked')).toBeInTheDocument();
       expect(screen.queryByText('vendor_blocked')).not.toBeInTheDocument();
+    });
+
+    it('keeps a resolved attempt and passed fulfillment post-check separate from a partial customer refund', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773266',
+        sourceShopifyOrderNumber: '#1113',
+        customer: 'Customer',
+        financialStatus: 'partially_refunded',
+        customerRefundCompletion: {
+          status: 'VERIFIED_PARTIAL_CUSTOMER_REFUND',
+          reasonCode: 'canonical_partial_customer_refund_verified',
+          displayFinancialStatus: 'PARTIALLY_REFUNDED',
+          currency: 'TRY',
+          totalReceivedAmount: '2499.50',
+          totalRefundedAmount: '2399.50',
+          netPaymentAmount: '100.00',
+          totalOutstandingAmount: '0.00',
+          totalRefundedShippingAmount: '0.00',
+        },
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [buildAllocation({
+          refundTotal: '2399.50',
+          refundedItems: [{
+            id: 'refund-line-partial',
+            originalVendorId: 'yalispor',
+            assignedVendorId: 'yalispor',
+            vendorId: 'yalispor',
+            sku: 'SKU-1113',
+            variantTitle: 'Refund',
+            name: 'Product',
+            quantity: 1,
+            condition: 'New',
+            refundAmount: '2399.50',
+          }],
+          cancelRefundReview: {
+            status: 'RESOLVED',
+            reason: 'OUT_OF_STOCK',
+            note: 'Reviewed',
+            requestedAt: '2026-06-21T11:00:00.000Z',
+            requestedByUserId: 'admin-1',
+          },
+          outboundRefundAttemptSummary: {
+            id: 'attempt-partial',
+            status: 'RESOLVED',
+            restockType: 'CANCEL',
+            refundShipping: false,
+            notifyCustomer: false,
+            shopifyRefundId: 'gid://shopify/Refund/partial',
+            previewedAt: '2026-06-21T12:00:00.000Z',
+            requestedAt: '2026-06-21T12:05:00.000Z',
+            submittedAt: '2026-06-21T12:06:00.000Z',
+            resolvedAt: '2026-06-21T12:07:00.000Z',
+            failedAt: null,
+            failureReason: null,
+            postRefundFulfillmentCheckStatus: 'passed',
+            postRefundFulfillmentCheckMessage: 'Selected lines no longer fulfillable.',
+          },
+        })],
+      });
+
+      renderPage();
+
+      const statusAxes = await findLatestStatusAxes();
+      expect(within(statusAxes).getByText('Partially refunded')).toBeInTheDocument();
+      expect(within(statusAxes).getByText('Fulfillment not required')).toBeInTheDocument();
+      expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
+      expect(screen.getByText('Customer refund review required')).toBeInTheDocument();
+      expect(screen.getByText('Refund attempt resolved')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Preview Shopify refund' })).not.toBeInTheDocument();
+      expect(screen.queryByText('No action required')).not.toBeInTheDocument();
+    });
+
+    it('does not infer full completion from positive local refund totals or refunded items alone', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+        sourceShopifyOrderId: '7817723773267',
+        sourceShopifyOrderNumber: '#1114',
+        customer: 'Customer',
+        financialStatus: 'partially_refunded',
+        createdAt: '2026-06-21T08:00:00.000Z',
+        allocations: [buildAllocation({
+          refundTotal: '150.00',
+          refundedItems: [{
+            id: 'local-refund-only',
+            originalVendorId: 'yalispor',
+            assignedVendorId: 'yalispor',
+            vendorId: 'yalispor',
+            sku: 'SKU-1114',
+            variantTitle: 'Refund',
+            name: 'Product',
+            quantity: 1,
+            condition: 'New',
+            refundAmount: '150.00',
+          }],
+        })],
+      });
+
+      renderPage();
+
+      const statusAxes = await findLatestStatusAxes();
+      expect(within(statusAxes).getByText('Partially Refunded')).toBeInTheDocument();
+      expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
+      expect(within(statusAxes).queryByText('Fulfillment not required')).not.toBeInTheDocument();
     });
   });

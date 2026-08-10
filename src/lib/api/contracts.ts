@@ -1341,12 +1341,29 @@ export type ShopifyOrderBreakdown = {
   sourceShopifyOrderNumber: string | number;
   customer: string;
   financialStatus?: string | null;
+  customerRefundCompletion?: CustomerRefundCompletion;
   createdAt: string;
   productPanelVariantDisableMode?: {
     enabled: boolean;
     dryRun: boolean;
   };
   allocations: VendorAllocationSummary[];
+};
+
+export type CustomerRefundCompletion = {
+  status:
+    | 'NO_VERIFIED_MONETARY_REFUND'
+    | 'VERIFIED_PARTIAL_CUSTOMER_REFUND'
+    | 'VERIFIED_FULL_CUSTOMER_REFUND'
+    | 'UNRESOLVED';
+  reasonCode: string;
+  displayFinancialStatus: string | null;
+  currency: string | null;
+  totalReceivedAmount: string | null;
+  totalRefundedAmount: string | null;
+  netPaymentAmount: string | null;
+  totalOutstandingAmount: string | null;
+  totalRefundedShippingAmount: string | null;
 };
 
 export type ReturnStatus =

@@ -23,7 +23,16 @@ import {
   isShopifyReturnSignalTopic,
   mapWebhookEventToReturnSignalDiscovery,
 } from '../shopify/return-signal-discovery.service.js';
-import type { FetchOrderLineItemImagesResult } from '../shopify/shopify-admin.types.js';
+import type {
+  FetchCanonicalShopifyRefundsForOrderResult,
+  FetchOrderLineItemImagesResult,
+} from '../shopify/shopify-admin.types.js';
+import {
+  classifyCanonicalRefundMonetaryEvidence,
+  classifyCustomerRefundCompletion,
+  CUSTOMER_REFUND_COMPLETION_STATUSES,
+  type CustomerRefundCompletion,
+} from '../shopify/shopify-refund-monetary-evidence.js';
 import type {
   CancelFulfillmentOrderResult,
   CreateShopifyRefundInput,
@@ -3892,6 +3901,7 @@ export async function getVendorOrderByIdForUser(
 
 export async function getAdminShopifyOrderBreakdown(
   shopifyOrderId: string,
+  options: { canonicalRefunds?: FetchCanonicalShopifyRefundsForOrderResult; canonicalRefundReadFailed?: boolean } = {},
 ): Promise<AdminOrderBreakdownDto | null> {
   const order = await prisma.shopifyOrder.findUnique({
     where: {
@@ -4112,6 +4122,38 @@ export async function getAdminShopifyOrderBreakdown(
       allocation.lineItems.reduce((lineSum, lineItem) => lineSum + toNumber(lineItem.lineAmount), 0),
     0,
   );
+  const hasLocalRefundEvidence = order.allocations.some((allocation) => allocation.refundRecords.length > 0);
+  let customerRefundCompletion: CustomerRefundCompletion;
+  if (options.canonicalRefunds) {
+    const monetaryEvidence = classifyCanonicalRefundMonetaryEvidence(options.canonicalRefunds);
+    customerRefundCompletion = classifyCustomerRefundCompletion(options.canonicalRefunds, monetaryEvidence);
+  } else if (hasLocalRefundEvidence || options.canonicalRefundReadFailed) {
+    customerRefundCompletion = {
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.unresolved,
+      reasonCode: options.canonicalRefundReadFailed
+        ? 'canonical_shopify_refund_read_failed'
+        : 'canonical_shopify_refund_evidence_unavailable',
+      displayFinancialStatus: null,
+      currency: null,
+      totalReceivedAmount: null,
+      totalRefundedAmount: null,
+      netPaymentAmount: null,
+      totalOutstandingAmount: null,
+      totalRefundedShippingAmount: null,
+    };
+  } else {
+    customerRefundCompletion = {
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.noVerifiedMonetaryRefund,
+      reasonCode: 'no_local_or_canonical_refund_evidence',
+      displayFinancialStatus: null,
+      currency: null,
+      totalReceivedAmount: null,
+      totalRefundedAmount: null,
+      netPaymentAmount: null,
+      totalOutstandingAmount: null,
+      totalRefundedShippingAmount: null,
+    };
+  }
 
   return {
     order: {
@@ -4125,6 +4167,7 @@ export async function getAdminShopifyOrderBreakdown(
       totalAmount: order.totalPrice ? toAmountString(toNumber(order.totalPrice)) : toAmountString(orderTotal),
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),
+      customerRefundCompletion,
     },
     productPanelVariantDisableMode: getProductPanelVariantDisableMode(),
     allocations: order.allocations.map((allocation) => {

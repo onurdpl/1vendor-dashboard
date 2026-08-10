@@ -59,6 +59,28 @@ export type CanonicalRefundMonetaryEvidence = {
   refunds: CanonicalRefundItemMonetaryEvidence[];
 };
 
+export const CUSTOMER_REFUND_COMPLETION_STATUSES = {
+  noVerifiedMonetaryRefund: 'NO_VERIFIED_MONETARY_REFUND',
+  verifiedPartial: 'VERIFIED_PARTIAL_CUSTOMER_REFUND',
+  verifiedFull: 'VERIFIED_FULL_CUSTOMER_REFUND',
+  unresolved: 'UNRESOLVED',
+} as const;
+
+export type CustomerRefundCompletionStatus =
+  (typeof CUSTOMER_REFUND_COMPLETION_STATUSES)[keyof typeof CUSTOMER_REFUND_COMPLETION_STATUSES];
+
+export type CustomerRefundCompletion = {
+  status: CustomerRefundCompletionStatus;
+  reasonCode: string;
+  displayFinancialStatus: string | null;
+  currency: string | null;
+  totalReceivedAmount: string | null;
+  totalRefundedAmount: string | null;
+  netPaymentAmount: string | null;
+  totalOutstandingAmount: string | null;
+  totalRefundedShippingAmount: string | null;
+};
+
 type CanonicalRefundCollection = NonNullable<FetchCanonicalShopifyRefundsForOrderResult>;
 
 type ParsedMoney = {
@@ -467,6 +489,116 @@ export function requiresRefundMonetaryEvidenceClassification(
 export function isRefundEvidenceBlocked(evidence: CanonicalRefundMonetaryEvidence) {
   return evidence.classification === REFUND_MONETARY_CLASSIFICATIONS.nonFinalRefund ||
     evidence.classification === REFUND_MONETARY_CLASSIFICATIONS.unsupportedOrAmbiguous;
+}
+
+export function classifyCustomerRefundCompletion(
+  collection: CanonicalRefundCollection,
+  evidence: CanonicalRefundMonetaryEvidence = classifyCanonicalRefundMonetaryEvidence(collection),
+): CustomerRefundCompletion {
+  const base = {
+    displayFinancialStatus: collection.displayFinancialStatus?.trim().toUpperCase() ?? null,
+    currency: evidence.currency,
+    totalReceivedAmount: collection.orderTotalReceivedAmount ?? null,
+    totalRefundedAmount: collection.orderTotalRefundedAmount,
+    netPaymentAmount: collection.orderNetPaymentAmount ?? null,
+    totalOutstandingAmount: collection.orderTotalOutstandingAmount ?? null,
+    totalRefundedShippingAmount: collection.orderTotalRefundedShippingAmount ?? null,
+  };
+
+  if (!requiresRefundMonetaryEvidenceClassification(collection)) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.noVerifiedMonetaryRefund,
+      reasonCode: 'no_verified_monetary_refund',
+    };
+  }
+
+  if (evidence.classification === REFUND_MONETARY_CLASSIFICATIONS.zeroValueVoid) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.noVerifiedMonetaryRefund,
+      reasonCode: 'no_verified_monetary_refund',
+    };
+  }
+
+  if (evidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.unresolved,
+      reasonCode: `monetary_evidence_${evidence.reasonCode}`,
+    };
+  }
+
+  const totalReceived = parseMoney(
+    collection.orderTotalReceivedAmount ?? null,
+    collection.orderTotalReceivedCurrencyCode ?? null,
+  );
+  const totalRefunded = parseMoney(collection.orderTotalRefundedAmount, collection.orderTotalRefundedCurrencyCode);
+  const netPayment = parseMoney(collection.orderNetPaymentAmount ?? null, collection.orderNetPaymentCurrencyCode ?? null);
+  const totalOutstanding = parseMoney(
+    collection.orderTotalOutstandingAmount ?? null,
+    collection.orderTotalOutstandingCurrencyCode ?? null,
+  );
+  const money = [totalReceived, totalRefunded, netPayment, totalOutstanding];
+  const currency = totalReceived?.currency ?? null;
+  if (
+    money.some((value) => value === null) ||
+    !currency ||
+    money.some((value) => value?.currency !== currency) ||
+    evidence.currency !== currency
+  ) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.unresolved,
+      reasonCode: 'canonical_customer_money_missing_or_currency_mismatch',
+    };
+  }
+
+  const received = totalReceived!.decimal;
+  const refunded = totalRefunded!.decimal;
+  const net = netPayment!.decimal;
+  const outstanding = totalOutstanding!.decimal;
+  const arithmeticConsistent = received.minus(refunded).equals(net);
+  if (!arithmeticConsistent || received.isNegative() || refunded.isNegative() || outstanding.isNegative()) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.unresolved,
+      reasonCode: 'canonical_customer_money_conflict',
+    };
+  }
+
+  if (
+    base.displayFinancialStatus === 'REFUNDED' &&
+    refunded.greaterThan(0) &&
+    refunded.equals(received) &&
+    net.equals(0) &&
+    outstanding.equals(0)
+  ) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.verifiedFull,
+      reasonCode: 'canonical_full_customer_refund_verified',
+    };
+  }
+
+  if (
+    base.displayFinancialStatus === 'PARTIALLY_REFUNDED' &&
+    refunded.greaterThan(0) &&
+    received.greaterThan(refunded) &&
+    net.greaterThan(0)
+  ) {
+    return {
+      ...base,
+      status: CUSTOMER_REFUND_COMPLETION_STATUSES.verifiedPartial,
+      reasonCode: 'canonical_partial_customer_refund_verified',
+    };
+  }
+
+  return {
+    ...base,
+    status: CUSTOMER_REFUND_COMPLETION_STATUSES.unresolved,
+    reasonCode: 'canonical_customer_refund_state_conflict',
+  };
 }
 
 export function findCanonicalRefundItemEvidence(

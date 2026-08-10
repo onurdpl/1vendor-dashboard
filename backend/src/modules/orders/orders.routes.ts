@@ -22,6 +22,7 @@ import {
 import { EconomicTransferValidationError } from '../finance/economic-transfer.service.js';
 import { AllocationSplitValidationError } from './allocation-split.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import type { FetchCanonicalShopifyRefundsForOrderResult } from '../shopify/shopify-admin.types.js';
 import {
   ProductPanelVariantDisableDryRunSendError,
   sendProductPanelVariantDisableDryRunEventsForOrder,
@@ -71,6 +72,7 @@ function readStringArray(value: unknown) {
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+  const shopifyAdminService = createShopifyAdminService(env);
 
   app.get(
     '/orders',
@@ -244,8 +246,18 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
+      let canonicalRefunds: FetchCanonicalShopifyRefundsForOrderResult = null;
+      let canonicalRefundReadFailed = false;
+      try {
+        canonicalRefunds = await shopifyAdminService.fetchCanonicalRefundsForOrder(request.params.shopifyOrderId);
+      } catch {
+        canonicalRefundReadFailed = true;
+      }
       const breakdown = await withSlowEndpointTiming('GET /admin/orders/:shopifyOrderId', () =>
-        getAdminShopifyOrderBreakdown(request.params.shopifyOrderId),
+        getAdminShopifyOrderBreakdown(request.params.shopifyOrderId, {
+          canonicalRefunds,
+          canonicalRefundReadFailed,
+        }),
       );
       if (!breakdown) {
         return reply.code(404).send({ message: 'Shopify order not found.' });
@@ -408,7 +420,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             restockType: request.body?.restockType,
             refundShipping: false,
             actorUserId: request.authUser?.id ?? null,
-            shopifyAdminService: createShopifyAdminService(env),
+            shopifyAdminService,
           }),
         );
       } catch (error) {
@@ -455,7 +467,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
             confirmPostRefundFulfillmentCheck: request.body?.confirmPostRefundFulfillmentCheck,
             confirmMixedFulfillmentOrderDirectRefundProbe: request.body?.confirmMixedFulfillmentOrderDirectRefundProbe,
             actorUserId: request.authUser?.id ?? null,
-            shopifyAdminService: createShopifyAdminService(env),
+            shopifyAdminService,
           }),
         );
       } catch (error) {

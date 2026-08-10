@@ -23,6 +23,7 @@ import type {
   ShopifyRefundExecutionResult,
   ShopifyRefundPreviewResult,
   ShopifyOrderBreakdown,
+  CustomerRefundCompletion,
   ReturnOwnershipSummary,
   VendorAllocationSummary,
   KargonomiWarehouseSyncResult,
@@ -218,6 +219,7 @@ type AdminOrderBreakdownDto = {
     totalAmount: string;
     createdAt: string;
     updatedAt: string;
+    customerRefundCompletion: CustomerRefundCompletion;
   };
   productPanelVariantDisableMode?: {
     enabled: boolean;
@@ -650,6 +652,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     sourceShopifyOrderNumber: response.order.sourceShopifyOrderNumber,
     customer: response.order.customerName ?? response.order.customerEmail ?? 'Shopify customer',
     financialStatus: response.order.financialStatus ?? null,
+    customerRefundCompletion: response.order.customerRefundCompletion,
     createdAt: response.order.createdAt,
     productPanelVariantDisableMode: response.productPanelVariantDisableMode,
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {

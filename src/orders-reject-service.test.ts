@@ -2343,6 +2343,69 @@ describe('vendor order reject operational hold', () => {
     }));
   });
 
+  it('projects canonical partial customer refund completion independently from local refund records', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.allocations[0]!.refundRecords = [{
+      id: 'refund-yalispor-partial',
+      sourceShopifyRefundId: 'refund-partial',
+      amount: '2399.50',
+      status: 'processed',
+      createdAt: new Date('2026-06-21T12:02:00.000Z'),
+      updatedAt: new Date('2026-06-21T12:02:00.000Z'),
+      lineItems: [],
+    }];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088', {
+      canonicalRefunds: {
+        orderGid: 'gid://shopify/Order/1088',
+        sourceShopifyOrderId: '1088',
+        displayFinancialStatus: 'PARTIALLY_REFUNDED',
+        orderTotalReceivedAmount: '2499.50',
+        orderTotalReceivedCurrencyCode: 'TRY',
+        orderTotalRefundedAmount: '2399.50',
+        orderTotalRefundedCurrencyCode: 'TRY',
+        orderNetPaymentAmount: '100.00',
+        orderNetPaymentCurrencyCode: 'TRY',
+        orderTotalOutstandingAmount: '0.00',
+        orderTotalOutstandingCurrencyCode: 'TRY',
+        orderTotalRefundedShippingAmount: '0.00',
+        orderTotalRefundedShippingCurrencyCode: 'TRY',
+        refundsListComplete: true,
+        source: 'shopify_admin',
+        refunds: [{
+          refundGid: 'gid://shopify/Refund/refund-partial',
+          sourceShopifyRefundId: 'refund-partial',
+          createdAt: '2026-06-21T12:02:00.000Z',
+          updatedAt: '2026-06-21T12:02:00.000Z',
+          note: null,
+          totalRefundedAmount: '2399.50',
+          totalRefundedCurrencyCode: 'TRY',
+          transactionPaginationComplete: true,
+          lineItemPaginationComplete: true,
+          transactions: [{
+            transactionGid: 'gid://shopify/OrderTransaction/refund-partial',
+            kind: 'REFUND',
+            status: 'SUCCESS',
+            amount: '2399.50',
+            currencyCode: 'TRY',
+            parentTransactionGid: 'gid://shopify/OrderTransaction/payment',
+            createdAt: '2026-06-21T12:02:00.000Z',
+            processedAt: '2026-06-21T12:02:01.000Z',
+          }],
+          refundLineItems: [],
+        }],
+      },
+    });
+
+    expect(breakdown?.order.customerRefundCompletion).toMatchObject({
+      status: 'VERIFIED_PARTIAL_CUSTOMER_REFUND',
+      totalReceivedAmount: '2499.50',
+      totalRefundedAmount: '2399.50',
+      netPaymentAmount: '100.00',
+    });
+  });
+
   it('includes the latest completed economic transfer summary in admin Shopify order breakdown', async () => {
     const orderDb = buildAdminOrderBreakdownDb();
     orderDb.allocations[0]!.economicTransfers = [

@@ -245,7 +245,12 @@ type CanonicalRefundsForOrderQueryResponse = {
   order: {
     id: string;
     legacyResourceId?: string | null;
+    displayFinancialStatus?: string | null;
+    totalReceivedSet?: ShopifyMoneySetNode;
     totalRefundedSet?: ShopifyMoneySetNode;
+    netPaymentSet?: ShopifyMoneySetNode;
+    totalOutstandingSet?: ShopifyMoneySetNode;
+    totalRefundedShippingSet?: ShopifyMoneySetNode;
     refunds: Array<{
       id: string;
       createdAt?: string | null;
@@ -808,8 +813,17 @@ function normalizeCanonicalRefundSnapshot(value: unknown): CanonicalShopifyRefun
 }
 
 type MockCanonicalRefundCollection = {
+  displayFinancialStatus: string | null;
+  orderTotalReceivedAmount: string | null;
+  orderTotalReceivedCurrencyCode: string | null;
   orderTotalRefundedAmount: string | null;
   orderTotalRefundedCurrencyCode: string | null;
+  orderNetPaymentAmount: string | null;
+  orderNetPaymentCurrencyCode: string | null;
+  orderTotalOutstandingAmount: string | null;
+  orderTotalOutstandingCurrencyCode: string | null;
+  orderTotalRefundedShippingAmount: string | null;
+  orderTotalRefundedShippingCurrencyCode: string | null;
   refundsListComplete: boolean;
   refunds: CanonicalShopifyRefundSnapshot[];
 };
@@ -830,8 +844,17 @@ function parseMockCanonicalRefundsByOrderId(rawValue: string | undefined): Recor
       : null;
     const values = Array.isArray(value) ? value : Array.isArray(collection?.refunds) ? collection.refunds : [];
     acc[orderId] = {
+      displayFinancialStatus: collection?.displayFinancialStatus ?? null,
+      orderTotalReceivedAmount: collection?.orderTotalReceivedAmount ?? null,
+      orderTotalReceivedCurrencyCode: collection?.orderTotalReceivedCurrencyCode ?? null,
       orderTotalRefundedAmount: collection?.orderTotalRefundedAmount ?? null,
       orderTotalRefundedCurrencyCode: collection?.orderTotalRefundedCurrencyCode ?? null,
+      orderNetPaymentAmount: collection?.orderNetPaymentAmount ?? null,
+      orderNetPaymentCurrencyCode: collection?.orderNetPaymentCurrencyCode ?? null,
+      orderTotalOutstandingAmount: collection?.orderTotalOutstandingAmount ?? null,
+      orderTotalOutstandingCurrencyCode: collection?.orderTotalOutstandingCurrencyCode ?? null,
+      orderTotalRefundedShippingAmount: collection?.orderTotalRefundedShippingAmount ?? null,
+      orderTotalRefundedShippingCurrencyCode: collection?.orderTotalRefundedShippingCurrencyCode ?? null,
       refundsListComplete: collection?.refundsListComplete === true,
       refunds: values
       .map(normalizeCanonicalRefundSnapshot)
@@ -1894,12 +1917,37 @@ export function createShopifyAdminService(env: AppEnv) {
               order(id: $orderId) {
                 id
                 legacyResourceId
+                displayFinancialStatus
+                totalReceivedSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
                 totalRefundedSet {
                   shopMoney {
                     amount
                     currencyCode
                   }
                   presentmentMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                netPaymentSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                totalOutstandingSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                totalRefundedShippingSet {
+                  shopMoney {
                     amount
                     currencyCode
                   }
@@ -2019,8 +2067,17 @@ export function createShopifyAdminService(env: AppEnv) {
     return {
       orderGid: order.id,
       sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
+      displayFinancialStatus: normalizeShopifyString(order.displayFinancialStatus),
+      orderTotalReceivedAmount: readMoneyAmount(order.totalReceivedSet ?? null),
+      orderTotalReceivedCurrencyCode: order.totalReceivedSet?.shopMoney?.currencyCode ?? null,
       orderTotalRefundedAmount: readMoneyAmount(order.totalRefundedSet ?? null),
       orderTotalRefundedCurrencyCode: order.totalRefundedSet?.shopMoney?.currencyCode ?? null,
+      orderNetPaymentAmount: readMoneyAmount(order.netPaymentSet ?? null),
+      orderNetPaymentCurrencyCode: order.netPaymentSet?.shopMoney?.currencyCode ?? null,
+      orderTotalOutstandingAmount: readMoneyAmount(order.totalOutstandingSet ?? null),
+      orderTotalOutstandingCurrencyCode: order.totalOutstandingSet?.shopMoney?.currencyCode ?? null,
+      orderTotalRefundedShippingAmount: readMoneyAmount(order.totalRefundedShippingSet ?? null),
+      orderTotalRefundedShippingCurrencyCode: order.totalRefundedShippingSet?.shopMoney?.currencyCode ?? null,
       refundsListComplete: order.refunds.length < 250,
       source: 'shopify_admin',
       refunds: order.refunds.map((refund) => {
