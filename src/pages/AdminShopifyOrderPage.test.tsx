@@ -1122,6 +1122,57 @@ describe('AdminShopifyOrderPage split visibility', () => {
         });
       }
 
+      it('submits an unchecked optional customer notification as false', async () => {
+        arrangeRefundExecution();
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'RESOLVED'), true));
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        const notifyCustomerCheckbox = within(dialog).getByLabelText('Notify customer through Shopify (optional)');
+
+        expect(notifyCustomerCheckbox).not.toBeChecked();
+        expect(within(dialog).getByText(
+          'When unchecked, the refund is still processed but Shopify will not send the customer a notification.',
+        )).toBeInTheDocument();
+
+        await submitRefund(dialog);
+
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledWith(
+          '7817723773265',
+          'alloc-child',
+          expect.objectContaining({
+            notifyCustomer: false,
+            confirmRefund: true,
+          }),
+        );
+      });
+
+      it('submits a checked optional customer notification as true', async () => {
+        arrangeRefundExecution();
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'RESOLVED'), true));
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        const notifyCustomerCheckbox = within(dialog).getByLabelText('Notify customer through Shopify (optional)');
+        fireEvent.click(notifyCustomerCheckbox);
+
+        expect(notifyCustomerCheckbox).toBeChecked();
+        await submitRefund(dialog);
+
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledWith(
+          '7817723773265',
+          'alloc-child',
+          expect.objectContaining({
+            notifyCustomer: true,
+            confirmRefund: true,
+          }),
+        );
+      });
+
       it('refetches a pending matching attempt until its authoritative projection resolves', async () => {
         arrangeRefundExecution();
         getAdminShopifyOrderBreakdownMock

@@ -3048,8 +3048,11 @@ export function AdminShopifyOrderPage() {
                     onChange={(event) => setShopifyRefundNotifyCustomer(event.target.checked)}
                     disabled={shopifyRefundExecutionMutation.isPending}
                   />
-                  <span>Notify customer through Shopify.</span>
+                  <span>Notify customer through Shopify (optional)</span>
                 </label>
+                <p className="muted helper-text">
+                  When unchecked, the refund is still processed but Shopify will not send the customer a notification.
+                </p>
                 <label className="checkbox-field economic-transfer-confirmation">
                   <input
                     type="checkbox"
