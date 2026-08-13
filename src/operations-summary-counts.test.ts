@@ -464,9 +464,7 @@ describe('admin operations summary counts', () => {
         allocationStatus: 'VENDOR_BLOCKED',
         NOT: expect.any(Object),
       },
-      orderBy: {
-        updatedAt: 'desc',
-      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       skip: 0,
       take: 5,
     }));
@@ -517,6 +515,71 @@ describe('admin operations summary counts', () => {
     expect(prismaMock.financeIntegrityAlert.findMany).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
     expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
+  });
+
+  it('filters resolved vendor-blocked history before pagination with an authoritative total and no active count', async () => {
+    const resolvedAllocations = ['#1113', '#1112', '#1111'].map((orderNumber, index) =>
+      buildAllocation({
+        id: `alloc-resolved-${index + 11}`,
+        assignedVendorId: 'yalispor',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        cancelRefundReviewStatus: 'RESOLVED',
+        reassignmentRequired: false,
+        updatedAt: new Date(`2026-08-1${3 - index}T10:00:00.000Z`),
+        assignedVendor: { name: 'Yalı Spor' },
+        refundRecords: [{ sourceShopifyRefundId: `gid://shopify/Refund/${index + 1}` }],
+        outboundShopifyRefundAttempts: [{ status: 'RESOLVED' }],
+        order: {
+          sourceShopifyOrderId: String(8002737996113 - index),
+          sourceShopifyOrderNumber: orderNumber,
+          cancelledAt: null,
+        },
+      }),
+    );
+    prismaMock.vendorAllocation.count.mockResolvedValueOnce(15);
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce(resolvedAllocations);
+
+    const dashboard = await getAdminOperationsQueue({
+      type: 'vendor_blocked',
+      scope: 'resolved',
+      limit: 10,
+      offset: 10,
+    });
+
+    expect(dashboard.summary).toMatchObject({
+      total: 15,
+      vendorBlocked: 0,
+      warning: 0,
+      normal: 15,
+    });
+    expect(dashboard.items).toHaveLength(3);
+    expect(dashboard.items[0]).toEqual(expect.objectContaining({
+      id: 'op-resolved-blocked-alloc-resolved-11',
+      type: 'vendor_blocked',
+      severity: 'normal',
+      title: 'Vendor rejection resolved by Shopify refund',
+      relatedShopifyOrderNumber: '#1113',
+      status: 'resolved',
+      destinationPath: '/admin/orders/8002737996113',
+    }));
+    expect(prismaMock.vendorAllocation.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancelRefundReviewStatus: { in: ['RESOLVED', 'COMPLETED', 'REFUND_COMPLETED'] },
+        OR: expect.any(Array),
+      }),
+    });
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancelRefundReviewStatus: { in: ['RESOLVED', 'COMPLETED', 'REFUND_COMPLETED'] },
+        OR: expect.any(Array),
+      }),
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      skip: 10,
+      take: 10,
+    }));
   });
 
   it('filters shipment executions before pagination and returns an authoritative matching total', async () => {

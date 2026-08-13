@@ -12,10 +12,11 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
-import type { OperationsQueueTypeFilter } from './operations.types.js';
+import type { OperationsQueueTypeFilter, VendorBlockedQueueScope } from './operations.types.js';
 
 const OPERATIONS_QUEUE_TYPE_FILTER_ERROR =
   'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, or finance_integrity_alert.';
+const VENDOR_BLOCKED_SCOPE_ERROR = 'scope must be active or resolved and may only be used with type=vendor_blocked.';
 
 function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFilter | undefined {
   const rawType = (query as { type?: unknown } | undefined)?.type;
@@ -43,6 +44,26 @@ function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFi
   return normalized;
 }
 
+function resolveVendorBlockedQueueScope(
+  query: unknown,
+  type: OperationsQueueTypeFilter | undefined,
+): VendorBlockedQueueScope | undefined {
+  const rawScope = (query as { scope?: unknown } | undefined)?.scope;
+  if (rawScope === undefined || rawScope === null || rawScope === '') {
+    return undefined;
+  }
+  if (typeof rawScope !== 'string') {
+    throw new Error(VENDOR_BLOCKED_SCOPE_ERROR);
+  }
+
+  const normalized = rawScope.trim().toLowerCase();
+  if ((normalized !== 'active' && normalized !== 'resolved') || type !== 'vendor_blocked') {
+    throw new Error(VENDOR_BLOCKED_SCOPE_ERROR);
+  }
+
+  return normalized;
+}
+
 export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
@@ -58,15 +79,19 @@ export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       let type: OperationsQueueTypeFilter | undefined;
+      let scope: VendorBlockedQueueScope | undefined;
       try {
         type = resolveOperationsQueueTypeFilter(request.query);
+        scope = resolveVendorBlockedQueueScope(request.query, type);
       } catch (error) {
         return reply.code(400).send({ message: error instanceof Error ? error.message : 'Unsupported operations queue type filter.' });
       }
       const pagination = resolvePagination(request.query);
 
       return withDashboardRouteTiming('GET /admin/operations', () =>
-        withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue({ ...pagination, type })),
+        withSlowEndpointTiming('GET /admin/operations', () =>
+          getAdminOperationsQueue({ ...pagination, type, ...(scope ? { scope } : {}) }),
+        ),
       );
     },
   );

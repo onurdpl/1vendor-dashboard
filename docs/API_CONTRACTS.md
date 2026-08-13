@@ -161,6 +161,9 @@ Webhook processing lifecycle states:
 - Expected `404` behavior: not used for this route.
 - Optional filters:
   - `type=vendor_blocked`: returns only Vendor Blocked allocation queue rows.
+  - `type=vendor_blocked&scope=active`: returns unresolved Vendor Blocked rows. Omitting `scope` preserves this behavior.
+  - `type=vendor_blocked&scope=resolved`: returns historically resolved Vendor Blocked rows with an authoritative total. Resolved rows do not contribute to the active `summary.vendorBlocked` count.
+  - `scope` is only valid with `type=vendor_blocked`; unsupported combinations return `400`.
   - Unsupported `type` values return `400`.
 - Queue item semantics:
   - `pending_reassignment`: allocation requires reassignment (`reassignmentRequired` or pending reassignment status)
@@ -168,7 +171,7 @@ Webhook processing lifecycle states:
   - `awaiting_shipment`: allocation in shipping wait state
   - `refund_attention`: return/refund records requiring review
 - Count semantics: queue and summary counts are generated attention rows and are not guaranteed to be unique business incidents.
-- Filtered pagination semantics: when `type=vendor_blocked` is supplied, filtering occurs before pagination, `summary.total` represents matching Vendor Blocked rows, and returned `items` contain only Vendor Blocked rows. Without `type`, the endpoint preserves the mixed queue behavior and mixed `summary.total`.
+- Filtered pagination semantics: when `type=vendor_blocked` is supplied, the selected active/resolved scope is filtered before pagination, `summary.total` represents matching rows in that scope, and returned `items` contain only Vendor Blocked rows. Without `type`, the endpoint preserves the mixed queue behavior and mixed `summary.total`.
 - Vendor Blocked full-list UI behavior: the Operations Control Center uses `type=vendor_blocked` with `limit` and `offset` so Previous/Next page through Vendor Blocked rows rather than mixed queue rows.
 
 ### GET /admin/operations/attention

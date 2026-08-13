@@ -25,6 +25,7 @@ import type {
   OperationsQueueSeverity,
   OperationsQueueTypeFilter,
   OperationsVendorRiskDto,
+  VendorBlockedQueueScope,
 } from './operations.types.js';
 import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
@@ -290,6 +291,7 @@ type AdminOperationsQueueOptions = {
   limit?: number;
   offset?: number;
   type?: OperationsQueueTypeFilter;
+  scope?: VendorBlockedQueueScope;
 };
 
 function hoursSince(value: Date, now = new Date()) {
@@ -1056,6 +1058,34 @@ function mapVendorBlockedAllocationToQueueItem(allocation: OperationsAllocationR
   };
 }
 
+function mapResolvedVendorBlockedAllocationToQueueItem(allocation: OperationsAllocationRow): OperationsQueueItemDto {
+  const vendorName = allocation.assignedVendor.name;
+  const orderReference =
+    formatOrderReference(allocation.order.sourceShopifyOrderNumber, allocation.order.sourceShopifyOrderId) ??
+    `allocation ${allocation.id}`;
+
+  return {
+    id: `op-resolved-blocked-${allocation.id}`,
+    type: 'vendor_blocked',
+    severity: 'normal',
+    title: 'Vendor rejection resolved by Shopify refund',
+    description: `${vendorName} rejection for ${orderReference} is resolved.`,
+    vendorId: allocation.assignedVendorId,
+    vendorName,
+    relatedOrderId: allocation.id,
+    relatedShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    relatedShopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
+    relatedReturnId: allocation.returnRecords[0]?.id ?? null,
+    relatedRefundId: allocation.refundRecords[0]?.sourceShopifyRefundId ?? null,
+    status: 'resolved',
+    createdAt: allocation.updatedAt.toISOString(),
+    actionLabel: 'Open order',
+    destinationPath: `/admin/orders/${allocation.order.sourceShopifyOrderId}`,
+    reassignmentRequired: false,
+    splitChildAllocation: (allocation.childAllocationSplitEvents ?? []).length > 0,
+  };
+}
+
 function buildVendorBlockedFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
   return {
     total,
@@ -1074,11 +1104,34 @@ function buildVendorBlockedFilteredSummary(total: number): OperationsQueueDashbo
   };
 }
 
-async function getVendorBlockedOperationsQueue(options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>>): Promise<OperationsQueueDashboardDto> {
-  const where = {
-    ...fullOrderOperationalAllocationWhere,
-    ...getUnresolvedVendorBlockedWhere(),
+function buildResolvedVendorBlockedFilteredSummary(total: number): OperationsQueueDashboardDto['summary'] {
+  return {
+    total,
+    critical: 0,
+    warning: 0,
+    attention: 0,
+    normal: total,
+    pendingReassignment: 0,
+    vendorBlocked: 0,
+    awaitingShipment: 0,
+    refundAttention: 0,
+    financeReview: 0,
+    financeIntegrityAlerts: 0,
+    operationalSignals: 0,
+    automationActions: 0,
   };
+}
+
+async function getVendorBlockedOperationsQueue(
+  options: Required<Pick<AdminOperationsQueueOptions, 'limit' | 'offset'>> & { scope: VendorBlockedQueueScope },
+): Promise<OperationsQueueDashboardDto> {
+  const resolved = options.scope === 'resolved';
+  const where = resolved
+    ? getResolvedVendorBlockedRefundWhere()
+    : {
+        ...fullOrderOperationalAllocationWhere,
+        ...getUnresolvedVendorBlockedWhere(),
+      };
   const [total, allocations] = await Promise.all([
     withDashboardTiming('operations.vendor_blocked_filtered_count', () =>
       prisma.vendorAllocation.count({
@@ -1089,9 +1142,7 @@ async function getVendorBlockedOperationsQueue(options: Required<Pick<AdminOpera
       prisma.vendorAllocation.findMany({
         where,
         select: operationsAllocationSelect,
-        orderBy: {
-          updatedAt: 'desc',
-        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip: options.offset,
         take: options.limit,
       }),
@@ -1099,8 +1150,10 @@ async function getVendorBlockedOperationsQueue(options: Required<Pick<AdminOpera
   ]);
 
   return {
-    summary: buildVendorBlockedFilteredSummary(total),
-    items: allocations.map(mapVendorBlockedAllocationToQueueItem).filter((item): item is OperationsQueueItemDto => Boolean(item)),
+    summary: resolved ? buildResolvedVendorBlockedFilteredSummary(total) : buildVendorBlockedFilteredSummary(total),
+    items: resolved
+      ? allocations.map(mapResolvedVendorBlockedAllocationToQueueItem)
+      : allocations.map(mapVendorBlockedAllocationToQueueItem).filter((item): item is OperationsQueueItemDto => Boolean(item)),
   };
 }
 
@@ -1421,7 +1474,7 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
   if (options.type === 'vendor_blocked') {
-    return getVendorBlockedOperationsQueue({ limit, offset });
+    return getVendorBlockedOperationsQueue({ limit, offset, scope: options.scope ?? 'active' });
   }
   if (options.type === 'awaiting_shipment') {
     return getShipmentOperationsQueue({ limit, offset });

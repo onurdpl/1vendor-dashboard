@@ -10,6 +10,7 @@ import type {
   OperationsQueueTypeFilter,
   SupportAttentionTicket,
   SupportAttentionTicketsPage,
+  VendorBlockedQueueScope,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { formatDateTime } from '../services/real/formatting';
@@ -26,14 +27,14 @@ function formatOperationsTimestamp(value: string) {
 }
 
 const attentionMock = vi.fn<() => Promise<OperationsAttentionDashboard>>();
-const queueDashboardMock = vi.fn<(options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) => Promise<OperationsQueueDashboard>>();
+const queueDashboardMock = vi.fn<(options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope }) => Promise<OperationsQueueDashboard>>();
 const supportAttentionMock = vi.fn<(options?: { limit?: number; offset?: number }) => Promise<SupportAttentionTicketsPage>>();
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     operations: {
       attention: () => attentionMock(),
-      dashboard: (options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) => queueDashboardMock(options),
+      dashboard: (options?: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope }) => queueDashboardMock(options),
     },
     support: {
       listAdminAttention: (options?: { limit?: number; offset?: number }) => supportAttentionMock(options),
@@ -354,6 +355,19 @@ function buildVendorBlockedQueueItem(orderNumber: string, index: number): Operat
   };
 }
 
+function buildResolvedVendorBlockedQueueItem(orderNumber: string, index: number): OperationsQueueItem {
+  return {
+    ...buildVendorBlockedQueueItem(orderNumber, index),
+    id: `op-resolved-blocked-alloc-${orderNumber.replace(/\D/g, '')}`,
+    severity: 'low',
+    title: 'Vendor rejection resolved by Shopify refund',
+    description: `Sporjinal rejection for Order ${orderNumber} is resolved.`,
+    status: 'resolved',
+    actionLabel: 'Open order',
+    reassignmentRequired: false,
+  };
+}
+
 function buildShipmentQueueItem(
   orderNumber: string,
   index: number,
@@ -614,7 +628,10 @@ function buildSupportAttentionPage(
   };
 }
 
-function buildDefaultQueueDashboardForOptions(options?: { type?: OperationsQueueTypeFilter }): OperationsQueueDashboard {
+function buildDefaultQueueDashboardForOptions(options?: { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope }): OperationsQueueDashboard {
+  if (options?.type === 'vendor_blocked' && options.scope === 'resolved') {
+    return buildQueueDashboard([], 0);
+  }
   if (options?.type === 'awaiting_shipment') {
     return buildShipmentQueueDashboard([buildShipmentQueueItem('#1028', 0)]);
   }
@@ -1120,6 +1137,66 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await within(vendorBlockedList as HTMLElement).findByText('Order #1109')).toBeInTheDocument();
     expect(within(vendorBlockedList as HTMLElement).getAllByRole('link', { name: 'Open order' }).some((link) => link.getAttribute('href') === '/admin/orders/7900000000010')).toBe(true);
     expect(queueDashboardMock).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10, offset: 10, type: 'vendor_blocked' }));
+  });
+
+  it('keeps Active and Resolved Vendor Blocked history independently paginated and preserves resolved order navigation', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    const activeFirstPage = Array.from({ length: 10 }, (_unused, index) => buildVendorBlockedQueueItem(`#12${index + 1}`, index));
+    const activeSecondPage = [buildVendorBlockedQueueItem('#1109', 10)];
+    const resolvedFirstPage = [
+      buildResolvedVendorBlockedQueueItem('#1113', 13),
+      ...Array.from({ length: 9 }, (_unused, index) => buildResolvedVendorBlockedQueueItem(`#11${12 - index}`, index)),
+    ];
+    const resolvedSecondPage = [buildResolvedVendorBlockedQueueItem('#1101', 20)];
+
+    queueDashboardMock.mockImplementation(async (options) => {
+      if (options?.type === 'vendor_blocked') {
+        const secondPage = (options.offset ?? 0) === 10;
+        if (options.scope === 'resolved') {
+          return buildQueueDashboard(secondPage ? resolvedSecondPage : resolvedFirstPage, 11);
+        }
+        return buildQueueDashboard(secondPage ? activeSecondPage : activeFirstPage, 11);
+      }
+      return buildDefaultQueueDashboardForOptions(options);
+    });
+
+    renderPage();
+
+    const vendorBlockedList = await screen.findByRole('heading', { name: 'Vendor Blocked Allocations' }).then((heading) => heading.closest('article'));
+    expect(vendorBlockedList).not.toBeNull();
+    const activeTab = within(vendorBlockedList as HTMLElement).getByRole('button', { name: /Active/ });
+    const resolvedTab = within(vendorBlockedList as HTMLElement).getByRole('button', { name: /Resolved/ });
+
+    expect(activeTab).toHaveAttribute('aria-pressed', 'true');
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Vendor Blocked rows 1-10 of 11')).toBeInTheDocument();
+    fireEvent.click(within(vendorBlockedList as HTMLElement).getByRole('button', { name: 'Next' }));
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Order #1109')).toBeInTheDocument();
+
+    fireEvent.click(resolvedTab);
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Resolved Vendor Blocked rows 1-10 of 11')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getByText('Order #1113')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getAllByText('Vendor rejection resolved by Shopify refund')).toHaveLength(10);
+    expect(within(vendorBlockedList as HTMLElement).getAllByRole('link', { name: 'Open order' })[0]).toHaveAttribute(
+      'href',
+      '/admin/orders/7900000000013',
+    );
+    expect(queueDashboardMock).toHaveBeenCalledWith(expect.objectContaining({
+      limit: 10,
+      offset: 0,
+      type: 'vendor_blocked',
+      scope: 'resolved',
+    }));
+
+    fireEvent.click(within(vendorBlockedList as HTMLElement).getByRole('button', { name: 'Next' }));
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Resolved Vendor Blocked rows 11-11 of 11')).toBeInTheDocument();
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Order #1101')).toBeInTheDocument();
+
+    fireEvent.click(activeTab);
+    expect(await within(vendorBlockedList as HTMLElement).findByText('Vendor Blocked rows 11-11 of 11')).toBeInTheDocument();
+    expect(within(vendorBlockedList as HTMLElement).getByText('Order #1109')).toBeInTheDocument();
+    expect(queueDashboardMock.mock.calls.filter(([options]) => options?.type === 'vendor_blocked' && options.scope === 'resolved').at(-1)?.[0]).toEqual(
+      expect.objectContaining({ offset: 10 }),
+    );
   });
 
   it('renders Shipment as an authoritative table without using the attention preview rows', async () => {

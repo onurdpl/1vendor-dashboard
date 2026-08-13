@@ -6462,6 +6462,15 @@ h3 {
   color: #2563eb;
 }
 
+.vendor-blocked-scope-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.vendor-blocked-scope-tabs button {
+  min-height: 54px;
+}
+
 .returns-workflow-tabs {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;

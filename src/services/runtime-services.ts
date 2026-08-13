@@ -48,6 +48,7 @@ import type {
   OperationsQueueDashboard,
   OperationsQueueItem,
   OperationsQueueTypeFilter,
+  VendorBlockedQueueScope,
   SupportAnalytics,
   SupportAttentionTicketsPage,
   SupportTicket,
@@ -87,7 +88,7 @@ function getCurrentVendorId() {
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
-type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter };
+type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
 
@@ -107,6 +108,11 @@ function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQu
     operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
     automationActions: items.filter((item) => item.type === 'automation_action').length,
   };
+}
+
+function filterMockOperationsQueue(options: OperationsReadRequestOptions) {
+  const typedItems = listMockAdminOperationsQueue().filter((item) => !options.type || item.type === options.type);
+  return options.type === 'vendor_blocked' && options.scope === 'resolved' ? [] : typedItems;
 }
 
 function buildMockDashboardOperationalSummary(vendorId: string): DashboardOperationalSummary {
@@ -2855,8 +2861,8 @@ export const runtimeServices = {
   operations: {
     list: (options: OperationsReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset, type: options.type })
-        : Promise.resolve(listMockAdminOperationsQueue().filter((item) => !options.type || item.type === options.type)),
+        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset, type: options.type, scope: options.scope })
+        : Promise.resolve(filterMockOperationsQueue(options)),
     dashboard: (options: OperationsReadRequestOptions = {}) => {
       if (runtimeConfig.apiMode === 'real') {
         return realOperations.getAdminOperationsQueueDashboard({
@@ -2865,10 +2871,11 @@ export const runtimeServices = {
           limit: options.limit,
           offset: options.offset,
           type: options.type,
+          scope: options.scope,
         });
       }
 
-      const items = listMockAdminOperationsQueue().filter((item) => !options.type || item.type === options.type);
+      const items = filterMockOperationsQueue(options);
       return Promise.resolve({
         summary: buildOperationsQueueSummary(items),
         items,

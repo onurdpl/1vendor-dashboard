@@ -91,6 +91,44 @@ describe('operations route contract', () => {
     expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 5, offset: 5, type: 'vendor_blocked' });
   });
 
+  it('passes an explicit resolved vendor-blocked scope and rejects scope on other queues', async () => {
+    getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 3 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const resolved = await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'vendor_blocked', scope: 'resolved', limit: '10', offset: '20' },
+    }, reply);
+    const invalid = await gets.get('/admin/operations')?.({
+      authUser: { role: 'admin' },
+      query: { type: 'awaiting_shipment', scope: 'resolved' },
+    }, reply);
+
+    expect(resolved).toEqual({ summary: { total: 3 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({
+      limit: 10,
+      offset: 20,
+      type: 'vendor_blocked',
+      scope: 'resolved',
+    });
+    expect(invalid).toEqual({
+      status: 400,
+      body: { message: 'scope must be active or resolved and may only be used with type=vendor_blocked.' },
+    });
+  });
+
   it('passes the supported shipment queue type filter and normalized pagination to the operations service', async () => {
     getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 12 }, items: [] });
     const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();

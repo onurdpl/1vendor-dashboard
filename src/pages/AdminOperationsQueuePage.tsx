@@ -24,6 +24,7 @@ import type {
   OperationsQueueItem,
   OperationsVendorRisk,
   SupportAttentionTicket,
+  VendorBlockedQueueScope,
 } from '../lib/api/contracts';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
@@ -287,7 +288,9 @@ function getActivityContext(item: OperationsActivity) {
 }
 
 export function AdminOperationsQueuePage() {
+  const [vendorBlockedScope, setVendorBlockedScope] = useState<VendorBlockedQueueScope>('active');
   const [vendorBlockedQueueOffset, setVendorBlockedQueueOffset] = useState(0);
+  const [resolvedVendorBlockedQueueOffset, setResolvedVendorBlockedQueueOffset] = useState(0);
   const [shipmentQueueOffset, setShipmentQueueOffset] = useState(0);
   const [returnReviewQueueOffset, setReturnReviewQueueOffset] = useState(0);
   const [financeReviewQueueOffset, setFinanceReviewQueueOffset] = useState(0);
@@ -312,6 +315,34 @@ export function AdminOperationsQueuePage() {
       enabled: pageReadiness.ready,
       routeName: 'AdminOperationsQueuePage',
       endpoint: '/admin/operations/attention',
+    },
+  );
+  const {
+    data: resolvedVendorBlockedQueueDashboard,
+    isLoading: isResolvedVendorBlockedQueueLoading,
+    isFetching: isResolvedVendorBlockedQueueFetching,
+    isError: isResolvedVendorBlockedQueueError,
+    error: resolvedVendorBlockedQueueError,
+    refetch: refetchResolvedVendorBlockedQueue,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(
+      VENDOR_BLOCKED_QUEUE_PAGE_SIZE,
+      resolvedVendorBlockedQueueOffset,
+      'vendor_blocked',
+      'resolved',
+    ),
+    ({ signal }) =>
+      runtimeServices.operations.dashboard({
+        signal,
+        limit: VENDOR_BLOCKED_QUEUE_PAGE_SIZE,
+        offset: resolvedVendorBlockedQueueOffset,
+        type: 'vendor_blocked',
+        scope: 'resolved',
+      }),
+    {
+      enabled: pageReadiness.ready && vendorBlockedScope === 'resolved',
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations?type=vendor_blocked&scope=resolved',
     },
   );
   const {
@@ -482,12 +513,28 @@ export function AdminOperationsQueuePage() {
   const supportPageEnd = Math.min(supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE, totalSupportAttentionRows);
   const canPageSupportBack = supportAttentionOffset > 0;
   const canPageSupportForward = supportAttentionOffset + SUPPORT_ATTENTION_PAGE_SIZE < totalSupportAttentionRows;
-  const paginatedQueueItems = safeArray(vendorBlockedQueueDashboard?.items);
-  const totalPaginatedQueueRows = vendorBlockedQueueDashboard?.summary.total ?? 0;
-  const queuePageStart = totalPaginatedQueueRows > 0 ? vendorBlockedQueueOffset + 1 : 0;
-  const queuePageEnd = Math.min(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE, totalPaginatedQueueRows);
-  const canPageVendorBlockedBack = vendorBlockedQueueOffset > 0;
-  const canPageVendorBlockedForward = vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE < totalPaginatedQueueRows;
+  const showingResolvedVendorBlocked = vendorBlockedScope === 'resolved';
+  const selectedVendorBlockedDashboard = showingResolvedVendorBlocked
+    ? resolvedVendorBlockedQueueDashboard
+    : vendorBlockedQueueDashboard;
+  const selectedVendorBlockedOffset = showingResolvedVendorBlocked
+    ? resolvedVendorBlockedQueueOffset
+    : vendorBlockedQueueOffset;
+  const paginatedQueueItems = safeArray(selectedVendorBlockedDashboard?.items);
+  const totalPaginatedQueueRows = selectedVendorBlockedDashboard?.summary.total ?? 0;
+  const queuePageStart = totalPaginatedQueueRows > 0 ? selectedVendorBlockedOffset + 1 : 0;
+  const queuePageEnd = Math.min(selectedVendorBlockedOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE, totalPaginatedQueueRows);
+  const canPageVendorBlockedBack = selectedVendorBlockedOffset > 0;
+  const canPageVendorBlockedForward = selectedVendorBlockedOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE < totalPaginatedQueueRows;
+  const selectedVendorBlockedLoading = showingResolvedVendorBlocked
+    ? isResolvedVendorBlockedQueueLoading || isResolvedVendorBlockedQueueFetching
+    : isVendorBlockedQueueLoading || isVendorBlockedQueueFetching;
+  const selectedVendorBlockedError = showingResolvedVendorBlocked
+    ? isResolvedVendorBlockedQueueError
+    : isVendorBlockedQueueError;
+  const selectedVendorBlockedErrorMessage = showingResolvedVendorBlocked
+    ? resolvedVendorBlockedQueueError
+    : vendorBlockedQueueError;
   const shipmentQueueItems = safeArray(shipmentQueueDashboard?.items);
   const totalShipmentQueueRows = shipmentQueueDashboard?.summary.total ?? 0;
   const shipmentPageStart = totalShipmentQueueRows > 0 ? shipmentQueueOffset + 1 : 0;
@@ -718,19 +765,47 @@ export function AdminOperationsQueuePage() {
                   <p className="eyebrow">Vendor blocked</p>
                   <h3>Vendor Blocked Allocations</h3>
                   <span>
-                    Authoritative vendor-blocked allocations · {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
+                    {showingResolvedVendorBlocked ? 'Authoritative resolved vendor-blocked history' : 'Authoritative vendor-blocked allocations'} ·{' '}
+                    {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
                   </span>
                 </div>
               </div>
 
+              <div className="orders-workflow-tabs vendor-blocked-scope-tabs" aria-label="Vendor Blocked views">
+                <button
+                  type="button"
+                  className={!showingResolvedVendorBlocked ? 'is-active' : ''}
+                  aria-pressed={!showingResolvedVendorBlocked}
+                  onClick={() => setVendorBlockedScope('active')}
+                >
+                  <span>Active</span>
+                  <small>Needs operator attention</small>
+                </button>
+                <button
+                  type="button"
+                  className={showingResolvedVendorBlocked ? 'is-active' : ''}
+                  aria-pressed={showingResolvedVendorBlocked}
+                  onClick={() => setVendorBlockedScope('resolved')}
+                >
+                  <span>Resolved</span>
+                  <small>Completed refund history</small>
+                </button>
+              </div>
+
               <div className="vendor-blocked-page-controls">
                 <span>
-                  Vendor Blocked rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
+                  {showingResolvedVendorBlocked ? 'Resolved Vendor Blocked' : 'Vendor Blocked'} rows {queuePageStart}-{queuePageEnd} of {totalPaginatedQueueRows}
                 </span>
                 <button
                   type="button"
                   className="button button-secondary button-link button-compact"
-                  onClick={() => setVendorBlockedQueueOffset(Math.max(0, vendorBlockedQueueOffset - VENDOR_BLOCKED_QUEUE_PAGE_SIZE))}
+                  onClick={() => {
+                    if (showingResolvedVendorBlocked) {
+                      setResolvedVendorBlockedQueueOffset(Math.max(0, resolvedVendorBlockedQueueOffset - VENDOR_BLOCKED_QUEUE_PAGE_SIZE));
+                    } else {
+                      setVendorBlockedQueueOffset(Math.max(0, vendorBlockedQueueOffset - VENDOR_BLOCKED_QUEUE_PAGE_SIZE));
+                    }
+                  }}
                   disabled={!canPageVendorBlockedBack}
                 >
                   Previous
@@ -738,22 +813,28 @@ export function AdminOperationsQueuePage() {
                 <button
                   type="button"
                   className="button button-secondary button-link button-compact"
-                  onClick={() => setVendorBlockedQueueOffset(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE)}
+                  onClick={() => {
+                    if (showingResolvedVendorBlocked) {
+                      setResolvedVendorBlockedQueueOffset(resolvedVendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE);
+                    } else {
+                      setVendorBlockedQueueOffset(vendorBlockedQueueOffset + VENDOR_BLOCKED_QUEUE_PAGE_SIZE);
+                    }
+                  }}
                   disabled={!canPageVendorBlockedForward}
                 >
                   Next
                 </button>
               </div>
 
-              {isVendorBlockedQueueError ? (
+              {selectedVendorBlockedError ? (
                 <SectionErrorRetry
-                  title="Vendor-blocked allocations unavailable"
-                  description={vendorBlockedQueueError ?? 'The paginated vendor-blocked allocation table could not be loaded.'}
-                  onRetry={() => void refetchVendorBlockedQueue()}
+                  title={showingResolvedVendorBlocked ? 'Resolved vendor-blocked history unavailable' : 'Vendor-blocked allocations unavailable'}
+                  description={selectedVendorBlockedErrorMessage ?? 'The paginated vendor-blocked allocation table could not be loaded.'}
+                  onRetry={() => void (showingResolvedVendorBlocked ? refetchResolvedVendorBlockedQueue() : refetchVendorBlockedQueue())}
                 />
-              ) : isVendorBlockedQueueLoading || isVendorBlockedQueueFetching ? (
+              ) : selectedVendorBlockedLoading ? (
                 <SectionSkeleton
-                  title="Loading vendor-blocked allocations"
+                  title={showingResolvedVendorBlocked ? 'Loading resolved vendor-blocked history' : 'Loading vendor-blocked allocations'}
                   description="Fetching vendor-blocked allocations with server-side pagination."
                 />
               ) : paginatedQueueItems.length ? (
@@ -791,8 +872,10 @@ export function AdminOperationsQueuePage() {
                 </OperationalTable>
               ) : (
                 <EmptyStatePanel
-                  title="No vendor-blocked allocations"
-                  description="No active vendor-blocked allocation rows need operator attention."
+                  title={showingResolvedVendorBlocked ? 'No resolved vendor-blocked allocations' : 'No vendor-blocked allocations'}
+                  description={showingResolvedVendorBlocked
+                    ? 'No resolved vendor-blocked allocation history is available.'
+                    : 'No active vendor-blocked allocation rows need operator attention.'}
                 />
               )}
             </article>

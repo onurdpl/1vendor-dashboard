@@ -1,5 +1,11 @@
 import { apiClient } from '../../lib/api-client';
-import type { OperationsAttentionDashboard, OperationsQueueDashboard, OperationsQueueItem, OperationsQueueTypeFilter } from '../../lib/api/contracts';
+import type {
+  OperationsAttentionDashboard,
+  OperationsQueueDashboard,
+  OperationsQueueItem,
+  OperationsQueueTypeFilter,
+  VendorBlockedQueueScope,
+} from '../../lib/api/contracts';
 
 type OperationsResponseDto = {
   summary: OperationsSummaryDto;
@@ -64,9 +70,15 @@ function mapSeverity(severity: OperationsResponseDto['items'][number]['severity'
   return 'critical';
 }
 
-function buildOperationsQueuePath(options: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter }) {
+function buildOperationsQueuePath(options: {
+  limit?: number;
+  offset?: number;
+  type?: OperationsQueueTypeFilter;
+  scope?: VendorBlockedQueueScope;
+}) {
   const params = new URLSearchParams();
   if (options.type) params.set('type', options.type);
+  if (options.scope) params.set('scope', options.scope);
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
 
@@ -117,7 +129,7 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
   };
 }
 
-export async function getAdminOperationsQueueDashboard(options: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueDashboard> {
+export async function getAdminOperationsQueueDashboard(options: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueDashboard> {
   const response = await apiClient.get<OperationsResponseDto>(buildOperationsQueuePath(options), {
     signal: options.signal,
     headers: options.headers,
@@ -135,7 +147,7 @@ export async function getAdminOperationsQueueSummary(options: { signal?: AbortSi
   return mapOperationsSummary(response);
 }
 
-export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {
+export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {
   return (await getAdminOperationsQueueDashboard(options)).items;
 }
 

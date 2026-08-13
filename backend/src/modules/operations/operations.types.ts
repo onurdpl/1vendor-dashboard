@@ -15,6 +15,8 @@ export type OperationsQueueTypeFilter =
   | 'finance_review'
   | 'finance_integrity_alert';
 
+export type VendorBlockedQueueScope = 'active' | 'resolved';
+
 export type OperationsQueueSeverity = 'critical' | 'warning' | 'attention' | 'normal';
 
 export type OperationsQueueItemDto = {

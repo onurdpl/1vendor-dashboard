@@ -13,7 +13,10 @@ export const queryKeys = {
     },
     operations: {
       queue: () => ['admin', 'operations', 'queue'] as const,
-      queuePage: (limit: number, offset: number, type = 'all') => ['admin', 'operations', 'queue', type, limit, offset] as const,
+      queuePage: (limit: number, offset: number, type = 'all', scope?: 'active' | 'resolved') =>
+        scope
+          ? ['admin', 'operations', 'queue', type, scope, limit, offset] as const
+          : ['admin', 'operations', 'queue', type, limit, offset] as const,
       attention: () => ['admin', 'operations', 'attention'] as const,
     },
     observability: {
