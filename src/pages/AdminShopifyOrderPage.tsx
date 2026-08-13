@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
@@ -174,6 +174,48 @@ type ProductPanelDryRunFeedback = {
   failed?: number;
   skipped?: number;
 };
+
+// Give refunds/create persistence a short bounded window without turning the page into a polling client.
+const REFUND_PROJECTION_CONVERGENCE_DELAYS_MS = [500, 1000, 1500, 2000, 2500] as const;
+
+type RefundProjectionConvergenceResult =
+  | { outcome: 'resolved' }
+  | { outcome: 'failed'; failureReason: string | null }
+  | { outcome: 'pending' }
+  | { outcome: 'cancelled' };
+
+type RefundProjectionDelay = {
+  timeoutId: ReturnType<typeof globalThis.setTimeout>;
+  resolve: (active: boolean) => void;
+};
+
+function findMatchingOutboundRefundAttempt(breakdown: ShopifyOrderBreakdown | undefined, attemptId: string) {
+  for (const allocation of breakdown?.allocations ?? []) {
+    if (allocation.outboundRefundAttemptSummary?.id === attemptId) {
+      return allocation.outboundRefundAttemptSummary;
+    }
+  }
+
+  return null;
+}
+
+function classifyRefundProjectionAttempt(
+  breakdown: ShopifyOrderBreakdown | undefined,
+  attemptId: string,
+): RefundProjectionConvergenceResult | null {
+  const attempt = findMatchingOutboundRefundAttempt(breakdown, attemptId);
+  const status = normalizeStateToken(attempt?.status);
+
+  if (status === 'resolved') {
+    return { outcome: 'resolved' };
+  }
+
+  if (status === 'failed') {
+    return { outcome: 'failed', failureReason: attempt?.failureReason ?? null };
+  }
+
+  return null;
+}
 
 function formatPreviewMoney(
   amount: string | null | undefined,
@@ -715,6 +757,8 @@ export function AdminShopifyOrderPage() {
   const [rescanSummaries, setRescanSummaries] = useState<Record<string, FinanceIntegrityAlertRescanSummary>>({});
   const [shopifyRefundPreviews, setShopifyRefundPreviews] = useState<Record<string, ShopifyRefundPreviewResult>>({});
   const [productPanelDryRunFeedback, setProductPanelDryRunFeedback] = useState<Record<string, ProductPanelDryRunFeedback>>({});
+  const refundProjectionConvergenceRunIdRef = useRef(0);
+  const refundProjectionDelayRef = useRef<RefundProjectionDelay | null>(null);
   const { data: breakdown, isLoading, isError, error, refetch } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
     ({ signal }) => {
@@ -728,6 +772,77 @@ export function AdminShopifyOrderPage() {
       enabled: pageReadiness.ready && Boolean(shopifyOrderId),
     },
   );
+
+  function cancelRefundProjectionConvergence() {
+    refundProjectionConvergenceRunIdRef.current += 1;
+    const scheduledDelay = refundProjectionDelayRef.current;
+    if (scheduledDelay) {
+      globalThis.clearTimeout(scheduledDelay.timeoutId);
+      refundProjectionDelayRef.current = null;
+      scheduledDelay.resolve(false);
+    }
+  }
+
+  function waitForRefundProjectionConvergenceDelay(delayMs: number, runId: number) {
+    if (refundProjectionConvergenceRunIdRef.current !== runId) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const scheduledDelay: RefundProjectionDelay = {
+        timeoutId: globalThis.setTimeout(() => {
+          if (refundProjectionDelayRef.current === scheduledDelay) {
+            refundProjectionDelayRef.current = null;
+          }
+          resolve(refundProjectionConvergenceRunIdRef.current === runId);
+        }, delayMs),
+        resolve,
+      };
+      refundProjectionDelayRef.current = scheduledDelay;
+    });
+  }
+
+  async function convergeRefundProjection(attemptId: string): Promise<RefundProjectionConvergenceResult> {
+    cancelRefundProjectionConvergence();
+    const runId = refundProjectionConvergenceRunIdRef.current;
+
+    const initialResult = await refetch();
+    if (refundProjectionConvergenceRunIdRef.current !== runId) {
+      return { outcome: 'cancelled' };
+    }
+
+    const initialOutcome = classifyRefundProjectionAttempt(initialResult.data, attemptId);
+    if (initialOutcome) {
+      return initialOutcome;
+    }
+
+    for (const delayMs of REFUND_PROJECTION_CONVERGENCE_DELAYS_MS) {
+      const active = await waitForRefundProjectionConvergenceDelay(delayMs, runId);
+      if (!active) {
+        return { outcome: 'cancelled' };
+      }
+
+      const result = await refetch();
+      if (refundProjectionConvergenceRunIdRef.current !== runId) {
+        return { outcome: 'cancelled' };
+      }
+
+      const outcome = classifyRefundProjectionAttempt(result.data, attemptId);
+      if (outcome) {
+        return outcome;
+      }
+    }
+
+    return { outcome: 'pending' };
+  }
+
+  useEffect(() => {
+    cancelRefundProjectionConvergence();
+    return () => {
+      cancelRefundProjectionConvergence();
+    };
+  }, [shopifyOrderId]);
+
   const returnToVendorMutation = useMutationAction(
     async (payload: { allocationId: string; note: string }) => {
       if (!shopifyOrderId) {
@@ -1103,8 +1218,23 @@ export function AdminShopifyOrderPage() {
       setShopifyRefundWebhookConfirmed(false);
       setShopifyRefundPostCheckConfirmed(false);
       setShopifyRefundMixedProbeConfirmed(false);
-      await refetch();
       showFeedback(result.message || 'Shopify refund submitted. Waiting for refunds/create webhook.', 'success');
+      const convergence = await convergeRefundProjection(result.attemptId);
+      if (convergence.outcome === 'resolved') {
+        showFeedback('Shopify refund completed and the admin order view is up to date.', 'success');
+      } else if (convergence.outcome === 'failed') {
+        showFeedback(
+          convergence.failureReason
+            ? `Shopify refund processing failed: ${convergence.failureReason}`
+            : 'Shopify refund processing failed. Review the outbound refund attempt details.',
+          'error',
+        );
+      } else if (convergence.outcome === 'pending') {
+        showFeedback(
+          'Shopify refund is still processing. Refresh the order to check for completion.',
+          'info',
+        );
+      }
     } catch {
       await refetch();
       // The mutation onError handler owns user-facing feedback.

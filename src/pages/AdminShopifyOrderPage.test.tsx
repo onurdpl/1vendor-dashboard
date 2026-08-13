@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
@@ -9,11 +9,13 @@ import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
 const getAdminShopifyOrderBreakdownMock = vi.fn<() => Promise<ShopifyOrderBreakdown>>();
 const sendAdminProductPanelVariantDisableDryRunMock = vi.fn();
 const previewAdminShopifyRefundMock = vi.fn();
+const executeAdminShopifyRefundMock = vi.fn();
 
 vi.mock('../features/orders/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../features/orders/api')>();
   return {
     ...actual,
+    executeAdminShopifyRefund: (...args: unknown[]) => executeAdminShopifyRefundMock(...args),
     getAdminShopifyOrderBreakdown: () => getAdminShopifyOrderBreakdownMock(),
     previewAdminShopifyRefund: (...args: unknown[]) => previewAdminShopifyRefundMock(...args),
     sendAdminProductPanelVariantDisableDryRun: (shopifyOrderId: string) =>
@@ -147,6 +149,138 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+function buildRefundAttemptSummary(
+  id: string,
+  status: 'SHOPIFY_ACTION_PENDING' | 'RESOLVED' | 'FAILED',
+  failureReason: string | null = null,
+): NonNullable<ShopifyOrderBreakdown['allocations'][number]['outboundRefundAttemptSummary']> {
+  return {
+    id,
+    status,
+    restockType: 'CANCEL',
+    refundShipping: false,
+    notifyCustomer: false,
+    shopifyRefundId: status === 'RESOLVED' ? 'gid://shopify/Refund/terminal' : null,
+    previewedAt: '2026-08-12T10:00:00.000Z',
+    requestedAt: '2026-08-12T10:01:00.000Z',
+    submittedAt: '2026-08-12T10:01:01.000Z',
+    resolvedAt: status === 'RESOLVED' ? '2026-08-12T10:01:02.000Z' : null,
+    failedAt: status === 'FAILED' ? '2026-08-12T10:01:02.000Z' : null,
+    failureReason,
+    postRefundFulfillmentCheckStatus: status === 'RESOLVED' ? 'passed' : null,
+    postRefundFulfillmentCheckMessage: status === 'RESOLVED' ? 'Selected lines are no longer fulfillable.' : null,
+  };
+}
+
+function buildRefundExecutionBreakdown(
+  attemptSummary: ShopifyOrderBreakdown['allocations'][number]['outboundRefundAttemptSummary'] = null,
+  completed = false,
+): ShopifyOrderBreakdown {
+  return {
+    sourceShopifyOrderId: '7817723773265',
+    sourceShopifyOrderNumber: '#1117',
+    customer: 'Customer',
+    financialStatus: completed ? 'refunded' : 'pending',
+    customerRefundCompletion: completed
+      ? {
+          status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+          reasonCode: 'canonical_full_customer_refund_verified',
+          displayFinancialStatus: 'REFUNDED',
+          currency: 'TRY',
+          totalReceivedAmount: '250.00',
+          totalRefundedAmount: '250.00',
+          netPaymentAmount: '0.00',
+          totalOutstandingAmount: '0.00',
+          totalRefundedShippingAmount: '0.00',
+        }
+      : undefined,
+    createdAt: '2026-08-12T09:00:00.000Z',
+    allocations: [
+      buildAllocation({
+        cancelRefundReview: {
+          status: 'PENDING_REVIEW',
+          reason: 'OUT_OF_STOCK',
+          note: 'Customer refund approved.',
+          requestedAt: '2026-08-12T09:30:00.000Z',
+          requestedByUserId: 'admin-1',
+        },
+        outboundRefundAttemptSummary: attemptSummary,
+        refundTotal: completed ? '250.00' : '0.00',
+        refundedItems: completed
+          ? [{
+              id: 'refund-line-terminal',
+              originalVendorId: 'yalispor',
+              assignedVendorId: 'yalispor',
+              vendorId: 'yalispor',
+              sku: 'SKU-1088',
+              variantTitle: 'Refund',
+              name: 'Split item',
+              quantity: 1,
+              condition: 'New',
+              refundAmount: '250.00',
+            }]
+          : [],
+      }),
+    ],
+  };
+}
+
+function buildExecutableRefundPreview() {
+  return {
+    ok: true,
+    writesPerformed: false,
+    allocationId: 'alloc-child',
+    shopifyOrderId: '7817723773265',
+    refundLineItemsPreview: [{
+      lineItemId: 'gid://shopify/LineItem/1',
+      quantity: 1,
+      restockType: 'CANCEL',
+    }],
+    suggestedRefund: {
+      totalRefundAmount: '250.00',
+      productRefundAmount: '250.00',
+      currencyCode: 'TRY',
+      totalTaxAmount: '0.00',
+      shippingAmount: null,
+      shippingMaximumRefundableAmount: '0.00',
+      suggestedTransactions: [{
+        gateway: 'bogus',
+        amount: '250.00',
+        currencyCode: 'TRY',
+        parentTransactionId: 'gid://shopify/OrderTransaction/1',
+      }],
+    },
+    refundMode: 'PRODUCT_ONLY',
+    shippingEligibility: {
+      status: 'NOT_ELIGIBLE',
+      reasonCode: 'not_requested',
+    },
+    fulfillmentOrderCancellation: {
+      affectedFulfillmentOrders: [],
+      overallClassification: 'no_cancellation_needed',
+      blockers: [],
+      warnings: [],
+    },
+    warnings: [],
+    blockers: [],
+    missingData: [],
+  } as const;
+}
+
+async function openRefundExecutionDialog() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview Shopify refund' }));
+  await screen.findByLabelText('Shopify suggested refund preview');
+  fireEvent.click(screen.getByRole('button', { name: 'Refund in Shopify' }));
+
+  const dialog = await screen.findByRole('dialog', { name: 'Refund in Shopify' });
+  fireEvent.change(within(dialog).getByLabelText('Refund note'), {
+    target: { value: 'Customer-approved refund.' },
+  });
+  fireEvent.click(within(dialog).getByLabelText('I understand this will trigger a real Shopify payment refund.'));
+  fireEvent.click(within(dialog).getByLabelText('I understand Sporgym finance updates only after the refunds/create webhook.'));
+  return dialog;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -175,6 +309,7 @@ async function findLatestStatusAxes() {
 describe('AdminShopifyOrderPage split visibility', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
@@ -196,6 +331,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
     getAdminShopifyOrderBreakdownMock.mockReset();
     sendAdminProductPanelVariantDisableDryRunMock.mockReset();
     previewAdminShopifyRefundMock.mockReset();
+    executeAdminShopifyRefundMock.mockReset();
   });
 
   it('loads admin order detail for an authenticated admin even when vendor context is missing', async () => {
@@ -962,5 +1098,160 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(statusAxes).getByText('Refund review required')).toBeInTheDocument();
       expect(within(statusAxes).queryByText('Refund completed')).not.toBeInTheDocument();
       expect(within(statusAxes).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+    });
+
+    describe('refund projection terminal convergence', () => {
+      function arrangeRefundExecution() {
+        previewAdminShopifyRefundMock.mockResolvedValueOnce(buildExecutableRefundPreview());
+        executeAdminShopifyRefundMock.mockResolvedValueOnce({
+          ok: true,
+          writesPerformed: true,
+          status: 'SHOPIFY_ACTION_PENDING',
+          shopifyRefundId: null,
+          attemptId: 'attempt-a',
+          message: 'Shopify refund submitted. Waiting for refunds/create webhook.',
+        });
+      }
+
+      async function submitRefund(dialog: HTMLElement) {
+        await act(async () => {
+          fireEvent.click(within(dialog).getByRole('button', { name: 'Refund in Shopify' }));
+          await Promise.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+
+      it('refetches a pending matching attempt until its authoritative projection resolves', async () => {
+        arrangeRefundExecution();
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'SHOPIFY_ACTION_PENDING')))
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'RESOLVED'), true));
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        vi.useFakeTimers();
+        await submitRefund(dialog);
+
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(3);
+        expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+        expect(screen.getByText('Refund attempt resolved')).toBeInTheDocument();
+        expect(within(screen.getByLabelText('Cancel refund review summary')).getByText('250.00')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Allocated refunded items' })).toBeInTheDocument();
+        expect(screen.queryByText('Refund pending')).not.toBeInTheDocument();
+        expect(screen.queryByText('Not resolved')).not.toBeInTheDocument();
+        expect(screen.getByText('Shopify refund completed and the admin order view is up to date.')).toBeInTheDocument();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(7_500);
+        });
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(3);
+      });
+
+      it('does not schedule delayed refetches when the matching attempt is immediately resolved', async () => {
+        arrangeRefundExecution();
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'RESOLVED'), true));
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        await submitRefund(dialog);
+
+        expect(await screen.findByText('Shopify refund completed and the admin order view is up to date.')).toBeInTheDocument();
+        expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('stops on a matching failed attempt without retrying the refund mutation', async () => {
+        arrangeRefundExecution();
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'FAILED', 'Webhook reconciliation failed.')));
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        await submitRefund(dialog);
+
+        expect(await screen.findByText('Shopify refund processing failed: Webhook reconciliation failed.')).toBeInTheDocument();
+        expect(within(screen.getByLabelText('Outbound Shopify refund attempt summary')).getByText('Webhook reconciliation failed.')).toBeInTheDocument();
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('stops after the bounded window when the matching attempt remains pending', async () => {
+        arrangeRefundExecution();
+        const pendingBreakdown = buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'SHOPIFY_ACTION_PENDING'));
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValue(pendingBreakdown);
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        vi.useFakeTimers();
+        await submitRefund(dialog);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(7_500);
+        });
+
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(7);
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('Shopify refund is still processing. Refresh the order to check for completion.')).toBeInTheDocument();
+        expect(screen.queryByText('Shopify refund completed and the admin order view is up to date.')).not.toBeInTheDocument();
+      });
+
+      it('cleans up delayed convergence when the page unmounts', async () => {
+        arrangeRefundExecution();
+        const pendingBreakdown = buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-a', 'SHOPIFY_ACTION_PENDING'));
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValue(pendingBreakdown);
+
+        const view = renderPage();
+        const dialog = await openRefundExecutionDialog();
+        vi.useFakeTimers();
+        await submitRefund(dialog);
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+
+        view.unmount();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(7_500);
+        });
+
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(2);
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not treat a different latest terminal attempt as completion of the submitted attempt', async () => {
+        arrangeRefundExecution();
+        const differentAttempt = buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-b', 'RESOLVED'), true);
+        getAdminShopifyOrderBreakdownMock
+          .mockResolvedValueOnce(buildRefundExecutionBreakdown())
+          .mockResolvedValue(differentAttempt);
+
+        renderPage();
+        const dialog = await openRefundExecutionDialog();
+        vi.useFakeTimers();
+        await submitRefund(dialog);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(7_500);
+        });
+
+        expect(getAdminShopifyOrderBreakdownMock).toHaveBeenCalledTimes(7);
+        expect(executeAdminShopifyRefundMock).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('Shopify refund is still processing. Refresh the order to check for completion.')).toBeInTheDocument();
+        expect(screen.queryByText('Shopify refund completed and the admin order view is up to date.')).not.toBeInTheDocument();
+      });
     });
   });
