@@ -557,15 +557,9 @@ function buildAllocationTimelineEvents(allocation: ShopifyOrderBreakdown['alloca
   }
   if (attempt?.resolvedAt) {
     events.push({
-      key: `${allocation.vendorId}-refund-webhook-${attempt.resolvedAt}`,
-      title: 'Refund webhook received',
-      meta: `Webhook confirmed ${attempt.shopifyRefundId ?? 'Shopify refund'} · ${formatDate(attempt.resolvedAt)}`,
-      at: attempt.resolvedAt,
-    });
-    events.push({
-      key: `${allocation.vendorId}-refund-completed-${attempt.resolvedAt}`,
-      title: 'Refund completed',
-      meta: `Refund total ${allocation.refundTotal} · ${formatDate(attempt.resolvedAt)}`,
+      key: `${allocation.vendorId}-refund-resolved-${attempt.resolvedAt}`,
+      title: 'Refund resolution recorded',
+      meta: `${attempt.shopifyRefundId ?? 'Shopify refund'} · ${formatDate(attempt.resolvedAt)}`,
       at: attempt.resolvedAt,
     });
   }
@@ -1878,10 +1872,6 @@ export function AdminShopifyOrderPage() {
               <strong>{allocation.allocationTotal}</strong>
             </div>
             <div className="summary-row">
-              <span>Refund impact</span>
-              <strong>{allocation.refundTotal}</strong>
-            </div>
-            <div className="summary-row">
               <span>Fulfillment</span>
               <strong>{fulfillmentNotRequired ? 'Fulfillment not required' : allocation.fulfillmentStatus}</strong>
             </div>
@@ -2074,16 +2064,16 @@ export function AdminShopifyOrderPage() {
                 {refundCompleted ? (
                   <>
                     <div className="meta-item">
-                      <span>Refund amount</span>
+                      <span>Product refund recorded</span>
                       <strong>{allocation.refundTotal}</strong>
                     </div>
                     <div className="meta-item">
-                      <span>Refunded at</span>
-                      <strong>{latestRefundedAt ? formatDate(latestRefundedAt) : 'Webhook time unavailable'}</strong>
+                      <span>Refund resolution recorded</span>
+                      <strong>{latestRefundedAt ? formatDate(latestRefundedAt) : 'Time unavailable'}</strong>
                     </div>
                     <div className="meta-item">
-                      <span>Webhook received</span>
-                      <strong>Yes</strong>
+                      <span>Latest order refund webhook</span>
+                      <strong>{breakdown.refundWebhookStatus ? formatTransferStatus(breakdown.refundWebhookStatus) : 'Not observed'}</strong>
                     </div>
                   </>
                 ) : null}

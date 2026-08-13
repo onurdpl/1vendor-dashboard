@@ -771,6 +771,7 @@ export type AdminOrderBreakdownDto = {
     createdAt: string;
     updatedAt: string;
     customerRefundCompletion: CustomerRefundCompletion;
+    refundWebhookStatus: 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | null;
   };
   productPanelVariantDisableMode: {
     enabled: boolean;

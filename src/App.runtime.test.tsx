@@ -462,6 +462,7 @@ describe('App startup runtime safety', () => {
             totalOutstandingAmount: '0.00',
             totalRefundedShippingAmount: '0.00',
           },
+          refundWebhookStatus: 'PROCESSED',
           createdAt: '2026-06-02T12:00:00.000Z',
           allocations: [
             {
@@ -570,11 +571,12 @@ describe('App startup runtime safety', () => {
     expect(screen.getByText('Historical Context')).toBeInTheDocument();
     expect(screen.getAllByText('Vendor blocked').length).toBeGreaterThan(0);
     expect(screen.getByText('Shopify refund processed successfully. This allocation is operationally closed and fulfillment is no longer required.')).toBeInTheDocument();
-    expect(screen.getByText('Webhook received')).toBeInTheDocument();
+    expect(screen.getByText('Latest order refund webhook')).toBeInTheDocument();
+    expect(screen.getByText('Processed')).toBeInTheDocument();
     expect(screen.getByText('gid://shopify/Refund/1')).toBeInTheDocument();
     expect(screen.getAllByText('SKU-REFUNDED').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund submitted to Shopify')).toBeInTheDocument();
-    expect(screen.getByText('Refund webhook received')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund resolution recorded').length).toBeGreaterThan(0);
     expect(screen.getByText('Post-check Passed')).toBeInTheDocument();
     expect(screen.queryByText('No refunded items in this vendor allocation.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Transfer economics' })).not.toBeInTheDocument();

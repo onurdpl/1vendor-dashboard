@@ -1349,6 +1349,7 @@ export type ShopifyOrderBreakdown = {
   customer: string;
   financialStatus?: string | null;
   customerRefundCompletion?: CustomerRefundCompletion;
+  refundWebhookStatus?: RefundWebhookStatus | null;
   createdAt: string;
   productPanelVariantDisableMode?: {
     enabled: boolean;
@@ -1356,6 +1357,8 @@ export type ShopifyOrderBreakdown = {
   };
   allocations: VendorAllocationSummary[];
 };
+
+export type RefundWebhookStatus = 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED';
 
 export type CustomerRefundCompletion = {
   status:

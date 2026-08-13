@@ -220,6 +220,7 @@ type AdminOrderBreakdownDto = {
     createdAt: string;
     updatedAt: string;
     customerRefundCompletion: CustomerRefundCompletion;
+    refundWebhookStatus?: 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED' | null;
   };
   productPanelVariantDisableMode?: {
     enabled: boolean;
@@ -653,6 +654,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     customer: response.order.customerName ?? response.order.customerEmail ?? 'Shopify customer',
     financialStatus: response.order.financialStatus ?? null,
     customerRefundCompletion: response.order.customerRefundCompletion,
+    refundWebhookStatus: response.order.refundWebhookStatus,
     createdAt: response.order.createdAt,
     productPanelVariantDisableMode: response.productPanelVariantDisableMode,
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {

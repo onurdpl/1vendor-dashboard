@@ -882,16 +882,26 @@ describe('AdminShopifyOrderPage split visibility', () => {
           reasonCode: 'canonical_full_customer_refund_verified',
           displayFinancialStatus: 'REFUNDED',
           currency: 'TRY',
-          totalReceivedAmount: '250.00',
-          totalRefundedAmount: '250.00',
+          totalReceivedAmount: '1249.00',
+          totalRefundedAmount: '1249.00',
           netPaymentAmount: '0.00',
           totalOutstandingAmount: '0.00',
           totalRefundedShippingAmount: '0.00',
         },
+        refundWebhookStatus: 'PROCESSED',
         createdAt: '2026-06-21T08:00:00.000Z',
         allocations: [
           buildAllocation({
-            refundTotal: '250.00',
+            allocationTotal: 'TRY\u00a01,249.00',
+            lineItems: [buildLineItem({ price: 'TRY\u00a01,249.00' })],
+            refundTotal: 'TRY\u00a01,249.00',
+            cancelRefundReview: {
+              status: 'RESOLVED',
+              reason: 'OUT_OF_STOCK',
+              note: 'Reviewed',
+              requestedAt: '2026-06-21T11:00:00.000Z',
+              requestedByUserId: 'admin-1',
+            },
             refundedItems: [
               {
                 id: 'refund-line-1',
@@ -903,7 +913,7 @@ describe('AdminShopifyOrderPage split visibility', () => {
                 name: 'Split item',
                 quantity: 1,
                 condition: 'New',
-                refundAmount: '250.00',
+                refundAmount: 'TRY\u00a01,249.00',
               },
             ],
             outboundRefundAttemptSummary: {
@@ -937,7 +947,66 @@ describe('AdminShopifyOrderPage split visibility', () => {
       expect(within(statusAxes).getByText('Refund completed')).toBeInTheDocument();
       expect(within(statusAxes).getByText('Historical Context')).toBeInTheDocument();
       expect(within(statusAxes).getByText('Vendor blocked')).toBeInTheDocument();
+      expect(screen.getByText('Product refund recorded')).toBeInTheDocument();
+      const productRefundItem = screen.getByText('Product refund recorded').closest('.meta-item');
+      expect(productRefundItem).not.toBeNull();
+      expect(productRefundItem).toHaveTextContent('TRY 1,249.00');
+      expect(screen.getByText('Latest order refund webhook')).toBeInTheDocument();
+      expect(screen.getByText('Processed')).toBeInTheDocument();
+      expect(screen.queryByText('Refund impact', { exact: false })).not.toBeInTheDocument();
+      expect(screen.queryByText('Webhook received', { exact: false })).not.toBeInTheDocument();
       expect(screen.queryByText('vendor_blocked')).not.toBeInTheDocument();
+    });
+
+    it('keeps product refund recorded separate from a later checkout shipping-only refund', async () => {
+      const breakdown = buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-shipping-only', 'RESOLVED'), true);
+      breakdown.customerRefundCompletion = {
+        status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+        reasonCode: 'canonical_full_customer_refund_verified',
+        displayFinancialStatus: 'REFUNDED',
+        currency: 'TRY',
+        totalReceivedAmount: '2499.50',
+        totalRefundedAmount: '2499.50',
+        netPaymentAmount: '0.00',
+        totalOutstandingAmount: '0.00',
+        totalRefundedShippingAmount: '100.00',
+      };
+      breakdown.refundWebhookStatus = 'PROCESSED';
+      breakdown.allocations[0]!.refundTotal = 'TRY\u00a02,399.50';
+      breakdown.allocations[0]!.refundedItems[0]!.refundAmount = 'TRY\u00a02,399.50';
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const productRefundItem = (await screen.findByText('Product refund recorded')).closest('.meta-item');
+      expect(productRefundItem).not.toBeNull();
+      expect(productRefundItem).toHaveTextContent('TRY 2,399.50');
+      expect(screen.queryByText('Refund impact', { exact: false })).not.toBeInTheDocument();
+    });
+
+    it('does not infer webhook receipt from canonical full refund completion', async () => {
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(
+        buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-no-webhook', 'RESOLVED'), true),
+      );
+
+      renderPage();
+
+      expect(await screen.findByText('Latest order refund webhook')).toBeInTheDocument();
+      expect(screen.getByText('Not observed')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook received', { exact: false })).not.toBeInTheDocument();
+    });
+
+    it('shows a stored failed refunds/create webhook state without converting it to success', async () => {
+      const breakdown = buildRefundExecutionBreakdown(buildRefundAttemptSummary('attempt-failed-webhook', 'RESOLVED'), true);
+      breakdown.refundWebhookStatus = 'FAILED';
+      getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+      renderPage();
+
+      const webhookItem = (await screen.findByText('Latest order refund webhook')).closest('.meta-item');
+      expect(webhookItem).not.toBeNull();
+      expect(within(webhookItem as HTMLElement).getByText('Failed')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook received', { exact: false })).not.toBeInTheDocument();
     });
 
     it('keeps a resolved attempt and passed fulfillment post-check separate from a partial customer refund', async () => {

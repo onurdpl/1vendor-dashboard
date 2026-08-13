@@ -348,6 +348,7 @@ function buildAdminOrderBreakdownDb() {
     totalPrice: '1000.00',
     createdAt: new Date('2026-06-21T08:00:00.000Z'),
     updatedAt: new Date('2026-06-21T08:05:00.000Z'),
+    webhookEvents: [] as Array<Record<string, unknown>>,
     allocations: [
       {
         ...buildDetailAllocation({
@@ -2512,6 +2513,51 @@ describe('vendor order reject operational hold', () => {
     expect(breakdown?.order.financialStatus).toBe('refunded');
   });
 
+  it('exposes the newest order-linked refunds/create webhook status deterministically', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.webhookEvents = [{ status: 'PROCESSED' }];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.order.refundWebhookStatus).toBe('PROCESSED');
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        webhookEvents: {
+          where: {
+            topic: 'refunds/create',
+          },
+          select: {
+            status: true,
+          },
+          orderBy: [
+            { receivedAt: 'desc' },
+            { id: 'desc' },
+          ],
+          take: 1,
+        },
+      }),
+    }));
+  });
+
+  it('reports no refund webhook evidence when no order-linked refunds/create event exists', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(buildAdminOrderBreakdownDb());
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.order.refundWebhookStatus).toBeNull();
+  });
+
+  it('preserves a stored failed refunds/create webhook state', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.webhookEvents = [{ status: 'FAILED' }];
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.order.refundWebhookStatus).toBe('FAILED');
+  });
+
   it('includes null transfer summary when no completed economic transfer exists', async () => {
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(buildAdminOrderBreakdownDb());
 
@@ -2586,7 +2632,7 @@ describe('vendor order reject operational hold', () => {
       {
         id: 'refund-yalispor-1',
         sourceShopifyRefundId: 'refund-1',
-        amount: '100.00',
+        amount: '1249.00',
         status: 'processed',
         createdAt: new Date('2026-06-21T12:02:00.000Z'),
         updatedAt: new Date('2026-06-21T12:02:00.000Z'),
@@ -2597,7 +2643,7 @@ describe('vendor order reject operational hold', () => {
             title: 'Refunded item',
             sourceLineItemId: 'gid://shopify/LineItem/1',
             quantity: 1,
-            subtotal: '100.00',
+            subtotal: '1249.00',
             createdAt: new Date('2026-06-21T12:02:00.000Z'),
           },
         ],
@@ -2611,7 +2657,7 @@ describe('vendor order reject operational hold', () => {
       expect.objectContaining({
         id: 'refund-yalispor-1',
         sourceShopifyRefundId: 'refund-1',
-        amount: '100.00',
+        amount: '1249.00',
         status: 'processed',
         lineItems: [
           {
@@ -2620,7 +2666,7 @@ describe('vendor order reject operational hold', () => {
             title: 'Refunded item',
             sourceLineItemId: 'gid://shopify/LineItem/1',
             quantity: 1,
-            subtotal: '100.00',
+            subtotal: '1249.00',
           },
         ],
       }),

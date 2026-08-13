@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   executeAdminShopifyRefund,
+  getAdminShopifyOrderBreakdown,
   previewAdminShopifyRefund,
   requestAdminCancelRefundReview,
   sendAdminProductPanelVariantDisableDryRun,
@@ -8,15 +9,18 @@ import {
 } from './orders';
 
 const apiClientPost = vi.hoisted(() => vi.fn());
+const apiClientGet = vi.hoisted(() => vi.fn());
 
 vi.mock('../../lib/api-client', () => ({
   apiClient: {
+    get: apiClientGet,
     post: apiClientPost,
   },
 }));
 
 describe('real orders economic transfer service', () => {
   beforeEach(() => {
+    apiClientGet.mockReset();
     apiClientPost.mockReset();
     apiClientPost.mockResolvedValue({
       ok: true,
@@ -77,6 +81,74 @@ describe('real orders economic transfer service', () => {
         ],
       },
     });
+  });
+
+  it('maps product refund records separately from real order-linked webhook evidence', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      order: {
+        sourceShopifyOrderId: 'shopify-1',
+        sourceShopifyOrderNumber: '#1001',
+        customerName: 'Customer',
+        customerEmail: null,
+        financialStatus: 'refunded',
+        totalAmount: '1249.00',
+        createdAt: '2026-06-22T08:00:00.000Z',
+        updatedAt: '2026-06-22T08:10:00.000Z',
+        customerRefundCompletion: {
+          status: 'VERIFIED_FULL_CUSTOMER_REFUND',
+          reasonCode: 'canonical_full_customer_refund_verified',
+          displayFinancialStatus: 'REFUNDED',
+          currency: 'TRY',
+          totalReceivedAmount: '1249.00',
+          totalRefundedAmount: '1249.00',
+          netPaymentAmount: '0.00',
+          totalOutstandingAmount: '0.00',
+          totalRefundedShippingAmount: '0.00',
+        },
+        refundWebhookStatus: 'PROCESSED',
+      },
+      allocations: [{
+        id: 'alloc-1',
+        vendorId: 'vendor-a',
+        vendorName: 'Vendor A',
+        originalVendorId: 'vendor-a',
+        assignedVendorId: 'vendor-a',
+        allocationStatus: 'VENDOR_BLOCKED',
+        cancellationReason: 'OUT_OF_STOCK',
+        reassignmentRequired: true,
+        fulfillmentStatus: 'PENDING',
+        shippingStatus: 'AWAITING_SHIPMENT',
+        trackingNumber: null,
+        carrier: null,
+        trackingUrl: null,
+        fulfilledAt: null,
+        shipmentCreatedAt: null,
+        shipmentUpdatedAt: null,
+        totalAmount: '1249.00',
+        lineItems: [],
+        assignmentHistory: [],
+        returnRecords: [],
+        refundRecords: [{
+          id: 'refund-1',
+          sourceShopifyRefundId: 'shopify-refund-1',
+          amount: '1249.00',
+          status: 'processed',
+          createdAt: '2026-06-22T08:05:00.000Z',
+          lineItems: [],
+        }],
+        financeIntegrityAlerts: [],
+        transferSummary: null,
+        cancelRefundReview: null,
+        outboundRefundAttemptSummary: null,
+        productPanelVariantDisableEvents: [],
+      }],
+    });
+
+    const result = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1001');
+
+    expect(apiClientGet).toHaveBeenCalledWith('/admin/orders/gid://shopify/Order/1001', { signal: undefined });
+    expect(result.refundWebhookStatus).toBe('PROCESSED');
+    expect(result.allocations[0]?.refundTotal).toBe('TRY\u00a01,249.00');
   });
 
   it('posts admin economic transfer payload without vendor context and maps refreshed order', async () => {

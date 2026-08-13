@@ -4241,6 +4241,23 @@ export async function getAdminShopifyOrderBreakdown(
       sourceShopifyOrderId: shopifyOrderId,
     },
     include: {
+        webhookEvents: {
+          where: {
+            topic: 'refunds/create',
+          },
+          select: {
+            status: true,
+          },
+          orderBy: [
+            {
+              receivedAt: 'desc',
+            },
+            {
+              id: 'desc',
+            },
+          ],
+          take: 1,
+        },
         allocations: {
           include: {
             assignedVendor: true,
@@ -4501,6 +4518,7 @@ export async function getAdminShopifyOrderBreakdown(
       createdAt: order.createdAt.toISOString(),
       updatedAt: order.updatedAt.toISOString(),
       customerRefundCompletion,
+      refundWebhookStatus: order.webhookEvents[0]?.status ?? null,
     },
     productPanelVariantDisableMode: getProductPanelVariantDisableMode(),
     allocations: order.allocations.map((allocation) => {
