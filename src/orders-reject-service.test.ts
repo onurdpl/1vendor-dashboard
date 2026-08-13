@@ -342,6 +342,7 @@ function buildAdminOrderBreakdownDb() {
   return {
     sourceShopifyOrderId: 'gid://shopify/Order/1088',
     sourceShopifyOrderNumber: '#1088',
+    financialStatus: 'paid',
     customerName: 'Customer',
     customerEmail: 'customer@example.test',
     totalPrice: '1000.00',
@@ -2499,6 +2500,16 @@ describe('vendor order reject operational hold', () => {
         }),
       }),
     }));
+  });
+
+  it('exposes the converged persisted financial status in the admin order snapshot', async () => {
+    const orderDb = buildAdminOrderBreakdownDb();
+    orderDb.financialStatus = 'refunded';
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(orderDb);
+
+    const breakdown = await getAdminShopifyOrderBreakdown('gid://shopify/Order/1088');
+
+    expect(breakdown?.order.financialStatus).toBe('refunded');
   });
 
   it('includes null transfer summary when no completed economic transfer exists', async () => {

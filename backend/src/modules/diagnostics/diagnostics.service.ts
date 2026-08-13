@@ -2870,6 +2870,7 @@ async function processWebhookEvent(
       event,
       payload: typedPayload,
       monetaryEvidence: refundEvidence,
+      canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
     });
 
     return ingestionResult.ok

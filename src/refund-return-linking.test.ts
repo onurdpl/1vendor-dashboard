@@ -6,6 +6,7 @@ const txMock = vi.hoisted(() => ({
   },
   shopifyOrder: {
     findUnique: vi.fn(),
+    update: vi.fn(),
   },
   vendor: {
     findMany: vi.fn(),
@@ -110,6 +111,8 @@ const positiveMonetaryEvidence = {
   sanitizedWarnings: [],
 } as const;
 
+const CANONICAL_REFUNDED_STATUS = 'REFUNDED';
+
 function monetaryEvidence(sourceShopifyRefundId: string, monetaryRefundAmount: string) {
   return {
     ...positiveMonetaryEvidence,
@@ -148,6 +151,7 @@ function setupShippingOnlyOrder() {
     sourceShopifyOrderId: '7621834670417',
     sourceShopifyOrderNumber: '#1029',
     currency: 'TRY',
+    financialStatus: 'partially_refunded',
     lineItems: [],
     allocations: [],
   });
@@ -223,6 +227,7 @@ function setupOrder(options: { cancelRefundReviewStatus?: string | null } = {}) 
     sourceShopifyOrderId: '7621834670417',
     sourceShopifyOrderNumber: '#1029',
     currency: 'TRY',
+    financialStatus: 'paid',
     lineItems: [orderLineItem],
     allocations: [allocation],
   });
@@ -288,6 +293,7 @@ function setupTransferredOrder() {
     sourceShopifyOrderId: '7621834670417',
     sourceShopifyOrderNumber: '#1029',
     currency: 'TRY',
+    financialStatus: 'paid',
     lineItems: [orderLineItem],
     allocations: [allocation],
   });
@@ -404,6 +410,7 @@ function setupSplitOrderRefund(input: {
     sourceShopifyOrderId: 'split-order',
     sourceShopifyOrderNumber: '#1096',
     currency: 'TRY',
+    financialStatus: 'paid',
     lineItems: [sourceLineItem, childLineItem],
     allocations: [sourceAllocation, childAllocation],
   });
@@ -525,6 +532,7 @@ describe('Shopify refund return linking', () => {
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
     txMock.orderShippingRefundClaim.findMany.mockResolvedValue([]);
     txMock.orderShippingRefundClaim.updateMany.mockResolvedValue({ count: 0 });
+    txMock.shopifyOrder.update.mockResolvedValue({ id: 'shopify-order-db-1029' });
   });
 
   it('terminalizes an exactly owned verified shipping-only refund without product or vendor-finance writes', async () => {
@@ -534,6 +542,7 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(result).toMatchObject({
@@ -588,6 +597,14 @@ describe('Shopify refund return linking', () => {
     expect(txMock.webhookEvent.update).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'PROCESSED' }),
     }));
+    expect(txMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: {
+        id: 'shopify-order-db-1029',
+      },
+      data: {
+        financialStatus: 'refunded',
+      },
+    });
     expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
     expect(txMock.shopifyRefund.upsert).not.toHaveBeenCalled();
     expect(txMock.shopifyRefundLineItem.upsert).not.toHaveBeenCalled();
@@ -615,11 +632,13 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
     await ingestVerifiedShopifyRefund({
       event: canonicalReconciliationEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
@@ -646,11 +665,13 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
     await ingestVerifiedShopifyRefund({
       event: { ...webhookEvent(), id: 'webhook-refund-duplicate' } as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
@@ -677,11 +698,13 @@ describe('Shopify refund return linking', () => {
       event: canonicalReconciliationEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
     await ingestVerifiedShopifyRefund({
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
@@ -708,6 +731,7 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(result).toMatchObject({
@@ -735,6 +759,7 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: shippingOnlyPayload(),
       monetaryEvidence: positiveMonetaryEvidence,
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(result).toMatchObject({
@@ -759,6 +784,7 @@ describe('Shopify refund return linking', () => {
     });
     expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
     expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+    expect(txMock.shopifyOrder.update).not.toHaveBeenCalled();
   });
 
   it('keeps product plus checkout-shipping money on the existing product accounting path', async () => {
@@ -769,6 +795,7 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: refundPayload() as never,
       monetaryEvidence: monetaryEvidence('1074533826897', '3499.00'),
+      canonicalFinancialStatus: CANONICAL_REFUNDED_STATUS,
     });
 
     expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
@@ -781,6 +808,10 @@ describe('Shopify refund return linking', () => {
     }));
     expect(txMock.financeEvent.createMany).toHaveBeenCalled();
     expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
+    expect(txMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-1029' },
+      data: { financialStatus: 'refunded' },
+    });
   });
 
   it('keeps product-only refunds out of shipping-only owner matching', async () => {
@@ -791,12 +822,17 @@ describe('Shopify refund return linking', () => {
       event: webhookEvent() as never,
       payload: refundPayload() as never,
       monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
     });
 
     expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
     expect(txMock.refundRecord.upsert).toHaveBeenCalled();
     expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalled();
     expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
+    expect(txMock.shopifyOrder.update).toHaveBeenCalledWith({
+      where: { id: 'shopify-order-db-1029' },
+      data: { financialStatus: 'partially_refunded' },
+    });
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {

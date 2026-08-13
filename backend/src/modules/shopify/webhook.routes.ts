@@ -1136,6 +1136,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         event: idempotencyResult.event,
         payload,
         monetaryEvidence: refundEvidence,
+        canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify refunds/create ingestion failed.';

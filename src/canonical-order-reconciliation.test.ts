@@ -277,6 +277,17 @@ describe('canonical Shopify order reconciliation', () => {
     }));
   });
 
+  it('repairs stale financial status using canonical Shopify normalization', async () => {
+    const snapshot = buildCanonicalSnapshot({ financialStatus: 'REFUNDED' });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder({ financialStatus: 'paid' }));
+
+    await createReconciliationService(buildEnv(snapshot)).reconcileShopifyOrder('order-1');
+
+    expect(prismaMock.shopifyOrder.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ financialStatus: 'refunded' }),
+    }));
+  });
+
   it('repairs stale line item metadata', async () => {
     const snapshot = buildCanonicalSnapshot();
     prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce(shopifyOrder());

@@ -753,6 +753,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
             }),
             transactionClient: tx,
             monetaryEvidence: itemEvidence,
+            canonicalFinancialStatus: input.bundle.refundCollection.displayFinancialStatus,
           });
           if (!result.ok) {
             throw new Error(result.error);

@@ -33,6 +33,7 @@ import {
   REFUND_MONETARY_CLASSIFICATIONS,
   type CanonicalRefundItemMonetaryEvidence,
 } from './shopify-refund-monetary-evidence.js';
+import { synchronizeCanonicalShopifyOrderFinancialStatus } from './shopify-order-financial-status.service.js';
 
 const CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET = new Set<string>(CANCEL_REFUND_REVIEW_BLOCKING_STATUSES);
 
@@ -388,6 +389,7 @@ async function reconcileVerifiedShippingOnlyRefund(
 async function ingestShopifyRefundWebhookInternal(
   input: RefundIngestionInput,
   monetaryEvidence?: CanonicalRefundItemMonetaryEvidence,
+  canonicalFinancialStatus?: string | null,
 ): Promise<RefundIngestionResult> {
   const parsedRefund = parseRefundPayload(input.payload);
 
@@ -460,6 +462,14 @@ async function ingestShopifyRefundWebhookInternal(
 
       if (!shopifyOrder) {
         throw new Error(`No ingested Shopify order found for refund order id ${parsedRefund.sourceShopifyOrderId}.`);
+      }
+
+      if (monetaryEvidence) {
+        await synchronizeCanonicalShopifyOrderFinancialStatus({
+          db: tx,
+          shopifyOrder,
+          canonicalFinancialStatus,
+        });
       }
 
       if (parsedRefund.refundLineItems.length === 0) {
@@ -1024,7 +1034,10 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
 }
 
 export async function ingestVerifiedShopifyRefund(
-  input: RefundIngestionInput & { monetaryEvidence: CanonicalRefundItemMonetaryEvidence },
+  input: RefundIngestionInput & {
+    monetaryEvidence: CanonicalRefundItemMonetaryEvidence;
+    canonicalFinancialStatus: string | null | undefined;
+  },
 ): Promise<RefundIngestionResult> {
   const sourceShopifyRefundId = String(input.payload.id);
   if (
@@ -1034,5 +1047,9 @@ export async function ingestVerifiedShopifyRefund(
     throw new Error('Verified positive Shopify monetary refund evidence is required before refund ingestion.');
   }
 
-  return ingestShopifyRefundWebhookInternal(input, input.monetaryEvidence);
+  return ingestShopifyRefundWebhookInternal(
+    input,
+    input.monetaryEvidence,
+    input.canonicalFinancialStatus,
+  );
 }

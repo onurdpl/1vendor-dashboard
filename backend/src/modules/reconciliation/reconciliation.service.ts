@@ -14,6 +14,7 @@ import type {
   ShopifyOrderFulfillment,
   ShopifyOrderFulfillmentState,
 } from '../shopify/shopify-admin.types.js';
+import { normalizeCanonicalShopifyOrderFinancialStatus } from '../shopify/shopify-order-financial-status.service.js';
 import type {
   OrderReconciliationResult,
   ReconciliationAllocationResult,
@@ -580,7 +581,9 @@ async function repairCanonicalOrderSnapshot(input: {
   addField('sourceShopifyOrderNumber');
   addField('shopifyCreatedAt', { kind: 'date' });
   addField('currency');
-  addField('financialStatus');
+  addField('financialStatus', {
+    value: normalizeCanonicalShopifyOrderFinancialStatus(canonicalOrderSnapshot.financialStatus),
+  });
   addField('paymentGatewayName');
   addField('taxesIncluded', { kind: 'boolean' });
   addField('orderTaxAmount', { kind: 'amount' });

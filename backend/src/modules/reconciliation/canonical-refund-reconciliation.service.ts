@@ -491,6 +491,7 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
         event: webhookEvent,
         payload,
         monetaryEvidence: refundEvidence,
+        canonicalFinancialStatus: canonicalRefunds.displayFinancialStatus,
       });
       const after = await getRefundEvidenceCounts(refund.sourceShopifyRefundId);
       const recordSummary = await getRefundRecordSummary(refund.sourceShopifyRefundId);

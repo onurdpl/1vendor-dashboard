@@ -473,6 +473,27 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(payload.shipment).not.toHaveProperty('sender_name');
   });
 
+  it('keeps Shopify financial status out of Kargonomi collection and payment fields', () => {
+    const payload = buildKargonomiShipmentCreatePayload({
+      warehouseId: 12707,
+      buyer: {
+        buyer_name: 'Test Buyer',
+        buyer_phone: '5551112233',
+        buyer_address: 'Test Buyer Address',
+        buyer_state_id: 34,
+        buyer_city_id: 828,
+      },
+      packages: [{ desi: 2 }],
+      financialStatus: 'refunded',
+      payment_method: 'cod',
+      amount_due: 100,
+    } as never);
+
+    expect(payload.shipment).not.toHaveProperty('financialStatus');
+    expect(payload.shipment).not.toHaveProperty('payment_method');
+    expect(payload.shipment).not.toHaveProperty('amount_due');
+  });
+
   it('preserves package desi/content/barcode mapping', () => {
     const payload = buildKargonomiShipmentCreatePayload({
       warehouseId: '12707',

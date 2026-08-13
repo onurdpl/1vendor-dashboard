@@ -91,6 +91,7 @@ function buildEnv(refunds: CanonicalShopifyRefundSnapshot[]): AppEnv {
     SHOPIFY_SHOP_DOMAIN: 'demo.myshopify.com',
     SHOPIFY_MOCK_CANONICAL_REFUNDS: JSON.stringify({
       'order-1': {
+        displayFinancialStatus: 'PARTIALLY_REFUNDED',
         orderTotalRefundedAmount: totalRefundedAmount,
         orderTotalRefundedCurrencyCode: 'TRY',
         refundsListComplete: true,
@@ -175,6 +176,7 @@ describe('canonical Shopify refund reconciliation', () => {
         classification: 'MONETARY_REFUND',
         monetaryRefundAmount: '100',
       }),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
       payload: expect.objectContaining({
         id: '5001',
         order_id: 'order-1',
@@ -254,6 +256,7 @@ describe('canonical Shopify refund reconciliation', () => {
         classification: 'MONETARY_REFUND',
         monetaryRefundAmount: '100',
       }),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
     }));
     expect(result).toMatchObject({
       refundsCreated: 0,

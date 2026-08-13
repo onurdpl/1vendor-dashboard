@@ -371,6 +371,7 @@ describe('Shopify canonical refund monetary evidence', () => {
     await expect(ingestVerifiedShopifyRefund({
       payload: { id: 'refund-1', order_id: '7856043819345', refund_line_items: [] },
       monetaryEvidence: evidence.refunds[0],
+      canonicalFinancialStatus: 'REFUNDED',
     })).rejects.toThrow(/verified positive Shopify monetary refund evidence is required/i);
   });
 

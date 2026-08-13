@@ -170,6 +170,19 @@ describe('order detail snapshot API mapping', () => {
     expect(JSON.stringify(result)).not.toContain('rawPayload');
   });
 
+  it('exposes a canonically converged refund status from the persisted order snapshot', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      order: {
+        ...buildAllocation().order,
+        financialStatus: 'refunded',
+      },
+    }));
+
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+
+    expect(result?.orderSnapshot.financialStatus).toBe('refunded');
+  });
+
   it('renders missing optional snapshot values as null in the API payload', async () => {
     prismaMock.vendorAllocation.findFirst.mockResolvedValue(
       buildAllocation({
