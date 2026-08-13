@@ -224,6 +224,52 @@ describe('canonical Shopify refund reconciliation', () => {
     });
   });
 
+  it('routes a canonical shipping-only refund through verified ingestion without product finance deltas', async () => {
+    mockEvidenceCounts([
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+    ]);
+    prismaMock.refundRecord.findMany.mockResolvedValueOnce([]);
+    ingestVerifiedShopifyRefundMock.mockResolvedValueOnce({
+      ok: true,
+      action: 'accepted',
+      processingStatus: 'processed',
+      shopifyOrderId: 'order-1',
+      refundAllocationCount: 0,
+      reconciliationMode: 'shipping_only',
+      terminalStateChanged: true,
+    });
+
+    const result = await createCanonicalRefundReconciliationService(
+      buildEnv([canonicalRefund({ refundLineItems: [] })]),
+    ).reconcileShopifyOrderRefunds('order-1');
+
+    expect(ingestVerifiedShopifyRefundMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        id: '5001',
+        order_id: 'order-1',
+        refund_line_items: [],
+      }),
+      monetaryEvidence: expect.objectContaining({
+        classification: 'MONETARY_REFUND',
+        monetaryRefundAmount: '100',
+      }),
+    }));
+    expect(result).toMatchObject({
+      refundsCreated: 0,
+      ledgersRepaired: 0,
+      eventsRepaired: 0,
+      failedCount: 0,
+      results: [expect.objectContaining({ status: 'repaired' })],
+    });
+    expect(prismaMock.operationalSignal.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        title: 'Canonical shipping refund reconciled',
+        description: 'Canonical Shopify refund reconciliation terminalized the owned shipping-only refund without product finance records.',
+      }),
+    }));
+  });
+
   it('reports repaired when an existing refund record gains missing ledger and event evidence', async () => {
     mockEvidenceCounts([
       { refundRecords: 1, refundLedgers: 0, financeEvents: 0 },

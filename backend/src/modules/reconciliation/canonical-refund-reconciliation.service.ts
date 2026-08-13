@@ -532,11 +532,16 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
         continue;
       }
 
-      const status = summarizeItemStatus({
-        before,
-        after,
-        ingestionOk: ingestionResult.ok,
-      });
+      const shippingOnlyReconciliation = ingestionResult.reconciliationMode === 'shipping_only';
+      const status = shippingOnlyReconciliation
+        ? ingestionResult.terminalStateChanged
+          ? 'repaired' as const
+          : 'already_present' as const
+        : summarizeItemStatus({
+            before,
+            after,
+            ingestionOk: ingestionResult.ok,
+          });
       const ledgerDelta = Math.max(0, after.refundLedgers - before.refundLedgers);
       const eventDelta = Math.max(0, after.financeEvents - before.financeEvents);
       report.ledgersRepaired += ledgerDelta;
@@ -565,9 +570,13 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
           sourceShopifyOrderId,
           sourceShopifyRefundId: refund.sourceShopifyRefundId,
           severity: OperationalSignalSeverity.INFO,
-          title: 'Canonical refund repaired',
-          description: 'Canonical Shopify refund reconciliation created or repaired local refund finance records.',
-          suggestedAction: 'No action required unless settlement review remains pending.',
+          title: shippingOnlyReconciliation ? 'Canonical shipping refund reconciled' : 'Canonical refund repaired',
+          description: shippingOnlyReconciliation
+            ? 'Canonical Shopify refund reconciliation terminalized the owned shipping-only refund without product finance records.'
+            : 'Canonical Shopify refund reconciliation created or repaired local refund finance records.',
+          suggestedAction: shippingOnlyReconciliation
+            ? 'No action required unless customer refund completion remains unresolved.'
+            : 'No action required unless settlement review remains pending.',
           metadata: {
             status,
             ledgerDelta,

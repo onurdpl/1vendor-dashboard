@@ -549,6 +549,43 @@ describe('Shopify orders/cancelled webhook bridge', () => {
     });
   });
 
+  it('completes the REFUND_SYNC job when verified shipping-only ingestion succeeds', async () => {
+    refundIngestionMock.ingestVerifiedShopifyRefund.mockResolvedValueOnce({
+      ok: true,
+      action: 'accepted',
+      processingStatus: 'processed',
+      shopifyOrderId: '1105',
+      refundAllocationCount: 0,
+    });
+    const { routes } = registerRoutes();
+    const handler = routes.get('/webhooks/shopify/refunds-create');
+    const payload = { id: 5001, order_id: 1105, refund_line_items: [] };
+
+    const result = await handler?.(buildWebhookRequest({
+      topic: 'refunds/create',
+      payload,
+    }), buildReply());
+
+    expect(refundIngestionMock.ingestVerifiedShopifyRefund).toHaveBeenCalledWith(expect.objectContaining({
+      payload,
+      monetaryEvidence: expect.objectContaining({ classification: 'MONETARY_REFUND' }),
+    }));
+    expect(operationalJobsMock.createWebhookOperationalJob).toHaveBeenCalledWith(expect.objectContaining({
+      topic: 'refunds/create',
+      sourceShopifyOrderId: '1105',
+    }));
+    expect(operationalJobsMock.markOperationalJobFailed).not.toHaveBeenCalled();
+    expect(operationalJobsMock.markOperationalJobCompleted).toHaveBeenCalledWith('operational-job-cancelled');
+    expect(result).toMatchObject({
+      status: 202,
+      body: {
+        action: 'accepted',
+        processingStatus: 'processed',
+        refundAllocationCount: 0,
+      },
+    });
+  });
+
   it('processes a zero-value void without invoking refund ingestion', async () => {
     shopifyAdminMock.fetchCanonicalRefundsForOrder.mockResolvedValueOnce(canonicalRefunds('VOID', '0.00'));
     const { routes } = registerRoutes();

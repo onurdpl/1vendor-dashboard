@@ -46,6 +46,8 @@ export type RefundIngestionSuccessResult = {
   processingStatus: 'processed';
   shopifyOrderId: string;
   refundAllocationCount: number;
+  reconciliationMode?: 'shipping_only';
+  terminalStateChanged?: boolean;
 };
 
 export type RefundIngestionFailureResult = {

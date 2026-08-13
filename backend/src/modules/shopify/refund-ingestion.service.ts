@@ -16,7 +16,10 @@ import {
 import { createSettlementRefundAdjustmentForRefundLedger } from '../finance/settlement-refund-adjustment.service.js';
 import { createVendorDebtForPaidRefund } from '../finance/vendor-balance.service.js';
 import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from '../orders/outbound-shopify-refund-attempt.service.js';
-import { releaseResolvedOrderShippingRefundClaimsForAllocation } from '../orders/order-shipping-refund-claim.service.js';
+import {
+  ORDER_SHIPPING_REFUND_CLAIM_STATUSES,
+  releaseResolvedOrderShippingRefundClaimsForAllocation,
+} from '../orders/order-shipping-refund-claim.service.js';
 import { resolveAllocationForShopifyOrderLineItem } from '../orders/allocation-ownership-resolution.service.js';
 import type {
   ParsedShopifyRefundLineItem,
@@ -238,7 +241,154 @@ type ResolvedRefundLineItem = ParsedShopifyRefundLineItem & {
   refundAmount: string;
 };
 
-export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): Promise<RefundIngestionResult> {
+function hasEmptySubmittedRefundLineItems(value: Prisma.JsonValue | null) {
+  return Array.isArray(value) && value.length === 0;
+}
+
+function normalizeShopifyResourceId(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (!normalized.includes('/')) {
+    return normalized;
+  }
+  const refundGidPrefix = 'gid://shopify/Refund/';
+  return normalized.startsWith(refundGidPrefix) && normalized.length > refundGidPrefix.length
+    ? normalized.slice(refundGidPrefix.length)
+    : null;
+}
+
+async function reconcileVerifiedShippingOnlyRefund(
+  tx: Prisma.TransactionClient,
+  input: {
+    sourceShopifyOrderId: string;
+    sourceShopifyRefundId: string;
+    resolvedAt: Date;
+  },
+) {
+  const matchingClaims = await tx.orderShippingRefundClaim.findMany({
+    where: {
+      shopifyOrderId: input.sourceShopifyOrderId,
+      ownerAttempt: {
+        shopifyOrderId: input.sourceShopifyOrderId,
+        refundShipping: true,
+        OR: [
+          { shopifyRefundId: input.sourceShopifyRefundId },
+          { shopifyRefundId: { endsWith: `/${input.sourceShopifyRefundId}` } },
+        ],
+      },
+    },
+    select: {
+      id: true,
+      status: true,
+      activeOrderKey: true,
+      ownerAttempt: {
+        select: {
+          id: true,
+          status: true,
+          shopifyOrderId: true,
+          shopifyRefundId: true,
+          refundShipping: true,
+          refundLineItemsJson: true,
+          vendorAllocationId: true,
+          vendorAllocation: {
+            select: {
+              cancelRefundReviewStatus: true,
+              order: {
+                select: {
+                  sourceShopifyOrderId: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      acquiredAt: 'desc',
+    },
+    take: 2,
+  });
+
+  if (matchingClaims.length !== 1) {
+    throw new Error('Shipping-only refund could not be matched to one exact order shipping refund owner.');
+  }
+
+  const claim = matchingClaims[0];
+  const attempt = claim.ownerAttempt;
+  if (
+    attempt.shopifyOrderId !== input.sourceShopifyOrderId ||
+    attempt.vendorAllocation.order.sourceShopifyOrderId !== input.sourceShopifyOrderId ||
+    normalizeShopifyResourceId(attempt.shopifyRefundId) !== normalizeShopifyResourceId(input.sourceShopifyRefundId) ||
+    !attempt.refundShipping ||
+    !hasEmptySubmittedRefundLineItems(attempt.refundLineItemsJson)
+  ) {
+    throw new Error('Shipping-only refund ownership evidence does not match the submitted refund attempt.');
+  }
+
+  const alreadyTerminal =
+    attempt.status === OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED &&
+    claim.status === ORDER_SHIPPING_REFUND_CLAIM_STATUSES.RELEASED &&
+    claim.activeOrderKey === null;
+  if (alreadyTerminal) {
+    return { vendorAllocationId: attempt.vendorAllocationId, terminalStateChanged: false };
+  }
+
+  const activeOwner =
+    attempt.status === OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING &&
+    claim.status === ORDER_SHIPPING_REFUND_CLAIM_STATUSES.ACTIVE &&
+    claim.activeOrderKey === input.sourceShopifyOrderId;
+  if (!activeOwner) {
+    throw new Error('Shipping-only refund owner is not the active pending attempt for this Shopify order.');
+  }
+
+  const attemptResolution = await tx.outboundShopifyRefundAttempt.updateMany({
+    where: {
+      id: attempt.id,
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+      shopifyOrderId: input.sourceShopifyOrderId,
+      OR: [
+        { shopifyRefundId: input.sourceShopifyRefundId },
+        { shopifyRefundId: { endsWith: `/${input.sourceShopifyRefundId}` } },
+      ],
+      refundShipping: true,
+    },
+    data: {
+      status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED,
+      resolvedAt: input.resolvedAt,
+    },
+  });
+  if (attemptResolution.count !== 1) {
+    throw new Error('Shipping-only refund attempt changed before terminal reconciliation completed.');
+  }
+
+  const normalizedReviewStatus = attempt.vendorAllocation.cancelRefundReviewStatus?.trim().toUpperCase() ?? '';
+  if (CANCEL_REFUND_REVIEW_RESOLVABLE_STATUS_SET.has(normalizedReviewStatus)) {
+    await tx.vendorAllocation.updateMany({
+      where: {
+        id: attempt.vendorAllocationId,
+        cancelRefundReviewStatus: {
+          in: [...CANCEL_REFUND_REVIEW_BLOCKING_STATUSES],
+        },
+      },
+      data: {
+        cancelRefundReviewStatus: 'RESOLVED',
+      },
+    });
+  }
+
+  await releaseResolvedOrderShippingRefundClaimsForAllocation(tx, {
+    vendorAllocationId: attempt.vendorAllocationId,
+    releasedAt: input.resolvedAt,
+  });
+  return { vendorAllocationId: attempt.vendorAllocationId, terminalStateChanged: true };
+}
+
+async function ingestShopifyRefundWebhookInternal(
+  input: RefundIngestionInput,
+  monetaryEvidence?: CanonicalRefundItemMonetaryEvidence,
+): Promise<RefundIngestionResult> {
   const parsedRefund = parseRefundPayload(input.payload);
 
   if (!parsedRefund.sourceShopifyOrderId) {
@@ -260,7 +410,14 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
     };
   }
 
-  if (parsedRefund.refundLineItems.length === 0) {
+  if (
+    parsedRefund.refundLineItems.length === 0 &&
+    (
+      monetaryEvidence?.sourceShopifyRefundId !== parsedRefund.sourceShopifyRefundId ||
+      monetaryEvidence.classification !== REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund ||
+      !(Number(monetaryEvidence.monetaryRefundAmount) > 0)
+    )
+  ) {
     if (input.event) {
       await prisma.webhookEvent.update({
         where: { id: input.event.id },
@@ -303,6 +460,33 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
 
       if (!shopifyOrder) {
         throw new Error(`No ingested Shopify order found for refund order id ${parsedRefund.sourceShopifyOrderId}.`);
+      }
+
+      if (parsedRefund.refundLineItems.length === 0) {
+        const terminalization = await reconcileVerifiedShippingOnlyRefund(tx, {
+          sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
+          resolvedAt: new Date(),
+        });
+
+        if (input.event) {
+          await tx.webhookEvent.update({
+            where: { id: input.event.id },
+            data: {
+              status: 'PROCESSED',
+              processedAt: new Date(),
+              errorMessage: null,
+              shopifyOrderId: shopifyOrder.id,
+            },
+          });
+        }
+
+        return {
+          shopifyOrderId: parsedRefund.sourceShopifyOrderId,
+          refundAllocationCount: 0,
+          reconciliationMode: 'shipping_only' as const,
+          terminalStateChanged: terminalization.terminalStateChanged,
+        };
       }
 
       const resolvedLineItems: ResolvedRefundLineItem[] = [];
@@ -806,6 +990,12 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
       processingStatus: 'processed',
       shopifyOrderId: result.shopifyOrderId,
       refundAllocationCount: result.refundAllocationCount,
+      ...('reconciliationMode' in result
+        ? {
+            reconciliationMode: result.reconciliationMode,
+            terminalStateChanged: result.terminalStateChanged,
+          }
+        : {}),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Shopify refund ingestion failed.';
@@ -829,6 +1019,10 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
   }
 }
 
+export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): Promise<RefundIngestionResult> {
+  return ingestShopifyRefundWebhookInternal(input);
+}
+
 export async function ingestVerifiedShopifyRefund(
   input: RefundIngestionInput & { monetaryEvidence: CanonicalRefundItemMonetaryEvidence },
 ): Promise<RefundIngestionResult> {
@@ -840,5 +1034,5 @@ export async function ingestVerifiedShopifyRefund(
     throw new Error('Verified positive Shopify monetary refund evidence is required before refund ingestion.');
   }
 
-  return ingestShopifyRefundWebhook(input);
+  return ingestShopifyRefundWebhookInternal(input, input.monetaryEvidence);
 }

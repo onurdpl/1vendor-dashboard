@@ -39,6 +39,7 @@ const txMock = vi.hoisted(() => ({
     updateMany: vi.fn(),
   },
   orderShippingRefundClaim: {
+    findMany: vi.fn(),
     updateMany: vi.fn(),
   },
   financeLedgerEntry: {
@@ -72,7 +73,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { ingestShopifyRefundWebhook } = await import('../backend/src/modules/shopify/refund-ingestion.service.js');
+const { ingestShopifyRefundWebhook, ingestVerifiedShopifyRefund } = await import('../backend/src/modules/shopify/refund-ingestion.service.js');
 
 function webhookEvent() {
   return {
@@ -88,6 +89,81 @@ function webhookEvent() {
     processedAt: null,
     errorMessage: null,
     shopifyOrderId: null,
+  };
+}
+
+function canonicalReconciliationEvent() {
+  return {
+    ...webhookEvent(),
+    id: 'webhook-canonical-shipping-refund-1',
+    webhookId: 'canonical-refund-reconciliation-shipping-refund-1',
+    idempotencyKey: 'canonical_refund_reconciliation:demo.myshopify.com:7621834670417:shipping-refund-1',
+  };
+}
+
+const positiveMonetaryEvidence = {
+  sourceShopifyRefundId: 'shipping-refund-1',
+  classification: 'MONETARY_REFUND',
+  monetaryRefundAmount: '100.00',
+  currency: 'TRY',
+  reasonCode: 'monetary_refund_verified',
+  sanitizedWarnings: [],
+} as const;
+
+function monetaryEvidence(sourceShopifyRefundId: string, monetaryRefundAmount: string) {
+  return {
+    ...positiveMonetaryEvidence,
+    sourceShopifyRefundId,
+    monetaryRefundAmount,
+  };
+}
+
+function shippingOnlyOwner(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'shipping-claim-1',
+    status: 'ACTIVE',
+    activeOrderKey: '7621834670417',
+    ownerAttempt: {
+      id: 'shipping-attempt-1',
+      status: 'SHOPIFY_ACTION_PENDING',
+      shopifyOrderId: '7621834670417',
+      shopifyRefundId: 'gid://shopify/Refund/shipping-refund-1',
+      refundShipping: true,
+      refundLineItemsJson: [],
+      vendorAllocationId: 'alloc-1029-sporjinal',
+      vendorAllocation: {
+        cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING',
+        order: {
+          sourceShopifyOrderId: '7621834670417',
+        },
+      },
+    },
+    ...overrides,
+  };
+}
+
+function setupShippingOnlyOrder() {
+  txMock.shopifyOrder.findUnique.mockResolvedValue({
+    id: 'shopify-order-db-1029',
+    sourceShopifyOrderId: '7621834670417',
+    sourceShopifyOrderNumber: '#1029',
+    currency: 'TRY',
+    lineItems: [],
+    allocations: [],
+  });
+  txMock.orderShippingRefundClaim.findMany.mockResolvedValue([shippingOnlyOwner()]);
+  txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 1 });
+  txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 1 });
+  txMock.orderShippingRefundClaim.updateMany.mockResolvedValue({ count: 1 });
+}
+
+function shippingOnlyPayload() {
+  return {
+    id: 'shipping-refund-1',
+    order_id: '7621834670417',
+    created_at: '2026-08-12T10:00:00.000Z',
+    note: 'Checkout shipping refund',
+    refund_line_items: [],
   };
 }
 
@@ -447,7 +523,280 @@ describe('Shopify refund return linking', () => {
     txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
     txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
+    txMock.orderShippingRefundClaim.findMany.mockResolvedValue([]);
     txMock.orderShippingRefundClaim.updateMany.mockResolvedValue({ count: 0 });
+  });
+
+  it('terminalizes an exactly owned verified shipping-only refund without product or vendor-finance writes', async () => {
+    setupShippingOnlyOrder();
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      processingStatus: 'processed',
+      shopifyOrderId: '7621834670417',
+      refundAllocationCount: 0,
+      reconciliationMode: 'shipping_only',
+      terminalStateChanged: true,
+    });
+    expect(txMock.orderShippingRefundClaim.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        shopifyOrderId: '7621834670417',
+        ownerAttempt: {
+          shopifyOrderId: '7621834670417',
+          refundShipping: true,
+          OR: [
+            { shopifyRefundId: 'shipping-refund-1' },
+            { shopifyRefundId: { endsWith: '/shipping-refund-1' } },
+          ],
+        },
+      },
+      take: 2,
+    }));
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'shipping-attempt-1',
+        status: 'SHOPIFY_ACTION_PENDING',
+        shopifyOrderId: '7621834670417',
+        refundShipping: true,
+        OR: [
+          { shopifyRefundId: 'shipping-refund-1' },
+          { shopifyRefundId: { endsWith: '/shipping-refund-1' } },
+        ],
+      },
+      data: {
+        status: 'RESOLVED',
+        resolvedAt: expect.any(Date),
+      },
+    });
+    expect(txMock.vendorAllocation.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'alloc-1029-sporjinal' }),
+      data: { cancelRefundReviewStatus: 'RESOLVED' },
+    }));
+    expect(txMock.orderShippingRefundClaim.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'RELEASED',
+        activeOrderKey: null,
+        releaseReason: 'OWNER_ATTEMPT_RESOLVED',
+      }),
+    }));
+    expect(txMock.webhookEvent.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'PROCESSED' }),
+    }));
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.shopifyRefund.upsert).not.toHaveBeenCalled();
+    expect(txMock.shopifyRefundLineItem.upsert).not.toHaveBeenCalled();
+    expect(txMock.returnRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps webhook then canonical shipping-only reconciliation idempotent', async () => {
+    setupShippingOnlyOrder();
+    txMock.orderShippingRefundClaim.findMany
+      .mockResolvedValueOnce([shippingOnlyOwner()])
+      .mockResolvedValueOnce([shippingOnlyOwner({
+        status: 'RELEASED',
+        activeOrderKey: null,
+        ownerAttempt: {
+          ...shippingOnlyOwner().ownerAttempt,
+          status: 'RESOLVED',
+        },
+      })]);
+
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+    await ingestVerifiedShopifyRefund({
+      event: canonicalReconciliationEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.orderShippingRefundClaim.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps a duplicate live shipping-only webhook free of repeated side effects', async () => {
+    setupShippingOnlyOrder();
+    txMock.orderShippingRefundClaim.findMany
+      .mockResolvedValueOnce([shippingOnlyOwner()])
+      .mockResolvedValueOnce([shippingOnlyOwner({
+        status: 'RELEASED',
+        activeOrderKey: null,
+        ownerAttempt: {
+          ...shippingOnlyOwner().ownerAttempt,
+          status: 'RESOLVED',
+        },
+      })]);
+
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+    await ingestVerifiedShopifyRefund({
+      event: { ...webhookEvent(), id: 'webhook-refund-duplicate' } as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.orderShippingRefundClaim.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps canonical reconciliation then a later live webhook idempotent', async () => {
+    setupShippingOnlyOrder();
+    txMock.orderShippingRefundClaim.findMany
+      .mockResolvedValueOnce([shippingOnlyOwner()])
+      .mockResolvedValueOnce([shippingOnlyOwner({
+        status: 'RELEASED',
+        activeOrderKey: null,
+        ownerAttempt: {
+          ...shippingOnlyOwner().ownerAttempt,
+          status: 'RESOLVED',
+        },
+      })]);
+
+    await ingestVerifiedShopifyRefund({
+      event: canonicalReconciliationEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+    await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.orderShippingRefundClaim.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.shopifyRefundLineItem.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+    expect(txMock.vendorBalanceEvent.upsert).not.toHaveBeenCalled();
+    expect(txMock.settlementRefundAdjustment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for a verified zero-line refund without one exact shipping owner', async () => {
+    txMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'shopify-order-db-1029',
+      sourceShopifyOrderId: '7621834670417',
+      sourceShopifyOrderNumber: '#1029',
+      currency: 'TRY',
+      lineItems: [],
+      allocations: [],
+    });
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      processingStatus: 'needs_attention',
+      error: 'Shipping-only refund could not be matched to one exact order shipping refund owner.',
+    });
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+    expect(txMock.orderShippingRefundClaim.updateMany).not.toHaveBeenCalled();
+    expect(txMock.refundRecord.upsert).not.toHaveBeenCalled();
+    expect(txMock.financeEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wrong-owner claim even when the database mock returns it', async () => {
+    setupShippingOnlyOrder();
+    txMock.orderShippingRefundClaim.findMany.mockResolvedValueOnce([shippingOnlyOwner({
+      ownerAttempt: {
+        ...shippingOnlyOwner().ownerAttempt,
+        id: 'wrong-attempt',
+        shopifyRefundId: 'different-refund',
+      },
+    })]);
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+      monetaryEvidence: positiveMonetaryEvidence,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'Shipping-only refund ownership evidence does not match the submitted refund attempt.',
+    });
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+    expect(txMock.orderShippingRefundClaim.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not allow unverified zero-line payloads into shipping-only reconciliation', async () => {
+    setupShippingOnlyOrder();
+
+    const result = await ingestShopifyRefundWebhook({
+      event: webhookEvent() as never,
+      payload: shippingOnlyPayload(),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'Shopify refunds/create payload did not include refund line items.',
+    });
+    expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps product plus checkout-shipping money on the existing product accounting path', async () => {
+    setupOrder({ cancelRefundReviewStatus: 'SHOPIFY_ACTION_PENDING' });
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3499.00'),
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.refundRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ amount: '3399.00' }),
+    }));
+    expect(txMock.shopifyRefundLineItem.upsert).toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ amount: '3399.00' }),
+    }));
+    expect(txMock.financeEvent.createMany).toHaveBeenCalled();
+    expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps product-only refunds out of shipping-only owner matching', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.refundRecord.upsert).toHaveBeenCalled();
+    expect(txMock.financeLedgerEntry.upsert).toHaveBeenCalled();
+    expect(txMock.orderShippingRefundClaim.findMany).not.toHaveBeenCalled();
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {
