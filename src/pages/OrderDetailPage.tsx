@@ -4226,6 +4226,12 @@ export function OrderDetailPage() {
   const refundFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Refund');
   const settlementFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Payout' || record.category === 'Invoice') ?? null;
   const payoutCalculation = payoutFinanceRecord?.payoutCalculation ?? null;
+  const postedRefundEvidencePresent =
+    isPositiveFinanceValue(refundFinanceRecord?.amount) ||
+    (order.refundRecordCount ?? 0) > 0 ||
+    Boolean(financePreview && financePreview.sourceFields.refundCount > 0);
+  const isTerminalRefundCompletedOrder = operationalStory.resolvedByRefund;
+  const shouldHideVendorEstimatedEarnings = postedRefundEvidencePresent || isTerminalRefundCompletedOrder;
 
   async function handleSplitRejectSuccess(_result: AllocationSplitExecutionResponse) {
     showFeedback('Selected items rejected. Admin review was created for those items.', 'success');
@@ -4326,20 +4332,18 @@ export function OrderDetailPage() {
       value: refundImpactValue,
       state: 'Estimated',
     },
-    {
-      label: isActiveVendorBlockedOrder
-        ? 'Held settlement estimate'
-        : isRefundResolvedVendorBlockedOrder
-          ? 'Refund completed'
-          : 'Estimated settlement',
-      value: financePreview
-        ? formatFinancePreviewValue(financePreview.balance.netVendorPosition, financePreview.currency, {
-            unknown: financePreview.unknowns.includes('vendor_payable'),
-          })
-        : payoutCalculation?.estimatedPayout ?? ORDER_FINANCE_UNKNOWN_VALUE,
-      state: 'Estimated',
-    },
-  ].map((row) => ({
+    !isTerminalRefundCompletedOrder
+      ? {
+          label: isActiveVendorBlockedOrder ? 'Held settlement estimate' : 'Estimated settlement',
+          value: financePreview
+            ? formatFinancePreviewValue(financePreview.balance.netVendorPosition, financePreview.currency, {
+                unknown: financePreview.unknowns.includes('vendor_payable'),
+              })
+            : payoutCalculation?.estimatedPayout ?? ORDER_FINANCE_UNKNOWN_VALUE,
+          state: 'Estimated',
+        }
+      : null,
+  ].filter((row): row is { label: string; value: string; state: string } => Boolean(row)).map((row) => ({
     ...row,
     state: row.value === ORDER_FINANCE_UNKNOWN_VALUE
       ? ORDER_FINANCE_UNKNOWN_VALUE
@@ -4347,8 +4351,6 @@ export function OrderDetailPage() {
         ? 'Held estimate'
       : isRefundResolvedVendorBlockedOrder && row.label === 'Refund impact'
         ? 'Recorded'
-      : isRefundResolvedVendorBlockedOrder && row.label === 'Refund completed'
-        ? 'Completed'
         : row.state,
   }));
   const financePreviewEntryTime = (eventType: string) =>
@@ -4356,14 +4358,14 @@ export function OrderDetailPage() {
   const commissionEstimateValue = financePreviewRows.find((row) => row.label === 'Commission estimate')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const shippingDeductionValue = financePreviewRows.find((row) => row.label === 'Shipping deduction')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const estimatedSettlementValue =
-    financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate' || row.label === 'Refund completed')?.value ??
+    financePreviewRows.find((row) => row.label === 'Estimated settlement' || row.label === 'Held settlement estimate')?.value ??
     ORDER_FINANCE_UNKNOWN_VALUE;
   const grossOrderAmountValue =
     financePreviewRows.find((row) => row.label === 'Gross order amount')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
   const vendorFinancialSummaryRows = [
     isKnownFinanceValue(grossOrderAmountValue)
       ? {
-          label: 'Gross Order Amount',
+          label: 'Gross Allocation Amount',
           value: grossOrderAmountValue,
           helper: 'Total value for this order.',
         }
@@ -4389,7 +4391,7 @@ export function OrderDetailPage() {
           helper: isRefundResolvedVendorBlockedOrder ? 'Refund completed for this order.' : 'Refund activity linked to this order.',
         }
       : null,
-    !isActiveVendorBlockedOrder && isKnownFinanceValue(estimatedSettlementValue)
+    !isActiveVendorBlockedOrder && !shouldHideVendorEstimatedEarnings && isKnownFinanceValue(estimatedSettlementValue)
       ? {
           label: 'Estimated Earnings',
           value: estimatedSettlementValue,

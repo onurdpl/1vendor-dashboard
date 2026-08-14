@@ -347,6 +347,61 @@ function renderOrderDetail() {
   );
 }
 
+function buildOrderFinanceDashboard(options: { estimatedPayout?: string; includeProductRefund?: boolean } = {}) {
+  const estimatedPayout = options.estimatedPayout ?? 'TRY 4,449.20';
+  return {
+    summary: {
+      grossSales: 'TRY 4,999.00',
+      refunds: options.includeProductRefund ? 'TRY 4,999.00' : 'TRY 0.00',
+      netRevenue: options.includeProductRefund ? 'TRY 0.00' : 'TRY 4,999.00',
+      platformFee: 'TRY 499.90',
+      payoutEstimate: estimatedPayout,
+    },
+    transactions: [
+      {
+        id: 'finance-sale-1028',
+        category: 'Invoice' as const,
+        shopifyOrderId: '7616544244049',
+        shopifyOrderNumber: '#1028',
+        amount: 'TRY 4,999.00',
+        date: '2026-05-15T12:08:00.000Z',
+        status: 'Pending' as const,
+        payoutCalculation: {
+          grossAmount: 'TRY 4,999.00',
+          commission: 'TRY 499.90',
+          commissionVat: 'TRY 99.98',
+          shippingDeduction: 'TRY 0.00',
+          refundImpact: options.includeProductRefund ? 'TRY 4,999.00' : 'TRY 0.00',
+          estimatedPayout,
+          shippingApplied: false,
+          shippingMode: 'disabled' as const,
+        },
+      },
+      ...(options.includeProductRefund
+        ? [{
+            id: 'finance-refund-1028',
+            category: 'Refund' as const,
+            shopifyOrderId: '7616544244049',
+            shopifyOrderNumber: '#1028',
+            amount: 'TRY 4,999.00',
+            date: '2026-05-16T12:08:00.000Z',
+            status: 'Recorded' as const,
+            payoutCalculation: {
+              grossAmount: 'TRY 0.00',
+              commission: 'TRY 0.00',
+              commissionVat: 'TRY 0.00',
+              shippingDeduction: 'TRY 0.00',
+              refundImpact: 'TRY 4,999.00',
+              estimatedPayout: 'TRY -4,999.00',
+              shippingApplied: false,
+              shippingMode: 'disabled' as const,
+            },
+          }]
+        : []),
+    ],
+  };
+}
+
 function formatTimelineDateForTest(value: string) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -2355,7 +2410,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const itemsSection = screen.getByRole('heading', { name: /Items/ }).closest('article') as HTMLElement;
     const financialSummary = screen.getByLabelText('Order financial summary');
     expect(within(financialSummary).getByRole('heading', { name: 'Order financial summary' })).toBeInTheDocument();
-    expect(within(financialSummary).getByText('Gross Order Amount')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expect(within(financialSummary).queryByText('Gross Order Amount')).not.toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,999.00')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 499.90')).toBeInTheDocument();
@@ -2389,6 +2445,128 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('SHIPPING_EXECUTION_ENABLED')).not.toBeInTheDocument();
     expect(screen.queryByText('Endpoint:')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
+  });
+
+  it('hides negative Estimated Earnings after a posted full product refund', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      refundRecordCount: 1,
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard({
+      estimatedPayout: 'TRY -599.88',
+      includeProductRefund: true,
+    }));
+
+    renderOrderDetail();
+
+    const financialSummary = await screen.findByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
+    expect(within(financialSummary).getAllByText('TRY 4,999.00')).toHaveLength(2);
+    expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
+    expect(within(financialSummary).queryByText('TRY -599.88')).not.toBeInTheDocument();
+  });
+
+  it('hides Estimated Earnings after a product refund plus terminal checkout shipping refund', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecordCount: 1,
+      latestOutboundRefundAttemptStatus: 'RESOLVED',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      shipmentExecution: null,
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard({
+      estimatedPayout: 'TRY -599.88',
+      includeProductRefund: true,
+    }));
+
+    renderOrderDetail();
+
+    const financialSummary = await screen.findByLabelText('Order financial summary');
+    expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
+    expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+  });
+
+  it('hides Estimated Earnings for a terminal shipping-only refund without product finance rows', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecordCount: 0,
+      latestOutboundRefundAttemptStatus: 'RESOLVED',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      shipmentExecution: null,
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard());
+
+    renderOrderDetail();
+
+    const financialSummary = await screen.findByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+  });
+
+  it('keeps Estimated Earnings for a non-terminal return without posted refund evidence', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listReturnsMock.mockResolvedValueOnce([{
+      id: 'return-1028',
+      relatedOrderId: orderWithShipmentSummary.id,
+      sourceShopifyOrderId: orderWithShipmentSummary.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: orderWithShipmentSummary.sourceShopifyOrderNumber,
+      date: '2026-05-16T12:08:00.000Z',
+      status: 'Requested',
+    }]);
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard());
+
+    renderOrderDetail();
+
+    const financialSummary = await screen.findByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
   });
 
   it('shows selected item rejection on detail for multi-line rejectable allocations', async () => {
@@ -2637,6 +2815,71 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(timelineScope.queryByText('Order review started')).not.toBeInTheDocument();
     expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+  });
+
+  it('keeps terminal refund status separate from admin monetary preview rows', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      cancelRefundReviewStatus: 'RESOLVED',
+      refundRecordCount: 1,
+      latestOutboundRefundAttemptStatus: 'RESOLVED',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      shipmentExecution: null,
+      financeLedgerPreview: {
+        status: 'ready',
+        currency: 'TRY',
+        entries: [],
+        balance: {
+          grossSales: '4999.00',
+          marketplaceCommission: '499.90',
+          vendorPayable: '0.00',
+          shippingCostReserved: '0.00',
+          vendorDebt: '0.00',
+          netVendorPosition: '-599.88',
+        },
+        unknowns: [],
+        assumptions: [],
+        sourceFields: {
+          orderId: '7616544244049',
+          orderNumber: '#1028',
+          allocationId: 'alloc-sporjinal-7621783322961',
+          vendorId: 'sporjinal',
+          lineItemCount: 1,
+          returnCount: 0,
+          refundCount: 1,
+          commissionProfile: 'configured',
+          shippingCost: 'confirmed',
+          payoutAlreadyPaid: false,
+        },
+      },
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard({
+      estimatedPayout: 'TRY -599.88',
+      includeProductRefund: true,
+    }));
+
+    renderOrderDetail();
+
+    const financePreview = await screen.findByLabelText('Order finance preview');
+    expect(within(financePreview).getByRole('heading', { name: 'Refund completed' })).toBeInTheDocument();
+    const monetaryRows = financePreview.querySelector('.order-finance-preview-grid') as HTMLElement;
+    expect(monetaryRows).not.toBeNull();
+    expect(within(monetaryRows).queryByText('Refund completed')).not.toBeInTheDocument();
+    expect(within(monetaryRows).queryByText('Estimated settlement')).not.toBeInTheDocument();
+    expect(monetaryRows).not.toHaveTextContent(/TRY\s*-599\.88/);
+    expect(within(financePreview).getByText('Refund impact recorded.')).toBeInTheDocument();
   });
 
   it('uses canonical Shopify cancellation time instead of order creation time', async () => {
