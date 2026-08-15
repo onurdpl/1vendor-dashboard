@@ -742,6 +742,75 @@ function getPayoutImpact(record: FinanceTransaction, audience: 'admin' | 'vendor
   return record.payoutCalculation?.estimatedPayout ?? record.amount;
 }
 
+const NO_SETTLEMENT_IMPACT = '—';
+
+function hasSameAbsoluteCurrencyValue(left: string | null | undefined, right: string | null | undefined) {
+  return Math.abs(parseCurrencyValue(left)) === Math.abs(parseCurrencyValue(right));
+}
+
+function getTransactionListSettlementImpact(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
+  if (audience === 'vendor') {
+    return getPayoutImpact(record, audience);
+  }
+
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'Held';
+  }
+
+  if (isRefundRecord(record)) {
+    const refundImpact = record.payoutCalculation?.refundImpact;
+    if (refundImpact && !hasSameAbsoluteCurrencyValue(refundImpact, record.amount)) {
+      return formatDeductionValue(refundImpact);
+    }
+    return 'Deducts balance';
+  }
+
+  if (record.category === 'Adjustment') {
+    const adjustment = record.settlementRefundAdjustments?.[0];
+    if (adjustment?.status === 'applied') {
+      return 'Adjustment applied';
+    }
+    if (adjustment?.status === 'pending' || adjustment?.status === 'partially_applied') {
+      return 'Balance adjustment';
+    }
+    return 'Balance adjustment';
+  }
+
+  if (record.category === 'Payout') {
+    if (hasReliablePaidEvidence(record)) {
+      return 'Paid';
+    }
+    if (record.payoutBatch) {
+      return getPayoutBatchStatusLabel(record.payoutBatch.status, audience);
+    }
+    return NO_SETTLEMENT_IMPACT;
+  }
+
+  const estimatedPayout = record.payoutCalculation?.estimatedPayout;
+  if (estimatedPayout) {
+    return hasSameAbsoluteCurrencyValue(estimatedPayout, record.amount) ? 'Payable estimate' : estimatedPayout;
+  }
+  if (record.payoutBatch?.netAmount && !hasSameAbsoluteCurrencyValue(record.payoutBatch.netAmount, record.amount)) {
+    return record.payoutBatch.netAmount;
+  }
+  return NO_SETTLEMENT_IMPACT;
+}
+
+function getTransactionListSettlementImpactClass(record: FinanceTransaction, value: string, audience: 'admin' | 'vendor' = 'admin') {
+  if (audience === 'vendor') {
+    const scenario = getVendorFinanceScenario(record);
+    return `${getVendorScenarioImpactClass(value, scenario) ?? ''} finance-amount-emphasis`.trim();
+  }
+  const normalizedValue = value.toLowerCase();
+  if (value === NO_SETTLEMENT_IMPACT || value === 'Held' || value === 'Paid' || normalizedValue.includes('adjustment') || normalizedValue.includes('deduction') || normalizedValue.includes('deducts') || normalizedValue.includes('estimate')) {
+    return 'finance-amount-emphasis';
+  }
+  if (parseCurrencyValue(value) < 0 || isRefundRecord(record)) {
+    return 'finance-negative finance-amount-emphasis';
+  }
+  return 'finance-positive finance-amount-emphasis';
+}
+
 function formatVendorScenarioAmount(value: string, scenario: VendorFinanceScenario) {
   if (scenario.kind === 'refund') {
     return formatDeductionValue(value);
@@ -2129,7 +2198,7 @@ export function FinancePage() {
           <OperationalTable
             columns={isVendorUser
               ? ['Tarih', 'İşlem Tipi', 'Sipariş', 'Durum', 'Tutar', 'Ödeme Etkisi', 'İşlem']
-              : ['Date', 'Type', 'Order', 'Status', 'Amount', 'Payment impact', 'Action']}
+              : ['Date', 'Type', 'Order', 'Status', 'Source amount', 'Settlement impact', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
             {isError && !finance ? (
@@ -2174,14 +2243,14 @@ export function FinancePage() {
               const orderSettlementHref = vendorBlockedHold ? buildOrdersHref(record) : isVendorUser ? null : buildOrderSettlementHref(record);
               const projection = getFinanceOperationalProjection(record, { audience: financeAudience });
               const rowVendorFinanceScenario = getVendorFinanceScenario(record);
-              const rowPaymentImpact = getPayoutImpact(record, financeAudience);
+              const rowPaymentImpact = getTransactionListSettlementImpact(record, financeAudience);
               const rowStatusLabel = isVendorUser
                 ? rowVendorFinanceScenario.status
                 : projection.legacyStatusLabel;
               const rowStatusDetail = isVendorUser
                 ? null
-                : projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState;
-              const rowActivityDetail = getPayoutActivityDetail(record, financeAudience);
+                : vendorBlockedHold ? null : projection.blockerState === 'None' ? projection.payoutReadiness : projection.blockerState;
+              const rowActivityDetail = vendorBlockedHold && !isSplitChildFinanceHold(record) ? null : getPayoutActivityDetail(record, financeAudience);
               return (
                 <OperationalTableRow
                   key={record.id}
@@ -2219,7 +2288,7 @@ export function FinancePage() {
                   <strong className={isVendorUser ? getVendorScenarioAmountClass(record.amount, rowVendorFinanceScenario) : isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isVendorUser ? formatVendorScenarioAmount(record.amount, rowVendorFinanceScenario) : `${isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}${record.amount}`}
                   </strong>
-                  <strong className={isVendorUser ? `${getVendorScenarioImpactClass(rowPaymentImpact, rowVendorFinanceScenario) ?? ''} finance-amount-emphasis`.trim() : isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : vendorBlockedHold ? 'finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
+                  <strong className={getTransactionListSettlementImpactClass(record, rowPaymentImpact, financeAudience)}>
                     {rowPaymentImpact}
                   </strong>
                   <OperationalActionGroup>

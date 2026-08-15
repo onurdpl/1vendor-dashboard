@@ -486,7 +486,8 @@ describe('FinancePage control center', () => {
     expect(screen.getByRole('heading', { name: /finance workspace/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search by order #, type, status, amount...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Payment impact' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Source amount' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Finance unavailable')).not.toBeInTheDocument();
   });
@@ -785,8 +786,8 @@ describe('FinancePage control center', () => {
     expect(screen.queryByRole('columnheader', { name: 'Settlement' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Payout' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Hold / Blocker' })).not.toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Amount' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Payment impact' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Source amount' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
     await waitFor(() => expect(container.querySelectorAll('.finance-queue-state').length).toBeGreaterThan(0));
 
     await userEvent.click(screen.getAllByRole('button', { name: 'View details' })[0]);
@@ -794,6 +795,115 @@ describe('FinancePage control center', () => {
     expect((await screen.findAllByText('Payment eligibility')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('Ready for review').length).toBeGreaterThan(0));
     expect(screen.getByText('Reason')).toBeInTheDocument();
+  });
+
+  it('uses stable source amount and settlement impact semantics in the admin transaction list', async () => {
+    const blockedSale: FinanceTransaction = {
+      ...financeDashboard.transactions[0],
+      id: 'ledger-sale-blocked-list',
+      shopifyOrderNumber: '1116',
+      shopifyOrderId: '7819000001116',
+      payoutBatch: null,
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'held',
+        payoutReady: false,
+        holdReason: 'Vendor allocation is blocked and awaiting admin resolution.',
+      },
+    };
+    const adjustment: FinanceTransaction = {
+      id: 'ledger-adjustment-list',
+      date: '2026-05-13T10:00:00Z',
+      description: 'Manual balance adjustment',
+      counterparty: 'Demo Vendor A',
+      category: 'Adjustment',
+      amount: '$50.00',
+      status: 'Recorded',
+      shopifyOrderNumber: '1117',
+      shopifyOrderId: '7819000001117',
+    };
+    const payout: FinanceTransaction = {
+      id: 'ledger-payout-list',
+      date: '2026-05-14T10:00:00Z',
+      description: 'Vendor payout paid',
+      counterparty: 'Demo Vendor A',
+      category: 'Payout',
+      amount: '$100.00',
+      status: 'Completed',
+      payoutStatus: 'paid',
+      shopifyOrderNumber: '1118',
+      shopifyOrderId: '7819000001118',
+      payoutBatch: {
+        id: 'batch-paid-list',
+        status: 'paid',
+        netAmount: '$100.00',
+        createdAt: '2026-05-14T10:00:00Z',
+        paidAt: '2026-05-15T10:00:00Z',
+        paymentReference: 'EFT-1118',
+      },
+    };
+    const fallbackSale: FinanceTransaction = {
+      id: 'ledger-sale-no-impact-list',
+      date: '2026-05-15T10:00:00Z',
+      description: 'Sale without calculation snapshot',
+      counterparty: 'Demo Vendor A',
+      category: 'Invoice',
+      amount: '$777.00',
+      status: 'Recorded',
+      shopifyOrderNumber: '1119',
+      shopifyOrderId: '7819000001119',
+    };
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        financeDashboard.transactions[0],
+        blockedSale,
+        financeDashboard.transactions[1],
+        adjustment,
+        payout,
+        fallbackSale,
+      ],
+    });
+
+    const { container } = renderFinancePage();
+    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    await table.findByText('#1021');
+    const rowForOrder = (orderNumber: string) =>
+      table.getByText(`#${orderNumber}`).closest('[role="button"]') as HTMLElement;
+
+    expect(await table.findByRole('columnheader', { name: 'Source amount' })).toBeInTheDocument();
+    expect(table.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
+
+    const normalSaleRow = within(rowForOrder('1021'));
+    expect(normalSaleRow.getByText('$3,399.00')).toBeInTheDocument();
+    expect(normalSaleRow.getByText('$3,059.10')).toBeInTheDocument();
+    expect(normalSaleRow.queryByText('Held')).not.toBeInTheDocument();
+
+    const blockedSaleRow = within(rowForOrder('1116'));
+    expect(blockedSaleRow.getByText('$3,399.00')).toBeInTheDocument();
+    expect(blockedSaleRow.getByText('Held')).toBeInTheDocument();
+    expect(blockedSaleRow.getByRole('link', { name: 'Review assignment' })).toBeInTheDocument();
+    expect(blockedSaleRow.queryByText('$3,059.10')).not.toBeInTheDocument();
+    expect(blockedSaleRow.queryByText('Vendor blocked')).not.toBeInTheDocument();
+
+    const refundRow = within(rowForOrder('1001'));
+    expect(refundRow.getByText('-$425.00')).toBeInTheDocument();
+    expect(refundRow.getByText('Deducts balance')).toBeInTheDocument();
+    expect(refundRow.queryByText('$425.00')).not.toBeInTheDocument();
+
+    const adjustmentRow = within(rowForOrder('1117'));
+    expect(adjustmentRow.getByText('-$50.00')).toBeInTheDocument();
+    expect(adjustmentRow.getByText('Balance adjustment')).toBeInTheDocument();
+    expect(adjustmentRow.queryByText('$50.00')).not.toBeInTheDocument();
+
+    const payoutRow = within(rowForOrder('1118'));
+    expect(payoutRow.getByText('$100.00')).toBeInTheDocument();
+    expect(payoutRow.getAllByText('Paid').length).toBeGreaterThan(0);
+    expect(payoutRow.queryByText('+$100.00')).not.toBeInTheDocument();
+
+    const fallbackRow = within(rowForOrder('1119'));
+    expect(fallbackRow.getByText('$777.00')).toBeInTheDocument();
+    expect(fallbackRow.getByText('—')).toBeInTheDocument();
   });
 
   it('shows shipping reconciliation as required only when the finance projection needs it', async () => {
