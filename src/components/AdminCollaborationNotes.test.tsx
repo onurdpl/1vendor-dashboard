@@ -34,6 +34,9 @@ describe('AdminCollaborationNotes', () => {
   it('renders and highlights admin-only collaboration notes', async () => {
     render(<AdminCollaborationNotes contextType="order" contextId="ORD-A-1001" currentUser={adminUser} />);
 
+    expect(screen.getByText('No internal notes yet.')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/add an internal note/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add note' }));
     await userEvent.type(screen.getByPlaceholderText(/add an internal note/i), 'Follow up with @operator-one');
     await userEvent.click(screen.getByRole('button', { name: 'Add note' }));
 

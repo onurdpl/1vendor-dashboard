@@ -442,7 +442,9 @@ describe('operational deep-link smoke navigation', () => {
 
     expect(await screen.findByRole('heading', { name: 'Order #1030' })).toBeInTheDocument();
     expect((await screen.findAllByText('TRY 1,030.00')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Recorded').length).toBeGreaterThan(0);
+    expect(screen.getByText('Settlement')).toBeInTheDocument();
+    expect(screen.getByText('Financial preview')).toBeInTheDocument();
+    expect(screen.getByText('Estimated vendor payable')).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId }));
   });
 

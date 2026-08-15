@@ -73,6 +73,7 @@ export function AdminCollaborationNotes({
   const isAdmin = currentUser?.role === 'admin';
   const [notes, setNotes] = useState<AdminCollaborationNote[]>([]);
   const [content, setContent] = useState('');
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -110,6 +111,7 @@ export function AdminCollaborationNotes({
     writeNotes(nextNotes);
     setNotes(nextNotes);
     setContent('');
+    setIsComposerOpen(false);
   }
 
   return (
@@ -135,20 +137,29 @@ export function AdminCollaborationNotes({
             </div>
           ))
         ) : (
-          <p className="admin-collab-empty">{emptyMessage}</p>
+          <div className="admin-collab-empty">
+            <span>{emptyMessage}</span>
+            {!isComposerOpen ? (
+              <button type="button" className="button button-secondary button-compact" onClick={() => setIsComposerOpen(true)}>
+                Add note
+              </button>
+            ) : null}
+          </div>
         )}
       </div>
-      <form className="admin-collab-form" onSubmit={handleSubmit}>
-        <textarea
-          value={content}
-          onChange={(event) => setContent(event.target.value)}
-          placeholder="Add an internal note. Use @name for lightweight mentions."
-          rows={3}
-        />
-        <button type="submit" className="button button-secondary" disabled={!content.trim()}>
-          Add note
-        </button>
-      </form>
+      {visibleNotes.length || isComposerOpen ? (
+        <form className="admin-collab-form" onSubmit={handleSubmit}>
+          <textarea
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder="Add an internal note. Use @name for lightweight mentions."
+            rows={3}
+          />
+          <button type="submit" className="button button-secondary" disabled={!content.trim()}>
+            Add note
+          </button>
+        </form>
+      ) : null}
     </article>
   );
 }

@@ -15,7 +15,6 @@ import {
   SideDetailPanel,
   StatusBadge,
   TableSkeletonRows,
-  WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -30,10 +29,9 @@ import {
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
 import { getPageReadinessState } from '../lib/pageReadiness';
-import type { FinanceTransaction, OperationsRecommendation, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, SupportTicket, VendorDebtHistoryEvent } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
-import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import {
   supportTicketMatchesFinance,
@@ -42,7 +40,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatCurrency, formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
-import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
+import { getFinanceWorkflowAction, type WorkflowActionGuidance as WorkflowActionGuidanceModel } from '../lib/workflowActionGuidance';
 import {
   VENDOR_BLOCKED_FINANCE_HOLD_REASON,
   getFinanceNeedsReviewBreakdown,
@@ -153,10 +151,6 @@ function buildReturnsHref(record: FinanceTransaction) {
     return `/returns?order=${encodeURIComponent(String(record.shopifyOrderNumber))}`;
   }
   return null;
-}
-
-function buildFinanceHref(record: Pick<FinanceTransaction, 'id'>) {
-  return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
 }
 
 function buildOrderSettlementHref(record: FinanceTransaction) {
@@ -787,26 +781,6 @@ function getVendorScenarioTypeClass(scenario: VendorFinanceScenario) {
   return undefined;
 }
 
-function getTotalDeductions(record: FinanceTransaction) {
-  const values = [
-    record.payoutCalculation?.commission,
-    record.payoutCalculation?.commissionVat,
-    record.payoutCalculation?.shippingDeduction,
-    record.payoutCalculation?.refundImpact,
-  ].filter((value): value is string => Boolean(value));
-
-  if (!values.length) {
-    return UNKNOWN_FINANCE_VALUE;
-  }
-
-  const total = values.reduce((sum, value) => {
-    const numeric = Number(value.replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(numeric) ? sum + Math.abs(numeric) : sum;
-  }, 0);
-  const currency = values[0].match(/^[^\d-]+/)?.[0] ?? '$';
-  return `${currency}${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineItem[] {
   const reviewDisplay = getSettlementReviewDisplay(record);
   const splitRole = getSplitFinanceLedgerRole(record);
@@ -868,6 +842,64 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
   ];
 
   return items.filter((item): item is FinanceTimelineItem => Boolean(item));
+}
+
+function isMeaningfulFinanceTimelineEvent(event: OperationalEventInput) {
+  return event.title !== 'Order captured' && event.title !== 'Settlement preview generated';
+}
+
+function getPaymentEligibilityLabel(record: FinanceTransaction, projection: FinanceOperationalProjection | null) {
+  if (projection?.blockerState && projection.blockerState !== 'None') {
+    return 'Not eligible';
+  }
+  if (record.settlement?.payoutReady || record.settlement?.status === 'payable' || record.settlement?.status === 'partially_refunded') {
+    return 'Eligible';
+  }
+  return 'Not eligible';
+}
+
+function getSettlementReasonLabel(record: FinanceTransaction, projection: FinanceOperationalProjection | null) {
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'Vendor blocked';
+  }
+  if (isSplitChildFinanceHold(record)) {
+    return 'Split order assignment hold';
+  }
+  if (projection?.blockerState && projection.blockerState !== 'None') {
+    return projection.blockerState;
+  }
+  return 'None';
+}
+
+function getSettlementNextActionLabel(record: FinanceTransaction, projection: FinanceOperationalProjection | null, guidance: WorkflowActionGuidanceModel | null) {
+  if (isVendorBlockedFinanceHold(record)) {
+    return 'Resolve vendor allocation';
+  }
+  if (projection?.blockerState && projection.blockerState !== 'None') {
+    return guidance?.actionLabel ?? 'Review blocker';
+  }
+  if (record.payoutBatch || record.settlement?.review) {
+    return guidance?.actionLabel ?? 'Review settlement';
+  }
+  if (record.settlement?.payoutReady || record.settlement?.status === 'payable' || record.settlement?.status === 'partially_refunded') {
+    return 'Review settlement';
+  }
+  return 'Monitor eligibility';
+}
+
+function shouldShowRefundImpactRow(record: FinanceTransaction) {
+  return !isZeroCurrencyValue(record.payoutCalculation?.refundImpact);
+}
+
+function shouldShowShippingFeeRow(record: FinanceTransaction, projection: FinanceOperationalProjection | null) {
+  return !isZeroCurrencyValue(record.payoutCalculation?.shippingDeduction) || projection?.shippingImpact.state === 'required' || projection?.shippingImpact.state === 'completed';
+}
+
+function shouldShowBalanceAdjustmentImpact(finance: FinanceDashboard | null | undefined) {
+  return (
+    !isZeroCurrencyValue(finance?.payoutBatchSummary?.outstandingDebtAmount ?? finance?.summary.outstandingVendorDebt) ||
+    !isZeroCurrencyValue(finance?.payoutBatchSummary?.debtOffsetPreviewAmount)
+  );
 }
 
 function hasFinanceReviewCopy(value: string | null | undefined) {
@@ -1724,6 +1756,25 @@ export function FinancePage() {
   const selectedVendorPaymentWaitingSummary = getVendorPaymentWaitingSummary(selectedVendorFinanceScenario.status);
   const vendorFinanceTimelineEvents = getVendorFinanceTimelineEvents(financeTimelineEvents, selectedVendorFinanceScenario);
   const selectedPaymentImpact = selectedRecord ? getPayoutImpact(selectedRecord, financeAudience) : UNKNOWN_FINANCE_VALUE;
+  const selectedPaymentEligibility = selectedRecord
+    ? getPaymentEligibilityLabel(selectedRecord, selectedOperationalProjection)
+    : UNKNOWN_FINANCE_VALUE;
+  const selectedSettlementReason = selectedRecord
+    ? getSettlementReasonLabel(selectedRecord, selectedOperationalProjection)
+    : UNKNOWN_FINANCE_VALUE;
+  const selectedSettlementNextAction = selectedRecord
+    ? getSettlementNextActionLabel(selectedRecord, selectedOperationalProjection, selectedFinanceGuidance)
+    : UNKNOWN_FINANCE_VALUE;
+  const selectedAssignmentHref = selectedRecord && isVendorBlockedFinanceHold(selectedRecord) ? buildOrdersHref(selectedRecord) : null;
+  const selectedSettlementActionHref = selectedAssignmentHref ?? selectedOrderSettlementHref;
+  const showSelectedRefundImpact = selectedRecord ? shouldShowRefundImpactRow(selectedRecord) : false;
+  const showSelectedShippingFee = selectedRecord ? shouldShowShippingFeeRow(selectedRecord, selectedOperationalProjection) : false;
+  const showSelectedBalanceAdjustmentImpact = shouldShowBalanceAdjustmentImpact(finance);
+  const showSelectedTimeline = financeTimelineEvents.some(isMeaningfulFinanceTimelineEvent);
+  const selectedHasSingleRelatedOrder =
+    financeCrossLinks.length === 1 &&
+    financeCrossLinks[0]?.eyebrow === 'Order' &&
+    Boolean(financeCrossLinks[0]?.href);
   const vendorFinanceCrossLinks = financeCrossLinks
     .filter((link) => link.eyebrow !== 'Support')
     .map((link) => ({
@@ -1738,35 +1789,6 @@ export function FinancePage() {
       description: undefined,
       status: undefined,
     }));
-  const financeRecommendations: OperationsRecommendation[] = [];
-  if (selectedRecord && isAdmin) {
-    if (
-      !selectedRecord.settlement?.review &&
-      (selectedRecord.status === 'Pending' || selectedRecord.settlement?.status === 'held' || selectedRecord.settlement?.status === 'disputed')
-    ) {
-      financeRecommendations.push({
-        id: `finance-rec-payout-${selectedRecord.id}`,
-        type: 'finance_review',
-        severity: 'warning',
-        title: 'Review settlement issue',
-        description: selectedRecord.shopifyOrderNumber
-          ? `Settlement activity for ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)} needs operator review.`
-          : 'This transaction needs operator review.',
-        recommendedAction: 'Review settlement status before draft preparation',
-        relatedObjectType: 'Transaction',
-        relatedObjectId: selectedRecord.id,
-        vendor: {
-          id: currentVendor.vendorId,
-          name: currentVendor.vendorName,
-        },
-        createdFromSignal: `finance:${selectedRecord.id}:payout`,
-        deepLink: buildFinanceHref(selectedRecord),
-        vendorVisible: false,
-        createdAt: selectedRecord.date,
-      });
-    }
-  }
-
   const financeView = finance ?? {
     summary: {
       grossSales: UNKNOWN_FINANCE_VALUE,
@@ -2397,38 +2419,17 @@ export function FinancePage() {
             <>
               <div className="finance-selected-summary-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Selected Transaction</h4>
+                  <h4>Transaction</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
                     {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
                   </StatusBadge>
                 </div>
                 <div className="finance-selected-summary-grid">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Current status" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Settlement state" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Payment readiness" value={selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Blocker" value={selectedOperationalProjection?.blockerState ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
+                  <MetadataRow label="Payment impact" value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>} />
                 </div>
               </div>
-              {selectedFinanceGuidance ? (
-                <WorkflowActionGuidance
-                  actionLabel={selectedFinanceGuidance.actionLabel}
-                  description={selectedFinanceGuidance.description}
-                  tone={selectedFinanceGuidance.tone}
-                >
-                  {selectedOrderSettlementHref ? (
-                    <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedOrderSettlementHref}>
-                      View order settlement
-                    </Link>
-                  ) : null}
-                </WorkflowActionGuidance>
-              ) : null}
-              <OperationalRecommendations
-                title="Suggested next steps"
-                subtitle="Admin-only guidance for this transaction."
-                recommendations={financeRecommendations}
-                audience={isAdmin ? 'admin' : 'vendor'}
-              />
               {selectedRecord.splitFinanceSummary ? (
                 <div className="finance-detail-card finance-split-detail-card">
                   <div className="finance-detail-card-heading">
@@ -2452,17 +2453,37 @@ export function FinancePage() {
               ) : null}
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Settlement preview</h4>
+                  <h4>Settlement</h4>
                   <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
-                    {selectedSettlementReviewStatusLabel}
+                    {selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE}
                   </StatusBadge>
                 </div>
                 {selectedSettlementOffsetReviewPending ? (
                   <p className="page-description">Refund completed. The Shopify refund has been processed. This review only determines how the refund adjustment is recorded in settlement accounting. No shipment, refund, or vendor action is required.</p>
                 ) : null}
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Review status" value={selectedSettlementReviewStatusLabel} />
+                  <MetadataRow label="Status" value={selectedOperationalProjection?.legacyStatusLabel ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Reason" value={selectedSettlementReason} />
+                  {isSplitChildFinanceHold(selectedRecord) ? (
+                    <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
+                  ) : null}
+                  <MetadataRow label="Payment eligibility" value={selectedPaymentEligibility} />
+                  <MetadataRow
+                    label="Next action"
+                    value={
+                      <span>
+                        {selectedSettlementNextAction}
+                        {selectedSettlementActionHref ? (
+                          <>
+                            {' '}
+                            <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedSettlementActionHref}>
+                              {selectedAssignmentHref ? 'Review assignment' : 'View order settlement'}
+                            </Link>
+                          </>
+                        ) : null}
+                      </span>
+                    }
+                  />
                   {selectedRefundedSplitChildSaleBasis ? (
                     <>
                       <MetadataRow label="Operational status" value="Resolved" />
@@ -2472,36 +2493,11 @@ export function FinancePage() {
                       <MetadataRow label="Net child effect" value={<span>{selectedRefundedSplitChildNetEffect ?? UNKNOWN_FINANCE_VALUE}</span>} />
                     </>
                   ) : null}
-                  <MetadataRow
-                    label="Estimated payment"
-                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
-                  />
-                  <MetadataRow
-                    label="Refund impact"
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
-                  />
-                  <MetadataRow
-                    label="Payment impact"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
-                  />
-                  {isSplitChildFinanceHold(selectedRecord) ? (
-                    <>
-                      <MetadataRow label="Reason" value="Split order assignment hold" />
-                      <MetadataRow label="Hold context" value="Vendor rejected selected line items." />
-                    </>
-                  ) : isVendorBlockedFinanceHold(selectedRecord) ? (
-                    <MetadataRow label="Reason" value="Vendor blocked" />
+                  <MetadataRow label="Settlement state" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Payment" value={selectedOperationalProjection?.payoutState ?? UNKNOWN_FINANCE_VALUE} />
+                  {selectedReviewDisplay || selectedSettlementOffsetReviewPending ? (
+                    <MetadataRow label="Review status" value={selectedSettlementReviewStatusLabel} />
                   ) : null}
-                  <MetadataRow
-                    label={isVendorUser ? 'Settlement review' : 'Payment review'}
-                    value={
-                      selectedReviewDisplay
-                        ? selectedReviewDisplay.label
-                        : selectedRecord.payoutBatch
-                          ? (isVendorUser ? 'Pending review' : 'Draft review artifact')
-                          : 'No review scheduled'
-                    }
-                  />
                   {selectedRecord.settlement?.review ? (
                     <MetadataRow label="Approval" value={selectedRecord.settlement.review.approvalId} />
                   ) : null}
@@ -2514,37 +2510,60 @@ export function FinancePage() {
                 </div>
               </div>
 
-              <div className="finance-detail-card finance-payout-readiness-card">
+              <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Payment readiness</h4>
-                  <StatusBadge tone={selectedOperationalProjection?.blockerState === 'None' ? 'success' : 'warning'}>
-                    {selectedOperationalProjection?.payoutReadiness ?? UNKNOWN_FINANCE_VALUE}
-                  </StatusBadge>
+                  <h4>Financial preview</h4>
                 </div>
-                <p className="page-description">
-                  {selectedOperationalProjection?.payoutReadinessDetail ?? 'Payment readiness is unavailable for this row.'}
-                </p>
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Settlement" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Payment" value={selectedOperationalProjection?.payoutState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Hold / blocker" value={selectedOperationalProjection?.blockerState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Blocker detail" value={selectedOperationalProjection?.blockerDetail ?? UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow
+                    label="Gross allocation amount"
+                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.grossAmount ?? selectedRecord.amount)}</span>}
+                  />
+                  <MetadataRow
+                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commission)}</span>}
+                  />
+                  <MetadataRow
+                    label={`Commission VAT (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commissionVat)}</span>}
+                  />
+                  {showSelectedShippingFee ? (
+                    <MetadataRow
+                      label="Shipping fee"
+                      value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction)}</span>}
+                    />
+                  ) : null}
+                  {showSelectedRefundImpact ? (
+                    <MetadataRow
+                      label="Refund impact"
+                      value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
+                    />
+                  ) : null}
+                  <MetadataRow
+                    label="Estimated vendor payable"
+                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
+                  />
+                  {selectedPaymentEligibility === 'Not eligible' ? (
+                    <p className="page-description">This amount is not currently payable.</p>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="finance-detail-card finance-debt-impact-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Balance adjustment impact on payment</h4>
-                  <StatusBadge tone={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'neutral' : 'warning'}>
-                    {isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'No adjustment' : 'Adjustment impact'}
-                  </StatusBadge>
+              {showSelectedBalanceAdjustmentImpact ? (
+                <div className="finance-detail-card finance-debt-impact-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Balance adjustment impact on payment</h4>
+                    <StatusBadge tone={isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'neutral' : 'warning'}>
+                      {isZeroCurrencyValue(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt) ? 'No adjustment' : 'Adjustment impact'}
+                    </StatusBadge>
+                  </div>
+                  <div className="finance-detail-rows">
+                    <MetadataRow label="Outstanding adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)} />
+                    <MetadataRow label="Adjustment preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
+                    <MetadataRow label="Net after adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)} />
+                  </div>
                 </div>
-                <div className="finance-detail-rows">
-                  <MetadataRow label="Outstanding adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt)} />
-                  <MetadataRow label="Adjustment preview" value={financeValueOrUnknown(financeView.payoutBatchSummary?.debtOffsetPreviewAmount)} />
-                  <MetadataRow label="Net after adjustment" value={financeValueOrUnknown(financeView.payoutBatchSummary?.netEligibleAfterDebtOffset ?? financeView.summary.netPayableAfterDebt)} />
-                </div>
-              </div>
+              ) : null}
 
               {selectedOperationalProjection?.shippingImpact.state === 'required' && isAdmin && selectedRecord.category === 'Invoice' ? (
                 <form className="finance-shipping-cost-form finance-shipping-action-card" aria-label="Attach shipping cost" onSubmit={handleAttachShippingCost}>
@@ -2671,47 +2690,37 @@ export function FinancePage() {
                 </div>
               ) : null}
 
-              <div className="finance-detail-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Deductions</h4>
-                </div>
-                <div className="finance-detail-rows">
+              {showSelectedTimeline ? (
+                <OperationalTimeline
+                  title="Activity timeline"
+                  subtitle={FINANCE_TIMELINE_HELPER}
+                  events={financeTimelineEvents}
+                  audience={financeAudience}
+                />
+              ) : null}
+
+              {selectedHasSingleRelatedOrder ? (
+                <div className="finance-detail-card finance-related-inline-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Related</h4>
+                  </div>
                   <MetadataRow
-                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commission)}</span>}
-                  />
-                  <MetadataRow
-                    label={`Tax (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commissionVat)}</span>}
-                  />
-                  <MetadataRow
-                    label="Shipping fee"
-                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction)}</span>}
-                  />
-                  <MetadataRow
-                    label="Total deductions"
-                    value={<span className="finance-deduction-value">{getTotalDeductions(selectedRecord) === UNKNOWN_FINANCE_VALUE ? UNKNOWN_FINANCE_VALUE : formatDeductionValue(getTotalDeductions(selectedRecord))}</span>}
-                  />
-                  <MetadataRow
-                    label="Net estimate impact"
-                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                    label={financeCrossLinks[0].title}
+                    value={
+                      <Link className="button button-secondary button-compact" to={financeCrossLinks[0].href!}>
+                        Open
+                      </Link>
+                    }
                   />
                 </div>
-              </div>
-
-              <OperationalTimeline
-                title="Activity timeline"
-                subtitle={FINANCE_TIMELINE_HELPER}
-                events={financeTimelineEvents}
-                audience={financeAudience}
-              />
-
-              <OperationalLinkCards
-                title="Related records"
-                subtitle="Grouped order, return, and support context for this transaction."
-                links={financeCrossLinks}
-                audience={financeAudience}
-              />
+              ) : (
+                <OperationalLinkCards
+                  title="Related records"
+                  subtitle="Grouped order, return, and support context for this transaction."
+                  links={financeCrossLinks}
+                  audience={financeAudience}
+                />
+              )}
 
               {relatedSupportTickets.length > 1 ? (
                 <details className="finance-support-history">
@@ -2740,8 +2749,8 @@ export function FinancePage() {
                 contextType="finance"
                 contextId={selectedRecord.id}
                 currentUser={currentUser}
-                title="Finance investigation notes"
-                emptyMessage="No finance investigation notes."
+                title="Internal notes"
+                emptyMessage="No notes"
               />
             </>
           ) : (
