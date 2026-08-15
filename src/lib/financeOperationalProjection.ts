@@ -22,6 +22,7 @@ export type FinanceOperationalProjection = {
 
 export type FinanceNeedsReviewBreakdown = {
   needsReviewTotal: number;
+  failedRows: number;
   settlementReview: number;
   refundReview: number;
   blockedRows: number;
@@ -378,6 +379,7 @@ export function getFinanceNeedsReviewBreakdown(
 
   return {
     needsReviewTotal: failedRows + blockedRows,
+    failedRows,
     settlementReview,
     refundReview,
     blockedRows,

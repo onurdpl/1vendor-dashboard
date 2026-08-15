@@ -473,10 +473,10 @@ function optionalDeductionValue(value?: string | null) {
   return typeof value === 'string' && value.trim() ? formatDeductionValue(value) : UNKNOWN_FINANCE_VALUE;
 }
 
-function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+function getLatestDraftDateLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
   return finance.payoutBatchSummary?.latestBatch?.createdAt
     ? formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date
-    : financeValueOrUnknown(finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate);
+    : 'No draft';
 }
 
 function getOverviewBalanceValue(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
@@ -1903,10 +1903,12 @@ export function FinancePage() {
     financeView.summary,
     financeAudience,
   );
-  const settlementEstimate = financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate);
-  const refundDeductions = formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
+  const estimatedBalance = financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate);
+  const eligibleNetEstimate = financeView.payoutBatchSummary?.eligibleNetAmount;
+  const refundDeductionsTotal = formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds);
   const vendorBalance = financeValueOrUnknown(financeView.summary.vendorBalance);
-  const latestReview = getUpcomingPayoutLabel(financeView);
+  const outstandingAdjustment = financeView.payoutBatchSummary?.outstandingDebtAmount ?? financeView.summary.outstandingVendorDebt;
+  const latestDraftDate = getLatestDraftDateLabel(financeView);
   const overviewAvailableBalance = getOverviewBalanceValue(financeView);
   const overviewPendingBalance = getOverviewPendingValue(financeView);
   const overviewHoldBalance = getOverviewHoldValue(financeView);
@@ -2110,19 +2112,47 @@ export function FinancePage() {
         <>
       {isAdmin ? (
         <section className="finance-compact-summary" aria-label="Finance workflow summary">
-          <div className="finance-compact-primary">
-            <span className="finance-compact-label">Action required</span>
-            <strong>{needsReviewBreakdown.needsReviewTotal}</strong>
-            <small aria-label="Needs review breakdown">
-              Breakdown: Refund {needsReviewBreakdown.refundReview} · Blocked {needsReviewBreakdown.blockedRows} · Shipping {needsReviewBreakdown.shippingReconciliation} · Balance adjustment {needsReviewBreakdown.debtReview}
-            </small>
+          <div className="finance-compact-group" aria-label="Needs attention">
+            <span className="finance-compact-label">NEEDS ATTENTION</span>
+            <div className="finance-compact-metrics">
+              <span><strong>{needsReviewBreakdown.failedRows}</strong> Failed rows</span>
+              <span><strong>{needsReviewBreakdown.blockedRows}</strong> Blocked rows</span>
+              {needsReviewBreakdown.refundReview > 0 ? <span><strong>{needsReviewBreakdown.refundReview}</strong> Refund reviews</span> : null}
+              {needsReviewBreakdown.shippingReconciliation > 0 ? <span><strong>{needsReviewBreakdown.shippingReconciliation}</strong> Shipping reconciliation</span> : null}
+            </div>
           </div>
-          <div className="finance-compact-metrics" aria-label="Financial Totals">
-            <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> settlement review</span>
-            <span><strong>{settlementEstimate}</strong> settlement estimate</span>
-            <span><strong>{refundDeductions}</strong> refund deductions</span>
-            <span><strong>{vendorBalance}</strong> vendor balance</span>
-            <span><strong>{latestReview}</strong> latest draft</span>
+          <div className="finance-compact-group" aria-label="Settlement">
+            <span className="finance-compact-label">SETTLEMENT</span>
+            <div className="finance-compact-metrics">
+              <span><strong>{financeView.payoutBatchSummary?.eligibleRowCount ?? 0}</strong> Review-ready rows</span>
+              {typeof eligibleNetEstimate === 'string' && eligibleNetEstimate.trim() ? (
+                <span><strong>{eligibleNetEstimate}</strong> Eligible net estimate</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="finance-compact-group" aria-label="Financial summary">
+            <span className="finance-compact-label">FINANCIAL SUMMARY</span>
+            <div className="finance-compact-metrics">
+              <span><strong>{estimatedBalance}</strong> Estimated balance</span>
+              {!isZeroCurrencyValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds) ? (
+                <span><strong className="finance-deduction-value">{refundDeductionsTotal}</strong> Refund deductions total</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="finance-compact-group" aria-label="Vendor balance">
+            <span className="finance-compact-label">VENDOR BALANCE</span>
+            <div className="finance-compact-metrics">
+              <span><strong>{vendorBalance}</strong> Vendor balance</span>
+              {!isZeroCurrencyValue(outstandingAdjustment) ? (
+                <span><strong className="finance-deduction-value">{financeValueOrUnknown(outstandingAdjustment)}</strong> Outstanding adjustment</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="finance-compact-group" aria-label="Draft status">
+            <span className="finance-compact-label">DRAFT STATUS</span>
+            <div className="finance-compact-metrics">
+              <span><strong>{latestDraftDate}</strong> Latest draft date</span>
+            </div>
           </div>
         </section>
       ) : null}
