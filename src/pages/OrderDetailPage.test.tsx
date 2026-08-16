@@ -1325,7 +1325,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const snapshot = await screen.findByLabelText('Shopify order snapshot');
+    const snapshot = (await screen.findByLabelText('Shopify order snapshot')) as HTMLDetailsElement;
+    expect(snapshot.open).toBe(false);
     expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
     expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
     expect(within(snapshot).queryByText('Finance state')).not.toBeInTheDocument();
@@ -1632,6 +1633,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    const snapshot = screen.getByLabelText('Shopify order snapshot') as HTMLDetailsElement;
+    const blocker = screen.getByLabelText('Shopify shipping blocker');
+    expect(snapshot.open).toBe(false);
+    expect(snapshot).not.toContainElement(blocker);
     expect(screen.getByText('Shipping address')).toBeInTheDocument();
     expect(screen.getByText(/NA, NA NA/)).toBeInTheDocument();
     expect(screen.getByText('Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.')).toBeInTheDocument();
@@ -2897,6 +2902,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(primaryStatus).getByText('Refund completed')).toBeInTheDocument();
     expect(within(primaryStatus).getByText('Fulfillment is not required for this refunded order.')).toBeInTheDocument();
 
+    const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
+    expect(shipmentRequirement).toHaveTextContent('Fulfillment not required');
+    expect(shipmentRequirement).toHaveTextContent('Shipment work is closed');
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry shipment' })).not.toBeInTheDocument();
+
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
     const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
@@ -3315,6 +3326,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportCard = await screen.findByLabelText('Shipment and return support');
+    expect(supportCard).not.toHaveClass('order-support-card-empty');
     const contactSupport = await within(supportCard).findByRole('link', { name: 'Contact support' });
     expect(contactSupport).toHaveAttribute('href', '/support/ticket-shipment-1');
     expect(await within(supportCard).findByText(/already open/i)).toBeInTheDocument();
@@ -3366,6 +3378,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportCard = await screen.findByLabelText('Shipment and return support');
+    expect(supportCard).toHaveClass('order-support-card-empty');
+    expect(within(supportCard).getByText('No linked tickets')).toBeInTheDocument();
     expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(within(supportCard).getByText(/Create a support ticket before escalating/i)).toBeInTheDocument();
     expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
@@ -3420,12 +3434,38 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
+    const linkedRecord = await screen.findByLabelText('Linked record');
+    expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
+    expect(within(linkedRecord).getByText('Support activity')).toBeInTheDocument();
+    expect(within(linkedRecord).getByText(/2 linked tickets/i)).toBeInTheDocument();
+    expect(linkedRecord).toHaveTextContent('Latest status: In Review');
+
+    const ticketSummary = screen.getByLabelText('Support ticket summary');
+    expect(ticketSummary).toHaveTextContent('Tickets · 2');
+    expect(within(ticketSummary).getByText('Settlement review question for #1028')).toBeInTheDocument();
+  });
+
+  it('keeps the full linked records card when multiple meaningful records are available', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    listAdminSupportTicketsMock.mockResolvedValueOnce([buildSupportTicket()]);
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard());
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
     const linkedRecords = (await screen.findByRole('heading', { name: 'Linked records' })).closest('.order-linked-records-panel');
     expect(linkedRecords).toBeTruthy();
-    expect(await within(linkedRecords as HTMLElement).findByText('Support activity')).toBeInTheDocument();
-    expect(within(linkedRecords as HTMLElement).getAllByText(/2 linked tickets/i).length).toBeGreaterThan(0);
-    expect(within(linkedRecords as HTMLElement).getByText('Latest status: In Review')).toBeInTheDocument();
-    expect(within(linkedRecords as HTMLElement).getByText('Settlement review question for #1028')).toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).getByText('Support activity')).toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).getByText('Settlement activity')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Linked record')).not.toBeInTheDocument();
   });
 
   it('shows finance ledger preview to admins and hides it from vendors', async () => {
@@ -3514,20 +3554,27 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(settlementPreview).toHaveTextContent(
       'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.',
     );
-    expect(within(settlementPreview).getByText('Gross order amount')).toBeInTheDocument();
-    expect(within(settlementPreview).getByText('Commission estimate')).toBeInTheDocument();
-    expect(within(settlementPreview).getByText('Shipping deduction')).toBeInTheDocument();
-    expect(within(settlementPreview).getByText('Refund impact')).toBeInTheDocument();
-    expect(within(settlementPreview).getByText('Estimated settlement')).toBeInTheDocument();
-    expect(settlementPreview).toHaveTextContent(/TRY\s*4,999\.00/);
-    expect(settlementPreview).toHaveTextContent(/TRY\s*499\.90/);
-    expect(settlementPreview).toHaveTextContent(/TRY\s*4,499\.10/);
-    expect(within(settlementPreview).getAllByText('Unknown').length).toBeGreaterThan(0);
-    expect(within(settlementPreview).getAllByText('Estimated').length).toBeGreaterThan(0);
-    expect(within(settlementPreview).getByLabelText('Workflow action guidance')).toHaveTextContent('Review settlement estimate');
-    expect(settlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
+    const settlementSummary = within(settlementPreview).getByLabelText('Settlement summary values');
+    expect(within(settlementSummary).getByText('Estimated vendor payable')).toBeInTheDocument();
+    expect(settlementSummary).toHaveTextContent(/TRY\s*4,499\.10/);
+    expect(within(settlementSummary).queryByText('Refund impact')).not.toBeInTheDocument();
+    expect(within(settlementSummary).queryByText('Shipping deduction')).not.toBeInTheDocument();
 
-    const financeTimeline = screen.getByLabelText('Finance timeline');
+    const financeDetails = within(settlementPreview).getByLabelText('Finance details') as HTMLDetailsElement;
+    expect(financeDetails.open).toBe(false);
+    expect(within(financeDetails).getByText('Gross order amount')).toBeInTheDocument();
+    expect(within(financeDetails).getByText('Commission estimate')).toBeInTheDocument();
+    expect(within(financeDetails).getByText('Shipping deduction')).toBeInTheDocument();
+    expect(within(financeDetails).getByText('Refund impact')).toBeInTheDocument();
+    expect(within(financeDetails).getByText('Estimated settlement')).toBeInTheDocument();
+    expect(financeDetails).toHaveTextContent(/TRY\s*4,999\.00/);
+    expect(financeDetails).toHaveTextContent(/TRY\s*499\.90/);
+    expect(within(financeDetails).getAllByText('Unknown').length).toBeGreaterThan(0);
+    expect(within(settlementPreview).getByLabelText('Workflow action guidance')).toHaveTextContent('Review settlement estimate');
+    expect(settlementPreview).not.toHaveTextContent(/Confirmed/i);
+
+    const financeTimeline = screen.getByLabelText('Finance timeline') as HTMLDetailsElement;
+    expect(financeTimeline.open).toBe(false);
     expect(within(financeTimeline).getByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
     expect(financeTimeline).toHaveTextContent('Finance events are previews until settlement review is completed.');
     expect(within(financeTimeline).getByText('Settlement preview generated')).toBeInTheDocument();
@@ -3537,7 +3584,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financeTimeline).getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(financeTimeline).not.toHaveTextContent(/Payout scheduled|Payout paid|Confirmed settlement/i);
 
-    expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
+    const financeLedgerPreview = (await screen.findByLabelText('Finance ledger preview')) as HTMLDetailsElement;
+    expect(financeLedgerPreview.open).toBe(false);
     expect(screen.getByText('Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.')).toBeInTheDocument();
     expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
     expect(screen.getByText(/Marketplace commission reserved/i)).toBeInTheDocument();
@@ -8317,7 +8365,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
     expect(screen.queryByRole('link', { name: /Settlement activity/i })).not.toBeInTheDocument();
-    expect(screen.getAllByText('Return linked').length).toBeGreaterThan(0);
+    const linkedRecord = screen.getByLabelText('Linked record');
+    expect(linkedRecord).toHaveTextContent('Return linked');
+    expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
     expect(screen.queryByText('Pending review')).not.toBeInTheDocument();
     expect(screen.queryByText('TRY 4,999.00 · Pending')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance timeline')).not.toBeInTheDocument();

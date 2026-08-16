@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { AdminCollaborationNotes } from './AdminCollaborationNotes';
@@ -48,5 +48,54 @@ describe('AdminCollaborationNotes', () => {
     render(<AdminCollaborationNotes contextType="order" contextId="ORD-A-1001" currentUser={vendorUser} />);
 
     expect(screen.queryByText('Internal notes')).not.toBeInTheDocument();
+  });
+
+  it('keeps an empty admin note surface compact until the composer is opened', async () => {
+    render(
+      <AdminCollaborationNotes
+        contextType="order"
+        contextId="ORD-A-1001"
+        currentUser={adminUser}
+        compactWhenEmpty
+      />,
+    );
+
+    const compactCard = screen.getByLabelText('Internal notes (0)');
+    expect(compactCard).toHaveClass('admin-collab-card-compact');
+    expect(screen.queryByText('No internal notes yet.')).not.toBeInTheDocument();
+
+    await userEvent.click(within(compactCard).getByRole('button', { name: 'Add note' }));
+
+    expect(screen.getByPlaceholderText(/add an internal note/i)).toBeInTheDocument();
+    expect(screen.getByText('No internal notes yet.')).toBeInTheDocument();
+  });
+
+  it('preserves the full notes surface when notes already exist', () => {
+    window.localStorage.setItem(
+      'vendor-dashboard.admin-collaboration-notes',
+      JSON.stringify([
+        {
+          id: 'note-1',
+          contextType: 'order',
+          contextId: 'ORD-A-1001',
+          authorName: 'Demo Admin',
+          content: 'Existing operational note',
+          createdAt: '2026-05-15T12:08:00.000Z',
+        },
+      ]),
+    );
+
+    render(
+      <AdminCollaborationNotes
+        contextType="order"
+        contextId="ORD-A-1001"
+        currentUser={adminUser}
+        compactWhenEmpty
+      />,
+    );
+
+    expect(screen.queryByLabelText('Internal notes (0)')).not.toBeInTheDocument();
+    expect(screen.getByText('Existing operational note')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/add an internal note/i)).toBeInTheDocument();
   });
 });
