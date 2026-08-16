@@ -1867,6 +1867,17 @@ export function FinancePage() {
   const selectedPaymentEligibility = selectedRecord
     ? getPaymentEligibilityLabel(selectedRecord, selectedOperationalProjection)
     : UNKNOWN_FINANCE_VALUE;
+  const selectedSettlementState = selectedOperationalProjection?.settlementState ?? null;
+  const selectedPayoutState = selectedOperationalProjection?.payoutState ?? null;
+  const showSelectedSettlementState =
+    Boolean(selectedSettlementState) &&
+    selectedSettlementState !== 'Held' &&
+    selectedSettlementState !== selectedOperationalProjection?.legacyStatusLabel;
+  const showSelectedPayoutState =
+    Boolean(selectedPayoutState) &&
+    selectedPayoutState !== selectedPaymentEligibility &&
+    !Boolean(selectedRecord && isVendorBlockedFinanceHold(selectedRecord)) &&
+    Boolean(selectedRecord?.payoutBatch || selectedRecord?.settlement?.review);
   const selectedSettlementReason = selectedRecord
     ? getSettlementReasonLabel(selectedRecord, selectedOperationalProjection)
     : UNKNOWN_FINANCE_VALUE;
@@ -2565,7 +2576,6 @@ export function FinancePage() {
                 <div className="finance-selected-summary-grid">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
                   <MetadataRow label="Type" value={getPayoutActivityType(selectedRecord, financeAudience)} />
-                  <MetadataRow label="Payment impact" value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : isVendorBlockedFinanceHold(selectedRecord) ? undefined : 'finance-payout-value'}>{selectedPaymentImpact}</span>} />
                 </div>
               </div>
               {selectedRecord.splitFinanceSummary ? (
@@ -2609,15 +2619,12 @@ export function FinancePage() {
                   <MetadataRow
                     label="Next action"
                     value={
-                      <span>
-                        {selectedSettlementNextAction}
+                      <span className="finance-next-action-value">
+                        <span>{selectedSettlementNextAction}</span>
                         {selectedSettlementActionHref ? (
-                          <>
-                            {' '}
-                            <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedSettlementActionHref}>
-                              {selectedAssignmentHref ? 'Review assignment' : 'View order settlement'}
-                            </Link>
-                          </>
+                          <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedSettlementActionHref}>
+                            {selectedAssignmentHref ? 'Review assignment' : 'View order settlement'}
+                          </Link>
                         ) : null}
                       </span>
                     }
@@ -2631,8 +2638,8 @@ export function FinancePage() {
                       <MetadataRow label="Net child effect" value={<span>{selectedRefundedSplitChildNetEffect ?? UNKNOWN_FINANCE_VALUE}</span>} />
                     </>
                   ) : null}
-                  <MetadataRow label="Settlement state" value={selectedOperationalProjection?.settlementState ?? UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Payment" value={selectedOperationalProjection?.payoutState ?? UNKNOWN_FINANCE_VALUE} />
+                  {showSelectedSettlementState ? <MetadataRow label="Settlement state" value={selectedSettlementState} /> : null}
+                  {showSelectedPayoutState ? <MetadataRow label="Payment" value={selectedPayoutState} /> : null}
                   {selectedReviewDisplay || selectedSettlementOffsetReviewPending ? (
                     <MetadataRow label="Review status" value={selectedSettlementReviewStatusLabel} />
                   ) : null}
@@ -2759,7 +2766,7 @@ export function FinancePage() {
                     <MetadataRow label="Shipping deduction" value={selectedRecord.payoutCalculation?.shippingDeduction ?? UNKNOWN_FINANCE_VALUE} />
                   </div>
                 </div>
-              ) : (
+              ) : selectedOperationalProjection?.shippingImpact.state === 'unknown' ? (
                 <details className="finance-detail-card finance-shipping-collapsed">
                   <summary>
                     <span>
@@ -2772,7 +2779,7 @@ export function FinancePage() {
                     {selectedOperationalProjection?.shippingImpact.detail ?? 'Shipping cost review state is unavailable.'}
                   </p>
                 </details>
-              )}
+              ) : null}
 
               {selectedRecord.settlementRefundAdjustments?.length ? (
                 <div className="finance-detail-card">

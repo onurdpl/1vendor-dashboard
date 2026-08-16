@@ -4916,6 +4916,12 @@ h3 {
   line-height: 1.25;
 }
 
+.finance-next-action-value {
+  display: inline-grid;
+  gap: 6px;
+  justify-items: start;
+}
+
 .finance-control-center .op-panel-section {
   gap: 5px;
 }

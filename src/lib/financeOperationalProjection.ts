@@ -126,10 +126,10 @@ function getSettlementReviewLabel(record: FinanceTransaction) {
 function getLegacyStatusLabel(record: FinanceTransaction, audience: FinanceAudience) {
   const status = normalizeFinanceStatus(record.status);
   if (isRefundedSplitChildSaleBasis(record) && record.splitFinanceSummary?.refundOffsetStatus === 'settlement_review_pending') {
-    return 'Settlement review pending';
+    return 'Refund offset review';
   }
   if (isRefundDeductionSettlementReviewPending(record)) {
-    return 'Settlement review pending';
+    return 'Refund offset review';
   }
   if (isVendorBlockedFinanceHold(record)) {
     return 'On hold';
