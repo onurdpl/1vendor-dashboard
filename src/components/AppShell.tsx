@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken, recordAuthDiagnostic } from '../lib/auth';
@@ -329,45 +329,119 @@ function ShellAccountCard({
   context,
   roleLabel,
   suppressVendorContext = false,
+  presentation = 'card',
 }: {
   context: ShellContext;
   roleLabel: string;
   suppressVendorContext?: boolean;
+  presentation?: 'card' | 'menu';
 }) {
+  const menuId = useId();
+  const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const accountLabel = suppressVendorContext
     ? context.currentUser?.name ?? 'Admin workspace'
     : context.currentVendor.vendorName;
   const accountInitial = suppressVendorContext
     ? (context.currentUser?.name ?? 'A').trim().charAt(0).toUpperCase() || 'A'
     : getVendorInitial(context.currentVendor.vendorName);
+  const showVendorSwitcher = !suppressVendorContext && context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0;
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && menuRootRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  const accountIdentity = (
+    <div className="vendor-account-main">
+      <span className="vendor-account-avatar" aria-hidden="true">
+        {accountInitial}
+      </span>
+      <div className="vendor-account-copy">
+        <strong>{accountLabel}</strong>
+        <span>{roleLabel}</span>
+      </div>
+      {showVendorSwitcher ? (
+        <label className="vendor-account-switcher">
+          <span className="sr-only">Select vendor</span>
+          <select
+            className="vendor-account-select"
+            value={context.selectedVendorId}
+            onChange={(event) => context.handleVendorChange(event.target.value)}
+          >
+            {context.visibleVendors.map((vendor) => (
+              <option key={vendor.vendorId} value={vendor.vendorId}>
+                {vendor.vendorName}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+    </div>
+  );
+
+  if (presentation === 'menu') {
+    return (
+      <div className={`vendor-account-menu-root ${menuOpen ? 'is-open' : ''}`} ref={menuRootRef}>
+        <button
+          type="button"
+          className="vendor-account-trigger"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
+          onClick={() => setMenuOpen((isOpen) => !isOpen)}
+        >
+          <span className="vendor-account-avatar" aria-hidden="true">
+            {accountInitial}
+          </span>
+          <span className="vendor-account-trigger-copy">
+            <strong>{accountLabel}</strong>
+            <span>{roleLabel}</span>
+          </span>
+          <span className="vendor-account-chevron" aria-hidden="true">
+            {menuOpen ? '⌃' : '⌄'}
+          </span>
+        </button>
+        {menuOpen ? (
+          <div className="vendor-account-menu shell-card" id={menuId} role="menu" aria-label="Account menu">
+            {accountIdentity}
+            <AdminWorkspaceSwitcher context={context} />
+            <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
+              <ShellIcon name="logout" />
+              Log out
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="vendor-account-card shell-card">
-      <div className="vendor-account-main">
-        <span className="vendor-account-avatar" aria-hidden="true">
-          {accountInitial}
-        </span>
-        <div className="vendor-account-copy">
-          <strong>{accountLabel}</strong>
-          <span>{roleLabel}</span>
-        </div>
-        {!suppressVendorContext && context.currentUser?.canSwitchVendors && context.visibleVendors.length > 0 ? (
-          <label className="vendor-account-switcher">
-            <span className="sr-only">Select vendor</span>
-            <select
-              className="vendor-account-select"
-              value={context.selectedVendorId}
-              onChange={(event) => context.handleVendorChange(event.target.value)}
-            >
-              {context.visibleVendors.map((vendor) => (
-                <option key={vendor.vendorId} value={vendor.vendorId}>
-                  {vendor.vendorName}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-      </div>
+      {accountIdentity}
       <AdminWorkspaceSwitcher context={context} />
       <button type="button" className="vendor-logout-button" onClick={context.handleLogout} disabled={context.logoutRequested}>
         <ShellIcon name="logout" />
@@ -522,7 +596,11 @@ export function VendorShell() {
               </NavLink>
             ))}
           </nav>
-          <ShellAccountCard context={context} roleLabel={context.currentUser?.role === 'admin' ? 'Admin view' : 'Vendor'} />
+          <ShellAccountCard
+            context={context}
+            roleLabel={context.currentUser?.role === 'admin' ? 'Admin view' : 'Vendor'}
+            presentation="menu"
+          />
         </div>
         {context.message ? <ActionFeedback tone={context.tone} message={context.message} /> : null}
       </header>

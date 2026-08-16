@@ -90,6 +90,12 @@ function renderShell(initialEntry: string) {
   );
 }
 
+async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
+  const trigger = screen.getByRole('button', { name: /Yalı Spor/i });
+  await user.click(trigger);
+  return screen.getByRole('menu', { name: 'Account menu' });
+}
+
 beforeEach(() => {
   logoutMock.mockResolvedValue(undefined);
 });
@@ -113,6 +119,57 @@ describe('AppShell workspace navigation', () => {
     expect(screen.queryByLabelText('Admin workspace switcher')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Workspace')).not.toBeInTheDocument();
     expect(screen.queryByText(/Admin Workspace/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Log out/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Yalı Spor/i })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('opens and closes the compact vendor account menu with accessible state', async () => {
+    const user = userEvent.setup();
+    seedSession(adminUser);
+
+    renderShell('/orders');
+
+    const trigger = screen.getByRole('button', { name: /Yalı Spor/i });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor context: Yalı Spor')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Log out/i })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+
+    const menu = screen.getByRole('menu', { name: 'Account menu' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', menu.id);
+    expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
+    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: /Log out/i })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menu', { name: 'Account menu' })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(screen.getByRole('menu', { name: 'Account menu' })).toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(screen.queryByRole('menu', { name: 'Account menu' })).not.toBeInTheDocument();
+  });
+
+  it('preserves vendor selection inside the compact account menu', async () => {
+    const user = userEvent.setup();
+    seedSession(multiVendorAdminUser);
+
+    renderShell('/finance');
+
+    const menu = await openAccountMenu(user);
+    const vendorSelect = within(menu).getByLabelText('Select vendor');
+    expect(vendorSelect).toHaveValue('yalispor');
+
+    await user.selectOptions(vendorSelect, 'demo-vendor-b');
+
+    expect(await screen.findByRole('button', { name: /Demo Vendor B/i })).toBeInTheDocument();
   });
 
   it('shows the restricted account banner for restricted vendors', () => {
@@ -142,12 +199,14 @@ describe('AppShell workspace navigation', () => {
     renderShell('/orders');
 
     expect(screen.getByText('Admin view')).toBeInTheDocument();
-    expect(screen.getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workspace')).toHaveValue('vendor');
+    expect(screen.queryByText('Vendor context: Yalı Spor')).not.toBeInTheDocument();
+    const menu = await openAccountMenu(user);
+    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
     expect(screen.getByRole('link', { name: /Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Orders/i })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Workspace'), 'admin');
+    await user.selectOptions(within(menu).getByLabelText('Workspace'), 'admin');
 
     expect(await screen.findByText('Admin operations content')).toBeInTheDocument();
     expect(screen.getByLabelText('Workspace')).toHaveValue('admin');
@@ -174,8 +233,9 @@ describe('AppShell workspace navigation', () => {
     await user.selectOptions(screen.getByLabelText('Workspace'), 'vendor');
 
     expect(await screen.findByText('Vendor dashboard content')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workspace')).toHaveValue('vendor');
-    expect(screen.getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
+    const menu = await openAccountMenu(user);
+    expect(within(menu).getByLabelText('Workspace')).toHaveValue('vendor');
+    expect(within(menu).getByText('Vendor context: Yalı Spor')).toBeInTheDocument();
 
     const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
     expect(within(primaryNav).getByRole('link', { name: /Dashboard/i })).toBeInTheDocument();
@@ -220,7 +280,8 @@ describe('AppShell workspace navigation', () => {
     expect(getCurrentUser()?.email).toBe('vendor@example.com');
     expect(getToken()).toBe('test-session');
 
-    await user.click(screen.getByRole('button', { name: /Log out/i }));
+    const menu = await openAccountMenu(user);
+    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
 
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(getCurrentUser()).toBeNull();
@@ -238,7 +299,8 @@ describe('AppShell workspace navigation', () => {
 
     expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Log out/i }));
+    const menu = await openAccountMenu(user);
+    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
@@ -275,7 +337,8 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
     expect(screen.getByText('Admin view')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Log out/i }));
+    const menu = await openAccountMenu(user);
+    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
@@ -293,7 +356,8 @@ describe('AppShell workspace navigation', () => {
 
     expect(screen.getByText('Finance workspace content')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Log out/i }));
+    const menu = await openAccountMenu(user);
+    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
