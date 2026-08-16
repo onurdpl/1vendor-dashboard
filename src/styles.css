@@ -11170,6 +11170,32 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #f8fafc;
 }
 
+.vendor-app-shell .vendor-shell-header .vendor-account-menu {
+  top: calc(100% + 6px);
+  gap: 8px;
+  padding: 10px;
+  border-color: #e6eaf2;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-account-menu .vendor-account-main {
+  padding-bottom: 8px;
+  border-bottom-color: #e6eaf2;
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-account-menu .admin-workspace-switcher {
+  gap: 5px;
+  padding-top: 8px;
+  border-top-color: #e6eaf2;
+}
+
+.vendor-app-shell .vendor-shell-header .vendor-account-menu .vendor-logout-button {
+  padding-top: 7px;
+}
+
 .finance-shell-active .vendor-card {
   margin-top: 8px;
 }
