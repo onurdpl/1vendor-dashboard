@@ -452,7 +452,13 @@ function isVendorBlockedStatus(value: string | null | undefined) {
 }
 
 function formatCancellationReason(value: string | null | undefined) {
-  return value?.trim() || null;
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return REJECT_ORDER_REASONS.find((reason) => reason.value === normalized.toUpperCase())?.label
+    ?? toTitleCaseLabel(normalized.replace(/_/g, ' '));
 }
 
 function normalizeTimelineTitle(value: string | null | undefined) {
@@ -4917,19 +4923,11 @@ export function OrderDetailPage() {
     isActiveVendorBlockedOrder
       ? {
           id: 'vendor-blocked',
-          label: isAdmin ? 'Vendor rejected allocation' : 'Unavailable items rejected',
-          detail: vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
+          label: 'Vendor rejected allocation',
+          detail: vendorBlockedReason
+            ? `Reason: ${vendorBlockedReason}. Admin resolution required.`
+            : 'Admin resolution required.',
           tone: 'attention',
-          href: null,
-          action: null,
-        }
-      : null,
-    isActiveVendorBlockedOrder
-      ? {
-          id: 'admin-resolution-required',
-          label: 'Admin resolution required',
-          detail: isAdmin ? 'Transfer allocation, refund review, or return to vendor.' : 'Transfer, refund review, or return review is required.',
-          tone: 'warning',
           href: null,
           action: null,
         }
@@ -5246,7 +5244,7 @@ export function OrderDetailPage() {
             </div>
           ) : null}
         </div>
-        {!hasOperationalReturn ? (
+        {!hasOperationalReturn && !isActiveVendorBlockedOrder ? (
           <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
             <strong>{orderHealth.label}</strong>
             <span>{orderHealth.helper}</span>
@@ -7906,34 +7904,6 @@ export function OrderDetailPage() {
 
         <aside className="order-detail-right-rail" aria-label="Order timeline and support">
           <div className="order-detail-sidebar-flow">
-            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Right panel status">
-              <div className="order-card-heading">
-                <div>
-                  <h2>Status</h2>
-                </div>
-              </div>
-              <div className="orders-status-axis-grid" aria-label="Right panel status axes">
-                <div className="orders-status-axis">
-                  <span>Operational status</span>
-                  <span className={`status-badge status-${operationalStatusClass}`}>
-                    {operationalStatusLabel}
-                  </span>
-                </div>
-                <div className="orders-status-axis">
-                  <span>Fulfillment</span>
-                  <span className={`status-badge status-${getStatusClass(fulfillmentStateLabel)}`}>
-                    {fulfillmentStateLabel}
-                  </span>
-                </div>
-                <div className="orders-status-axis">
-                  <span>Finance state</span>
-                  <span className={`status-badge status-${getFinanceStatusClass(financeStateLabel)}`}>
-                    {financeStateLabel}
-                  </span>
-                </div>
-              </div>
-            </article>
-
             {canShowOrderIssueActions ? (
               <article className="order-detail-card-v2 order-workspace-panel" aria-label="Order issue">
                 <div className="order-card-heading">

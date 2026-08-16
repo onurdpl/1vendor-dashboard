@@ -1298,6 +1298,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(axes).getByText('In flow')).toBeInTheDocument();
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
     expect(within(axes).queryByText('paid')).not.toBeInTheDocument();
+    const alerts = screen.getByLabelText('Operational alerts');
+    expect(within(alerts).queryByText('Vendor rejected allocation')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
   });
 
   it('labels a normal paid Shopify snapshot with its explicit authority', async () => {
@@ -2757,17 +2761,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(axes).getByText('Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
-    const primaryStatus = screen.getByLabelText('Primary operational status');
-    expect(within(primaryStatus).getByText('Order needs admin review')).toBeInTheDocument();
-    expect(within(primaryStatus).getByText('Admin action required. Reason: OUT_OF_STOCK.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
 
     const alerts = screen.getByLabelText('Operational alerts');
-    expect(within(alerts).getByText('Unavailable items rejected')).toBeInTheDocument();
-    expect(within(alerts).getByText('Reason: OUT_OF_STOCK')).toBeInTheDocument();
-    expect(within(alerts).getByText('Admin resolution required')).toBeInTheDocument();
-    expect(within(alerts).getByText('Transfer, refund review, or return review is required.')).toBeInTheDocument();
+    expect(alerts.querySelectorAll('.order-operational-alert')).toHaveLength(1);
+    expect(within(alerts).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(alerts).getByText('Reason: Out of stock. Admin resolution required.')).toBeInTheDocument();
+    expect(within(alerts).queryByText('OUT_OF_STOCK')).not.toBeInTheDocument();
     expect(within(alerts).queryByText('Tracking missing')).not.toBeInTheDocument();
     expect(within(alerts).queryByText('Awaiting shipment')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
 
     expect(screen.queryByText('Current state')).not.toBeInTheDocument();
     expect(screen.queryByText('Finance')).not.toBeInTheDocument();
@@ -2824,6 +2827,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
     expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
     expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
+
+    const summaryStrip = document.querySelector('.order-status-summary-grid');
+    expect(summaryStrip).toBeInstanceOf(HTMLElement);
+    const summary = within(summaryStrip as HTMLElement);
+    expect(summary.getByText('Current state')).toBeInTheDocument();
+    expect(summary.getByText('Fulfillment')).toBeInTheDocument();
+    expect(summary.getByText('Finance')).toBeInTheDocument();
+    expect(summary.getByText('Next action')).toBeInTheDocument();
+    expect(summary.getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(summary.getByText('Blocked')).toBeInTheDocument();
+    expect(summary.getByText('Held')).toBeInTheDocument();
+    expect(summary.getByText('Review allocation')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
   });
 
   it('shows refund-completed overlay for vendor-blocked orders resolved by Shopify refund', async () => {
@@ -2872,6 +2888,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.queryByText('Awaiting Admin Resolution')).not.toBeInTheDocument();
+
+    const alerts = screen.getByLabelText('Operational alerts');
+    expect(within(alerts).queryByText('Vendor rejected allocation')).not.toBeInTheDocument();
+    expect(within(alerts).queryByText(/Admin resolution required/i)).not.toBeInTheDocument();
 
     const primaryStatus = screen.getByLabelText('Primary operational status');
     expect(within(primaryStatus).getByText('Refund completed')).toBeInTheDocument();
@@ -3095,7 +3115,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Existing operational evidence')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Right panel status')).getByText('Review required')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Order status axes')).getByText('Review required')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
 
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
@@ -3134,21 +3155,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const sidebarFlow = rail.querySelector('.order-detail-sidebar-flow');
     expect(sidebarFlow).toBeInstanceOf(HTMLElement);
 
-    const statusCard = within(sidebarFlow as HTMLElement).getByLabelText('Right panel status');
     const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Order activity' }).closest('article');
     const supportCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Support' }).closest('article');
 
-    expect(statusCard).toBeInTheDocument();
+    expect(within(sidebarFlow as HTMLElement).queryByLabelText('Right panel status')).not.toBeInTheDocument();
     expect(timelineCard).not.toBeNull();
     expect(supportCard).not.toBeNull();
-    expect(statusCard.parentElement).toBe(sidebarFlow);
     expect(timelineCard?.parentElement).toBe(sidebarFlow);
     expect(supportCard?.parentElement).toBe(sidebarFlow);
     expect(supportCard?.parentElement).not.toBe(rail);
-    expect(Boolean(statusCard.compareDocumentPosition(timelineCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(timelineCard!.compareDocumentPosition(supportCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Array.from(sidebarFlow!.children).map((child) => child.className)).toEqual([
-      expect.stringContaining('order-workspace-panel'),
       expect.stringContaining('operational-timeline-card'),
       expect.stringContaining('order-support-card'),
     ]);
