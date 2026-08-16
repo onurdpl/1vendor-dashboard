@@ -526,8 +526,13 @@ describe('FinancePage control center', () => {
     expect(summary).not.toHaveTextContent('settlement estimate');
     expect(screen.getByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).toBeInTheDocument();
     expect(screen.queryByText('Values update as orders become eligible, refunds are processed, or reviews are completed.')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'This week' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'This week' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Date range' })).toHaveValue('week');
+    expect(screen.getByRole('option', { name: 'This week' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'This month' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'All time' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Transactions' })).toBeInTheDocument();
   });
@@ -745,6 +750,32 @@ describe('FinancePage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
 
     expect(await screen.findByText('#1001')).toBeInTheDocument();
+  });
+
+  it('preserves reset behavior without changing the date range control', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    const searchInput = screen.getByPlaceholderText('Search by order #, type, status, amount...');
+    const [statusFilter, categoryFilter, dateRange] = screen.getAllByRole('combobox');
+
+    await userEvent.type(searchInput, '1021');
+    await userEvent.selectOptions(statusFilter, 'Blocked');
+    await userEvent.selectOptions(categoryFilter, 'Refund');
+    await userEvent.selectOptions(dateRange, 'all');
+
+    expect(searchInput).toHaveValue('1021');
+    expect(statusFilter).toHaveValue('Blocked');
+    expect(categoryFilter).toHaveValue('Refund');
+    expect(dateRange).toHaveValue('all');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset' }));
+
+    expect(searchInput).toHaveValue('');
+    expect(statusFilter).toHaveValue('all');
+    expect(categoryFilter).toHaveValue('all');
+    expect(dateRange).toHaveValue('all');
   });
 
   it('renders an honest empty state for empty settlement workflow queues', async () => {

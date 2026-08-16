@@ -1978,20 +1978,6 @@ export function FinancePage() {
               : 'Track balances, upcoming payments, and recent finance activity for your marketplace sales.'}
           </p>
         </div>
-        {isVendorUser ? null : (
-          <div className="op-heading-meta">
-            <button type="button" className="button button-secondary button-compact">
-              This week
-            </button>
-            <button
-              type="button"
-              className="button button-secondary button-compact"
-              onClick={() => showFeedback('Finance export prepared for review.', 'success')}
-            >
-              Export
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="finance-workspace-tabs" role="tablist" aria-label="Finance workspace sections">

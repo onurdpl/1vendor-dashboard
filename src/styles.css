@@ -4906,6 +4906,14 @@ h3 {
   min-width: min(440px, 100%);
 }
 
+.finance-control-center .op-filter-bar .button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
 .finance-op-table-v2 {
   border: 1px solid #e2e8f0;
   border-radius: 18px;
