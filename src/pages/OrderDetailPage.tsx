@@ -430,7 +430,7 @@ function getOrderActivityReturnTitle(returnRecord: {
   return 'Refund recorded';
 }
 
-function getPaymentStatusClass(value: string | null | undefined) {
+function getFinanceStatusClass(value: string | null | undefined) {
   const normalized = getStatusClass(value);
   if (normalized.includes('refund-completed')) {
     return 'refund-completed';
@@ -4213,9 +4213,8 @@ export function OrderDetailPage() {
     : operationalStory.resolvedByRefund
       ? 'refunded'
       : getStatusClass(order.allocationStatus);
-  const paymentStatusLabel = hasCanonicalOperationalStory
-    ? operationalStory.financeLabel
-    : formatSnapshotValue(order.orderSnapshot?.financialStatus);
+  const fulfillmentStateLabel = operationalStory.fulfillmentLabel;
+  const financeStateLabel = operationalStory.financeLabel;
   const isRefundResolvedVendorBlockedOrder = operationalStory.state === 'vendor_blocked_resolved_by_refund';
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
   const shouldShowCreateShipmentAction =
@@ -5227,9 +5226,15 @@ export function OrderDetailPage() {
             </span>
           </div>
           <div className="order-status-axis">
-            <span>Payment Status</span>
-            <span className={`status-badge status-${getPaymentStatusClass(paymentStatusLabel)}`}>
-              {paymentStatusLabel}
+            <span>Fulfillment</span>
+            <span className={`status-badge status-${getStatusClass(fulfillmentStateLabel)}`}>
+              {fulfillmentStateLabel}
+            </span>
+          </div>
+          <div className="order-status-axis">
+            <span>Finance state</span>
+            <span className={`status-badge status-${getFinanceStatusClass(financeStateLabel)}`}>
+              {financeStateLabel}
             </span>
           </div>
           {operationalStory.resolvedByRefund && isVendorBlockedOrder ? (
@@ -5367,10 +5372,12 @@ export function OrderDetailPage() {
               </div>
             </div>
             <div className="order-financial-impact-grid order-finance-preview-grid">
-              <div>
-                <span>Financial status</span>
-                <strong>{formatSnapshotValue(order.orderSnapshot?.financialStatus)}</strong>
-              </div>
+              {order.orderSnapshot?.financialStatus ? (
+                <div>
+                  <span>Shopify financial status</span>
+                  <strong>{toTitleCaseLabel(order.orderSnapshot.financialStatus)}</strong>
+                </div>
+              ) : null}
               <div>
                 <span>Payment gateway</span>
                 <strong>{formatSnapshotValue(order.orderSnapshot?.paymentGatewayName)}</strong>
@@ -7907,15 +7914,21 @@ export function OrderDetailPage() {
               </div>
               <div className="orders-status-axis-grid" aria-label="Right panel status axes">
                 <div className="orders-status-axis">
-                  <span>Status</span>
+                  <span>Operational status</span>
                   <span className={`status-badge status-${operationalStatusClass}`}>
                     {operationalStatusLabel}
                   </span>
                 </div>
                 <div className="orders-status-axis">
-                  <span>Payment Status</span>
-                  <span className={`status-badge status-${getPaymentStatusClass(paymentStatusLabel)}`}>
-                    {paymentStatusLabel}
+                  <span>Fulfillment</span>
+                  <span className={`status-badge status-${getStatusClass(fulfillmentStateLabel)}`}>
+                    {fulfillmentStateLabel}
+                  </span>
+                </div>
+                <div className="orders-status-axis">
+                  <span>Finance state</span>
+                  <span className={`status-badge status-${getFinanceStatusClass(financeStateLabel)}`}>
+                    {financeStateLabel}
                   </span>
                 </div>
               </div>
