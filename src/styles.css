@@ -4397,11 +4397,11 @@ h3 {
 }
 
 .finance-control-center {
-  gap: 14px;
+  gap: 10px;
   width: min(100%, 1340px);
   margin-inline: auto;
   box-sizing: border-box;
-  padding: 22px;
+  padding: 18px 22px 22px;
   background: #f8fafc;
 }
 
@@ -4414,16 +4414,21 @@ h3 {
 }
 
 .finance-page-header .eyebrow {
+  margin-bottom: 2px;
   color: #2563eb;
   letter-spacing: 0.22em;
 }
 
 .finance-page-header h2 {
-  margin: 4px 0 6px;
+  margin: 2px 0 4px;
   color: #0f172a;
   font-size: clamp(1.75rem, 2vw, 2.1rem);
   font-weight: 850;
   letter-spacing: -0.02em;
+}
+
+.finance-page-header .page-description {
+  margin: 0;
 }
 
 .finance-page-header .op-heading-meta {

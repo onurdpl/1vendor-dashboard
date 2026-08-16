@@ -65,8 +65,6 @@ type FinanceTimelineItem = {
   visibility?: 'admin';
 };
 
-const FINANCE_ESTIMATE_HELPER =
-  'Values update as orders become eligible, refunds are processed, or reviews are completed.';
 const FINANCE_TIMELINE_HELPER = 'Activity entries are previews until settlement review is completed.';
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
 
@@ -1979,7 +1977,6 @@ export function FinancePage() {
               ? 'Track balances, upcoming payments, and recent payment activity.'
               : 'Track balances, upcoming payments, and recent finance activity for your marketplace sales.'}
           </p>
-          {isVendorUser ? null : <p className="page-description">{FINANCE_ESTIMATE_HELPER}</p>}
         </div>
         {isVendorUser ? null : (
           <div className="op-heading-meta">

@@ -524,7 +524,12 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Action required')).not.toBeInTheDocument();
     expect(screen.queryByText('This period')).not.toBeInTheDocument();
     expect(summary).not.toHaveTextContent('settlement estimate');
-    expect(screen.getByText('Values update as orders become eligible, refunds are processed, or reviews are completed.')).toBeInTheDocument();
+    expect(screen.getByText('Track balances, upcoming payments, and recent finance activity for your marketplace sales.')).toBeInTheDocument();
+    expect(screen.queryByText('Values update as orders become eligible, refunds are processed, or reviews are completed.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This week' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Transactions' })).toBeInTheDocument();
   });
 
   it('renders non-zero refund and shipping attention metrics without an aggregate total', async () => {
