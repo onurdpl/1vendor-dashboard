@@ -50,21 +50,15 @@ describe('AdminCollaborationNotes', () => {
     expect(screen.queryByText('Internal notes')).not.toBeInTheDocument();
   });
 
-  it('keeps an empty admin note surface compact until the composer is opened', async () => {
-    render(
-      <AdminCollaborationNotes
-        contextType="order"
-        contextId="ORD-A-1001"
-        currentUser={adminUser}
-        compactWhenEmpty
-      />,
-    );
+  it('keeps an empty admin note surface as a normal card with a compact body', async () => {
+    render(<AdminCollaborationNotes contextType="order" contextId="ORD-A-1001" currentUser={adminUser} />);
 
-    const compactCard = screen.getByLabelText('Internal notes (0)');
-    expect(compactCard).toHaveClass('admin-collab-card-compact');
-    expect(screen.queryByText('No internal notes yet.')).not.toBeInTheDocument();
+    const notesCard = screen.getByRole('heading', { name: 'Internal notes' }).closest('article');
+    expect(notesCard).toHaveClass('admin-collab-card');
+    expect(notesCard).not.toHaveClass('admin-collab-card-compact');
+    expect(screen.getByText('No internal notes yet.')).toBeInTheDocument();
 
-    await userEvent.click(within(compactCard).getByRole('button', { name: 'Add note' }));
+    await userEvent.click(within(notesCard as HTMLElement).getByRole('button', { name: 'Add note' }));
 
     expect(screen.getByPlaceholderText(/add an internal note/i)).toBeInTheDocument();
     expect(screen.getByText('No internal notes yet.')).toBeInTheDocument();
@@ -90,7 +84,6 @@ describe('AdminCollaborationNotes', () => {
         contextType="order"
         contextId="ORD-A-1001"
         currentUser={adminUser}
-        compactWhenEmpty
       />,
     );
 

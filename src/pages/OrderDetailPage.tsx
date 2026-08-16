@@ -4872,6 +4872,10 @@ export function OrderDetailPage() {
       : []),
   ];
   const visibleOrderCrossLinks = filterOperationalLinks(orderCrossLinks, audience);
+  const singleFinanceCrossLink =
+    visibleOrderCrossLinks.length === 1 && visibleOrderCrossLinks[0].id.startsWith('finance-')
+      ? visibleOrderCrossLinks[0]
+      : null;
   const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
   const openLinkedSupportTicket = relatedSupportTickets.find(isOpenSupportTicket) ?? null;
@@ -5386,19 +5390,23 @@ export function OrderDetailPage() {
 
           {isAdmin ? (
           <article className="order-detail-card-v2 order-workspace-panel order-shopify-details" aria-label="Shopify details section">
+            <div className="order-card-heading order-shopify-card-heading">
+              <div>
+                <p className="eyebrow">Shopify details</p>
+                <h2>Shopify order snapshot</h2>
+                <p>Reference values synced from Shopify.</p>
+              </div>
+            </div>
             {isInvalidShippingSnapshotAddress(order.orderSnapshot?.shippingAddress) ? (
               <div className="order-snapshot-address-warning" aria-label="Shopify shipping blocker">
                 <span>Shipping warning</span>
                 <strong>Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.</strong>
               </div>
             ) : null}
-            <details className="order-secondary-disclosure" aria-label="Shopify order snapshot">
-              <summary className="order-secondary-disclosure-heading">
-                <span>
-                  <h2>Shopify order snapshot</h2>
-                  <small>Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.</small>
-                </span>
-                <span>Shopify details</span>
+            <details className="order-shopify-disclosure" aria-label="Shopify order snapshot">
+              <summary className="order-shopify-disclosure-summary">
+                <span>Show details</span>
+                <small>Full-order Shopify values; not allocation-projected.</small>
               </summary>
               {order.splitSummary ? (
                 <p>This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.</p>
@@ -7788,8 +7796,8 @@ export function OrderDetailPage() {
               ))}
             </div>
             ) : null}
-            <details className="order-secondary-disclosure" aria-label="Finance details">
-              <summary className="order-secondary-disclosure-heading">
+            <details className="order-settlement-disclosure" aria-label="Finance details">
+              <summary className="order-settlement-disclosure-heading">
                 <span>
                   <strong>Finance details</strong>
                   <small>Calculation inputs, deductions, and reconciliation context.</small>
@@ -7814,138 +7822,131 @@ export function OrderDetailPage() {
                 </div>
               ) : null}
             </details>
+            {visibleFinanceTimelineItems.length ? (
+              <details className="order-settlement-disclosure" aria-label="Finance timeline">
+                <summary className="order-settlement-disclosure-heading">
+                  <span>
+                    <strong>Finance activity</strong>
+                    <small>{ORDER_FINANCE_TIMELINE_HELPER_COPY}</small>
+                  </span>
+                  <span>View activity</span>
+                </summary>
+                <ol className="order-finance-timeline-list">
+                  {visibleFinanceTimelineItems.map((item) => (
+                    <li key={item.id}>
+                      <span className={`order-finance-timeline-dot op-tone-${item.tone ?? 'neutral'}`} aria-hidden="true" />
+                      <div className="order-finance-timeline-content">
+                        <div className="order-finance-timeline-title-row">
+                          {item.href ? <Link to={item.href}>{item.title}</Link> : <strong>{item.title}</strong>}
+                          {item.status ? (
+                            <span className={`order-finance-timeline-status op-tone-${item.tone ?? 'neutral'}`}>{item.status}</span>
+                          ) : null}
+                        </div>
+                        {item.description ? <p>{item.description}</p> : null}
+                        <small>{formatOptionalDate(item.at ?? undefined)}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            ) : null}
+            {order.financeLedgerPreview ? (
+              <details className="order-settlement-disclosure" aria-label="Finance ledger preview">
+                <summary className="order-settlement-disclosure-heading">
+                  <span>
+                    <strong>Ledger preview</strong>
+                    <small>Admin-only reconciliation trace; not settlement or payout truth.</small>
+                  </span>
+                  <span>View ledger</span>
+                </summary>
+                <div className="order-financial-impact-grid">
+                  <div>
+                    <span>Vendor settlement estimate</span>
+                    <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
+                  </div>
+                  <div>
+                    <span>Marketplace commission estimate</span>
+                    <strong>{formatCurrency(order.financeLedgerPreview.balance.marketplaceCommission, order.financeLedgerPreview.currency)}</strong>
+                  </div>
+                  <div>
+                    <span>Refund impact</span>
+                    <strong>
+                      {order.financeLedgerPreview.balance.vendorDebt !== '0.00'
+                        ? `Debt ${formatCurrency(order.financeLedgerPreview.balance.vendorDebt, order.financeLedgerPreview.currency)}`
+                        : formatCurrency(
+                            String(
+                              Math.max(
+                                Number(order.financeLedgerPreview.balance.grossSales) -
+                                  Number(order.financeLedgerPreview.balance.marketplaceCommission) -
+                                  Number(order.financeLedgerPreview.balance.vendorPayable),
+                                0,
+                              ).toFixed(2),
+                            ),
+                            order.financeLedgerPreview.currency,
+                          )}
+                    </strong>
+                  </div>
+                </div>
+                <details className="provider-response-summary admin-diagnostics-panel" aria-label="Finance preview diagnostics">
+                  <summary className="provider-response-heading">
+                    <strong>Finance preview diagnostics</strong>
+                    <span>Admin diagnostics</span>
+                  </summary>
+                  <div className="summary-row">
+                    <span>Status</span>
+                    <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>Unknown fields</span>
+                    <strong>{order.financeLedgerPreview.unknowns.length ? order.financeLedgerPreview.unknowns.join(', ') : '—'}</strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>Source fields</span>
+                    <strong>
+                      {order.financeLedgerPreview.sourceFields.lineItemCount} line items · {order.financeLedgerPreview.sourceFields.returnCount} returns ·{' '}
+                      {order.financeLedgerPreview.sourceFields.refundCount} refunds
+                    </strong>
+                  </div>
+                  <div className="summary-row">
+                    <span>Assumptions</span>
+                    <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
+                  </div>
+                  <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
+                    {safeArray(order.financeLedgerPreview.entries).slice(0, 12).map((entry) => (
+                      <div className="summary-row" key={entry.id}>
+                        <span>{toTitleCaseLabel(entry.eventType)}</span>
+                        <strong>
+                          {[
+                            entry.impact.vendorPayable ? `settlement ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
+                            entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
+                            entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
+                            entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
+                          ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </details>
+            ) : null}
+            {singleFinanceCrossLink?.href ? (
+              <div className="order-settlement-actions" aria-label="Settlement actions">
+                <Link className="button button-secondary button-compact" to={singleFinanceCrossLink.href}>
+                  Open finance
+                </Link>
+              </div>
+            ) : null}
           </article>
           ) : null}
 
-          {isAdmin && visibleFinanceTimelineItems.length ? (
-          <details className="order-detail-card-v2 order-finance-timeline-card order-workspace-panel order-secondary-disclosure-card" aria-label="Finance timeline">
-            <summary className="order-card-heading order-secondary-card-heading">
-              <div>
-                <h2>Finance timeline</h2>
-                <p>{ORDER_FINANCE_TIMELINE_HELPER_COPY}</p>
-              </div>
-              <span className="order-preview-badge">Preview</span>
-            </summary>
-            <ol className="order-finance-timeline-list">
-              {visibleFinanceTimelineItems.map((item) => (
-                <li key={item.id}>
-                  <span className={`order-finance-timeline-dot op-tone-${item.tone ?? 'neutral'}`} aria-hidden="true" />
-                  <div className="order-finance-timeline-content">
-                    <div className="order-finance-timeline-title-row">
-                      {item.href ? <Link to={item.href}>{item.title}</Link> : <strong>{item.title}</strong>}
-                      {item.status ? (
-                        <span className={`order-finance-timeline-status op-tone-${item.tone ?? 'neutral'}`}>{item.status}</span>
-                      ) : null}
-                    </div>
-                    {item.description ? <p>{item.description}</p> : null}
-                    <small>{formatOptionalDate(item.at ?? undefined)}</small>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </details>
-          ) : null}
-
-          {isAdmin && order.financeLedgerPreview ? (
-            <details className="order-detail-card-v2 order-finance-ledger-card order-workspace-panel order-secondary-disclosure-card" aria-label="Finance ledger preview">
-              <summary className="order-card-heading order-secondary-card-heading">
-                <div>
-                  <h2>Finance ledger preview</h2>
-                  <p>Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.</p>
-                </div>
-              </summary>
-              <div className="order-financial-impact-grid">
-                <div>
-                  <span>Vendor settlement estimate</span>
-                  <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
-                </div>
-                <div>
-                  <span>Marketplace commission estimate</span>
-                  <strong>{formatCurrency(order.financeLedgerPreview.balance.marketplaceCommission, order.financeLedgerPreview.currency)}</strong>
-                </div>
-                <div>
-                  <span>Refund impact</span>
-                  <strong>
-                    {order.financeLedgerPreview.balance.vendorDebt !== '0.00'
-                      ? `Debt ${formatCurrency(order.financeLedgerPreview.balance.vendorDebt, order.financeLedgerPreview.currency)}`
-                      : formatCurrency(
-                          String(
-                            Math.max(
-                              Number(order.financeLedgerPreview.balance.grossSales) -
-                                Number(order.financeLedgerPreview.balance.marketplaceCommission) -
-                                Number(order.financeLedgerPreview.balance.vendorPayable),
-                              0,
-                            ).toFixed(2),
-                          ),
-                          order.financeLedgerPreview.currency,
-                        )}
-                  </strong>
-                </div>
-              </div>
-              <details className="provider-response-summary admin-diagnostics-panel" aria-label="Finance preview diagnostics">
-                <summary className="provider-response-heading">
-                  <strong>Finance preview diagnostics</strong>
-                  <span>Admin diagnostics</span>
-                </summary>
-                <div className="summary-row">
-                  <span>Status</span>
-                  <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Unknown fields</span>
-                  <strong>{order.financeLedgerPreview.unknowns.length ? order.financeLedgerPreview.unknowns.join(', ') : '—'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Source fields</span>
-                  <strong>
-                    {order.financeLedgerPreview.sourceFields.lineItemCount} line items · {order.financeLedgerPreview.sourceFields.returnCount} returns ·{' '}
-                    {order.financeLedgerPreview.sourceFields.refundCount} refunds
-                  </strong>
-                </div>
-                <div className="summary-row">
-                  <span>Assumptions</span>
-                  <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
-                </div>
-                <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
-                  {safeArray(order.financeLedgerPreview.entries).slice(0, 12).map((entry) => (
-                    <div className="summary-row" key={entry.id}>
-                      <span>{toTitleCaseLabel(entry.eventType)}</span>
-                      <strong>
-                        {[
-                          entry.impact.vendorPayable ? `settlement ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
-                          entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
-                          entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
-                          entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
-                        ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </details>
-          ) : null}
-
-          {visibleOrderCrossLinks.length === 1 ? (
-            <div className="order-linked-record-compact" aria-label="Linked record">
-              {visibleOrderCrossLinks[0].href ? (
-                <Link to={visibleOrderCrossLinks[0].href}>
-                  <span>{visibleOrderCrossLinks[0].eyebrow ?? 'Linked record'}</span>
-                  <strong>{visibleOrderCrossLinks[0].title}</strong>
-                  <small>
-                    {[visibleOrderCrossLinks[0].status, visibleOrderCrossLinks[0].description ?? visibleOrderCrossLinks[0].actionLabel]
-                      .filter(Boolean)
-                      .join(' · ') || 'Open record'}
-                  </small>
-                </Link>
-              ) : (
-                <div>
-                  <span>{visibleOrderCrossLinks[0].eyebrow ?? 'Linked record'}</span>
-                  <strong>{visibleOrderCrossLinks[0].title}</strong>
-                  <small>
-                    {[visibleOrderCrossLinks[0].status, visibleOrderCrossLinks[0].description].filter(Boolean).join(' · ') || 'Linked operational record'}
-                  </small>
-                </div>
-              )}
+          {visibleOrderCrossLinks.length === 1 && !singleFinanceCrossLink ? (
+            <div className="order-linked-records-panel">
+              <OperationalLinkCards
+                title="Linked record"
+                subtitle="Secondary operational context linked to this order."
+                links={visibleOrderCrossLinks}
+                audience={audience}
+              />
             </div>
           ) : visibleOrderCrossLinks.length > 1 ? (
             <div className="order-linked-records-panel">
@@ -8051,11 +8052,11 @@ export function OrderDetailPage() {
               emptyMessage="No records available."
             />
 
-            <article className={`order-detail-card-v2 order-support-card${relatedSupportTickets.length ? '' : ' order-support-card-empty'}`} aria-label="Shipment and return support">
+            <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
               <div className="order-card-heading">
                 <div>
                   <h2>Support</h2>
-                  <p>{relatedSupportTickets.length ? (isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.') : 'No linked tickets'}</p>
+                  <p>{relatedSupportTickets.length ? (isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.') : 'No linked support tickets'}</p>
                 </div>
               </div>
               <div className="order-support-compact-stack">
@@ -8151,7 +8152,7 @@ export function OrderDetailPage() {
             </article>
 
             {order ? (
-              <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} compactWhenEmpty />
+              <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
             ) : null}
           </div>
 

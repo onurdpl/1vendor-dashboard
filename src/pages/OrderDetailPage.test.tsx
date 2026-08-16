@@ -1431,8 +1431,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const snapshot = await screen.findByLabelText('Shopify order snapshot');
-    expect(within(snapshot).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
-    expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    const shopifyCard = screen.getByLabelText('Shopify details section');
+    expect(within(shopifyCard).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(within(shopifyCard).getByText('Reference values synced from Shopify.')).toBeInTheDocument();
+    expect(snapshot).not.toHaveAttribute('open');
+    expect(within(snapshot).getByText('Full-order Shopify values; not allocation-projected.')).toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
     expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
@@ -1498,8 +1501,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const snapshot = await screen.findByLabelText('Shopify order snapshot');
-    expect(within(snapshot).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
-    expect(within(snapshot).getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    const shopifyCard = screen.getByLabelText('Shopify details section');
+    expect(within(shopifyCard).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(snapshot).not.toHaveAttribute('open');
+    expect(within(snapshot).getByText('Full-order Shopify values; not allocation-projected.')).toBeInTheDocument();
     expect(within(snapshot).getByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).toBeInTheDocument();
     expect(within(snapshot).getByText('Vendor integration')).toBeInTheDocument();
     expect(within(snapshot).getByText('Tax total')).toBeInTheDocument();
@@ -3378,8 +3383,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportCard = await screen.findByLabelText('Shipment and return support');
-    expect(supportCard).toHaveClass('order-support-card-empty');
-    expect(within(supportCard).getByText('No linked tickets')).toBeInTheDocument();
+    expect(supportCard).toHaveClass('order-support-card');
+    expect(supportCard).not.toHaveClass('order-support-card-empty');
+    expect(within(supportCard).getByText('No linked support tickets')).toBeInTheDocument();
     expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(within(supportCard).getByText(/Create a support ticket before escalating/i)).toBeInTheDocument();
     expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
@@ -3434,10 +3440,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const linkedRecord = await screen.findByLabelText('Linked record');
+    const linkedRecord = (await screen.findByRole('heading', { name: 'Linked record' })).closest('.order-linked-records-panel');
     expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
-    expect(within(linkedRecord).getByText('Support activity')).toBeInTheDocument();
-    expect(within(linkedRecord).getByText(/2 linked tickets/i)).toBeInTheDocument();
+    expect(linkedRecord).toBeTruthy();
+    expect(within(linkedRecord as HTMLElement).getByText('Support activity')).toBeInTheDocument();
+    expect(within(linkedRecord as HTMLElement).getByText(/2 linked tickets/i)).toBeInTheDocument();
     expect(linkedRecord).toHaveTextContent('Latest status: In Review');
 
     const ticketSummary = screen.getByLabelText('Support ticket summary');
@@ -3466,6 +3473,54 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(linkedRecords as HTMLElement).getByText('Support activity')).toBeInTheDocument();
     expect(within(linkedRecords as HTMLElement).getByText('Settlement activity')).toBeInTheDocument();
     expect(screen.queryByLabelText('Linked record')).not.toBeInTheDocument();
+  });
+
+  it('integrates a single finance linked record into Settlement', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard());
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const settlement = await screen.findByLabelText('Order finance preview');
+    const openFinance = within(settlement).getByRole('link', { name: 'Open finance' });
+    expect(openFinance).toHaveAttribute('href', expect.stringContaining('/finance'));
+    expect(screen.queryByRole('heading', { name: 'Linked record' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the admin right rail as timeline, Support, then a normal Internal notes card', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const rail = await screen.findByLabelText('Order timeline and support');
+    const sidebar = rail.querySelector('.order-detail-sidebar-flow') as HTMLElement;
+    const timeline = within(sidebar).getByRole('heading', { name: 'Timeline' }).closest('article') as HTMLElement;
+    const support = within(sidebar).getByRole('heading', { name: 'Support' }).closest('article') as HTMLElement;
+    const notes = within(sidebar).getByRole('heading', { name: 'Internal notes' }).closest('article') as HTMLElement;
+
+    expect(within(support).getByText('No linked support tickets')).toBeInTheDocument();
+    expect(within(notes).getByText('No internal notes yet.')).toBeInTheDocument();
+    expect(notes).not.toHaveClass('admin-collab-card-compact');
+    expect(Boolean(timeline.compareDocumentPosition(support) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(support.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('shows finance ledger preview to admins and hides it from vendors', async () => {
@@ -3575,7 +3630,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const financeTimeline = screen.getByLabelText('Finance timeline') as HTMLDetailsElement;
     expect(financeTimeline.open).toBe(false);
-    expect(within(financeTimeline).getByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
+    expect(within(financeTimeline).getByText('Finance activity')).toBeInTheDocument();
+    expect(financeTimeline.closest('article')).toBe(settlementPreview);
+    expect(financeTimeline).not.toHaveClass('order-finance-timeline-card');
     expect(financeTimeline).toHaveTextContent('Finance events are previews until settlement review is completed.');
     expect(within(financeTimeline).getByText('Settlement preview generated')).toBeInTheDocument();
     expect(within(financeTimeline).getByText('Commission estimated')).toBeInTheDocument();
@@ -3586,7 +3643,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const financeLedgerPreview = (await screen.findByLabelText('Finance ledger preview')) as HTMLDetailsElement;
     expect(financeLedgerPreview.open).toBe(false);
-    expect(screen.getByText('Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.')).toBeInTheDocument();
+    expect(financeLedgerPreview.closest('article')).toBe(settlementPreview);
+    expect(financeLedgerPreview).not.toHaveClass('order-finance-ledger-card');
+    expect(screen.getByText('Admin-only reconciliation trace; not settlement or payout truth.')).toBeInTheDocument();
     expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
     expect(screen.getByText(/Marketplace commission reserved/i)).toBeInTheDocument();
 
@@ -8365,7 +8424,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
     expect(screen.queryByRole('link', { name: /Settlement activity/i })).not.toBeInTheDocument();
-    const linkedRecord = screen.getByLabelText('Linked record');
+    const linkedRecord = screen.getByRole('heading', { name: 'Linked record' }).closest('.order-linked-records-panel');
     expect(linkedRecord).toHaveTextContent('Return linked');
     expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
     expect(screen.queryByText('Pending review')).not.toBeInTheDocument();

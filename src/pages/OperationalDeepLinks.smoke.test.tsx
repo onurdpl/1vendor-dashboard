@@ -438,7 +438,7 @@ describe('operational deep-link smoke navigation', () => {
     renderOperationalRoutes(`/orders/${targetOrder.id}`);
 
     await screen.findByRole('heading', { name: 'Order #1030' });
-    await user.click(await findLinkedRecordAnchor('Settlement activity'));
+    await user.click(await screen.findByRole('link', { name: 'Open finance' }));
 
     expect(await screen.findByRole('heading', { name: 'Order #1030' })).toBeInTheDocument();
     expect((await screen.findAllByText('TRY 1,030.00')).length).toBeGreaterThan(0);

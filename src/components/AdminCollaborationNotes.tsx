@@ -63,14 +63,12 @@ export function AdminCollaborationNotes({
   currentUser,
   title = 'Internal notes',
   emptyMessage = 'No internal notes yet.',
-  compactWhenEmpty = false,
 }: {
   contextType: AdminCollaborationNote['contextType'];
   contextId: string;
   currentUser: CurrentUser | null;
   title?: string;
   emptyMessage?: string;
-  compactWhenEmpty?: boolean;
 }) {
   const isAdmin = currentUser?.role === 'admin';
   const [notes, setNotes] = useState<AdminCollaborationNote[]>([]);
@@ -114,22 +112,6 @@ export function AdminCollaborationNotes({
     setNotes(nextNotes);
     setContent('');
     setIsComposerOpen(false);
-  }
-
-  if (compactWhenEmpty && visibleNotes.length === 0 && !isComposerOpen) {
-    return (
-      <article className="admin-collab-card admin-collab-card-compact" aria-label={`${title} (0)`}>
-        <div className="admin-collab-heading">
-          <div>
-            <p className="eyebrow">Admin collaboration</p>
-            <h3>{title} (0)</h3>
-          </div>
-          <button type="button" className="button button-secondary button-compact" onClick={() => setIsComposerOpen(true)}>
-            Add note
-          </button>
-        </div>
-      </article>
-    );
   }
 
   return (
