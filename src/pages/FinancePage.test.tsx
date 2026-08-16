@@ -973,10 +973,50 @@ describe('FinancePage control center', () => {
       shopifyOrderNumber: '1119',
       shopifyOrderId: '7819000001119',
     };
+    const refundedSale: FinanceTransaction = {
+      ...financeDashboard.transactions[0],
+      id: 'ledger-sale-refunded-list',
+      date: '2026-05-16T10:00:00Z',
+      description: 'Sale estimate after refund',
+      amount: 'TRY 2,399.50',
+      shopifyOrderNumber: '1113',
+      shopifyOrderId: '7819000001113',
+      payoutBatch: null,
+      payoutCalculation: {
+        ...financeDashboard.transactions[0].payoutCalculation!,
+        grossAmount: 'TRY 2,399.50',
+        commission: 'TRY 431.92',
+        commissionVat: 'TRY 0.00',
+        refundImpact: 'TRY 2,399.50',
+        estimatedPayout: '-TRY 431.92',
+      },
+      settlement: {
+        ...financeDashboard.transactions[0].settlement!,
+        status: 'partially_refunded',
+        payoutReady: true,
+        holdReason: null,
+        note: 'Refund impact is reducing the vendor balance.',
+      },
+    };
+    const refundDeduction: FinanceTransaction = {
+      ...financeDashboard.transactions[1],
+      id: 'ledger-refund-1113-list',
+      date: '2026-05-16T10:30:00Z',
+      amount: 'TRY 2,399.50',
+      shopifyOrderNumber: '1113',
+      shopifyOrderId: '7819000001113',
+      payoutCalculation: {
+        ...financeDashboard.transactions[1].payoutCalculation!,
+        refundImpact: 'TRY 2,399.50',
+        estimatedPayout: '-TRY 2,399.50',
+      },
+    };
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       transactions: [
         financeDashboard.transactions[0],
+        refundedSale,
+        refundDeduction,
         blockedSale,
         financeDashboard.transactions[1],
         adjustment,
@@ -986,10 +1026,15 @@ describe('FinancePage control center', () => {
     });
 
     const { container } = renderFinancePage();
-    const table = within(container.querySelector('.finance-op-table') as HTMLElement);
+    const tableElement = container.querySelector('.finance-op-table') as HTMLElement;
+    const table = within(tableElement);
     await table.findByText('#1021');
     const rowForOrder = (orderNumber: string) =>
       table.getByText(`#${orderNumber}`).closest('[role="button"]') as HTMLElement;
+    const rowForOrderWithText = (orderNumber: string, text: string) =>
+      Array.from(tableElement.querySelectorAll('.op-table-row')).find((row) =>
+        row.textContent?.includes(`#${orderNumber}`) && row.textContent.includes(text),
+      ) as HTMLElement;
 
     expect(await table.findByRole('columnheader', { name: 'Source amount' })).toBeInTheDocument();
     expect(table.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
@@ -1010,6 +1055,15 @@ describe('FinancePage control center', () => {
     expect(refundRow.getByText('-$425.00')).toBeInTheDocument();
     expect(refundRow.getByText('Deducts balance')).toBeInTheDocument();
     expect(refundRow.queryByText('$425.00')).not.toBeInTheDocument();
+
+    const refund1113Row = within(rowForOrderWithText('1113', 'Refund deduction'));
+    expect(refund1113Row.getByText('-TRY 2,399.50')).toBeInTheDocument();
+    expect(refund1113Row.getByText('Deducts balance')).toBeInTheDocument();
+
+    const refundedSaleRow = within(rowForOrderWithText('1113', 'Sale estimate'));
+    expect(refundedSaleRow.getByText('TRY 2,399.50')).toBeInTheDocument();
+    expect(refundedSaleRow.getByText('Refund recorded')).toBeInTheDocument();
+    expect(refundedSaleRow.queryByText('-TRY 431.92')).not.toBeInTheDocument();
 
     const adjustmentRow = within(rowForOrder('1117'));
     expect(adjustmentRow.getByText('-$50.00')).toBeInTheDocument();

@@ -786,6 +786,18 @@ function getTransactionListSettlementImpact(record: FinanceTransaction, audience
     return NO_SETTLEMENT_IMPACT;
   }
 
+  if (record.category === 'Invoice' && hasSaleRefundEvidence(record)) {
+    const authoritativeImpact = getAuthoritativeSaleSettlementImpact(record);
+    if (authoritativeImpact) {
+      return authoritativeImpact;
+    }
+    const projection = getFinanceOperationalProjection(record, { audience });
+    if (projection.blockerState === 'Refund offset review' || projection.settlementState.includes('Offset review')) {
+      return 'Refund offset review';
+    }
+    return 'Refund recorded';
+  }
+
   const estimatedPayout = record.payoutCalculation?.estimatedPayout;
   if (estimatedPayout) {
     return hasSameAbsoluteCurrencyValue(estimatedPayout, record.amount) ? 'Payable estimate' : estimatedPayout;
@@ -794,6 +806,33 @@ function getTransactionListSettlementImpact(record: FinanceTransaction, audience
     return record.payoutBatch.netAmount;
   }
   return NO_SETTLEMENT_IMPACT;
+}
+
+function hasSaleRefundEvidence(record: FinanceTransaction) {
+  if (record.category !== 'Invoice') {
+    return false;
+  }
+  return (
+    !isZeroCurrencyValue(record.payoutCalculation?.refundImpact) ||
+    record.settlement?.status === 'partially_refunded' ||
+    isRefundedSplitChildSaleBasis(record) ||
+    isRefundDeductionSettlementReviewPending(record) ||
+    safeArray(record.settlementRefundAdjustments).length > 0
+  );
+}
+
+function getAuthoritativeSaleSettlementImpact(record: FinanceTransaction) {
+  if (record.category !== 'Invoice') {
+    return null;
+  }
+  const payoutBatch = record.payoutBatch;
+  if (!payoutBatch?.netAmount || hasSameAbsoluteCurrencyValue(payoutBatch.netAmount, record.amount)) {
+    return null;
+  }
+  if (payoutBatch.status === 'approved' || payoutBatch.status === 'execution_pending' || payoutBatch.status === 'paid') {
+    return payoutBatch.status === 'paid' ? 'Paid' : payoutBatch.netAmount;
+  }
+  return null;
 }
 
 function getTransactionListSettlementImpactClass(record: FinanceTransaction, value: string, audience: 'admin' | 'vendor' = 'admin') {
