@@ -444,6 +444,27 @@ export function createApp() {
     }
   });
 
+  app.get('/ready', async (request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return {
+        status: 'ready',
+      };
+    } catch {
+      request.log.warn(
+        {
+          event: 'BACKEND_READY_DB_CHECK_FAILED',
+          requestId: request.requestId ?? request.id ?? null,
+        },
+        'database readiness check failed',
+      );
+      reply.status(503);
+      return {
+        status: 'not_ready',
+      };
+    }
+  });
+
   registerAuthRoutes(app, env);
   registerOrdersRoutes(app, env);
   registerReturnsRoutes(app, env);

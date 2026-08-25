@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../backend/src/app';
 
+const queryRawMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../backend/src/db/prisma.js', () => ({
+  prisma: {
+    $queryRaw: queryRawMock,
+  },
+}));
+
 describe('backend deployment health endpoint', () => {
   afterEach(() => {
+    queryRawMock.mockReset();
     vi.unstubAllEnvs();
   });
 
@@ -126,6 +135,54 @@ describe('backend deployment health endpoint', () => {
       expect(payload).not.toHaveProperty('schemaReady');
       expect(payload).not.toHaveProperty('missingColumns');
       expect(payload).not.toHaveProperty('financeAuditMetadata');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns ready when the database readiness ping succeeds', async () => {
+    stubProductionEnv();
+    queryRawMock.mockResolvedValueOnce([{ '?column?': 1 }]);
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/ready',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        status: 'ready',
+      });
+      expect(queryRawMock).toHaveBeenCalledOnce();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns not ready without exposing raw database error details when the ping fails', async () => {
+    stubProductionEnv();
+    queryRawMock.mockRejectedValueOnce(new Error('postgresql://db_user:db_password@db.example.com:5432/vendor_dashboard failed'));
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/ready',
+      });
+      const payload = response.json();
+
+      expect(response.statusCode).toBe(503);
+      expect(payload).toMatchObject({
+        status: 'not_ready',
+      });
+      expect(payload.requestId).toEqual(expect.any(String));
+      expect(response.body).not.toContain('postgresql://');
+      expect(response.body).not.toContain('db_password');
+      expect(response.body).not.toContain('db.example.com');
+      expect(response.body).not.toContain('failed');
+      expect(queryRawMock).toHaveBeenCalledOnce();
     } finally {
       await app.close();
     }

@@ -51,7 +51,7 @@ npm run backend:db:deploy && npm run backend:start
 
 ## Frontend Deploy
 
-- Deploy the frontend after the backend is healthy.
+- Deploy the frontend after the backend is live and ready.
 - Confirm SPA fallback remains configured so direct routes such as `/orders`, `/returns/:id`, `/finance`, and `/admin/diagnostics` load the app shell.
 - Confirm `VITE_API_BASE_URL` points to the production backend origin, not localhost.
 - For mobile same-origin auth testing, configure Render Static Site rewrites in this order:
@@ -62,7 +62,7 @@ npm run backend:db:deploy && npm run backend:start
 
 ## Post-Deploy Verification
 
-- Open backend health:
+- Open backend liveness:
 
 ```bash
 curl -sS <BACKEND_URL>/health
@@ -71,13 +71,21 @@ curl -sS <BACKEND_URL>/health
 Expected safe fields:
 - `ok`
 - `status`
-- `service`
-- `version`
-- `environment`
-- `dbReachable`
-- `migrationsReachable`
 - `timestamp`
 
+- Open backend DB-backed readiness:
+
+```bash
+curl -sS <BACKEND_URL>/ready
+```
+
+Expected ready response:
+
+```json
+{ "status": "ready" }
+```
+
+- Production Render backend Health Check Path should be changed to `/ready` only after the deployed `/ready` endpoint returns `200` in production.
 - Open frontend as admin and visit `/admin/diagnostics`.
 - In the Deployment runtime section, verify:
   - frontend mode is `real`
@@ -97,9 +105,9 @@ Expected safe fields:
 
 ## Migration Safety
 
-- Runtime health checks report database reachability, `_prisma_migrations` table reachability, and required operational columns such as `ShopifyOrder.customerPhone` and Navlungo return evidence fields on `ReturnRecord`.
+- Runtime readiness checks report whether the production backend can complete a minimal database round trip. Non-production database diagnostics may also report `_prisma_migrations` table reachability and required operational columns such as `ShopifyOrder.customerPhone` and Navlungo return evidence fields on `ReturnRecord`.
 - `schemaReady=false` or a non-empty `missingColumns` list means production is running with unapplied schema changes. Apply migrations before testing return pickup evidence or Shopify order ingestion.
-- Health checks still do not prove whether every local migration file has been applied. Use `npm run backend:db:deploy` during backend deploy for authoritative Prisma migration application.
+- Readiness checks still do not prove whether every local migration file has been applied. Use `npm run backend:db:deploy` during backend deploy for authoritative Prisma migration application.
 - If `migrationsReachable=false` but `dbReachable=true`, do not proceed with frontend verification until the backend migration deploy path is checked.
 
 ## Rollback Guidance
