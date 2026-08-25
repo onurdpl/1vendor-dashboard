@@ -302,8 +302,9 @@ function getDiagnosticEndpoint(path: string) {
   }
 }
 
-function isSessionRestoreEndpoint(path: string) {
-  return getDiagnosticEndpoint(path) === '/auth/me';
+function shouldClearLocalSessionOnUnauthorized(path: string) {
+  const endpoint = getDiagnosticEndpoint(path);
+  return endpoint !== '/auth/me' && endpoint !== '/auth/logout';
 }
 
 function getPayloadRequestId(payload: unknown) {
@@ -447,7 +448,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
       if (!response.ok) {
       const diagnostics = createApiDiagnostics(path, headers, response, payload);
 
-      if (response.status === 401 && !isSessionRestoreEndpoint(path)) {
+      if (response.status === 401 && shouldClearLocalSessionOnUnauthorized(path)) {
         recordAuthDiagnostic('CACHE_USER_CLEAR', {
           flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
           requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? diagnostics.requestId,
@@ -507,7 +508,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
       });
     }
     if (error instanceof ApiError) {
-      if (error.kind === 'unauthorized' && !isSessionRestoreEndpoint(path)) {
+      if (error.kind === 'unauthorized' && shouldClearLocalSessionOnUnauthorized(path)) {
         recordAuthDiagnostic('CACHE_USER_CLEAR', {
           flowId: getAuthCorrelationHeader(headers, 'X-Auth-Flow-Id'),
           requestId: getAuthCorrelationHeader(headers, 'X-Auth-Request-Id') ?? error.diagnostics?.requestId ?? null,

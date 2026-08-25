@@ -208,7 +208,7 @@ function useShellContext() {
     setSelectedVendorId(appReadiness.currentVendor.vendorId);
   }, [appReadiness.currentVendor.vendorId]);
 
-  function handleLogout() {
+  async function handleLogout() {
     if (logoutRequestedRef.current) {
       return;
     }
@@ -222,21 +222,31 @@ function useShellContext() {
       cachedUserPresent: Boolean(currentUser),
     });
     setLogoutRequested(true);
-    clearCsrfToken();
-    clearToken({ source: 'AppShell.handleLogout' });
-    queryClient.clear();
-    showFeedback('Signed out successfully.', 'success');
-    recordAuthDiagnostic('REDIRECT_LOGIN', {
-      flowId: null,
-      requestId: null,
-      source: 'AppShell.handleLogout',
-      nextAuthState: 'unauthenticated',
-    });
-    navigate('/login', { replace: true });
-
-    void runtimeServices.auth.logout().catch(() => {
-      // Server logout is best-effort; local sign-out has already completed.
-    });
+    try {
+      await runtimeServices.auth.logout();
+      clearCsrfToken();
+      clearToken({ source: 'AppShell.handleLogout' });
+      queryClient.clear();
+      showFeedback('Signed out successfully.', 'success');
+      recordAuthDiagnostic('REDIRECT_LOGIN', {
+        flowId: null,
+        requestId: null,
+        source: 'AppShell.handleLogout',
+        nextAuthState: 'unauthenticated',
+      });
+      navigate('/login', { replace: true });
+    } catch {
+      logoutRequestedRef.current = false;
+      setLogoutRequested(false);
+      showFeedback('Unable to sign out. Please try again.', 'error');
+      recordAuthDiagnostic('LOGOUT_TRIGGER', {
+        flowId: null,
+        requestId: null,
+        source: 'AppShell.handleLogout',
+        resultCategory: 'failure',
+        cachedUserPresent: Boolean(currentUser),
+      });
+    }
   }
 
   function handleSignInAgain() {

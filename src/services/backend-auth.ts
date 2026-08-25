@@ -690,12 +690,9 @@ export async function logout() {
     source: 'backend-auth.logout',
     resultCategory: 'started',
   });
-  try {
-    await apiClient.post<{ ok: true }>('/auth/logout', undefined, {
-      headers: buildAuthCorrelationHeaders({ authRequestId }),
-      skipVendorContext: true,
-    });
-  } finally {
-    clearCsrfToken();
-  }
+  await apiClient.post<{ ok: true }>('/auth/logout', undefined, {
+    headers: buildAuthCorrelationHeaders({ authRequestId }),
+    skipVendorContext: true,
+  });
+  clearCsrfToken();
 }

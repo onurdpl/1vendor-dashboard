@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeConfig } from './config/runtime';
-import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
+import { apiClient, clearCsrfToken, setCsrfToken } from './lib/api-client';
+import { getCurrentUser, getToken, setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
 import {
   interpretDualPathTransportDiagnostic,
   login,
+  logout,
   me,
   probeDirectBackendLoginPostTransport,
   probeDualPathLoginPostTransport,
@@ -14,11 +16,14 @@ import {
 describe('backend auth client diagnostics', () => {
   const fetchMock = vi.fn();
   const originalRuntimeConfig = {
+    apiBaseUrl: runtimeConfig.apiBaseUrl,
+    apiMode: runtimeConfig.apiMode,
     diagnosticBackendOrigin: runtimeConfig.diagnosticBackendOrigin,
   };
 
   beforeEach(() => {
     window.localStorage.clear();
+    clearCsrfToken();
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(
       new Response(
@@ -43,6 +48,7 @@ describe('backend auth client diagnostics', () => {
   });
 
   afterEach(() => {
+    clearCsrfToken();
     Object.assign(runtimeConfig, originalRuntimeConfig);
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -170,6 +176,65 @@ describe('backend auth client diagnostics', () => {
     expect(headers.get('X-Auth-Request-Id')).toBe('req-restore123');
     expect(JSON.stringify(init)).not.toContain('sporgym_session=');
     expect(JSON.stringify(init)).not.toContain('csrf-token');
+  });
+
+  it('preserves the current CSRF token when backend logout fails', async () => {
+    Object.assign(runtimeConfig, { apiBaseUrl: '/api', apiMode: 'real' });
+    setToken('session-before-logout');
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    setCsrfToken('csrf-before-logout');
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'logout unavailable' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+    await expect(logout()).rejects.toMatchObject({ status: 401 });
+    expect(getToken()).toBe('session-before-logout');
+    expect(getCurrentUser()?.email).toBe('vendor@example.com');
+    await apiClient.post('/logout-retry-probe', {}, { skipVendorContext: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryHeaders = new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers);
+    expect(retryHeaders.get('X-CSRF-Token')).toBe('csrf-before-logout');
+  });
+
+  it('clears the current CSRF token after backend logout succeeds', async () => {
+    Object.assign(runtimeConfig, { apiBaseUrl: '/api', apiMode: 'real' });
+    setCsrfToken('csrf-before-logout');
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: 'csrf-after-logout' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+    await logout();
+    await apiClient.post('/logout-success-probe', {}, { skipVendorContext: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/auth/csrf');
+    const protectedHeaders = new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers);
+    expect(protectedHeaders.get('X-CSRF-Token')).toBe('csrf-after-logout');
   });
 
   it('posts the fixed login transport probe payload without credentials', async () => {

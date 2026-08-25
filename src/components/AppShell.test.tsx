@@ -3,8 +3,27 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminShell, VendorShell } from './AppShell';
-import { getCurrentUser, getToken, setCurrentVendorId, setSession, type CurrentUser } from '../lib/auth';
+import {
+  clearAuthRestoreState,
+  getAuthRestoreSnapshot,
+  getCurrentUser,
+  getToken,
+  markAuthConfirmed,
+  setCurrentVendorId,
+  setSession,
+  type CurrentUser,
+} from '../lib/auth';
+import { clearCsrfToken, setCsrfToken } from '../lib/api-client';
+import { queryClient } from '../lib/api/queryClient';
 import { runtimeServices } from '../services/runtime-services';
+
+vi.mock('../lib/api-client', async () => {
+  const actual = await vi.importActual<typeof import('../lib/api-client')>('../lib/api-client');
+  return {
+    ...actual,
+    clearCsrfToken: vi.fn(actual.clearCsrfToken),
+  };
+});
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
@@ -15,6 +34,8 @@ vi.mock('../services/runtime-services', () => ({
 }));
 
 const logoutMock = vi.mocked(runtimeServices.auth.logout);
+const clearCsrfTokenMock = vi.mocked(clearCsrfToken);
+const logoutQueryKey = ['logout-ordering-test'] as const;
 
 const adminUser: CurrentUser = {
   email: 'admin@example.com',
@@ -63,6 +84,21 @@ const restrictedVendorUser: CurrentUser = {
 function seedSession(user: CurrentUser) {
   setSession('test-session', user);
   setCurrentVendorId(user.defaultVendorId);
+  markAuthConfirmed({ restoreAttemptId: 'restore-test' });
+}
+
+function seedLogoutState(user: CurrentUser) {
+  seedSession(user);
+  setCsrfToken('logout-csrf-token');
+  queryClient.setQueryData(logoutQueryKey, { preserved: true });
+}
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function renderShell(initialEntry: string) {
@@ -103,6 +139,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  queryClient.clear();
+  clearAuthRestoreState();
+  clearCsrfToken();
   vi.clearAllMocks();
 });
 
@@ -272,7 +311,7 @@ describe('AppShell workspace navigation', () => {
 
   it('clears the cached user and replaces the route with login on logout', async () => {
     const user = userEvent.setup();
-    seedSession(vendorUser);
+    seedLogoutState(vendorUser);
 
     renderShell('/orders');
 
@@ -286,50 +325,76 @@ describe('AppShell workspace navigation', () => {
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(getCurrentUser()).toBeNull();
     expect(getToken()).toBeNull();
+    expect(clearCsrfTokenMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(logoutQueryKey)).toBeUndefined();
+    expect(getAuthRestoreSnapshot()).toMatchObject({
+      phase: 'unconfirmed',
+      authConfirmed: false,
+      restoreAttemptId: null,
+    });
     expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
     expect(logoutMock).toHaveBeenCalledTimes(1);
   });
 
-  it('logs out vendor users immediately when backend logout never resolves', async () => {
+  it('keeps local auth and query state intact until backend logout resolves', async () => {
     const user = userEvent.setup();
-    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
-    seedSession(vendorUser);
+    const deferredLogout = createDeferred();
+    logoutMock.mockReturnValueOnce(deferredLogout.promise);
+    seedLogoutState(vendorUser);
 
     renderShell('/orders');
 
     expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
 
     const menu = await openAccountMenu(user);
-    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
+    const logoutButton = within(menu).getByRole('button', { name: /Log out/i });
+    await user.click(logoutButton);
+
+    expect(logoutButton).toBeDisabled();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
+    expect(getCurrentUser()?.email).toBe('vendor@example.com');
+    expect(getToken()).toBe('test-session');
+    expect(clearCsrfTokenMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(logoutQueryKey)).toEqual({ preserved: true });
+    expect(getAuthRestoreSnapshot()).toMatchObject({ phase: 'confirmed', authConfirmed: true });
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+
+    deferredLogout.resolve();
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
     expect(getToken()).toBeNull();
-    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
-    expect(logoutMock).toHaveBeenCalledTimes(1);
+    expect(clearCsrfTokenMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(logoutQueryKey)).toBeUndefined();
   });
 
-  it('logs out admin workspace users immediately when backend logout never resolves', async () => {
+  it('waits for backend logout before leaving the admin workspace', async () => {
     const user = userEvent.setup();
-    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
+    const deferredLogout = createDeferred();
+    logoutMock.mockReturnValueOnce(deferredLogout.promise);
     seedSession(adminUser);
 
     renderShell('/admin/operations');
 
     expect(screen.getByText('Admin operations content')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Log out/i }));
+    const logoutButton = screen.getByRole('button', { name: /Log out/i });
+    await user.click(logoutButton);
 
-    expect(await screen.findByText('Login screen')).toBeInTheDocument();
-    expect(getCurrentUser()).toBeNull();
-    expect(getToken()).toBeNull();
-    expect(screen.queryByText('Admin operations content')).not.toBeInTheDocument();
+    expect(logoutButton).toBeDisabled();
+    expect(screen.getByText('Admin operations content')).toBeInTheDocument();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
     expect(logoutMock).toHaveBeenCalledTimes(1);
+
+    deferredLogout.resolve();
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
   });
 
-  it('logs out admins viewing vendor workspace immediately', async () => {
+  it('waits for backend logout when an admin is viewing the vendor workspace', async () => {
     const user = userEvent.setup();
-    logoutMock.mockImplementationOnce(() => new Promise<never>(() => {}));
+    const deferredLogout = createDeferred();
+    logoutMock.mockReturnValueOnce(deferredLogout.promise);
     seedSession(adminUser);
 
     renderShell('/orders');
@@ -338,31 +403,48 @@ describe('AppShell workspace navigation', () => {
     expect(screen.getByText('Admin view')).toBeInTheDocument();
 
     const menu = await openAccountMenu(user);
-    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
+    const logoutButton = within(menu).getByRole('button', { name: /Log out/i });
+    await user.click(logoutButton);
 
-    expect(await screen.findByText('Login screen')).toBeInTheDocument();
-    expect(getCurrentUser()).toBeNull();
-    expect(getToken()).toBeNull();
-    expect(screen.queryByText('Orders workspace content')).not.toBeInTheDocument();
+    expect(logoutButton).toBeDisabled();
+    expect(screen.getByText('Orders workspace content')).toBeInTheDocument();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
     expect(logoutMock).toHaveBeenCalledTimes(1);
+
+    deferredLogout.resolve();
+    expect(await screen.findByText('Login screen')).toBeInTheDocument();
   });
 
-  it('keeps local logout complete when backend logout rejects', async () => {
+  it('preserves local auth and query state after logout rejection and allows retry', async () => {
     const user = userEvent.setup();
     logoutMock.mockRejectedValueOnce(new Error('logout unavailable'));
-    seedSession(vendorUser);
+    seedLogoutState(vendorUser);
 
     renderShell('/finance');
 
     expect(screen.getByText('Finance workspace content')).toBeInTheDocument();
 
     const menu = await openAccountMenu(user);
-    await user.click(within(menu).getByRole('button', { name: /Log out/i }));
+    const logoutButton = within(menu).getByRole('button', { name: /Log out/i });
+    await user.click(logoutButton);
+
+    expect(await screen.findByText('Unable to sign out. Please try again.')).toBeInTheDocument();
+    expect(logoutButton).toBeEnabled();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+    expect(screen.getByText('Finance workspace content')).toBeInTheDocument();
+    expect(getCurrentUser()?.email).toBe('vendor@example.com');
+    expect(getToken()).toBe('test-session');
+    expect(clearCsrfTokenMock).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(logoutQueryKey)).toEqual({ preserved: true });
+    expect(getAuthRestoreSnapshot()).toMatchObject({ phase: 'confirmed', authConfirmed: true });
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+
+    await user.click(logoutButton);
 
     expect(await screen.findByText('Login screen')).toBeInTheDocument();
     expect(getCurrentUser()).toBeNull();
     expect(getToken()).toBeNull();
-    expect(screen.queryByText('Finance workspace content')).not.toBeInTheDocument();
-    expect(logoutMock).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryData(logoutQueryKey)).toBeUndefined();
+    expect(logoutMock).toHaveBeenCalledTimes(2);
   });
 });
