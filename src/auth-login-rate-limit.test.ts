@@ -273,6 +273,7 @@ describe('auth login rate limiting', () => {
         user: expect.objectContaining({
           email: 'vendor@example.com',
           role: 'vendor',
+          status: 'active',
         }),
         csrfToken: expect.any(String),
       }),
@@ -413,6 +414,47 @@ describe('auth login rate limiting', () => {
     const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
     expect(serializedLogs).not.toContain('vendor@example.com');
     expect(serializedLogs).not.toContain('wrong-password');
+  });
+
+  it('rejects a non-active user login without creating an authenticated session', async () => {
+    findUniqueMock.mockResolvedValueOnce({
+      ...buildUser(),
+      status: 'inactive',
+    });
+    const handlers = createAuthRouteHandlers();
+    const reply = createReply();
+
+    const result = await handlers.post['/auth/login']?.(
+      {
+        requestId: 'inactive-login-request',
+        method: 'POST',
+        routeOptions: { url: '/auth/login' },
+        headers: {},
+        body: {
+          email: 'vendor@example.com',
+          password: 'demo123',
+        },
+        ip: '127.0.0.1',
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.sent ? reply.payload : result).toEqual({ message: 'Invalid email or password.' });
+    expect(readSetCookieHeader(reply.headers)).toBe('');
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_DIAGNOSTICS',
+        success: false,
+        failureStage: 'user_status',
+        failureReason: 'inactive_user',
+        sessionCookieSetAttempted: false,
+        csrfTokenGenerationAttempted: false,
+        responseStatus: 401,
+      }),
+      'auth login diagnostics',
+    );
   });
 
   it('returns minimal public login readiness in production without exposing config diagnostics', async () => {
@@ -783,6 +825,56 @@ describe('auth login rate limiting', () => {
         csrfToken: expect.any(String),
       }),
     );
+  });
+
+  it('rejects a previously issued session on the next authenticated request after user deactivation', async () => {
+    const login = await injectLogin();
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(login.headers));
+    findUniqueMock.mockResolvedValueOnce({
+      ...buildUser(),
+      status: 'inactive',
+    });
+    const authService = createAuthService(buildEnv());
+    const authMiddleware = createAuthMiddleware(authService);
+    const reply = createReply();
+    const request = {
+      method: 'GET',
+      headers: { cookie: sessionCookie },
+    } as never;
+
+    await authMiddleware.authenticateRequest(request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual(expect.objectContaining({ message: 'Unauthorized' }));
+    expect(request).not.toHaveProperty('authUser');
+  });
+
+  it('rejects /auth/me for a non-active user with an otherwise valid session cookie', async () => {
+    const env = buildEnv();
+    const handlers = createAuthRouteHandlers(env);
+    const token = signJwt(env.JWT_SECRET, Math.floor(Date.now() / 1000) + 3600);
+    findUniqueMock.mockResolvedValueOnce({
+      ...buildUser(),
+      status: 'inactive',
+    });
+    const reply = createReply();
+    const request = {
+      method: 'GET',
+      routeOptions: { url: '/auth/me' },
+      requestId: 'inactive-auth-me-request',
+      log: {
+        info: vi.fn(),
+      },
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+    };
+
+    await invokeGetRoute(handlers.get['/auth/me'], request, reply);
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual(expect.objectContaining({ message: 'Unauthorized' }));
+    expect(reply.payload).not.toEqual(expect.objectContaining({ user: expect.anything() }));
   });
 
   it('reuses the middleware-authenticated user for /auth/me without a duplicate route lookup', async () => {

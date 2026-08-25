@@ -8,6 +8,7 @@ import { mapRole } from './auth.types.js';
 import { classifyPasswordHashScheme, hashPasswordArgon2id, verifyPasswordHash } from './password-hashing.js';
 
 const AUTH_LOGIN_DB_PROBE_ENABLED = process.env.AUTH_LOGIN_DB_PROBE_ENABLED === 'true';
+const ACTIVE_USER_STATUS = 'active';
 
 type UserRecordWithVendorLinks = {
   id: string;
@@ -92,6 +93,10 @@ function mapUserRecordToAuthResponse(user: UserRecordWithVendorLinks): AuthUserR
   };
 }
 
+function isActiveUser(status: string) {
+  return status === ACTIVE_USER_STATUS;
+}
+
 export function createAuthService(env: AppEnv) {
   function signToken(payload: JwtPayload) {
     return jwt.sign(payload, env.JWT_SECRET, {
@@ -131,7 +136,7 @@ export function createAuthService(env: AppEnv) {
       },
     });
 
-    if (!user) {
+    if (!user || !isActiveUser(user.status)) {
       return null;
     }
 
@@ -187,6 +192,18 @@ export function createAuthService(env: AppEnv) {
         timing,
         failureStage: 'password_verify',
         failureReason: 'invalid_password',
+      };
+    }
+
+    if (!isActiveUser(user.status)) {
+      timing.serviceTotalMs = elapsedMs(serviceStartedAt);
+      return {
+        success: false,
+        token: null,
+        user: null,
+        timing,
+        failureStage: 'user_status',
+        failureReason: 'inactive_user',
       };
     }
 
