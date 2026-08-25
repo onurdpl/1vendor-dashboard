@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { queryClient } from './api/queryClient';
 import { useEffect, useRef, useState } from 'react';
 import {
   clearToken,
@@ -94,7 +95,7 @@ function logAuthRestoreWarn(event: string, details: Record<string, unknown> = {}
 
 function isUnauthorizedRestoreFailure(error: unknown) {
   if (error instanceof ApiError) {
-    return error.kind === 'unauthorized' || error.status === 401 || error.status === 403;
+    return error.kind === 'unauthorized' || error.status === 401;
   }
 
   if (!error || typeof error !== 'object') {
@@ -102,7 +103,7 @@ function isUnauthorizedRestoreFailure(error: unknown) {
   }
 
   const candidate = error as { kind?: unknown; status?: unknown };
-  return candidate.kind === 'unauthorized' || candidate.status === 401 || candidate.status === 403;
+  return candidate.kind === 'unauthorized' || candidate.status === 401;
 }
 
 function createRestoreAttemptId() {
@@ -511,6 +512,9 @@ export function RequireAuth() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     const unsubscribeSession = onSessionReset(() => {
+      if (!getCurrentUser()) {
+        queryClient.clear();
+      }
       if (suppressNextSessionReset) {
         suppressNextSessionReset = false;
         return;

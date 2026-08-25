@@ -3,8 +3,11 @@ import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RequireAuth } from './RequireAuth';
-import { clearAuthRestoreState, clearToken, setCurrentUser, setToken } from './auth';
+import { clearAuthRestoreState, clearToken, getCurrentUser, setCurrentUser, setToken } from './auth';
+import { apiClient } from './api-client';
 import { ApiError } from './api/errors';
+import { queryClient } from './api/queryClient';
+import { queryKeys } from './api/queryKeys';
 
 function seedSession() {
   setToken('test-token');
@@ -15,6 +18,22 @@ function seedSession() {
     vendorAccess: ['sporjinal'],
     vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
     canSwitchVendors: false,
+    defaultVendorId: 'sporjinal',
+  });
+}
+
+function seedAdminSession() {
+  setToken('admin-test-token');
+  setCurrentUser({
+    email: 'admin@example.com',
+    name: 'Admin User',
+    role: 'admin',
+    vendorAccess: ['sporjinal', 'yalispor'],
+    vendorDetails: [
+      { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+      { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+    ],
+    canSwitchVendors: true,
     defaultVendorId: 'sporjinal',
   });
 }
@@ -55,10 +74,12 @@ function makeDeferred<T>() {
 
 afterEach(() => {
   cleanup();
+  queryClient.clear();
   vi.doUnmock('../config/runtime');
   vi.doUnmock('../services/runtime-services');
   vi.resetModules();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   clearAuthRestoreState();
   window.localStorage.clear();
   window.history.replaceState({}, '', '/');
@@ -87,6 +108,114 @@ describe('RequireAuth', () => {
     });
 
     expect(screen.getByText('Login screen')).toBeInTheDocument();
+  });
+
+  it('purges privileged cache before redirecting after a protected 401', async () => {
+    window.history.replaceState({}, '', '/admin/operations?type=return_review');
+    seedAdminSession();
+    const privilegedKey = queryKeys.admin.operations.attention();
+    queryClient.setQueryData(privilegedKey, { visibleToAdminOnly: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    render(
+      <MemoryRouter initialEntries={['/admin/operations?type=return_review']}>
+        <Routes>
+          <Route element={<RequireAuth />}>
+            <Route path="/admin/operations" element={<div>Admin operations workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await expect(apiClient.get('/admin/operations/attention')).rejects.toMatchObject({
+      kind: 'unauthorized',
+      status: 401,
+    });
+
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(getCurrentUser()).toBeNull();
+    expect(queryClient.getQueryData(privilegedKey)).toBeUndefined();
+
+    setToken('lower-privileged-session');
+    setCurrentUser(buildTestUser());
+    expect(queryClient.getQueryData(privilegedKey)).toBeUndefined();
+  });
+
+  it('preserves auth and protected cache after 403, network, and 5xx failures', async () => {
+    seedSession();
+    const protectedKey = queryKeys.orders.list('sporjinal');
+    const protectedData = [{ orderId: 'order-1' }];
+    queryClient.setQueryData(protectedKey, protectedData);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Forbidden' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockRejectedValueOnce(new TypeError('temporary network failure'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Backend unavailable' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await expect(apiClient.get('/orders', { vendorId: 'sporjinal' })).rejects.toMatchObject({ status: 403 });
+    await expect(apiClient.get('/orders', { vendorId: 'sporjinal' })).rejects.toMatchObject({ kind: 'network' });
+    await expect(apiClient.get('/orders', { vendorId: 'sporjinal' })).rejects.toMatchObject({ status: 500 });
+
+    expect(getCurrentUser()?.email).toBe('vendor@example.com');
+    expect(queryClient.getQueryData(protectedKey)).toEqual(protectedData);
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
+  });
+
+  it('handles simultaneous protected 401 responses idempotently', async () => {
+    seedSession();
+    const protectedKey = queryKeys.finance.summary('sporjinal');
+    queryClient.setQueryData(protectedKey, { balance: 1200 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    render(
+      <MemoryRouter initialEntries={['/finance']}>
+        <Routes>
+          <Route element={<RequireAuth />}>
+            <Route path="/finance" element={<div>Finance workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const results = await Promise.allSettled([
+      apiClient.get('/finance/summary', { vendorId: 'sporjinal' }),
+      apiClient.get('/orders', { vendorId: 'sporjinal' }),
+    ]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ status: 'rejected' }),
+      expect.objectContaining({ status: 'rejected' }),
+    ]);
+    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
+    expect(getCurrentUser()).toBeNull();
+    expect(queryClient.getQueryData(protectedKey)).toBeUndefined();
   });
 
   it('renders cached shell immediately in real mode while protected data stays locked until /auth/me confirms', async () => {
@@ -283,11 +412,14 @@ describe('RequireAuth', () => {
         },
       },
     }));
-    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+    const [{ RequireAuth: RealModeRequireAuth }, auth, queryClientModule] = await Promise.all([
       import('./RequireAuth'),
       import('./auth'),
+      import('./api/queryClient'),
     ]);
     auth.setCurrentUser(buildTestUser());
+    const previousUserCacheKey = queryKeys.orders.detail('order-1048', 'sporjinal');
+    queryClientModule.queryClient.setQueryData(previousUserCacheKey, { customerEmail: 'previous-user@example.com' });
     window.history.replaceState({}, '', '/orders');
 
     render(
@@ -305,10 +437,11 @@ describe('RequireAuth', () => {
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(meMock).toHaveBeenCalledTimes(1);
     expect(auth.getCurrentUser()).toBeNull();
+    expect(queryClientModule.queryClient.getQueryData(previousUserCacheKey)).toBeUndefined();
     expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
   });
 
-  it('redirects real-mode sessions to login when /auth/me returns forbidden for a stale local user', async () => {
+  it('preserves the session and protected cache when /auth/me returns forbidden', async () => {
     vi.resetModules();
     vi.doMock('../config/runtime', () => ({
       runtimeConfig: {
@@ -323,11 +456,15 @@ describe('RequireAuth', () => {
         },
       },
     }));
-    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+    const [{ RequireAuth: RealModeRequireAuth }, auth, queryClientModule] = await Promise.all([
       import('./RequireAuth'),
       import('./auth'),
+      import('./api/queryClient'),
     ]);
     auth.setCurrentUser(buildTestUser());
+    const protectedKey = queryKeys.orders.list('sporjinal');
+    const protectedData = [{ orderId: 'order-1' }];
+    queryClientModule.queryClient.setQueryData(protectedKey, protectedData);
     window.history.replaceState({}, '', '/orders');
 
     render(
@@ -342,10 +479,11 @@ describe('RequireAuth', () => {
     );
 
     expect(screen.getByText('Orders workspace')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
-    expect(meMock).toHaveBeenCalledTimes(1);
-    expect(auth.getCurrentUser()).toBeNull();
-    expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
+    await waitFor(() => expect(meMock).toHaveBeenCalledTimes(2));
+    expect(auth.getCurrentUser()?.email).toBe('vendor@example.com');
+    expect(queryClientModule.queryClient.getQueryData(protectedKey)).toEqual(protectedData);
+    expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument();
   });
 
   it('recovers when the first real-mode session restore has a network failure and retry succeeds', async () => {
