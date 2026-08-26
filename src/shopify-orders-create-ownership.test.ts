@@ -14,6 +14,8 @@ const {
   claimDueReceivedOrdersCreateEvent,
   claimExpiredProcessingOrdersCreateEvent,
   createOrdersCreateFencedExecutionContext,
+  discoverOrdersCreateExecutionCandidates,
+  fenceExpiredExhaustedOrdersCreateEvent,
   finalizeRetryableOrdersCreateFailure,
   finalizeTerminalOrdersCreateFailure,
   heartbeatOrdersCreateOwnership,
@@ -42,6 +44,30 @@ function context(generation = 4) {
 function sqlText(callIndex = 0) {
   const sql = prismaMock.$queryRaw.mock.calls[callIndex]?.[0] as { strings?: string[] } | undefined;
   return sql?.strings?.join('?') ?? '';
+}
+
+function event(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'event-1',
+    sourceShopDomain: 'store.myshopify.com',
+    topic: 'orders/create',
+    webhookId: 'webhook-1',
+    idempotencyKey: 'key-1',
+    payloadHash: 'hash-1',
+    rawPayload: JSON.stringify({ id: 2001 }),
+    status: 'RECEIVED',
+    receivedAt: new Date('2026-08-26T10:00:00.000Z'),
+    processedAt: null,
+    errorMessage: null,
+    shopifyOrderId: null,
+    sourceShopifyOrderId: '2001',
+    executionAvailableAt: new Date('2026-08-26T10:00:01.000Z'),
+    executionAttemptCount: 0,
+    executionMaxAttempts: 3,
+    processingGeneration: 0,
+    processingLeaseExpiresAt: null,
+    ...overrides,
+  };
 }
 
 describe('orders/create fenced ownership primitives', () => {
@@ -89,6 +115,19 @@ describe('orders/create fenced ownership primitives', () => {
     expect(sqlText()).toContain('"executionAvailableAt" <= CURRENT_TIMESTAMP');
   });
 
+  it.each([
+    ['FAILED', claimDueFailedOrdersCreateEvent],
+    ['expired PROCESSING', claimExpiredProcessingOrdersCreateEvent],
+  ])('allows exactly one concurrent claimant for %s work', async (_label, claim) => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([ownership()])
+      .mockResolvedValueOnce([]);
+
+    const results = await Promise.all([claim('event-1'), claim('event-1')]);
+
+    expect(results.filter((result) => result.acquired)).toHaveLength(1);
+  });
+
   it('claims only expired PROCESSING ownership and increments its fence', async () => {
     prismaMock.$queryRaw.mockResolvedValueOnce([ownership({ processingGeneration: 5 })]);
 
@@ -111,6 +150,60 @@ describe('orders/create fenced ownership primitives', () => {
 
     await expect(claimDueFailedOrdersCreateEvent('event-1')).resolves.toEqual({ acquired: false });
     expect(sqlText()).toContain('"executionAttemptCount" < "executionMaxAttempts"');
+  });
+
+  it('discovers only explicitly enrolled due work with bounded indexed ordering', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([event({ id: 'received-later', receivedAt: new Date('2026-08-26T10:01:00.000Z') })])
+      .mockResolvedValueOnce([event({ id: 'failed-first', status: 'FAILED', executionAvailableAt: new Date('2026-08-26T09:59:00.000Z') })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const candidates = await discoverOrdersCreateExecutionCandidates(2);
+
+    expect(candidates.map((candidate) => candidate.event.id)).toEqual(['failed-first', 'received-later']);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(4);
+    expect(sqlText(0)).toContain('"status" = \'RECEIVED\'');
+    expect(sqlText(0)).toContain('"executionAvailableAt" IS NOT NULL');
+    expect(sqlText(0)).toContain('"executionAvailableAt" <= CURRENT_TIMESTAMP');
+    expect(sqlText(0)).toContain('"executionAttemptCount" < "executionMaxAttempts"');
+    expect(sqlText(0)).toContain('ORDER BY "executionAvailableAt" ASC, "receivedAt" ASC, "id" ASC');
+    expect(sqlText(0)).toContain('LIMIT ?');
+    expect(sqlText(1)).toContain('"status" = \'FAILED\'');
+    expect(sqlText(2)).toContain('"processingLeaseExpiresAt" IS NOT NULL');
+    expect(sqlText(2)).toContain('"processingLeaseExpiresAt" <= CURRENT_TIMESTAMP');
+    expect(sqlText(3)).toContain('"executionAttemptCount" >= "executionMaxAttempts"');
+  });
+
+  it('globally bounds discovery after deterministic due-time ordering', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([event({ id: 'second', executionAvailableAt: new Date('2026-08-26T10:00:02.000Z') })])
+      .mockResolvedValueOnce([event({ id: 'first', status: 'FAILED', executionAvailableAt: new Date('2026-08-26T10:00:01.000Z') })])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const candidates = await discoverOrdersCreateExecutionCandidates(1);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.event.id).toBe('first');
+  });
+
+  it('fences an exhausted expired owner before terminalization without incrementing attempts', async () => {
+    prismaMock.$queryRaw.mockResolvedValueOnce([ownership({
+      processingGeneration: 5,
+      executionAttemptCount: 3,
+      processingLeaseExpiresAt: null,
+    })]);
+
+    await expect(fenceExpiredExhaustedOrdersCreateEvent('event-1')).resolves.toMatchObject({
+      processingGeneration: 5,
+      executionAttemptCount: 3,
+    });
+    expect(sqlText()).toContain('"processingGeneration" = "processingGeneration" + 1');
+    expect(sqlText()).toContain('"executionAttemptCount" >= "executionMaxAttempts"');
+    expect(sqlText()).not.toContain('"executionAttemptCount" = "executionAttemptCount" + 1');
+    expect(sqlText()).toContain('"executionAvailableAt" = NULL');
+    expect(sqlText()).toContain('"processingLeaseExpiresAt" = NULL');
   });
 
   it('heartbeats current ownership using the 60-second lease design', async () => {

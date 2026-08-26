@@ -206,6 +206,7 @@ export type OrdersCreateFencedExecutionContext = {
   processingGeneration: number;
   sourceShopifyOrderId: string;
   signal: AbortSignal;
+  shopifyAdminRequestTimeoutMs?: number;
 };
 
 export type OrderIngestionInput = {

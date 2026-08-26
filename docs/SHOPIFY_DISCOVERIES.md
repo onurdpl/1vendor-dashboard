@@ -563,10 +563,16 @@ POST /fulfillments.json
 ### Orders/Create Fenced Processing Preparation
 
 - The existing `orders/create` business processing has been extracted behind a reusable service while the HTTP route still awaits it synchronously before responding.
-- Database-backed claim, lease, heartbeat, generation fencing, conditional failure finalization, and transaction fence primitives exist for future executor use only.
+- A request-independent `orders/create` executor runtime now exists and is disabled by default through `SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=false`.
+- The executor processes only explicitly enrolled `WebhookEvent` rows whose `executionAvailableAt` is non-null and due, or whose non-null processing lease has expired. Legacy rows with null availability or lease remain excluded and are not backfilled.
+- Due RECEIVED work, due FAILED retries, and expired PROCESSING takeover use database-backed atomic claims. `WebhookEvent` generation, attempt, lease, availability, and status fields remain the execution and retry authority; `OperationalJob` is best-effort metadata only.
+- Heartbeats extend current ownership, and generation fencing plus the commerce transaction fence prevent an expired or replaced owner from finalizing failure or committing commerce.
+- Exhausted expired PROCESSING ownership is fenced and terminalized without running commerce or Current-State Repair.
+- Executor-owned seller_info, image, and tax Admin requests use a deadline derived from half the configured lease. The synchronous webhook path has no new request deadline.
 - Fenced ingestion uses an order-scoped PostgreSQL transaction advisory lock and verifies the current event generation and unexpired lease before commerce mutation and final success.
 - The current synchronous route does not supply a fenced execution context and does not require lease fields.
-- Automatic execution, stale-processing takeover, heartbeat timers, fast acknowledgement, and executor feature flags are not active or implemented.
+- When explicitly enabled with a database configuration, the executor polls immediately and periodically, consumes durable retries, heartbeats active work, and drains active ownership for at most one lease during graceful shutdown.
+- Fast acknowledgement remains not implemented. The live `orders/create` webhook route still performs and awaits processing synchronously, does not set executor availability, and does not enroll incoming events into the executor.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.

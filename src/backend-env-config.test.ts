@@ -208,6 +208,69 @@ describe('backend env shipping provider gates', () => {
   });
 });
 
+describe('orders/create executor environment', () => {
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('is disabled by default with conservative runtime settings', () => {
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: undefined,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: undefined,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: undefined,
+      SHOPIFY_ORDERS_CREATE_LEASE_MS: undefined,
+      SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: undefined,
+    });
+
+    expect(loadEnv()).toMatchObject({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: false,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: 2_000,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: 5,
+      SHOPIFY_ORDERS_CREATE_LEASE_MS: 60_000,
+      SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: 10_000,
+    });
+  });
+
+  it('parses enabled positive executor settings', () => {
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: 'true',
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: '3000',
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: '7',
+      SHOPIFY_ORDERS_CREATE_LEASE_MS: '90000',
+      SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: '15000',
+    });
+
+    expect(loadEnv()).toMatchObject({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: 3_000,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: 7,
+      SHOPIFY_ORDERS_CREATE_LEASE_MS: 90_000,
+      SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: 15_000,
+    });
+  });
+
+  it.each([
+    ['SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS', '0'],
+    ['SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE', '0'],
+    ['SHOPIFY_ORDERS_CREATE_LEASE_MS', '-1'],
+    ['SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS', '0'],
+  ])('rejects non-positive %s', (name, value) => {
+    resetEnv({ [name]: value });
+    expect(() => loadEnv()).toThrow();
+  });
+
+  it('rejects a heartbeat that is not materially shorter than its lease', () => {
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_LEASE_MS: '60000',
+      SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: '30000',
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS must be materially shorter than SHOPIFY_ORDERS_CREATE_LEASE_MS.',
+    );
+  });
+});
+
 describe('backend env Lidio configuration', () => {
   afterEach(() => {
     process.env = { ...originalEnv };

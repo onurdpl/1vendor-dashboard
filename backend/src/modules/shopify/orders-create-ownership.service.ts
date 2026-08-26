@@ -25,6 +25,25 @@ type OwnershipExistsRow = {
 
 type ClaimKind = 'RECEIVED' | 'FAILED' | 'EXPIRED_PROCESSING';
 
+export type OrdersCreateExecutionCandidateKind =
+  | 'RECEIVED'
+  | 'FAILED'
+  | 'EXPIRED_PROCESSING'
+  | 'EXHAUSTED_PROCESSING';
+
+export type OrdersCreateExecutionCandidate = {
+  kind: OrdersCreateExecutionCandidateKind;
+  event: WebhookEvent;
+  dueAt: Date;
+};
+
+export type OrdersCreateFailureFinalizationState = {
+  id: string;
+  executionAvailableAt: Date | null;
+  executionAttemptCount: number;
+  executionMaxAttempts: number;
+};
+
 export type OrdersCreateFencedClaimResult =
   | {
       acquired: true;
@@ -123,6 +142,106 @@ export function claimExpiredProcessingOrdersCreateEvent(eventId: string, leaseDu
   return claimFencedOrdersCreateEvent({ eventId, kind: 'EXPIRED_PROCESSING', leaseDurationMs });
 }
 
+export async function discoverOrdersCreateExecutionCandidates(batchSize: number) {
+  const [received, failed, expired, exhausted] = await Promise.all([
+    prisma.$queryRaw<WebhookEvent[]>(Prisma.sql`
+      SELECT * FROM "WebhookEvent"
+      WHERE "topic" = 'orders/create'
+        AND "status" = 'RECEIVED'
+        AND "sourceShopifyOrderId" IS NOT NULL
+        AND "executionAvailableAt" IS NOT NULL
+        AND "executionAvailableAt" <= CURRENT_TIMESTAMP
+        AND "executionAttemptCount" < "executionMaxAttempts"
+      ORDER BY "executionAvailableAt" ASC, "receivedAt" ASC, "id" ASC
+      LIMIT ${batchSize}
+    `),
+    prisma.$queryRaw<WebhookEvent[]>(Prisma.sql`
+      SELECT * FROM "WebhookEvent"
+      WHERE "topic" = 'orders/create'
+        AND "status" = 'FAILED'
+        AND "sourceShopifyOrderId" IS NOT NULL
+        AND "executionAvailableAt" IS NOT NULL
+        AND "executionAvailableAt" <= CURRENT_TIMESTAMP
+        AND "executionAttemptCount" < "executionMaxAttempts"
+      ORDER BY "executionAvailableAt" ASC, "receivedAt" ASC, "id" ASC
+      LIMIT ${batchSize}
+    `),
+    prisma.$queryRaw<WebhookEvent[]>(Prisma.sql`
+      SELECT * FROM "WebhookEvent"
+      WHERE "topic" = 'orders/create'
+        AND "status" = 'PROCESSING'
+        AND "sourceShopifyOrderId" IS NOT NULL
+        AND "processingLeaseExpiresAt" IS NOT NULL
+        AND "processingLeaseExpiresAt" <= CURRENT_TIMESTAMP
+        AND "executionAttemptCount" < "executionMaxAttempts"
+      ORDER BY "processingLeaseExpiresAt" ASC, "receivedAt" ASC, "id" ASC
+      LIMIT ${batchSize}
+    `),
+    prisma.$queryRaw<WebhookEvent[]>(Prisma.sql`
+      SELECT * FROM "WebhookEvent"
+      WHERE "topic" = 'orders/create'
+        AND "status" = 'PROCESSING'
+        AND "sourceShopifyOrderId" IS NOT NULL
+        AND "processingLeaseExpiresAt" IS NOT NULL
+        AND "processingLeaseExpiresAt" <= CURRENT_TIMESTAMP
+        AND "executionAttemptCount" >= "executionMaxAttempts"
+      ORDER BY "processingLeaseExpiresAt" ASC, "receivedAt" ASC, "id" ASC
+      LIMIT ${batchSize}
+    `),
+  ]);
+
+  const candidates: OrdersCreateExecutionCandidate[] = [
+    ...received.map((event) => ({ kind: 'RECEIVED' as const, event, dueAt: event.executionAvailableAt! })),
+    ...failed.map((event) => ({ kind: 'FAILED' as const, event, dueAt: event.executionAvailableAt! })),
+    ...expired.map((event) => ({
+      kind: 'EXPIRED_PROCESSING' as const,
+      event,
+      dueAt: event.processingLeaseExpiresAt!,
+    })),
+    ...exhausted.map((event) => ({
+      kind: 'EXHAUSTED_PROCESSING' as const,
+      event,
+      dueAt: event.processingLeaseExpiresAt!,
+    })),
+  ];
+
+  return candidates
+    .sort((left, right) =>
+      left.dueAt.getTime() - right.dueAt.getTime() ||
+      left.event.receivedAt.getTime() - right.event.receivedAt.getTime() ||
+      left.event.id.localeCompare(right.event.id) ||
+      left.kind.localeCompare(right.kind))
+    .slice(0, batchSize);
+}
+
+export async function fenceExpiredExhaustedOrdersCreateEvent(eventId: string) {
+  const rows = await prisma.$queryRaw<FencedClaimRow[]>(Prisma.sql`
+    UPDATE "WebhookEvent"
+    SET
+      "status" = 'FAILED',
+      "processingGeneration" = "processingGeneration" + 1,
+      "executionAvailableAt" = NULL,
+      "processingLeaseExpiresAt" = NULL,
+      "errorMessage" = 'Shopify orders/create automatic execution attempts exhausted.'
+    WHERE "id" = ${eventId}
+      AND "topic" = 'orders/create'
+      AND "status" = 'PROCESSING'
+      AND "sourceShopifyOrderId" IS NOT NULL
+      AND "processingLeaseExpiresAt" IS NOT NULL
+      AND "processingLeaseExpiresAt" <= CURRENT_TIMESTAMP
+      AND "executionAttemptCount" >= "executionMaxAttempts"
+    RETURNING
+      "id",
+      "sourceShopifyOrderId",
+      "processingGeneration",
+      "executionAttemptCount",
+      "executionMaxAttempts",
+      "processingLeaseExpiresAt"
+  `);
+
+  return rows[0] ?? null;
+}
+
 export function createOrdersCreateFencedExecutionContext(
   ownership: FencedClaimRow,
   signal: AbortSignal,
@@ -187,12 +306,12 @@ export async function assertOrdersCreateOwnership(context: OrdersCreateFencedExe
   }
 }
 
-export async function finalizeRetryableOrdersCreateFailure(
+async function finalizeRetryableOrdersCreateFailureInternal(
   context: OrdersCreateFencedExecutionContext,
   error: unknown,
 ) {
   const message = sanitizeFailureMessage(error);
-  const rows = await prisma.$queryRaw<OwnershipRow[]>(Prisma.sql`
+  const rows = await prisma.$queryRaw<OrdersCreateFailureFinalizationState[]>(Prisma.sql`
     UPDATE "WebhookEvent"
     SET
       "status" = 'FAILED',
@@ -212,12 +331,32 @@ export async function finalizeRetryableOrdersCreateFailure(
       AND "sourceShopifyOrderId" = ${context.sourceShopifyOrderId}
       AND "processingLeaseExpiresAt" IS NOT NULL
       AND "processingLeaseExpiresAt" > CURRENT_TIMESTAMP
-    RETURNING "id"
+    RETURNING
+      "id",
+      "executionAvailableAt",
+      "executionAttemptCount",
+      "executionMaxAttempts"
   `);
 
   if (!rows[0]) {
     throw new OrdersCreateLostFenceError('Stale orders/create owner cannot finalize a retryable failure.');
   }
+
+  return rows[0];
+}
+
+export async function finalizeRetryableOrdersCreateFailure(
+  context: OrdersCreateFencedExecutionContext,
+  error: unknown,
+) {
+  await finalizeRetryableOrdersCreateFailureInternal(context, error);
+}
+
+export function finalizeRetryableOrdersCreateFailureWithState(
+  context: OrdersCreateFencedExecutionContext,
+  error: unknown,
+) {
+  return finalizeRetryableOrdersCreateFailureInternal(context, error);
 }
 
 export async function finalizeTerminalOrdersCreateFailure(

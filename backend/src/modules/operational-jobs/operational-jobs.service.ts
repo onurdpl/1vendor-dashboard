@@ -32,6 +32,15 @@ export type OperationalJobTypeLabel =
   | 'refund_sync'
   | 'return_sync';
 
+export type OrdersCreateExecutorJobState =
+  | 'processing'
+  | 'retrying'
+  | 'retry_scheduled'
+  | 'completed'
+  | 'failed'
+  | 'permanently_failed'
+  | 'dead_letter_ready';
+
 export type OperationalJobDto = {
   id: string;
   jobType: OperationalJobTypeLabel;
@@ -122,6 +131,70 @@ function toIsoString(value: Date | null) {
 function summarizeOperationalError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || 'Operational job failed.');
   return message.length > 500 ? `${message.slice(0, 497)}...` : message;
+}
+
+export function buildOrdersCreateExecutorJobId(webhookEventId: string) {
+  return `shopify-orders-create-executor-${webhookEventId}`;
+}
+
+export async function mirrorOrdersCreateExecutorJob(input: {
+  webhookEventId: string;
+  sourceShopifyOrderId: string;
+  state: OrdersCreateExecutorJobState;
+  attemptCount: number;
+  maxAttempts: number;
+  nextRetryAt?: Date | null;
+  error?: unknown;
+}) {
+  const now = new Date();
+  const status = statusToPrisma[input.state];
+  const active = input.state === 'processing' || input.state === 'retrying';
+  const completed = input.state === 'completed';
+  const failed = !active && !completed;
+  const failureCategory = input.state === 'retry_scheduled'
+    ? 'transient'
+    : input.state === 'permanently_failed'
+      ? 'permanent'
+      : failed
+        ? 'reconciliation_required'
+        : null;
+  const errorSummary = input.error ? summarizeOperationalError(input.error) : null;
+  const escalationReason = input.state === 'dead_letter_ready'
+    ? `Execution attempts exhausted after ${input.attemptCount}/${input.maxAttempts}. Manual intervention required.`
+    : input.state === 'retry_scheduled' && input.nextRetryAt
+      ? `Retry scheduled for ${input.nextRetryAt.toISOString()}.`
+      : input.state === 'permanently_failed'
+        ? 'Permanent orders/create failure requires manual intervention.'
+        : null;
+  const data = {
+    jobType: OperationalJobType.WEBHOOK_PROCESSING,
+    status,
+    payloadRef: `webhook-event:${input.webhookEventId}`,
+    webhookEventId: input.webhookEventId,
+    sourceShopifyOrderId: input.sourceShopifyOrderId,
+    retryCount: input.attemptCount,
+    maxRetries: input.maxAttempts,
+    scheduledAt: input.nextRetryAt ?? now,
+    nextRetryAt: input.state === 'retry_scheduled' ? input.nextRetryAt ?? null : null,
+    lastAttemptAt: active || failed || completed ? now : null,
+    startedAt: active ? now : undefined,
+    completedAt: completed ? now : null,
+    failedAt: failed ? now : null,
+    errorSummary,
+    failureCategory,
+    escalationReason,
+  };
+
+  return prisma.operationalJob.upsert({
+    where: { id: buildOrdersCreateExecutorJobId(input.webhookEventId) },
+    update: data,
+    create: {
+      id: buildOrdersCreateExecutorJobId(input.webhookEventId),
+      priority: 0,
+      retryBackoffMs: 60_000,
+      ...data,
+    },
+  });
 }
 
 function isFailureCategory(value: string | null): value is OperationalJobFailureCategory {

@@ -22,6 +22,11 @@ export type AppEnv = {
   SHOPIFY_MOCK_RETURN_DETAILS?: string;
   SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE?: string;
   SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: number;
+  SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED?: boolean;
+  SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS?: number;
+  SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE?: number;
+  SHOPIFY_ORDERS_CREATE_LEASE_MS?: number;
+  SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS?: number;
   SHOPIFY_MISSED_ORDER_DISCOVERY_ENABLED?: boolean;
   SHOPIFY_MISSED_ORDER_DISCOVERY_INTERVAL_MS?: number;
   SHOPIFY_MISSED_ORDER_DISCOVERY_LOOKBACK_DAYS?: number;
@@ -239,6 +244,20 @@ export function loadEnv(): AppEnv {
   const shopifyAdminAccessToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || undefined;
   const shopifyApiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
   const defaultRetryDelayMs = nodeEnv === 'test' ? 25 : 2000;
+  const ordersCreateExecutorLeaseMs = parsePositiveInteger(
+    process.env.SHOPIFY_ORDERS_CREATE_LEASE_MS,
+    60_000,
+  );
+  const ordersCreateExecutorHeartbeatMs = parsePositiveInteger(
+    process.env.SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS,
+    10_000,
+  );
+
+  if (ordersCreateExecutorHeartbeatMs * 2 >= ordersCreateExecutorLeaseMs) {
+    throw new Error(
+      'SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS must be materially shorter than SHOPIFY_ORDERS_CREATE_LEASE_MS.',
+    );
+  }
 
   if (!jwtSecret) {
     throw new Error('JWT_SECRET is required in production.');
@@ -335,6 +354,20 @@ export function loadEnv(): AppEnv {
       process.env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
       defaultRetryDelayMs,
     ),
+    SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: parseBoolean(
+      process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED,
+      false,
+    ),
+    SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: parsePositiveInteger(
+      process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS,
+      2_000,
+    ),
+    SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: parsePositiveInteger(
+      process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE,
+      5,
+    ),
+    SHOPIFY_ORDERS_CREATE_LEASE_MS: ordersCreateExecutorLeaseMs,
+    SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: ordersCreateExecutorHeartbeatMs,
     SHOPIFY_MISSED_ORDER_DISCOVERY_ENABLED: parseBoolean(
       process.env.SHOPIFY_MISSED_ORDER_DISCOVERY_ENABLED,
       false,

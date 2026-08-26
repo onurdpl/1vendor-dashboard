@@ -84,6 +84,37 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+class OrdersCreateAdminRequestTimeoutError extends Error {
+  readonly code = 'ETIMEDOUT';
+
+  constructor(timeoutMs: number) {
+    super(`Shopify Admin orders/create request timed out after ${timeoutMs} ms.`);
+    this.name = 'OrdersCreateAdminRequestTimeoutError';
+  }
+}
+
+async function withShopifyAdminRequestDeadline<T>(input: {
+  parentSignal: AbortSignal;
+  timeoutMs: number;
+  request: (signal: AbortSignal) => Promise<T>;
+}) {
+  input.parentSignal.throwIfAborted();
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(input.parentSignal.reason);
+  input.parentSignal.addEventListener('abort', forwardAbort, { once: true });
+  const timeout = globalThis.setTimeout(() => {
+    controller.abort(new OrdersCreateAdminRequestTimeoutError(input.timeoutMs));
+  }, input.timeoutMs);
+  timeout.unref?.();
+
+  try {
+    return await input.request(controller.signal);
+  } finally {
+    globalThis.clearTimeout(timeout);
+    input.parentSignal.removeEventListener('abort', forwardAbort);
+  }
+}
+
 export function createOrdersCreateProcessingService(input: {
   env: AppEnv;
   shopifyAdminService?: OrdersCreateAdminService;
@@ -115,9 +146,16 @@ export function createOrdersCreateProcessingService(input: {
 
     try {
       processingInput.executionContext?.signal.throwIfAborted();
+      const fetchSellerInfo = processingInput.executionContext?.shopifyAdminRequestTimeoutMs
+        ? (orderId: string) => withShopifyAdminRequestDeadline({
+            parentSignal: processingInput.executionContext!.signal,
+            timeoutMs: processingInput.executionContext!.shopifyAdminRequestTimeoutMs!,
+            request: (signal) => shopifyAdminService.fetchOrderSellerInfo(orderId, { signal }),
+          })
+        : shopifyAdminService.fetchOrderSellerInfo;
       const sellerInfoResult = await fetchSellerInfoWithRetry({
         orderId: sourceShopifyOrderId,
-        fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
+        fetchSellerInfo,
         delayMs: input.env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
         signal: processingInput.executionContext?.signal,
       });
@@ -132,10 +170,16 @@ export function createOrdersCreateProcessingService(input: {
         });
       }
 
-      const lineItemImagesRequest = processingInput.executionContext
-        ? shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId, {
-            signal: processingInput.executionContext.signal,
+      const lineItemImagesRequest = processingInput.executionContext?.shopifyAdminRequestTimeoutMs
+        ? withShopifyAdminRequestDeadline({
+            parentSignal: processingInput.executionContext.signal,
+            timeoutMs: processingInput.executionContext.shopifyAdminRequestTimeoutMs,
+            request: (signal) => shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId, { signal }),
           })
+        : processingInput.executionContext
+          ? shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId, {
+              signal: processingInput.executionContext.signal,
+            })
         : shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId);
       const lineItemImages = await lineItemImagesRequest
         .then(
@@ -158,10 +202,16 @@ export function createOrdersCreateProcessingService(input: {
           },
         );
 
-      const taxSnapshotRequest = processingInput.executionContext
-        ? shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId, {
-            signal: processingInput.executionContext.signal,
+      const taxSnapshotRequest = processingInput.executionContext?.shopifyAdminRequestTimeoutMs
+        ? withShopifyAdminRequestDeadline({
+            parentSignal: processingInput.executionContext.signal,
+            timeoutMs: processingInput.executionContext.shopifyAdminRequestTimeoutMs,
+            request: (signal) => shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId, { signal }),
           })
+        : processingInput.executionContext
+          ? shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId, {
+              signal: processingInput.executionContext.signal,
+            })
         : shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId);
       const taxSnapshot = await taxSnapshotRequest
         .then(
@@ -209,3 +259,7 @@ export function createOrdersCreateProcessingService(input: {
 
   return { process };
 }
+
+export const __ordersCreateProcessingTesting = {
+  withShopifyAdminRequestDeadline,
+};

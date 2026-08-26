@@ -21,6 +21,7 @@ import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.ser
 import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.js';
 import { registerShopifyOrderWebhookRegistrationRoutes } from './modules/shopify/order-webhook-registration.routes.js';
 import { registerMissedOrderDiscoveryScheduler } from './modules/shopify/missed-order-discovery.service.js';
+import { registerOrdersCreateExecutor } from './modules/shopify/orders-create-executor.service.js';
 import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.routes.js';
 import { registerCanonicalReconciliationScheduler } from './modules/reconciliation/canonical-reconciliation-runner.service.js';
@@ -493,6 +494,7 @@ export function createApp() {
   registerReconciliationRoutes(app, env);
   registerShopifyOrderWebhookRegistrationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
+  registerOrdersCreateExecutor(app, env);
   registerMissedOrderDiscoveryScheduler(app, env);
   registerCanonicalReconciliationScheduler(app, env);
   registerScheduledReconciliationScheduler(app, env);

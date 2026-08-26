@@ -12,6 +12,7 @@ vi.mock('../backend/src/modules/shopify/order-ingestion.service.js', () => inges
 vi.mock('../backend/src/modules/shopify/seller-info-retry.service.js', () => sellerRetryMock);
 
 const {
+  __ordersCreateProcessingTesting,
   createOrdersCreateProcessingService,
   prepareOrdersCreatePayload,
 } = await import('../backend/src/modules/shopify/orders-create-processing.service.js');
@@ -118,6 +119,68 @@ describe('orders/create reusable processing service', () => {
       mode: 'upsert',
       executionContext: undefined,
     });
+    expect(admin.fetchOrderLineItemImages).toHaveBeenCalledWith('2001');
+    expect(admin.fetchOrderTaxSnapshot).toHaveBeenCalledWith('2001');
+  });
+
+  it('bounds only executor-owned seller, image, and tax Admin requests', async () => {
+    const { admin, service } = createService();
+    sellerRetryMock.fetchSellerInfoWithRetry.mockImplementationOnce(async (input: {
+      fetchSellerInfo: (orderId: string) => Promise<unknown>;
+    }) => {
+      await input.fetchSellerInfo('2001');
+      return {
+        ok: true,
+        sellerInfo: { 'SKU-1': 'sporjinal' },
+        attempts: 1,
+        source: 'shopify_admin',
+      };
+    });
+    admin.fetchOrderSellerInfo.mockResolvedValue({ sellerInfo: { 'SKU-1': 'sporjinal' }, source: 'shopify_admin' });
+    const controller = new AbortController();
+
+    await service.process({
+      event: event(),
+      payload: { id: 2001 },
+      mode: 'missing_order_only',
+      executionContext: {
+        webhookEventId: 'event-1',
+        processingGeneration: 1,
+        sourceShopifyOrderId: '2001',
+        signal: controller.signal,
+        shopifyAdminRequestTimeoutMs: 30_000,
+      },
+    });
+
+    for (const request of [
+      admin.fetchOrderSellerInfo,
+      admin.fetchOrderLineItemImages,
+      admin.fetchOrderTaxSnapshot,
+    ]) {
+      expect(request).toHaveBeenCalledWith('2001', { signal: expect.any(AbortSignal) });
+      expect(request.mock.calls[0]?.[1]?.signal).not.toBe(controller.signal);
+    }
+  });
+
+  it('aborts an executor Admin request at its ownership-derived deadline', async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    const request = __ordersCreateProcessingTesting.withShopifyAdminRequestDeadline({
+      parentSignal: new AbortController().signal,
+      timeoutMs: 30_000,
+      request: (signal) => {
+        requestSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+    const rejection = expect(request).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejection;
+    expect(requestSignal?.aborted).toBe(true);
+    vi.useRealTimers();
   });
 
   it('preserves image and tax enrichment fallback behavior', async () => {
