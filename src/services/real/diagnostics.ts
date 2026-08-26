@@ -121,6 +121,7 @@ export type DiagnosticsReconciliationSummary = {
   missingPayload: number;
   staleAllocations: number;
   scheduledReconciliationJobs: number;
+  missingShopifyOrders: number;
   total: number;
 };
 
@@ -132,7 +133,8 @@ export type DiagnosticsReconciliationItem = {
     | 'fulfillment_sync_failed'
     | 'missing_payload'
     | 'stale_allocation'
-    | 'scheduled_reconciliation';
+    | 'scheduled_reconciliation'
+    | 'shopify_order_missing_local';
   severity: 'critical' | 'warning' | 'attention' | 'normal';
   title: string;
   description: string;
@@ -147,6 +149,9 @@ export type DiagnosticsReconciliationItem = {
   nextAttemptAt?: string | null;
   lastAttemptAt?: string | null;
   reconciliationReason?: string | null;
+  relatedShopifyOrderNumber?: string | null;
+  shopifyCreatedAt?: string | null;
+  firstDetectedAt?: string | null;
 };
 
 type WebhooksResponseDto = {

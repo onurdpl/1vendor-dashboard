@@ -298,6 +298,14 @@ Alternative for quick schema sync without migration history:
 - Admin diagnostics reconciliation now surfaces scheduled reconciliation jobs with job id, candidate reason, current status, related order/allocation, and next/last attempt metadata.
 - This phase still does not add Redis, BullMQ, Kafka, RabbitMQ, Kubernetes cron, distributed workers, websocket infrastructure, or event-sourcing changes.
 
+## Shopify-First Missed Order Discovery
+- An isolated opt-in in-process runner enumerates recent Shopify orders and detects orders with no local `ShopifyOrder`.
+- It remains separate from canonical and scheduled reconciliation because their candidate populations start from local records.
+- Defaults are a 15-minute interval, 15-minute grace period, seven-day overlapping lookback, 100-order pages, and a 1,000-order cap.
+- Deterministic `OperationalSignal` identities make repeated and multi-instance observations converge without a migration or distributed lock.
+- The runner writes diagnostics signals only. It never invokes ingestion, Current-State Repair, Fresh Order Backfill, allocation, or finance mutations.
+- Active signals are exposed through existing admin diagnostics and open the existing Order State Inspector for supervised dry-run and explicit repair execution.
+
 ## Phase 17D Operational Observability and Metrics
 - The lightweight observability layer is documented in [PHASE_17D_OBSERVABILITY.md](docs/PHASE_17D_OBSERVABILITY.md).
 - Admin-only observability endpoints:

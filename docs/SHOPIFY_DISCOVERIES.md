@@ -521,6 +521,16 @@ POST /fulfillments.json
 - `notify_customer: true` lets Shopify send the tracking email to the customer.
 - Customer notification policy is still an operational choice and remains an open question for production behavior.
 
+## Shopify-First Missed Order Discovery
+- The backend can opt into a Shopify-first recent-order discovery scan with `SHOPIFY_MISSED_ORDER_DISCOVERY_ENABLED=true`.
+- Discovery uses Admin GraphQL `2026-01` and reads only `Order.id`, `legacyResourceId`, `name`, `createdAt`, and cursor page information.
+- `Order.legacyResourceId` is compared with unique local `ShopifyOrder.sourceShopifyOrderId`; order name is display and repair-input metadata only.
+- Operational defaults are a 15-minute interval, 15-minute grace period, seven-day overlapping lookback, 100-order page size, and 1,000-order run cap.
+- Missing orders create one deterministic `shopify_order_missing_local` `OperationalSignal`. Repeated observations update the same signal without replacing its original detection timestamp.
+- A completed scan resolves a missing-order signal only after positive confirmation that the local `ShopifyOrder` exists. Failed or truncated scans do not resolve existing missing-order signals.
+- Discovery is read-only toward commerce state. It never creates or modifies orders, allocations, finance entries/events, fulfillment, refunds, returns, settlements, or payouts.
+- Recovery remains admin-supervised: inspect the signal in Recovery Center, run existing Current-State Repair dry-run, review it, and explicitly confirm execution when safe. Discovery never invokes Current-State Repair or Fresh Order Backfill.
+
 ## Known Race Conditions
 - `orders/create` webhook can arrive before Shopify Flow writes `custom.seller_info`.
 - Future fulfillment operations may depend on fulfillment orders being available after order creation.

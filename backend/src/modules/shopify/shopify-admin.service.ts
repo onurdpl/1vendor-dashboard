@@ -18,6 +18,7 @@ import type {
   FetchShopifyReturnDetailsResult,
   FetchShopifyReturnReverseDeliveryInputsResult,
   FetchOrderSellerInfoResult,
+  FetchRecentShopifyOrdersPageResult,
   ProbeShopifyReturnLabelUploadInput,
   ProbeShopifyReturnLabelUploadResult,
   PreviewSuggestedRefundInput,
@@ -65,6 +66,21 @@ type OrderSellerInfoQueryResponse = {
       value: string | null;
     } | null;
   } | null;
+};
+
+type RecentOrdersQueryResponse = {
+  orders: {
+    nodes: Array<{
+      id?: string | null;
+      legacyResourceId?: string | null;
+      name?: string | null;
+      createdAt?: string | null;
+    }>;
+    pageInfo: {
+      hasNextPage: boolean;
+      endCursor?: string | null;
+    };
+  };
 };
 
 type OrderLineItemImagesQueryResponse = {
@@ -1260,6 +1276,82 @@ function parseMockOrderFulfillmentStateByOrderId(
 
 export function createShopifyAdminService(env: AppEnv) {
   const mockSellerInfoByOrderId = parseMockSellerInfoByOrderId(env.SHOPIFY_MOCK_SELLER_INFO);
+
+  async function fetchRecentOrdersPage(input: {
+    createdAtFrom: Date;
+    createdAtTo: Date;
+    first: number;
+    after?: string | null;
+  }): Promise<FetchRecentShopifyOrdersPageResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify Admin credentials are required for missed-order discovery.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query RecentOrdersForMissingLocalDiscovery($first: Int!, $after: String, $query: String!) {
+              orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+                nodes {
+                  id
+                  legacyResourceId
+                  name
+                  createdAt
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          `,
+          variables: {
+            first: input.first,
+            after: input.after ?? null,
+            query: `created_at:>='${input.createdAtFrom.toISOString()}' created_at:<='${input.createdAtTo.toISOString()}'`,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify recent-order discovery failed with status ${response.status}.`);
+    }
+
+    const json = await parseCanonicalShopifyResponse<RecentOrdersQueryResponse>(response);
+    if (json.errors?.length) {
+      throw new Error(`Shopify recent-order discovery returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+    if (!json.data?.orders || !Array.isArray(json.data.orders.nodes)) {
+      throw new CanonicalShopifySnapshotParseError('Shopify recent-order discovery response was incomplete.');
+    }
+
+    const orders = json.data.orders.nodes.flatMap((node) => {
+      if (!node.id || !node.legacyResourceId || !node.name || !node.createdAt) {
+        return [];
+      }
+      return [{
+        orderGid: node.id,
+        sourceShopifyOrderId: String(node.legacyResourceId),
+        sourceShopifyOrderNumber: node.name,
+        shopifyCreatedAt: node.createdAt,
+      }];
+    });
+    return {
+      orders,
+      nodesCount: json.data.orders.nodes.length,
+      malformedNodes: json.data.orders.nodes.length - orders.length,
+      hasNextPage: json.data.orders.pageInfo.hasNextPage,
+      endCursor: json.data.orders.pageInfo.endCursor ?? null,
+    };
+  }
   const mockOrderLineItemImagesByOrderId = parseMockOrderLineItemImagesByOrderId(
     (env as { SHOPIFY_MOCK_LINE_ITEM_IMAGES?: string }).SHOPIFY_MOCK_LINE_ITEM_IMAGES,
   );
@@ -3959,6 +4051,7 @@ export function createShopifyAdminService(env: AppEnv) {
   }
 
   return {
+    fetchRecentOrdersPage,
     fetchOrderSellerInfo,
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,

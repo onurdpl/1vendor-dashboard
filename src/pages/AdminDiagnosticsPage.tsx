@@ -230,6 +230,7 @@ export function AdminDiagnosticsPage() {
   const [eligibilityFilter, setEligibilityFilter] = useState('all');
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
   const [repairCandidateCount, setRepairCandidateCount] = useState(0);
+  const [selectedMissingOrderIdentifier, setSelectedMissingOrderIdentifier] = useState<string>();
   const [pendingWebhookAction, setPendingWebhookAction] = useState<{
     action: 'replay' | 'recover';
     webhookEventId: string;
@@ -410,7 +411,11 @@ export function AdminDiagnosticsPage() {
   const canonicalRun = canonicalReconciliationQuery.data?.lastRun ?? null;
   const visibleWebhooks = filteredWebhooks.slice(0, 20);
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
-  const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
+  const visibleReconciliationItems = reconciliationQuery.data?.items
+    .filter((item) => item.type !== 'shopify_order_missing_local')
+    .slice(0, 8) ?? [];
+  const missingShopifyOrders = reconciliationQuery.data?.items.filter((item) =>
+    item.type === 'shopify_order_missing_local' && ['active', 'acknowledged'].includes(item.status.toLowerCase())) ?? [];
 
   const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading || canonicalReconciliationQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? canonicalReconciliationQuery.error ?? webhookDetailQuery.error;
@@ -429,6 +434,7 @@ export function AdminDiagnosticsPage() {
       fulfillmentFailures: reconciliationQuery.data?.summary.fulfillmentSyncFailures ?? 0,
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
       staleAllocations: reconciliationQuery.data?.summary.staleAllocations ?? 0,
+      missingShopifyOrders: reconciliationQuery.data?.summary.missingShopifyOrders ?? 0,
       scheduledReconciliationJobs: reconciliationQuery.data?.summary.scheduledReconciliationJobs ?? 0,
       retryPressure: observabilityQuery.data?.retryPressure.pressureScore ?? 0,
       deadLetterReady: observabilityQuery.data
@@ -445,6 +451,7 @@ export function AdminDiagnosticsPage() {
     combinedCounts.fulfillmentFailures ||
     combinedCounts.missingPayload ||
     combinedCounts.staleAllocations ||
+    combinedCounts.missingShopifyOrders ||
     combinedCounts.retryPressure ||
     repairCandidateCount,
   );
@@ -633,7 +640,48 @@ export function AdminDiagnosticsPage() {
         )}
       </OperationalSection>
 
-      <OrderStateInspector onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)} />
+      <OperationalSection title="Missing Shopify orders">
+        {missingShopifyOrders.length === 0 ? (
+          <DiagnosticsEmptyState
+            title="No missing Shopify orders detected"
+            description="The Shopify-first discovery signal queue is clear."
+            status="No action required"
+            tone="success"
+          />
+        ) : (
+          <div className="op-event-list reconciliation-event-list">
+            {missingShopifyOrders.map((item) => (
+              <article key={item.id} className="op-event-row reconciliation-event-row">
+                <SeverityBadge tone="danger">critical</SeverityBadge>
+                <div>
+                  <strong>{item.relatedShopifyOrderNumber ?? 'Shopify order'}</strong>
+                  <p>{item.description}</p>
+                  <div className="reconciliation-meta">
+                    <span>ID {item.relatedShopifyOrderId ?? 'Not recorded'}</span>
+                    <span>Created {formatDate(item.shopifyCreatedAt)}</span>
+                    <span>Detected {formatDate(item.firstDetectedAt ?? item.createdAt)}</span>
+                    <span>{safeStatusLabel(item.status)}</span>
+                  </div>
+                </div>
+                <OperationalActionGroup>
+                  <button
+                    type="button"
+                    className="button button-secondary button-compact"
+                    onClick={() => setSelectedMissingOrderIdentifier(item.relatedShopifyOrderNumber ?? item.relatedShopifyOrderId ?? undefined)}
+                  >
+                    Inspect
+                  </button>
+                </OperationalActionGroup>
+              </article>
+            ))}
+          </div>
+        )}
+      </OperationalSection>
+
+      <OrderStateInspector
+        initialOrderIdentifier={selectedMissingOrderIdentifier}
+        onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)}
+      />
 
       <OperationalSection
         title="Webhooks"

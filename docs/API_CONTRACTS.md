@@ -351,6 +351,8 @@ Webhook processing lifecycle states:
   - `fulfillmentSyncFailures`
   - `missingPayload`
   - `staleAllocations`
+  - `scheduledReconciliationJobs`
+  - `missingShopifyOrders`
   - `total`
 - Item shape includes:
   - `id`
@@ -365,6 +367,8 @@ Webhook processing lifecycle states:
   - `createdAt`
   - `suggestedAction`
   - `payloadAvailable`
+- Active `shopify_order_missing_local` items additionally expose the Shopify order name, Shopify creation time, and first detection time from safe signal metadata.
+- Recovery Center's `Inspect` action only opens/prefills the existing Order State Inspector. It does not execute repair; Current-State Repair remains dry-run first with separately confirmed execution.
 - Current stale allocation signals are visibility-only heuristics. They may point operators to the admin reconciliation endpoints, but they do not perform background repair.
 
 ### POST /admin/reconciliation/orders/:allocationId

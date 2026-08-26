@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -437,6 +437,7 @@ describe('AdminDiagnosticsPage control center', () => {
         missingPayload: 1,
         staleAllocations: 1,
         scheduledReconciliationJobs: 0,
+        missingShopifyOrders: 0,
         total: 2,
       },
       items: [
@@ -1035,6 +1036,68 @@ describe('AdminDiagnosticsPage control center', () => {
     await userEvent.click(repairDetailsLabel);
     expect(repairDetails.open).toBe(true);
     expect(screen.getByText('admin@example.com')).toBeInTheDocument();
+  });
+
+  it('surfaces a missing Shopify order signal and Inspect only prefills the existing inspector', async () => {
+    const user = userEvent.setup();
+    diagnosticsMocks.reconciliation.mockResolvedValue({
+      summary: {
+        stuckReceived: 0,
+        failedWebhooks: 0,
+        fulfillmentSyncFailures: 0,
+        missingPayload: 0,
+        staleAllocations: 0,
+        scheduledReconciliationJobs: 0,
+        missingShopifyOrders: 1,
+        total: 1,
+      },
+      items: [{
+        id: 'signal-diagnostics-shopify-order-missing-local-1200',
+        type: 'shopify_order_missing_local',
+        severity: 'critical',
+        title: 'Shopify order #1200 is missing locally',
+        description: 'Shopify contains this order, but no local ShopifyOrder exists.',
+        relatedWebhookEventId: null,
+        relatedShopifyOrderId: '9001200',
+        relatedShopifyOrderNumber: '#1200',
+        relatedAllocationId: null,
+        status: 'active',
+        createdAt: '2026-08-26T10:20:00.000Z',
+        firstDetectedAt: '2026-08-26T10:20:00.000Z',
+        shopifyCreatedAt: '2026-08-26T10:00:00.000Z',
+        suggestedAction: 'Inspect this order.',
+        payloadAvailable: null,
+      }, {
+        id: 'signal-diagnostics-shopify-order-missing-local-1199',
+        type: 'shopify_order_missing_local',
+        severity: 'critical',
+        title: 'Resolved Shopify order #1199',
+        description: 'Resolved discovery signal.',
+        relatedWebhookEventId: null,
+        relatedShopifyOrderId: '9001199',
+        relatedShopifyOrderNumber: '#1199',
+        relatedAllocationId: null,
+        status: 'resolved',
+        createdAt: '2026-08-25T10:20:00.000Z',
+        firstDetectedAt: '2026-08-25T10:20:00.000Z',
+        shopifyCreatedAt: '2026-08-25T10:00:00.000Z',
+        suggestedAction: 'No action.',
+        payloadAvailable: null,
+      }],
+    });
+    diagnosticsMocks.inspectOrderState.mockRejectedValue(new Error('Order not found.'));
+
+    renderDiagnosticsPage();
+    const orderLabel = await screen.findByText('#1200');
+    const signalRow = orderLabel.closest('article');
+    expect(signalRow).not.toBeNull();
+    expect(within(signalRow as HTMLElement).getByText('ID 9001200')).toBeInTheDocument();
+    expect(screen.queryByText('#1199')).not.toBeInTheDocument();
+    await user.click(within(signalRow as HTMLElement).getByRole('button', { name: 'Inspect' }));
+
+    await waitFor(() => expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledWith('#1200', expect.any(Object)));
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /bulk/i })).not.toBeInTheDocument();
   });
 
   it('renders loading and safe not-found states without changing the data path on narrow screens', async () => {

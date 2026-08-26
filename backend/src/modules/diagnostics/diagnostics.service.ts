@@ -3322,6 +3322,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     payloadUnknownEvents,
     staleAllocations,
     scheduledReconciliationJobs,
+    missingShopifyOrderSignals,
   ] = await Promise.all([
     withDashboardTiming('diagnostics.stuck_received_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
@@ -3452,6 +3453,14 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       },
       take: 25,
     })),
+    withDashboardTiming('diagnostics.missing_shopify_orders_fetch', () => prisma.operationalSignal.findMany({
+      where: {
+        type: 'shopify_order_missing_local',
+        status: { in: ['ACTIVE', 'ACKNOWLEDGED'] },
+      },
+      orderBy: { triggeredAt: 'desc' },
+      take: 100,
+    })),
   ]);
   const aggregationStartedAt = startDashboardTimer();
 
@@ -3565,6 +3574,30 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     };
   });
 
+  const missingShopifyOrderItems: ReconciliationItem[] = missingShopifyOrderSignals.map((signal) => {
+    const metadata = typeof signal.metadata === 'object' && signal.metadata !== null && !Array.isArray(signal.metadata)
+      ? signal.metadata as Record<string, unknown>
+      : {};
+    const text = (key: string) => typeof metadata[key] === 'string' ? metadata[key] as string : null;
+    return {
+      id: signal.id,
+      type: 'shopify_order_missing_local',
+      severity: 'critical',
+      title: signal.title,
+      description: signal.description,
+      relatedWebhookEventId: null,
+      relatedShopifyOrderId: text('sourceShopifyOrderId'),
+      relatedShopifyOrderNumber: text('sourceShopifyOrderNumber'),
+      relatedAllocationId: null,
+      status: signal.status.toLowerCase(),
+      createdAt: signal.triggeredAt.toISOString(),
+      firstDetectedAt: text('firstDetectedAt') ?? signal.triggeredAt.toISOString(),
+      shopifyCreatedAt: text('shopifyCreatedAt'),
+      suggestedAction: signal.suggestedAction ?? 'Inspect this order and use Current-State Repair dry-run.',
+      payloadAvailable: null,
+    };
+  });
+
   const items = [
     ...stuckItems,
     ...failedItems,
@@ -3572,6 +3605,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     ...missingPayloadItems,
     ...staleAllocationItems,
     ...scheduledReconciliationItems,
+    ...missingShopifyOrderItems,
   ].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
@@ -3584,6 +3618,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       missingPayload: missingPayloadItems.length,
       staleAllocations: staleAllocationItems.length,
       scheduledReconciliationJobs: scheduledReconciliationItems.length,
+      missingShopifyOrders: missingShopifyOrderItems.length,
       total: items.length,
     },
     items,

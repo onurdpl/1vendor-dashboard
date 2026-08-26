@@ -1,5 +1,20 @@
 export type SellerInfoMap = Record<string, string>;
 
+export type RecentShopifyOrderIdentity = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+  shopifyCreatedAt: string;
+};
+
+export type FetchRecentShopifyOrdersPageResult = {
+  orders: RecentShopifyOrderIdentity[];
+  nodesCount: number;
+  malformedNodes: number;
+  hasNextPage: boolean;
+  endCursor: string | null;
+};
+
 export type FetchOrderSellerInfoResult = {
   sellerInfo: SellerInfoMap | null;
   source: 'mock' | 'shopify_admin';

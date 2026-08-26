@@ -168,6 +168,7 @@ export type ReconciliationSummary = {
   missingPayload: number;
   staleAllocations: number;
   scheduledReconciliationJobs: number;
+  missingShopifyOrders: number;
   total: number;
 };
 
@@ -179,7 +180,8 @@ export type ReconciliationItem = {
     | 'fulfillment_sync_failed'
     | 'missing_payload'
     | 'stale_allocation'
-    | 'scheduled_reconciliation';
+    | 'scheduled_reconciliation'
+    | 'shopify_order_missing_local';
   severity: SyncDiagnosticSeverity;
   title: string;
   description: string;
@@ -194,6 +196,9 @@ export type ReconciliationItem = {
   nextAttemptAt?: string | null;
   lastAttemptAt?: string | null;
   reconciliationReason?: string | null;
+  relatedShopifyOrderNumber?: string | null;
+  shopifyCreatedAt?: string | null;
+  firstDetectedAt?: string | null;
 };
 
 export type ReconciliationResponse = {

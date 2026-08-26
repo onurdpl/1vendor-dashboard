@@ -129,6 +129,7 @@ function EvidenceList({ items }: { items: string[] }) {
 
 type OrderStateInspectorProps = {
   onRepairCandidateChange?: (isCandidate: boolean) => void;
+  initialOrderIdentifier?: string;
 };
 
 type RepairFeedback = {
@@ -149,7 +150,7 @@ function normalizeRepairOrderNumber(value: string) {
   return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
 }
 
-export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspectorProps = {}) {
+export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdentifier }: OrderStateInspectorProps = {}) {
   const [orderNumber, setOrderNumber] = useState('');
   const [inspectedOrderNumber, setInspectedOrderNumber] = useState('');
   const [dryRunResult, setDryRunResult] = useState<CurrentStateOrderRepairResult | null>(null);
@@ -237,6 +238,14 @@ export function OrderStateInspector({ onRepairCandidateChange }: OrderStateInspe
   useEffect(() => {
     onRepairCandidateChange?.(isMissingLocalOrder);
   }, [isMissingLocalOrder, onRepairCandidateChange]);
+
+  useEffect(() => {
+    const identifier = initialOrderIdentifier?.trim();
+    if (!identifier) return;
+    currentInputOrderNumberRef.current = identifier;
+    setOrderNumber(identifier);
+    setInspectedOrderNumber(identifier);
+  }, [initialOrderIdentifier]);
 
   useEffect(() => {
     clearRepairState();
