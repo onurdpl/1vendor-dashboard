@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type BackfillLocalStore,
   runShopifyOrderBackfill,
@@ -211,6 +211,15 @@ function shopifyFetchFor(order: unknown) {
 }
 
 describe('manual Shopify order backfill', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-01T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('defaults to dry-run without explicit live confirmation', () => {
     const config = validateShopifyOrderBackfillEnv({
       ...validEnv,
