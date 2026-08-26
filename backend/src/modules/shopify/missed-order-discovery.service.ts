@@ -23,7 +23,6 @@ const DISCOVERY_TRUNCATION_SIGNAL_ID = 'signal-diagnostics-shopify-order-discove
 const ACTIVE_JOB_STATUSES = [
   OperationalJobStatus.PENDING,
   OperationalJobStatus.PROCESSING,
-  OperationalJobStatus.RETRY_SCHEDULED,
   OperationalJobStatus.RETRYING,
 ];
 

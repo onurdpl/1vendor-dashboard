@@ -54,6 +54,20 @@ function missingSignalUpserts() {
     String(input.where.id).startsWith('signal-diagnostics-shopify-order-missing-local-'));
 }
 
+function mockOperationalJob(input: {
+  sourceShopifyOrderId: string;
+  status: string;
+  nextRetryAt?: Date | null;
+}) {
+  prismaMock.operationalJob.findMany.mockImplementation(async ({ where }) => {
+    const sourceIds = where.sourceShopifyOrderId.in as string[];
+    const suppressingStatuses = where.status.in as string[];
+    return sourceIds.includes(input.sourceShopifyOrderId) && suppressingStatuses.includes(input.status)
+      ? [{ sourceShopifyOrderId: input.sourceShopifyOrderId }]
+      : [];
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.shopifyOrder.findMany.mockResolvedValue([]);
@@ -188,11 +202,67 @@ describe('missed Shopify order discovery', () => {
     expect(missingSignalUpserts().map(([input]) => input.where.id)).toContain(buildMissedOrderSignalId('1013'));
   });
 
-  it('defers a missing order with an active indexed operational job', async () => {
-    fetchRecentOrdersPage.mockResolvedValue(page([order('1014')]));
-    prismaMock.operationalJob.findMany.mockResolvedValue([{ sourceShopifyOrderId: '1014' }]);
+  it.each(['PENDING', 'PROCESSING', 'RETRYING'])(
+    'defers a missing order while an operational job is %s',
+    async (status) => {
+      fetchRecentOrdersPage.mockResolvedValue(page([order(`1014-${status}`)]));
+      mockOperationalJob({ sourceShopifyOrderId: `1014-${status}`, status });
+
+      const result = await runMissedOrderDiscovery(env, { now });
+
+      expect(result.deferredOrders).toBe(1);
+      expect(result.missingOrders).toBe(0);
+      expect(missingSignalUpserts()).toHaveLength(0);
+    },
+  );
+
+  it.each(['RETRY_SCHEDULED', 'FAILED', 'COMPLETED', 'DEAD_LETTER_READY', 'PERMANENTLY_FAILED'])(
+    'signals a missing order when an operational job is %s',
+    async (status) => {
+      fetchRecentOrdersPage.mockResolvedValue(page([order(`1014-${status}`)]));
+      mockOperationalJob({ sourceShopifyOrderId: `1014-${status}`, status });
+
+      const result = await runMissedOrderDiscovery(env, { now });
+
+      expect(result.deferredOrders).toBe(0);
+      expect(result.missingOrders).toBe(1);
+      expect(missingSignalUpserts()).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ['future', new Date('2026-08-26T13:00:00.000Z')],
+    ['past', new Date('2026-08-26T11:00:00.000Z')],
+  ])('does not let a %s nextRetryAt suppress a RETRY_SCHEDULED missing order', async (_timing, nextRetryAt) => {
+    fetchRecentOrdersPage.mockResolvedValue(page([order('1014-retry-scheduled')]));
+    mockOperationalJob({
+      sourceShopifyOrderId: '1014-retry-scheduled',
+      status: 'RETRY_SCHEDULED',
+      nextRetryAt,
+    });
+
     const result = await runMissedOrderDiscovery(env, { now });
-    expect(result.deferredOrders).toBe(1);
+
+    expect(result.deferredOrders).toBe(0);
+    expect(result.missingOrders).toBe(1);
+    expect(missingSignalUpserts()).toHaveLength(1);
+  });
+
+  it('does not signal when a Shopify retry created the local order before discovery', async () => {
+    fetchRecentOrdersPage.mockResolvedValue(page([order('1014-retry-succeeded')]));
+    prismaMock.shopifyOrder.findMany.mockImplementation(async ({ where }) =>
+      where.sourceShopifyOrderId.in.includes('1014-retry-succeeded')
+        ? [{ sourceShopifyOrderId: '1014-retry-succeeded' }]
+        : []);
+    mockOperationalJob({
+      sourceShopifyOrderId: '1014-retry-succeeded',
+      status: 'COMPLETED',
+    });
+
+    const result = await runMissedOrderDiscovery(env, { now });
+
+    expect(result.deferredOrders).toBe(0);
+    expect(result.missingOrders).toBe(0);
     expect(missingSignalUpserts()).toHaveLength(0);
   });
 

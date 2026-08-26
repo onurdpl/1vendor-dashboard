@@ -554,7 +554,8 @@ POST /fulfillments.json
 - Only explicitly classified and durably recorded transient failures return non-2xx so Shopify can retry. Validation, configuration, and unknown failures fail closed with `202` needs-attention semantics.
 - Admin failed-webhook recovery uses the same atomic event claim and retained missing-order-only behavior.
 - Operational jobs record bounded retry state but are not execution locks. No automatic OperationalJob worker exists.
-- Stale `PROCESSING`, Shopify five-second acknowledgement timing, and `RETRY_SCHEDULED` missed-order-discovery deferral remain separate unresolved issues.
+- Missed-order discovery treats `PENDING`, `PROCESSING`, and `RETRYING` as active execution, but does not suppress a missing-order signal for `RETRY_SCHEDULED` because no automatic OperationalJob worker consumes `nextRetryAt`.
+- Stale `PROCESSING` and Shopify five-second acknowledgement timing remain separate unresolved issues.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.
