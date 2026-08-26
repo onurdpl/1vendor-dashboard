@@ -3137,8 +3137,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
 
-    const returnRow = timelineScope.getByText('Return requested').closest('li');
-    const refundRow = timelineScope.getByText('Refund processed').closest('li');
+    const returnRow = (await timelineScope.findByText('Return requested')).closest('li');
+    const refundRow = (await timelineScope.findByText('Refund processed')).closest('li');
     expect(returnRow).not.toBeNull();
     expect(refundRow).not.toBeNull();
     expect(returnRow).not.toBe(refundRow);
