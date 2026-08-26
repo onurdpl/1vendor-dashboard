@@ -15,6 +15,17 @@ import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '..
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { createOrdersCreateProcessingService } from '../shopify/orders-create-processing.service.js';
 import { claimWebhookEvent } from '../shopify/webhook-idempotency.service.js';
+import {
+  claimOrdersCreateEventForAdminRecovery,
+  createOrdersCreateFencedExecutionContext,
+  finalizeRetryableOrdersCreateFailureWithState,
+  finalizeTerminalOrdersCreateFailure,
+  getOrdersCreateLeaseState,
+  heartbeatOrdersCreateOwnership,
+  ORDERS_CREATE_HEARTBEAT_CADENCE_MS,
+  ORDERS_CREATE_PROCESSING_LEASE_MS,
+  type OrdersCreateLeaseState,
+} from '../shopify/orders-create-ownership.service.js';
 import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
 import {
   classifyCanonicalRefundMonetaryEvidence,
@@ -28,6 +39,8 @@ import {
 } from '../shopify/return-lifecycle-ingestion.service.js';
 import { ingestFulfillmentWebhook } from '../shopify/fulfillment-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
+import type { OrdersCreateFencedExecutionContext } from '../shopify/order-ingestion.types.js';
+import { classifyOrderIngestionException } from '../shopify/order-ingestion.service.js';
 import type { ShopifyRefundsCreateWebhookPayload } from '../shopify/refund-ingestion.types.js';
 import type { ReturnLifecycleWebhookPayload } from '../shopify/return-lifecycle-ingestion.types.js';
 import type { FulfillmentWebhookPayload, FulfillmentWebhookTopic } from '../shopify/fulfillment-ingestion.types.js';
@@ -94,11 +107,6 @@ const PROCESSING_REVIEW_SIGNAL_RULE_KEY = 'diagnostics.shopify_orders_create_pro
 const PROCESSING_REVIEW_SIGNAL_ID_PREFIX = 'signal-diagnostics-shopify-orders-create-processing-review';
 const PROCESSING_REVIEW_INFERENCE =
   'Execution may have been interrupted. Current records cannot prove whether the original execution has ended.';
-const MISSED_ORDER_SUPPRESSING_JOB_STATUSES = new Set<OperationalJobStatus>([
-  OperationalJobStatus.PENDING,
-  OperationalJobStatus.PROCESSING,
-  OperationalJobStatus.RETRYING,
-]);
 const SAFE_SIGNAL_METADATA_KEYS = new Set([
   'allocationId',
   'conflictType',
@@ -216,6 +224,12 @@ function processingReviewMetadata(input: {
   allocationCount: number;
   saleLedgerCount: number;
   latestJob: OperationalJob | null;
+  processingGeneration: number;
+  executionAttemptCount: number;
+  executionMaxAttempts: number;
+  processingLeaseExpiresAt: Date | null;
+  leaseState: OrdersCreateLeaseState;
+  executorEnabled: boolean;
 }) {
   return {
     webhookEventId: input.webhookEventId,
@@ -237,11 +251,19 @@ function processingReviewMetadata(input: {
     localCommerceClassification: input.classification,
     allocationCount: input.allocationCount,
     saleLedgerCount: input.saleLedgerCount,
+    processingGeneration: input.processingGeneration,
+    executionAttemptCount: input.executionAttemptCount,
+    executionMaxAttempts: input.executionMaxAttempts,
+    processingLeaseExpiresAt: input.processingLeaseExpiresAt?.toISOString() ?? null,
+    leaseState: input.leaseState,
+    executorEnabled: input.executorEnabled,
+    executionExhausted: input.executionAttemptCount >= input.executionMaxAttempts,
+    operationalJobAuthority: false,
     ...(input.latestJob
       ? {
           latestJobId: input.latestJob.id,
           latestJobStatus: input.latestJob.status,
-          currentJobSuppressesMissedOrderDiscovery: MISSED_ORDER_SUPPRESSING_JOB_STATUSES.has(input.latestJob.status),
+          currentJobSuppressesMissedOrderDiscovery: false,
         }
       : { currentJobSuppressesMissedOrderDiscovery: false }),
   } satisfies Prisma.InputJsonObject;
@@ -493,6 +515,8 @@ function getRecoverBlockedReason(event: {
   rawPayload?: string | null;
   payloadAvailable?: boolean;
   payloadHash: string | null;
+  executionAttemptCount?: number;
+  executionMaxAttempts?: number;
 }) {
   if (!SUPPORTED_RECOVER_TOPICS.has(event.topic)) {
     return `Recover is not supported for topic ${event.topic}.`;
@@ -512,6 +536,15 @@ function getRecoverBlockedReason(event: {
 
   if (event.status !== 'RECEIVED' && event.status !== 'FAILED') {
     return `Webhook event in status ${event.status} is not recoverable.`;
+  }
+
+  if (
+    event.topic === 'orders/create' &&
+    event.executionAttemptCount !== undefined &&
+    event.executionMaxAttempts !== undefined &&
+    event.executionAttemptCount >= event.executionMaxAttempts
+  ) {
+    return 'Shopify orders/create execution attempt budget is exhausted. Use Current-State Repair dry-run for supervised canonical recovery.';
   }
 
   return null;
@@ -702,7 +735,7 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
     processedAt: toIsoString(event.processedAt),
     createdAt: toIsoString(event.receivedAt),
     updatedAt: toIsoString(event.processedAt ?? event.receivedAt),
-    relatedShopifyOrderId: event.shopifyOrder?.sourceShopifyOrderId ?? null,
+    relatedShopifyOrderId: event.sourceShopifyOrderId ?? event.shopifyOrder?.sourceShopifyOrderId ?? null,
   };
 }
 
@@ -2723,7 +2756,7 @@ export async function listSyncDiagnostics(): Promise<SyncDiagnosticsResponse> {
     title: 'Webhook ingestion needs attention',
     description: event.errorMessage ?? 'Webhook event failed during verification or ingestion.',
     relatedWebhookEventId: event.id,
-    relatedShopifyOrderId: event.shopifyOrder?.sourceShopifyOrderId ?? null,
+    relatedShopifyOrderId: event.sourceShopifyOrderId ?? event.shopifyOrder?.sourceShopifyOrderId ?? null,
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
@@ -2817,6 +2850,8 @@ async function processWebhookEvent(
   env: AppEnv,
   event: WebhookEvent,
   payload: Record<string, unknown>,
+  executionContext?: OrdersCreateFencedExecutionContext,
+  scheduleOrdersCreateRetry = true,
 ): Promise<WebhookReplayResponse> {
   if (event.topic === 'orders/create') {
     const typedPayload = payload as ShopifyOrdersCreateWebhookPayload;
@@ -2830,13 +2865,33 @@ async function processWebhookEvent(
       },
       propagateProcessingExceptions: true,
     });
-    const ingestionResult = await processingService.process({
-      event,
-      payload: typedPayload,
-      mode: 'missing_order_only',
-    });
+    let ingestionResult;
+    try {
+      ingestionResult = await processingService.process({
+        event,
+        payload: typedPayload,
+        mode: 'missing_order_only',
+        executionContext,
+      });
+    } catch (error) {
+      if (executionContext && !executionContext.signal.aborted) {
+        const failure = classifyOrderIngestionException(error);
+        if (failure.failureDisposition === 'RETRYABLE' && scheduleOrdersCreateRetry) {
+          await finalizeRetryableOrdersCreateFailureWithState(executionContext, error);
+        } else {
+          await finalizeTerminalOrdersCreateFailure(executionContext, error);
+        }
+      }
+      throw error;
+    }
 
-    if (!ingestionResult.ok) {
+    if (!ingestionResult.ok && executionContext) {
+      if (ingestionResult.failureDisposition === 'RETRYABLE' && scheduleOrdersCreateRetry) {
+        await finalizeRetryableOrdersCreateFailureWithState(executionContext, new Error(ingestionResult.error));
+      } else {
+        await finalizeTerminalOrdersCreateFailure(executionContext, new Error(ingestionResult.error));
+      }
+    } else if (!ingestionResult.ok) {
       await markWebhookFailed(event.id, ingestionResult.error);
     }
 
@@ -3303,6 +3358,19 @@ export async function retryOperationalJob(
     };
   }
 
+  if (job.webhookEvent.topic === 'orders/create') {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: 'OperationalJob is diagnostic metadata for orders/create. Use explicit webhook recovery or Current-State Repair.',
+      }),
+    };
+  }
+
   const replayBlockedReason = getReplayBlockedReason(job.webhookEvent);
   const recoverBlockedReason = getRecoverBlockedReason(job.webhookEvent);
   if (replayBlockedReason && recoverBlockedReason) {
@@ -3547,9 +3615,11 @@ async function findSuccessfulCurrentStateRepair(sourceShopifyOrderId: string | n
 export async function evaluateProcessingReviewSignals(options: {
   now?: Date;
   thresholdMs?: number;
+  executorEnabled?: boolean;
 } = {}): Promise<ReconciliationItem[]> {
   const now = options.now ?? new Date();
   const thresholdMs = options.thresholdMs ?? PROCESSING_REVIEW_THRESHOLD_MS;
+  const executorEnabled = options.executorEnabled === true;
   await resolveProcessingReviewSignalsForEventsNoLongerProcessing(now);
 
   const events = await prisma.webhookEvent.findMany({
@@ -3576,6 +3646,44 @@ export async function evaluateProcessingReviewSignals(options: {
   const items: ReconciliationItem[] = [];
   for (const event of events) {
     const signalId = buildProcessingReviewSignalId(event.id);
+    const existingSignal = await prisma.operationalSignal.findUnique({
+      where: { id: signalId },
+      select: { triggeredAt: true, status: true, metadata: true },
+    });
+    const leaseState = getOrdersCreateLeaseState({
+      processingLeaseExpiresAt: event.processingLeaseExpiresAt ?? null,
+    }, now);
+    if (leaseState === 'ACTIVE') {
+      if (existingSignal && (
+        existingSignal.status === OperationalSignalStatus.ACTIVE ||
+        existingSignal.status === OperationalSignalStatus.ACKNOWLEDGED
+      )) {
+        await prisma.operationalSignal.updateMany({
+          where: {
+            id: signalId,
+            status: { in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED] },
+          },
+          data: {
+            status: OperationalSignalStatus.RESOLVED,
+            resolvedAt: now,
+            metadata: {
+              ...(existingSignal.metadata && typeof existingSignal.metadata === 'object' && !Array.isArray(existingSignal.metadata)
+                ? existingSignal.metadata as Prisma.InputJsonObject
+                : {}),
+              resolutionReason: 'authoritative_active_lease',
+              resolvedAt: now.toISOString(),
+              processingGeneration: event.processingGeneration,
+              executionAttemptCount: event.executionAttemptCount,
+              executionMaxAttempts: event.executionMaxAttempts,
+              processingLeaseExpiresAt: event.processingLeaseExpiresAt?.toISOString() ?? null,
+              leaseState,
+              executorEnabled,
+            },
+          },
+        });
+      }
+      continue;
+    }
     const identity = getProcessingReviewIdentity(event);
     const commerce = await classifyProcessingReviewCommerce(identity);
     const resolvedIdentity = {
@@ -3586,10 +3694,6 @@ export async function evaluateProcessingReviewSignals(options: {
       resolvedIdentity.sourceShopifyOrderId,
       event.receivedAt,
     );
-    const existingSignal = await prisma.operationalSignal.findUnique({
-      where: { id: signalId },
-      select: { triggeredAt: true, status: true, metadata: true },
-    });
     const firstDetectedAt = existingSignal?.triggeredAt ?? now;
     const latestJob = event.operationalJobs[0] ?? null;
     const metadata = processingReviewMetadata({
@@ -3603,6 +3707,12 @@ export async function evaluateProcessingReviewSignals(options: {
       allocationCount: commerce.allocationCount,
       saleLedgerCount: commerce.saleLedgerCount,
       latestJob,
+      processingGeneration: event.processingGeneration,
+      executionAttemptCount: event.executionAttemptCount,
+      executionMaxAttempts: event.executionMaxAttempts,
+      processingLeaseExpiresAt: event.processingLeaseExpiresAt,
+      leaseState,
+      executorEnabled,
     });
 
     if (successfulRepair) {
@@ -3634,9 +3744,17 @@ export async function evaluateProcessingReviewSignals(options: {
     }
 
     const hasCompleteLocalCommerce = commerce.hasCompleteLocalCommerce;
-    const severity = hasCompleteLocalCommerce
+    const exhausted = event.executionAttemptCount >= event.executionMaxAttempts;
+    const severity = exhausted
+      ? OperationalSignalSeverity.HIGH
+      : hasCompleteLocalCommerce
       ? OperationalSignalSeverity.WARNING
       : OperationalSignalSeverity.HIGH;
+    const inference = exhausted
+      ? 'Execution attempt budget is exhausted while the event remains PROCESSING; terminalization did not complete.'
+      : leaseState === 'EXPIRED'
+        ? 'The execution lease expired and the event remains PROCESSING beyond the supervised review threshold; executor takeover has not resolved it.'
+        : PROCESSING_REVIEW_INFERENCE;
     await prisma.operationalSignal.upsert({
       where: { id: signalId },
       create: {
@@ -3646,7 +3764,7 @@ export async function evaluateProcessingReviewSignals(options: {
         sourceArea: OperationalSignalSourceArea.DIAGNOSTICS,
         operationalJobId: latestJob?.id ?? null,
         title: 'Processing review required',
-        description: PROCESSING_REVIEW_INFERENCE,
+        description: inference,
         suggestedAction:
           'Inspect the order. Use Current-State Repair dry-run only after confirming the original request can no longer still be executing.',
         status: OperationalSignalStatus.ACTIVE,
@@ -3658,7 +3776,7 @@ export async function evaluateProcessingReviewSignals(options: {
         severity,
         operationalJobId: latestJob?.id ?? null,
         title: 'Processing review required',
-        description: PROCESSING_REVIEW_INFERENCE,
+        description: inference,
         suggestedAction:
           'Inspect the order. Use Current-State Repair dry-run only after confirming the original request can no longer still be executing.',
         status: existingSignal?.status === OperationalSignalStatus.ACKNOWLEDGED
@@ -3674,9 +3792,9 @@ export async function evaluateProcessingReviewSignals(options: {
       id: signalId,
       signalId,
       type: 'processing_review_required',
-      severity: hasCompleteLocalCommerce ? 'warning' : 'high',
+      severity: exhausted ? 'high' : hasCompleteLocalCommerce ? 'warning' : 'high',
       title: 'Processing review required',
-      description: PROCESSING_REVIEW_INFERENCE,
+      description: inference,
       relatedWebhookEventId: event.id,
       webhookEventId: event.id,
       shopifyWebhookId: event.webhookId,
@@ -3698,9 +3816,14 @@ export async function evaluateProcessingReviewSignals(options: {
       latestJobLastAttemptAt: toIsoString(latestJob?.lastAttemptAt),
       latestJobUpdatedAt: toIsoString(latestJob?.updatedAt),
       latestJobRetryCount: latestJob?.retryCount ?? null,
-      currentJobSuppressesMissedOrderDiscovery: latestJob
-        ? MISSED_ORDER_SUPPRESSING_JOB_STATUSES.has(latestJob.status)
-        : false,
+      currentJobSuppressesMissedOrderDiscovery: false,
+      processingGeneration: event.processingGeneration,
+      executionAttemptCount: event.executionAttemptCount,
+      executionMaxAttempts: event.executionMaxAttempts,
+      processingLeaseExpiresAt: event.processingLeaseExpiresAt?.toISOString() ?? null,
+      leaseState,
+      executorEnabled,
+      executionExhausted: exhausted,
       localCommerceClassification: commerce.classification,
       localOrderExists: commerce.localOrderExists,
       allocationCount: commerce.allocationCount,
@@ -3718,7 +3841,7 @@ export const __processingReviewTesting = {
   buildProcessingReviewSignalId,
 };
 
-export async function getReconciliationDiagnostics(): Promise<ReconciliationResponse> {
+export async function getReconciliationDiagnostics(options: { executorEnabled?: boolean } = {}): Promise<ReconciliationResponse> {
   const olderThan = new Date(Date.now() - 5 * 60 * 1000);
   const [
     processingReviewItems,
@@ -3730,7 +3853,9 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     scheduledReconciliationJobs,
     missingShopifyOrderSignals,
   ] = await Promise.all([
-    withDashboardTiming('diagnostics.processing_review_evaluation', () => evaluateProcessingReviewSignals()),
+    withDashboardTiming('diagnostics.processing_review_evaluation', () => evaluateProcessingReviewSignals({
+      executorEnabled: options.executorEnabled,
+    })),
     withDashboardTiming('diagnostics.stuck_received_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
         status: 'RECEIVED',
@@ -3878,7 +4003,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     title: 'Webhook event is stuck in received state',
     description: `Webhook ${event.topic} has remained in RECEIVED for more than 5 minutes.`,
     relatedWebhookEventId: event.id,
-    relatedShopifyOrderId: event.shopifyOrder?.sourceShopifyOrderId ?? null,
+    relatedShopifyOrderId: event.sourceShopifyOrderId ?? event.shopifyOrder?.sourceShopifyOrderId ?? null,
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
@@ -3886,23 +4011,45 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       ? 'Use diagnostics recover endpoint to resume stuck processing.'
       : 'Payload missing. Manual recovery from Shopify source data is required.',
     payloadAvailable: Boolean(event.rawPayload),
+    processingGeneration: event.topic === 'orders/create' ? event.processingGeneration : null,
+    executionAttemptCount: event.topic === 'orders/create' ? event.executionAttemptCount : null,
+    executionMaxAttempts: event.topic === 'orders/create' ? event.executionMaxAttempts : null,
+    processingLeaseExpiresAt: event.topic === 'orders/create' ? event.processingLeaseExpiresAt?.toISOString() ?? null : null,
+    executorEnabled: event.topic === 'orders/create' ? options.executorEnabled === true : null,
+    executionExhausted: event.topic === 'orders/create'
+      ? event.executionAttemptCount >= event.executionMaxAttempts
+      : null,
   }));
 
   const failedItems: ReconciliationItem[] = failedWebhookEvents.map((event) => ({
     id: `reconciliation-failed-${event.id}`,
     type: 'failed_webhook',
-    severity: detectWebhookFailureSeverity(event.errorMessage),
-    title: 'Webhook processing failed',
+    severity: event.topic === 'orders/create' && event.executionAttemptCount >= event.executionMaxAttempts
+      ? 'high'
+      : detectWebhookFailureSeverity(event.errorMessage),
+    title: event.topic === 'orders/create' && event.executionAttemptCount >= event.executionMaxAttempts
+      ? 'Webhook execution exhausted'
+      : 'Webhook processing failed',
     description: event.errorMessage ?? `Webhook ${event.topic} failed without a recorded error message.`,
     relatedWebhookEventId: event.id,
-    relatedShopifyOrderId: event.shopifyOrder?.sourceShopifyOrderId ?? null,
+    relatedShopifyOrderId: event.sourceShopifyOrderId ?? event.shopifyOrder?.sourceShopifyOrderId ?? null,
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
-    suggestedAction: event.rawPayload
-      ? 'Use diagnostics recover/replay after confirming the mapping issue is resolved.'
-      : 'Payload missing. Manual recovery from Shopify source data is required.',
+    suggestedAction: event.topic === 'orders/create' && event.executionAttemptCount >= event.executionMaxAttempts
+      ? 'Inspect the retained evidence and use Current-State Repair dry-run for supervised canonical recovery.'
+      : event.rawPayload
+        ? 'Use diagnostics recover/replay after confirming the mapping issue is resolved.'
+        : 'Payload missing. Manual recovery from Shopify source data is required.',
     payloadAvailable: Boolean(event.rawPayload),
+    processingGeneration: event.topic === 'orders/create' ? event.processingGeneration : null,
+    executionAttemptCount: event.topic === 'orders/create' ? event.executionAttemptCount : null,
+    executionMaxAttempts: event.topic === 'orders/create' ? event.executionMaxAttempts : null,
+    processingLeaseExpiresAt: event.topic === 'orders/create' ? event.processingLeaseExpiresAt?.toISOString() ?? null : null,
+    executorEnabled: event.topic === 'orders/create' ? options.executorEnabled === true : null,
+    executionExhausted: event.topic === 'orders/create'
+      ? event.executionAttemptCount >= event.executionMaxAttempts
+      : null,
   }));
 
   const fulfillmentItems: ReconciliationItem[] = fulfillmentFailures.map((fulfillment) => ({
@@ -4095,18 +4242,50 @@ export async function recoverWebhookEvent(
   }
 
   const beforeStatus = event.status;
-  const claimResult = await claimWebhookEvent({
-    eventId: event.id,
-    expectedStatus: beforeStatus as 'RECEIVED' | 'FAILED',
-  });
-  if (!claimResult.acquired) {
-    const currentStatus = claimResult.event?.status ?? null;
+  const ordersCreateLeaseMs = env.SHOPIFY_ORDERS_CREATE_LEASE_MS ?? ORDERS_CREATE_PROCESSING_LEASE_MS;
+  const ordersCreateHeartbeatMs = env.SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS ?? ORDERS_CREATE_HEARTBEAT_CADENCE_MS;
+  const sourceShopifyOrderId = event.topic === 'orders/create'
+    ? safeShopifyOrderId(stringifyEntityId(parsedPayload.payload.id))
+    : null;
+  const legacyUnenrolledOrdersCreate = event.topic === 'orders/create' &&
+    event.sourceShopifyOrderId === null &&
+    event.executionAvailableAt === null &&
+    event.processingLeaseExpiresAt === null;
+  if (event.topic === 'orders/create' && !sourceShopifyOrderId) {
     return {
       ok: false,
       statusCode: 409,
       response: {
         ...buildBlockedReplayResponse({
-          event: claimResult.event ?? event,
+          event,
+          action: 'recover',
+          reason: 'Stored orders/create payload does not contain a safe Shopify order identity.',
+        }),
+        recoveryStatus: 'not_recoverable',
+      },
+    };
+  }
+  const ordersCreateClaim = event.topic === 'orders/create'
+    ? await claimOrdersCreateEventForAdminRecovery({
+        eventId: event.id,
+        expectedStatus: beforeStatus as 'RECEIVED' | 'FAILED',
+        sourceShopifyOrderId: sourceShopifyOrderId!,
+        leaseDurationMs: ordersCreateLeaseMs,
+      })
+    : null;
+  const claimResult = ordersCreateClaim ?? await claimWebhookEvent({
+    eventId: event.id,
+    expectedStatus: beforeStatus as 'RECEIVED' | 'FAILED',
+  });
+  if (!claimResult.acquired) {
+    const currentEvent = await prisma.webhookEvent.findUnique({ where: { id: event.id } });
+    const currentStatus = currentEvent?.status ?? null;
+    return {
+      ok: false,
+      statusCode: 409,
+      response: {
+        ...buildBlockedReplayResponse({
+          event: currentEvent ?? event,
           action: 'recover',
           reason: `Webhook recovery ownership was not acquired; current status is ${currentStatus ?? 'unknown'}.`,
         }),
@@ -4121,15 +4300,51 @@ export async function recoverWebhookEvent(
     jobType: 'recovery',
     webhookEventId: event.id,
     payloadRef: event.payloadHash,
+    sourceShopifyOrderId,
   });
   await markDiagnosticsJobProcessing(operationalJob?.id);
 
   let response: WebhookReplayResponse;
+  const controller = new AbortController();
+  const fencedContext: OrdersCreateFencedExecutionContext | undefined = ordersCreateClaim?.acquired
+    ? {
+        ...createOrdersCreateFencedExecutionContext(ordersCreateClaim.ownership, controller.signal),
+        shopifyAdminRequestTimeoutMs: Math.max(1, Math.floor(ordersCreateLeaseMs / 2)),
+      }
+    : undefined;
+  let heartbeatFailure: unknown = null;
+  let heartbeatInFlight: Promise<void> | null = null;
+  const heartbeatTimer = fencedContext
+    ? globalThis.setInterval(() => {
+        if (heartbeatInFlight) return;
+        heartbeatInFlight = heartbeatOrdersCreateOwnership(fencedContext, ordersCreateLeaseMs)
+          .then(() => undefined)
+          .catch((error) => {
+            heartbeatFailure = error;
+            controller.abort(error);
+          })
+          .finally(() => {
+            heartbeatInFlight = null;
+          });
+      }, ordersCreateHeartbeatMs)
+    : null;
+  heartbeatTimer?.unref?.();
   try {
-    response = await processWebhookEvent(env, event, parsedPayload.payload);
+    response = await processWebhookEvent(
+      env,
+      event,
+      parsedPayload.payload,
+      fencedContext,
+      !legacyUnenrolledOrdersCreate,
+    );
+    if (heartbeatTimer) globalThis.clearInterval(heartbeatTimer);
+    if (heartbeatInFlight) await heartbeatInFlight;
+    if (heartbeatFailure) throw heartbeatFailure;
   } catch (error) {
     await markDiagnosticsJobFailed(operationalJob?.id, error);
     throw error;
+  } finally {
+    if (heartbeatTimer) globalThis.clearInterval(heartbeatTimer);
   }
   const { afterStatus, errorSummary } = await getWebhookStatus(event.id);
   const recoveryStatus: WebhookRecoverResponse['recoveryStatus'] =

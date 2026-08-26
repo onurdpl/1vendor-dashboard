@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  $queryRaw: vi.fn(),
   webhookEvent: {
     update: vi.fn(),
     updateMany: vi.fn(),
@@ -92,6 +93,12 @@ function buildEvent(overrides: Record<string, unknown> = {}) {
     processedAt: null,
     errorMessage: null,
     shopifyOrderId: null,
+    sourceShopifyOrderId: '2001',
+    executionAvailableAt: null,
+    executionAttemptCount: 0,
+    executionMaxAttempts: 3,
+    processingGeneration: 0,
+    processingLeaseExpiresAt: null,
     ...overrides,
   };
 }
@@ -183,6 +190,7 @@ describe('orders/create state-aware retry ownership', () => {
     webhookServiceMock.verifyShopifyWebhookHmac.mockReturnValue(true);
     getOrCreateWebhookEventMock.mockResolvedValue(buildIdempotencyResult());
     prismaMock.webhookEvent.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.webhookEvent.findUnique.mockResolvedValue(buildEvent({ status: 'PROCESSING' }));
     prismaMock.webhookEvent.update.mockResolvedValue({});
     prismaMock.operationalJob.findMany.mockResolvedValue([]);
@@ -506,7 +514,14 @@ describe('orders/create state-aware retry ownership', () => {
     prismaMock.webhookEvent.findUnique
       .mockResolvedValueOnce(failedEvent)
       .mockResolvedValueOnce(buildEvent({ status: 'PROCESSED' }));
-    prismaMock.webhookEvent.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.$queryRaw.mockResolvedValueOnce([{
+      id: failedEvent.id,
+      sourceShopifyOrderId: '2001',
+      processingGeneration: 1,
+      executionAttemptCount: 1,
+      executionMaxAttempts: 3,
+      processingLeaseExpiresAt: new Date('2026-08-26T12:01:00.000Z'),
+    }]);
 
     const result = await recoverWebhookEvent({
       NODE_ENV: 'test',
@@ -514,12 +529,13 @@ describe('orders/create state-aware retry ownership', () => {
       SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: 0,
     } as never, failedEvent.id);
 
-    expect(prismaMock.webhookEvent.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: failedEvent.id, status: 'FAILED' } }),
-    );
-    expect(operationalJobsMock.createOperationalJob).toHaveBeenCalledAfter(prismaMock.webhookEvent.updateMany);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledOnce();
+    expect(operationalJobsMock.createOperationalJob).toHaveBeenCalledAfter(prismaMock.$queryRaw);
     expect(orderIngestionMock.ingestShopifyOrderWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'missing_order_only' }),
+      expect.objectContaining({
+        mode: 'missing_order_only',
+        executionContext: expect.objectContaining({ processingGeneration: 1, sourceShopifyOrderId: '2001' }),
+      }),
     );
     expect(result).toMatchObject({ ok: true, response: { recoveryStatus: 'recovered' } });
   });
@@ -529,7 +545,7 @@ describe('orders/create state-aware retry ownership', () => {
     prismaMock.webhookEvent.findUnique
       .mockResolvedValueOnce(failedEvent)
       .mockResolvedValueOnce(buildEvent({ status: 'PROCESSING' }));
-    prismaMock.webhookEvent.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.$queryRaw.mockResolvedValueOnce([]);
 
     const result = await recoverWebhookEvent({
       NODE_ENV: 'test',
@@ -544,5 +560,48 @@ describe('orders/create state-aware retry ownership', () => {
     });
     expect(operationalJobsMock.createOperationalJob).not.toHaveBeenCalled();
     expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit legacy recovery fenced without enrolling automatic retry', async () => {
+    const failedEvent = buildEvent({
+      status: 'FAILED',
+      sourceShopifyOrderId: null,
+      executionAvailableAt: null,
+      processingLeaseExpiresAt: null,
+    });
+    prismaMock.webhookEvent.findUnique
+      .mockResolvedValueOnce(failedEvent)
+      .mockResolvedValueOnce(buildEvent({ status: 'FAILED', executionAttemptCount: 1 }));
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{
+        id: failedEvent.id,
+        sourceShopifyOrderId: '2001',
+        processingGeneration: 1,
+        executionAttemptCount: 1,
+        executionMaxAttempts: 3,
+        processingLeaseExpiresAt: new Date('2026-08-26T12:01:00.000Z'),
+      }])
+      .mockResolvedValueOnce([{ id: failedEvent.id }]);
+    orderIngestionMock.ingestShopifyOrderWebhook.mockResolvedValueOnce({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      failureCode: 'seller_info_retry_exhausted',
+      failureDisposition: 'RETRYABLE',
+      failureCategory: 'transient',
+      retryable: true,
+      error: 'seller_info unavailable',
+    });
+
+    const result = await recoverWebhookEvent({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgres://example',
+      SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: 0,
+    } as never, failedEvent.id);
+
+    const finalizerSql = prismaMock.$queryRaw.mock.calls[1][0] as { strings?: string[] };
+    expect(finalizerSql.strings?.join('?')).toContain('"executionAvailableAt" = NULL');
+    expect(finalizerSql.strings?.join('?')).not.toContain('POWER');
+    expect(result).toMatchObject({ ok: true, response: { recoveryStatus: 'failed' } });
   });
 });

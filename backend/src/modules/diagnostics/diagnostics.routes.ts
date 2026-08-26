@@ -111,7 +111,9 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return withDashboardRouteTiming('GET /admin/diagnostics/reconciliation', () => getReconciliationDiagnostics());
+      return withDashboardRouteTiming('GET /admin/diagnostics/reconciliation', () => getReconciliationDiagnostics({
+        executorEnabled: env.SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED,
+      }));
     },
   );
 

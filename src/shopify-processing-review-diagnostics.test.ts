@@ -85,6 +85,10 @@ function event(input: {
   rawPayload?: string | null;
   status?: string;
   jobs?: ReturnType<typeof job>[];
+  processingLeaseExpiresAt?: Date | null;
+  executionAttemptCount?: number;
+  executionMaxAttempts?: number;
+  processingGeneration?: number;
 } = {}) {
   return {
     id: 'event-processing-1',
@@ -102,6 +106,12 @@ function event(input: {
     errorMessage: null,
     shopifyOrderId: null,
     shopifyOrder: null,
+    sourceShopifyOrderId: '9001',
+    executionAvailableAt: null,
+    executionAttemptCount: input.executionAttemptCount ?? 0,
+    executionMaxAttempts: input.executionMaxAttempts ?? 3,
+    processingGeneration: input.processingGeneration ?? 0,
+    processingLeaseExpiresAt: input.processingLeaseExpiresAt ?? null,
     operationalJobs: input.jobs ?? [],
   };
 }
@@ -166,8 +176,53 @@ describe('Shopify orders/create PROCESSING supervised review diagnostics', () =>
 
     expect(item).toMatchObject({
       latestJobStatus: status,
-      currentJobSuppressesMissedOrderDiscovery: true,
+      currentJobSuppressesMissedOrderDiscovery: false,
     });
+  });
+
+  it('does not mark old PROCESSING work stale while its authoritative lease is active', async () => {
+    prismaMock.webhookEvent.findMany.mockResolvedValue([event({
+      processingLeaseExpiresAt: new Date('2026-08-26T12:01:00.000Z'),
+      processingGeneration: 4,
+      executionAttemptCount: 2,
+    })]);
+
+    expect(await evaluateProcessingReviewSignals({ now, executorEnabled: false })).toEqual([]);
+    expect(prismaMock.operationalSignal.upsert).not.toHaveBeenCalled();
+  });
+
+  it('surfaces expired takeover-eligible ownership with safe generation and lease evidence', async () => {
+    prismaMock.webhookEvent.findMany.mockResolvedValue([event({
+      processingLeaseExpiresAt: new Date('2026-08-26T11:31:00.000Z'),
+      processingGeneration: 4,
+      executionAttemptCount: 2,
+    })]);
+
+    const [item] = await evaluateProcessingReviewSignals({ now, executorEnabled: true });
+
+    expect(item).toMatchObject({
+      leaseState: 'EXPIRED',
+      processingGeneration: 4,
+      executionAttemptCount: 2,
+      executionMaxAttempts: 3,
+      executorEnabled: true,
+      executionExhausted: false,
+    });
+    expect(item).not.toHaveProperty('rawPayload');
+    expect(JSON.stringify(item)).not.toContain('not-returned@example.com');
+  });
+
+  it('keeps exhausted expired PROCESSING at high severity', async () => {
+    prismaMock.webhookEvent.findMany.mockResolvedValue([event({
+      processingLeaseExpiresAt: new Date('2026-08-26T11:31:00.000Z'),
+      executionAttemptCount: 3,
+      executionMaxAttempts: 3,
+    })]);
+    prismaMock.shopifyOrder.findMany.mockResolvedValue([localOrder(1, [1])]);
+
+    const [item] = await evaluateProcessingReviewSignals({ now });
+
+    expect(item).toMatchObject({ severity: 'high', leaseState: 'EXPIRED', executionExhausted: true });
   });
 
   it('does not create review noise below the diagnostic threshold', async () => {
@@ -412,5 +467,35 @@ describe('Shopify orders/create PROCESSING supervised review diagnostics', () =>
       }),
     ]);
     expect(response.items[0]).not.toHaveProperty('rawPayload');
+  });
+
+  it('keeps exhausted FAILED execution visible with safe terminal evidence', async () => {
+    prismaMock.webhookEvent.findMany.mockImplementation(async (input: { where?: Record<string, unknown> }) => {
+      if (input.where?.status === 'FAILED') {
+        return [event({
+          status: 'FAILED',
+          executionAttemptCount: 3,
+          executionMaxAttempts: 3,
+          processingGeneration: 5,
+          rawPayload: JSON.stringify({ id: 9001, email: 'not-returned@example.com' }),
+        })];
+      }
+      return [];
+    });
+
+    const response = await getReconciliationDiagnostics({ executorEnabled: false });
+    const terminal = response.items.find((item) => item.type === 'failed_webhook');
+
+    expect(terminal).toMatchObject({
+      severity: 'high',
+      title: 'Webhook execution exhausted',
+      relatedShopifyOrderId: '9001',
+      processingGeneration: 5,
+      executionAttemptCount: 3,
+      executionMaxAttempts: 3,
+      executionExhausted: true,
+      executorEnabled: false,
+    });
+    expect(JSON.stringify(terminal)).not.toContain('not-returned@example.com');
   });
 });

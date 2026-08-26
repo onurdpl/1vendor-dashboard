@@ -32,6 +32,11 @@ import type {
   CanonicalShopifyReturnSnapshot,
   FetchCanonicalShopifyRefundsForOrderResult,
 } from './shopify-admin.types.js';
+import {
+  acquireShopifyOrderTransactionLock,
+  findAuthoritativeOrdersCreateIntake,
+  type AuthoritativeOrdersCreateIntake,
+} from './orders-create-ownership.service.js';
 
 const REPAIR_OPERATION = 'shopify_current_state_order_repair';
 const REPAIR_SIGNAL_RULE_KEY = 'shopify_current_state_order_repair';
@@ -48,6 +53,7 @@ export type CurrentStateOrderRepairSummary = {
   returnApplied: boolean;
   refundEvidence: Omit<CanonicalRefundMonetaryEvidence, 'refunds'> | null;
   executionBlocked: boolean;
+  executionBlockedReason?: 'active_shopify_order_intake' | null;
   warnings: string[];
   skipped: boolean;
 };
@@ -96,6 +102,7 @@ type LocalRepairState = {
 export type CurrentStateOrderRepairDependencies = {
   fetchCanonicalBundle(orderIdentifier: string): Promise<CanonicalRepairBundle | null>;
   inspectLocalState(bundle: CanonicalRepairBundle): Promise<LocalRepairState>;
+  inspectActiveIntake?(sourceShopifyOrderId: string): Promise<AuthoritativeOrdersCreateIntake | null>;
   executeRepair(input: {
     bundle: CanonicalRepairBundle;
     actor: CurrentStateOrderRepairActor;
@@ -369,6 +376,53 @@ function buildPlannedSummary(
     warnings: refundEvidence?.sanitizedWarnings ?? [],
     skipped: state.orderExists && state.allocationExists && state.financeExists && lifecycleAlreadyCurrent,
   };
+}
+
+function blockPlannedSummaryForActiveIntake(summary: CurrentStateOrderRepairSummary) {
+  return {
+    ...summary,
+    executionBlocked: true,
+    executionBlockedReason: 'active_shopify_order_intake' as const,
+    warnings: [
+      ...summary.warnings,
+      'Current-State Repair is blocked because authoritative Shopify orders/create intake is actionable. Run a fresh dry-run after intake settles.',
+    ],
+  };
+}
+
+async function assertRepairLocalAssumptionsUnchanged(
+  tx: Prisma.TransactionClient,
+  sourceShopifyOrderId: string,
+  inspectedState: LocalRepairState,
+) {
+  const currentOrder = await tx.shopifyOrder.findUnique({
+    where: { sourceShopifyOrderId },
+    include: {
+      allocations: {
+        include: {
+          financeEntries: { where: { entryType: 'sale' }, select: { id: true } },
+        },
+      },
+    },
+  });
+  const current = {
+    orderExists: Boolean(currentOrder),
+    allocationExists: Boolean(currentOrder?.allocations.length),
+    financeExists: Boolean(currentOrder?.allocations.some((allocation) => allocation.financeEntries.length > 0)),
+    cancelledAt: currentOrder?.cancelledAt?.toISOString() ?? null,
+  };
+  if (
+    current.orderExists !== inspectedState.orderExists ||
+    current.allocationExists !== inspectedState.allocationExists ||
+    current.financeExists !== inspectedState.financeExists ||
+    current.cancelledAt !== inspectedState.cancelledAt
+  ) {
+    throw new CurrentStateOrderRepairError(
+      'repair_plan_stale',
+      'Local order state changed after the repair plan was prepared. Run a fresh dry-run before executing.',
+      409,
+    );
+  }
 }
 
 function orderData(order: CanonicalShopifyOrderSnapshot) {
@@ -684,6 +738,10 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
   }
 
   return {
+    async inspectActiveIntake(sourceShopifyOrderId) {
+      return (await findAuthoritativeOrdersCreateIntake(prisma, [sourceShopifyOrderId])).get(sourceShopifyOrderId) ?? null;
+    },
+
     async fetchCanonicalBundle(orderIdentifier) {
       const hasMockCanonicalOrder = Boolean(
         (env as { SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT?: string }).SHOPIFY_MOCK_CANONICAL_ORDER_SNAPSHOT,
@@ -742,6 +800,23 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
 
     async executeRepair(input) {
       return prisma.$transaction(async (tx) => {
+        await acquireShopifyOrderTransactionLock(tx, input.bundle.order.sourceShopifyOrderId);
+        const activeIntake = (await findAuthoritativeOrdersCreateIntake(
+          tx,
+          [input.bundle.order.sourceShopifyOrderId],
+        )).get(input.bundle.order.sourceShopifyOrderId);
+        if (activeIntake) {
+          throw new CurrentStateOrderRepairError(
+            'active_shopify_order_intake',
+            'Current-State Repair is blocked because authoritative Shopify orders/create intake is actionable. Run a fresh dry-run after intake settles.',
+            409,
+          );
+        }
+        await assertRepairLocalAssumptionsUnchanged(
+          tx,
+          input.bundle.order.sourceShopifyOrderId,
+          input.inspectedState,
+        );
         const base = await applyBaseOrderInTransaction(tx, input.bundle);
 
         const monetaryRefunds = getMonetaryRefunds(input.bundle, input.refundEvidence);
@@ -784,6 +859,7 @@ function createDefaultDependencies(env: AppEnv): CurrentStateOrderRepairDependen
           returnApplied: input.bundle.returns.length > 0,
           refundEvidence: input.refundEvidence ? toSafeRefundMonetaryEvidence(input.refundEvidence) : null,
           executionBlocked: false,
+          executionBlockedReason: null,
           warnings: [...(input.refundEvidence?.sanitizedWarnings ?? []), ...cancellation.warnings],
           skipped: base.summary.shopifyOrder === 'Existing' &&
             base.summary.allocation === 'Existing' &&
@@ -937,6 +1013,9 @@ export function createCurrentStateOrderRepairService(
     const inspectedState = await dependencies.inspectLocalState(bundle);
     validateCanonicalBundle(bundle, inspectedState);
     const refundEvidence = classifyBundleRefunds(bundle);
+    const activeIntake = dependencies.inspectActiveIntake
+      ? await dependencies.inspectActiveIntake(bundle.order.sourceShopifyOrderId)
+      : null;
     const repairTimestamp = new Date();
     const dryRun = input.execute !== true;
     if (dryRun) {
@@ -949,7 +1028,9 @@ export function createCurrentStateOrderRepairService(
         repairTimestamp: repairTimestamp.toISOString(),
         dryRun: true,
         executed: false,
-        summary: buildPlannedSummary(bundle, inspectedState, refundEvidence),
+        summary: activeIntake
+          ? blockPlannedSummaryForActiveIntake(buildPlannedSummary(bundle, inspectedState, refundEvidence))
+          : buildPlannedSummary(bundle, inspectedState, refundEvidence),
       };
     }
 
@@ -957,6 +1038,14 @@ export function createCurrentStateOrderRepairService(
       throw new CurrentStateOrderRepairError(
         refundEvidence.reasonCode,
         `Current-state repair is blocked: ${refundEvidence.sanitizedWarnings[0] ?? 'Canonical refund evidence is not safe to apply.'}`,
+        409,
+      );
+    }
+
+    if (activeIntake) {
+      throw new CurrentStateOrderRepairError(
+        'active_shopify_order_intake',
+        'Current-State Repair is blocked because authoritative Shopify orders/create intake is actionable. Run a fresh dry-run after intake settles.',
         409,
       );
     }
@@ -982,6 +1071,9 @@ export function createCurrentStateOrderRepairService(
         summary,
       };
     } catch (error) {
+      if (error instanceof CurrentStateOrderRepairError) {
+        throw error;
+      }
       const errorMessage = safeErrorMessage(error);
       await dependencies.recordFailure({
         bundle,
@@ -1008,4 +1100,5 @@ export const __currentStateOrderRepairTesting = {
   validateCanonicalBundle,
   fetchCanonicalRepairBundle,
   applyBaseOrderInTransaction,
+  assertRepairLocalAssumptionsUnchanged,
 };

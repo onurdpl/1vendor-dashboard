@@ -197,6 +197,7 @@ function dependencies(input: {
   state?: Partial<Awaited<ReturnType<CurrentStateOrderRepairDependencies['inspectLocalState']>>>;
   executeResult?: CurrentStateOrderRepairSummary;
   executeError?: Error;
+  activeIntake?: Record<string, unknown> | null;
 } = {}) {
   const state = {
     orderExists: false,
@@ -230,6 +231,7 @@ function dependencies(input: {
       returns: input.returns ?? [],
     })),
     inspectLocalState: vi.fn(async () => state),
+    inspectActiveIntake: vi.fn(async () => (input.activeIntake ?? null) as never),
     executeRepair,
     recordFailure,
   };
@@ -241,6 +243,56 @@ function service(deps: CurrentStateOrderRepairDependencies) {
 }
 
 describe('Shopify current-state order repair', () => {
+  it('reports authoritative active intake as a safe dry-run execution block', async () => {
+    const fixture = dependencies({
+      activeIntake: {
+        id: 'event-active',
+        status: 'PROCESSING',
+        sourceShopifyOrderId: '7856043819345',
+        executionAvailableAt: null,
+        executionAttemptCount: 1,
+        executionMaxAttempts: 3,
+        processingGeneration: 2,
+        processingLeaseExpiresAt: new Date('2026-08-26T12:01:00.000Z'),
+        leaseState: 'ACTIVE',
+      },
+    });
+
+    const result = await service(fixture.deps).repair({ orderIdentifier: '#1105', execute: false, actor });
+
+    expect(result.summary).toMatchObject({
+      executionBlocked: true,
+      executionBlockedReason: 'active_shopify_order_intake',
+    });
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+  });
+
+  it('blocks execute for authoritative intake without recording a failed mutation', async () => {
+    const fixture = dependencies({ activeIntake: { id: 'event-active' } });
+
+    await expect(service(fixture.deps).repair({ orderIdentifier: '#1105', execute: true, actor }))
+      .rejects.toMatchObject({ code: 'active_shopify_order_intake', statusCode: 409 });
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+    expect(fixture.recordFailure).not.toHaveBeenCalled();
+  });
+
+  it('requires a fresh dry-run when local commerce changes behind the prepared plan', async () => {
+    const tx = {
+      shopifyOrder: {
+        findUnique: vi.fn(async () => ({
+          cancelledAt: null,
+          allocations: [{ financeEntries: [{ id: 'ledger-1' }] }],
+        })),
+      },
+    };
+    const fixture = dependencies();
+
+    await expect(__currentStateOrderRepairTesting.assertRepairLocalAssumptionsUnchanged(
+      tx as never,
+      '7856043819345',
+      fixture.state,
+    )).rejects.toMatchObject({ code: 'repair_plan_stale', statusCode: 409 });
+  });
   it('repairs one open order from its canonical current state', async () => {
     const fixture = dependencies();
     const result = await service(fixture.deps).repair({ orderIdentifier: '#1105', execute: true, actor });

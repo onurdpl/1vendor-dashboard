@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
+  webhookEvent: { findMany: vi.fn() },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({ prisma: prismaMock }));
@@ -10,6 +11,8 @@ const {
   ORDERS_CREATE_HEARTBEAT_CADENCE_MS,
   ORDERS_CREATE_PROCESSING_LEASE_MS,
   OrdersCreateLostFenceError,
+  acquireShopifyOrderTransactionLock,
+  claimOrdersCreateEventForAdminRecovery,
   claimDueFailedOrdersCreateEvent,
   claimDueReceivedOrdersCreateEvent,
   claimExpiredProcessingOrdersCreateEvent,
@@ -18,6 +21,7 @@ const {
   fenceExpiredExhaustedOrdersCreateEvent,
   finalizeRetryableOrdersCreateFailure,
   finalizeTerminalOrdersCreateFailure,
+  findAuthoritativeOrdersCreateIntake,
   heartbeatOrdersCreateOwnership,
   verifyOrdersCreateOwnership,
 } = await import('../backend/src/modules/shopify/orders-create-ownership.service.js');
@@ -73,6 +77,7 @@ function event(overrides: Record<string, unknown> = {}) {
 describe('orders/create fenced ownership primitives', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.webhookEvent.findMany.mockResolvedValue([]);
   });
 
   it('claims a due RECEIVED event while incrementing generation and attempt count', async () => {
@@ -105,6 +110,75 @@ describe('orders/create fenced ownership primitives', () => {
 
     expect([first.acquired, second.acquired].filter(Boolean)).toHaveLength(1);
     expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives worker and admin recovery one shared event ownership winner without resetting attempts', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([ownership({ executionAttemptCount: 2, processingGeneration: 5 })])
+      .mockResolvedValueOnce([]);
+
+    const [worker, admin] = await Promise.all([
+      claimDueFailedOrdersCreateEvent('event-1'),
+      claimOrdersCreateEventForAdminRecovery({
+        eventId: 'event-1',
+        expectedStatus: 'FAILED',
+        sourceShopifyOrderId: '2001',
+      }),
+    ]);
+
+    expect([worker.acquired, admin.acquired].filter(Boolean)).toHaveLength(1);
+    expect(sqlText(1)).toContain('"executionAttemptCount" = "executionAttemptCount" + 1');
+    expect(sqlText(1)).toContain('"executionAttemptCount" < "executionMaxAttempts"');
+  });
+
+  it('exposes the shared parameterized Shopify order advisory lock for repair and ingestion', async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) };
+
+    await acquireShopifyOrderTransactionLock(tx as never, '2001');
+
+    const sql = tx.$queryRaw.mock.calls[0]?.[0] as { strings?: string[]; values?: unknown[] };
+    expect(sql.strings?.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(?, 0))');
+    expect(sql.values).toEqual(['2001']);
+  });
+
+  it.each([
+    ['RECEIVED', new Date('2026-08-26T12:10:00.000Z'), null],
+    ['FAILED', new Date('2026-08-26T12:10:00.000Z'), null],
+    ['PROCESSING', null, new Date('2026-08-26T12:10:00.000Z')],
+    ['PROCESSING', null, new Date('2026-08-26T11:50:00.000Z')],
+  ])('classifies %s enrolled event state as authoritative intake', async (status, executionAvailableAt, processingLeaseExpiresAt) => {
+    prismaMock.webhookEvent.findMany.mockResolvedValue([event({
+      status,
+      executionAvailableAt,
+      processingLeaseExpiresAt,
+      executionAttemptCount: 1,
+    })]);
+
+    const result = await findAuthoritativeOrdersCreateIntake(
+      prismaMock as never,
+      ['2001'],
+      new Date('2026-08-26T12:00:00.000Z'),
+    );
+
+    expect(result.get('2001')).toMatchObject({ status });
+  });
+
+  it.each([
+    ['legacy received', 'RECEIVED', null, null, 0],
+    ['legacy processing', 'PROCESSING', null, null, 0],
+    ['terminal failed', 'FAILED', null, null, 2],
+    ['exhausted failed', 'FAILED', new Date('2026-08-26T12:10:00.000Z'), null, 3],
+  ])('does not classify %s as authoritative intake', async (_label, status, executionAvailableAt, processingLeaseExpiresAt, attempts) => {
+    prismaMock.webhookEvent.findMany.mockResolvedValue([event({
+      status,
+      executionAvailableAt,
+      processingLeaseExpiresAt,
+      executionAttemptCount: attempts,
+    })]);
+
+    const result = await findAuthoritativeOrdersCreateIntake(prismaMock as never, ['2001']);
+
+    expect(result.size).toBe(0);
   });
 
   it('serializes a due FAILED claim with the same conditional mutation', async () => {

@@ -1,5 +1,4 @@
 import {
-  OperationalJobStatus,
   OperationalSignalSeverity,
   OperationalSignalSourceArea,
   OperationalSignalStatus,
@@ -10,6 +9,10 @@ import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
 import type { RecentShopifyOrderIdentity } from './shopify-admin.types.js';
+import {
+  findAuthoritativeOrdersCreateIntake,
+  type AuthoritativeOrdersCreateIntake,
+} from './orders-create-ownership.service.js';
 
 export const MISSED_ORDER_DISCOVERY_PAGE_SIZE = 100;
 export const MISSED_ORDER_DISCOVERY_INTERVAL_MS = 15 * 60 * 1000;
@@ -20,11 +23,6 @@ export const MISSED_ORDER_SIGNAL_TYPE = 'shopify_order_missing_local';
 export const MISSED_ORDER_SIGNAL_RULE_KEY = 'diagnostics.shopify_order_missing_local';
 const DISCOVERY_FAILURE_SIGNAL_ID = 'signal-diagnostics-shopify-order-discovery-run-failed';
 const DISCOVERY_TRUNCATION_SIGNAL_ID = 'signal-diagnostics-shopify-order-discovery-truncated';
-const ACTIVE_JOB_STATUSES = [
-  OperationalJobStatus.PENDING,
-  OperationalJobStatus.PROCESSING,
-  OperationalJobStatus.RETRYING,
-];
 
 function sanitizeSignalPart(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -101,7 +99,12 @@ async function resolveSignal(id: string) {
   });
 }
 
-async function upsertMissingOrderSignal(order: RecentShopifyOrderIdentity, observedAt: Date) {
+async function upsertMissingOrderSignal(
+  order: RecentShopifyOrderIdentity,
+  observedAt: Date,
+  intake: AuthoritativeOrdersCreateIntake | null,
+  executorEnabled: boolean,
+) {
   const id = buildMissedOrderSignalId(order.sourceShopifyOrderId);
   const existing = await prisma.operationalSignal.findUnique({ where: { id }, select: { triggeredAt: true } });
   const firstDetectedAt = existing?.triggeredAt ?? observedAt;
@@ -113,6 +116,20 @@ async function upsertMissingOrderSignal(order: RecentShopifyOrderIdentity, obser
     firstDetectedAt: firstDetectedAt.toISOString(),
     lastObservedAt: observedAt.toISOString(),
     discoveryRuleVersion: 1,
+    executorEnabled,
+    actionableOrdersCreateIntakePresent: Boolean(intake),
+    ...(intake
+      ? {
+          ordersCreateWebhookEventId: intake.id,
+          ordersCreateExecutionStatus: intake.status,
+          executionAttemptCount: intake.executionAttemptCount,
+          executionMaxAttempts: intake.executionMaxAttempts,
+          processingGeneration: intake.processingGeneration,
+          executionAvailableAt: intake.executionAvailableAt?.toISOString() ?? null,
+          processingLeaseExpiresAt: intake.processingLeaseExpiresAt?.toISOString() ?? null,
+          leaseState: intake.leaseState,
+        }
+      : {}),
   };
 
   await prisma.operationalSignal.upsert({
@@ -178,6 +195,7 @@ export async function runMissedOrderDiscovery(env: AppEnv, options: DiscoveryOpt
   const createdAtFrom = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
   const createdAtTo = new Date(now.getTime() - gracePeriodMs);
   const shopifyAdmin = createShopifyAdminService(env);
+  const executorEnabled = env.SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED === true;
   const report: MissedOrderDiscoveryReport = { complete: true, truncated: false, ordersScanned: 0, missingOrders: 0, deferredOrders: 0, errors: [] };
   let after: string | null = null;
 
@@ -200,22 +218,19 @@ export async function runMissedOrderDiscovery(env: AppEnv, options: DiscoveryOpt
         return createdAt >= createdAtFrom.getTime() && createdAt <= createdAtTo.getTime();
       });
       const sourceIds = eligibleOrders.map((order) => order.sourceShopifyOrderId);
-      const [localOrders, activeJobs] = await Promise.all([
+      const [localOrders, activeIntakeBySourceId] = await Promise.all([
         prisma.shopifyOrder.findMany({
           where: { sourceShopifyOrderId: { in: sourceIds } },
           select: { sourceShopifyOrderId: true },
         }),
-        prisma.operationalJob.findMany({
-          where: { sourceShopifyOrderId: { in: sourceIds }, status: { in: ACTIVE_JOB_STATUSES } },
-          select: { sourceShopifyOrderId: true },
-        }),
+        findAuthoritativeOrdersCreateIntake(prisma, sourceIds, now),
       ]);
       const localIds = new Set(localOrders.map((order) => order.sourceShopifyOrderId));
-      const activeJobIds = new Set(activeJobs.flatMap((job) => job.sourceShopifyOrderId ? [job.sourceShopifyOrderId] : []));
 
       for (const order of eligibleOrders) {
         if (localIds.has(order.sourceShopifyOrderId)) continue;
-        if (activeJobIds.has(order.sourceShopifyOrderId)) {
+        const activeIntake = activeIntakeBySourceId.get(order.sourceShopifyOrderId) ?? null;
+        if (executorEnabled && activeIntake) {
           report.deferredOrders += 1;
           continue;
         }
@@ -226,7 +241,7 @@ export async function runMissedOrderDiscovery(env: AppEnv, options: DiscoveryOpt
             select: { id: true },
           });
           if (beforeWrite) continue;
-          await upsertMissingOrderSignal(order, now);
+          await upsertMissingOrderSignal(order, now, activeIntake, executorEnabled);
           report.missingOrders += 1;
           const afterWrite = await prisma.shopifyOrder.findUnique({
             where: { sourceShopifyOrderId: order.sourceShopifyOrderId },

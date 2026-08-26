@@ -705,6 +705,8 @@ export function AdminDiagnosticsPage() {
                       <span>{item.status.toUpperCase()}</span>
                       <span>Received age {formatReceivedAge(item.receivedAgeMs)}</span>
                       <span>Job {item.latestJobStatus ? item.latestJobStatus.toUpperCase() : 'Not linked'}</span>
+                      <span>Lease {item.leaseState ?? 'LEGACY_NO_LEASE'}</span>
+                      <span>Attempt {item.executionAttemptCount ?? 0}/{item.executionMaxAttempts ?? 0}</span>
                       <span>{processingReviewLocalStateLabel(item.localCommerceClassification)}</span>
                       <span>{item.allocationCount ?? 0} allocation(s)</span>
                       <span>{item.saleLedgerCount ?? 0} sale ledger(s)</span>
@@ -721,6 +723,10 @@ export function AdminDiagnosticsPage() {
                         <MetadataRow label="Job last attempt" value={formatDate(item.latestJobLastAttemptAt)} />
                         <MetadataRow label="Job updated" value={formatDate(item.latestJobUpdatedAt)} />
                         <MetadataRow label="Retry count" value={item.latestJobRetryCount ?? 'Not recorded'} />
+                        <MetadataRow label="Processing generation" value={item.processingGeneration ?? 'Not recorded'} />
+                        <MetadataRow label="Lease state" value={item.leaseState ?? 'LEGACY_NO_LEASE'} />
+                        <MetadataRow label="Lease expires" value={formatDate(item.processingLeaseExpiresAt)} />
+                        <MetadataRow label="Executor enabled" value={item.executorEnabled ? 'Yes' : 'No'} />
                         <MetadataRow
                           label="Suppresses missed-order discovery"
                           value={item.currentJobSuppressesMissedOrderDiscovery ? 'Yes' : 'No'}

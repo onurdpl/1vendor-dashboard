@@ -49,4 +49,13 @@ describe('diagnostics recovery policy', () => {
     expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, payloadHash: null }))
       .toMatch(/payload hash is not available/i);
   });
+
+  it('does not reset an exhausted orders/create attempt budget through admin recovery', () => {
+    expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({
+      ...baseEvent,
+      topic: 'orders/create',
+      executionAttemptCount: 3,
+      executionMaxAttempts: 3,
+    })).toMatch(/attempt budget is exhausted.*Current-State Repair/i);
+  });
 });

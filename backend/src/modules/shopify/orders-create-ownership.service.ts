@@ -25,6 +25,24 @@ type OwnershipExistsRow = {
 
 type ClaimKind = 'RECEIVED' | 'FAILED' | 'EXPIRED_PROCESSING';
 
+export type OrdersCreateLeaseState = 'ACTIVE' | 'EXPIRED' | 'LEGACY_NO_LEASE';
+
+export type AuthoritativeOrdersCreateIntake = Pick<
+  WebhookEvent,
+  | 'id'
+  | 'status'
+  | 'sourceShopifyOrderId'
+  | 'executionAvailableAt'
+  | 'executionAttemptCount'
+  | 'executionMaxAttempts'
+  | 'processingGeneration'
+  | 'processingLeaseExpiresAt'
+> & {
+  leaseState: OrdersCreateLeaseState;
+};
+
+type WebhookEventReader = Pick<Prisma.TransactionClient, 'webhookEvent'>;
+
 export type OrdersCreateExecutionCandidateKind =
   | 'RECEIVED'
   | 'FAILED'
@@ -140,6 +158,98 @@ export function claimDueFailedOrdersCreateEvent(eventId: string, leaseDurationMs
 
 export function claimExpiredProcessingOrdersCreateEvent(eventId: string, leaseDurationMs?: number) {
   return claimFencedOrdersCreateEvent({ eventId, kind: 'EXPIRED_PROCESSING', leaseDurationMs });
+}
+
+export async function claimOrdersCreateEventForAdminRecovery(input: {
+  eventId: string;
+  expectedStatus: 'RECEIVED' | 'FAILED';
+  sourceShopifyOrderId: string;
+  leaseDurationMs?: number;
+}): Promise<OrdersCreateFencedClaimResult> {
+  const leaseDurationMs = input.leaseDurationMs ?? ORDERS_CREATE_PROCESSING_LEASE_MS;
+  const rows = await prisma.$queryRaw<FencedClaimRow[]>(Prisma.sql`
+    UPDATE "WebhookEvent"
+    SET
+      "status" = 'PROCESSING',
+      "sourceShopifyOrderId" = COALESCE("sourceShopifyOrderId", ${input.sourceShopifyOrderId}),
+      "processingGeneration" = "processingGeneration" + 1,
+      "executionAttemptCount" = "executionAttemptCount" + 1,
+      "executionAvailableAt" = NULL,
+      "processingLeaseExpiresAt" = CURRENT_TIMESTAMP + (${leaseDurationMs} * INTERVAL '1 millisecond'),
+      "errorMessage" = NULL
+    WHERE "id" = ${input.eventId}
+      AND "topic" = 'orders/create'
+      AND "status" = ${input.expectedStatus}::"WebhookStatus"
+      AND ("sourceShopifyOrderId" IS NULL OR "sourceShopifyOrderId" = ${input.sourceShopifyOrderId})
+      AND "executionAttemptCount" < "executionMaxAttempts"
+    RETURNING
+      "id",
+      "sourceShopifyOrderId",
+      "processingGeneration",
+      "executionAttemptCount",
+      "executionMaxAttempts",
+      "processingLeaseExpiresAt"
+  `);
+
+  return rows[0] ? { acquired: true, ownership: rows[0] } : { acquired: false };
+}
+
+export function getOrdersCreateLeaseState(input: {
+  processingLeaseExpiresAt: Date | null;
+}, now = new Date()): OrdersCreateLeaseState {
+  if (!input.processingLeaseExpiresAt) return 'LEGACY_NO_LEASE';
+  return input.processingLeaseExpiresAt.getTime() > now.getTime() ? 'ACTIVE' : 'EXPIRED';
+}
+
+export function isActionableOrdersCreateIntake(input: {
+  status: string;
+  sourceShopifyOrderId: string | null;
+  executionAvailableAt: Date | null;
+  executionAttemptCount: number;
+  executionMaxAttempts: number;
+  processingLeaseExpiresAt: Date | null;
+}) {
+  if (!input.sourceShopifyOrderId || input.executionAttemptCount >= input.executionMaxAttempts) return false;
+  if (input.status === 'RECEIVED' || input.status === 'FAILED') {
+    return input.executionAvailableAt !== null;
+  }
+  return input.status === 'PROCESSING' && input.processingLeaseExpiresAt !== null;
+}
+
+export async function findAuthoritativeOrdersCreateIntake(
+  client: WebhookEventReader,
+  sourceShopifyOrderIds: string[],
+  now = new Date(),
+) {
+  if (sourceShopifyOrderIds.length === 0) return new Map<string, AuthoritativeOrdersCreateIntake>();
+  const events = await client.webhookEvent.findMany({
+    where: {
+      topic: 'orders/create',
+      sourceShopifyOrderId: { in: sourceShopifyOrderIds },
+      status: { in: ['RECEIVED', 'PROCESSING', 'FAILED'] },
+    },
+    select: {
+      id: true,
+      status: true,
+      sourceShopifyOrderId: true,
+      executionAvailableAt: true,
+      executionAttemptCount: true,
+      executionMaxAttempts: true,
+      processingGeneration: true,
+      processingLeaseExpiresAt: true,
+    },
+    orderBy: { receivedAt: 'desc' },
+  });
+  const result = new Map<string, AuthoritativeOrdersCreateIntake>();
+  for (const event of events) {
+    if (!event.sourceShopifyOrderId || result.has(event.sourceShopifyOrderId)) continue;
+    if (!isActionableOrdersCreateIntake(event)) continue;
+    result.set(event.sourceShopifyOrderId, {
+      ...event,
+      leaseState: getOrdersCreateLeaseState(event, now),
+    });
+  }
+  return result;
 }
 
 export async function discoverOrdersCreateExecutionCandidates(batchSize: number) {
@@ -390,9 +500,7 @@ export async function lockAndVerifyOrdersCreateOwnership(
   tx: Prisma.TransactionClient,
   context: OrdersCreateFencedExecutionContext,
 ) {
-  await tx.$queryRaw(Prisma.sql`
-    SELECT pg_advisory_xact_lock(hashtextextended(${context.sourceShopifyOrderId}, 0))
-  `);
+  await acquireShopifyOrderTransactionLock(tx, context.sourceShopifyOrderId);
 
   const rows = await tx.$queryRaw<OwnershipRow[]>(Prisma.sql`
     SELECT "id"
@@ -410,6 +518,15 @@ export async function lockAndVerifyOrdersCreateOwnership(
   if (!rows[0]) {
     throw new OrdersCreateLostFenceError();
   }
+}
+
+export async function acquireShopifyOrderTransactionLock(
+  tx: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  sourceShopifyOrderId: string,
+) {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(${sourceShopifyOrderId}, 0))
+  `);
 }
 
 export async function finalizeFencedOrdersCreateSuccess(input: {

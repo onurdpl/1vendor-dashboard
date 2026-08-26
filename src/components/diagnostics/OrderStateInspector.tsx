@@ -466,7 +466,9 @@ export function OrderStateInspector({
                 ) : (
                   <span>
                     {dryRunResult.summary.executionBlocked
-                      ? 'Execution is blocked by the canonical safety review.'
+                      ? dryRunResult.summary.executionBlockedReason === 'active_shopify_order_intake'
+                        ? 'Execution is blocked while Shopify order intake is active. Run a fresh dry-run after intake settles.'
+                        : 'Execution is blocked by the canonical safety review.'
                       : 'No repair execution is required; the reviewed canonical plan is already satisfied.'}
                   </span>
                 )}

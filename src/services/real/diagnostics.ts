@@ -166,6 +166,13 @@ export type DiagnosticsReconciliationItem = {
   latestJobUpdatedAt?: string | null;
   latestJobRetryCount?: number | null;
   currentJobSuppressesMissedOrderDiscovery?: boolean | null;
+  processingGeneration?: number | null;
+  executionAttemptCount?: number | null;
+  executionMaxAttempts?: number | null;
+  processingLeaseExpiresAt?: string | null;
+  leaseState?: 'ACTIVE' | 'EXPIRED' | 'LEGACY_NO_LEASE' | null;
+  executorEnabled?: boolean | null;
+  executionExhausted?: boolean | null;
   localCommerceClassification?:
     | 'LOCAL_ORDER_ABSENT'
     | 'LOCAL_ORDER_EXISTS'
@@ -333,6 +340,7 @@ export type CurrentStateOrderRepairResult = {
       sanitizedWarnings: string[];
     } | null;
     executionBlocked: boolean;
+    executionBlockedReason?: 'active_shopify_order_intake' | null;
     warnings: string[];
     skipped: boolean;
   };

@@ -6,6 +6,7 @@ const fetchRecentOrdersPage = vi.hoisted(() => vi.fn());
 const prismaMock = vi.hoisted(() => ({
   shopifyOrder: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), upsert: vi.fn() },
   operationalJob: { findMany: vi.fn() },
+  webhookEvent: { findMany: vi.fn() },
   operationalSignal: { findMany: vi.fn(), findUnique: vi.fn(), upsert: vi.fn(), updateMany: vi.fn() },
   vendorAllocation: { create: vi.fn(), update: vi.fn(), upsert: vi.fn() },
   financeLedgerEntry: { create: vi.fn(), update: vi.fn(), upsert: vi.fn() },
@@ -73,6 +74,7 @@ beforeEach(() => {
   prismaMock.shopifyOrder.findMany.mockResolvedValue([]);
   prismaMock.shopifyOrder.findUnique.mockResolvedValue(null);
   prismaMock.operationalJob.findMany.mockResolvedValue([]);
+  prismaMock.webhookEvent.findMany.mockResolvedValue([]);
   prismaMock.operationalSignal.findMany.mockResolvedValue([]);
   prismaMock.operationalSignal.findUnique.mockResolvedValue(null);
   prismaMock.operationalSignal.upsert.mockResolvedValue({});
@@ -203,16 +205,16 @@ describe('missed Shopify order discovery', () => {
   });
 
   it.each(['PENDING', 'PROCESSING', 'RETRYING'])(
-    'defers a missing order while an operational job is %s',
+    'does not let a stale %s OperationalJob suppress a missing order',
     async (status) => {
       fetchRecentOrdersPage.mockResolvedValue(page([order(`1014-${status}`)]));
       mockOperationalJob({ sourceShopifyOrderId: `1014-${status}`, status });
 
       const result = await runMissedOrderDiscovery(env, { now });
 
-      expect(result.deferredOrders).toBe(1);
-      expect(result.missingOrders).toBe(0);
-      expect(missingSignalUpserts()).toHaveLength(0);
+      expect(result.deferredOrders).toBe(0);
+      expect(result.missingOrders).toBe(1);
+      expect(prismaMock.operationalJob.findMany).not.toHaveBeenCalled();
     },
   );
 
@@ -246,6 +248,82 @@ describe('missed Shopify order discovery', () => {
     expect(result.deferredOrders).toBe(0);
     expect(result.missingOrders).toBe(1);
     expect(missingSignalUpserts()).toHaveLength(1);
+  });
+
+  it.each([
+    ['RECEIVED', new Date('2026-08-26T12:30:00.000Z'), null],
+    ['FAILED', new Date('2026-08-26T12:30:00.000Z'), null],
+    ['PROCESSING', null, new Date('2026-08-26T12:30:00.000Z')],
+    ['PROCESSING', null, new Date('2026-08-26T11:30:00.000Z')],
+  ])('suppresses actionable enrolled %s intake while executor is enabled', async (status, executionAvailableAt, processingLeaseExpiresAt) => {
+    fetchRecentOrdersPage.mockResolvedValue(page([order('1014-authoritative')]));
+    prismaMock.webhookEvent.findMany.mockResolvedValue([{
+      id: 'event-1014',
+      status,
+      sourceShopifyOrderId: '1014-authoritative',
+      executionAvailableAt,
+      executionAttemptCount: 1,
+      executionMaxAttempts: 3,
+      processingGeneration: 2,
+      processingLeaseExpiresAt,
+    }]);
+
+    const result = await runMissedOrderDiscovery({
+      ...env,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+    }, { now });
+
+    expect(result).toMatchObject({ deferredOrders: 1, missingOrders: 0 });
+  });
+
+  it('keeps enrolled work visible when the executor is disabled', async () => {
+    fetchRecentOrdersPage.mockResolvedValue(page([order('1014-disabled')]));
+    prismaMock.webhookEvent.findMany.mockResolvedValue([{
+      id: 'event-disabled',
+      status: 'FAILED',
+      sourceShopifyOrderId: '1014-disabled',
+      executionAvailableAt: new Date('2026-08-26T12:30:00.000Z'),
+      executionAttemptCount: 1,
+      executionMaxAttempts: 3,
+      processingGeneration: 2,
+      processingLeaseExpiresAt: null,
+    }]);
+
+    const result = await runMissedOrderDiscovery(env, { now });
+
+    expect(result).toMatchObject({ deferredOrders: 0, missingOrders: 1 });
+    expect(missingSignalUpserts()[0][0].create.metadata).toMatchObject({
+      executorEnabled: false,
+      actionableOrdersCreateIntakePresent: true,
+      ordersCreateExecutionStatus: 'FAILED',
+    });
+  });
+
+  it.each([
+    ['terminal failed', 'FAILED', null, 2, 3, null],
+    ['exhausted failed', 'FAILED', new Date('2026-08-26T12:30:00.000Z'), 3, 3, null],
+    ['exhausted processing', 'PROCESSING', null, 3, 3, new Date('2026-08-26T11:30:00.000Z')],
+    ['legacy received', 'RECEIVED', null, 0, 3, null],
+    ['legacy processing', 'PROCESSING', null, 0, 3, null],
+  ])('does not suppress %s event state', async (_label, status, executionAvailableAt, attempts, maxAttempts, processingLeaseExpiresAt) => {
+    fetchRecentOrdersPage.mockResolvedValue(page([order('1014-terminal')]));
+    prismaMock.webhookEvent.findMany.mockResolvedValue([{
+      id: 'event-terminal',
+      status,
+      sourceShopifyOrderId: '1014-terminal',
+      executionAvailableAt,
+      executionAttemptCount: attempts,
+      executionMaxAttempts: maxAttempts,
+      processingGeneration: 2,
+      processingLeaseExpiresAt,
+    }]);
+
+    const result = await runMissedOrderDiscovery({
+      ...env,
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+    }, { now });
+
+    expect(result).toMatchObject({ deferredOrders: 0, missingOrders: 1 });
   });
 
   it('does not signal when a Shopify retry created the local order before discovery', async () => {
