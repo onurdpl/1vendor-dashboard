@@ -799,10 +799,6 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           update: {
             sourceShopifyOrderId: shopifyOrder.id,
             sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
-            fulfillmentStatus: 'Pending',
-            shippingStatus: 'Awaiting Shipment',
-            carrier: null,
-            trackingNumber: null,
           },
           create: {
             id: allocationId,
@@ -815,6 +811,8 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             reassignmentRequired: false,
             fulfillmentStatus: 'Pending',
             shippingStatus: 'Awaiting Shipment',
+            carrier: null,
+            trackingNumber: null,
           },
         });
 

@@ -336,8 +336,26 @@ describe('vendor order snapshot ingestion', () => {
     expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
   });
 
-  it('preserves existing allocation workflow state when Shopify order ingestion is replayed', async () => {
-    await ingestShopifyOrderWebhook({
+  it('preserves existing allocation operational and ownership state when Shopify order ingestion is replayed', async () => {
+    const existingAllocation = {
+      id: 'alloc-sporjinal-2001',
+      sourceShopifyOrderId: 'shopify-order-db-1',
+      sourceShopifyOrderNumber: '#old-2001',
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'yalispor',
+      fulfillmentStatus: 'fulfillment_submitted',
+      shippingStatus: 'shipped',
+      carrier: 'Test Carrier',
+      trackingNumber: 'TRACK-123',
+    };
+    prismaMock.vendorAllocation.upsert.mockImplementationOnce(
+      async ({ update }: { update: Record<string, unknown> }) => {
+        Object.assign(existingAllocation, update);
+        return existingAllocation;
+      },
+    );
+
+    const result = await ingestShopifyOrderWebhook({
       event: { id: 'webhook-replay-preserve-blocked-state' } as never,
       sellerInfo: {
         'SKU-1': 'sporjinal',
@@ -345,6 +363,22 @@ describe('vendor order snapshot ingestion', () => {
       payload: buildSimpleOrderPayload(),
     });
 
+    expect(result).toMatchObject({
+      ok: true,
+      action: 'accepted',
+      processingStatus: 'processed',
+      shopifyOrderId: '2001',
+      allocationCount: 1,
+    });
+    expect(existingAllocation).toMatchObject({
+      sourceShopifyOrderNumber: '#2001',
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'yalispor',
+      fulfillmentStatus: 'fulfillment_submitted',
+      shippingStatus: 'shipped',
+      carrier: 'Test Carrier',
+      trackingNumber: 'TRACK-123',
+    });
     expect(prismaMock.vendorAllocation.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: expect.not.objectContaining({
@@ -352,6 +386,11 @@ describe('vendor order snapshot ingestion', () => {
           cancellationReason: expect.anything(),
           reassignmentRequired: expect.anything(),
           originalVendorId: expect.anything(),
+          assignedVendorId: expect.anything(),
+          fulfillmentStatus: expect.anything(),
+          shippingStatus: expect.anything(),
+          carrier: expect.anything(),
+          trackingNumber: expect.anything(),
         }),
       }),
     );
@@ -388,6 +427,10 @@ describe('vendor order snapshot ingestion', () => {
           allocationStatus: 'ACTIVE',
           cancellationReason: null,
           reassignmentRequired: false,
+          fulfillmentStatus: 'Pending',
+          shippingStatus: 'Awaiting Shipment',
+          carrier: null,
+          trackingNumber: null,
         }),
       }),
     );
