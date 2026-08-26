@@ -558,7 +558,7 @@ POST /fulfillments.json
 - Admin reconciliation diagnostics evaluate `orders/create` events that remain `PROCESSING` for 15 minutes from `receivedAt` and surface a deterministic supervised-review `OperationalSignal`. An unexpired lease is authoritative and is not marked stale solely because of age. Expired and legacy no-lease work remains reviewable after the threshold, while exhausted `PROCESSING` is always HIGH severity. Review remains diagnostic-only and exposes only safe generation, attempt, lease, job, and local-commerce evidence.
 - The review reuses Order State Inspector and the canonical Current-State Repair boundary. Repair remains dry-run first and explicitly confirmed; skipped or execution-blocked plans do not expose execute. Detection never calls Shopify and never mutates webhook/job or commerce state.
 - A completed exact-order Current-State Repair can resolve only the separate review signal while preserving the historically `PROCESSING` event/job evidence. Request-driven evaluation adds no scheduler, worker, schema change, or migration.
-- Shopify five-second acknowledgement timing remains a separate unresolved issue.
+- Shopify five-second acknowledgement can now be addressed by the default-disabled durable fast-ack path described below; production activation and live timing evidence remain intentionally pending.
 
 ### Orders/Create Fenced Processing Preparation
 
@@ -574,7 +574,12 @@ POST /fulfillments.json
 - Explicit admin recovery can fence a legacy `RECEIVED`/`FAILED` attempt, but a retryable legacy failure keeps `executionAvailableAt` null so the action does not enroll that historical row for automatic execution.
 - The current synchronous route does not supply a fenced execution context and does not require lease fields.
 - When explicitly enabled with a database configuration, the executor polls immediately and periodically, consumes durable retries, heartbeats active work, and drains active ownership for at most one lease during graceful shutdown.
-- Fast acknowledgement remains not implemented. The live `orders/create` webhook route still performs and awaits processing synchronously, does not set executor availability, and does not enroll incoming events into the executor.
+- Durable fast acknowledgement is implemented behind `SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED=false`. With the flag disabled, the existing synchronous route remains unchanged and does not enroll incoming events.
+- Enabling fast acknowledgement requires `SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true`; invalid startup configuration fails closed.
+- With both flags enabled, the verified route atomically persists the retained event envelope and enrolls it with `sourceShopifyOrderId` plus database-current `executionAvailableAt`, then returns `202` without seller-info lookup, operational-job creation, commerce processing, or direct executor invocation.
+- A persistence failure returns retryable `503`, so Shopify is not told that an event was durably accepted when no inbox row exists. Duplicate responses are derived from retained event status and scheduling fields without mutating legacy unenrolled rows.
+- Request timing logs include the safe route name, response status, elapsed time, and response size; intake logs correlate only by internal webhook event id and outcome, never by raw payload or secret material.
+- Production fast acknowledgement was not activated as part of this implementation phase.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.

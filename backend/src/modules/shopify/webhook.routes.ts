@@ -792,8 +792,26 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     }
 
     const incomingPayload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
+    const asyncAckEnabled = env.SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED === true;
+    const rawSourceShopifyOrderId = incomingPayload.id;
+    const asyncSourceShopifyOrderId =
+      typeof rawSourceShopifyOrderId === 'string'
+        ? rawSourceShopifyOrderId.trim()
+        : typeof rawSourceShopifyOrderId === 'number' && Number.isFinite(rawSourceShopifyOrderId)
+          ? String(rawSourceShopifyOrderId)
+          : '';
 
     if (!env.DATABASE_URL) {
+      if (asyncAckEnabled) {
+        return reply.code(503).send({
+          ok: false,
+          duplicate: false,
+          action: 'intake_persistence_failed',
+          processingStatus: 'not_persisted',
+          retryable: true,
+          message: 'Shopify orders/create intake could not be persisted.',
+        });
+      }
       return reply.code(202).send({
         ok: true,
         duplicate: false,
@@ -802,12 +820,95 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
-    const idempotencyResult = await getOrCreateWebhookEvent({
-      topic: headers.topic,
-      shopDomain: getPersistedShopDomain(headers.shopDomain),
-      webhookId: headers.webhookId,
-      rawBody,
-    });
+    if (asyncAckEnabled && !asyncSourceShopifyOrderId) {
+      return reply.code(400).send({
+        ok: false,
+        duplicate: false,
+        action: 'invalid_payload',
+        processingStatus: 'not_persisted',
+        retryable: false,
+        message: 'Shopify orders/create payload did not include an order id.',
+      });
+    }
+
+    let idempotencyResult: Awaited<ReturnType<typeof getOrCreateWebhookEvent>>;
+    try {
+      idempotencyResult = await getOrCreateWebhookEvent({
+        topic: headers.topic,
+        shopDomain: getPersistedShopDomain(headers.shopDomain),
+        webhookId: headers.webhookId,
+        rawBody,
+        ...(asyncAckEnabled
+          ? { executionEnrollment: { sourceShopifyOrderId: asyncSourceShopifyOrderId } }
+          : {}),
+      });
+    } catch (error) {
+      if (!asyncAckEnabled) throw error;
+      app.log.error(
+        {
+          event: 'SHOPIFY_ORDERS_CREATE_ASYNC_INTAKE_PERSISTENCE_FAILED',
+          webhookIdPresent: headers.webhookId !== null,
+          errorMessage: error instanceof Error ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 500) : 'Unknown persistence failure.',
+        },
+        'Shopify orders/create async intake persistence failed.',
+      );
+      return reply.code(503).send({
+        ok: false,
+        duplicate: false,
+        action: 'intake_persistence_failed',
+        processingStatus: 'not_persisted',
+        retryable: true,
+        message: 'Shopify orders/create intake could not be persisted.',
+      });
+    }
+
+    if (asyncAckEnabled) {
+      const { event } = idempotencyResult;
+      const isScheduled =
+        event.sourceShopifyOrderId !== null &&
+        event.executionAvailableAt !== null &&
+        event.executionAttemptCount < event.executionMaxAttempts;
+      let action = 'accepted';
+      let processingStatus = 'queued';
+
+      if (idempotencyResult.payloadIdentity === 'mismatched') {
+        action = 'identity_conflict_needs_attention';
+        processingStatus = 'needs_attention';
+      } else if (idempotencyResult.isDuplicate) {
+        if (event.status === 'PROCESSED') {
+          action = 'duplicate_ignored';
+          processingStatus = 'processed';
+        } else if (event.status === 'PROCESSING') {
+          action = 'duplicate_in_progress';
+          processingStatus = 'processing';
+        } else if (event.status === 'RECEIVED' && isScheduled) {
+          action = 'already_queued';
+        } else if (event.status === 'FAILED' && isScheduled) {
+          action = 'retry_queued';
+        } else {
+          action = 'received_needs_attention';
+          processingStatus = 'needs_attention';
+        }
+      }
+
+      app.log.info(
+        {
+          event: 'SHOPIFY_ORDERS_CREATE_ASYNC_ACK',
+          webhookEventId: event.id,
+          duplicate: idempotencyResult.isDuplicate,
+          action,
+          processingStatus,
+        },
+        'Shopify orders/create async intake acknowledged.',
+      );
+      return reply.code(202).send({
+        ok: true,
+        duplicate: idempotencyResult.isDuplicate,
+        action,
+        processingStatus,
+        ...(processingStatus === 'needs_attention' ? { retryable: false } : {}),
+      });
+    }
 
     const respondForClaimLoser = async (event: WebhookEvent | null) => {
       if (event?.status === 'PROCESSED') {

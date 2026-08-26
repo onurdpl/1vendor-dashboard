@@ -37,6 +37,8 @@ const operationalJobsMock = vi.hoisted(() => ({
   markOperationalJobFailed: vi.fn(),
   markOperationalJobProcessing: vi.fn(),
   markOperationalJobRetrying: vi.fn(),
+  mirrorOrdersCreateExecutorJob: vi.fn(),
+  runBestEffortOperationalJobMutation: vi.fn(async (operation: () => Promise<unknown>) => operation()),
   serializeOperationalJob: vi.fn(),
 }));
 
@@ -72,6 +74,8 @@ const { __webhookIdempotencyTesting, claimWebhookEvent } = await import(
   '../backend/src/modules/shopify/webhook-idempotency.service.js'
 );
 const { registerShopifyWebhookRoutes } = await import('../backend/src/modules/shopify/webhook.routes.js');
+const { createOrdersCreateExecutor } = await import('../backend/src/modules/shopify/orders-create-executor.service.js');
+const { createOrdersCreateProcessingService } = await import('../backend/src/modules/shopify/orders-create-processing.service.js');
 const { recoverWebhookEvent } = await import('../backend/src/modules/diagnostics/diagnostics.service.js');
 
 function buildEvent(overrides: Record<string, unknown> = {}) {
@@ -138,7 +142,7 @@ function buildReply() {
   return reply;
 }
 
-function registerRoutes() {
+function registerRoutes(envOverrides: Record<string, unknown> = {}) {
   const routes = new Map<string, (request: unknown, reply: ReturnType<typeof buildReply>) => Promise<unknown>>();
   const app = {
     post: vi.fn((path: string, handler: (request: unknown, reply: ReturnType<typeof buildReply>) => Promise<unknown>) => {
@@ -157,6 +161,9 @@ function registerRoutes() {
     SHOPIFY_WEBHOOK_SECRET: 'webhook-secret',
     SHOPIFY_SHOP_DOMAIN: 'sporgym.myshopify.com',
     SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: 0,
+    SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: false,
+    SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: false,
+    ...envOverrides,
   } as never);
 
   return routes.get('/webhooks/shopify/orders-create')!;
@@ -349,6 +356,226 @@ describe('orders/create state-aware retry ownership', () => {
       status: 202,
       body: { processingStatus: 'processed' },
     });
+  });
+
+  it('durably enrolls and fast-acknowledges without request-path processing when enabled', async () => {
+    getOrCreateWebhookEventMock.mockResolvedValueOnce(buildIdempotencyResult({
+      event: buildEvent({ executionAvailableAt: new Date('2026-08-26T10:00:00.000Z') }),
+    }));
+
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(getOrCreateWebhookEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      executionEnrollment: { sourceShopifyOrderId: '2001' },
+    }));
+    expect(result).toMatchObject({
+      status: 202,
+      body: { ok: true, duplicate: false, action: 'accepted', processingStatus: 'queued' },
+    });
+    expect(prismaMock.webhookEvent.updateMany).not.toHaveBeenCalled();
+    expect(operationalJobsMock.createWebhookOperationalJob).not.toHaveBeenCalled();
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('keeps intake synchronous when the executor is enabled but async acknowledgement is disabled', async () => {
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: false,
+    })(buildRequest(payload), buildReply());
+
+    expect(getOrCreateWebhookEventMock).toHaveBeenCalledWith(expect.not.objectContaining({
+      executionEnrollment: expect.anything(),
+    }));
+    expect(prismaMock.webhookEvent.updateMany).toHaveBeenCalled();
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ status: 202, body: { processingStatus: 'processed' } });
+  });
+
+  it('rejects invalid async signatures before persistence or enrollment', async () => {
+    webhookServiceMock.verifyShopifyWebhookHmac.mockReturnValueOnce(false);
+
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(result).toMatchObject({ status: 401 });
+    expect(getOrCreateWebhookEventMock).not.toHaveBeenCalled();
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid async shop domain before persistence or enrollment', async () => {
+    const result = await registerRoutes({
+      SHOPIFY_SHOP_DOMAIN: 'different-store.myshopify.com',
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(result).toMatchObject({ status: 403 });
+    expect(getOrCreateWebhookEventMock).not.toHaveBeenCalled();
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('returns retryable non-2xx when durable async intake persistence fails', async () => {
+    getOrCreateWebhookEventMock.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(result).toMatchObject({
+      status: 503,
+      body: { ok: false, action: 'intake_persistence_failed', retryable: true },
+    });
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge or persist an async payload without the authoritative order id', async () => {
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest({ name: '#missing-id' }), buildReply());
+
+    expect(result).toMatchObject({ status: 400, body: { action: 'invalid_payload' } });
+    expect(getOrCreateWebhookEventMock).not.toHaveBeenCalled();
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['PROCESSED', null, 'duplicate_ignored', 'processed'],
+    ['RECEIVED', new Date('2026-08-26T10:00:00.000Z'), 'already_queued', 'queued'],
+    ['PROCESSING', null, 'duplicate_in_progress', 'processing'],
+    ['FAILED', new Date('2026-08-26T10:05:00.000Z'), 'retry_queued', 'queued'],
+    ['FAILED', null, 'received_needs_attention', 'needs_attention'],
+    ['RECEIVED', null, 'received_needs_attention', 'needs_attention'],
+  ])('reports async duplicate %s state without processing', async (status, executionAvailableAt, action, processingStatus) => {
+    getOrCreateWebhookEventMock.mockResolvedValueOnce(buildIdempotencyResult({
+      isDuplicate: true,
+      event: buildEvent({ status, executionAvailableAt }),
+    }));
+
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(result).toMatchObject({ status: 202, body: { action, processingStatus } });
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('keeps async same-id payload mismatch as a non-processing identity conflict', async () => {
+    getOrCreateWebhookEventMock.mockResolvedValueOnce(buildIdempotencyResult({
+      isDuplicate: true,
+      payloadIdentity: 'mismatched',
+      event: buildEvent({ executionAvailableAt: new Date('2026-08-26T10:00:00.000Z') }),
+    }));
+
+    const result = await registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    })(buildRequest(payload), buildReply());
+
+    expect(result).toMatchObject({
+      status: 202,
+      body: { action: 'identity_conflict_needs_attention', processingStatus: 'needs_attention' },
+    });
+    expect(orderIngestionMock.ingestShopifyOrderWebhook).not.toHaveBeenCalled();
+  });
+
+  it('carries one enrolled intake through executor claim, fenced processing, and duplicate no-op', async () => {
+    let durableEvent = buildEvent({ executionAvailableAt: new Date('2026-08-26T10:00:00.000Z') });
+    let commerceCreates = 0;
+    let allocationCreates = 0;
+    let financeCreates = 0;
+    getOrCreateWebhookEventMock.mockImplementation(async () => ({
+      ...buildIdempotencyResult(),
+      isDuplicate: durableEvent.status !== 'RECEIVED',
+      event: durableEvent,
+    }));
+    const handler = registerRoutes({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    });
+
+    const ack = await handler(buildRequest(payload), buildReply());
+    expect(ack).toMatchObject({ status: 202, body: { processingStatus: 'queued' } });
+    expect(commerceCreates).toBe(0);
+
+    orderIngestionMock.ingestShopifyOrderWebhook.mockImplementationOnce(async (input) => {
+      expect(input.executionContext).toMatchObject({
+        webhookEventId: durableEvent.id,
+        processingGeneration: 1,
+      });
+      commerceCreates += 1;
+      allocationCreates += 1;
+      financeCreates += 1;
+      durableEvent = buildEvent({
+        status: 'PROCESSED',
+        processedAt: new Date('2026-08-26T10:00:02.000Z'),
+        executionAvailableAt: null,
+        executionAttemptCount: 1,
+        processingGeneration: 1,
+      });
+      return {
+        ok: true as const,
+        action: 'accepted' as const,
+        processingStatus: 'processed' as const,
+        shopifyOrderId: '2001',
+        allocationCount: 1,
+      };
+    });
+    const processingService = createOrdersCreateProcessingService({
+      env: { SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: 0 } as never,
+      shopifyAdminService: shopifyAdminMock,
+    });
+    const executor = createOrdersCreateExecutor({
+      env: {
+        SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: 5,
+        SHOPIFY_ORDERS_CREATE_LEASE_MS: 60_000,
+        SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: 10_000,
+      } as never,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
+      dependencies: {
+        discoverCandidates: vi.fn().mockResolvedValue([{
+          kind: 'RECEIVED',
+          event: durableEvent,
+          dueAt: durableEvent.executionAvailableAt,
+        }]),
+        claimReceived: vi.fn().mockResolvedValue({
+          acquired: true,
+          ownership: {
+            id: durableEvent.id,
+            sourceShopifyOrderId: '2001',
+            processingGeneration: 1,
+            executionAttemptCount: 1,
+            executionMaxAttempts: 3,
+            processingLeaseExpiresAt: new Date('2026-08-26T10:01:00.000Z'),
+          },
+        }),
+        heartbeat: vi.fn(),
+        mirrorJob: vi.fn(),
+        processingService,
+      } as never,
+    });
+
+    await expect(executor.runCycle()).resolves.toMatchObject({ processed: 1, claimWins: 1 });
+    expect(commerceCreates).toBe(1);
+    expect(allocationCreates).toBe(1);
+    expect(financeCreates).toBe(1);
+    expect(durableEvent).toMatchObject({ id: 'webhook-event-orders-create', status: 'PROCESSED' });
+
+    const duplicate = await handler(buildRequest(payload), buildReply());
+    expect(duplicate).toMatchObject({
+      status: 202,
+      body: { duplicate: true, action: 'duplicate_ignored', processingStatus: 'processed' },
+    });
+    expect(commerceCreates).toBe(1);
+    expect(allocationCreates).toBe(1);
+    expect(financeCreates).toBe(1);
   });
 
   it('uses retained payload and missing-order-only mode for duplicate RECEIVED recovery', async () => {

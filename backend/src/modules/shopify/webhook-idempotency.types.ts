@@ -13,6 +13,9 @@ export type GetOrCreateWebhookEventInput = {
   shopDomain: string;
   webhookId: string | null;
   rawBody: string;
+  executionEnrollment?: {
+    sourceShopifyOrderId: string;
+  };
 };
 
 export type GetOrCreateWebhookEventResult = {

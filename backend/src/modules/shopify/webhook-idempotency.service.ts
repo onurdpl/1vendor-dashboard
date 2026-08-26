@@ -47,17 +47,35 @@ export async function getOrCreateWebhookEvent(
   });
 
   try {
-    const event = await prisma.webhookEvent.create({
-      data: {
-        sourceShopDomain: input.shopDomain,
-        topic: input.topic,
-        webhookId: input.webhookId,
-        idempotencyKey,
-        payloadHash,
-        rawPayload: input.rawBody,
-        status: 'RECEIVED',
-      },
-    });
+    const createData = {
+      sourceShopDomain: input.shopDomain,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      idempotencyKey,
+      payloadHash,
+      rawPayload: input.rawBody,
+      status: 'RECEIVED' as const,
+      ...(input.executionEnrollment
+        ? { sourceShopifyOrderId: input.executionEnrollment.sourceShopifyOrderId }
+        : {}),
+    };
+    const event = input.executionEnrollment
+      ? await prisma.$transaction(async (transaction) => {
+          const created = await transaction.webhookEvent.create({ data: createData });
+          const enrolled = await transaction.$queryRaw<typeof created[]>(Prisma.sql`
+            UPDATE "WebhookEvent"
+            SET "executionAvailableAt" = CURRENT_TIMESTAMP
+            WHERE "id" = ${created.id}
+              AND "status" = 'RECEIVED'
+              AND "executionAvailableAt" IS NULL
+            RETURNING *
+          `);
+          if (!enrolled[0]) {
+            throw new Error('Shopify orders/create event could not be enrolled atomically.');
+          }
+          return enrolled[0];
+        })
+      : await prisma.webhookEvent.create({ data: createData });
 
     return {
       event,

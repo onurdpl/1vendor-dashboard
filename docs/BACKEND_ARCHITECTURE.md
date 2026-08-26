@@ -148,6 +148,14 @@ Alternative for quick schema sync without migration history:
 - Active vendor, stock ownership, and pricing are managed by an external source system and synced into Shopify.
 - This application starts from post-order operations after a Shopify order already exists.
 
+## Orders/Create Durable Fast Acknowledgement
+
+- `SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED` defaults to `false`; the existing synchronous webhook behavior is preserved while disabled.
+- Fast acknowledgement may be enabled only with `SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true`. Startup rejects the unsafe flag combination.
+- The enabled request path performs verification, atomically persists the retained webhook envelope and executor enrollment, and only then returns `202`.
+- The request path does not run seller lookup, create operational jobs, mutate order/allocation/finance state, or invoke the executor. The request-independent executor owns later discovery, fenced claims, processing, heartbeat, retry, and terminal handling.
+- If durable intake fails, the route returns retryable `503`; no successful acknowledgement is sent.
+
 ## Vendor Allocation Model
 - Backend persists source Shopify order and line items.
 - Backend creates vendor allocations from line-item vendor mapping.

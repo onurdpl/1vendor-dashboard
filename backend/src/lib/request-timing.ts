@@ -23,6 +23,7 @@ const TIMED_ROUTE_NAMES = new Set([
   'GET /admin/diagnostics/reconciliation',
   'GET /admin/observability/summary',
   'GET /admin/observability/metrics',
+  'POST /webhooks/shopify/orders-create',
 ]);
 
 const requestStartedAt = new WeakMap<FastifyRequest, bigint>();

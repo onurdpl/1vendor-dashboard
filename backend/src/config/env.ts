@@ -23,6 +23,7 @@ export type AppEnv = {
   SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE?: string;
   SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: number;
   SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED?: boolean;
+  SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED?: boolean;
   SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS?: number;
   SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE?: number;
   SHOPIFY_ORDERS_CREATE_LEASE_MS?: number;
@@ -252,6 +253,20 @@ export function loadEnv(): AppEnv {
     process.env.SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS,
     10_000,
   );
+  const ordersCreateExecutorEnabled = parseBoolean(
+    process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED,
+    false,
+  );
+  const ordersCreateAsyncAckEnabled = parseBoolean(
+    process.env.SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED,
+    false,
+  );
+
+  if (ordersCreateAsyncAckEnabled && !ordersCreateExecutorEnabled) {
+    throw new Error(
+      'SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED requires SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true.',
+    );
+  }
 
   if (ordersCreateExecutorHeartbeatMs * 2 >= ordersCreateExecutorLeaseMs) {
     throw new Error(
@@ -354,10 +369,8 @@ export function loadEnv(): AppEnv {
       process.env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
       defaultRetryDelayMs,
     ),
-    SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: parseBoolean(
-      process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED,
-      false,
-    ),
+    SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: ordersCreateExecutorEnabled,
+    SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: ordersCreateAsyncAckEnabled,
     SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: parsePositiveInteger(
       process.env.SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS,
       2_000,

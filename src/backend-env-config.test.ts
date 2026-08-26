@@ -216,6 +216,7 @@ describe('orders/create executor environment', () => {
   it('is disabled by default with conservative runtime settings', () => {
     resetEnv({
       SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: undefined,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: undefined,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: undefined,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: undefined,
       SHOPIFY_ORDERS_CREATE_LEASE_MS: undefined,
@@ -224,6 +225,7 @@ describe('orders/create executor environment', () => {
 
     expect(loadEnv()).toMatchObject({
       SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: false,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: false,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: 2_000,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: 5,
       SHOPIFY_ORDERS_CREATE_LEASE_MS: 60_000,
@@ -242,11 +244,42 @@ describe('orders/create executor environment', () => {
 
     expect(loadEnv()).toMatchObject({
       SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: false,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_INTERVAL_MS: 3_000,
       SHOPIFY_ORDERS_CREATE_EXECUTOR_BATCH_SIZE: 7,
       SHOPIFY_ORDERS_CREATE_LEASE_MS: 90_000,
       SHOPIFY_ORDERS_CREATE_HEARTBEAT_MS: 15_000,
     });
+  });
+
+  it('keeps production-like executor deployments synchronous when the new flag is absent', () => {
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: 'true',
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: undefined,
+    });
+    expect(loadEnv()).toMatchObject({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: false,
+    });
+  });
+
+  it('permits fast acknowledgement only when the executor is enabled', () => {
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: 'true',
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: 'true',
+    });
+    expect(loadEnv()).toMatchObject({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: true,
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: true,
+    });
+
+    resetEnv({
+      SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED: 'false',
+      SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED: 'true',
+    });
+    expect(() => loadEnv()).toThrow(
+      'SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED requires SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true.',
+    );
   });
 
   it.each([

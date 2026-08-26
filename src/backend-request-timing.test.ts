@@ -35,7 +35,7 @@ describe('backend request timing instrumentation', () => {
     expect(shouldLogRequestTiming('GET /admin/operations/summary')).toBe(true);
     expect(shouldLogRequestTiming('GET /admin/operations/attention')).toBe(true);
     expect(shouldLogRequestTiming('POST /shipments/:id/retry')).toBe(false);
-    expect(shouldLogRequestTiming('POST /webhooks/shopify/orders-create')).toBe(false);
+    expect(shouldLogRequestTiming('POST /webhooks/shopify/orders-create')).toBe(true);
   });
 
   it('creates a safe timing log without query strings or payload values', () => {
