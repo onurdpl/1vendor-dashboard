@@ -1,4 +1,13 @@
-import { OperationalJobStatus, OperationalJobType, type OperationalJob, type WebhookEvent } from '@prisma/client';
+import {
+  OperationalJobStatus,
+  OperationalJobType,
+  OperationalSignalSeverity,
+  OperationalSignalSourceArea,
+  OperationalSignalStatus,
+  Prisma,
+  type OperationalJob,
+  type WebhookEvent,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { buildFinanceAuditRuntimeMetadata } from '../../config/database-source-diagnostics.js';
@@ -80,6 +89,17 @@ const ORDER_INSPECTOR_SIGNAL_LIMIT = 50;
 const ORDER_INSPECTOR_FINANCE_EVENT_LIMIT = 100;
 const ORDER_INSPECTOR_REPAIR_HISTORY_LIMIT = 20;
 const CURRENT_STATE_REPAIR_OPERATION = 'shopify_current_state_order_repair';
+const PROCESSING_REVIEW_THRESHOLD_MS = 15 * 60 * 1000;
+const PROCESSING_REVIEW_SIGNAL_TYPE = 'shopify_orders_create_processing_review_required';
+const PROCESSING_REVIEW_SIGNAL_RULE_KEY = 'diagnostics.shopify_orders_create_processing_review_required';
+const PROCESSING_REVIEW_SIGNAL_ID_PREFIX = 'signal-diagnostics-shopify-orders-create-processing-review';
+const PROCESSING_REVIEW_INFERENCE =
+  'Execution may have been interrupted. Current records cannot prove whether the original execution has ended.';
+const MISSED_ORDER_SUPPRESSING_JOB_STATUSES = new Set<OperationalJobStatus>([
+  OperationalJobStatus.PENDING,
+  OperationalJobStatus.PROCESSING,
+  OperationalJobStatus.RETRYING,
+]);
 const SAFE_SIGNAL_METADATA_KEYS = new Set([
   'allocationId',
   'conflictType',
@@ -135,6 +155,97 @@ function readSafeRepairJobPayload(value: unknown) {
     actorUserId: typeof payload.actorUserId === 'string' ? payload.actorUserId : null,
     actorEmail: typeof payload.actorEmail === 'string' ? payload.actorEmail : null,
   };
+}
+
+type ProcessingReviewLocalCommerceClassification = NonNullable<
+  ReconciliationItem['localCommerceClassification']
+>;
+
+type ProcessingReviewIdentity = {
+  sourceShopifyOrderId: string | null;
+  sourceShopifyOrderNumber: string | null;
+};
+
+function buildProcessingReviewSignalId(webhookEventId: string) {
+  return `${PROCESSING_REVIEW_SIGNAL_ID_PREFIX}-${webhookEventId}`;
+}
+
+function safeShopifyOrderId(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  const gidMatch = trimmed.match(/^gid:\/\/shopify\/Order\/(\d+)$/i);
+  return gidMatch?.[1] ?? null;
+}
+
+function safeShopifyOrderNumber(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const match = trimmed.match(/^#?(\d+)$/);
+  return match ? `#${match[1]}` : null;
+}
+
+function getProcessingReviewIdentity(event: {
+  topic: string;
+  rawPayload: string | null;
+  shopifyOrder?: { sourceShopifyOrderId: string; sourceShopifyOrderNumber: string } | null;
+}): ProcessingReviewIdentity {
+  const affected = inferAffectedEntities(event);
+  return {
+    sourceShopifyOrderId: safeShopifyOrderId(affected.shopifyOrderId),
+    sourceShopifyOrderNumber: safeShopifyOrderNumber(affected.shopifyOrderNumber),
+  };
+}
+
+function readProcessingReviewSignalMetadata(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const metadata = value as Record<string, unknown>;
+  return {
+    webhookEventId: typeof metadata.webhookEventId === 'string' ? metadata.webhookEventId : null,
+    resolutionReason: typeof metadata.resolutionReason === 'string' ? metadata.resolutionReason : null,
+  };
+}
+
+function processingReviewMetadata(input: {
+  webhookEventId: string;
+  shopifyWebhookId: string | null;
+  identity: ProcessingReviewIdentity;
+  receivedAt: Date;
+  firstDetectedAt: Date;
+  lastObservedAt: Date;
+  classification: ProcessingReviewLocalCommerceClassification;
+  allocationCount: number;
+  saleLedgerCount: number;
+  latestJob: OperationalJob | null;
+}) {
+  return {
+    webhookEventId: input.webhookEventId,
+    ...(input.shopifyWebhookId ? { shopifyWebhookId: input.shopifyWebhookId } : {}),
+    ...(input.identity.sourceShopifyOrderId
+      ? { sourceShopifyOrderId: input.identity.sourceShopifyOrderId }
+      : {}),
+    ...(input.identity.sourceShopifyOrderNumber
+      ? { sourceShopifyOrderNumber: input.identity.sourceShopifyOrderNumber }
+      : {}),
+    topic: 'orders/create',
+    webhookStatus: 'PROCESSING',
+    eventReceivedAt: input.receivedAt.toISOString(),
+    reviewThresholdMs: PROCESSING_REVIEW_THRESHOLD_MS,
+    thresholdPurpose: 'diagnostic_only',
+    inference: PROCESSING_REVIEW_INFERENCE,
+    firstDetectedAt: input.firstDetectedAt.toISOString(),
+    lastObservedAt: input.lastObservedAt.toISOString(),
+    localCommerceClassification: input.classification,
+    allocationCount: input.allocationCount,
+    saleLedgerCount: input.saleLedgerCount,
+    ...(input.latestJob
+      ? {
+          latestJobId: input.latestJob.id,
+          latestJobStatus: input.latestJob.status,
+          currentJobSuppressesMissedOrderDiscovery: MISSED_ORDER_SUPPRESSING_JOB_STATUSES.has(input.latestJob.status),
+        }
+      : { currentJobSuppressesMissedOrderDiscovery: false }),
+  } satisfies Prisma.InputJsonObject;
 }
 
 function normalizeStateToken(value: string | null | undefined) {
@@ -3315,9 +3426,346 @@ export async function retryOperationalJob(
   };
 }
 
+async function resolveProcessingReviewSignalsForEventsNoLongerProcessing(now: Date) {
+  const signals = await prisma.operationalSignal.findMany({
+    where: {
+      type: PROCESSING_REVIEW_SIGNAL_TYPE,
+      status: { in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED] },
+    },
+    select: {
+      id: true,
+      metadata: true,
+    },
+  });
+
+  for (const signal of signals) {
+    const metadata = readProcessingReviewSignalMetadata(signal.metadata);
+    if (!metadata?.webhookEventId) continue;
+    const event = await prisma.webhookEvent.findUnique({
+      where: { id: metadata.webhookEventId },
+      select: { status: true },
+    });
+    if (!event || event.status === 'PROCESSING') continue;
+
+    await prisma.operationalSignal.updateMany({
+      where: {
+        id: signal.id,
+        status: { in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED] },
+      },
+      data: {
+        status: OperationalSignalStatus.RESOLVED,
+        resolvedAt: now,
+        metadata: {
+          ...(signal.metadata && typeof signal.metadata === 'object' && !Array.isArray(signal.metadata)
+            ? signal.metadata as Prisma.InputJsonObject
+            : {}),
+          resolutionReason: 'event_left_processing',
+          resolvedAt: now.toISOString(),
+          lastObservedWebhookStatus: event?.status ?? 'NOT_FOUND',
+        },
+      },
+    });
+  }
+}
+
+async function classifyProcessingReviewCommerce(identity: ProcessingReviewIdentity): Promise<{
+  classification: ProcessingReviewLocalCommerceClassification;
+  localOrderExists: boolean | null;
+  allocationCount: number;
+  saleLedgerCount: number;
+  hasCompleteLocalCommerce: boolean;
+  resolvedSourceShopifyOrderId: string | null;
+}> {
+  if (!identity.sourceShopifyOrderId && !identity.sourceShopifyOrderNumber) {
+    return {
+      classification: 'AMBIGUOUS_QUERY_FAILED',
+      localOrderExists: null,
+      allocationCount: 0,
+      saleLedgerCount: 0,
+      hasCompleteLocalCommerce: false,
+      resolvedSourceShopifyOrderId: null,
+    };
+  }
+
+  try {
+    const orders = await prisma.shopifyOrder.findMany({
+      where: {
+        OR: [
+          ...(identity.sourceShopifyOrderId
+            ? [{ sourceShopifyOrderId: identity.sourceShopifyOrderId }]
+            : []),
+          ...(identity.sourceShopifyOrderNumber
+            ? [{ sourceShopifyOrderNumber: identity.sourceShopifyOrderNumber }]
+            : []),
+        ],
+      },
+      select: {
+        sourceShopifyOrderId: true,
+        allocations: {
+          select: {
+            financeEntries: {
+              where: { entryType: 'sale' },
+              select: { id: true },
+            },
+          },
+        },
+      },
+      take: 2,
+    });
+
+    if (orders.length > 1) {
+      return {
+        classification: 'AMBIGUOUS_QUERY_FAILED',
+        localOrderExists: null,
+        allocationCount: 0,
+        saleLedgerCount: 0,
+        hasCompleteLocalCommerce: false,
+        resolvedSourceShopifyOrderId: null,
+      };
+    }
+
+    const order = orders[0];
+    if (!order) {
+      return {
+        classification: 'LOCAL_ORDER_ABSENT',
+        localOrderExists: false,
+        allocationCount: 0,
+        saleLedgerCount: 0,
+        hasCompleteLocalCommerce: false,
+        resolvedSourceShopifyOrderId: identity.sourceShopifyOrderId,
+      };
+    }
+
+    const allocationCount = order.allocations.length;
+    const saleLedgerCount = order.allocations.reduce(
+      (count, allocation) => count + allocation.financeEntries.length,
+      0,
+    );
+    const hasCompleteLocalCommerce = allocationCount > 0 &&
+      order.allocations.every((allocation) => allocation.financeEntries.length > 0);
+    const classification: ProcessingReviewLocalCommerceClassification = allocationCount === 0
+      ? 'LOCAL_ORDER_EXISTS'
+      : saleLedgerCount === 0
+        ? 'LOCAL_ORDER_EXISTS_WITH_ALLOCATIONS'
+        : 'LOCAL_ORDER_EXISTS_WITH_FINANCE';
+
+    return {
+      classification,
+      localOrderExists: true,
+      allocationCount,
+      saleLedgerCount,
+      hasCompleteLocalCommerce,
+      resolvedSourceShopifyOrderId: order.sourceShopifyOrderId,
+    };
+  } catch {
+    return {
+      classification: 'AMBIGUOUS_QUERY_FAILED',
+      localOrderExists: null,
+      allocationCount: 0,
+      saleLedgerCount: 0,
+      hasCompleteLocalCommerce: false,
+      resolvedSourceShopifyOrderId: null,
+    };
+  }
+}
+
+async function findSuccessfulCurrentStateRepair(sourceShopifyOrderId: string | null, receivedAt: Date) {
+  if (!sourceShopifyOrderId) return null;
+  const jobs = await prisma.operationalJob.findMany({
+    where: {
+      sourceShopifyOrderId,
+      jobType: OperationalJobType.RECONCILIATION,
+      status: OperationalJobStatus.COMPLETED,
+      completedAt: { gte: receivedAt },
+    },
+    orderBy: { completedAt: 'desc' },
+    take: 20,
+  });
+  return jobs.find((job) => {
+    if (job.status !== OperationalJobStatus.COMPLETED) return false;
+    const payload = readSafeRepairJobPayload(job.payload);
+    return payload?.executed === true && payload.dryRun === false;
+  }) ?? null;
+}
+
+export async function evaluateProcessingReviewSignals(options: {
+  now?: Date;
+  thresholdMs?: number;
+} = {}): Promise<ReconciliationItem[]> {
+  const now = options.now ?? new Date();
+  const thresholdMs = options.thresholdMs ?? PROCESSING_REVIEW_THRESHOLD_MS;
+  await resolveProcessingReviewSignalsForEventsNoLongerProcessing(now);
+
+  const events = await prisma.webhookEvent.findMany({
+    where: {
+      topic: 'orders/create',
+      status: 'PROCESSING',
+      receivedAt: { lte: new Date(now.getTime() - thresholdMs) },
+    },
+    include: {
+      shopifyOrder: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+      operationalJobs: {
+        orderBy: { updatedAt: 'desc' },
+        take: 1,
+      },
+    },
+    orderBy: { receivedAt: 'asc' },
+  });
+
+  const items: ReconciliationItem[] = [];
+  for (const event of events) {
+    const signalId = buildProcessingReviewSignalId(event.id);
+    const identity = getProcessingReviewIdentity(event);
+    const commerce = await classifyProcessingReviewCommerce(identity);
+    const resolvedIdentity = {
+      ...identity,
+      sourceShopifyOrderId: commerce.resolvedSourceShopifyOrderId ?? identity.sourceShopifyOrderId,
+    };
+    const successfulRepair = await findSuccessfulCurrentStateRepair(
+      resolvedIdentity.sourceShopifyOrderId,
+      event.receivedAt,
+    );
+    const existingSignal = await prisma.operationalSignal.findUnique({
+      where: { id: signalId },
+      select: { triggeredAt: true, status: true, metadata: true },
+    });
+    const firstDetectedAt = existingSignal?.triggeredAt ?? now;
+    const latestJob = event.operationalJobs[0] ?? null;
+    const metadata = processingReviewMetadata({
+      webhookEventId: event.id,
+      shopifyWebhookId: event.webhookId,
+      identity: resolvedIdentity,
+      receivedAt: event.receivedAt,
+      firstDetectedAt,
+      lastObservedAt: now,
+      classification: commerce.classification,
+      allocationCount: commerce.allocationCount,
+      saleLedgerCount: commerce.saleLedgerCount,
+      latestJob,
+    });
+
+    if (successfulRepair) {
+      if (existingSignal && (
+        existingSignal.status === OperationalSignalStatus.ACTIVE ||
+        existingSignal.status === OperationalSignalStatus.ACKNOWLEDGED
+      )) {
+        await prisma.operationalSignal.updateMany({
+          where: {
+            id: signalId,
+            status: { in: [OperationalSignalStatus.ACTIVE, OperationalSignalStatus.ACKNOWLEDGED] },
+          },
+          data: {
+            status: OperationalSignalStatus.RESOLVED,
+            resolvedAt: now,
+            metadata: {
+              ...metadata,
+              resolutionReason: 'commerce_repaired_from_canonical_current_state',
+              resolvedAt: now.toISOString(),
+              repairJobId: successfulRepair.id,
+              repairCompletedAt: successfulRepair.completedAt?.toISOString() ?? now.toISOString(),
+              resolutionSummary:
+                'Commerce repaired from canonical current state; original webhook execution record preserved.',
+            },
+          },
+        });
+      }
+      continue;
+    }
+
+    const hasCompleteLocalCommerce = commerce.hasCompleteLocalCommerce;
+    const severity = hasCompleteLocalCommerce
+      ? OperationalSignalSeverity.WARNING
+      : OperationalSignalSeverity.HIGH;
+    await prisma.operationalSignal.upsert({
+      where: { id: signalId },
+      create: {
+        id: signalId,
+        type: PROCESSING_REVIEW_SIGNAL_TYPE,
+        severity,
+        sourceArea: OperationalSignalSourceArea.DIAGNOSTICS,
+        operationalJobId: latestJob?.id ?? null,
+        title: 'Processing review required',
+        description: PROCESSING_REVIEW_INFERENCE,
+        suggestedAction:
+          'Inspect the order. Use Current-State Repair dry-run only after confirming the original request can no longer still be executing.',
+        status: OperationalSignalStatus.ACTIVE,
+        ruleKey: PROCESSING_REVIEW_SIGNAL_RULE_KEY,
+        triggeredAt: firstDetectedAt,
+        metadata,
+      },
+      update: {
+        severity,
+        operationalJobId: latestJob?.id ?? null,
+        title: 'Processing review required',
+        description: PROCESSING_REVIEW_INFERENCE,
+        suggestedAction:
+          'Inspect the order. Use Current-State Repair dry-run only after confirming the original request can no longer still be executing.',
+        status: existingSignal?.status === OperationalSignalStatus.ACKNOWLEDGED
+          ? OperationalSignalStatus.ACKNOWLEDGED
+          : OperationalSignalStatus.ACTIVE,
+        resolvedAt: null,
+        metadata,
+      },
+    });
+
+    const receivedAgeMs = Math.max(0, now.getTime() - event.receivedAt.getTime());
+    items.push({
+      id: signalId,
+      signalId,
+      type: 'processing_review_required',
+      severity: hasCompleteLocalCommerce ? 'warning' : 'high',
+      title: 'Processing review required',
+      description: PROCESSING_REVIEW_INFERENCE,
+      relatedWebhookEventId: event.id,
+      webhookEventId: event.id,
+      shopifyWebhookId: event.webhookId,
+      relatedShopifyOrderId: resolvedIdentity.sourceShopifyOrderId,
+      relatedShopifyOrderNumber: resolvedIdentity.sourceShopifyOrderNumber,
+      relatedAllocationId: null,
+      status: event.status,
+      createdAt: firstDetectedAt.toISOString(),
+      firstDetectedAt: firstDetectedAt.toISOString(),
+      receivedAt: event.receivedAt.toISOString(),
+      receivedAgeMs,
+      suggestedAction:
+        'Inspect the order. Current-State Repair remains canonical, dry-run first, and explicitly executed.',
+      payloadAvailable: Boolean(event.rawPayload),
+      operationalJobId: latestJob?.id ?? null,
+      latestJobId: latestJob?.id ?? null,
+      latestJobStatus: latestJob?.status ?? null,
+      latestJobStartedAt: toIsoString(latestJob?.startedAt),
+      latestJobLastAttemptAt: toIsoString(latestJob?.lastAttemptAt),
+      latestJobUpdatedAt: toIsoString(latestJob?.updatedAt),
+      latestJobRetryCount: latestJob?.retryCount ?? null,
+      currentJobSuppressesMissedOrderDiscovery: latestJob
+        ? MISSED_ORDER_SUPPRESSING_JOB_STATUSES.has(latestJob.status)
+        : false,
+      localCommerceClassification: commerce.classification,
+      localOrderExists: commerce.localOrderExists,
+      allocationCount: commerce.allocationCount,
+      saleLedgerCount: commerce.saleLedgerCount,
+    });
+  }
+
+  return items;
+}
+
+export const __processingReviewTesting = {
+  PROCESSING_REVIEW_THRESHOLD_MS,
+  PROCESSING_REVIEW_SIGNAL_TYPE,
+  PROCESSING_REVIEW_SIGNAL_RULE_KEY,
+  buildProcessingReviewSignalId,
+};
+
 export async function getReconciliationDiagnostics(): Promise<ReconciliationResponse> {
   const olderThan = new Date(Date.now() - 5 * 60 * 1000);
   const [
+    processingReviewItems,
     stuckReceived,
     failedWebhookEvents,
     fulfillmentFailures,
@@ -3326,6 +3774,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     scheduledReconciliationJobs,
     missingShopifyOrderSignals,
   ] = await Promise.all([
+    withDashboardTiming('diagnostics.processing_review_evaluation', () => evaluateProcessingReviewSignals()),
     withDashboardTiming('diagnostics.stuck_received_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
         status: 'RECEIVED',
@@ -3601,6 +4050,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
   });
 
   const items = [
+    ...processingReviewItems,
     ...stuckItems,
     ...failedItems,
     ...fulfillmentItems,
@@ -3615,6 +4065,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
   const response = {
     summary: {
       stuckReceived: stuckItems.length,
+      processingReviewRequiredCount: processingReviewItems.length,
       failedWebhooks: failedItems.length,
       fulfillmentSyncFailures: fulfillmentItems.length,
       missingPayload: missingPayloadItems.length,

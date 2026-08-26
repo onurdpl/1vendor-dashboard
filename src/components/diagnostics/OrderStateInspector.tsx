@@ -130,6 +130,11 @@ function EvidenceList({ items }: { items: string[] }) {
 type OrderStateInspectorProps = {
   onRepairCandidateChange?: (isCandidate: boolean) => void;
   initialOrderIdentifier?: string;
+  processingReviewContext?: {
+    identifier: string;
+    identifierKind: 'order_number' | 'shopify_order_id';
+    localCommerceClassification: string | null;
+  } | null;
 };
 
 type RepairFeedback = {
@@ -145,12 +150,17 @@ function currentRecordState(value: 'Created' | 'Existing') {
   return value === 'Created' ? 'Missing' : 'Existing';
 }
 
-function normalizeRepairOrderNumber(value: string) {
+function normalizeRepairIdentifier(value: string, identifierKind: 'order_number' | 'shopify_order_id' = 'order_number') {
   const trimmed = value.trim();
+  if (identifierKind === 'shopify_order_id') return trimmed;
   return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
 }
 
-export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdentifier }: OrderStateInspectorProps = {}) {
+export function OrderStateInspector({
+  onRepairCandidateChange,
+  initialOrderIdentifier,
+  processingReviewContext,
+}: OrderStateInspectorProps = {}) {
   const [orderNumber, setOrderNumber] = useState('');
   const [inspectedOrderNumber, setInspectedOrderNumber] = useState('');
   const [dryRunResult, setDryRunResult] = useState<CurrentStateOrderRepairResult | null>(null);
@@ -159,6 +169,11 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
   const [executeFeedback, setExecuteFeedback] = useState<RepairFeedback | null>(null);
   const currentInputOrderNumberRef = useRef('');
   const normalizedOrderNumber = inspectedOrderNumber.trim();
+  const activeProcessingReviewContext = processingReviewContext &&
+    normalizeRepairIdentifier(normalizedOrderNumber, processingReviewContext.identifierKind) ===
+      normalizeRepairIdentifier(processingReviewContext.identifier, processingReviewContext.identifierKind)
+    ? processingReviewContext
+    : null;
   const inspectorQuery = useQueryResource(
     queryKeys.admin.diagnostics.orderState(normalizedOrderNumber || 'idle'),
     ({ signal }) => runtimeServices.diagnostics.inspectOrderState(normalizedOrderNumber, { signal }),
@@ -171,7 +186,7 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
 
   const dryRunMutation = useMutationAction(
     async (orderNumber: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(
-      normalizeRepairOrderNumber(orderNumber),
+      normalizeRepairIdentifier(orderNumber, activeProcessingReviewContext?.identifierKind),
       false,
     ),
     {
@@ -182,14 +197,20 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
         setExecuteFeedback(null);
       },
       onSuccess: (repairResult, requestedOrderNumber) => {
-        if (normalizeRepairOrderNumber(requestedOrderNumber) !== normalizeRepairOrderNumber(currentInputOrderNumberRef.current)) {
+        if (
+          normalizeRepairIdentifier(requestedOrderNumber, activeProcessingReviewContext?.identifierKind) !==
+          normalizeRepairIdentifier(currentInputOrderNumberRef.current, activeProcessingReviewContext?.identifierKind)
+        ) {
           return;
         }
         setDryRunResult(repairResult);
         setDryRunFeedback({ message: 'Dry run complete. Review the current-state plan before execution.', tone: 'info' });
       },
       onError: (error, requestedOrderNumber) => {
-        if (normalizeRepairOrderNumber(requestedOrderNumber) !== normalizeRepairOrderNumber(currentInputOrderNumberRef.current)) {
+        if (
+          normalizeRepairIdentifier(requestedOrderNumber, activeProcessingReviewContext?.identifierKind) !==
+          normalizeRepairIdentifier(currentInputOrderNumberRef.current, activeProcessingReviewContext?.identifierKind)
+        ) {
           return;
         }
         setDryRunResult(null);
@@ -204,7 +225,7 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
 
   const executeMutation = useMutationAction(
     async (orderNumber: string) => runtimeServices.diagnostics.repairMissingShopifyOrder(
-      normalizeRepairOrderNumber(orderNumber),
+      normalizeRepairIdentifier(orderNumber, activeProcessingReviewContext?.identifierKind),
       true,
     ),
     {
@@ -298,6 +319,12 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
           <p>One order, its related records, and the guarded missing-order repair path.</p>
         </div>
       </div>
+      {activeProcessingReviewContext ? (
+        <ActionFeedback
+          tone="info"
+          message="`PROCESSING` does not prove that the original webhook request has ended. Before running Current-State Repair, confirm that the original deployment or request can no longer still be executing. This workflow does not replay, reset, or take ownership of the webhook."
+        />
+      ) : null}
       <form className="order-state-inspector-form" onSubmit={handleSubmit}>
         <label htmlFor="order-state-inspector-number">
           Order number
@@ -336,10 +363,12 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
         />
       ) : null}
 
-      {isMissingLocalOrder ? (
+      {isMissingLocalOrder || (activeProcessingReviewContext && result) ? (
         <OperationalSection
-          title="Repair Missing Shopify Order"
-          description="Starts with a dry run; execution stays separate."
+          title={isMissingLocalOrder ? 'Repair Missing Shopify Order' : 'Current-State Repair comparison'}
+          description={isMissingLocalOrder
+            ? 'Starts with a dry run; execution stays separate.'
+            : 'Canonical comparison starts with a dry run; execution is available only for a supported non-skipped plan.'}
         >
           <div className="current-state-repair-actions">
             <button
@@ -348,7 +377,11 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
               disabled={dryRunMutation.isPending || executeMutation.isPending}
               onClick={() => dryRunMutation.mutate(normalizedOrderNumber)}
             >
-              {dryRunMutation.isPending ? 'Running Dry Run...' : 'Repair Missing Shopify Order'}
+              {dryRunMutation.isPending
+                ? 'Running Dry Run...'
+                : isMissingLocalOrder
+                  ? 'Repair Missing Shopify Order'
+                  : 'Run Current-State Repair Dry Run'}
             </button>
             <span>One explicit Shopify order only. Bulk or range repair is unavailable.</span>
           </div>
@@ -421,14 +454,22 @@ export function OrderStateInspector({ onRepairCandidateChange, initialOrderIdent
               </OperationalSection>
 
               <div className="current-state-repair-actions">
-                <button
-                  type="button"
-                  className="button button-primary"
-                  disabled={executeMutation.isPending || dryRunResult.summary.executionBlocked}
-                  onClick={() => setExecuteConfirmationOpen(true)}
-                >
-                  {dryRunResult.summary.executionBlocked ? 'Execution Blocked' : 'Execute Repair'}
-                </button>
+                {!dryRunResult.summary.skipped && !dryRunResult.summary.executionBlocked ? (
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={executeMutation.isPending}
+                    onClick={() => setExecuteConfirmationOpen(true)}
+                  >
+                    Execute Repair
+                  </button>
+                ) : (
+                  <span>
+                    {dryRunResult.summary.executionBlocked
+                      ? 'Execution is blocked by the canonical safety review.'
+                      : 'No repair execution is required; the reviewed canonical plan is already satisfied.'}
+                  </span>
+                )}
                 <a className="button button-secondary" href="#order-state-inspector-title">Back to Order State Inspector</a>
               </div>
             </div>

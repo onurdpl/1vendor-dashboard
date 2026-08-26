@@ -116,6 +116,7 @@ export type DiagnosticsSyncEvent = {
 
 export type DiagnosticsReconciliationSummary = {
   stuckReceived: number;
+  processingReviewRequiredCount: number;
   failedWebhooks: number;
   fulfillmentSyncFailures: number;
   missingPayload: number;
@@ -134,8 +135,9 @@ export type DiagnosticsReconciliationItem = {
     | 'missing_payload'
     | 'stale_allocation'
     | 'scheduled_reconciliation'
+    | 'processing_review_required'
     | 'shopify_order_missing_local';
-  severity: 'critical' | 'warning' | 'attention' | 'normal';
+  severity: 'critical' | 'high' | 'warning' | 'attention' | 'normal';
   title: string;
   description: string;
   relatedWebhookEventId: string | null;
@@ -152,6 +154,28 @@ export type DiagnosticsReconciliationItem = {
   relatedShopifyOrderNumber?: string | null;
   shopifyCreatedAt?: string | null;
   firstDetectedAt?: string | null;
+  signalId?: string | null;
+  webhookEventId?: string | null;
+  shopifyWebhookId?: string | null;
+  receivedAt?: string | null;
+  receivedAgeMs?: number | null;
+  latestJobStatus?: string | null;
+  latestJobId?: string | null;
+  latestJobStartedAt?: string | null;
+  latestJobLastAttemptAt?: string | null;
+  latestJobUpdatedAt?: string | null;
+  latestJobRetryCount?: number | null;
+  currentJobSuppressesMissedOrderDiscovery?: boolean | null;
+  localCommerceClassification?:
+    | 'LOCAL_ORDER_ABSENT'
+    | 'LOCAL_ORDER_EXISTS'
+    | 'LOCAL_ORDER_EXISTS_WITH_ALLOCATIONS'
+    | 'LOCAL_ORDER_EXISTS_WITH_FINANCE'
+    | 'AMBIGUOUS_QUERY_FAILED'
+    | null;
+  localOrderExists?: boolean | null;
+  allocationCount?: number | null;
+  saleLedgerCount?: number | null;
 };
 
 type WebhooksResponseDto = {

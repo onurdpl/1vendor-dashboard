@@ -432,6 +432,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.reconciliation.mockResolvedValue({
       summary: {
         stuckReceived: 1,
+        processingReviewRequiredCount: 0,
         failedWebhooks: 1,
         fulfillmentSyncFailures: 1,
         missingPayload: 1,
@@ -1038,11 +1039,124 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('admin@example.com')).toBeInTheDocument();
   });
 
+  it('surfaces processing review evidence, groups the same-order missing alert, and opens the guarded Inspector flow', async () => {
+    const user = userEvent.setup();
+    diagnosticsMocks.reconciliation.mockResolvedValue({
+      summary: {
+        stuckReceived: 0,
+        processingReviewRequiredCount: 1,
+        failedWebhooks: 0,
+        fulfillmentSyncFailures: 0,
+        missingPayload: 0,
+        staleAllocations: 0,
+        scheduledReconciliationJobs: 0,
+        missingShopifyOrders: 1,
+        total: 2,
+      },
+      items: [{
+        id: 'signal-diagnostics-shopify-orders-create-processing-review-event-1200',
+        signalId: 'signal-diagnostics-shopify-orders-create-processing-review-event-1200',
+        type: 'processing_review_required',
+        severity: 'high',
+        title: 'Processing review required',
+        description: 'Execution may have been interrupted. Current records cannot prove whether the original execution has ended.',
+        relatedWebhookEventId: 'event-1200',
+        webhookEventId: 'event-1200',
+        shopifyWebhookId: 'shopify-webhook-1200',
+        relatedShopifyOrderId: '9001200',
+        relatedShopifyOrderNumber: '#1200',
+        relatedAllocationId: null,
+        status: 'PROCESSING',
+        createdAt: '2026-08-26T10:20:00.000Z',
+        firstDetectedAt: '2026-08-26T10:20:00.000Z',
+        receivedAt: '2026-08-26T10:00:00.000Z',
+        receivedAgeMs: 30 * 60 * 1000,
+        suggestedAction: 'Inspect this order.',
+        payloadAvailable: true,
+        latestJobId: 'job-1200',
+        latestJobStatus: 'RETRYING',
+        latestJobStartedAt: '2026-08-26T10:01:00.000Z',
+        latestJobLastAttemptAt: '2026-08-26T10:10:00.000Z',
+        latestJobUpdatedAt: '2026-08-26T10:10:00.000Z',
+        latestJobRetryCount: 1,
+        currentJobSuppressesMissedOrderDiscovery: true,
+        localCommerceClassification: 'LOCAL_ORDER_EXISTS_WITH_ALLOCATIONS',
+        localOrderExists: true,
+        allocationCount: 2,
+        saleLedgerCount: 0,
+      }, {
+        id: 'signal-diagnostics-shopify-order-missing-local-1200',
+        type: 'shopify_order_missing_local',
+        severity: 'critical',
+        title: 'Competing missing-order alert for #1200',
+        description: 'Shopify contains this order, but no local ShopifyOrder exists.',
+        relatedWebhookEventId: null,
+        relatedShopifyOrderId: '9001200',
+        relatedShopifyOrderNumber: '#1200',
+        relatedAllocationId: null,
+        status: 'active',
+        createdAt: '2026-08-26T10:20:00.000Z',
+        suggestedAction: 'Inspect this order.',
+        payloadAvailable: null,
+      }],
+    });
+
+    renderDiagnosticsPage();
+
+    const sectionHeading = await screen.findByRole('heading', { name: 'Processing review required' });
+    const section = sectionHeading.closest('section') as HTMLElement;
+    expect(within(section).getByText(/`PROCESSING` does not prove that the original webhook request has ended/)).toBeInTheDocument();
+    expect(within(section).getByText('#1200')).toBeInTheDocument();
+    expect(within(section).getByText('PROCESSING')).toBeInTheDocument();
+    expect(within(section).getByText('Received age 30 min')).toBeInTheDocument();
+    expect(within(section).getByText('Job RETRYING')).toBeInTheDocument();
+    expect(within(section).getByText('Local order + allocations')).toBeInTheDocument();
+    expect(within(section).getByText('2 allocation(s)')).toBeInTheDocument();
+    expect(within(section).getByText('0 sale ledger(s)')).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: /retry|reset|recover/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Competing missing-order alert for #1200')).not.toBeInTheDocument();
+
+    await user.click(within(section).getByRole('button', { name: 'Inspect' }));
+
+    await waitFor(() => expect(diagnosticsMocks.inspectOrderState).toHaveBeenCalledWith('#1200', expect.any(Object)));
+    expect(screen.getByLabelText('Order number')).toHaveValue('#1200');
+    expect(await screen.findByRole('button', { name: 'Run Current-State Repair Dry Run' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Execute Repair' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Run Current-State Repair Dry Run' }));
+    expect(diagnosticsMocks.repairMissingShopifyOrder).toHaveBeenCalledWith('#1200', false);
+    expect(await screen.findByRole('button', { name: 'Execute Repair' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['skipped', { skipped: true, executionBlocked: false }],
+    ['execution-blocked', { skipped: false, executionBlocked: true }],
+  ])('does not expose execute for a %s Current-State Repair plan', async (_label, safetyState) => {
+    diagnosticsMocks.inspectOrderState.mockReset().mockRejectedValue(new Error('Order not found.'));
+    diagnosticsMocks.repairMissingShopifyOrder.mockResolvedValueOnce({
+      ...currentStateRepairResult('#1105', false),
+      summary: {
+        ...currentStateRepairResult('#1105', false).summary,
+        ...safetyState,
+      },
+    });
+
+    renderDiagnosticsPage();
+    await userEvent.type(await screen.findByLabelText('Order number'), '#1105');
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Repair Missing Shopify Order' }));
+    await screen.findByLabelText('Current-state repair dry-run plan');
+
+    expect(screen.queryByRole('button', { name: 'Execute Repair' })).not.toBeInTheDocument();
+    expect(diagnosticsMocks.repairMissingShopifyOrder).not.toHaveBeenCalledWith(expect.any(String), true);
+  });
+
   it('surfaces a missing Shopify order signal and Inspect only prefills the existing inspector', async () => {
     const user = userEvent.setup();
     diagnosticsMocks.reconciliation.mockResolvedValue({
       summary: {
         stuckReceived: 0,
+        processingReviewRequiredCount: 0,
         failedWebhooks: 0,
         fulfillmentSyncFailures: 0,
         missingPayload: 0,

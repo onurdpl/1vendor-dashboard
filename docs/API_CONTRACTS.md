@@ -347,6 +347,7 @@ Webhook processing lifecycle states:
 - Expected success response shape: `{ summary, items }`.
 - Summary includes:
   - `stuckReceived`
+  - `processingReviewRequiredCount`
   - `failedWebhooks`
   - `fulfillmentSyncFailures`
   - `missingPayload`
@@ -368,6 +369,9 @@ Webhook processing lifecycle states:
   - `suggestedAction`
   - `payloadAvailable`
 - Active `shopify_order_missing_local` items additionally expose the Shopify order name, Shopify creation time, and first detection time from safe signal metadata.
+- Threshold-aged `orders/create` events that remain `PROCESSING` are evaluated request-by-request and projected as `processing_review_required` items. The threshold is 15 minutes from `receivedAt` and is diagnostic-only: it does not prove abandonment or authorize replay, retry, reset, ownership takeover, event/job mutation, or repair execution.
+- Processing-review items expose only safe evidence: deterministic signal and webhook-event IDs, Shopify webhook ID, safe order number/ID, received time/age, retained-payload availability, latest linked job status/timestamps/retry count, missed-order suppression state, local commerce classification, allocation count, and sale-ledger count. Raw payload and customer data are not returned.
+- The processing-review signal resolves when its webhook event leaves `PROCESSING`, or when a completed, executed, non-dry-run Current-State Repair exists for that exact Shopify order after the event was received. The original webhook event and job remain unchanged.
 - Recovery Center's `Inspect` action only opens/prefills the existing Order State Inspector. It does not execute repair; Current-State Repair remains dry-run first with separately confirmed execution.
 - Current stale allocation signals are visibility-only heuristics. They may point operators to the admin reconciliation endpoints, but they do not perform background repair.
 

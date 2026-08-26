@@ -60,8 +60,8 @@ function formatDuration(value: number | null | undefined) {
   return `${Math.round(value / 1000)}s`;
 }
 
-function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'normal') {
-  if (severity === 'critical') {
+function getSeverityTone(severity: 'critical' | 'high' | 'warning' | 'attention' | 'normal') {
+  if (severity === 'critical' || severity === 'high') {
     return 'danger' as const;
   }
   if (severity === 'warning') {
@@ -71,6 +71,27 @@ function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'norma
     return 'attention' as const;
   }
   return 'neutral' as const;
+}
+
+function formatReceivedAge(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'Age unavailable';
+  const minutes = Math.max(0, Math.floor(value / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function processingReviewLocalStateLabel(value: string | null | undefined) {
+  if (value === 'LOCAL_ORDER_ABSENT') return 'Local order absent';
+  if (value === 'LOCAL_ORDER_EXISTS') return 'Local order present';
+  if (value === 'LOCAL_ORDER_EXISTS_WITH_ALLOCATIONS') return 'Local order + allocations';
+  if (value === 'LOCAL_ORDER_EXISTS_WITH_FINANCE') return 'Local commerce + finance present';
+  return 'Local state unavailable';
+}
+
+function normalizedShopifyOrderIdentity(value: string | null | undefined) {
+  return value?.trim().replace(/^#/, '') || null;
 }
 
 function getStatusTone(status?: string | null) {
@@ -231,6 +252,11 @@ export function AdminDiagnosticsPage() {
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
   const [repairCandidateCount, setRepairCandidateCount] = useState(0);
   const [selectedMissingOrderIdentifier, setSelectedMissingOrderIdentifier] = useState<string>();
+  const [selectedProcessingReview, setSelectedProcessingReview] = useState<{
+    identifier: string;
+    identifierKind: 'order_number' | 'shopify_order_id';
+    localCommerceClassification: string | null;
+  } | null>(null);
   const [pendingWebhookAction, setPendingWebhookAction] = useState<{
     action: 'replay' | 'recover';
     webhookEventId: string;
@@ -411,11 +437,22 @@ export function AdminDiagnosticsPage() {
   const canonicalRun = canonicalReconciliationQuery.data?.lastRun ?? null;
   const visibleWebhooks = filteredWebhooks.slice(0, 20);
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
+  const processingReviewItems = reconciliationQuery.data?.items.filter((item) =>
+    item.type === 'processing_review_required' && ['active', 'acknowledged', 'processing'].includes(item.status.toLowerCase())) ?? [];
+  const processingReviewOrderIdentities = new Set(processingReviewItems.flatMap((item) => [
+    normalizedShopifyOrderIdentity(item.relatedShopifyOrderId),
+    normalizedShopifyOrderIdentity(item.relatedShopifyOrderNumber),
+  ].filter((value): value is string => Boolean(value))));
   const visibleReconciliationItems = reconciliationQuery.data?.items
-    .filter((item) => item.type !== 'shopify_order_missing_local')
+    .filter((item) => item.type !== 'shopify_order_missing_local' && item.type !== 'processing_review_required')
     .slice(0, 8) ?? [];
   const missingShopifyOrders = reconciliationQuery.data?.items.filter((item) =>
-    item.type === 'shopify_order_missing_local' && ['active', 'acknowledged'].includes(item.status.toLowerCase())) ?? [];
+    item.type === 'shopify_order_missing_local' &&
+    ['active', 'acknowledged'].includes(item.status.toLowerCase()) &&
+    ![
+      normalizedShopifyOrderIdentity(item.relatedShopifyOrderId),
+      normalizedShopifyOrderIdentity(item.relatedShopifyOrderNumber),
+    ].some((identity) => identity && processingReviewOrderIdentities.has(identity))) ?? [];
 
   const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading || canonicalReconciliationQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? canonicalReconciliationQuery.error ?? webhookDetailQuery.error;
@@ -430,6 +467,7 @@ export function AdminDiagnosticsPage() {
   const combinedCounts = useMemo(() => {
     return {
       stuck: reconciliationQuery.data?.summary.stuckReceived ?? 0,
+      processingReviewRequired: reconciliationQuery.data?.summary.processingReviewRequiredCount ?? 0,
       failed: webhooksQuery.data?.summary.failed ?? 0,
       fulfillmentFailures: reconciliationQuery.data?.summary.fulfillmentSyncFailures ?? 0,
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
@@ -447,6 +485,7 @@ export function AdminDiagnosticsPage() {
   const hasActionRequired = Boolean(
     webhooksQuery.data?.summary.needsAttention ||
     combinedCounts.stuck ||
+    combinedCounts.processingReviewRequired ||
     combinedCounts.failed ||
     combinedCounts.fulfillmentFailures ||
     combinedCounts.missingPayload ||
@@ -640,6 +679,80 @@ export function AdminDiagnosticsPage() {
         )}
       </OperationalSection>
 
+      <OperationalSection title="Processing review required">
+        <ActionFeedback
+          tone="info"
+          message="`PROCESSING` does not prove that the original webhook request has ended. Before running Current-State Repair, confirm that the original deployment or request can no longer still be executing. This workflow does not replay, reset, or take ownership of the webhook."
+        />
+        {processingReviewItems.length === 0 ? (
+          <DiagnosticsEmptyState
+            title="No processing reviews required"
+            description="No orders/create webhook has crossed the diagnostic review threshold."
+            status="No action required"
+            tone="success"
+          />
+        ) : (
+          <div className="op-event-list reconciliation-event-list">
+            {processingReviewItems.map((item) => {
+              const identifier = item.relatedShopifyOrderNumber ?? item.relatedShopifyOrderId ?? null;
+              return (
+                <article key={item.id} className="op-event-row reconciliation-event-row">
+                  <SeverityBadge tone={getSeverityTone(item.severity)}>{item.severity}</SeverityBadge>
+                  <div>
+                    <strong>{item.relatedShopifyOrderNumber ?? item.relatedShopifyOrderId ?? 'Shopify order identity unavailable'}</strong>
+                    <p>{item.description}</p>
+                    <div className="reconciliation-meta">
+                      <span>{item.status.toUpperCase()}</span>
+                      <span>Received age {formatReceivedAge(item.receivedAgeMs)}</span>
+                      <span>Job {item.latestJobStatus ? item.latestJobStatus.toUpperCase() : 'Not linked'}</span>
+                      <span>{processingReviewLocalStateLabel(item.localCommerceClassification)}</span>
+                      <span>{item.allocationCount ?? 0} allocation(s)</span>
+                      <span>{item.saleLedgerCount ?? 0} sale ledger(s)</span>
+                    </div>
+                    <DiagnosticsTechnicalDetails label="Processing review technical evidence">
+                      <MetadataGroup>
+                        <MetadataRow label="WebhookEvent ID" value={item.webhookEventId ?? item.relatedWebhookEventId ?? 'Not recorded'} />
+                        <MetadataRow label="Shopify webhook ID" value={item.shopifyWebhookId ?? 'Not recorded'} />
+                        <MetadataRow label="Topic" value="orders/create" />
+                        <MetadataRow label="Received" value={formatDate(item.receivedAt)} />
+                        <MetadataRow label="Retained payload" value={item.payloadAvailable ? 'Available' : 'Unavailable'} />
+                        <MetadataRow label="Latest job ID" value={item.latestJobId ?? 'Not recorded'} />
+                        <MetadataRow label="Job started" value={formatDate(item.latestJobStartedAt)} />
+                        <MetadataRow label="Job last attempt" value={formatDate(item.latestJobLastAttemptAt)} />
+                        <MetadataRow label="Job updated" value={formatDate(item.latestJobUpdatedAt)} />
+                        <MetadataRow label="Retry count" value={item.latestJobRetryCount ?? 'Not recorded'} />
+                        <MetadataRow
+                          label="Suppresses missed-order discovery"
+                          value={item.currentJobSuppressesMissedOrderDiscovery ? 'Yes' : 'No'}
+                        />
+                      </MetadataGroup>
+                    </DiagnosticsTechnicalDetails>
+                  </div>
+                  <OperationalActionGroup>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      disabled={!identifier}
+                      onClick={() => {
+                        if (!identifier) return;
+                        setSelectedProcessingReview({
+                          identifier,
+                          identifierKind: item.relatedShopifyOrderNumber ? 'order_number' : 'shopify_order_id',
+                          localCommerceClassification: item.localCommerceClassification ?? null,
+                        });
+                        setSelectedMissingOrderIdentifier(identifier);
+                      }}
+                    >
+                      Inspect
+                    </button>
+                  </OperationalActionGroup>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </OperationalSection>
+
       <OperationalSection title="Missing Shopify orders">
         {missingShopifyOrders.length === 0 ? (
           <DiagnosticsEmptyState
@@ -667,7 +780,10 @@ export function AdminDiagnosticsPage() {
                   <button
                     type="button"
                     className="button button-secondary button-compact"
-                    onClick={() => setSelectedMissingOrderIdentifier(item.relatedShopifyOrderNumber ?? item.relatedShopifyOrderId ?? undefined)}
+                    onClick={() => {
+                      setSelectedProcessingReview(null);
+                      setSelectedMissingOrderIdentifier(item.relatedShopifyOrderNumber ?? item.relatedShopifyOrderId ?? undefined);
+                    }}
                   >
                     Inspect
                   </button>
@@ -680,6 +796,7 @@ export function AdminDiagnosticsPage() {
 
       <OrderStateInspector
         initialOrderIdentifier={selectedMissingOrderIdentifier}
+        processingReviewContext={selectedProcessingReview}
         onRepairCandidateChange={(isCandidate) => setRepairCandidateCount(isCandidate ? 1 : 0)}
       />
 

@@ -3408,6 +3408,7 @@ export const runtimeServices = {
         : Promise.resolve({
             summary: {
               stuckReceived: 0,
+              processingReviewRequiredCount: 0,
               failedWebhooks: 0,
               fulfillmentSyncFailures: 0,
               missingPayload: 0,

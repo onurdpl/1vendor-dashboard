@@ -599,11 +599,16 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - job persistence failure is logged and does not block the existing inline processing path
 - Reconciliation strategy:
   - surfaces `RECEIVED` webhook events older than 5 minutes
+  - request-driven reconciliation diagnostics surface `orders/create` events still `PROCESSING` 15 minutes after `receivedAt` through deterministic `OperationalSignal` review records
+  - the 15-minute `PROCESSING` threshold is visibility-only and never grants retry, replay, reset, takeover, webhook/job mutation, or automatic repair authority
+  - processing-review evidence is classified from safe order identity plus local order/allocation/sale-ledger state; ambiguous reads fail closed
+  - review signals resolve when the event leaves `PROCESSING` or a later completed exact-order Current-State Repair is recorded, while the original event/job interruption evidence remains preserved
   - surfaces failed webhook events
   - surfaces fulfillment records with `fulfillment_sync_failed`
   - surfaces events missing replayable payload content
   - provides a `suggestedAction` per item rather than attempting silent recovery
   - recommends recovery for stuck `RECEIVED` events with payload, recover/replay review for `FAILED` events with payload, manual investigation for missing payload, and no action for processed/duplicate-safe outcomes
+- The supervised `PROCESSING` review path adds no scheduler, timer, worker, schema field, or migration. Operators reuse Order State Inspector and the existing canonical Current-State Repair workflow: dry-run first, then explicit confirmed execution only for a supported, non-skipped, non-blocked plan.
 
 ## Admin Shopify State Reconciliation (Phase 16-3J)
 - Backend now includes admin-only reconciliation endpoints for explicit operator recovery:

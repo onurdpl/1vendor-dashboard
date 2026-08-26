@@ -555,7 +555,10 @@ POST /fulfillments.json
 - Admin failed-webhook recovery uses the same atomic event claim and retained missing-order-only behavior.
 - Operational jobs record bounded retry state but are not execution locks. No automatic OperationalJob worker exists.
 - Missed-order discovery treats `PENDING`, `PROCESSING`, and `RETRYING` as active execution, but does not suppress a missing-order signal for `RETRY_SCHEDULED` because no automatic OperationalJob worker consumes `nextRetryAt`.
-- Stale `PROCESSING` and Shopify five-second acknowledgement timing remain separate unresolved issues.
+- Admin reconciliation diagnostics now evaluate `orders/create` events that remain `PROCESSING` for 15 minutes from `receivedAt` and surface a deterministic supervised-review `OperationalSignal`. This age is diagnostic-only: it does not prove abandonment and never makes `PROCESSING` replayable, retryable, resettable, or eligible for ownership takeover.
+- The review reuses Order State Inspector and the canonical Current-State Repair boundary. Repair remains dry-run first and explicitly confirmed; skipped or execution-blocked plans do not expose execute. Detection never calls Shopify and never mutates webhook/job or commerce state.
+- A completed exact-order Current-State Repair can resolve only the separate review signal while preserving the historically `PROCESSING` event/job evidence. Request-driven evaluation adds no scheduler, worker, schema change, or migration.
+- Shopify five-second acknowledgement timing remains a separate unresolved issue.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.
