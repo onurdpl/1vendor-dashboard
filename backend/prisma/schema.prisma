@@ -1527,22 +1527,31 @@ model VendorBalanceEvent {
 }
 
 model WebhookEvent {
-  id               String           @id @default(cuid())
-  sourceShopDomain String
-  topic            String
-  webhookId        String?
-  idempotencyKey   String?          @unique
-  payloadHash      String?
-  rawPayload       String?
-  status           WebhookStatus    @default(RECEIVED)
-  receivedAt       DateTime         @default(now())
-  processedAt      DateTime?
-  errorMessage     String?
-  shopifyOrderId   String?
-  shopifyOrder     ShopifyOrder?    @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
-  operationalJobs  OperationalJob[]
+  id                       String           @id @default(cuid())
+  sourceShopDomain         String
+  topic                    String
+  webhookId                String?
+  idempotencyKey           String?          @unique
+  payloadHash              String?
+  rawPayload               String?
+  status                   WebhookStatus    @default(RECEIVED)
+  receivedAt               DateTime         @default(now())
+  processedAt              DateTime?
+  errorMessage             String?
+  shopifyOrderId           String?
+  sourceShopifyOrderId     String?
+  executionAvailableAt     DateTime?
+  executionAttemptCount    Int              @default(0)
+  executionMaxAttempts     Int              @default(3)
+  processingGeneration     Int              @default(0)
+  processingLeaseExpiresAt DateTime?
+  shopifyOrder             ShopifyOrder?    @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+  operationalJobs          OperationalJob[]
 
   @@unique([sourceShopDomain, topic, webhookId])
+  @@index([topic, status, executionAvailableAt, receivedAt])
+  @@index([topic, status, processingLeaseExpiresAt])
+  @@index([topic, sourceShopifyOrderId, status])
 }
 
 model OperationalJob {
