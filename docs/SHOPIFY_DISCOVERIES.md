@@ -560,6 +560,14 @@ POST /fulfillments.json
 - A completed exact-order Current-State Repair can resolve only the separate review signal while preserving the historically `PROCESSING` event/job evidence. Request-driven evaluation adds no scheduler, worker, schema change, or migration.
 - Shopify five-second acknowledgement timing remains a separate unresolved issue.
 
+### Orders/Create Fenced Processing Preparation
+
+- The existing `orders/create` business processing has been extracted behind a reusable service while the HTTP route still awaits it synchronously before responding.
+- Database-backed claim, lease, heartbeat, generation fencing, conditional failure finalization, and transaction fence primitives exist for future executor use only.
+- Fenced ingestion uses an order-scoped PostgreSQL transaction advisory lock and verifies the current event generation and unexpired lease before commerce mutation and final success.
+- The current synchronous route does not supply a fenced execution context and does not require lease fields.
+- Automatic execution, stale-processing takeover, heartbeat timers, fast acknowledgement, and executor feature flags are not active or implemented.
+
 ## Operational Rules
 - Shopify is the commerce and order source of truth.
 - This application owns post-order operational state:

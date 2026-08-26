@@ -13,8 +13,7 @@ import type { AppEnv } from '../../config/env.js';
 import { buildFinanceAuditRuntimeMetadata } from '../../config/database-source-diagnostics.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
-import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
-import { ingestShopifyOrderWebhook } from '../shopify/order-ingestion.service.js';
+import { createOrdersCreateProcessingService } from '../shopify/orders-create-processing.service.js';
 import { claimWebhookEvent } from '../shopify/webhook-idempotency.service.js';
 import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
 import {
@@ -2821,68 +2820,25 @@ async function processWebhookEvent(
 ): Promise<WebhookReplayResponse> {
   if (event.topic === 'orders/create') {
     const typedPayload = payload as ShopifyOrdersCreateWebhookPayload;
-    const sourceShopifyOrderId =
-      typedPayload.id !== undefined && typedPayload.id !== null ? String(typedPayload.id) : null;
-
-    if (!sourceShopifyOrderId) {
-      await markWebhookFailed(event.id, 'Shopify orders/create payload did not include an order id.');
-      return {
-        ok: true,
-        topic: event.topic,
-        action: 'received_needs_attention',
-        processingStatus: 'needs_attention',
-        message: 'Shopify orders/create payload did not include an order id.',
-      };
-    }
-
-    const shopifyAdminService = createShopifyAdminService(env);
-    const sellerInfoResult = await fetchSellerInfoWithRetry({
-      orderId: sourceShopifyOrderId,
-      fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
-      delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
+    const processingService = createOrdersCreateProcessingService({
+      env,
+      shopifyAdminService: createShopifyAdminService(env),
+      logger: {
+        warn(context, message) {
+          console.warn(`[diagnostics] ${message}`, context);
+        },
+      },
+      propagateProcessingExceptions: true,
     });
-
-    if (!sellerInfoResult.ok) {
-      await markWebhookFailed(event.id, sellerInfoResult.error);
-      return {
-        ok: true,
-        topic: event.topic,
-        action: 'received_needs_attention',
-        processingStatus: 'needs_attention',
-        message: sellerInfoResult.error,
-      };
-    }
-
-    const lineItemImages = await shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId).then(
-      (result) => result.lineItems,
-      (error) => {
-        console.warn('[diagnostics] Shopify line item image enrichment failed; continuing replay.', {
-          sourceShopifyOrderId,
-          errorMessage: error instanceof Error ? error.message : 'Unknown Shopify line item image enrichment error.',
-        });
-        return [];
-      },
-    );
-
-    const taxSnapshot = await shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId).then(
-      (result) => result,
-      (error) => {
-        console.warn('[diagnostics] Shopify tax snapshot enrichment failed; continuing replay with VAT fallback.', {
-          sourceShopifyOrderId,
-          errorMessage: error instanceof Error ? error.message : 'Unknown Shopify tax snapshot enrichment error.',
-        });
-        return null;
-      },
-    );
-
-    const ingestionResult = await ingestShopifyOrderWebhook({
+    const ingestionResult = await processingService.process({
       event,
       payload: typedPayload,
-      sellerInfo: sellerInfoResult.sellerInfo,
-      lineItemImages,
-      taxSnapshot,
       mode: 'missing_order_only',
     });
+
+    if (!ingestionResult.ok) {
+      await markWebhookFailed(event.id, ingestionResult.error);
+    }
 
     return ingestionResult.ok
       ? {

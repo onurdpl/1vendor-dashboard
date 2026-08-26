@@ -10,6 +10,12 @@ import type {
   ShopifyOrdersCreateWebhookPayload,
 } from './order-ingestion.types.js';
 import type { FetchOrderTaxSnapshotResult, ShopifyOrderLineItemImage, ShopifyTaxLineSnapshot } from './shopify-admin.types.js';
+import {
+  finalizeFencedOrdersCreateSuccess,
+  isOrdersCreateLostFenceError,
+  lockAndVerifyOrdersCreateOwnership,
+  OrdersCreateLostFenceError,
+} from './orders-create-ownership.service.js';
 
 const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
 
@@ -709,14 +715,24 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
   const parsedOrder = parseOrderPayload(input.payload, input.taxSnapshot);
   const resolveImageUrl = createLineItemImageResolver(input.lineItemImages);
 
+  if (
+    input.executionContext &&
+    (input.executionContext.webhookEventId !== input.event.id ||
+      input.executionContext.sourceShopifyOrderId !== parsedOrder.sourceShopifyOrderId)
+  ) {
+    throw new OrdersCreateLostFenceError('Fenced orders/create execution context did not match its event or order.');
+  }
+
   if (parsedOrder.lineItems.length === 0) {
-    await prisma.webhookEvent.update({
-      where: { id: input.event.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: 'Shopify order payload did not include line items.',
-      },
-    });
+    if (!input.executionContext) {
+      await prisma.webhookEvent.update({
+        where: { id: input.event.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: 'Shopify order payload did not include line items.',
+        },
+      });
+    }
 
     return {
       ok: false,
@@ -803,6 +819,10 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
     };
 
     const result = await prisma.$transaction(async (tx) => {
+      if (input.executionContext) {
+        await lockAndVerifyOrdersCreateOwnership(tx, input.executionContext);
+      }
+
       let shopifyOrder;
       if (input.mode === 'missing_order_only') {
         const existingOrder = await tx.shopifyOrder.findUnique({
@@ -946,15 +966,23 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
         await upsertSaleLedgerForAllocation(tx, allocationId);
       }
 
-      await tx.webhookEvent.update({
-        where: { id: input.event.id },
-        data: {
-          status: 'PROCESSED',
-          processedAt: new Date(),
-          errorMessage: null,
+      if (input.executionContext) {
+        await finalizeFencedOrdersCreateSuccess({
+          tx,
+          context: input.executionContext,
           shopifyOrderId: shopifyOrder.id,
-        },
-      });
+        });
+      } else {
+        await tx.webhookEvent.update({
+          where: { id: input.event.id },
+          data: {
+            status: 'PROCESSED',
+            processedAt: new Date(),
+            errorMessage: null,
+            shopifyOrderId: shopifyOrder.id,
+          },
+        });
+      }
 
       return {
         shopifyOrderId: parsedOrder.sourceShopifyOrderId,
@@ -971,6 +999,10 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       allocationCount: result.allocationCount,
     };
   } catch (error) {
+    if (isOrdersCreateLostFenceError(error)) {
+      throw error;
+    }
+
     const failure =
       input.mode === 'missing_order_only' &&
       readErrorCode(error) === 'P2002'
@@ -983,13 +1015,15 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           }
         : classifyOrderIngestionException(error);
 
-    await prisma.webhookEvent.update({
-      where: { id: input.event.id },
-      data: {
-        status: 'FAILED',
-        errorMessage: failure.error,
-      },
-    });
+    if (!input.executionContext) {
+      await prisma.webhookEvent.update({
+        where: { id: input.event.id },
+        data: {
+          status: 'FAILED',
+          errorMessage: failure.error,
+        },
+      });
+    }
 
     return {
       ok: false,

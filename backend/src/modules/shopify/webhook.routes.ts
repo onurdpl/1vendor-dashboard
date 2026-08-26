@@ -5,14 +5,15 @@ import type { AppEnv } from '../../config/env.js';
 import { getShopifyWebhookHeaders } from './webhook.types.js';
 import { claimWebhookEvent, getOrCreateWebhookEvent } from './webhook-idempotency.service.js';
 import {
-  classifyOrderIngestionException,
-  ingestShopifyOrderWebhook,
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
 } from './order-ingestion.service.js';
 import { ingestVerifiedShopifyRefund } from './refund-ingestion.service.js';
-import { fetchSellerInfoWithRetry } from './seller-info-retry.service.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
+import {
+  createOrdersCreateProcessingService,
+  prepareOrdersCreatePayload,
+} from './orders-create-processing.service.js';
 import {
   verifyShopifyWebhookHmac,
   verifyShopifyWebhookShopDomain,
@@ -54,6 +55,11 @@ import {
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
+  const ordersCreateProcessingService = createOrdersCreateProcessingService({
+    env,
+    shopifyAdminService,
+    logger: app.log,
+  });
   const canonicalCancellationReconciliationService = createCanonicalCancellationReconciliationService(env);
   const resolveWebhookSecret = (topic: string) => {
     if (topic.startsWith('returns/')) {
@@ -879,7 +885,6 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
-    let payload = incomingPayload;
     let retryJob = null as Awaited<ReturnType<typeof findOrdersCreateRetryJob>>;
     const retainedSnapshotMode = idempotencyResult.isDuplicate;
     const expectedStatus = idempotencyResult.event.status;
@@ -894,28 +899,19 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
-    if (idempotencyResult.isDuplicate) {
-      if (!idempotencyResult.event.rawPayload || !idempotencyResult.event.payloadHash) {
-        return reply.code(202).send({
-          ok: true,
-          duplicate: true,
-          action: 'received_needs_attention',
-          processingStatus: 'needs_attention',
-          message: 'Retained webhook payload evidence is unavailable for automatic retry.',
-        });
-      }
-
-      try {
-        payload = JSON.parse(idempotencyResult.event.rawPayload) as ShopifyOrdersCreateWebhookPayload;
-      } catch {
-        return reply.code(202).send({
-          ok: true,
-          duplicate: true,
-          action: 'received_needs_attention',
-          processingStatus: 'needs_attention',
-          message: 'Retained webhook payload is not valid JSON.',
-        });
-      }
+    const preparedPayload = prepareOrdersCreatePayload({
+      event: idempotencyResult.event,
+      incomingPayload,
+      retainedSnapshotMode,
+    });
+    if (!preparedPayload.ok) {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message: preparedPayload.message,
+      });
     }
 
     if (expectedStatus === 'FAILED') {
@@ -940,8 +936,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       return respondForClaimLoser(claimResult.event);
     }
 
-    const sourceShopifyOrderId =
-      payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+    const { payload, sourceShopifyOrderId } = preparedPayload;
     let operationalJob = retryJob;
 
     if (retryJob) {
@@ -997,73 +992,11 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     };
 
-    let ingestionResult;
-    try {
-      if (!sourceShopifyOrderId) {
-        return respondForFailure({
-          failureCode: 'missing_order_id',
-          failureDisposition: 'NON_RETRYABLE',
-          failureCategory: 'validation',
-          retryable: false,
-          error: 'Shopify orders/create payload did not include an order id.',
-        });
-      }
-
-      const sellerInfoResult = await fetchSellerInfoWithRetry({
-        orderId: sourceShopifyOrderId,
-        fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
-        delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
-      });
-
-      if (!sellerInfoResult.ok) {
-        return respondForFailure({
-          failureCode: 'seller_info_unavailable',
-          failureDisposition: 'RETRYABLE',
-          failureCategory: 'transient',
-          retryable: true,
-          error: sellerInfoResult.error,
-        });
-      }
-
-      const lineItemImages = await shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId).then(
-        (result) => result.lineItems,
-        (error) => {
-          app.log.warn(
-            {
-              sourceShopifyOrderId,
-              errorMessage: error instanceof Error ? error.message : 'Unknown Shopify line item image enrichment error.',
-            },
-            'Shopify line item image enrichment failed; continuing order ingestion.',
-          );
-          return [];
-        },
-      );
-
-      const taxSnapshot = await shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId).then(
-        (result) => result,
-        (error) => {
-          app.log.warn(
-            {
-              sourceShopifyOrderId,
-              errorMessage: error instanceof Error ? error.message : 'Unknown Shopify tax snapshot enrichment error.',
-            },
-            'Shopify tax snapshot enrichment failed; continuing order ingestion with VAT fallback.',
-          );
-          return null;
-        },
-      );
-
-      ingestionResult = await ingestShopifyOrderWebhook({
-        event: idempotencyResult.event,
-        payload,
-        sellerInfo: sellerInfoResult.sellerInfo,
-        lineItemImages,
-        taxSnapshot,
-        mode: retainedSnapshotMode ? 'missing_order_only' : 'upsert',
-      });
-    } catch (error) {
-      return respondForFailure(classifyOrderIngestionException(error));
-    }
+    const ingestionResult = await ordersCreateProcessingService.process({
+      event: idempotencyResult.event,
+      payload,
+      mode: preparedPayload.mode,
+    });
 
     if (!ingestionResult.ok) {
       return respondForFailure(ingestionResult);

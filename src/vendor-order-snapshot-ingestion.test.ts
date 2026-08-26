@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
+  $executeRaw: vi.fn(),
   vendor: {
     findMany: vi.fn(),
   },
@@ -45,6 +47,9 @@ const {
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
 } = await import('../backend/src/modules/shopify/order-ingestion.service.js');
+const { OrdersCreateLostFenceError } = await import(
+  '../backend/src/modules/shopify/orders-create-ownership.service.js'
+);
 
 function buildSimpleOrderPayload(orderId = 2001, sku = 'SKU-1') {
   return {
@@ -437,6 +442,95 @@ describe('vendor order snapshot ingestion', () => {
     });
     expect(prismaMock.shopifyOrder.create).toHaveBeenCalledOnce();
     expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+  });
+
+  it('commits fenced ingestion only for the current generation and clears lease availability', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
+      .mockResolvedValueOnce([{ id: 'event-fenced-current' }]);
+    prismaMock.$executeRaw.mockResolvedValueOnce(1);
+    const executionContext = {
+      webhookEventId: 'event-fenced-current',
+      processingGeneration: 4,
+      sourceShopifyOrderId: '2013',
+      signal: new AbortController().signal,
+    };
+
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'event-fenced-current' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2013),
+      executionContext,
+    });
+
+    expect(result).toMatchObject({ ok: true, shopifyOrderId: '2013' });
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(prismaMock.$executeRaw).toHaveBeenCalledOnce();
+    const advisorySql = prismaMock.$queryRaw.mock.calls[0]?.[0] as { strings?: string[] };
+    const fenceSql = prismaMock.$queryRaw.mock.calls[1]?.[0] as { strings?: string[] };
+    expect(advisorySql.strings?.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
+    expect(fenceSql.strings?.join('?')).toContain('FOR UPDATE');
+    expect(fenceSql.strings?.join('?')).toContain('"processingLeaseExpiresAt" > clock_timestamp()');
+    const finalSql = prismaMock.$executeRaw.mock.calls[0]?.[0] as { strings?: string[] };
+    const finalSqlText = finalSql.strings?.join('?') ?? '';
+    const finalSetClause = finalSqlText.split('WHERE')[0] ?? '';
+    expect(finalSqlText).toContain('"processingGeneration" =');
+    expect(finalSqlText).toContain('"processingLeaseExpiresAt" = NULL');
+    expect(finalSqlText).toContain('"executionAvailableAt" = NULL');
+    expect(finalSetClause).not.toContain('"processingGeneration" =');
+    expect(finalSetClause).not.toContain('"executionAttemptCount" =');
+    expect(prismaMock.webhookEvent.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['wrong generation'],
+    ['expired lease'],
+  ])('rejects fenced ingestion for %s before any commerce or finance mutation', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
+      .mockResolvedValueOnce([]);
+    const executionContext = {
+      webhookEventId: 'event-fenced-stale',
+      processingGeneration: 3,
+      sourceShopifyOrderId: '2014',
+      signal: new AbortController().signal,
+    };
+
+    await expect(ingestShopifyOrderWebhook({
+      event: { id: 'event-fenced-stale' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2014),
+      executionContext,
+    })).rejects.toBeInstanceOf(OrdersCreateLostFenceError);
+
+    expect(prismaMock.shopifyOrder.create).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+    expect(prismaMock.webhookEvent.update).not.toHaveBeenCalled();
+  });
+
+  it('rolls back fenced success when the final generation-conditional transition loses ownership', async () => {
+    prismaMock.$queryRaw
+      .mockResolvedValueOnce([{ pg_advisory_xact_lock: null }])
+      .mockResolvedValueOnce([{ id: 'event-fenced-finalize-lost' }]);
+    prismaMock.$executeRaw.mockResolvedValueOnce(0);
+
+    await expect(ingestShopifyOrderWebhook({
+      event: { id: 'event-fenced-finalize-lost' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2015),
+      executionContext: {
+        webhookEventId: 'event-fenced-finalize-lost',
+        processingGeneration: 7,
+        sourceShopifyOrderId: '2015',
+        signal: new AbortController().signal,
+      },
+    })).rejects.toBeInstanceOf(OrdersCreateLostFenceError);
+
+    expect(prismaMock.$executeRaw).toHaveBeenCalledOnce();
+    expect(prismaMock.webhookEvent.update).not.toHaveBeenCalled();
   });
 
   it('refuses a retained snapshot when the local order already exists', async () => {

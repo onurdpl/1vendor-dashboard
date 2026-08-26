@@ -201,6 +201,13 @@ export type OrderIngestionFailureResult = OrderIngestionFailureDetails & {
 
 export type OrderIngestionResult = OrderIngestionSuccessResult | OrderIngestionFailureResult;
 
+export type OrdersCreateFencedExecutionContext = {
+  webhookEventId: string;
+  processingGeneration: number;
+  sourceShopifyOrderId: string;
+  signal: AbortSignal;
+};
+
 export type OrderIngestionInput = {
   event: WebhookEvent;
   payload: ShopifyOrdersCreateWebhookPayload;
@@ -208,4 +215,5 @@ export type OrderIngestionInput = {
   lineItemImages?: ShopifyOrderLineItemImage[];
   taxSnapshot?: FetchOrderTaxSnapshotResult | null;
   mode?: OrderIngestionMode;
+  executionContext?: OrdersCreateFencedExecutionContext;
 };

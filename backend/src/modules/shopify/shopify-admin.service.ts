@@ -1372,7 +1372,11 @@ export function createShopifyAdminService(env: AppEnv) {
       .filter(Boolean),
   );
 
-  async function fetchOrderSellerInfo(orderId: string): Promise<FetchOrderSellerInfoResult> {
+  async function fetchOrderSellerInfo(
+    orderId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<FetchOrderSellerInfoResult> {
+    options?.signal?.throwIfAborted();
     if (mockSellerInfoByOrderId[orderId]) {
       return {
         sellerInfo: mockSellerInfoByOrderId[orderId],
@@ -1409,6 +1413,7 @@ export function createShopifyAdminService(env: AppEnv) {
             id: toShopifyOrderGid(orderId),
           },
         }),
+        signal: options?.signal,
       },
     );
 
@@ -1427,7 +1432,11 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
-  async function fetchOrderLineItemImages(orderId: string): Promise<FetchOrderLineItemImagesResult> {
+  async function fetchOrderLineItemImages(
+    orderId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<FetchOrderLineItemImagesResult> {
+    options?.signal?.throwIfAborted();
     if (mockOrderLineItemImagesByOrderId[orderId]) {
       return mockOrderLineItemImagesByOrderId[orderId];
     }
@@ -1491,6 +1500,7 @@ export function createShopifyAdminService(env: AppEnv) {
             orderId: toShopifyOrderGid(orderId),
           },
         }),
+        signal: options?.signal,
       },
     );
 
@@ -1527,7 +1537,11 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
-  async function fetchOrderTaxSnapshot(orderId: string): Promise<FetchOrderTaxSnapshotResult> {
+  async function fetchOrderTaxSnapshot(
+    orderId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<FetchOrderTaxSnapshotResult> {
+    options?.signal?.throwIfAborted();
     if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
       return {
         orderGid: toShopifyOrderGid(orderId),
@@ -1613,6 +1627,7 @@ export function createShopifyAdminService(env: AppEnv) {
             orderId: toShopifyOrderGid(orderId),
           },
         }),
+        signal: options?.signal,
       },
     );
 

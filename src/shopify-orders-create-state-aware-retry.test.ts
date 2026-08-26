@@ -316,6 +316,33 @@ describe('orders/create state-aware retry ownership', () => {
     expect(result).toMatchObject({ status: 202, body: { processingStatus: 'processed' } });
   });
 
+  it('continues awaiting full processing before sending the synchronous response', async () => {
+    let resolveIngestion!: (value: unknown) => void;
+    orderIngestionMock.ingestShopifyOrderWebhook.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveIngestion = resolve;
+      }),
+    );
+    const reply = buildReply();
+    const response = registerRoutes()(buildRequest(payload), reply);
+    await vi.waitFor(() => expect(orderIngestionMock.ingestShopifyOrderWebhook).toHaveBeenCalledOnce());
+
+    expect(reply.send).not.toHaveBeenCalled();
+
+    resolveIngestion({
+      ok: true,
+      action: 'accepted',
+      processingStatus: 'processed',
+      shopifyOrderId: '2001',
+      allocationCount: 1,
+    });
+
+    await expect(response).resolves.toMatchObject({
+      status: 202,
+      body: { processingStatus: 'processed' },
+    });
+  });
+
   it('uses retained payload and missing-order-only mode for duplicate RECEIVED recovery', async () => {
     const retainedPayload = { ...payload, id: 2012, name: '#2012' };
     getOrCreateWebhookEventMock.mockResolvedValueOnce(buildIdempotencyResult({
