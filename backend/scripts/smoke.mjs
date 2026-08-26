@@ -154,6 +154,9 @@ async function runSmoke() {
     '9002': {
       'DH2987-100-41': 'yalispor',
     },
+    '9003': {
+      'UNKNOWN-SKU-FALLBACK': 'unknown-vendor',
+    },
   });
   const mockReturnDetails = JSON.stringify({
     'gid://shopify/Return/777001': {
@@ -706,7 +709,11 @@ async function runSmoke() {
       );
     }
     const noWebhookIdDuplicateJson = await noWebhookIdDuplicateResponse.json();
-    if (noWebhookIdDuplicateJson?.duplicate !== true || noWebhookIdDuplicateJson?.action !== 'duplicate_ignored') {
+    if (
+      noWebhookIdDuplicateJson?.duplicate !== true ||
+      noWebhookIdDuplicateJson?.action !== 'received_needs_attention' ||
+      noWebhookIdDuplicateJson?.retryable !== false
+    ) {
       throw new Error(
         `/webhooks/shopify/orders-create duplicate payload-hash fallback invalid: ${JSON.stringify(noWebhookIdDuplicateJson)}`,
       );
@@ -748,10 +755,54 @@ async function runSmoke() {
     if (
       failingWebhookJson?.duplicate !== false ||
       failingWebhookJson?.action !== 'received_needs_attention' ||
-      failingWebhookJson?.processingStatus !== 'needs_attention'
+      failingWebhookJson?.processingStatus !== 'needs_attention' ||
+      failingWebhookJson?.retryable !== false
     ) {
       throw new Error(
         `/webhooks/shopify/orders-create unresolved seller_info payload invalid: ${JSON.stringify(failingWebhookJson)}`,
+      );
+    }
+
+    const retryableWebhookPayload = JSON.stringify({
+      id: 9004,
+      order_number: 9004,
+      name: '#9004',
+      line_items: [
+        {
+          id: `li-retryable-${runId}`,
+          sku: 'SELLER-INFO-NOT-YET-AVAILABLE',
+          quantity: 1,
+          price: '75.00',
+        },
+      ],
+    });
+    const retryableWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(retryableWebhookPayload, 'utf8')
+      .digest('base64');
+    const retryableWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': retryableWebhookHmac,
+        'x-shopify-topic': 'orders/create',
+        'x-shopify-shop-domain': shopifyShopDomain,
+        'x-shopify-webhook-id': `smoke-retryable-${runId}`,
+      },
+      body: retryableWebhookPayload,
+    });
+    if (retryableWebhookResponse.status !== 503) {
+      throw new Error(
+        `/webhooks/shopify/orders-create retryable seller_info failure expected 503, got ${retryableWebhookResponse.status}`,
+      );
+    }
+    const retryableWebhookJson = await retryableWebhookResponse.json();
+    if (
+      retryableWebhookJson?.action !== 'retryable_failure' ||
+      retryableWebhookJson?.failureCode !== 'seller_info_unavailable' ||
+      retryableWebhookJson?.retryable !== true
+    ) {
+      throw new Error(
+        `/webhooks/shopify/orders-create retryable seller_info payload invalid: ${JSON.stringify(retryableWebhookJson)}`,
       );
     }
 

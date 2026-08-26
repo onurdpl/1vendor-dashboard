@@ -6,6 +6,7 @@ import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '..
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
 import { ingestShopifyOrderWebhook } from '../shopify/order-ingestion.service.js';
+import { claimWebhookEvent } from '../shopify/webhook-idempotency.service.js';
 import { ingestVerifiedShopifyRefund } from '../shopify/refund-ingestion.service.js';
 import {
   classifyCanonicalRefundMonetaryEvidence,
@@ -2769,6 +2770,7 @@ async function processWebhookEvent(
       sellerInfo: sellerInfoResult.sellerInfo,
       lineItemImages,
       taxSnapshot,
+      mode: 'missing_order_only',
     });
 
     return ingestionResult.ok
@@ -3686,13 +3688,34 @@ export async function recoverWebhookEvent(
   }
 
   const beforeStatus = event.status;
+  const claimResult = await claimWebhookEvent({
+    eventId: event.id,
+    expectedStatus: beforeStatus as 'RECEIVED' | 'FAILED',
+  });
+  if (!claimResult.acquired) {
+    const currentStatus = claimResult.event?.status ?? null;
+    return {
+      ok: false,
+      statusCode: 409,
+      response: {
+        ...buildBlockedReplayResponse({
+          event: claimResult.event ?? event,
+          action: 'recover',
+          reason: `Webhook recovery ownership was not acquired; current status is ${currentStatus ?? 'unknown'}.`,
+        }),
+        beforeStatus,
+        afterStatus: currentStatus,
+        recoveryStatus: 'not_recoverable',
+      },
+    };
+  }
+
   const operationalJob = await createDiagnosticsOperationalJob({
     jobType: 'recovery',
     webhookEventId: event.id,
     payloadRef: event.payloadHash,
   });
   await markDiagnosticsJobProcessing(operationalJob?.id);
-  await markWebhookProcessing(event.id);
 
   let response: WebhookReplayResponse;
   try {

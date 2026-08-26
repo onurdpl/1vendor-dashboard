@@ -39,5 +39,14 @@ describe('diagnostics recovery policy', () => {
     expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, status: 'RECEIVED' })).toBeNull();
     expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, status: 'PROCESSED' }))
       .toMatch(/not recoverable/i);
+    expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, status: 'PROCESSING' }))
+      .toMatch(/not recoverable/i);
+  });
+
+  it('requires retained payload and hash evidence before recovery ownership can be attempted', () => {
+    expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, rawPayload: null }))
+      .toMatch(/payload is not available/i);
+    expect(__diagnosticsRecoveryPolicyTesting.getRecoverBlockedReason({ ...baseEvent, payloadHash: null }))
+      .toMatch(/payload hash is not available/i);
   });
 });

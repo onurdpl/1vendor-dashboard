@@ -168,11 +168,35 @@ export type OrderIngestionSuccessResult = {
   allocationCount: number;
 };
 
-export type OrderIngestionFailureResult = {
+export type OrderIngestionMode = 'upsert' | 'missing_order_only';
+
+export type OrderIngestionFailureDisposition = 'RETRYABLE' | 'NON_RETRYABLE' | 'UNKNOWN';
+
+export type OrderIngestionFailureCode =
+  | 'missing_order_id'
+  | 'seller_info_unavailable'
+  | 'no_line_items'
+  | 'missing_sku'
+  | 'missing_seller_mapping'
+  | 'unknown_vendor'
+  | 'protected_finance_state'
+  | 'existing_local_order_requires_current_state_repair'
+  | 'transient_database_or_network'
+  | 'transaction_contention'
+  | 'unknown_internal_error';
+
+export type OrderIngestionFailureDetails = {
+  failureCode: OrderIngestionFailureCode;
+  failureDisposition: OrderIngestionFailureDisposition;
+  failureCategory: 'transient' | 'validation' | 'reconciliation_required' | 'permanent';
+  retryable: boolean;
+  error: string;
+};
+
+export type OrderIngestionFailureResult = OrderIngestionFailureDetails & {
   ok: false;
   action: 'received_needs_attention';
   processingStatus: 'needs_attention';
-  error: string;
 };
 
 export type OrderIngestionResult = OrderIngestionSuccessResult | OrderIngestionFailureResult;
@@ -183,4 +207,5 @@ export type OrderIngestionInput = {
   sellerInfo: SellerInfoMap;
   lineItemImages?: ShopifyOrderLineItemImage[];
   taxSnapshot?: FetchOrderTaxSnapshotResult | null;
+  mode?: OrderIngestionMode;
 };

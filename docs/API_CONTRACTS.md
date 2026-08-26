@@ -479,19 +479,31 @@ Webhook processing lifecycle states:
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
   - processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", shopifyOrderId, allocationCount }`
-  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
-  - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
-- Expected `202` behavior: valid HMAC signature accepted whether processing succeeds immediately, is ignored as duplicate, or is parked in needs-attention state.
+  - processed duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", processingStatus: "processed" }`
+  - active duplicate: `{ ok: true, duplicate: true, action: "duplicate_in_progress", processingStatus: "processing" }`
+  - needs attention: `{ ok: true, duplicate, action: "received_needs_attention", processingStatus: "needs_attention", failureCode?, failureDisposition?, retryable: false, message }`
+  - evidence conflict: `{ ok: true, duplicate: true, action: "identity_conflict_needs_attention", processingStatus: "needs_attention" }`
+  - existing-order retained recovery refusal: `{ ok: true, duplicate: true, action: "current_state_repair_required", processingStatus: "needs_attention", failureCode: "existing_local_order_requires_current_state_repair", retryable: false, message }`
+- Expected `202` behavior: processing succeeds, a protected state is observed, or a non-retryable/unknown failure is parked for admin attention.
+- Expected `503` behavior: processing failed with an explicitly classified transient condition and the linked webhook-processing job durably remains retry-eligible.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Duplicate webhook response semantics:
   - first verified delivery -> `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed" }`
-  - repeated verified delivery -> `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+  - repeated `PROCESSED` delivery -> successful duplicate no-op
+  - repeated `PROCESSING` delivery -> successful in-progress no-op
+  - repeated eligible `FAILED` delivery -> atomically claimed retained-payload retry
 - Processing note:
-  - this phase verifies, de-duplicates, fetches `custom.seller_info`, and creates order allocations
+  - initial, redelivery, and admin recovery ownership use the same atomic `RECEIVED|FAILED -> PROCESSING` claim
+  - same-ID payload hash mismatch preserves original evidence and does not ingest
+  - eligible automatic retry uses retained raw payload, not the redelivery body
+  - retained-payload retry/recovery is missing-order-only; existing local orders require Current-State Repair
+  - only explicit transient failures may ask Shopify to retry; generic exceptions fail closed
+  - the route verifies, de-duplicates, fetches `custom.seller_info`, and creates order allocations
   - seller info fetch uses the documented Shopify Admin metafield query
   - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
   - future webhook events persist raw payloads for explicit admin replay and reconciliation
-- refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
+  - `PROCESSING` stale recovery and queue-based async execution are not implemented
+- refund ingestion and fulfillment mutation remain on their existing independent paths
 
 ### POST /webhooks/shopify/orders-paid
 

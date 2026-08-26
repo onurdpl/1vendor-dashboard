@@ -10,6 +10,8 @@ const prismaMock = vi.hoisted(() => ({
   },
   shopifyOrder: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
+    create: vi.fn(),
     upsert: vi.fn(),
     update: vi.fn(),
   },
@@ -38,6 +40,7 @@ vi.mock('../backend/src/modules/finance/sale-ledger.service.js', () => ({
 }));
 
 const {
+  classifyOrderIngestionException,
   ingestShopifyOrderWebhook,
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
@@ -65,6 +68,8 @@ function mockSuccessfulDbWrites() {
   prismaMock.webhookEvent.update.mockResolvedValue({});
   prismaMock.shopifyOrder.upsert.mockResolvedValue({ id: 'shopify-order-db-1' });
   prismaMock.shopifyOrder.findFirst.mockResolvedValue(null);
+  prismaMock.shopifyOrder.findUnique.mockResolvedValue(null);
+  prismaMock.shopifyOrder.create.mockResolvedValue({ id: 'shopify-order-db-1' });
   prismaMock.shopifyOrder.update.mockResolvedValue({});
   prismaMock.shopifyOrderLineItem.upsert.mockResolvedValue({ id: 'shopify-line-db-1' });
   prismaMock.vendorAllocation.upsert.mockResolvedValue({ id: 'alloc-sporjinal-2001' });
@@ -410,6 +415,94 @@ describe('vendor order snapshot ingestion', () => {
     expect(allocationUpsert.update).not.toHaveProperty('cancellationReason');
     expect(allocationUpsert.update).not.toHaveProperty('reassignmentRequired');
     expect(allocationUpsert.update).not.toHaveProperty('originalVendorId');
+  });
+
+  it('creates a missing local order in retained-snapshot mode without using upsert', async () => {
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-retained-missing-order' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: buildSimpleOrderPayload(2010),
+      mode: 'missing_order_only',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      shopifyOrderId: '2010',
+    });
+    expect(prismaMock.shopifyOrder.findUnique).toHaveBeenCalledWith({
+      where: { sourceShopifyOrderId: '2010' },
+      select: { id: true },
+    });
+    expect(prismaMock.shopifyOrder.create).toHaveBeenCalledOnce();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses a retained snapshot when the local order already exists', async () => {
+    prismaMock.shopifyOrder.findUnique.mockResolvedValueOnce({ id: 'existing-order' });
+
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-retained-existing-order' } as never,
+      sellerInfo: {
+        'SKU-1': 'sporjinal',
+      },
+      payload: buildSimpleOrderPayload(2011),
+      mode: 'missing_order_only',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureCode: 'existing_local_order_requires_current_state_repair',
+      failureDisposition: 'NON_RETRYABLE',
+      retryable: false,
+    });
+    expect(prismaMock.shopifyOrder.create).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrder.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+  });
+
+  it('maps a concurrent retained-order create conflict to Current-State Repair', async () => {
+    prismaMock.shopifyOrder.create.mockRejectedValueOnce(
+      { code: 'P2002', message: 'Unique constraint failed.' },
+    );
+
+    const result = await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-retained-order-race' } as never,
+      sellerInfo: { 'SKU-1': 'sporjinal' },
+      payload: buildSimpleOrderPayload(2012),
+      mode: 'missing_order_only',
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureCode: 'existing_local_order_requires_current_state_repair',
+      failureDisposition: 'NON_RETRYABLE',
+      retryable: false,
+    });
+    expect(prismaMock.shopifyOrderLineItem.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.upsert).not.toHaveBeenCalled();
+    expect(upsertSaleLedgerForAllocationMock).not.toHaveBeenCalled();
+  });
+
+  it('classifies only allowlisted infrastructure errors as retryable', () => {
+    expect(classifyOrderIngestionException({ code: 'P2034', message: 'transaction conflict' })).toMatchObject({
+      failureCode: 'transaction_contention',
+      failureDisposition: 'RETRYABLE',
+      retryable: true,
+    });
+    expect(classifyOrderIngestionException({ code: 'P1001', message: 'database unavailable' })).toMatchObject({
+      failureCode: 'transient_database_or_network',
+      failureDisposition: 'RETRYABLE',
+      retryable: true,
+    });
+    expect(classifyOrderIngestionException(new Error('generic internal error'))).toMatchObject({
+      failureCode: 'unknown_internal_error',
+      failureDisposition: 'UNKNOWN',
+      retryable: false,
+    });
   });
 
   it('defaults new allocations to active workflow state during Shopify order ingestion', async () => {

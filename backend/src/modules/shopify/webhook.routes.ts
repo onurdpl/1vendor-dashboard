@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
+import { OperationalJobStatus, OperationalJobType, type WebhookEvent } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
 import { getShopifyWebhookHeaders } from './webhook.types.js';
-import { getOrCreateWebhookEvent } from './webhook-idempotency.service.js';
+import { claimWebhookEvent, getOrCreateWebhookEvent } from './webhook-idempotency.service.js';
 import {
+  classifyOrderIngestionException,
   ingestShopifyOrderWebhook,
   syncShopifyOrderPaidSnapshotFromWebhook,
   updateShopifyOrderContactAddressSnapshotFromWebhook,
@@ -15,7 +17,10 @@ import {
   verifyShopifyWebhookHmac,
   verifyShopifyWebhookShopDomain,
 } from './webhook.service.js';
-import type { ShopifyOrdersCreateWebhookPayload } from './order-ingestion.types.js';
+import type {
+  OrderIngestionFailureDetails,
+  ShopifyOrdersCreateWebhookPayload,
+} from './order-ingestion.types.js';
 import type { ShopifyRefundsCreateWebhookPayload } from './refund-ingestion.types.js';
 import {
   applyReturnLifecycleStatusWebhook,
@@ -37,6 +42,7 @@ import {
   markOperationalJobCompleted,
   markOperationalJobFailed,
   markOperationalJobProcessing,
+  markOperationalJobRetrying,
 } from '../operational-jobs/operational-jobs.service.js';
 import { createCanonicalCancellationReconciliationService } from '../reconciliation/canonical-cancellation-reconciliation.service.js';
 import {
@@ -282,12 +288,41 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     }
   };
 
-  const markJobFailed = async (jobId: string | null | undefined, error: unknown) => {
+  const markJobFailed = async (
+    jobId: string | null | undefined,
+    error: unknown,
+    options?: Parameters<typeof markOperationalJobFailed>[2],
+  ) => {
     try {
-      await markOperationalJobFailed(jobId, error);
+      return options
+        ? await markOperationalJobFailed(jobId, error, options)
+        : await markOperationalJobFailed(jobId, error);
     } catch (jobError) {
       app.log.error({ error: jobError, operationalJobId: jobId }, 'Failed to mark operational job failed.');
+      return null;
     }
+  };
+
+  const findOrdersCreateRetryJob = async (webhookEventId: string) => {
+    const jobs = await prisma.operationalJob.findMany({
+      where: {
+        webhookEventId,
+        jobType: OperationalJobType.WEBHOOK_PROCESSING,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 2,
+    });
+
+    if (jobs.length !== 1) {
+      return null;
+    }
+
+    const [job] = jobs;
+    return job.status === OperationalJobStatus.RETRY_SCHEDULED &&
+      job.failureCategory === 'transient' &&
+      job.retryCount < job.maxRetries
+      ? job
+      : null;
   };
 
   const processCanonicalOrderCancellationBridge = async (input: {
@@ -750,7 +785,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       return reply.code(verification.statusCode).send({ message: verification.message });
     }
 
-    const payload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
+    const incomingPayload = (request.body ?? {}) as ShopifyOrdersCreateWebhookPayload;
 
     if (!env.DATABASE_URL) {
       return reply.code(202).send({
@@ -768,36 +803,209 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       rawBody,
     });
 
-    if (idempotencyResult.isDuplicate) {
+    const respondForClaimLoser = async (event: WebhookEvent | null) => {
+      if (event?.status === 'PROCESSED') {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'duplicate_ignored',
+          processingStatus: 'processed',
+        });
+      }
+
+      if (event?.status === 'PROCESSING') {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'duplicate_in_progress',
+          processingStatus: 'processing',
+        });
+      }
+
+      const retryJob = event?.status === 'FAILED' ? await findOrdersCreateRetryJob(event.id) : null;
+      if (event?.status === 'FAILED' && retryJob) {
+        return reply.code(503).send({
+          ok: false,
+          duplicate: true,
+          action: 'retryable_failure',
+          processingStatus: 'needs_attention',
+          retryable: true,
+          message: event.errorMessage ?? 'Shopify orders/create processing failed with a retryable error.',
+        });
+      }
+
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        retryable: false,
+        message: event?.errorMessage ?? 'Webhook event ownership was not acquired.',
+      });
+    };
+
+    if (idempotencyResult.isDuplicate && idempotencyResult.payloadIdentity === 'mismatched') {
+      app.log.warn(
+        {
+          webhookEventId: idempotencyResult.event.id,
+          storedPayloadHash: idempotencyResult.event.payloadHash,
+          incomingPayloadHash: idempotencyResult.incomingPayloadHash,
+        },
+        'Shopify orders/create same-id delivery had mismatching payload evidence.',
+      );
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'identity_conflict_needs_attention',
+        processingStatus: 'needs_attention',
+      });
+    }
+
+    if (idempotencyResult.isDuplicate && idempotencyResult.event.status === 'PROCESSED') {
       return reply.code(202).send({
         ok: true,
         duplicate: true,
         action: 'duplicate_ignored',
+        processingStatus: 'processed',
       });
+    }
+
+    if (idempotencyResult.isDuplicate && idempotencyResult.event.status === 'PROCESSING') {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: true,
+        action: 'duplicate_in_progress',
+        processingStatus: 'processing',
+      });
+    }
+
+    let payload = incomingPayload;
+    let retryJob = null as Awaited<ReturnType<typeof findOrdersCreateRetryJob>>;
+    const retainedSnapshotMode = idempotencyResult.isDuplicate;
+    const expectedStatus = idempotencyResult.event.status;
+
+    if (expectedStatus !== 'RECEIVED' && expectedStatus !== 'FAILED') {
+      return reply.code(202).send({
+        ok: true,
+        duplicate: idempotencyResult.isDuplicate,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message: `Webhook event in status ${expectedStatus} is not automatically reprocessable.`,
+      });
+    }
+
+    if (idempotencyResult.isDuplicate) {
+      if (!idempotencyResult.event.rawPayload || !idempotencyResult.event.payloadHash) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message: 'Retained webhook payload evidence is unavailable for automatic retry.',
+        });
+      }
+
+      try {
+        payload = JSON.parse(idempotencyResult.event.rawPayload) as ShopifyOrdersCreateWebhookPayload;
+      } catch {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message: 'Retained webhook payload is not valid JSON.',
+        });
+      }
+    }
+
+    if (expectedStatus === 'FAILED') {
+      retryJob = await findOrdersCreateRetryJob(idempotencyResult.event.id);
+      if (!retryJob) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          retryable: false,
+          message: 'Failed webhook does not have unambiguous retryable job evidence.',
+        });
+      }
+    }
+
+    const claimResult = await claimWebhookEvent({
+      eventId: idempotencyResult.event.id,
+      expectedStatus,
+    });
+    if (!claimResult.acquired) {
+      return respondForClaimLoser(claimResult.event);
     }
 
     const sourceShopifyOrderId =
       payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
-    const operationalJob = await createWebhookJob({
-      topic: headers.topic,
-      webhookEventId: idempotencyResult.event.id,
-      payloadRef: idempotencyResult.event.payloadHash,
-      sourceShopifyOrderId,
-    });
-    let ingestionResult;
-    try {
-      await markJobProcessing(operationalJob?.id);
-      await markWebhookProcessing(idempotencyResult.event.id);
+    let operationalJob = retryJob;
 
-      if (!sourceShopifyOrderId) {
-        await markJobFailed(operationalJob?.id, 'Shopify orders/create payload did not include an order id.');
-        await markWebhookFailed(idempotencyResult.event.id, 'Shopify orders/create payload did not include an order id.');
+    if (retryJob) {
+      try {
+        operationalJob = await markOperationalJobRetrying(retryJob.id);
+      } catch (error) {
+        const message = 'Automatic retry job state could not be recorded; admin recovery is required.';
+        app.log.error({ error, operationalJobId: retryJob.id }, message);
+        await markWebhookFailed(idempotencyResult.event.id, message);
         return reply.code(202).send({
           ok: true,
-          duplicate: false,
+          duplicate: true,
           action: 'received_needs_attention',
           processingStatus: 'needs_attention',
-          message: 'Shopify orders/create payload did not include an order id.',
+          retryable: false,
+          message,
+        });
+      }
+    } else {
+      operationalJob = await createWebhookJob({
+        topic: headers.topic,
+        webhookEventId: idempotencyResult.event.id,
+        payloadRef: idempotencyResult.event.payloadHash,
+        sourceShopifyOrderId,
+      });
+      await markJobProcessing(operationalJob?.id);
+    }
+
+    const respondForFailure = async (failure: OrderIngestionFailureDetails) => {
+      await markWebhookFailed(idempotencyResult.event.id, failure.error);
+      const failedJob = await markJobFailed(operationalJob?.id, failure.error, {
+        category: failure.failureCategory,
+        retryable: failure.retryable,
+      });
+      const retryRecorded =
+        failure.retryable && failedJob?.status === OperationalJobStatus.RETRY_SCHEDULED;
+      const currentStateRepairRequired =
+        failure.failureCode === 'existing_local_order_requires_current_state_repair';
+
+      return reply.code(retryRecorded ? 503 : 202).send({
+        ok: !retryRecorded,
+        duplicate: idempotencyResult.isDuplicate,
+        action: currentStateRepairRequired
+          ? 'current_state_repair_required'
+          : retryRecorded
+            ? 'retryable_failure'
+            : 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        failureCode: failure.failureCode,
+        failureDisposition: failure.failureDisposition,
+        retryable: retryRecorded,
+        message: failure.error,
+      });
+    };
+
+    let ingestionResult;
+    try {
+      if (!sourceShopifyOrderId) {
+        return respondForFailure({
+          failureCode: 'missing_order_id',
+          failureDisposition: 'NON_RETRYABLE',
+          failureCategory: 'validation',
+          retryable: false,
+          error: 'Shopify orders/create payload did not include an order id.',
         });
       }
 
@@ -808,14 +1016,12 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
 
       if (!sellerInfoResult.ok) {
-        await markJobFailed(operationalJob?.id, sellerInfoResult.error);
-        await markWebhookFailed(idempotencyResult.event.id, sellerInfoResult.error);
-        return reply.code(202).send({
-          ok: true,
-          duplicate: false,
-          action: 'received_needs_attention',
-          processingStatus: 'needs_attention',
-          message: sellerInfoResult.error,
+        return respondForFailure({
+          failureCode: 'seller_info_unavailable',
+          failureDisposition: 'RETRYABLE',
+          failureCategory: 'transient',
+          retryable: true,
+          error: sellerInfoResult.error,
         });
       }
 
@@ -853,35 +1059,20 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         sellerInfo: sellerInfoResult.sellerInfo,
         lineItemImages,
         taxSnapshot,
+        mode: retainedSnapshotMode ? 'missing_order_only' : 'upsert',
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Shopify orders/create ingestion failed.';
-      await markJobFailed(operationalJob?.id, message);
-      await markWebhookFailed(idempotencyResult.event.id, message);
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'received_needs_attention',
-        processingStatus: 'needs_attention',
-        message,
-      });
+      return respondForFailure(classifyOrderIngestionException(error));
     }
 
     if (!ingestionResult.ok) {
-      await markJobFailed(operationalJob?.id, ingestionResult.error);
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: ingestionResult.action,
-        processingStatus: ingestionResult.processingStatus,
-        message: ingestionResult.error,
-      });
+      return respondForFailure(ingestionResult);
     }
 
     await markJobCompleted(operationalJob?.id);
     return reply.code(202).send({
       ok: true,
-      duplicate: false,
+      duplicate: idempotencyResult.isDuplicate,
       action: ingestionResult.action,
       processingStatus: ingestionResult.processingStatus,
       shopifyOrderId: ingestionResult.shopifyOrderId,

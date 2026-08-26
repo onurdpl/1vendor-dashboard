@@ -1,9 +1,9 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import type {
   ParsedShopifyOrderLineItem,
   ParsedShopifyOrderPayload,
+  OrderIngestionFailureDetails,
   OrderIngestionInput,
   OrderIngestionResult,
   ShopifyOrdersCreateLineItemPayload,
@@ -12,6 +12,88 @@ import type {
 import type { FetchOrderTaxSnapshotResult, ShopifyOrderLineItemImage, ShopifyTaxLineSnapshot } from './shopify-admin.types.js';
 
 const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
+
+const TRANSIENT_DATABASE_OR_NETWORK_CODES = new Set([
+  'P1001',
+  'P1002',
+  'P1008',
+  'P1017',
+  'P2024',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+]);
+
+class StructuredOrderIngestionError extends Error {
+  readonly details: OrderIngestionFailureDetails;
+
+  constructor(details: OrderIngestionFailureDetails) {
+    super(details.error);
+    this.name = 'StructuredOrderIngestionError';
+    this.details = details;
+  }
+}
+
+function readErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
+
+export function classifyOrderIngestionException(error: unknown): OrderIngestionFailureDetails {
+  if (error instanceof StructuredOrderIngestionError) {
+    return error.details;
+  }
+
+  const errorCode = readErrorCode(error);
+  const message = error instanceof Error ? error.message : 'Shopify order ingestion failed.';
+
+  if (errorCode === 'P2034') {
+    return {
+      failureCode: 'transaction_contention',
+      failureDisposition: 'RETRYABLE',
+      failureCategory: 'transient',
+      retryable: true,
+      error: message,
+    };
+  }
+
+  if (errorCode && TRANSIENT_DATABASE_OR_NETWORK_CODES.has(errorCode)) {
+    return {
+      failureCode: 'transient_database_or_network',
+      failureDisposition: 'RETRYABLE',
+      failureCategory: 'transient',
+      retryable: true,
+      error: message,
+    };
+  }
+
+  return {
+    failureCode: 'unknown_internal_error',
+    failureDisposition: 'UNKNOWN',
+    failureCategory: 'reconciliation_required',
+    retryable: false,
+    error: message,
+  };
+}
+
+function nonRetryableFailure(
+  failureCode: OrderIngestionFailureDetails['failureCode'],
+  error: string,
+  failureCategory: OrderIngestionFailureDetails['failureCategory'] = 'validation',
+) {
+  return new StructuredOrderIngestionError({
+    failureCode,
+    failureDisposition: 'NON_RETRYABLE',
+    failureCategory,
+    retryable: false,
+    error,
+  });
+}
 
 function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
   const firstName = payload.customer?.first_name?.trim();
@@ -640,6 +722,10 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       ok: false,
       action: 'received_needs_attention',
       processingStatus: 'needs_attention',
+      failureCode: 'no_line_items',
+      failureDisposition: 'NON_RETRYABLE',
+      failureCategory: 'validation',
+      retryable: false,
       error: 'Shopify order payload did not include line items.',
     };
   }
@@ -650,16 +736,27 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
 
     const resolvedLineItems = parsedOrder.lineItems.map((lineItem) => {
       if (!lineItem.sku) {
-        throw new Error(`Line item ${lineItem.sourceLineItemId} is missing SKU and cannot be allocated.`);
+        throw nonRetryableFailure(
+          'missing_sku',
+          `Line item ${lineItem.sourceLineItemId} is missing SKU and cannot be allocated.`,
+        );
       }
 
       const vendorId = normalizeVendorSlug(input.sellerInfo[lineItem.sku]);
       if (!vendorId) {
-        throw new Error(`No seller_info mapping found for SKU ${lineItem.sku}.`);
+        throw nonRetryableFailure(
+          'missing_seller_mapping',
+          `No seller_info mapping found for SKU ${lineItem.sku}.`,
+          'reconciliation_required',
+        );
       }
 
       if (!vendorIds.has(vendorId)) {
-        throw new Error(`seller_info mapped SKU ${lineItem.sku} to unknown vendor ${vendorId}.`);
+        throw nonRetryableFailure(
+          'unknown_vendor',
+          `seller_info mapped SKU ${lineItem.sku} to unknown vendor ${vendorId}.`,
+          'reconciliation_required',
+        );
       }
 
       return {
@@ -669,83 +766,72 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       };
     });
 
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.webhookEvent.update({
-        where: { id: input.event.id },
-        data: {
-          status: 'PROCESSING',
-          errorMessage: null,
-        },
-      });
+    const orderSnapshot = {
+      sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
+      shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
+      currency: parsedOrder.currency,
+      financialStatus: parsedOrder.financialStatus,
+      paymentGatewayName: parsedOrder.paymentGatewayName,
+      taxesIncluded: parsedOrder.taxesIncluded,
+      orderTaxAmount: parsedOrder.orderTaxAmount,
+      shippingAmount: parsedOrder.shippingAmount,
+      discountAmount: parsedOrder.discountAmount,
+      orderNote: parsedOrder.orderNote,
+      orderTags: parsedOrder.orderTags,
+      customerName: parsedOrder.customerName,
+      customerEmail: parsedOrder.customerEmail,
+      customerPhone: parsedOrder.customerPhone,
+      billingFullName: parsedOrder.billingFullName,
+      billingCompany: parsedOrder.billingCompany,
+      billingPhone: parsedOrder.billingPhone,
+      billingCity: parsedOrder.billingCity,
+      billingDistrict: parsedOrder.billingDistrict,
+      billingAddress1: parsedOrder.billingAddress1,
+      billingAddress2: parsedOrder.billingAddress2,
+      billingPostcode: parsedOrder.billingPostcode,
+      shippingCountry: parsedOrder.shippingCountry,
+      shippingPostcode: parsedOrder.shippingPostcode,
+      shippingCity: parsedOrder.shippingCity,
+      shippingDistrict: parsedOrder.shippingDistrict,
+      shippingAddress: parsedOrder.shippingAddress,
+      totalPrice: parsedOrder.totalPrice,
+      createdAt: parsedOrder.createdAt,
+    };
+    const orderCreateData = {
+      sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
+      ...orderSnapshot,
+    };
 
-      const shopifyOrder = await tx.shopifyOrder.upsert({
-        where: {
-          sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
-        },
-        update: {
-          sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
-          shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
-          currency: parsedOrder.currency,
-          financialStatus: parsedOrder.financialStatus,
-          paymentGatewayName: parsedOrder.paymentGatewayName,
-          taxesIncluded: parsedOrder.taxesIncluded,
-          orderTaxAmount: parsedOrder.orderTaxAmount,
-          shippingAmount: parsedOrder.shippingAmount,
-          discountAmount: parsedOrder.discountAmount,
-          orderNote: parsedOrder.orderNote,
-          orderTags: parsedOrder.orderTags,
-          customerName: parsedOrder.customerName,
-          customerEmail: parsedOrder.customerEmail,
-          customerPhone: parsedOrder.customerPhone,
-          billingFullName: parsedOrder.billingFullName,
-          billingCompany: parsedOrder.billingCompany,
-          billingPhone: parsedOrder.billingPhone,
-          billingCity: parsedOrder.billingCity,
-          billingDistrict: parsedOrder.billingDistrict,
-          billingAddress1: parsedOrder.billingAddress1,
-          billingAddress2: parsedOrder.billingAddress2,
-          billingPostcode: parsedOrder.billingPostcode,
-          shippingCountry: parsedOrder.shippingCountry,
-          shippingPostcode: parsedOrder.shippingPostcode,
-          shippingCity: parsedOrder.shippingCity,
-          shippingDistrict: parsedOrder.shippingDistrict,
-          shippingAddress: parsedOrder.shippingAddress,
-          totalPrice: parsedOrder.totalPrice,
-          createdAt: parsedOrder.createdAt,
-        },
-        create: {
-          sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
-          sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
-          shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
-          currency: parsedOrder.currency,
-          financialStatus: parsedOrder.financialStatus,
-          paymentGatewayName: parsedOrder.paymentGatewayName,
-          taxesIncluded: parsedOrder.taxesIncluded,
-          orderTaxAmount: parsedOrder.orderTaxAmount,
-          shippingAmount: parsedOrder.shippingAmount,
-          discountAmount: parsedOrder.discountAmount,
-          orderNote: parsedOrder.orderNote,
-          orderTags: parsedOrder.orderTags,
-          customerName: parsedOrder.customerName,
-          customerEmail: parsedOrder.customerEmail,
-          customerPhone: parsedOrder.customerPhone,
-          billingFullName: parsedOrder.billingFullName,
-          billingCompany: parsedOrder.billingCompany,
-          billingPhone: parsedOrder.billingPhone,
-          billingCity: parsedOrder.billingCity,
-          billingDistrict: parsedOrder.billingDistrict,
-          billingAddress1: parsedOrder.billingAddress1,
-          billingAddress2: parsedOrder.billingAddress2,
-          billingPostcode: parsedOrder.billingPostcode,
-          shippingCountry: parsedOrder.shippingCountry,
-          shippingPostcode: parsedOrder.shippingPostcode,
-          shippingCity: parsedOrder.shippingCity,
-          shippingDistrict: parsedOrder.shippingDistrict,
-          shippingAddress: parsedOrder.shippingAddress,
-          totalPrice: parsedOrder.totalPrice,
-          createdAt: parsedOrder.createdAt,
-        },
-      });
+    const result = await prisma.$transaction(async (tx) => {
+      let shopifyOrder;
+      if (input.mode === 'missing_order_only') {
+        const existingOrder = await tx.shopifyOrder.findUnique({
+          where: {
+            sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
+          },
+          select: { id: true },
+        });
+
+        if (existingOrder) {
+          throw nonRetryableFailure(
+            'existing_local_order_requires_current_state_repair',
+            'Existing local Shopify order requires Current-State Repair; retained webhook snapshot was not applied.',
+            'reconciliation_required',
+          );
+        }
+
+        shopifyOrder = await tx.shopifyOrder.create({
+          data: orderCreateData,
+        });
+      } else {
+        shopifyOrder = await tx.shopifyOrder.upsert({
+          where: {
+            sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
+          },
+          update: orderSnapshot,
+          create: orderCreateData,
+        });
+      }
 
       const allocationIds = new Set<string>();
 
@@ -885,13 +971,23 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       allocationCount: result.allocationCount,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Shopify order ingestion failed.';
+    const failure =
+      input.mode === 'missing_order_only' &&
+      readErrorCode(error) === 'P2002'
+        ? {
+            failureCode: 'existing_local_order_requires_current_state_repair' as const,
+            failureDisposition: 'NON_RETRYABLE' as const,
+            failureCategory: 'reconciliation_required' as const,
+            retryable: false,
+            error: 'Existing local Shopify order requires Current-State Repair; retained webhook snapshot was not applied.',
+          }
+        : classifyOrderIngestionException(error);
 
     await prisma.webhookEvent.update({
       where: { id: input.event.id },
       data: {
         status: 'FAILED',
-        errorMessage: message,
+        errorMessage: failure.error,
       },
     });
 
@@ -899,7 +995,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       ok: false,
       action: 'received_needs_attention',
       processingStatus: 'needs_attention',
-      error: message,
+      ...failure,
     };
   }
 }

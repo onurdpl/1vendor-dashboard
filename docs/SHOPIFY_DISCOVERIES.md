@@ -543,6 +543,19 @@ POST /fulfillments.json
 - Retry up to 3 times before failing into diagnostics or attention state.
 - Future ingestion should record enough audit data to explain whether failure was caused by missing mapping, bad payload, or repeated webhook delivery.
 
+### Orders/Create State-Aware Retry Contract
+- Same-ID `orders/create` handling is state-aware:
+  - `PROCESSED` is a successful duplicate no-op.
+  - `PROCESSING` is non-reprocessable because active versus stale ownership is not yet authoritative.
+  - `RECEIVED` and strictly eligible `FAILED` events must win one atomic conditional transition to `PROCESSING` before ingestion.
+- A same-ID delivery with a different payload hash is acknowledged as an evidence conflict and never replaces or processes the retained payload.
+- Automatic retry uses the original retained raw payload. Retry/recovery ingestion is missing-order-only: it may create an absent local order but must not update an existing local order from a stale snapshot.
+- An existing local order requires admin Current-State Repair instead of retained-payload ingestion.
+- Only explicitly classified and durably recorded transient failures return non-2xx so Shopify can retry. Validation, configuration, and unknown failures fail closed with `202` needs-attention semantics.
+- Admin failed-webhook recovery uses the same atomic event claim and retained missing-order-only behavior.
+- Operational jobs record bounded retry state but are not execution locks. No automatic OperationalJob worker exists.
+- Stale `PROCESSING`, Shopify five-second acknowledgement timing, and `RETRY_SCHEDULED` missed-order-discovery deferral remain separate unresolved issues.
+
 ## Operational Rules
 - Shopify is the commerce and order source of truth.
 - This application owns post-order operational state:

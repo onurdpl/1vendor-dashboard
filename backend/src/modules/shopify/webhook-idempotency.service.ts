@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type {
+  ClaimWebhookEventInput,
+  ClaimWebhookEventResult,
   GetOrCreateWebhookEventInput,
   GetOrCreateWebhookEventResult,
   WebhookDuplicateStrategy,
@@ -26,6 +28,10 @@ function computeIdempotencyKey(input: {
   }
 
   return `${input.shopDomain}:${input.topic}:payload:${input.payloadHash}`;
+}
+
+function comparePayloadIdentity(storedPayloadHash: string | null, incomingPayloadHash: string) {
+  return storedPayloadHash === incomingPayloadHash ? 'matched' as const : 'mismatched' as const;
 }
 
 export async function getOrCreateWebhookEvent(
@@ -58,6 +64,8 @@ export async function getOrCreateWebhookEvent(
       isDuplicate: false,
       duplicateStrategy,
       action: 'accepted',
+      incomingPayloadHash: payloadHash,
+      payloadIdentity: 'matched',
     };
   } catch (error) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
@@ -90,6 +98,42 @@ export async function getOrCreateWebhookEvent(
       isDuplicate: true,
       duplicateStrategy,
       action: 'duplicate_ignored',
+      incomingPayloadHash: payloadHash,
+      payloadIdentity: comparePayloadIdentity(existingEvent.payloadHash, payloadHash),
     };
   }
+}
+
+export const __webhookIdempotencyTesting = {
+  comparePayloadIdentity,
+  computeIdempotencyKey,
+  getDuplicateStrategy,
+};
+
+export async function claimWebhookEvent(
+  input: ClaimWebhookEventInput,
+): Promise<ClaimWebhookEventResult> {
+  const claim = await prisma.webhookEvent.updateMany({
+    where: {
+      id: input.eventId,
+      status: input.expectedStatus,
+    },
+    data: {
+      status: 'PROCESSING',
+      errorMessage: null,
+    },
+  });
+
+  if (claim.count === 1) {
+    return { acquired: true };
+  }
+
+  const event = await prisma.webhookEvent.findUnique({
+    where: { id: input.eventId },
+  });
+
+  return {
+    acquired: false,
+    event,
+  };
 }
