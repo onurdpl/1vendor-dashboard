@@ -2514,7 +2514,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
-    expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
+    expect(await within(financialSummary).findByText('Commission')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
     expect(within(financialSummary).getAllByText('TRY 4,999.00')).toHaveLength(2);
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
