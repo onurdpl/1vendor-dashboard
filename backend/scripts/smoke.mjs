@@ -177,6 +177,113 @@ async function runSmoke() {
       ],
     },
   });
+  const mockCanonicalRefunds = JSON.stringify({
+    [smokeOrderId]: {
+      displayFinancialStatus: 'PARTIALLY_REFUNDED',
+      orderTotalReceivedAmount: '345.00',
+      orderTotalReceivedCurrencyCode: 'TRY',
+      orderTotalRefundedAmount: '305.00',
+      orderTotalRefundedCurrencyCode: 'TRY',
+      orderNetPaymentAmount: '40.00',
+      orderNetPaymentCurrencyCode: 'TRY',
+      orderTotalOutstandingAmount: '0.00',
+      orderTotalOutstandingCurrencyCode: 'TRY',
+      orderTotalRefundedShippingAmount: '0.00',
+      orderTotalRefundedShippingCurrencyCode: 'TRY',
+      refundsListComplete: true,
+      refunds: [
+        {
+          refundGid: `gid://shopify/Refund/rf-${runId}`,
+          sourceShopifyRefundId: `rf-${runId}`,
+          createdAt: '2026-05-11T12:30:00.000Z',
+          updatedAt: '2026-05-11T12:30:01.000Z',
+          note: 'Customer requested refund',
+          totalRefundedAmount: '255.00',
+          totalRefundedCurrencyCode: 'TRY',
+          transactionPaginationComplete: true,
+          lineItemPaginationComplete: true,
+          transactions: [
+            {
+              transactionGid: `gid://shopify/OrderTransaction/refund-${runId}`,
+              kind: 'REFUND',
+              status: 'SUCCESS',
+              amount: '255.00',
+              currencyCode: 'TRY',
+              parentTransactionGid: `gid://shopify/OrderTransaction/parent-${runId}`,
+              createdAt: '2026-05-11T12:30:00.000Z',
+              processedAt: '2026-05-11T12:30:01.000Z',
+            },
+          ],
+          refundLineItems: [
+            {
+              refundLineItemGid: `gid://shopify/RefundLineItem/rli-a-${runId}`,
+              sourceRefundLineItemId: `rli-a-${runId}`,
+              lineItemGid: `gid://shopify/LineItem/li-a-${runId}`,
+              sourceLineItemId: `li-a-${runId}`,
+              sku: 'DH2987-100-41',
+              title: 'Nike Dunk Low',
+              name: 'Nike Dunk Low',
+              variantTitle: '41',
+              quantity: 1,
+              subtotalAmount: '120.00',
+              currencyCode: 'TRY',
+            },
+            {
+              refundLineItemGid: `gid://shopify/RefundLineItem/rli-b-${runId}`,
+              sourceRefundLineItemId: `rli-b-${runId}`,
+              lineItemGid: `gid://shopify/LineItem/li-b-${runId}`,
+              sourceLineItemId: `li-b-${runId}`,
+              sku: 'DH2987-100-40,5',
+              title: 'Nike Dunk Low',
+              name: 'Nike Dunk Low',
+              variantTitle: '40,5',
+              quantity: 1,
+              subtotalAmount: '135.00',
+              currencyCode: 'TRY',
+            },
+          ],
+        },
+        {
+          refundGid: `gid://shopify/Refund/rf-fail-${runId}`,
+          sourceShopifyRefundId: `rf-fail-${runId}`,
+          createdAt: '2026-05-11T12:35:00.000Z',
+          updatedAt: '2026-05-11T12:35:01.000Z',
+          note: null,
+          totalRefundedAmount: '50.00',
+          totalRefundedCurrencyCode: 'TRY',
+          transactionPaginationComplete: true,
+          lineItemPaginationComplete: true,
+          transactions: [
+            {
+              transactionGid: `gid://shopify/OrderTransaction/refund-fail-${runId}`,
+              kind: 'REFUND',
+              status: 'SUCCESS',
+              amount: '50.00',
+              currencyCode: 'TRY',
+              parentTransactionGid: `gid://shopify/OrderTransaction/parent-fail-${runId}`,
+              createdAt: '2026-05-11T12:35:00.000Z',
+              processedAt: '2026-05-11T12:35:01.000Z',
+            },
+          ],
+          refundLineItems: [
+            {
+              refundLineItemGid: `gid://shopify/RefundLineItem/rli-fail-${runId}`,
+              sourceRefundLineItemId: `rli-fail-${runId}`,
+              lineItemGid: `gid://shopify/LineItem/li-fail-${runId}`,
+              sourceLineItemId: `li-fail-${runId}`,
+              sku: 'UNKNOWN-REFUND-SKU',
+              title: 'Unknown Product',
+              name: 'Unknown Product',
+              variantTitle: null,
+              quantity: 1,
+              subtotalAmount: '50.00',
+              currencyCode: 'TRY',
+            },
+          ],
+        },
+      ],
+    },
+  });
   const mockFulfillmentOrders = JSON.stringify({
     [smokeOrderId]: [
       {
@@ -346,6 +453,7 @@ async function runSmoke() {
       KARGONOMI_BASE_URL: process.env.KARGONOMI_BASE_URL || 'https://app.kargonomi.com.tr/api/v1',
       KARGONOMI_API_TOKEN: process.env.KARGONOMI_API_TOKEN || 'test-token',
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
+      SHOPIFY_MOCK_CANONICAL_REFUNDS: mockCanonicalRefunds,
       SHOPIFY_MOCK_RETURN_DETAILS: mockReturnDetails,
       SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE: mockOrderFulfillmentState,
       SHOPIFY_MOCK_FULFILLMENT_ORDERS: mockFulfillmentOrders,
@@ -554,17 +662,28 @@ async function runSmoke() {
       },
       body: webhookPayload,
     });
-    if (validWebhookResponse.status !== 202) {
-      throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
+    const expectedValidWebhookStatus = dbSmokeMode === 'not_configured' ? 503 : 202;
+    if (validWebhookResponse.status !== expectedValidWebhookStatus) {
+      throw new Error(
+        `/webhooks/shopify/orders-create valid signature expected ${expectedValidWebhookStatus}, got ${validWebhookResponse.status}`,
+      );
     }
     const validWebhookJson = await validWebhookResponse.json();
     if (dbSmokeMode === 'not_configured') {
       if (
+        validWebhookJson?.ok !== false ||
         validWebhookJson?.duplicate !== false ||
-        validWebhookJson?.action !== 'accepted' ||
-        validWebhookJson?.processingStatus !== 'deferred'
+        validWebhookJson?.action !== 'persistence_unavailable' ||
+        validWebhookJson?.processingStatus !== 'not_persisted' ||
+        validWebhookJson?.retryable !== true ||
+        validWebhookJson?.topic !== 'orders/create' ||
+        validWebhookJson?.message !== 'Shopify webhook could not be durably persisted.' ||
+        validWebhookJson?.shopifyOrderId !== undefined ||
+        validWebhookJson?.affectedAllocationCount !== undefined
       ) {
-        throw new Error(`/webhooks/shopify/orders-create no-db deferred payload invalid: ${JSON.stringify(validWebhookJson)}`);
+        throw new Error(
+          `/webhooks/shopify/orders-create no-db persistence failure payload invalid: ${JSON.stringify(validWebhookJson)}`,
+        );
       }
 
       const invalidWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
@@ -1698,11 +1817,11 @@ async function runSmoke() {
 
     if (prisma) {
       await prisma.refundRecord.update({
-        where: { id: `refund-yalispor-rf-${runId}` },
+        where: { id: `refund-yalispor-rf-${runId}-alloc-yalispor-${smokeOrderId}` },
         data: { status: 'failed' },
       });
       await prisma.financeLedgerEntry.deleteMany({
-        where: { id: `fin-yalispor-refund-rf-${runId}` },
+        where: { id: `fin-yalispor-refund-rf-${runId}-alloc-yalispor-${smokeOrderId}` },
       });
       await prisma.financeLedgerEntry.deleteMany({
         where: { id: `fin-yalispor-sale-${smokeOrderId}-alloc-yalispor-${smokeOrderId}` },
@@ -1720,13 +1839,36 @@ async function runSmoke() {
     }
     const reconcileOrderJson = await reconcileOrderResponse.json();
     if (
-      !['repaired', 'needs_attention'].includes(reconcileOrderJson?.reconciliationStatus) ||
+      reconcileOrderJson?.reconciliationStatus !== 'needs_attention' ||
       !reconcileOrderJson.repairedFields?.some((field) => field.field === 'refund.status') ||
-      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry') ||
-      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'saleFinanceLedgerEntry')
+      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'saleFinanceLedgerEntry') ||
+      reconcileOrderJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry') ||
+      !reconcileOrderJson.skippedFields?.some((field) => field.field === 'financeLedgerEntry')
     ) {
       throw new Error(
-        `/admin/reconciliation/shopify-order/:shopifyOrderId should repair refund state and missing sale/refund ledger: ${JSON.stringify(reconcileOrderJson)}`,
+        `/admin/reconciliation/shopify-order/:shopifyOrderId should repair refund state and the prerequisite sale ledger before refund-ledger repair: ${JSON.stringify(reconcileOrderJson)}`,
+      );
+    }
+
+    const reconcileOrderFinanceResponse = await fetch(`${baseUrl}/admin/reconciliation/shopify-order/${smokeOrderId}`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders(adminSession),
+      },
+    });
+    if (reconcileOrderFinanceResponse.status !== 200) {
+      throw new Error(
+        `/admin/reconciliation/shopify-order/:shopifyOrderId second pass expected 200, got ${reconcileOrderFinanceResponse.status}`,
+      );
+    }
+    const reconcileOrderFinanceJson = await reconcileOrderFinanceResponse.json();
+    if (
+      reconcileOrderFinanceJson?.reconciliationStatus !== 'repaired' ||
+      !reconcileOrderFinanceJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry') ||
+      reconcileOrderFinanceJson.skippedFields?.some((field) => field.field === 'financeLedgerEntry')
+    ) {
+      throw new Error(
+        `/admin/reconciliation/shopify-order/:shopifyOrderId second pass should repair the refund ledger after sale-ledger restoration: ${JSON.stringify(reconcileOrderFinanceJson)}`,
       );
     }
 
@@ -1793,18 +1935,13 @@ async function runSmoke() {
         }),
       },
     );
-    if (!adminTrackingUpdateResponse.ok) {
-      throw new Error(
-        `/fulfillments/:allocationId/tracking admin update failed with ${adminTrackingUpdateResponse.status}`,
-      );
-    }
     const adminTrackingUpdateJson = await adminTrackingUpdateResponse.json();
     if (
-      adminTrackingUpdateJson?.trackingNumber !== 'TRACK-SPORJINAL-9001' ||
-      adminTrackingUpdateJson?.carrier !== 'MNG Kargo'
+      adminTrackingUpdateResponse.status !== 409 ||
+      adminTrackingUpdateJson?.message !== 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.'
     ) {
       throw new Error(
-        `/fulfillments/:allocationId/tracking admin response invalid: ${JSON.stringify(adminTrackingUpdateJson)}`,
+        `/fulfillments/:allocationId/tracking existing Shopify fulfillment should prevent a duplicate sync: ${adminTrackingUpdateResponse.status} ${JSON.stringify(adminTrackingUpdateJson)}`,
       );
     }
 
@@ -1875,18 +2012,13 @@ async function runSmoke() {
         }),
       },
     );
-    if (!vendorTrackingUpdateResponse.ok) {
-      throw new Error(
-        `/fulfillments/:allocationId/tracking vendor own update failed with ${vendorTrackingUpdateResponse.status}`,
-      );
-    }
     const vendorTrackingUpdateJson = await vendorTrackingUpdateResponse.json();
     if (
-      vendorTrackingUpdateJson?.fulfillmentStatus !== 'fulfillment_submitted' ||
-      vendorTrackingUpdateJson?.shippingStatus !== 'shipped'
+      vendorTrackingUpdateResponse.status !== 409 ||
+      vendorTrackingUpdateJson?.message !== 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.'
     ) {
       throw new Error(
-        `/fulfillments/:allocationId/tracking vendor own response invalid: ${JSON.stringify(vendorTrackingUpdateJson)}`,
+        `/fulfillments/:allocationId/tracking vendor update should not duplicate an existing Shopify fulfillment: ${vendorTrackingUpdateResponse.status} ${JSON.stringify(vendorTrackingUpdateJson)}`,
       );
     }
 
@@ -1903,11 +2035,12 @@ async function runSmoke() {
     }
     const updatedVendorOrderJson = await updatedVendorOrderResponse.json();
     if (
-      updatedVendorOrderJson?.trackingNumber !== 'TRACK-YALI-9001' ||
-      updatedVendorOrderJson?.carrier !== 'Yurtiçi Kargo' ||
-      updatedVendorOrderJson?.fulfillmentStatus !== 'fulfillment_submitted'
+      updatedVendorOrderJson?.trackingNumber !== null ||
+      updatedVendorOrderJson?.carrier !== null ||
+      updatedVendorOrderJson?.fulfillmentStatus !== 'partially_fulfilled' ||
+      updatedVendorOrderJson?.shippingStatus !== 'partially_shipped'
     ) {
-      throw new Error('/orders/:orderId vendor updated allocation did not persist tracking fields.');
+      throw new Error('/orders/:orderId vendor allocation should preserve canonical fulfillment state after duplicate tracking rejection.');
     }
 
     const vendorOrdersForbiddenResponse = await fetch(`${baseUrl}/orders`, {
@@ -2434,8 +2567,10 @@ async function runSmoke() {
     }
     const missingPayloadReplayJson = await missingPayloadReplayResponse.json();
     if (
-      missingPayloadReplayJson?.skippedReason !== 'Webhook payload is not available for replay.' ||
-      missingPayloadReplayJson?.replayStatus !== 'not_replayable'
+      missingPayloadReplayJson?.replayStatus !== 'not_replayable' ||
+      missingPayloadReplayJson?.processingStatus !== 'not_recoverable' ||
+      missingPayloadReplayJson?.skippedReason !==
+        'Stored webhook replay is not safe for topic orders/create. Use failed-event recovery or current-state reconciliation instead.'
     ) {
       throw new Error(
         `/admin/diagnostics/webhooks/:id/replay missing payload returned unexpected result: ${JSON.stringify(missingPayloadReplayJson)}`,
@@ -2518,8 +2653,10 @@ async function runSmoke() {
     const recoverReceivedJson = await recoverReceivedResponse.json();
     if (
       recoverReceivedJson?.ok !== true ||
-      typeof recoverReceivedJson?.recoveryStatus !== 'string' ||
-      typeof recoverReceivedJson?.processingStatus !== 'string'
+      recoverReceivedJson?.recoveryStatus !== 'failed' ||
+      recoverReceivedJson?.processingStatus !== 'needs_attention' ||
+      recoverReceivedJson?.message !==
+        'Existing local Shopify order requires Current-State Repair; retained webhook snapshot was not applied.'
     ) {
       throw new Error(
         `/admin/diagnostics/webhooks/:id/recover received event returned invalid payload: ${JSON.stringify(recoverReceivedJson)}`,
@@ -2535,18 +2672,23 @@ async function runSmoke() {
         },
       },
     );
-    if (recoverReceivedAgainResponse.status !== 409) {
+    if (recoverReceivedAgainResponse.status !== 202) {
       throw new Error(
-        `/admin/diagnostics/webhooks/:id/recover processed event expected 409, got ${recoverReceivedAgainResponse.status}`,
+        `/admin/diagnostics/webhooks/:id/recover needs-attention event retry expected 202, got ${recoverReceivedAgainResponse.status}`,
       );
     }
     const recoverReceivedAgainJson = await recoverReceivedAgainResponse.json();
     if (
-      recoverReceivedAgainJson?.skippedReason !== 'Processed webhook events are not recoverable.' ||
-      recoverReceivedAgainJson?.recoveryStatus !== 'not_recoverable'
+      recoverReceivedAgainJson?.ok !== true ||
+      recoverReceivedAgainJson?.beforeStatus !== 'FAILED' ||
+      recoverReceivedAgainJson?.afterStatus !== 'FAILED' ||
+      recoverReceivedAgainJson?.recoveryStatus !== 'failed' ||
+      recoverReceivedAgainJson?.processingStatus !== 'needs_attention' ||
+      recoverReceivedAgainJson?.message !==
+        'Existing local Shopify order requires Current-State Repair; retained webhook snapshot was not applied.'
     ) {
       throw new Error(
-        `/admin/diagnostics/webhooks/:id/recover processed event returned unexpected result: ${JSON.stringify(recoverReceivedAgainJson)}`,
+        `/admin/diagnostics/webhooks/:id/recover needs-attention retry returned unexpected result: ${JSON.stringify(recoverReceivedAgainJson)}`,
       );
     }
 
@@ -2565,7 +2707,11 @@ async function runSmoke() {
       );
     }
     const recoverMissingPayloadJson = await recoverMissingPayloadResponse.json();
-    if (recoverMissingPayloadJson?.skippedReason !== 'Webhook payload is not available for replay.') {
+    if (
+      recoverMissingPayloadJson?.recoveryStatus !== 'not_recoverable' ||
+      recoverMissingPayloadJson?.processingStatus !== 'not_recoverable' ||
+      recoverMissingPayloadJson?.skippedReason !== 'Webhook payload is not available for recovery.'
+    ) {
       throw new Error(
         `/admin/diagnostics/webhooks/:id/recover missing payload returned unexpected result: ${JSON.stringify(recoverMissingPayloadJson)}`,
       );
