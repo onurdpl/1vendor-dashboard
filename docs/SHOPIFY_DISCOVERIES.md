@@ -580,6 +580,9 @@ POST /fulfillments.json
 - A persistence failure returns retryable `503`, so Shopify is not told that an event was durably accepted when no inbox row exists. Duplicate responses are derived from retained event status and scheduling fields without mutating legacy unenrolled rows.
 - Request timing logs include the safe route name, response status, elapsed time, and response size; intake logs correlate only by internal webhook event id and outcome, never by raw payload or secret material.
 - Production fast acknowledgement was not activated as part of this implementation phase.
+- The first production fast-ack canary durably enrolled its event and returned `202`, but executor commerce processing exposed Prisma's inability to deserialize the `void` result selected from PostgreSQL `pg_advisory_xact_lock`.
+- The shared order advisory-lock query now casts that result to a Prisma-supported `text` scalar. Its order key, `hashtextextended(..., 0)`, blocking transaction-scoped lock behavior, fencing boundary, and shared executor/recovery/Current-State Repair usage remain unchanged.
+- Production fast acknowledgement remains disabled, the failed canary event has not been recovered, and async production E2E success remains pending a later controlled validation.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.

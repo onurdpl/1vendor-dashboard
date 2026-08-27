@@ -23,6 +23,10 @@ type OwnershipExistsRow = {
   owned: boolean;
 };
 
+type AdvisoryLockRow = {
+  advisoryLock: string;
+};
+
 type ClaimKind = 'RECEIVED' | 'FAILED' | 'EXPIRED_PROCESSING';
 
 export type OrdersCreateLeaseState = 'ACTIVE' | 'EXPIRED' | 'LEGACY_NO_LEASE';
@@ -524,8 +528,8 @@ export async function acquireShopifyOrderTransactionLock(
   tx: Pick<Prisma.TransactionClient, '$queryRaw'>,
   sourceShopifyOrderId: string,
 ) {
-  await tx.$queryRaw(Prisma.sql`
-    SELECT pg_advisory_xact_lock(hashtextextended(${sourceShopifyOrderId}, 0))
+  await tx.$queryRaw<AdvisoryLockRow[]>(Prisma.sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(${sourceShopifyOrderId}, 0))::text AS "advisoryLock"
   `);
 }
 

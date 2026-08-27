@@ -132,12 +132,14 @@ describe('orders/create fenced ownership primitives', () => {
   });
 
   it('exposes the shared parameterized Shopify order advisory lock for repair and ingestion', async () => {
-    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([{ advisoryLock: '' }]) };
 
     await acquireShopifyOrderTransactionLock(tx as never, '2001');
 
     const sql = tx.$queryRaw.mock.calls[0]?.[0] as { strings?: string[]; values?: unknown[] };
-    expect(sql.strings?.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(?, 0))');
+    expect(sql.strings?.join('?')).toContain(
+      'pg_advisory_xact_lock(hashtextextended(?, 0))::text AS "advisoryLock"',
+    );
     expect(sql.values).toEqual(['2001']);
   });
 
