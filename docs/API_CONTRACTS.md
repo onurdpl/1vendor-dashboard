@@ -482,6 +482,7 @@ Webhook processing lifecycle states:
 
 ### POST /webhooks/shopify/orders-create
 
+- Shared durability contract: all persistence-required Shopify webhook routes return retryable `503` with `processingStatus: "not_persisted"` when `DATABASE_URL` is absent or empty; they never return `202` for an event that could not be persisted.
 - Purpose: receive verified Shopify `orders/create` webhook payloads and ingest vendor allocations when seller info can be resolved.
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:

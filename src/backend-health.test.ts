@@ -187,4 +187,23 @@ describe('backend deployment health endpoint', () => {
       await app.close();
     }
   });
+
+  it('returns not ready when DATABASE_URL is absent', async () => {
+    stubTestEnv();
+    vi.stubEnv('DATABASE_URL', '');
+    queryRawMock.mockRejectedValueOnce(new Error('Database is not configured.'));
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/ready',
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ status: 'not_ready' });
+    } finally {
+      await app.close();
+    }
+  });
 });

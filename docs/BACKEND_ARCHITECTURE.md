@@ -155,6 +155,8 @@ Alternative for quick schema sync without migration history:
 - The enabled request path performs verification, atomically persists the retained webhook envelope and executor enrollment, and only then returns `202`.
 - The request path does not run seller lookup, create operational jobs, mutate order/allocation/finance state, or invoke the executor. The request-independent executor owns later discovery, fenced claims, processing, heartbeat, retry, and terminal handling.
 - If durable intake fails, the route returns retryable `503`; no successful acknowledgement is sent.
+- Every persistence-required Shopify webhook route now applies the same fail-closed durability rule after verification: an absent or empty `DATABASE_URL` returns retryable `503` before event, job, or commerce processing. HTTP `202` never represents an unpersisted event.
+- Orders/create, payment, cancellation, and refund routes require durable webhook and commerce/reconciliation evidence; return and order-update discovery routes require durable webhook/diagnostic or lifecycle evidence; fulfillment routes require durable webhook and allocation-sync evidence. None may acknowledge success without that persistence boundary.
 
 ## Vendor Allocation Model
 - Backend persists source Shopify order and line items.

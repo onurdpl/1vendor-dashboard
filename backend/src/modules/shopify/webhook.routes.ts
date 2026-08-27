@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { createHash } from 'node:crypto';
 import { OperationalJobStatus, OperationalJobType, type WebhookEvent } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
@@ -178,6 +178,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
     return { ok: true as const };
   };
+
+  const sendPersistenceUnavailable = (reply: FastifyReply, topic: string) => reply.code(503).send({
+    ok: false,
+    duplicate: false,
+    action: 'persistence_unavailable',
+    processingStatus: 'not_persisted',
+    retryable: true,
+    topic,
+    message: 'Shopify webhook could not be durably persisted.',
+  });
 
   const getPersistedShopDomain = (shopDomain: string | null) => shopDomain ?? 'unknown.myshopify.com';
 
@@ -477,12 +487,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       if (!env.DATABASE_URL) {
-        return reply.code(202).send({
-          ok: true,
-          duplicate: false,
-          action: 'received_pending_implementation',
-          topic,
-        });
+        return sendPersistenceUnavailable(reply, topic);
       }
 
       const idempotencyResult = await getOrCreateWebhookEvent({
@@ -586,12 +591,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       if (!env.DATABASE_URL) {
-        return reply.code(202).send({
-          ok: true,
-          duplicate: false,
-          action: 'return_signal_discovery_deferred',
-          topic,
-        });
+        return sendPersistenceUnavailable(reply, topic);
       }
 
       const idempotencyResult = await getOrCreateWebhookEvent({
@@ -697,13 +697,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       if (!env.DATABASE_URL) {
-        return reply.code(202).send({
-          ok: true,
-          duplicate: false,
-          action: 'accepted',
-          processingStatus: 'deferred',
-          topic,
-        });
+        return sendPersistenceUnavailable(reply, topic);
       }
 
       const idempotencyResult = await getOrCreateWebhookEvent({
@@ -812,12 +806,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
           message: 'Shopify orders/create intake could not be persisted.',
         });
       }
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'accepted',
-        processingStatus: 'deferred',
-      });
+      return sendPersistenceUnavailable(reply, headers.topic);
     }
 
     if (asyncAckEnabled && !asyncSourceShopifyOrderId) {
@@ -1136,12 +1125,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
 
     if (!env.DATABASE_URL) {
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'accepted',
-        processingStatus: 'deferred',
-      });
+      return sendPersistenceUnavailable(reply, topic);
     }
 
     const idempotencyResult = await getOrCreateWebhookEvent({
@@ -1228,13 +1212,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     const sourceShopifyOrderId = resolveShopifyOrderIdFromPayload(payload);
 
     if (!env.DATABASE_URL) {
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'accepted',
-        processingStatus: 'deferred',
-        topic,
-      });
+      return sendPersistenceUnavailable(reply, topic);
     }
 
     const idempotencyResult = await getOrCreateWebhookEvent({
@@ -1281,12 +1259,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     const payload = (request.body ?? {}) as ShopifyRefundsCreateWebhookPayload;
 
     if (!env.DATABASE_URL) {
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'accepted',
-        processingStatus: 'deferred',
-      });
+      return sendPersistenceUnavailable(reply, headers.topic);
     }
 
     const idempotencyResult = await getOrCreateWebhookEvent({
