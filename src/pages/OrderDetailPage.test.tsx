@@ -3491,7 +3491,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const settlement = await screen.findByLabelText('Order finance preview');
-    const openFinance = within(settlement).getByRole('link', { name: 'Open finance' });
+    const openFinance = await within(settlement).findByRole('link', { name: 'Open finance' });
     expect(openFinance).toHaveAttribute('href', expect.stringContaining('/finance'));
     expect(screen.queryByRole('heading', { name: 'Linked record' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
