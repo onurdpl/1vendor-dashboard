@@ -17,11 +17,11 @@ This checklist is for Render production deploys of the VendorOps frontend and ba
   - `CORS_ORIGIN`
   - `JWT_SECRET`
   - `JWT_EXPIRES_IN`
-  - `SHOPIFY_WEBHOOK_SECRET`
+  - `SHOPIFY_WEBHOOK_SECRET` = the Shopify app Client Secret used for webhook HMAC verification, not an Admin API access token
   - `SHOPIFY_RETURN_WEBHOOK_SECRET` when return webhooks are enabled
   - `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when fulfillment webhooks are enabled
   - `SHOPIFY_SHOP_DOMAIN`
-  - `SHOPIFY_ADMIN_ACCESS_TOKEN`
+  - `SHOPIFY_ADMIN_ACCESS_TOKEN` = the dedicated Admin API access token, not the Shopify app Client Secret
   - `SHOPIFY_API_VERSION` (live Shopify webhooks currently use stable `2026-01`; do not set production webhooks to `unstable`)
   - provider gates such as `SHIPPING_EXECUTION_ENABLED`, `KARGO_ENTEGRATOR_ENABLED`, and `LOGO_ISBASI_CREATE_ENABLED` only when intentionally live
 - Confirm production frontend variables:

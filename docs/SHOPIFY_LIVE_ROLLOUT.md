@@ -13,7 +13,11 @@ Set these in `backend/.env` or the runtime environment before live rollout:
   - current production canonical value: `xgi47p-3k.myshopify.com`
   - do not use historical aliases such as `sporgym-3.myshopify.com`
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`
+  - must contain the dedicated Shopify Admin API access token
+  - must not contain the Shopify app Client Secret
 - `SHOPIFY_WEBHOOK_SECRET`
+  - must contain the Shopify app Client Secret used to sign webhook deliveries
+  - must not contain an Admin API access token
 - `SHOPIFY_API_VERSION` (production webhooks currently use stable `2026-01`; do not use `unstable`)
 - `SHOPIFY_RETURN_WEBHOOK_BASE_URL` (required only when registering return lifecycle webhooks)
 - `SHOPIFY_ORDER_WEBHOOK_BASE_URL` (required only when registering order-create webhooks)
@@ -195,7 +199,9 @@ https://<public-domain>/webhooks/shopify/orders-create
 ```
 
 ## Webhook Secret Reminder
-- The Shopify webhook signing secret configured in Shopify must match `SHOPIFY_WEBHOOK_SECRET` in the backend environment.
+- `SHOPIFY_WEBHOOK_SECRET` must be the actual Client Secret of the Shopify app that owns the webhook subscription.
+- Do not populate `SHOPIFY_WEBHOOK_SECRET` with a generated Admin API access token.
+- Keep Admin API authentication in `SHOPIFY_ADMIN_ACCESS_TOKEN`; do not reuse either variable for both purposes.
 - Do not commit secrets to git.
 - Do not store production secrets in `.env.example`.
 
