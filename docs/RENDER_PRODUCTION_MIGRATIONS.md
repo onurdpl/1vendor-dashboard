@@ -63,6 +63,37 @@ node dist/server.js
 prisma migrate deploy
 ```
 
+## Established Databases And Fresh Database Bootstrap
+
+Production and every other established database must continue to use the normal migration deployment command:
+
+```bash
+npm run backend:db:deploy
+```
+
+Do not replace this command with the fresh database bootstrap.
+
+For a genuinely new, empty PostgreSQL database only, run:
+
+```bash
+npm run backend:db:bootstrap:fresh
+```
+
+The fresh bootstrap validates that the target database is empty, validates the maintained schema snapshot, baseline manifest, and checksums, applies the snapshot, records the manifest's historical baseline migrations as applied, and then runs normal forward migration deployment. The command fails closed when these checks fail.
+
+**Do not run fresh bootstrap against an existing or non-empty database.** The script rejects detected application objects and Prisma migration history before applying the snapshot, but operators must still treat it as a fresh-environment-only command.
+
+This separate path is required because the historical migration chain cannot be replayed cleanly from zero: `20260513191500_add_operational_signals` references `PayoutBatch` before `20260513230000_add_payout_batch_preparation` creates it. Do not edit, reorder, squash, delete, or otherwise rewrite historical migration files to repair fresh-environment creation.
+
+The maintained baseline files are:
+
+- `backend/prisma/bootstrap/current-schema.sql`
+- `backend/prisma/bootstrap/baseline-manifest.json`
+
+Whenever `backend/prisma/schema.prisma` changes, the baseline must be refreshed in the same change because the bootstrap validates its checksum. Regenerate `current-schema.sql` from the actual schema using the repository's installed Prisma version and the generation command recorded in the manifest. Then advance the manifest cutoff to the latest migration represented by that snapshot, refresh the ordered baseline migration list, and update the recorded Prisma version plus schema, snapshot, and aggregate migration-file checksums. The bootstrap validates all of this metadata and applies only migrations newer than the cutoff afterward, so incomplete or inconsistent maintenance must fail CI. Validate the refreshed baseline against a disposable empty PostgreSQL database; leave all historical migration files unchanged.
+
+Restoring an existing production backup is not fresh bootstrap: restore the backup and continue with normal migration deployment. Fresh bootstrap is appropriate in disaster recovery only when the recovery plan intentionally creates a truly empty replacement database and restores or reconstructs application data separately.
+
 ## Recommended Render Commands
 
 Use these on the backend web service, not the frontend static service.
