@@ -21,6 +21,7 @@
     "backend:lidio:marketplace-payment-probe": "npm --prefix backend run lidio:marketplace-payment-probe",
     "backend:db:generate": "npm --prefix backend run db:generate",
     "backend:db:deploy": "npm --prefix backend run db:deploy",
+    "backend:db:bootstrap:fresh": "npm --prefix backend run db:bootstrap:fresh",
     "backend:db:migrate": "npm --prefix backend run db:migrate",
     "backend:db:push": "npm --prefix backend run db:push",
     "backend:db:studio": "npm --prefix backend run db:studio",
