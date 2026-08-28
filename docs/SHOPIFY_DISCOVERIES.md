@@ -558,7 +558,7 @@ POST /fulfillments.json
 - Admin reconciliation diagnostics evaluate `orders/create` events that remain `PROCESSING` for 15 minutes from `receivedAt` and surface a deterministic supervised-review `OperationalSignal`. An unexpired lease is authoritative and is not marked stale solely because of age. Expired and legacy no-lease work remains reviewable after the threshold, while exhausted `PROCESSING` is always HIGH severity. Review remains diagnostic-only and exposes only safe generation, attempt, lease, job, and local-commerce evidence.
 - The review reuses Order State Inspector and the canonical Current-State Repair boundary. Repair remains dry-run first and explicitly confirmed; skipped or execution-blocked plans do not expose execute. Detection never calls Shopify and never mutates webhook/job or commerce state.
 - A completed exact-order Current-State Repair can resolve only the separate review signal while preserving the historically `PROCESSING` event/job evidence. Request-driven evaluation adds no scheduler, worker, schema change, or migration.
-- Shopify five-second acknowledgement can now be addressed by the default-disabled durable fast-ack path described below; production activation and live timing evidence remain intentionally pending.
+- Shopify five-second acknowledgement is addressed in production by the durable fast-ack path described below. The code default remains disabled, while the verified production environment enables both Fast ACK and its required executor.
 
 ### Orders/Create Fenced Processing Preparation
 
@@ -574,7 +574,7 @@ POST /fulfillments.json
 - Explicit admin recovery can fence a legacy `RECEIVED`/`FAILED` attempt, but a retryable legacy failure keeps `executionAvailableAt` null so the action does not enroll that historical row for automatic execution.
 - The current synchronous route does not supply a fenced execution context and does not require lease fields.
 - When explicitly enabled with a database configuration, the executor polls immediately and periodically, consumes durable retries, heartbeats active work, and drains active ownership for at most one lease during graceful shutdown.
-- Durable fast acknowledgement is implemented behind `SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED=false`. With the flag disabled, the existing synchronous route remains unchanged and does not enroll incoming events.
+- Durable fast acknowledgement has a code default of `SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED=false`. With the flag disabled, the existing synchronous route remains unchanged and does not enroll incoming events. The verified production environment overrides this default with Fast ACK enabled.
 - Enabling fast acknowledgement requires `SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true`; invalid startup configuration fails closed.
 - With both flags enabled, the verified route atomically persists the retained event envelope and enrolls it with `sourceShopifyOrderId` plus database-current `executionAvailableAt`, then returns `202` without seller-info lookup, operational-job creation, commerce processing, or direct executor invocation.
 - A persistence failure returns retryable `503`, so Shopify is not told that an event was durably accepted when no inbox row exists. Duplicate responses are derived from retained event status and scheduling fields without mutating legacy unenrolled rows.
@@ -582,7 +582,15 @@ POST /fulfillments.json
 - Production fast acknowledgement was not activated as part of this implementation phase.
 - The first production fast-ack canary durably enrolled its event and returned `202`, but executor commerce processing exposed Prisma's inability to deserialize the `void` result selected from PostgreSQL `pg_advisory_xact_lock`.
 - The shared order advisory-lock query now casts that result to a Prisma-supported `text` scalar. Its order key, `hashtextextended(..., 0)`, blocking transaction-scoped lock behavior, fencing boundary, and shared executor/recovery/Current-State Repair usage remain unchanged.
-- Production fast acknowledgement remains disabled, the failed canary event has not been recovered, and async production E2E success remains pending a later controlled validation.
+
+### Production Fast ACK Rollout Closure
+
+- A subsequent successful production canary used Shopify order `#1124` (`8131796599121`) and `WebhookEvent` `cmtbnqjx90001n92curc7387l`.
+- HMAC verification passed and the webhook returned HTTP `202` in approximately 10 ms after durable intake, before executor completion.
+- The executor claimed generation `1`, attempt `1`, processed in approximately 1,111 ms, and finalized the event as `PROCESSED`.
+- The canary created exactly one local order, the correct vendor allocation and finance state, no duplicate commerce writes, and the order was visible in the panel.
+- No additional `orders/create` or `orders/updated` HTTP `401` delivery was observed for the canary, and `/ready` returned HTTP `200`.
+- Permanent production activation was subsequently verified with `SHOPIFY_ORDERS_CREATE_ASYNC_ACK_ENABLED=true` and `SHOPIFY_ORDERS_CREATE_EXECUTOR_ENABLED=true`.
 
 ## Operational Rules
 - Shopify is the commerce and order source of truth.
