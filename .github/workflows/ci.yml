@@ -47,6 +47,14 @@ jobs:
         # Frontend tests import backend enum-backed services, so generate Prisma before any build/test step.
         run: npm run backend:db:generate
 
+      - name: Validate fresh database bootstrap
+        run: |
+          PGPASSWORD=postgres createdb --host=127.0.0.1 --username=postgres vendor_dashboard_fresh_bootstrap
+          npm run backend:db:bootstrap:fresh
+          npm --prefix backend exec -- prisma migrate status --schema backend/prisma/schema.prisma
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_fresh_bootstrap?schema=public
+
       - name: Test PostgreSQL advisory lock
         run: npm run test:postgres
         env:
