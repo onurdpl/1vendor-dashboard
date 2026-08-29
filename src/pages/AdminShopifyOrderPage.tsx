@@ -32,6 +32,7 @@ import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatOwnerLabel } from '../lib/returnOwnershipSummary';
 import { formatDateTime } from '../services/real/formatting';
+import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -1507,6 +1508,8 @@ export function AdminShopifyOrderPage() {
         const outboundRefundPending = isOutboundRefundPending(allocation);
         const fulfillmentNotRequired = isAllocationFulfillmentNotRequired(allocation);
         const latestRefundedAt = getLatestRefundedAt(allocation);
+        const assignmentBlockedAt = getLatestVendorBlockedAt(allocation.allocationStatus, allocation.assignmentHistory);
+        const isVendorBlocked = normalizeStateToken(allocation.allocationStatus) === 'vendor_blocked';
         const timelineEvents = buildAllocationTimelineEvents(allocation);
         const operationalStatusLabel = refundCompleted
           ? 'Refunded'
@@ -1888,8 +1891,12 @@ export function AdminShopifyOrderPage() {
             </div>
             <div className="meta-item">
               <span>Assignment blocked</span>
-              <strong className={allocation.assignmentBlockedAt ? '' : 'muted'}>
-                {allocation.assignmentBlockedAt ? formatDate(allocation.assignmentBlockedAt) : 'Not blocked'}
+              <strong className={isVendorBlocked && assignmentBlockedAt ? '' : 'muted'}>
+                {isVendorBlocked
+                  ? assignmentBlockedAt
+                    ? `Blocked · ${formatDate(assignmentBlockedAt)}`
+                    : 'Blocked — time unavailable'
+                  : 'Not blocked'}
               </strong>
             </div>
             <div className="meta-item">

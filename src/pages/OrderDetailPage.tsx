@@ -58,6 +58,7 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
+import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
@@ -4644,8 +4645,9 @@ export function OrderDetailPage() {
     tone: 'info',
   });
   if (hasCanonicalOperationalStory) {
-    const vendorBlockedHistory = safeArray(order.assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
-    const vendorBlockedAt = order.assignmentBlockedAt ?? vendorBlockedHistory?.createdAt ?? order.date;
+    const vendorBlockedAt = isActiveVendorBlockedOrder || isRefundResolvedVendorBlockedOrder
+      ? getLatestVendorBlockedAt(order.allocationStatus, safeArray(order.assignmentHistory))
+      : order.assignmentBlockedAt;
     const existingTimelineTitles = new Set(
       safeArray(order.timeline).map((entry) => normalizeTimelineTitle(getVendorTimelineLabel(entry.label))),
     );

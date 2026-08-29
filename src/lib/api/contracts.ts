@@ -685,11 +685,14 @@ export type KargonomiWarehouseSyncResult = {
 export type AssignmentHistoryAction =
   | 'assigned'
   | 'vendor_blocked'
+  | 'allocation_split_source_updated'
   | 'reassignment_requested'
   | 'reassigned'
   | 'admin_returned_to_vendor'
   | 'admin_note'
-  | 'cancel_refund_review_requested';
+  | 'cancel_refund_review_requested'
+  | 'economic_transfer_completed'
+  | 'economic_transfer_retry_completed';
 
 export type AssignmentHistoryEntry = {
   action: AssignmentHistoryAction;
@@ -697,7 +700,7 @@ export type AssignmentHistoryEntry = {
   toVendorId: VendorId;
   reason?: string;
   actorName: string;
-  actorRole: 'admin' | 'vendor' | 'support' | 'finance' | 'system';
+  actorRole: 'admin' | 'vendor' | 'support' | 'finance' | 'system' | 'unknown';
   createdAt: string;
 };
 

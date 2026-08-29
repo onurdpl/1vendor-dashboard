@@ -31,6 +31,7 @@ import type {
   VendorShippingConfigUpdate,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
+import { getAssignmentActorPresentation, getLatestVendorBlockedAt } from '../../lib/orderAssignmentMetadata';
 
 export type SubmitFulfillmentTrackingPayload = {
   trackingNumber: string;
@@ -449,15 +450,17 @@ function hasCancellationConflict(input: {
 }
 
 function mapAssignmentHistory(entries: OrderDetailDto['assignmentHistory']): AssignmentHistoryEntry[] {
-  return entries.map((entry) => ({
-    action: (entry.action.trim().toLowerCase() as AssignmentHistoryAction) || 'assigned',
-    fromVendorId: entry.fromVendorId,
-    toVendorId: entry.toVendorId,
-    reason: entry.reason ?? undefined,
-    actorName: entry.actorUserId ? `User ${entry.actorUserId}` : 'System',
-    actorRole: entry.actorUserId ? 'admin' : 'system',
-    createdAt: entry.createdAt,
-  }));
+  return entries.map((entry) => {
+    const actor = getAssignmentActorPresentation(entry);
+    return {
+      action: (entry.action.trim().toLowerCase() as AssignmentHistoryAction) || 'assigned',
+      fromVendorId: entry.fromVendorId,
+      toVendorId: entry.toVendorId,
+      reason: entry.reason ?? undefined,
+      ...actor,
+      createdAt: entry.createdAt,
+    };
+  });
 }
 
 function mapOrderLineItems(
@@ -575,6 +578,7 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
 function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
   const summary = mapOrderSummary(dto);
   const history = mapAssignmentHistory(dto.assignmentHistory);
+  const assignmentBlockedAt = getLatestVendorBlockedAt(summary.allocationStatus, history);
 
   return {
     ...summary,
@@ -592,6 +596,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     splitSummary: dto.splitSummary ?? null,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
+    assignmentBlockedAt,
     assignmentHistory: history,
     customer: dto.customerName?.trim() || 'Customer unavailable',
     shippingAddress: 'Shopify shipping address available in future detail sync.',
@@ -705,6 +710,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         ];
       });
 
+      const assignmentHistory = mapAssignmentHistory(allocation.assignmentHistory);
       return {
         originalVendorId: allocation.originalVendorId,
         assignedVendorId: allocation.assignedVendorId,
@@ -720,7 +726,8 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
         cancellationReason: (allocation.cancellationReason?.trim().toLowerCase() as VendorAllocationSummary['cancellationReason']) ?? undefined,
         reassignmentRequired: allocation.reassignmentRequired,
         reassignmentCandidateVendorIds: [],
-        assignmentHistory: mapAssignmentHistory(allocation.assignmentHistory),
+        assignmentBlockedAt: getLatestVendorBlockedAt(allocationStatus, assignmentHistory),
+        assignmentHistory,
         fulfillmentActionState: toFulfillmentActionState(shippingStatus),
         fulfillmentActionAvailable: !isCancelled && allocationStatus === 'active',
         fulfillmentStatus,

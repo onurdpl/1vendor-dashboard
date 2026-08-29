@@ -12,6 +12,7 @@ import type {
   ShipmentExecution,
 } from '../features/orders/api';
 import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
+import { formatDateTime } from '../services/real/formatting';
 
 const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
@@ -1229,6 +1230,35 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('Shopify sync')).not.toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
+  });
+
+  it('uses the latest recorded vendor rejection in the selected-order timeline', async () => {
+    setVendorUser();
+    const firstRejectAt = '2026-05-08T09:30:00Z';
+    const latestRejectAt = '2026-05-08T15:30:00Z';
+    const blockedOrder = buildAwaitingRejectableOrder({
+      status: 'On Hold',
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'OUT_OF_STOCK',
+      fulfillmentActionAvailable: false,
+      assignmentHistory: [
+        { action: 'vendor_blocked', fromVendorId: 'demo-vendor-a', toVendorId: 'demo-vendor-a', actorName: 'Vendor user', actorRole: 'vendor', createdAt: firstRejectAt },
+        { action: 'admin_returned_to_vendor', fromVendorId: 'demo-vendor-a', toVendorId: 'demo-vendor-a', actorName: 'Admin user', actorRole: 'admin', createdAt: '2026-05-08T11:30:00Z' },
+        { action: 'vendor_blocked', fromVendorId: 'demo-vendor-a', toVendorId: 'demo-vendor-a', actorName: 'Vendor user', actorRole: 'vendor', createdAt: latestRejectAt },
+      ],
+    });
+    listOrdersMock.mockResolvedValue([toSummary(blockedOrder)]);
+    getOrderMock.mockResolvedValue(blockedOrder);
+
+    renderOrdersPage();
+
+    const timeline = (await screen.findByRole('heading', { name: 'Order activity' })).closest('section');
+    expect(timeline).not.toBeNull();
+    const blockedRow = within(timeline as HTMLElement).getByText('Vendor blocked').closest('li');
+    expect(blockedRow).not.toBeNull();
+    expect(blockedRow).toHaveTextContent(formatDateTime(latestRejectAt, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'Not synced'));
+    expect(blockedRow).not.toHaveTextContent(formatDateTime(firstRejectAt, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'Not synced'));
   });
 
   it('shows refunded completion story for vendor-blocked orders resolved by refund', async () => {

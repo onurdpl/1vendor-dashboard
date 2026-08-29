@@ -41,6 +41,7 @@ import { getRejectUnavailableReason } from '../lib/rejectEligibility';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 import { isVendorContextRestricted } from '../lib/auth';
+import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 
 type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type OrderWorkflowTabKey = 'all' | 'awaiting-shipment' | 'blocked-allocation' | 'stale-fulfillment' | 'tracking-missing';
@@ -1035,12 +1036,15 @@ export function OrdersPage() {
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
               if (hasCanonicalTerminalStory) {
-                const vendorBlockedHistory = safeArray((selectedOrder as OrderDetail).assignmentHistory).find((entry) => entry.action === 'vendor_blocked');
+                const vendorBlockedAt = getLatestVendorBlockedAt(
+                  selectedOrder.allocationStatus,
+                  safeArray((selectedOrder as OrderDetail).assignmentHistory),
+                );
                 operationalStory.timelineEvents.forEach((event) => {
                   timelineItems.push({
                     label: isAdmin ? event.label : getVendorSafeOrderPanelCopy(event.label) ?? event.label,
                     detail: isAdmin ? event.detail : getVendorSafeOrderPanelCopy(event.detail) ?? undefined,
-                    at: vendorBlockedHistory?.createdAt ? formatDate(vendorBlockedHistory.createdAt) : undefined,
+                    at: vendorBlockedAt ? formatDate(vendorBlockedAt) : undefined,
                   });
                 });
               }

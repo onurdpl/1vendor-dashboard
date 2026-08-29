@@ -126,7 +126,26 @@ describe('real orders economic transfer service', () => {
         shipmentUpdatedAt: null,
         totalAmount: '1249.00',
         lineItems: [],
-        assignmentHistory: [],
+        assignmentHistory: [
+          {
+            id: 'history-block-1',
+            action: 'vendor_blocked',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-a',
+            reason: 'OUT_OF_STOCK',
+            actorUserId: 'vendor-user-1',
+            createdAt: '2026-06-22T08:01:00.000Z',
+          },
+          {
+            id: 'history-block-2',
+            action: 'vendor_blocked',
+            fromVendorId: 'vendor-a',
+            toVendorId: 'vendor-a',
+            reason: 'OUT_OF_STOCK',
+            actorUserId: null,
+            createdAt: '2026-06-22T08:02:00.000Z',
+          },
+        ],
         returnRecords: [],
         refundRecords: [{
           id: 'refund-1',
@@ -149,6 +168,13 @@ describe('real orders economic transfer service', () => {
     expect(apiClientGet).toHaveBeenCalledWith('/admin/orders/gid://shopify/Order/1001', { signal: undefined });
     expect(result.refundWebhookStatus).toBe('PROCESSED');
     expect(result.allocations[0]?.refundTotal).toBe('TRY\u00a01,249.00');
+    expect(result.allocations[0]).toMatchObject({
+      assignmentBlockedAt: '2026-06-22T08:02:00.000Z',
+      assignmentHistory: [
+        { actorName: 'Vendor user', actorRole: 'vendor' },
+        { actorName: 'Vendor actor unavailable', actorRole: 'vendor' },
+      ],
+    });
   });
 
   it('posts admin economic transfer payload without vendor context and maps refreshed order', async () => {

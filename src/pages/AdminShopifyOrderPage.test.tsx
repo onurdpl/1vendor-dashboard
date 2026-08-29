@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import type { ShopifyOrderBreakdown } from '../features/orders/api';
+import { formatDateTime } from '../services/real/formatting';
 import { AdminShopifyOrderPage } from './AdminShopifyOrderPage';
 
 const getAdminShopifyOrderBreakdownMock = vi.fn<() => Promise<ShopifyOrderBreakdown>>();
@@ -332,6 +333,60 @@ describe('AdminShopifyOrderPage split visibility', () => {
     sendAdminProductPanelVariantDisableDryRunMock.mockReset();
     previewAdminShopifyRefundMock.mockReset();
     executeAdminShopifyRefundMock.mockReset();
+  });
+
+  it('uses current blocked state and latest history time without contradicting the status', async () => {
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+      sourceShopifyOrderId: '7817723773265',
+      sourceShopifyOrderNumber: '#1091',
+      customer: 'Customer',
+      financialStatus: 'pending',
+      createdAt: '2026-06-21T08:00:00.000Z',
+      allocations: [
+        buildAllocation({
+          splitSummary: null,
+          assignmentHistory: [
+            { action: 'vendor_blocked', fromVendorId: 'yalispor', toVendorId: 'yalispor', actorName: 'Vendor user', actorRole: 'vendor', createdAt: '2026-06-21T10:00:00.000Z' },
+            { action: 'admin_returned_to_vendor', fromVendorId: 'yalispor', toVendorId: 'yalispor', actorName: 'Admin user', actorRole: 'admin', createdAt: '2026-06-21T11:00:00.000Z' },
+            { action: 'vendor_blocked', fromVendorId: 'yalispor', toVendorId: 'yalispor', actorName: 'Vendor user', actorRole: 'vendor', createdAt: '2026-06-21T15:00:00.000Z' },
+          ],
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText(/Blocked ·/);
+    expect(screen.queryByText('Not blocked')).not.toBeInTheDocument();
+    expect(screen.getByText(/Blocked ·/)).toHaveTextContent(formatDateTime('2026-06-21T15:00:00.000Z', { dateStyle: 'medium', timeStyle: 'short' }));
+  });
+
+  it('shows unavailable block time for blocked history gaps and hides old history for active state', async () => {
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+      sourceShopifyOrderId: '7817723773265',
+      sourceShopifyOrderNumber: '#1091',
+      customer: 'Customer',
+      financialStatus: 'pending',
+      createdAt: '2026-06-21T08:00:00.000Z',
+      allocations: [buildAllocation({ splitSummary: null, assignmentHistory: [] })],
+    });
+
+    const view = renderPage();
+    expect(await screen.findByText('Blocked — time unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Not blocked')).not.toBeInTheDocument();
+
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
+      sourceShopifyOrderId: '7817723773265',
+      sourceShopifyOrderNumber: '#1091',
+      customer: 'Customer',
+      financialStatus: 'pending',
+      createdAt: '2026-06-21T08:00:00.000Z',
+      allocations: [buildAllocation({ allocationStatus: 'active', status: 'Pending', reassignmentRequired: false, splitSummary: null, assignmentHistory: [{ action: 'vendor_blocked', fromVendorId: 'yalispor', toVendorId: 'yalispor', actorName: 'Vendor user', actorRole: 'vendor', createdAt: '2026-06-21T10:00:00.000Z' }] })],
+    });
+    view.unmount();
+    renderPage();
+    expect(await screen.findByText('Not blocked')).toBeInTheDocument();
+    expect(screen.queryByText(/Blocked ·/)).not.toBeInTheDocument();
   });
 
   it('loads admin order detail for an authenticated admin even when vendor context is missing', async () => {

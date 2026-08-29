@@ -125,6 +125,9 @@ Webhook processing lifecycle states:
 - In the assigned-vendor model, vendor-facing order endpoints should scope by `assignedVendorId`.
 - Allocation workflow fields include `allocationStatus`, `cancellationReason`, `reassignmentRequired`, and optional `assignmentBlockedAt`.
 - Allocation records should include `assignmentHistory` for auditability (`assigned`, `vendor_blocked`, `reassignment_requested`, `reassigned`).
+- Vendor-block presentation uses raw `allocationStatus === VENDOR_BLOCKED` as the blocked-state authority. The optional displayed block time is the latest valid recorded `vendor_blocked` history timestamp. A missing timestamp means the block time is unavailable; it must not be presented as "Not blocked", and order/allocation create or update times must not be substituted.
+- Assignment-history actor authority is presentation-only metadata derived from known action writers (vendor, admin, or system). An actor ID alone does not establish admin authority, and a missing actor ID does not establish system authority. Unknown or legacy actions use an unavailable/unknown actor presentation.
+- These timestamp and actor labels have no workflow authority and do not change allocation, reassignment, fulfillment, or finance behavior.
 - Vendor-reported blocking reasons may include `out_of_stock`, `vendor_cancelled`, `damaged_inventory`, or `fulfillment_issue`.
 - Blocked allocations (`vendor_blocked`, `pending_reassignment`) must not allow fulfillment execution until reassignment or recovery.
 

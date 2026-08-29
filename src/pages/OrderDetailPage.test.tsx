@@ -2802,6 +2802,50 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
+  it('uses the latest recorded reject time and never falls back to order creation time', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const firstRejectAt = '2026-05-15T10:00:00.000Z';
+    const latestRejectAt = '2026-05-15T15:00:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      reassignmentRequired: true,
+      assignmentHistory: [
+        { action: 'vendor_blocked', fromVendorId: 'sporjinal', toVendorId: 'sporjinal', actorName: 'Vendor user', actorRole: 'vendor', createdAt: firstRejectAt },
+        { action: 'admin_returned_to_vendor', fromVendorId: 'sporjinal', toVendorId: 'sporjinal', actorName: 'Admin user', actorRole: 'admin', createdAt: '2026-05-15T11:00:00.000Z' },
+        { action: 'vendor_blocked', fromVendorId: 'sporjinal', toVendorId: 'sporjinal', actorName: 'Vendor user', actorRole: 'vendor', createdAt: latestRejectAt },
+      ],
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order blocked from shipment');
+    const row = getOrderActivityRow('Order blocked from shipment');
+    expect(row).toHaveTextContent(formatTimelineDateForTest(latestRejectAt));
+    expect(row).not.toHaveTextContent(formatTimelineDateForTest(firstRejectAt));
+
+    cleanup();
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      cancellationReason: 'OUT_OF_STOCK',
+      reassignmentRequired: true,
+      assignmentHistory: [],
+    });
+    renderOrderDetail();
+    await screen.findByText('Order blocked from shipment');
+    expect(getOrderActivityRow('Order blocked from shipment')).not.toHaveTextContent(formatTimelineDateForTest(orderWithShipmentSummary.date));
+  });
+
   it('keeps local Held finance state separate from a paid Shopify snapshot', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
