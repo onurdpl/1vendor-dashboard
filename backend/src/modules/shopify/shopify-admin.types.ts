@@ -481,6 +481,24 @@ export type CancelFulfillmentOrderResult = {
   userErrors: ShopifyUserError[];
 };
 
+export type CancelFulfillmentResult = {
+  fulfillmentId: string;
+  fulfillmentStatus: string;
+  shopifyOrderId: string;
+  outcome: 'cancelled' | 'already_cancelled' | 'rejected' | 'ambiguous';
+  confirmed: boolean;
+  mutationAttempted: boolean;
+  reason:
+    | 'canonical_cancelled'
+    | 'canonical_not_cancelled'
+    | 'already_cancelled'
+    | 'shopify_user_errors'
+    | 'mutation_result_unconfirmed'
+    | 'mutation_request_failed';
+  userErrors: ShopifyUserError[];
+  source: 'shopify_admin';
+};
+
 export type CreateFulfillmentTrackingInput = {
   allocationId: string;
   shopifyOrderId: string;

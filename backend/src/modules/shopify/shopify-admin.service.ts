@@ -4,6 +4,7 @@ import type {
   CanonicalShopifyOrderSnapshot,
   CanonicalShopifyRefundSnapshot,
   CanonicalShopifyReturnSnapshot,
+  CancelFulfillmentResult,
   CancelFulfillmentOrderResult,
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
@@ -571,6 +572,29 @@ type FulfillmentOrderCancelMutationResponse = {
     replacementFulfillmentOrder?: {
       id: string;
       status: string | null;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
+  } | null;
+};
+
+type FulfillmentCancellationTargetQueryResponse = {
+  fulfillment: {
+    id: string;
+    status: string;
+    order: {
+      id: string;
+    };
+  } | null;
+};
+
+type FulfillmentCancelMutationResponse = {
+  fulfillmentCancel?: {
+    fulfillment?: {
+      id: string;
+      status: string;
     } | null;
     userErrors?: Array<{
       field?: string[] | null;
@@ -3066,6 +3090,195 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function fetchCanonicalFulfillmentForCancellation(fulfillmentGid: string): Promise<{
+    fulfillmentId: string;
+    fulfillmentStatus: string;
+    shopifyOrderId: string;
+  }> {
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN!,
+        },
+        body: JSON.stringify({
+          query: `
+            query FulfillmentCancellationTarget($id: ID!) {
+              fulfillment(id: $id) {
+                id
+                status
+                order {
+                  id
+                }
+              }
+            }
+          `,
+          variables: { id: fulfillmentGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify fulfillment cancellation state fetch failed with status ${response.status}.`);
+    }
+
+    const json = await parseCanonicalShopifyResponse<FulfillmentCancellationTargetQueryResponse>(response);
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify fulfillment cancellation state fetch returned GraphQL errors: ${json.errors
+          .map((error) => error.message)
+          .join('; ')}`,
+      );
+    }
+
+    const target = json.data?.fulfillment;
+    if (!target?.id || target.id !== fulfillmentGid || !target.status || !target.order?.id) {
+      throw new CanonicalShopifySnapshotParseError('Shopify fulfillment cancellation target was incomplete or mismatched.');
+    }
+
+    const orderState = await fetchOrderFulfillmentState(target.order.id);
+    const canonicalFulfillment = orderState.fulfillments.find((fulfillment) => fulfillment.id === fulfillmentGid);
+    if (!canonicalFulfillment?.status) {
+      throw new CanonicalShopifySnapshotParseError(
+        'Shopify order fulfillment state did not contain the requested fulfillment.',
+      );
+    }
+    if (canonicalFulfillment.status !== target.status) {
+      throw new CanonicalShopifySnapshotParseError('Shopify fulfillment cancellation state was inconsistent.');
+    }
+
+    return {
+      fulfillmentId: canonicalFulfillment.id,
+      fulfillmentStatus: canonicalFulfillment.status,
+      shopifyOrderId: orderState.orderGid,
+    };
+  }
+
+  async function cancelFulfillment(fulfillmentGid: string): Promise<CancelFulfillmentResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify fulfillment cancel is not configured.');
+    }
+    if (!/^gid:\/\/shopify\/Fulfillment\/[1-9]\d*$/.test(fulfillmentGid)) {
+      throw new Error('Shopify fulfillment cancel requires a Fulfillment GID.');
+    }
+
+    const before = await fetchCanonicalFulfillmentForCancellation(fulfillmentGid);
+    if (before.fulfillmentStatus === 'CANCELLED') {
+      return {
+        ...before,
+        outcome: 'already_cancelled',
+        confirmed: true,
+        mutationAttempted: false,
+        reason: 'already_cancelled',
+        userErrors: [],
+        source: 'shopify_admin',
+      };
+    }
+
+    let mutationFailure = false;
+    let mutationResponseConfirmed = false;
+    try {
+      const response = await fetch(
+        `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+          },
+          body: JSON.stringify({
+            query: `
+              mutation FulfillmentCancel($id: ID!) {
+                fulfillmentCancel(id: $id) {
+                  fulfillment {
+                    id
+                    status
+                  }
+                  userErrors {
+                    field
+                    message
+                  }
+                }
+              }
+            `,
+            variables: { id: fulfillmentGid },
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        mutationFailure = true;
+      } else {
+        const json = await parseCanonicalShopifyResponse<FulfillmentCancelMutationResponse>(response);
+        if (json.errors?.length) {
+          mutationFailure = true;
+        } else {
+          const payload = json.data?.fulfillmentCancel;
+          const userErrors = normalizeUserErrors(payload?.userErrors);
+          if (userErrors.length > 0) {
+            return {
+              ...before,
+              outcome: 'rejected',
+              confirmed: false,
+              mutationAttempted: true,
+              reason: 'shopify_user_errors',
+              userErrors,
+              source: 'shopify_admin',
+            };
+          }
+          mutationResponseConfirmed =
+            payload?.fulfillment?.id === fulfillmentGid && payload.fulfillment.status === 'CANCELLED';
+        }
+      }
+    } catch {
+      mutationFailure = true;
+    }
+
+    try {
+      const after = await fetchCanonicalFulfillmentForCancellation(fulfillmentGid);
+      if (after.fulfillmentStatus === 'CANCELLED') {
+        return {
+          ...after,
+          outcome: 'cancelled',
+          confirmed: true,
+          mutationAttempted: true,
+          reason: 'canonical_cancelled',
+          userErrors: [],
+          source: 'shopify_admin',
+        };
+      }
+      return {
+        ...after,
+        outcome: 'ambiguous',
+        confirmed: false,
+        mutationAttempted: true,
+        reason: mutationFailure
+          ? 'mutation_request_failed'
+          : mutationResponseConfirmed
+            ? 'canonical_not_cancelled'
+            : 'mutation_result_unconfirmed',
+        userErrors: [],
+        source: 'shopify_admin',
+      };
+    } catch {
+      return {
+        ...before,
+        outcome: 'ambiguous',
+        confirmed: false,
+        mutationAttempted: true,
+        reason: mutationFailure
+          ? 'mutation_request_failed'
+          : mutationResponseConfirmed
+            ? 'canonical_not_cancelled'
+            : 'mutation_result_unconfirmed',
+        userErrors: [],
+        source: 'shopify_admin',
+      };
+    }
+  }
+
   async function createShopifyRefund(input: CreateShopifyRefundInput): Promise<CreateShopifyRefundResult> {
     if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
       throw new Error('Shopify refund create is not configured.');
@@ -4082,6 +4295,7 @@ export function createShopifyAdminService(env: AppEnv) {
     syncReturnShipping,
     fetchFulfillmentOrders,
     fetchFulfillmentOrdersForCancellationClassification,
+    cancelFulfillment,
     cancelFulfillmentOrder,
     createShopifyRefund,
     fetchOrderFulfillmentState,
