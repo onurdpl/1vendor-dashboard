@@ -15,7 +15,7 @@ import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import type { OperationsQueueTypeFilter, VendorBlockedQueueScope } from './operations.types.js';
 
 const OPERATIONS_QUEUE_TYPE_FILTER_ERROR =
-  'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, or finance_integrity_alert.';
+  'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, finance_integrity_alert, or customer_cancellation_exception.';
 const VENDOR_BLOCKED_SCOPE_ERROR = 'scope must be active or resolved and may only be used with type=vendor_blocked.';
 
 function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFilter | undefined {
@@ -36,7 +36,8 @@ function resolveOperationsQueueTypeFilter(query: unknown): OperationsQueueTypeFi
     normalized !== 'awaiting_shipment' &&
     normalized !== 'return_review' &&
     normalized !== 'finance_review' &&
-    normalized !== 'finance_integrity_alert'
+    normalized !== 'finance_integrity_alert' &&
+    normalized !== 'customer_cancellation_exception'
   ) {
     throw new Error(OPERATIONS_QUEUE_TYPE_FILTER_ERROR);
   }

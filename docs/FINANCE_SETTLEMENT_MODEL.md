@@ -74,6 +74,8 @@ A persisted pending customer-cancellation item is a non-monetary, allocation-sco
 
 The hold creates no ledger, refund, vendor-debt, settlement-payment, payout-payment, or Shopify mutation. It disappears when the existing customer-cancellation lifecycle no longer grants pending hold authority; any separate refund, return, Vendor Reject, reconciliation, or post-payment rule still applies. Historical paid records are not rewritten.
 
+Admin Operations surfaces only cancellation exceptions that cannot safely finish automatically; visibility does not release the finance hold, retry a job, or create a refund. `CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED` remains production-disabled unless separately authorized. The Customer Account extension is not live, and Shopify's native cancellation behavior is unchanged.
+
 ### Real Values Today
 
 These values are based on persisted operational records:

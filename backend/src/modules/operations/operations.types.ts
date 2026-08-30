@@ -5,6 +5,7 @@ export type OperationsQueueItemType =
   | 'refund_attention'
   | 'finance_review'
   | 'finance_integrity_alert'
+  | 'customer_cancellation_exception'
   | 'operational_signal'
   | 'automation_action';
 
@@ -13,7 +14,8 @@ export type OperationsQueueTypeFilter =
   | 'awaiting_shipment'
   | 'return_review'
   | 'finance_review'
-  | 'finance_integrity_alert';
+  | 'finance_integrity_alert'
+  | 'customer_cancellation_exception';
 
 export type VendorBlockedQueueScope = 'active' | 'resolved';
 
@@ -48,6 +50,20 @@ export type OperationsQueueItemDto = {
   settlementStatus?: string | null;
   vendorAllocationId?: string | null;
   allocationEconomicTransferId?: string | null;
+  customerCancellationRequestId?: string;
+  customerCancellationItemId?: string;
+  customerCancellationReason?: string;
+  customerCancellationItemStatus?: string;
+  customerCancellationExceptionReason?: string;
+  requestedQuantity?: number;
+  resolvedQuantity?: number | null;
+  itemSku?: string | null;
+  itemTitle?: string | null;
+  requestedAt?: string;
+  refundAttemptStatus?: string | null;
+  operationalJobStatus?: string | null;
+  shipmentHoldActive?: boolean;
+  financeHoldActive?: boolean;
 };
 
 export type OperationsQueueSummaryDto = {
@@ -62,6 +78,7 @@ export type OperationsQueueSummaryDto = {
   refundAttention: number;
   financeReview: number;
   financeIntegrityAlerts: number;
+  customerCancellationExceptions?: number;
   operationalSignals: number;
   automationActions: number;
 };

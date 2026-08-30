@@ -32,6 +32,9 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     count: vi.fn(),
   },
+  customerCancellationRequestItem: {
+    findMany: vi.fn(),
+  },
 }));
 const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const generateAutomationActionsForSignalsMock = vi.hoisted(() => vi.fn());
@@ -249,6 +252,7 @@ describe('admin operations summary counts', () => {
     prismaMock.shipmentExecution.count.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.financeLedgerEntry.count.mockReset();
+    prismaMock.customerCancellationRequestItem.findMany.mockReset();
     evaluateOperationalSignalsMock.mockReset();
     generateAutomationActionsForSignalsMock.mockReset();
 
@@ -263,6 +267,7 @@ describe('admin operations summary counts', () => {
     prismaMock.shipmentExecution.count.mockResolvedValue(0);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
     prismaMock.financeLedgerEntry.count.mockResolvedValue(0);
+    prismaMock.customerCancellationRequestItem.findMany.mockResolvedValue([]);
     evaluateOperationalSignalsMock.mockResolvedValue([]);
     generateAutomationActionsForSignalsMock.mockResolvedValue([]);
   });

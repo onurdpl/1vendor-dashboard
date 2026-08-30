@@ -34,6 +34,7 @@ const SHIPMENT_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const RETURN_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const FINANCE_REVIEW_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const FINANCE_INTEGRITY_QUEUE_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
+const CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 const SUPPORT_ATTENTION_PAGE_SIZE = AUTHORITATIVE_OPERATIONS_TABLE_PAGE_SIZE;
 
 function formatDate(value: string) {
@@ -295,6 +296,7 @@ export function AdminOperationsQueuePage() {
   const [returnReviewQueueOffset, setReturnReviewQueueOffset] = useState(0);
   const [financeReviewQueueOffset, setFinanceReviewQueueOffset] = useState(0);
   const [financeIntegrityQueueOffset, setFinanceIntegrityQueueOffset] = useState(0);
+  const [customerCancellationExceptionOffset, setCustomerCancellationExceptionOffset] = useState(0);
   const [supportAttentionOffset, setSupportAttentionOffset] = useState(0);
   const appReadiness = useAppReadiness();
   const pageReadiness = getPageReadinessState(appReadiness, {
@@ -476,6 +478,31 @@ export function AdminOperationsQueuePage() {
       endpoint: '/admin/support/tickets?attention=true',
     },
   );
+  const {
+    data: customerCancellationExceptionDashboard,
+    isLoading: isCustomerCancellationExceptionLoading,
+    isFetching: isCustomerCancellationExceptionFetching,
+    isError: isCustomerCancellationExceptionError,
+    error: customerCancellationExceptionError,
+    refetch: refetchCustomerCancellationExceptions,
+  } = useQueryResource(
+    queryKeys.admin.operations.queuePage(
+      CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE,
+      customerCancellationExceptionOffset,
+      'customer_cancellation_exception',
+    ),
+    ({ signal }) => runtimeServices.operations.dashboard({
+      signal,
+      limit: CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE,
+      offset: customerCancellationExceptionOffset,
+      type: 'customer_cancellation_exception',
+    }),
+    {
+      enabled: pageReadiness.ready,
+      routeName: 'AdminOperationsQueuePage',
+      endpoint: '/admin/operations?type=customer_cancellation_exception',
+    },
+  );
 
   const dataView = data ?? {
     generatedAt: new Date().toISOString(),
@@ -563,6 +590,16 @@ export function AdminOperationsQueuePage() {
   const canPageFinanceIntegrityBack = financeIntegrityQueueOffset > 0;
   const canPageFinanceIntegrityForward =
     financeIntegrityQueueOffset + FINANCE_INTEGRITY_QUEUE_PAGE_SIZE < totalFinanceIntegrityQueueRows;
+  const customerCancellationExceptionItems = safeArray(customerCancellationExceptionDashboard?.items);
+  const totalCustomerCancellationExceptions = customerCancellationExceptionDashboard?.summary.total ?? 0;
+  const customerCancellationPageStart = totalCustomerCancellationExceptions > 0 ? customerCancellationExceptionOffset + 1 : 0;
+  const customerCancellationPageEnd = Math.min(
+    customerCancellationExceptionOffset + CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE,
+    totalCustomerCancellationExceptions,
+  );
+  const canPageCustomerCancellationBack = customerCancellationExceptionOffset > 0;
+  const canPageCustomerCancellationForward =
+    customerCancellationExceptionOffset + CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE < totalCustomerCancellationExceptions;
 
   useEffect(() => {
     if (!shipmentQueueDashboard || shipmentQueueOffset === 0 || shipmentQueueOffset < totalShipmentQueueRows) {
@@ -616,6 +653,19 @@ export function AdminOperationsQueuePage() {
     );
     setFinanceIntegrityQueueOffset(lastPageOffset);
   }, [financeIntegrityQueueDashboard, financeIntegrityQueueOffset, totalFinanceIntegrityQueueRows]);
+
+  useEffect(() => {
+    if (
+      !customerCancellationExceptionDashboard ||
+      customerCancellationExceptionOffset === 0 ||
+      customerCancellationExceptionOffset < totalCustomerCancellationExceptions
+    ) return;
+    setCustomerCancellationExceptionOffset(Math.max(
+      0,
+      Math.floor((Math.max(totalCustomerCancellationExceptions, 1) - 1) / CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE) *
+        CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE,
+    ));
+  }, [customerCancellationExceptionDashboard, customerCancellationExceptionOffset, totalCustomerCancellationExceptions]);
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -756,6 +806,53 @@ export function AdminOperationsQueuePage() {
                 </OperationalTable>
               ) : (
                 <EmptyStatePanel title="No support attention tickets" description="No unresolved support tickets need operator attention." />
+              )}
+            </article>
+
+            <article className="attention-card customer-cancellation-exception-list" id="customer-cancellation-exception-list">
+              <div className="attention-card-heading">
+                <div>
+                  <p className="eyebrow">Customer cancellation</p>
+                  <h3>Customer Cancellation Exceptions</h3>
+                  <span>Exception-only, item-scoped Admin review · {customerCancellationPageStart}-{customerCancellationPageEnd} of {totalCustomerCancellationExceptions}</span>
+                </div>
+              </div>
+              <div className="vendor-blocked-page-controls">
+                <span>Active exceptions {totalCustomerCancellationExceptions}</span>
+                <button type="button" className="button button-secondary button-link button-compact"
+                  onClick={() => setCustomerCancellationExceptionOffset(Math.max(0, customerCancellationExceptionOffset - CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE))}
+                  disabled={!canPageCustomerCancellationBack}>Previous</button>
+                <button type="button" className="button button-secondary button-link button-compact"
+                  onClick={() => setCustomerCancellationExceptionOffset(customerCancellationExceptionOffset + CUSTOMER_CANCELLATION_EXCEPTION_PAGE_SIZE)}
+                  disabled={!canPageCustomerCancellationForward}>Next</button>
+              </div>
+              {isCustomerCancellationExceptionError ? (
+                <SectionErrorRetry title="Customer cancellation exceptions unavailable"
+                  description={customerCancellationExceptionError ?? 'The exception queue could not be loaded.'}
+                  onRetry={() => void refetchCustomerCancellationExceptions()} />
+              ) : isCustomerCancellationExceptionLoading || isCustomerCancellationExceptionFetching ? (
+                <SectionSkeleton title="Loading cancellation exceptions" description="Fetching persisted item-scoped exception evidence." />
+              ) : customerCancellationExceptionItems.length ? (
+                <OperationalTable columns={['Order', 'Vendor', 'Item', 'Quantity', 'Request', 'Status', 'Exception', 'Processing', 'Holds', 'Requested', 'Action']}
+                  className="customer-cancellation-exception-table">
+                  {customerCancellationExceptionItems.map((item) => (
+                    <OperationalTableRow key={item.id}>
+                      <strong>{item.relatedShopifyOrderNumber ? `#${String(item.relatedShopifyOrderNumber).replace(/^#/, '')}` : 'Unknown'}</strong>
+                      <strong>{item.vendorName ?? item.vendorId}</strong>
+                      <span><strong>{item.itemTitle ?? 'Order item'}</strong><small>{item.itemSku ?? 'No SKU'}</small></span>
+                      <strong>{item.requestedQuantity ?? '—'}</strong>
+                      <strong>{item.customerCancellationReason ? safeStatusLabel(item.customerCancellationReason) : 'Unknown'}</strong>
+                      <strong>{item.customerCancellationItemStatus ? safeStatusLabel(item.customerCancellationItemStatus) : safeStatusLabel(item.status)}</strong>
+                      <strong>{item.customerCancellationExceptionReason ? safeStatusLabel(item.customerCancellationExceptionReason) : 'Unknown'}</strong>
+                      <span><strong>{item.refundAttemptStatus ? `Attempt: ${safeStatusLabel(item.refundAttemptStatus)}` : 'No refund attempt'}</strong><small>{item.operationalJobStatus ? `Job: ${safeStatusLabel(item.operationalJobStatus)}` : 'No job'}</small></span>
+                      <span><strong>Shipment: {item.shipmentHoldActive ? 'held' : 'not held'}</strong><small>Finance: {item.financeHoldActive ? 'held' : 'not held'}</small></span>
+                      <strong>{formatDate(item.requestedAt ?? item.createdAt)}</strong>
+                      <OperationalActionGroup>{item.actionTo ? actionLink(item.actionTo, 'Open order') : <span className="queue-muted-action">No admin order</span>}</OperationalActionGroup>
+                    </OperationalTableRow>
+                  ))}
+                </OperationalTable>
+              ) : (
+                <EmptyStatePanel title="No customer cancellation exceptions" description="Clean pending and successfully resolved requests do not appear here." />
               )}
             </article>
 

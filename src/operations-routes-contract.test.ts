@@ -74,6 +74,22 @@ describe('operations route contract', () => {
     expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 100, offset: 0, type: undefined });
   });
 
+  it('keeps customer cancellation exception evidence admin-only and passes the dedicated filter', async () => {
+    getAdminOperationsQueueMock.mockResolvedValue({ summary: { total: 1 }, items: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => gets.set(path, handler)),
+      post: vi.fn(),
+    };
+    const reply = { code: vi.fn((status: number) => ({ send: vi.fn((body: unknown) => ({ status, body })) })) };
+    registerOperationsRoutes(app as never, {} as never);
+
+    const handler = gets.get('/admin/operations');
+    expect(await handler?.({ authUser: { role: 'vendor' }, query: { type: 'customer_cancellation_exception' } }, reply)).toEqual({ status: 403, body: { message: 'Forbidden' } });
+    expect(await handler?.({ authUser: { role: 'admin' }, query: { type: 'customer_cancellation_exception' } }, reply)).toEqual({ summary: { total: 1 }, items: [] });
+    expect(getAdminOperationsQueueMock).toHaveBeenCalledWith({ limit: 100, offset: 0, type: 'customer_cancellation_exception' });
+  });
+
   it('passes the supported vendor-blocked queue type filter to the operations service', async () => {
     getAdminOperationsQueueMock.mockResolvedValueOnce({ summary: { total: 7 }, items: [] });
     const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: unknown) => unknown>();
@@ -388,7 +404,7 @@ describe('operations route contract', () => {
     registerOperationsRoutes(app as never, {} as never);
     const response = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: { type: 'shipment' } }, reply);
 
-    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, or finance_integrity_alert.' } });
+    expect(response).toEqual({ status: 400, body: { message: 'type must be vendor_blocked, awaiting_shipment, return_review, finance_review, finance_integrity_alert, or customer_cancellation_exception.' } });
     expect(getAdminOperationsQueueMock).not.toHaveBeenCalled();
   });
 

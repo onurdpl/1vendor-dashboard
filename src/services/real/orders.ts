@@ -227,6 +227,7 @@ type AdminOrderBreakdownDto = {
     enabled: boolean;
     dryRun: boolean;
   };
+  customerCancellations?: ShopifyOrderBreakdown['customerCancellations'];
   allocations: Array<{
     id: string;
     vendorId: string;
@@ -662,6 +663,7 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
     refundWebhookStatus: response.order.refundWebhookStatus,
     createdAt: response.order.createdAt,
     productPanelVariantDisableMode: response.productPanelVariantDisableMode,
+    customerCancellations: response.customerCancellations ?? [],
     allocations: response.allocations.map((allocation): VendorAllocationSummary => {
       const allocationStatus = toAllocationStatus(allocation.allocationStatus);
       const isCancelled = allocation.isCancelled === true || Boolean(allocation.cancelledAt ?? response.order.cancelledAt);

@@ -583,6 +583,34 @@ function buildFinanceReviewQueueDashboard(items: OperationsQueueItem[], total = 
   };
 }
 
+function buildCustomerCancellationExceptionItem(): OperationsQueueItem {
+  return {
+    id: 'customer-cancellation-exception-item-1',
+    type: 'customer_cancellation_exception',
+    severity: 'high',
+    title: 'Customer cancellation exception',
+    description: 'Item requires Admin review.',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    relatedShopifyOrderId: 'gid://shopify/Order/1125',
+    relatedShopifyOrderNumber: '#1125',
+    status: 'APPROVED_FOR_REFUND',
+    createdAt: '2026-08-30T10:00:00.000Z',
+    actionLabel: 'Open order',
+    actionTo: '/admin/orders/gid://shopify/Order/1125',
+    customerCancellationReason: 'CUSTOMER_CHANGED_MIND',
+    customerCancellationItemStatus: 'APPROVED_FOR_REFUND',
+    customerCancellationExceptionReason: 'SHOPIFY_REFUND_ATTEMPT_FAILED',
+    requestedQuantity: 1,
+    itemSku: 'SKU-1125',
+    itemTitle: 'Test item',
+    refundAttemptStatus: 'FAILED',
+    operationalJobStatus: 'FAILED',
+    shipmentHoldActive: true,
+    financeHoldActive: true,
+  };
+}
+
 function buildSupportAttentionTicket(overrides: Partial<SupportAttentionTicket> = {}): SupportAttentionTicket {
   return {
     id: 'ticket-1',
@@ -643,6 +671,9 @@ function buildDefaultQueueDashboardForOptions(options?: { type?: OperationsQueue
   }
   if (options?.type === 'finance_integrity_alert') {
     return buildFinanceIntegrityQueueDashboard([], 0);
+  }
+  if (options?.type === 'customer_cancellation_exception') {
+    return buildQueueDashboard([], 0);
   }
   return buildQueueDashboard([buildVendorBlockedQueueItem('#1091', 0)]);
 }
@@ -778,12 +809,32 @@ describe('AdminOperationsQueuePage attention center', () => {
       Array.from(document.querySelectorAll('.attention-main-column .attention-card-heading h3')).map((heading) => heading.textContent),
     ).toEqual([
       'Support attention',
+      'Customer Cancellation Exceptions',
       'Vendor Blocked Allocations',
       'Shipment attention',
       'Return review',
       'Finance Review',
       'Finance Integrity',
     ]);
+  });
+
+  it('renders exception-only customer cancellation evidence without resolution actions', async () => {
+    attentionMock.mockResolvedValueOnce(dashboard);
+    queueDashboardMock.mockImplementation(async (options) =>
+      options?.type === 'customer_cancellation_exception'
+        ? buildQueueDashboard([buildCustomerCancellationExceptionItem()], 1)
+        : buildDefaultQueueDashboardForOptions(options),
+    );
+
+    renderPage();
+
+    await screen.findByText('#1125');
+    const section = screen.getByRole('heading', { name: 'Customer Cancellation Exceptions' }).closest('article');
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByText('#1125')).toBeInTheDocument();
+    expect(within(section as HTMLElement).getByText('Test item')).toBeInTheDocument();
+    expect(within(section as HTMLElement).getByText('Shopify Refund Attempt Failed')).toBeInTheDocument();
+    expect(within(section as HTMLElement).queryByRole('button', { name: /retry|refund|resolve|approve|decline/i })).not.toBeInTheDocument();
   });
 
   it('renders Support attention as a server-paginated table while preserving recommendation support rows', async () => {
@@ -889,6 +940,7 @@ describe('AdminOperationsQueuePage attention center', () => {
       Array.from((operationalStack as HTMLElement).querySelectorAll('.attention-card-heading h3')).map((heading) => heading.textContent),
     ).toEqual([
       'Support attention',
+      'Customer Cancellation Exceptions',
       'Vendor Blocked Allocations',
       'Shipment attention',
       'Return review',

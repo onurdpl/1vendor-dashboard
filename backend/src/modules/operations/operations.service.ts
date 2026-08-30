@@ -38,6 +38,9 @@ import {
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
 import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
+import {
+  getCustomerCancellationExceptionOperationsQueue,
+} from './customer-cancellation-exception-queue.service.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
@@ -1487,6 +1490,9 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   }
   if (options.type === 'finance_integrity_alert') {
     return getFinanceIntegrityAlertOperationsQueue({ limit, offset });
+  }
+  if (options.type === 'customer_cancellation_exception') {
+    return getCustomerCancellationExceptionOperationsQueue({ limit, offset });
   }
 
   const candidateTake = offset + limit;

@@ -38,6 +38,20 @@ type OperationsResponseDto = {
     settlementStatus?: string | null;
     vendorAllocationId?: string | null;
     allocationEconomicTransferId?: string | null;
+    customerCancellationRequestId?: string;
+    customerCancellationItemId?: string;
+    customerCancellationReason?: string;
+    customerCancellationItemStatus?: string;
+    customerCancellationExceptionReason?: string;
+    requestedQuantity?: number;
+    resolvedQuantity?: number | null;
+    itemSku?: string | null;
+    itemTitle?: string | null;
+    requestedAt?: string;
+    refundAttemptStatus?: string | null;
+    operationalJobStatus?: string | null;
+    shipmentHoldActive?: boolean;
+    financeHoldActive?: boolean;
   }>;
 };
 
@@ -53,6 +67,7 @@ type OperationsSummaryDto = {
   refundAttention: number;
   financeReview?: number;
   financeIntegrityAlerts?: number;
+  customerCancellationExceptions?: number;
   operationalSignals?: number;
   automationActions?: number;
 };
@@ -90,6 +105,7 @@ function mapOperationsSummary(summary: OperationsSummaryDto): OperationsQueueDas
       ...summary,
       financeReview: summary.financeReview ?? 0,
       financeIntegrityAlerts: summary.financeIntegrityAlerts ?? 0,
+      customerCancellationExceptions: summary.customerCancellationExceptions ?? 0,
       operationalSignals: summary.operationalSignals ?? 0,
     automationActions: summary.automationActions ?? 0,
   };
@@ -125,6 +141,20 @@ function mapOperationsResponse(response: OperationsResponseDto): OperationsQueue
       settlementStatus: item.settlementStatus,
       vendorAllocationId: item.vendorAllocationId,
       allocationEconomicTransferId: item.allocationEconomicTransferId,
+      customerCancellationRequestId: item.customerCancellationRequestId,
+      customerCancellationItemId: item.customerCancellationItemId,
+      customerCancellationReason: item.customerCancellationReason,
+      customerCancellationItemStatus: item.customerCancellationItemStatus,
+      customerCancellationExceptionReason: item.customerCancellationExceptionReason,
+      requestedQuantity: item.requestedQuantity,
+      resolvedQuantity: item.resolvedQuantity,
+      itemSku: item.itemSku,
+      itemTitle: item.itemTitle,
+      requestedAt: item.requestedAt,
+      refundAttemptStatus: item.refundAttemptStatus,
+      operationalJobStatus: item.operationalJobStatus,
+      shipmentHoldActive: item.shipmentHoldActive,
+      financeHoldActive: item.financeHoldActive,
     })),
   };
 }

@@ -1358,7 +1358,35 @@ export type ShopifyOrderBreakdown = {
     enabled: boolean;
     dryRun: boolean;
   };
+  customerCancellations?: CustomerCancellationRequestSummary[];
   allocations: VendorAllocationSummary[];
+};
+
+export type CustomerCancellationRequestSummary = {
+  id: string;
+  status: string;
+  reasonCode: string;
+  customerNote: string | null;
+  requestedAt: string;
+  resolvedAt: string | null;
+  items: Array<{
+    id: string;
+    status: string;
+    requestedQuantity: number;
+    resolvedQuantity: number | null;
+    vendorAllocationId: string;
+    vendorId: string;
+    vendorName: string;
+    sourceLineItemId: string;
+    sku: string | null;
+    title: string | null;
+    shipmentHoldActive: boolean;
+    financeHoldActive: boolean;
+    operationalJobStatus: string | null;
+    operationalJobAttempt: number | null;
+    refundAttemptStatus: string | null;
+    exceptionReason: string | null;
+  }>;
 };
 
 export type RefundWebhookStatus = 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED';
@@ -2844,6 +2872,7 @@ export type OperationsQueueItemType =
   | 'refund_attention'
   | 'finance_review'
   | 'finance_integrity_alert'
+  | 'customer_cancellation_exception'
   | 'operational_signal'
   | 'automation_action';
 export type OperationsQueueTypeFilter =
@@ -2851,7 +2880,8 @@ export type OperationsQueueTypeFilter =
   | 'awaiting_shipment'
   | 'return_review'
   | 'finance_review'
-  | 'finance_integrity_alert';
+  | 'finance_integrity_alert'
+  | 'customer_cancellation_exception';
 export type VendorBlockedQueueScope = 'active' | 'resolved';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
@@ -2882,6 +2912,20 @@ export type OperationsQueueItem = {
   settlementStatus?: string | null;
   vendorAllocationId?: string | null;
   allocationEconomicTransferId?: string | null;
+  customerCancellationRequestId?: string;
+  customerCancellationItemId?: string;
+  customerCancellationReason?: string;
+  customerCancellationItemStatus?: string;
+  customerCancellationExceptionReason?: string;
+  requestedQuantity?: number;
+  resolvedQuantity?: number | null;
+  itemSku?: string | null;
+  itemTitle?: string | null;
+  requestedAt?: string;
+  refundAttemptStatus?: string | null;
+  operationalJobStatus?: string | null;
+  shipmentHoldActive?: boolean;
+  financeHoldActive?: boolean;
 };
 
 export type OperationsQueueSummary = {
@@ -2896,6 +2940,7 @@ export type OperationsQueueSummary = {
   refundAttention: number;
   financeReview: number;
   financeIntegrityAlerts: number;
+  customerCancellationExceptions?: number;
   operationalSignals: number;
   automationActions: number;
 };

@@ -66,6 +66,16 @@ function formatTransferStatus(value: string) {
     .join(' ');
 }
 
+function formatCustomerCancellationStatus(status: string) {
+  if (status.trim().toUpperCase() === 'APPROVED_FOR_REFUND') {
+    return 'Approved — refund processing pending';
+  }
+  if (status.trim().toUpperCase() === 'APPROVED') {
+    return 'Approved — refund completed';
+  }
+  return formatTransferStatus(status);
+}
+
 function formatStatusAxisLabel(value: string | null | undefined, fallback = 'Unknown') {
   if (!value?.trim()) {
     return fallback;
@@ -1488,6 +1498,53 @@ export function AdminShopifyOrderPage() {
           </div>
         </div>
       </div>
+
+      {breakdown.customerCancellations?.length ? (
+        <article className="panel operational-card customer-cancellation-section" aria-label="Customer Cancellation">
+          <header className="allocation-header">
+            <div>
+              <p className="eyebrow">Customer Cancellation</p>
+              <h3>Cancellation request history</h3>
+              <p className="page-description">
+                Item-scoped request, hold, refund-processing, and exception evidence. Visibility here does not execute a refund or resolution.
+              </p>
+            </div>
+          </header>
+          <div className="attention-sections-stack">
+            {breakdown.customerCancellations.map((request) => (
+              <section key={request.id} className="split-summary-card" aria-label={`Cancellation request ${request.id}`}>
+                <div className="split-summary-heading">
+                  <div>
+                    <strong>{formatCustomerCancellationStatus(request.status)}</strong>
+                    <p className="page-description">Requested {formatDate(request.requestedAt)}</p>
+                  </div>
+                  <span className={`status-badge status-${request.items.some((item) => item.exceptionReason) ? 'warning' : 'info'}`}>
+                    {request.items.some((item) => item.exceptionReason) ? 'Admin review required' : 'No active exception'}
+                  </span>
+                </div>
+                <div className="compact-meta-grid">
+                  <div className="meta-item"><span>Customer reason</span><strong>{formatTransferStatus(request.reasonCode)}</strong></div>
+                  <div className="meta-item"><span>Customer note</span><strong>{request.customerNote || 'None provided'}</strong></div>
+                  <div className="meta-item"><span>Resolved</span><strong>{request.resolvedAt ? formatDate(request.resolvedAt) : 'Not resolved'}</strong></div>
+                </div>
+                {request.items.map((item) => (
+                  <div key={item.id} className="operational-meta-grid customer-cancellation-item">
+                    <div className="meta-item"><span>Item / SKU</span><strong>{item.title ?? 'Order item'} · {item.sku ?? 'No SKU'}</strong></div>
+                    <div className="meta-item"><span>Vendor / allocation</span><strong>{item.vendorName} · {item.vendorAllocationId}</strong></div>
+                    <div className="meta-item"><span>Item status</span><strong>{formatCustomerCancellationStatus(item.status)}</strong></div>
+                    <div className="meta-item"><span>Quantity</span><strong>{item.requestedQuantity} requested · {item.resolvedQuantity ?? 0} resolved</strong></div>
+                    <div className="meta-item"><span>Shipment hold</span><strong>{item.shipmentHoldActive ? 'Active' : 'Inactive'}</strong></div>
+                    <div className="meta-item"><span>Finance hold</span><strong>{item.financeHoldActive ? 'Active' : 'Inactive'}</strong></div>
+                    <div className="meta-item"><span>Refund attempt</span><strong>{item.refundAttemptStatus ? formatTransferStatus(item.refundAttemptStatus) : 'Not created'}</strong></div>
+                    <div className="meta-item"><span>Operational job</span><strong>{item.operationalJobStatus ? `${formatTransferStatus(item.operationalJobStatus)} · attempt ${item.operationalJobAttempt ?? 0}` : 'Not created'}</strong></div>
+                    <div className="meta-item"><span>Exception</span><strong>{item.exceptionReason ? formatTransferStatus(item.exceptionReason) : 'None'}</strong></div>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        </article>
+      ) : null}
 
       {breakdown.allocations.map((allocation) => {
         const replacementVendorOptions = (appReadiness.currentUser?.vendorDetails ?? []).filter(

@@ -105,6 +105,7 @@ function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQu
     refundAttention: items.filter((item) => item.type === 'refund_attention').length,
     financeReview: items.filter((item) => item.type === 'finance_review').length,
     financeIntegrityAlerts: items.filter((item) => item.type === 'finance_integrity_alert').length,
+    customerCancellationExceptions: items.filter((item) => item.type === 'customer_cancellation_exception').length,
     operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
     automationActions: items.filter((item) => item.type === 'automation_action').length,
   };

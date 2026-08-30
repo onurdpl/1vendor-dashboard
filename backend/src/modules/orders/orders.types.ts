@@ -777,5 +777,31 @@ export type AdminOrderBreakdownDto = {
     enabled: boolean;
     dryRun: boolean;
   };
+  customerCancellations: Array<{
+    id: string;
+    status: string;
+    reasonCode: string;
+    customerNote: string | null;
+    requestedAt: string;
+    resolvedAt: string | null;
+    items: Array<{
+      id: string;
+      status: string;
+      requestedQuantity: number;
+      resolvedQuantity: number | null;
+      vendorAllocationId: string;
+      vendorId: string;
+      vendorName: string;
+      sourceLineItemId: string;
+      sku: string | null;
+      title: string | null;
+      shipmentHoldActive: boolean;
+      financeHoldActive: boolean;
+      operationalJobStatus: string | null;
+      operationalJobAttempt: number | null;
+      refundAttemptStatus: string | null;
+      exceptionReason: string | null;
+    }>;
+  }>;
   allocations: AdminOrderBreakdownAllocationDto[];
 };

@@ -335,6 +335,46 @@ describe('AdminShopifyOrderPage split visibility', () => {
     executeAdminShopifyRefundMock.mockReset();
   });
 
+  it('shows item-scoped customer cancellation history and exception evidence without resolution actions', async () => {
+    const breakdown = buildRefundExecutionBreakdown();
+    breakdown.customerCancellations = [{
+      id: 'cancel-request-1',
+      status: 'PARTIALLY_RESOLVED',
+      reasonCode: 'CUSTOMER_CHANGED_MIND',
+      customerNote: 'Wrong size selected.',
+      requestedAt: '2026-08-30T10:00:00.000Z',
+      resolvedAt: null,
+      items: [{
+        id: 'cancel-item-1',
+        status: 'APPROVED_FOR_REFUND',
+        requestedQuantity: 1,
+        resolvedQuantity: null,
+        vendorAllocationId: 'alloc-child',
+        vendorId: 'yalispor',
+        vendorName: 'Yalı Spor',
+        sourceLineItemId: 'gid://shopify/LineItem/1',
+        sku: 'SKU-1088',
+        title: 'Split item',
+        shipmentHoldActive: true,
+        financeHoldActive: true,
+        operationalJobStatus: 'FAILED',
+        operationalJobAttempt: 2,
+        refundAttemptStatus: 'FAILED',
+        exceptionReason: 'SHOPIFY_REFUND_ATTEMPT_FAILED',
+      }],
+    }];
+    getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce(breakdown);
+
+    renderPage();
+
+    const section = (await screen.findByLabelText('Customer Cancellation'));
+    expect(within(section).getByText('Approved — refund processing pending')).toBeInTheDocument();
+    expect(within(section).getByText('Yalı Spor · alloc-child')).toBeInTheDocument();
+    expect(within(section).getByText('1 requested · 0 resolved')).toBeInTheDocument();
+    expect(within(section).getByText('Shopify Refund Attempt Failed')).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: /retry|refund|resolve|approve|decline/i })).not.toBeInTheDocument();
+  });
+
   it('uses current blocked state and latest history time without contradicting the status', async () => {
     getAdminShopifyOrderBreakdownMock.mockResolvedValueOnce({
       sourceShopifyOrderId: '7817723773265',

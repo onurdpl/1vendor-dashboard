@@ -84,6 +84,11 @@ import {
 } from '../product-panel/product-panel-variant-disable-outbox.service.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { isFullOrderCancelled } from './full-order-cancellation-policy.js';
+import {
+  classifyCustomerCancellationException,
+  readPostRefundFulfillmentCheckStatus,
+} from './customer-cancellation-exception.service.js';
+import { isPendingCustomerCancellationHoldState } from './customer-cancellation-hold.service.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -4245,6 +4250,36 @@ export async function getAdminShopifyOrderBreakdown(
       sourceShopifyOrderId: shopifyOrderId,
     },
     include: {
+        customerCancellationRequests: {
+          include: {
+            items: {
+              include: {
+                shopifyOrderLineItem: true,
+                vendorAllocation: {
+                  include: {
+                    assignedVendor: true,
+                    fulfillment: true,
+                    shipmentExecutions: {
+                      where: { shipmentStatus: { notIn: [ShipmentExecutionStatus.FAILED, ShipmentExecutionStatus.CANCELLED] } },
+                      take: 1,
+                    },
+                    financeIntegrityAlerts: {
+                      where: {
+                        status: { in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES] },
+                        severity: { in: ['critical', 'warning'] },
+                      },
+                      take: 1,
+                    },
+                  },
+                },
+                outboundShopifyRefundAttempt: true,
+                operationalJob: true,
+              },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+          orderBy: { requestedAt: 'desc' },
+        },
         webhookEvents: {
           where: {
             topic: 'refunds/create',
@@ -4525,6 +4560,56 @@ export async function getAdminShopifyOrderBreakdown(
       refundWebhookStatus: order.webhookEvents[0]?.status ?? null,
     },
     productPanelVariantDisableMode: getProductPanelVariantDisableMode(),
+    customerCancellations: (order.customerCancellationRequests ?? []).map((request) => ({
+      id: request.id,
+      status: request.status,
+      reasonCode: request.reasonCode,
+      customerNote: request.customerNote,
+      requestedAt: request.requestedAt.toISOString(),
+      resolvedAt: toIsoString(request.resolvedAt),
+      items: request.items.map((item) => {
+        const shipmentAuthorityExists = Boolean(
+          item.vendorAllocation.fulfillment ||
+            item.vendorAllocation.trackingNumber ||
+            item.vendorAllocation.shipmentExecutions.length,
+        );
+        const holdActive = isPendingCustomerCancellationHoldState({
+          requestStatus: request.status,
+          itemStatus: item.status,
+        });
+        return {
+          id: item.id,
+          status: item.status,
+          requestedQuantity: item.requestedQuantity,
+          resolvedQuantity: item.resolvedQuantity,
+          vendorAllocationId: item.vendorAllocationId,
+          vendorId: item.vendorAllocation.assignedVendorId,
+          vendorName: item.vendorAllocation.assignedVendor.name,
+          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
+          sku: item.shopifyOrderLineItem.sku,
+          title: item.shopifyOrderLineItem.title,
+          shipmentHoldActive: holdActive,
+          financeHoldActive: holdActive,
+          operationalJobStatus: item.operationalJob?.status ?? null,
+          operationalJobAttempt: item.operationalJob?.retryCount ?? null,
+          refundAttemptStatus: item.outboundShopifyRefundAttempt?.status ?? null,
+          exceptionReason: classifyCustomerCancellationException({
+            itemStatus: item.status,
+            attemptStatus: item.outboundShopifyRefundAttempt?.status,
+            postRefundCheckStatus: readPostRefundFulfillmentCheckStatus(
+              item.outboundShopifyRefundAttempt?.mutationResponseJson,
+            ),
+            jobStatus: item.operationalJob?.status,
+            jobRetryCount: item.operationalJob?.retryCount,
+            jobMaxRetries: item.operationalJob?.maxRetries,
+            jobFailureCategory: item.operationalJob?.failureCategory,
+            jobErrorSummary: item.operationalJob?.errorSummary,
+            shipmentAuthorityExists,
+            financeConflictExists: item.vendorAllocation.financeIntegrityAlerts.length > 0,
+          }),
+        };
+      }),
+    })),
     allocations: order.allocations.map((allocation) => {
       const allocationTotal = allocation.lineItems.reduce(
         (sum, lineItem) => sum + toNumber(lineItem.lineAmount),
