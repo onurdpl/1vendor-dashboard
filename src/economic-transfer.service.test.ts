@@ -94,6 +94,7 @@ type AllocationRow = Record<string, unknown> & {
   cancellationReason: string | null;
   financeEntries: LedgerRow[];
   economicTransfers: TransferRow[];
+  customerCancellationRequestItems?: Array<Record<string, unknown>>;
 };
 
 function buildSourceLedger(overrides: Partial<LedgerRow> = {}): LedgerRow {
@@ -160,6 +161,7 @@ function buildAllocation(overrides: Partial<AllocationRow> = {}): AllocationRow 
     shipmentExecutions: [],
     returnRecords: [],
     refundRecords: [],
+    customerCancellationRequestItems: [],
     financeEntries: [sourceLedger],
     economicTransfers: [],
     ...overrides,
@@ -424,6 +426,27 @@ describe('economic transfer service', () => {
         financeLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
       }),
     ]));
+  });
+
+  it('blocks economic transfer without monetary side effects while customer cancellation is pending', async () => {
+    const db = setupDb({
+      allocation: buildAllocation({
+        customerCancellationRequestItems: [{
+          status: 'PENDING',
+          request: { status: 'PENDING' },
+        }],
+      }),
+    });
+
+    await expect(runTransfer()).rejects.toMatchObject({
+      name: 'EconomicTransferValidationError',
+      statusCode: 409,
+      message: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
+    });
+    expect(db.transfers).toHaveLength(0);
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
   it('creates a distinct target ledger when the target vendor already has another allocation in the same Shopify order', async () => {

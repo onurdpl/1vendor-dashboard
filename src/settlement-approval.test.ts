@@ -95,6 +95,8 @@ function buildLedgerRow(input: {
 	  voidedAt?: Date | null;
 	  cancelRefundReviewStatus?: string | null;
 	  allocationStatus?: string | null;
+	  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+	  customerCancellationItemStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
 	}) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -142,6 +144,12 @@ function buildLedgerRow(input: {
 	      id: `alloc-${input.id}`,
 	      allocationStatus: input.allocationStatus ?? 'ACTIVE',
 	      cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
+      customerCancellationRequestItems: input.customerCancellationRequestStatus
+        ? [{
+            status: input.customerCancellationItemStatus ?? 'PENDING',
+            request: { status: input.customerCancellationRequestStatus },
+          }]
+        : [],
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       sourceShopifyOrderId: input.sourceShopifyOrderId ?? `order-${input.id}`,
@@ -540,6 +548,75 @@ describe('settlement approval foundation', () => {
         }),
       ]),
     );
+  });
+
+  it('holds only the allocation with a pending customer cancellation request', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildLedgerRow({
+        id: 'sale-cancellation-pending',
+        entryType: 'sale',
+        amount: 1000,
+        customerCancellationRequestStatus: 'PENDING',
+      }),
+      buildLedgerRow({ id: 'sale-unaffected-allocation', entryType: 'sale', amount: 500 }),
+    ]);
+
+    const preview = await previewApproval('vendor-a');
+
+    expect(preview.lines).toEqual([
+      expect.objectContaining({ financeLedgerEntryId: 'sale-unaffected-allocation' }),
+    ]);
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-cancellation-pending',
+        entryType: 'sale',
+        amount: 1000,
+        customerCancellationRequestStatus: 'PARTIALLY_RESOLVED',
+      }),
+    )).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
+    });
+  });
+
+  it.each(['APPROVED', 'DECLINED', 'TOO_LATE', 'CONFLICTED'] as const)(
+    'releases the finance hold when the cancellation request is %s',
+    (requestStatus) => {
+      expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(
+        buildLedgerRow({
+          id: `sale-cancellation-${requestStatus}`,
+          entryType: 'sale',
+          amount: 1000,
+          customerCancellationRequestStatus: requestStatus,
+          customerCancellationItemStatus: requestStatus,
+        }),
+      )).toMatchObject({ derivedSettlementStatus: 'payable', eligibilityDecision: 'included' });
+    },
+  );
+
+  it('does not hold a resolved historical item on a partially resolved request', () => {
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-historical-resolved-item',
+        entryType: 'sale',
+        amount: 1000,
+        customerCancellationRequestStatus: 'PARTIALLY_RESOLVED',
+        customerCancellationItemStatus: 'DECLINED',
+      }),
+    )).toMatchObject({ derivedSettlementStatus: 'payable', eligibilityDecision: 'included' });
+  });
+
+  it('does not rewrite a historically paid row when cancellation review is pending', () => {
+    expect(__settlementApprovalTesting.resolveSettlementStatus(
+      buildLedgerRow({
+        id: 'sale-already-paid',
+        entryType: 'sale',
+        amount: 1000,
+        payoutStatus: 'PAID',
+        customerCancellationRequestStatus: 'PENDING',
+      }),
+    )).toBe('settled');
   });
 
   it('excludes vendor-blocked rows from settlement preview', async () => {
@@ -1899,6 +1976,29 @@ describe('settlement approval foundation', () => {
           reason: 'Approved return hold is now active',
         }),
       ],
+    });
+    expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps draft status when customer cancellation becomes pending after draft creation', async () => {
+    prismaMock.settlementApproval.findUnique.mockResolvedValue(buildApproval({ id: 'approval-1', status: 'DRAFT' }));
+    prismaMock.financeLedgerEntry.findUnique.mockResolvedValue(
+      buildLedgerRow({
+        id: 'sale-1',
+        entryType: 'sale',
+        amount: 1000,
+        activeApproval: true,
+        activeApprovalId: 'approval-1',
+        customerCancellationRequestStatus: 'PENDING',
+      }),
+    );
+
+    await expect(approveSettlementApproval('approval-1', 'admin-1')).rejects.toMatchObject({
+      reasons: [expect.objectContaining({
+        financeLedgerEntryId: 'sale-1',
+        code: 'customer_cancellation_pending',
+        reason: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
+      })],
     });
     expect(prismaMock.settlementApproval.update).not.toHaveBeenCalled();
   });

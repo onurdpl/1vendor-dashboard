@@ -65,6 +65,8 @@ function buildEntry(input: {
   voidedAt?: Date | null;
   allocationStatus?: string | null;
   cancelRefundReviewStatus?: string | null;
+  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+  customerCancellationItemStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
   cancelledAt?: Date | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
@@ -125,6 +127,12 @@ function buildEntry(input: {
       id: `alloc-${input.id}`,
       allocationStatus: input.allocationStatus ?? 'ACTIVE',
       cancelRefundReviewStatus: input.cancelRefundReviewStatus ?? null,
+      customerCancellationRequestItems: input.customerCancellationRequestStatus
+        ? [{
+            status: input.customerCancellationItemStatus ?? 'PENDING',
+            request: { status: input.customerCancellationRequestStatus },
+          }]
+        : [],
       fulfillmentStatus: fulfilled ? 'Fulfilled' : 'Pending',
       shippingStatus: fulfilled ? 'Delivered' : 'Awaiting Shipment',
       order: {
@@ -821,6 +829,55 @@ describe('payout batch preparation', () => {
 	    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
 	  });
 
+  it('excludes pending customer cancellation allocations while paying an unaffected allocation', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-cancellation-pending',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        customerCancellationRequestStatus: 'PENDING',
+      }),
+      buildEntry({ id: 'sale-unaffected', entryType: 'sale', amount: 500, activeSettlementApproval: true }),
+    ]);
+    prismaMock.payoutBatch.create.mockImplementation(async ({ data }) => ({
+      id: 'batch-unaffected',
+      ...data,
+      createdAt: new Date('2026-05-13T11:00:00Z'),
+      updatedAt: new Date('2026-05-13T11:00:00Z'),
+      lines: data.lines.create.map((line: Record<string, unknown>, index: number) => ({
+        id: `line-${index}`,
+        ...line,
+        createdAt: new Date('2026-05-13T11:00:00Z'),
+      })),
+    }));
+
+    await preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user');
+
+    expect(prismaMock.payoutBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        lines: { create: [expect.objectContaining({ financeLedgerEntryId: 'sale-unaffected' })] },
+      }),
+    }));
+  });
+
+  it('returns the stable customer cancellation hold reason when no unaffected payout row remains', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-cancellation-only',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        customerCancellationRequestStatus: 'PENDING',
+      }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'CUSTOMER_CANCELLATION_PENDING',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
   it('does not offset refund rows when the related sale is already paid', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildEntry({ id: 'refund-after-paid-sale', entryType: 'refund', amount: 100, relatedSalePaid: true }),
@@ -1469,6 +1526,31 @@ describe('payout batch preparation', () => {
           code: 'cancel_refund_review_active',
           reason: 'Allocation is under cancel/refund review and cannot move through settlement or payout.',
           financeLedgerEntryId: 'sale-cancel-refund-review-transition',
+        }),
+      ]),
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks payout transition when customer cancellation becomes pending after batch creation', async () => {
+    const sale = buildEntry({
+      id: 'sale-cancellation-race',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+      customerCancellationRequestStatus: 'PENDING',
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'customer_cancellation_pending',
+          reason: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
+          financeLedgerEntryId: 'sale-cancellation-race',
         }),
       ]),
     });

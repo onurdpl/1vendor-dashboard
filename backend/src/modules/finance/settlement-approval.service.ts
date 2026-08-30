@@ -45,6 +45,12 @@ import {
   FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import {
+  CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON,
+  customerCancellationFinanceHoldSelect,
+  hasActiveCustomerCancellationFinanceHold,
+  type CustomerCancellationFinanceHoldSnapshot,
+} from './customer-cancellation-finance-hold.service.js';
 
 type SettlementApprovalTransaction = Prisma.TransactionClient;
 
@@ -136,7 +142,7 @@ type SettlementApprovalLedgerRow = {
   voidReason?: string | null;
   supersededByLedgerId?: string | null;
   createdAt: Date;
-  vendorAllocation: {
+  vendorAllocation: ({
     id: string;
     allocationStatus: string;
     cancelRefundReviewStatus?: string | null;
@@ -163,7 +169,7 @@ type SettlementApprovalLedgerRow = {
       sourceShopifyRefundId: string | null;
     }>;
     financeEntries?: RefundOffsetSaleLedgerSnapshot[];
-  } | null;
+  } & CustomerCancellationFinanceHoldSnapshot) | null;
   settlementApprovalLines: Array<{
     id: string;
     settlementApproval: {
@@ -460,6 +466,10 @@ function resolveSettlementStatus(
   if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
     return 'held';
   }
+
+  if (hasActiveCustomerCancellationFinanceHold(row.vendorAllocation)) {
+    return 'held';
+  }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
     return 'held';
   }
@@ -497,6 +507,9 @@ function rowIsEligible(
     return false;
   }
   if (hasActiveVendorBlockedFinanceHold(row.vendorAllocation)) {
+    return false;
+  }
+  if (hasActiveCustomerCancellationFinanceHold(row.vendorAllocation)) {
     return false;
   }
   if (hasBlockingCancelRefundReviewStatus(row.vendorAllocation)) {
@@ -542,6 +555,8 @@ export function buildSettlementEligibilityExplanation(row: SettlementApprovalLed
     eligibilityReason = `Excluded because ${FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE}`;
   } else if (type !== 'sale' && type !== 'refund') {
     eligibilityReason = 'Excluded because row type is not sale or refund.';
+  } else if (hasActiveCustomerCancellationFinanceHold(row.vendorAllocation)) {
+    eligibilityReason = CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON;
   } else if (rowHasActiveApproval(row)) {
     eligibilityDecision = 'excluded';
     eligibilityReason = 'Excluded because row already belongs to active settlement approval.';
@@ -964,6 +979,17 @@ function validateApprovalLineAgainstCurrentLedger(
     ));
   }
 
+  if (hasActiveCustomerCancellationFinanceHold(row.vendorAllocation)) {
+    reasons.push(buildRevalidationReason(
+      line,
+      'customer_cancellation_pending',
+      CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON,
+      {
+        vendorAllocationId: row.vendorAllocation?.id ?? null,
+      },
+    ));
+  }
+
   if (row.vendorId !== approval.vendorId) {
     reasons.push(buildRevalidationReason(line, 'vendor_mismatch', 'Ledger row vendor changed since draft creation'));
   }
@@ -1066,6 +1092,7 @@ function validateApprovalLineAgainstCurrentLedger(
         'approved_return_hold_active',
         'settlement_delay_not_satisfied',
         'cancel_refund_review_active',
+        'customer_cancellation_pending',
       ].includes(reason.code),
     );
     if (!alreadyExplained) {
@@ -1152,6 +1179,9 @@ async function loadCurrentLedgerRowForApprovalLine(
           id: true,
           allocationStatus: true,
           cancelRefundReviewStatus: true,
+          customerCancellationRequestItems: {
+            select: customerCancellationFinanceHoldSelect,
+          },
           fulfillmentStatus: true,
           shippingStatus: true,
           sourceShopifyOrderId: true,
@@ -1676,6 +1706,9 @@ async function buildApprovalPreview(
           id: true,
           allocationStatus: true,
           cancelRefundReviewStatus: true,
+          customerCancellationRequestItems: {
+            select: customerCancellationFinanceHoldSelect,
+          },
           fulfillmentStatus: true,
           shippingStatus: true,
           sourceShopifyOrderId: true,
@@ -1841,6 +1874,9 @@ async function buildApprovalPreview(
             id: true,
             allocationStatus: true,
             cancelRefundReviewStatus: true,
+            customerCancellationRequestItems: {
+              select: customerCancellationFinanceHoldSelect,
+            },
             fulfillmentStatus: true,
             shippingStatus: true,
             sourceShopifyOrderId: true,

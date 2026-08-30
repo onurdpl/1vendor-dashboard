@@ -68,6 +68,12 @@ APPROVED SettlementApproval
 
 An approved settlement line already linked to an active payout is excluded from another payout. Under the current lifecycle, `CANCELLED` is not an active payout state, so cancellation permits re-preparation without changing settlement approval history. The database relation is transitional nullable for non-destructive compatibility, while application code requires it for every new payout line and rejects missing linkage during later transitions.
 
+### Pending customer cancellation hold
+
+A persisted pending customer-cancellation item is a non-monetary, allocation-scoped finance hold identified by `CUSTOMER_CANCELLATION_PENDING`. The affected allocation is excluded from new settlement drafts, settlement approval, payout preparation and payout transitions; economic transfer is also blocked. Final approval and payout transitions revalidate the persisted request state so a hold created after an earlier preview still wins. Unaffected allocations, including allocations on the same Shopify order, continue independently.
+
+The hold creates no ledger, refund, vendor-debt, settlement-payment, payout-payment, or Shopify mutation. It disappears when the existing customer-cancellation lifecycle no longer grants pending hold authority; any separate refund, return, Vendor Reject, reconciliation, or post-payment rule still applies. Historical paid records are not rewritten.
+
 ### Real Values Today
 
 These values are based on persisted operational records:

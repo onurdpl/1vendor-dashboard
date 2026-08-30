@@ -22,6 +22,11 @@ import {
   evaluateSaleSettlementDelay,
   normalizeSettlementDelayDays,
 } from './settlement-delay-eligibility.service.js';
+import {
+  CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON,
+  customerCancellationFinanceHoldSelect,
+  hasActiveCustomerCancellationFinanceHold,
+} from './customer-cancellation-finance-hold.service.js';
 
 export type TransferAllocationEconomicsInput = {
   vendorAllocationId: string;
@@ -227,6 +232,9 @@ async function loadAllocationForTransfer(
       },
       returnRecords: true,
       refundRecords: true,
+      customerCancellationRequestItems: {
+        select: customerCancellationFinanceHoldSelect,
+      },
       financeEntries: {
         include: {
           payoutBatchLines: {
@@ -606,6 +614,10 @@ async function validatePreflight(input: {
     }
   }
 
+  if (hasActiveCustomerCancellationFinanceHold(allocation)) {
+    throw new EconomicTransferValidationError(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON, 409);
+  }
+
   const sourceLedger = assertAllocationTransferable({
     allocation,
     toVendorId: input.toVendorId,
@@ -780,6 +792,9 @@ export async function transferAllocationEconomics(
       if (!allocation) {
         throw new EconomicTransferValidationError('Allocation not found.', 404);
       }
+      if (hasActiveCustomerCancellationFinanceHold(allocation)) {
+        throw new EconomicTransferValidationError(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON, 409);
+      }
 
       const sourceLedger = assertAllocationTransferable({
         allocation,
@@ -940,6 +955,9 @@ export async function retryFailedEconomicTransfer(
   if (allocation.assignedVendorId !== transfer.fromVendorId) {
     throw new EconomicTransferValidationError('Economic transfer retry requires allocation to still be assigned to the source vendor.', 409);
   }
+  if (hasActiveCustomerCancellationFinanceHold(allocation)) {
+    throw new EconomicTransferValidationError(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON, 409);
+  }
   const sourceLedger = assertAllocationTransferable({
     allocation,
     toVendorId: transfer.toVendorId,
@@ -983,6 +1001,9 @@ export async function retryFailedEconomicTransfer(
       }
       if (currentAllocation.assignedVendorId !== currentTransfer.fromVendorId) {
         throw new EconomicTransferValidationError('Economic transfer retry requires allocation to still be assigned to the source vendor.', 409);
+      }
+      if (hasActiveCustomerCancellationFinanceHold(currentAllocation)) {
+        throw new EconomicTransferValidationError(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON, 409);
       }
       const currentSourceLedger = assertAllocationTransferable({
         allocation: currentAllocation,

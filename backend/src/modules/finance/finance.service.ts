@@ -64,6 +64,12 @@ import {
   FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import {
+  CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON,
+  customerCancellationFinanceHoldSelect,
+  hasActiveCustomerCancellationFinanceHold,
+  type CustomerCancellationFinanceHoldSnapshot,
+} from './customer-cancellation-finance-hold.service.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID', 'PAID_PLACEHOLDER'] as const;
 const PAYOUT_BATCH_REVISION_REQUIRED_MESSAGE =
@@ -130,6 +136,7 @@ export type PayoutBatchTransitionBlockerCode =
   | 'approved_return_hold_active'
   | 'cancel_refund_review_active'
   | 'vendor_blocked_finance_hold_active'
+  | 'customer_cancellation_pending'
   | 'finance_integrity_alert_open'
   | 'ledger_row_voided'
   | 'ledger_row_paid'
@@ -806,7 +813,7 @@ function getSettlementStatus(entry: {
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
   settlementDelayDaysSnapshot?: unknown;
-  vendorAllocation?: {
+  vendorAllocation?: ({
     allocationStatus?: string;
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
@@ -820,7 +827,7 @@ function getSettlementStatus(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } | null;
+  } & CustomerCancellationFinanceHoldSnapshot) | null;
 }): SettlementDto['status'] {
   const type = normalizeType(entry.entryType);
   if (getPostApprovalRefundRisk(entry).state === 'approved_settlement_adjustment_required') {
@@ -841,6 +848,9 @@ function getSettlementStatus(entry: {
     return 'held';
   }
   if (hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)) {
+    return 'held';
+  }
+  if (hasActiveCustomerCancellationFinanceHold(entry.vendorAllocation)) {
     return 'held';
   }
   if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
@@ -878,7 +888,7 @@ function buildSettlement(entry: {
   settlementDelayDaysSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
-  vendorAllocation?: {
+  vendorAllocation?: ({
     allocationStatus?: string;
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
@@ -892,12 +902,13 @@ function buildSettlement(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } | null;
+  } & CustomerCancellationFinanceHoldSnapshot) | null;
 }): SettlementDto {
   const status = getSettlementStatus(entry);
   const review = getActiveSettlementReview(entry);
   const postApprovalRefundRisk = getPostApprovalRefundRisk(entry);
   const cancelRefundReviewActive = hasBlockingCancelRefundReviewStatus(entry.vendorAllocation);
+  const customerCancellationHoldActive = hasActiveCustomerCancellationFinanceHold(entry.vendorAllocation);
   const saleDelay = evaluateSaleSettlementDelay(entry);
   const payableAt =
     saleDelay.applies
@@ -916,6 +927,8 @@ function buildSettlement(entry: {
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
         : hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)
           ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
+        : customerCancellationHoldActive
+          ? CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON
         : cancelRefundReviewActive
           ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : isFullOrderCancelled(entry.vendorAllocation?.order)
@@ -938,6 +951,8 @@ function buildSettlement(entry: {
         ? POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON
         : hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)
           ? VENDOR_BLOCKED_FINANCE_HOLD_REASON
+        : customerCancellationHoldActive
+          ? CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON
         : cancelRefundReviewActive
           ? CANCEL_REFUND_REVIEW_HOLD_REASON
         : entry.settlementHoldReason ?? null,
@@ -960,7 +975,7 @@ function isEntryEligibleForPayoutBatch(entry: {
   settlementDelayDaysSnapshot?: unknown;
   payoutBatchLines?: Array<{ payoutBatch?: { status?: string | null } | null }>;
   settlementApprovalLines?: SettlementApprovalLineReviewSnapshot[];
-  vendorAllocation?: {
+  vendorAllocation?: ({
     allocationStatus?: string;
     cancelRefundReviewStatus?: string | null;
     fulfillmentStatus?: string | null;
@@ -974,7 +989,7 @@ function isEntryEligibleForPayoutBatch(entry: {
       returnLifecycleStatus?: string | null;
       sourceShopifyRefundId?: string | null;
     }>;
-  } | null;
+  } & CustomerCancellationFinanceHoldSnapshot) | null;
 }, options: { requireApprovedSettlementSnapshot?: boolean } = {}) {
   const requireApprovedSettlementSnapshot = options.requireApprovedSettlementSnapshot ?? true;
   const type = normalizeType(entry.entryType);
@@ -994,6 +1009,9 @@ function isEntryEligibleForPayoutBatch(entry: {
     return false;
   }
   if (hasActiveVendorBlockedFinanceHold(entry.vendorAllocation)) {
+    return false;
+  }
+  if (hasActiveCustomerCancellationFinanceHold(entry.vendorAllocation)) {
     return false;
   }
   if (hasBlockingCancelRefundReviewStatus(entry.vendorAllocation)) {
@@ -1123,6 +1141,7 @@ function isApprovedSettlementLineEligibleForPayout(
   if (isRefundAdjustmentSettlementLine(line)) {
     return !isFullOrderCancelled(entry.vendorAllocation?.order) &&
       !hasActiveVendorBlockedFinanceHold(entry.vendorAllocation) &&
+      !hasActiveCustomerCancellationFinanceHold(entry.vendorAllocation) &&
       !hasBlockingCancelRefundReviewStatus(entry.vendorAllocation);
   }
 
@@ -1321,6 +1340,9 @@ export async function getVendorFinanceDashboard(
             id: true,
             allocationStatus: true,
             cancelRefundReviewStatus: true,
+            customerCancellationRequestItems: {
+              select: customerCancellationFinanceHoldSelect,
+            },
             fulfillmentStatus: true,
             shippingStatus: true,
             order: {
@@ -1486,6 +1508,9 @@ export async function getVendorFinanceDashboard(
             sourceShopifyOrderNumber: true,
             allocationStatus: true,
             cancelRefundReviewStatus: true,
+            customerCancellationRequestItems: {
+              select: customerCancellationFinanceHoldSelect,
+            },
             fulfillmentStatus: true,
             shippingStatus: true,
             order: {
@@ -1980,6 +2005,9 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
           select: {
             allocationStatus: true,
             cancelRefundReviewStatus: true,
+            customerCancellationRequestItems: {
+              select: customerCancellationFinanceHoldSelect,
+            },
             fulfillmentStatus: true,
             shippingStatus: true,
             order: {
@@ -2366,6 +2394,9 @@ export async function preparePayoutBatch(
         include: {
           vendorAllocation: {
             include: {
+              customerCancellationRequestItems: {
+                select: customerCancellationFinanceHoldSelect,
+              },
               order: {
                 select: {
                   cancelledAt: true,
@@ -2494,6 +2525,8 @@ export async function preparePayoutBatch(
       });
     const fullOrderCancelledEntries = entries.filter((entry) =>
       isFullOrderCancelled(entry.vendorAllocation?.order));
+    const customerCancellationHeldEntries = entries.filter((entry) =>
+      hasActiveCustomerCancellationFinanceHold(entry.vendorAllocation));
     const approvedCandidates = entries.flatMap((entry) =>
       entry.settlementApprovalLines.map((settlementLine) => ({
         entry,
@@ -2515,6 +2548,9 @@ export async function preparePayoutBatch(
     if (eligibleCandidates.length === 0) {
       if (fullOrderCancelledEntries.length > 0) {
         throw new Error(FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE);
+      }
+      if (customerCancellationHeldEntries.length > 0) {
+        throw new Error(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON);
       }
       if (adjustmentRequiredEntries.length > 0) {
         throw new Error(POST_APPROVAL_REFUND_ADJUSTMENT_REQUIRED_REASON);
@@ -2774,6 +2810,9 @@ async function validatePayoutBatchBeforeTransitionWithClient(
             include: {
               vendorAllocation: {
                 include: {
+                  customerCancellationRequestItems: {
+                    select: customerCancellationFinanceHoldSelect,
+                  },
                   order: {
                     select: {
                       cancelledAt: true,
@@ -3080,6 +3119,21 @@ async function validatePayoutBatchBeforeTransitionWithClient(
       }));
     }
 
+    const customerCancellationHoldActive = hasActiveCustomerCancellationFinanceHold(
+      transitionEntry.vendorAllocation,
+    );
+    if (customerCancellationHoldActive) {
+      blockers.push(buildPayoutBatchTransitionBlocker({
+        code: 'customer_cancellation_pending',
+        reason: CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON,
+        payoutBatchLineId: line.id,
+        financeLedgerEntryId: ledgerEntryId,
+        metadata: {
+          vendorAllocationId,
+        },
+      }));
+    }
+
     const cancelRefundReviewActive = hasBlockingCancelRefundReviewStatus(transitionEntry.vendorAllocation);
     if (cancelRefundReviewActive) {
       blockers.push(buildPayoutBatchTransitionBlocker({
@@ -3102,6 +3156,7 @@ async function validatePayoutBatchBeforeTransitionWithClient(
         transitionEntry.settlementHoldReason !== REFUND_OFFSET_REQUIRED_BEFORE_PAYOUT_REASON) ||
       (!refundAdjustmentApprovedLine &&
         !fullOrderCancelled &&
+        !customerCancellationHoldActive &&
         !cancelRefundReviewActive &&
         !approvedSettlementSnapshotMissing &&
         !isEntryEligibleForPayoutBatch(transitionEntry))
