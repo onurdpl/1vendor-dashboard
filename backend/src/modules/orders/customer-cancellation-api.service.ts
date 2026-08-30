@@ -2,6 +2,10 @@ import { CustomerCancellationStatus, type Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { CustomerAccountSession } from './customer-cancellation-session-token.service.js';
 import {
+  ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES,
+  isPendingCustomerCancellationHoldState,
+} from './customer-cancellation-hold.service.js';
+import {
   createPendingCustomerCancellationRequest,
   CustomerCancellationRequestConflictError,
   CustomerCancellationRequestValidationError,
@@ -81,12 +85,7 @@ function normalizeGidTail(value: string) {
 }
 
 function isActiveRequestStatus(status: CustomerCancellationStatus) {
-  return (
-    [
-      CustomerCancellationStatus.PENDING,
-      CustomerCancellationStatus.PARTIALLY_RESOLVED,
-    ] as CustomerCancellationStatus[]
-  ).includes(status);
+  return (ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES as readonly CustomerCancellationStatus[]).includes(status);
 }
 
 function assertBoundedText(value: unknown, field: string, maxLength: number) {
@@ -261,7 +260,11 @@ function deriveEligibility(input: {
           isActiveRequestStatus(request.status) &&
           request.items.some(
             (item) =>
-              item.shopifyOrderLineItemId === localLine.id && item.status === CustomerCancellationStatus.PENDING,
+              item.shopifyOrderLineItemId === localLine.id &&
+              isPendingCustomerCancellationHoldState({
+                requestStatus: request.status,
+                itemStatus: item.status,
+              }),
           ),
         ),
     );

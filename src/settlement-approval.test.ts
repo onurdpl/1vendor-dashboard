@@ -95,8 +95,8 @@ function buildLedgerRow(input: {
 	  voidedAt?: Date | null;
 	  cancelRefundReviewStatus?: string | null;
 	  allocationStatus?: string | null;
-	  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
-	  customerCancellationItemStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+	  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED_FOR_REFUND' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+	  customerCancellationItemStatus?: 'PENDING' | 'APPROVED_FOR_REFUND' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
 	}) {
   const fulfilled = input.fulfilled ?? true;
   const createdAt = new Date('2026-06-01T10:00:00.000Z');
@@ -617,6 +617,22 @@ describe('settlement approval foundation', () => {
         customerCancellationRequestStatus: 'PENDING',
       }),
     )).toBe('settled');
+  });
+
+  it('retains the finance hold after admin approval while refund execution is pending', () => {
+    expect(__settlementApprovalTesting.buildSettlementEligibilityExplanation(
+      buildLedgerRow({
+        id: 'sale-approved-for-refund',
+        entryType: 'sale',
+        amount: 1000,
+        customerCancellationRequestStatus: 'APPROVED_FOR_REFUND',
+        customerCancellationItemStatus: 'APPROVED_FOR_REFUND',
+      }),
+    )).toMatchObject({
+      derivedSettlementStatus: 'held',
+      eligibilityDecision: 'excluded',
+      eligibilityReason: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
+    });
   });
 
   it('excludes vendor-blocked rows from settlement preview', async () => {

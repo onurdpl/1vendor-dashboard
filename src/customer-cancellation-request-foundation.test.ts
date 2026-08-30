@@ -12,10 +12,13 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
   },
   customerCancellationRequestItem: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
     findMany: vi.fn(),
+    update: vi.fn(),
   },
   vendorAllocation: {
     findMany: vi.fn(),
@@ -46,6 +49,7 @@ vi.mock('../backend/src/modules/shopify/orders-create-ownership.service.js', () 
 }));
 
 import {
+  approveCustomerCancellationItemForRefund,
   createPendingCustomerCancellationRequest,
   CustomerCancellationRequestConflictError,
 } from '../backend/src/modules/orders/customer-cancellation-request.service.js';
@@ -57,6 +61,7 @@ import {
 const CustomerCancellationStatus = {
   PENDING: 'PENDING',
   PARTIALLY_RESOLVED: 'PARTIALLY_RESOLVED',
+  APPROVED_FOR_REFUND: 'APPROVED_FOR_REFUND',
   APPROVED: 'APPROVED',
   DECLINED: 'DECLINED',
 } as const;
@@ -346,6 +351,10 @@ describe('customer cancellation request persistence and hold foundation', () => 
       itemStatus: CustomerCancellationStatus.PENDING,
     })).toBe(true);
     expect(isPendingCustomerCancellationHoldState({
+      requestStatus: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+      itemStatus: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+    })).toBe(true);
+    expect(isPendingCustomerCancellationHoldState({
       requestStatus: CustomerCancellationStatus.APPROVED,
       itemStatus: CustomerCancellationStatus.PENDING,
     })).toBe(false);
@@ -374,10 +383,16 @@ describe('customer cancellation request persistence and hold foundation', () => 
     expect(holdDb.customerCancellationRequestItem.findFirst).toHaveBeenCalledWith({
       where: {
         vendorAllocationId: 'allocation-1',
-        status: CustomerCancellationStatus.PENDING,
+        status: {
+          in: [CustomerCancellationStatus.PENDING, CustomerCancellationStatus.APPROVED_FOR_REFUND],
+        },
         request: {
           status: {
-            in: [CustomerCancellationStatus.PENDING, CustomerCancellationStatus.PARTIALLY_RESOLVED],
+            in: [
+              CustomerCancellationStatus.PENDING,
+              CustomerCancellationStatus.PARTIALLY_RESOLVED,
+              CustomerCancellationStatus.APPROVED_FOR_REFUND,
+            ],
           },
         },
       },
@@ -385,5 +400,140 @@ describe('customer cancellation request persistence and hold foundation', () => 
         id: true,
       },
     });
+  });
+
+  it('transitions only a pending item to approved-for-refund under the canonical order lock', async () => {
+    prismaMock.customerCancellationRequestItem.findUnique
+      .mockResolvedValueOnce({
+        requestId: 'customer-cancellation-1',
+        request: { order: { sourceShopifyOrderId: 'gid://shopify/Order/9001' } },
+      })
+      .mockResolvedValueOnce({
+        id: 'item-a',
+        requestId: 'customer-cancellation-1',
+        status: CustomerCancellationStatus.PENDING,
+        request: {
+          status: CustomerCancellationStatus.PENDING,
+          items: [{ id: 'item-a', status: CustomerCancellationStatus.PENDING }],
+        },
+      });
+    prismaMock.customerCancellationRequestItem.update.mockImplementation(async ({ data }) => ({
+      id: 'item-a',
+      requestId: 'customer-cancellation-1',
+      ...data,
+    }));
+    prismaMock.customerCancellationRequest.update.mockImplementation(async ({ data }) => ({
+      id: 'customer-cancellation-1',
+      ...data,
+    }));
+
+    const result = await approveCustomerCancellationItemForRefund({
+      requestId: 'customer-cancellation-1',
+      itemId: 'item-a',
+      reviewedByUserId: 'admin-1',
+      reviewReason: 'Approved for later refund execution.',
+    });
+
+    expect(acquireShopifyOrderTransactionLockMock).toHaveBeenCalledWith(
+      prismaMock,
+      'gid://shopify/Order/9001',
+    );
+    expect(prismaMock.customerCancellationRequestItem.update).toHaveBeenCalledWith({
+      where: { id: 'item-a' },
+      data: expect.objectContaining({
+        status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+        reviewedByUserId: 'admin-1',
+        reviewReason: 'Approved for later refund execution.',
+        reviewedAt: expect.any(Date),
+      }),
+    });
+    expect(prismaMock.customerCancellationRequest.update).toHaveBeenCalledWith({
+      where: { id: 'customer-cancellation-1' },
+      data: { status: CustomerCancellationStatus.APPROVED_FOR_REFUND, resolvedAt: null },
+    });
+    expect(result.request.status).toBe(CustomerCancellationStatus.APPROVED_FOR_REFUND);
+    expect(isPendingCustomerCancellationHoldState({
+      requestStatus: result.request.status,
+      itemStatus: result.item.status,
+    })).toBe(true);
+    expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(prismaMock.fulfillment.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps mixed vendor item decisions allocation-scoped', async () => {
+    prismaMock.customerCancellationRequestItem.findUnique
+      .mockResolvedValueOnce({
+        requestId: 'customer-cancellation-1',
+        request: { order: { sourceShopifyOrderId: 'gid://shopify/Order/9001' } },
+      })
+      .mockResolvedValueOnce({
+        id: 'item-a',
+        requestId: 'customer-cancellation-1',
+        status: CustomerCancellationStatus.PENDING,
+        request: {
+          status: CustomerCancellationStatus.PARTIALLY_RESOLVED,
+          items: [
+            { id: 'item-a', status: CustomerCancellationStatus.PENDING },
+            { id: 'item-b', status: CustomerCancellationStatus.DECLINED },
+          ],
+        },
+      });
+    prismaMock.customerCancellationRequestItem.update.mockResolvedValue({
+      id: 'item-a',
+      requestId: 'customer-cancellation-1',
+      status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+    });
+    prismaMock.customerCancellationRequest.update.mockResolvedValue({
+      id: 'customer-cancellation-1',
+      status: CustomerCancellationStatus.PARTIALLY_RESOLVED,
+    });
+
+    const result = await approveCustomerCancellationItemForRefund({
+      requestId: 'customer-cancellation-1',
+      itemId: 'item-a',
+      reviewedByUserId: 'admin-1',
+      reviewReason: 'Vendor A approved for refund.',
+    });
+
+    expect(prismaMock.customerCancellationRequest.update).toHaveBeenCalledWith({
+      where: { id: 'customer-cancellation-1' },
+      data: { status: CustomerCancellationStatus.PARTIALLY_RESOLVED, resolvedAt: null },
+    });
+    expect(isPendingCustomerCancellationHoldState({
+      requestStatus: result.request.status,
+      itemStatus: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+    })).toBe(true);
+    expect(isPendingCustomerCancellationHoldState({
+      requestStatus: result.request.status,
+      itemStatus: CustomerCancellationStatus.DECLINED,
+    })).toBe(false);
+  });
+
+  it('rejects approved-for-refund to approved without refund reconciliation authority', async () => {
+    prismaMock.customerCancellationRequestItem.findUnique
+      .mockResolvedValueOnce({
+        requestId: 'customer-cancellation-1',
+        request: { order: { sourceShopifyOrderId: 'gid://shopify/Order/9001' } },
+      })
+      .mockResolvedValueOnce({
+        id: 'item-a',
+        requestId: 'customer-cancellation-1',
+        status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+        request: {
+          status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+          items: [{ id: 'item-a', status: CustomerCancellationStatus.APPROVED_FOR_REFUND }],
+        },
+      });
+
+    await expect(approveCustomerCancellationItemForRefund({
+      requestId: 'customer-cancellation-1',
+      itemId: 'item-a',
+      reviewedByUserId: 'admin-1',
+      reviewReason: 'Duplicate approval.',
+    })).rejects.toBeInstanceOf(CustomerCancellationRequestConflictError);
+    expect(prismaMock.customerCancellationRequestItem.update).not.toHaveBeenCalled();
+    expect(prismaMock.customerCancellationRequest.update).not.toHaveBeenCalled();
   });
 });

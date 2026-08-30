@@ -428,12 +428,14 @@ describe('economic transfer service', () => {
     ]));
   });
 
-  it('blocks economic transfer without monetary side effects while customer cancellation is pending', async () => {
+  it.each(['PENDING', 'APPROVED_FOR_REFUND'] as const)(
+    'blocks economic transfer without monetary side effects while customer cancellation is %s',
+    async (status) => {
     const db = setupDb({
       allocation: buildAllocation({
         customerCancellationRequestItems: [{
-          status: 'PENDING',
-          request: { status: 'PENDING' },
+          status,
+          request: { status },
         }],
       }),
     });
@@ -447,7 +449,8 @@ describe('economic transfer service', () => {
     expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
-  });
+    },
+  );
 
   it('creates a distinct target ledger when the target vendor already has another allocation in the same Shopify order', async () => {
     const existingTargetVendorOrderLedger = buildSourceLedger({

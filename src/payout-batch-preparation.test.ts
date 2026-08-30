@@ -65,8 +65,8 @@ function buildEntry(input: {
   voidedAt?: Date | null;
   allocationStatus?: string | null;
   cancelRefundReviewStatus?: string | null;
-  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
-  customerCancellationItemStatus?: 'PENDING' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+  customerCancellationRequestStatus?: 'PENDING' | 'PARTIALLY_RESOLVED' | 'APPROVED_FOR_REFUND' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
+  customerCancellationItemStatus?: 'PENDING' | 'APPROVED_FOR_REFUND' | 'APPROVED' | 'DECLINED' | 'TOO_LATE' | 'CONFLICTED';
   cancelledAt?: Date | null;
   refundRecords?: Array<{ id: string; sourceShopifyRefundId: string; amount: number; createdAt?: Date }>;
   returnRecords?: Array<{
@@ -878,6 +878,24 @@ describe('payout batch preparation', () => {
     expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
   });
 
+  it('keeps an approved-for-refund allocation out of payout preparation', async () => {
+    prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
+      buildEntry({
+        id: 'sale-approved-for-refund',
+        entryType: 'sale',
+        amount: 1000,
+        activeSettlementApproval: true,
+        customerCancellationRequestStatus: 'APPROVED_FOR_REFUND',
+        customerCancellationItemStatus: 'APPROVED_FOR_REFUND',
+      }),
+    ]);
+
+    await expect(preparePayoutBatch({ vendorId: 'demo-vendor-a' }, 'admin-user')).rejects.toThrow(
+      'CUSTOMER_CANCELLATION_PENDING',
+    );
+    expect(prismaMock.payoutBatch.create).not.toHaveBeenCalled();
+  });
+
   it('does not offset refund rows when the related sale is already paid', async () => {
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([
       buildEntry({ id: 'refund-after-paid-sale', entryType: 'refund', amount: 100, relatedSalePaid: true }),
@@ -1551,6 +1569,31 @@ describe('payout batch preparation', () => {
           code: 'customer_cancellation_pending',
           reason: expect.stringContaining('CUSTOMER_CANCELLATION_PENDING'),
           financeLedgerEntryId: 'sale-cancellation-race',
+        }),
+      ]),
+    });
+    expect(prismaMock.payoutBatch.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks payout transition while an approved refund is not yet executed', async () => {
+    const sale = buildEntry({
+      id: 'sale-approved-for-refund-transition',
+      entryType: 'sale',
+      amount: 1000,
+      batched: true,
+      activeSettlementApproval: true,
+      customerCancellationRequestStatus: 'APPROVED_FOR_REFUND',
+      customerCancellationItemStatus: 'APPROVED_FOR_REFUND',
+    });
+    mockTransitionBatch(buildTransitionBatch([
+      buildTransitionLine({ entry: sale, amountSnapshot: 900 }),
+    ]));
+
+    await expect(markPayoutBatchReview('batch-review')).rejects.toMatchObject({
+      blockers: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'customer_cancellation_pending',
+          financeLedgerEntryId: 'sale-approved-for-refund-transition',
         }),
       ]),
     });

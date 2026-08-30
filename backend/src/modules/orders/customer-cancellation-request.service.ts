@@ -2,6 +2,7 @@ import { CustomerCancellationStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
 import {
+  ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES,
   ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES,
   CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS,
 } from './customer-cancellation-hold.service.js';
@@ -40,6 +41,13 @@ export type CreateCustomerCancellationRequestResult = {
 export class CustomerCancellationRequestValidationError extends Error {}
 export class CustomerCancellationRequestConflictError extends Error {}
 
+export type ApproveCustomerCancellationItemForRefundInput = {
+  requestId: string;
+  itemId: string;
+  reviewedByUserId: string;
+  reviewReason: string;
+};
+
 function normalizeRequiredText(value: string, field: string) {
   const normalized = value.trim();
   if (!normalized) {
@@ -51,6 +59,16 @@ function normalizeRequiredText(value: string, field: string) {
 function normalizeOptionalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized || null;
+}
+
+function aggregateCustomerCancellationRequestStatus(statuses: CustomerCancellationStatus[]) {
+  if (statuses.length === 0) {
+    throw new CustomerCancellationRequestValidationError('Customer cancellation request has no items.');
+  }
+  const uniqueStatuses = new Set(statuses);
+  return uniqueStatuses.size === 1
+    ? statuses[0] ?? CustomerCancellationStatus.CONFLICTED
+    : CustomerCancellationStatus.PARTIALLY_RESOLVED;
 }
 
 function normalizeInput(input: CreateVerifiedCustomerCancellationRequestInput) {
@@ -293,17 +311,16 @@ async function createPendingCustomerCancellationRequestInTransaction(
   const itemStatuses = input.items.map((item) =>
     statusByAllocationId.get(item.vendorAllocationId) ?? CustomerCancellationStatus.CONFLICTED,
   );
-  const uniqueItemStatuses = new Set(itemStatuses);
-  const initialStatus = uniqueItemStatuses.size === 1
-    ? itemStatuses[0] ?? CustomerCancellationStatus.CONFLICTED
-    : CustomerCancellationStatus.PARTIALLY_RESOLVED;
+  const initialStatus = aggregateCustomerCancellationRequestStatus(itemStatuses);
 
   const existingPendingItem = await tx.customerCancellationRequestItem.findFirst({
     where: {
       vendorAllocationId: {
         in: [...new Set(input.items.map((item) => item.vendorAllocationId))],
       },
-      status: CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS,
+      status: {
+        in: [...ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES],
+      },
       request: {
         status: {
           in: [...ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES],
@@ -370,6 +387,101 @@ export async function createPendingCustomerCancellationRequest(
   }
 }
 
+export async function approveCustomerCancellationItemForRefund(
+  rawInput: ApproveCustomerCancellationItemForRefundInput,
+) {
+  const input = {
+    requestId: normalizeRequiredText(rawInput.requestId, 'requestId'),
+    itemId: normalizeRequiredText(rawInput.itemId, 'itemId'),
+    reviewedByUserId: normalizeRequiredText(rawInput.reviewedByUserId, 'reviewedByUserId'),
+    reviewReason: normalizeRequiredText(rawInput.reviewReason, 'reviewReason'),
+  };
+
+  return prisma.$transaction(async (tx) => {
+    const initialItem = await tx.customerCancellationRequestItem.findUnique({
+      where: { id: input.itemId },
+      select: {
+        requestId: true,
+        request: {
+          select: {
+            order: {
+              select: {
+                sourceShopifyOrderId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!initialItem || initialItem.requestId !== input.requestId) {
+      throw new CustomerCancellationRequestValidationError('Customer cancellation request item was not found.');
+    }
+
+    await acquireShopifyOrderTransactionLock(tx, initialItem.request.order.sourceShopifyOrderId);
+
+    const currentItem = await tx.customerCancellationRequestItem.findUnique({
+      where: { id: input.itemId },
+      select: {
+        id: true,
+        requestId: true,
+        status: true,
+        request: {
+          select: {
+            status: true,
+            items: {
+              select: {
+                id: true,
+                status: true,
+              },
+              orderBy: { id: 'asc' },
+            },
+          },
+        },
+      },
+    });
+    if (!currentItem || currentItem.requestId !== input.requestId) {
+      throw new CustomerCancellationRequestValidationError('Customer cancellation request item was not found.');
+    }
+    if (
+      currentItem.status !== CustomerCancellationStatus.PENDING ||
+      !(
+        ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES as readonly CustomerCancellationStatus[]
+      ).includes(currentItem.request.status)
+    ) {
+      throw new CustomerCancellationRequestConflictError(
+        'Only a pending customer cancellation item can be approved for refund.',
+      );
+    }
+
+    const reviewedAt = new Date();
+    const item = await tx.customerCancellationRequestItem.update({
+      where: { id: currentItem.id },
+      data: {
+        status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+        reviewedByUserId: input.reviewedByUserId,
+        reviewReason: input.reviewReason,
+        reviewedAt,
+      },
+    });
+    const requestStatus = aggregateCustomerCancellationRequestStatus(
+      currentItem.request.items.map((candidate) =>
+        candidate.id === currentItem.id
+          ? CustomerCancellationStatus.APPROVED_FOR_REFUND
+          : candidate.status,
+      ),
+    );
+    const request = await tx.customerCancellationRequest.update({
+      where: { id: currentItem.requestId },
+      data: {
+        status: requestStatus,
+        resolvedAt: null,
+      },
+    });
+
+    return { request, item };
+  });
+}
+
 export async function loadActiveCustomerCancellationRequestsForOrder(shopifyOrderId: string) {
   const normalizedOrderId = normalizeRequiredText(shopifyOrderId, 'shopifyOrderId');
   return prisma.customerCancellationRequest.findMany({
@@ -392,7 +504,9 @@ export async function loadPendingCustomerCancellationItemsForAllocation(vendorAl
   return prisma.customerCancellationRequestItem.findMany({
     where: {
       vendorAllocationId: normalizedAllocationId,
-      status: CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS,
+      status: {
+        in: [...ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES],
+      },
       request: {
         status: {
           in: [...ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES],

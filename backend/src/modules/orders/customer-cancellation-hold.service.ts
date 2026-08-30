@@ -4,9 +4,14 @@ import { prisma } from '../../db/prisma.js';
 export const ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES = [
   CustomerCancellationStatus.PENDING,
   CustomerCancellationStatus.PARTIALLY_RESOLVED,
+  CustomerCancellationStatus.APPROVED_FOR_REFUND,
 ] as const;
 
 export const CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS = CustomerCancellationStatus.PENDING;
+export const ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES = [
+  CustomerCancellationStatus.PENDING,
+  CustomerCancellationStatus.APPROVED_FOR_REFUND,
+] as const;
 export const CUSTOMER_CANCELLATION_PENDING_CODE = 'CUSTOMER_CANCELLATION_PENDING';
 export const CUSTOMER_CANCELLATION_PENDING_MESSAGE =
   'A pending customer cancellation request blocks new shipment and tracking actions.';
@@ -31,7 +36,9 @@ export function isPendingCustomerCancellationHoldState(input: {
   return (
     (ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES as readonly CustomerCancellationStatus[]).includes(
       input.requestStatus,
-    ) && input.itemStatus === CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS
+    ) && (ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES as readonly CustomerCancellationStatus[]).includes(
+      input.itemStatus,
+    )
   );
 }
 
@@ -47,7 +54,9 @@ export async function hasPendingCustomerCancellationHold(
   const pendingItem = await db.customerCancellationRequestItem.findFirst({
     where: {
       vendorAllocationId: normalizedAllocationId,
-      status: CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS,
+      status: {
+        in: [...ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES],
+      },
       request: {
         status: {
           in: [...ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES],

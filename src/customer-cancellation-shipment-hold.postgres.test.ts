@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const CustomerCancellationStatus = {
   PENDING: 'PENDING',
+  APPROVED_FOR_REFUND: 'APPROVED_FOR_REFUND',
   CONFLICTED: 'CONFLICTED',
   TOO_LATE: 'TOO_LATE',
 } as const;
@@ -70,6 +71,9 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
   let createPendingCustomerCancellationRequest: (typeof import(
     '../backend/src/modules/orders/customer-cancellation-request.service.js'
   ))['createPendingCustomerCancellationRequest'];
+  let approveCustomerCancellationItemForRefund: (typeof import(
+    '../backend/src/modules/orders/customer-cancellation-request.service.js'
+  ))['approveCustomerCancellationItemForRefund'];
 
   const suffix = `phase2-${process.pid}`;
   const vendorAId = `${suffix}-vendor-a`;
@@ -80,6 +84,7 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
   const lineBId = `${suffix}-line-b`;
   const allocationAId = `${suffix}-allocation-a`;
   const allocationBId = `${suffix}-allocation-b`;
+  const adminUserId = `${suffix}-admin`;
 
   beforeAll(async () => {
     process.env.DATABASE_URL = testDatabaseUrl;
@@ -90,7 +95,7 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
     ({ assertNoPendingCustomerCancellationHold, hasPendingCustomerCancellationHold } = await import(
       '../backend/src/modules/orders/customer-cancellation-hold.service.js'
     ));
-    ({ createPendingCustomerCancellationRequest } = await import(
+    ({ createPendingCustomerCancellationRequest, approveCustomerCancellationItemForRefund } = await import(
       '../backend/src/modules/orders/customer-cancellation-request.service.js'
     ));
     await database.$connect();
@@ -99,6 +104,17 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
   beforeEach(async () => {
     await database.shopifyOrder.deleteMany({ where: { id: orderId } });
     await database.vendor.deleteMany({ where: { id: { in: [vendorAId, vendorBId] } } });
+    await database.user.upsert({
+      where: { email: `${suffix}@example.test` },
+      create: {
+        id: adminUserId,
+        email: `${suffix}@example.test`,
+        name: 'Phase lifecycle admin',
+        role: 'ADMIN',
+        passwordHash: 'not-used',
+      },
+      update: {},
+    });
     await database.vendor.createMany({
       data: [
         { id: vendorAId, name: 'Phase 2 Vendor A' },
@@ -144,6 +160,7 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
     if (!database) return;
     await database.shopifyOrder.deleteMany({ where: { id: orderId } });
     await database.vendor.deleteMany({ where: { id: { in: [vendorAId, vendorBId] } } });
+    await database.user.deleteMany({ where: { id: adminUserId } });
     await database.$disconnect();
   });
 
@@ -199,6 +216,35 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
       releaseRequest.resolve();
       await Promise.allSettled([requestTransaction, ...(shipmentTransaction ? [shipmentTransaction] : [])]);
     }
+  });
+
+  it('retains the persisted hold after approval for later refund execution', async () => {
+    const created = await createPendingCustomerCancellationRequest({
+      shopifyOrderId: orderId,
+      shopDomain: 'xgi47p-3k.myshopify.com',
+      shopifyCustomerId: `gid://shopify/Customer/${suffix}`,
+      reasonCode: 'CUSTOMER_CHANGED_MIND',
+      idempotencyKey: `${suffix}-approve-for-refund`,
+      items: [{
+        shopifyOrderLineItemId: lineAId,
+        vendorAllocationId: allocationAId,
+        requestedQuantity: 1,
+      }],
+    });
+    const item = created.request.items[0];
+    expect(item).toBeDefined();
+
+    const approved = await approveCustomerCancellationItemForRefund({
+      requestId: created.request.id,
+      itemId: item!.id,
+      reviewedByUserId: adminUserId,
+      reviewReason: 'Approved for controlled refund execution.',
+    });
+
+    expect(approved.request.status).toBe(CustomerCancellationStatus.APPROVED_FOR_REFUND);
+    expect(approved.item.status).toBe(CustomerCancellationStatus.APPROVED_FOR_REFUND);
+    await expect(hasPendingCustomerCancellationHold(allocationAId)).resolves.toBe(true);
+    await expect(hasPendingCustomerCancellationHold(allocationBId)).resolves.toBe(false);
   });
 
   it('classifies a later request as conflicted when durable provider-call intent wins first', async () => {
