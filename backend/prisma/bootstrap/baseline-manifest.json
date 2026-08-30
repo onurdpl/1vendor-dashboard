@@ -7,14 +7,14 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "657c4f8931e67e2847e2516bda4b04a6554d07d0c031611589a3eeade39ccac9"
+    "sha256": "e7481bd253f8d21dc2d3da3ce5f96b101b3e105df096b9d4c64fb66f472c2fc8"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "5965cb416080eaf3f6417cac831ffa2c3e18daaafd425ead586f9c61f9a573a7"
+    "sha256": "5b0bb73a1a86d3e14cd39aecd5b4338bd89b75a25ec4d0debe8d84a6d43f8e36"
   },
-  "migrationCutoff": "20260826120000_add_webhook_execution_ownership",
-  "baselineMigrationFilesSha256": "e8e7256ba5e8f7c2acd8dc991ddd6773416446f1ffab9dab64279697d40a7786",
+  "migrationCutoff": "20260830120000_add_customer_cancellation_request_foundation",
+  "baselineMigrationFilesSha256": "f7ecfc354b38c259f2ef9dad4197ba017354348dc92d677ee948b4e3f45314f4",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -100,6 +100,7 @@
     "20260711180000_add_shopify_order_cancellation_metadata",
     "20260810120000_add_payout_settlement_line_traceability",
     "20260810150000_add_order_shipping_refund_claim",
-    "20260826120000_add_webhook_execution_ownership"
+    "20260826120000_add_webhook_execution_ownership",
+    "20260830120000_add_customer_cancellation_request_foundation"
   ]
 }

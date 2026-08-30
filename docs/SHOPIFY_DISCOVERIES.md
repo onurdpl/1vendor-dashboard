@@ -521,6 +521,15 @@ POST /fulfillments.json
 - `notify_customer: true` lets Shopify send the tracking email to the customer.
 - Customer notification policy is still an operational choice and remains an open question for production behavior.
 
+## Customer Cancellation Request Foundation
+
+- Customer Cancellation Request is a separate operational authority from Vendor Reject. It does not use `VENDOR_BLOCKED`, `cancelRefundReviewStatus`, `reassignmentRequired`, or allocation cancellation metadata.
+- The local persistence foundation retains request-level and item-level state, requested quantities, customer/shop identity, admin review metadata, and database-enforced idempotency.
+- Creating a `PENDING` request is non-monetary. It does not cancel the Shopify Order, change allocation ownership/status, create refunds or finance entries, or alter shipment/tracking state.
+- The reusable pending-request predicate exists for later shipment and finance guard phases, but it is not wired into those production paths yet.
+- No customer endpoint, Customer Account extension, admin approval/decline workflow, Shopify mutation, notification, or native Shopify setting change is implemented by this foundation.
+- Historical Shopify RequestedEdit evidence, including order `#1124`, is not imported into the local request model.
+
 ## Shopify-First Missed Order Discovery
 - The backend can opt into a Shopify-first recent-order discovery scan with `SHOPIFY_MISSED_ORDER_DISCOVERY_ENABLED=true`.
 - Discovery uses Admin GraphQL `2026-01` and reads only `Order.id`, `legacyResourceId`, `name`, `createdAt`, and cursor page information.

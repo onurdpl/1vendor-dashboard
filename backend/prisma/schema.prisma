@@ -29,6 +29,15 @@ enum CancellationReason {
   FULFILLMENT_ISSUE
 }
 
+enum CustomerCancellationStatus {
+  PENDING
+  PARTIALLY_RESOLVED
+  APPROVED
+  DECLINED
+  TOO_LATE
+  CONFLICTED
+}
+
 enum ProductPanelVariantDisableOutboxStatus {
   CREATED
   RESOLVED
@@ -306,24 +315,26 @@ enum VendorProfileSnapshotImpact {
 }
 
 model User {
-  id                                 String                         @id @default(cuid())
-  email                              String                         @unique
-  name                               String
-  role                               UserRole
-  status                             String                         @default("active")
-  passwordHash                       String
-  createdAt                          DateTime                       @default(now())
-  updatedAt                          DateTime                       @updatedAt
-  vendorLinks                        UserVendorAccess[]
-  assignments                        AllocationAssignmentHistory[]  @relation("assignmentActor")
-  economicTransfersAdministered      AllocationEconomicTransfer[]   @relation("economicTransferAdminActor")
-  financeIntegrityAlertsAcknowledged FinanceIntegrityAlert[]        @relation("financeIntegrityAlertAcknowledgedBy")
-  financeIntegrityAlertsResolved     FinanceIntegrityAlert[]        @relation("financeIntegrityAlertResolvedBy")
-  outboundRefundAttemptsRequested    OutboundShopifyRefundAttempt[] @relation("outboundShopifyRefundAttemptRequestedBy")
-  allocationSplitEventsCreated       AllocationSplitEvent[]         @relation("allocationSplitActor")
-  supportTickets                     SupportTicket[]
-  supportNotes                       SupportTicketNote[]
-  supportReplies                     SupportTicketReply[]
+  id                                   String                            @id @default(cuid())
+  email                                String                            @unique
+  name                                 String
+  role                                 UserRole
+  status                               String                            @default("active")
+  passwordHash                         String
+  createdAt                            DateTime                          @default(now())
+  updatedAt                            DateTime                          @updatedAt
+  vendorLinks                          UserVendorAccess[]
+  assignments                          AllocationAssignmentHistory[]     @relation("assignmentActor")
+  economicTransfersAdministered        AllocationEconomicTransfer[]      @relation("economicTransferAdminActor")
+  financeIntegrityAlertsAcknowledged   FinanceIntegrityAlert[]           @relation("financeIntegrityAlertAcknowledgedBy")
+  financeIntegrityAlertsResolved       FinanceIntegrityAlert[]           @relation("financeIntegrityAlertResolvedBy")
+  outboundRefundAttemptsRequested      OutboundShopifyRefundAttempt[]    @relation("outboundShopifyRefundAttemptRequestedBy")
+  customerCancellationRequestsReviewed CustomerCancellationRequest[]     @relation("customerCancellationRequestReviewedBy")
+  customerCancellationItemsReviewed    CustomerCancellationRequestItem[] @relation("customerCancellationRequestItemReviewedBy")
+  allocationSplitEventsCreated         AllocationSplitEvent[]            @relation("allocationSplitActor")
+  supportTickets                       SupportTicket[]
+  supportNotes                         SupportTicketNote[]
+  supportReplies                       SupportTicketReply[]
 }
 
 model Vendor {
@@ -549,69 +560,71 @@ model VendorIntegrationAuditLog {
 }
 
 model ShopifyOrder {
-  id                          String                       @id @default(cuid())
-  sourceShopifyOrderId        String                       @unique
-  sourceShopifyOrderNumber    String
-  shopifyCreatedAt            DateTime?
-  currency                    String?
-  financialStatus             String?
-  cancelledAt                 DateTime?
-  cancelReason                String?
-  paymentGatewayName          String?
-  taxesIncluded               Boolean?
-  orderTaxAmount              Decimal?                     @db.Decimal(10, 2)
-  shippingAmount              Decimal?                     @db.Decimal(10, 2)
-  discountAmount              Decimal?                     @db.Decimal(10, 2)
-  orderNote                   String?
-  orderTags                   String[]                     @default([])
-  customerName                String?
-  customerEmail               String?
-  customerPhone               String?
-  billingFullName             String?
-  billingCompany              String?
-  billingPhone                String?
-  billingCity                 String?
-  billingDistrict             String?
-  billingAddress1             String?
-  billingAddress2             String?
-  billingPostcode             String?
-  shippingCountry             String?
-  shippingPostcode            String?
-  shippingCity                String?
-  shippingDistrict            String?
-  shippingAddress             String?
-  totalPrice                  Decimal?                     @db.Decimal(10, 2)
-  createdAt                   DateTime                     @default(now())
-  updatedAt                   DateTime                     @updatedAt
-  lineItems                   ShopifyOrderLineItem[]
-  allocations                 VendorAllocation[]
-  webhookEvents               WebhookEvent[]
-  refunds                     ShopifyRefund[]
-  financeEvents               FinanceEvent[]
-  settlementRefundAdjustments SettlementRefundAdjustment[]
+  id                           String                        @id @default(cuid())
+  sourceShopifyOrderId         String                        @unique
+  sourceShopifyOrderNumber     String
+  shopifyCreatedAt             DateTime?
+  currency                     String?
+  financialStatus              String?
+  cancelledAt                  DateTime?
+  cancelReason                 String?
+  paymentGatewayName           String?
+  taxesIncluded                Boolean?
+  orderTaxAmount               Decimal?                      @db.Decimal(10, 2)
+  shippingAmount               Decimal?                      @db.Decimal(10, 2)
+  discountAmount               Decimal?                      @db.Decimal(10, 2)
+  orderNote                    String?
+  orderTags                    String[]                      @default([])
+  customerName                 String?
+  customerEmail                String?
+  customerPhone                String?
+  billingFullName              String?
+  billingCompany               String?
+  billingPhone                 String?
+  billingCity                  String?
+  billingDistrict              String?
+  billingAddress1              String?
+  billingAddress2              String?
+  billingPostcode              String?
+  shippingCountry              String?
+  shippingPostcode             String?
+  shippingCity                 String?
+  shippingDistrict             String?
+  shippingAddress              String?
+  totalPrice                   Decimal?                      @db.Decimal(10, 2)
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+  lineItems                    ShopifyOrderLineItem[]
+  allocations                  VendorAllocation[]
+  webhookEvents                WebhookEvent[]
+  refunds                      ShopifyRefund[]
+  financeEvents                FinanceEvent[]
+  settlementRefundAdjustments  SettlementRefundAdjustment[]
+  customerCancellationRequests CustomerCancellationRequest[]
 }
 
 model ShopifyOrderLineItem {
-  id                   String                     @id @default(cuid())
-  shopifyOrderId       String
-  sourceLineItemId     String
-  shopifyProductId     String?
-  sourceVariantId      String?
-  sku                  String?
-  title                String?
-  imageUrl             String?
-  quantity             Int                        @default(1)
-  unitPrice            Decimal?                   @db.Decimal(10, 2)
-  unitPriceVatIncluded Decimal?                   @db.Decimal(10, 2)
-  lineTotalVatIncluded Decimal?                   @db.Decimal(10, 2)
-  lineTaxAmount        Decimal?                   @db.Decimal(10, 2)
-  vatRate              Decimal?                   @db.Decimal(5, 2)
-  originalVendorId     String?
-  createdAt            DateTime                   @default(now())
-  updatedAt            DateTime                   @updatedAt
-  order                ShopifyOrder               @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
-  allocationLineItems  VendorAllocationLineItem[]
-  refundLineItems      ShopifyRefundLineItem[]
+  id                               String                            @id @default(cuid())
+  shopifyOrderId                   String
+  sourceLineItemId                 String
+  shopifyProductId                 String?
+  sourceVariantId                  String?
+  sku                              String?
+  title                            String?
+  imageUrl                         String?
+  quantity                         Int                               @default(1)
+  unitPrice                        Decimal?                          @db.Decimal(10, 2)
+  unitPriceVatIncluded             Decimal?                          @db.Decimal(10, 2)
+  lineTotalVatIncluded             Decimal?                          @db.Decimal(10, 2)
+  lineTaxAmount                    Decimal?                          @db.Decimal(10, 2)
+  vatRate                          Decimal?                          @db.Decimal(5, 2)
+  originalVendorId                 String?
+  createdAt                        DateTime                          @default(now())
+  updatedAt                        DateTime                          @updatedAt
+  order                            ShopifyOrder                      @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  allocationLineItems              VendorAllocationLineItem[]
+  refundLineItems                  ShopifyRefundLineItem[]
+  customerCancellationRequestItems CustomerCancellationRequestItem[]
 
   @@unique([shopifyOrderId, sourceLineItemId])
 }
@@ -676,11 +689,59 @@ model VendorAllocation {
   productPanelVariantDisableEvents       ProductPanelVariantDisableOutboxEvent[]
   sourceAllocationSplitEvents            AllocationSplitEvent[]                  @relation("allocationSplitSourceAllocation")
   childAllocationSplitEvents             AllocationSplitEvent[]                  @relation("allocationSplitChildAllocation")
+  customerCancellationRequestItems       CustomerCancellationRequestItem[]
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
   @@index([cancelRefundReviewStatus])
+}
+
+model CustomerCancellationRequest {
+  id                String                            @id @default(cuid())
+  shopifyOrderId    String
+  shopDomain        String
+  shopifyCustomerId String
+  status            CustomerCancellationStatus        @default(PENDING)
+  reasonCode        String
+  customerNote      String?
+  idempotencyKey    String
+  requestedAt       DateTime                          @default(now())
+  resolvedAt        DateTime?
+  reviewedByUserId  String?
+  reviewReason      String?
+  createdAt         DateTime                          @default(now())
+  updatedAt         DateTime                          @updatedAt
+  order             ShopifyOrder                      @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  reviewedByUser    User?                             @relation("customerCancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  items             CustomerCancellationRequestItem[]
+
+  @@unique([shopDomain, shopifyCustomerId, idempotencyKey])
+  @@index([shopifyOrderId, status])
+  @@index([shopifyCustomerId, status])
+}
+
+model CustomerCancellationRequestItem {
+  id                     String                      @id @default(cuid())
+  requestId              String
+  shopifyOrderLineItemId String
+  vendorAllocationId     String
+  requestedQuantity      Int
+  resolvedQuantity       Int?
+  status                 CustomerCancellationStatus  @default(PENDING)
+  reviewedByUserId       String?
+  reviewReason           String?
+  reviewedAt             DateTime?
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  request                CustomerCancellationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  shopifyOrderLineItem   ShopifyOrderLineItem        @relation(fields: [shopifyOrderLineItemId], references: [id], onDelete: Cascade)
+  vendorAllocation       VendorAllocation            @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  reviewedByUser         User?                       @relation("customerCancellationRequestItemReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([requestId, shopifyOrderLineItemId, vendorAllocationId])
+  @@index([vendorAllocationId, status])
+  @@index([shopifyOrderLineItemId])
 }
 
 model OutboundShopifyRefundAttempt {

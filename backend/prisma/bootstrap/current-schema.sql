@@ -11,6 +11,9 @@ CREATE TYPE "AllocationStatus" AS ENUM ('ACTIVE', 'VENDOR_BLOCKED', 'PENDING_REA
 CREATE TYPE "CancellationReason" AS ENUM ('OUT_OF_STOCK', 'VENDOR_CANCELLED', 'DAMAGED_INVENTORY', 'FULFILLMENT_ISSUE');
 
 -- CreateEnum
+CREATE TYPE "CustomerCancellationStatus" AS ENUM ('PENDING', 'PARTIALLY_RESOLVED', 'APPROVED', 'DECLINED', 'TOO_LATE', 'CONFLICTED');
+
+-- CreateEnum
 CREATE TYPE "ProductPanelVariantDisableOutboxStatus" AS ENUM ('CREATED', 'RESOLVED', 'RESOLVED_DRY_RUN', 'FAILED');
 
 -- CreateEnum
@@ -406,6 +409,44 @@ CREATE TABLE "VendorAllocation" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "VendorAllocation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CustomerCancellationRequest" (
+    "id" TEXT NOT NULL,
+    "shopifyOrderId" TEXT NOT NULL,
+    "shopDomain" TEXT NOT NULL,
+    "shopifyCustomerId" TEXT NOT NULL,
+    "status" "CustomerCancellationStatus" NOT NULL DEFAULT 'PENDING',
+    "reasonCode" TEXT NOT NULL,
+    "customerNote" TEXT,
+    "idempotencyKey" TEXT NOT NULL,
+    "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "resolvedAt" TIMESTAMP(3),
+    "reviewedByUserId" TEXT,
+    "reviewReason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "CustomerCancellationRequest_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CustomerCancellationRequestItem" (
+    "id" TEXT NOT NULL,
+    "requestId" TEXT NOT NULL,
+    "shopifyOrderLineItemId" TEXT NOT NULL,
+    "vendorAllocationId" TEXT NOT NULL,
+    "requestedQuantity" INTEGER NOT NULL,
+    "resolvedQuantity" INTEGER,
+    "status" "CustomerCancellationStatus" NOT NULL DEFAULT 'PENDING',
+    "reviewedByUserId" TEXT,
+    "reviewReason" TEXT,
+    "reviewedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "CustomerCancellationRequestItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1340,6 +1381,24 @@ CREATE INDEX "VendorAllocation_vendorIntegrationStatus_idx" ON "VendorAllocation
 CREATE INDEX "VendorAllocation_cancelRefundReviewStatus_idx" ON "VendorAllocation"("cancelRefundReviewStatus");
 
 -- CreateIndex
+CREATE INDEX "CustomerCancellationRequest_shopifyOrderId_status_idx" ON "CustomerCancellationRequest"("shopifyOrderId", "status");
+
+-- CreateIndex
+CREATE INDEX "CustomerCancellationRequest_shopifyCustomerId_status_idx" ON "CustomerCancellationRequest"("shopifyCustomerId", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CustomerCancellationRequest_shopDomain_shopifyCustomerId_id_key" ON "CustomerCancellationRequest"("shopDomain", "shopifyCustomerId", "idempotencyKey");
+
+-- CreateIndex
+CREATE INDEX "CustomerCancellationRequestItem_vendorAllocationId_status_idx" ON "CustomerCancellationRequestItem"("vendorAllocationId", "status");
+
+-- CreateIndex
+CREATE INDEX "CustomerCancellationRequestItem_shopifyOrderLineItemId_idx" ON "CustomerCancellationRequestItem"("shopifyOrderLineItemId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CustomerCancellationRequestItem_requestId_shopifyOrderLineI_key" ON "CustomerCancellationRequestItem"("requestId", "shopifyOrderLineItemId", "vendorAllocationId");
+
+-- CreateIndex
 CREATE INDEX "OutboundShopifyRefundAttempt_vendorAllocationId_idx" ON "OutboundShopifyRefundAttempt"("vendorAllocationId");
 
 -- CreateIndex
@@ -1821,6 +1880,24 @@ ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_originalVendorId
 
 -- AddForeignKey
 ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_assignedVendorId_fkey" FOREIGN KEY ("assignedVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequest" ADD CONSTRAINT "CustomerCancellationRequest_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequest" ADD CONSTRAINT "CustomerCancellationRequest_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "CustomerCancellationRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_shopifyOrderLineItemId_fkey" FOREIGN KEY ("shopifyOrderLineItemId") REFERENCES "ShopifyOrderLineItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerCancellationRequestItem" ADD CONSTRAINT "CustomerCancellationRequestItem_reviewedByUserId_fkey" FOREIGN KEY ("reviewedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
