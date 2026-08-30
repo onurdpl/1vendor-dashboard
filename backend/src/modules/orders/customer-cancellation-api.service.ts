@@ -20,6 +20,7 @@ import type {
 } from '../shopify/shopify-admin.types.js';
 
 export type CustomerCancellationApiErrorCode =
+  | 'CUSTOMER_CANCELLATION_INTAKE_DISABLED'
   | 'ORDER_NOT_OWNED_BY_CUSTOMER'
   | 'INVALID_LINE_OR_QUANTITY'
   | 'CANCELLATION_ALREADY_PENDING'
@@ -50,6 +51,23 @@ type ShopifyReadService = Pick<
 type LocalOrder = NonNullable<Awaited<ReturnType<typeof loadLocalOrder>>>;
 type LocalLine = LocalOrder['lineItems'][number];
 type LocalAllocationLine = LocalLine['allocationLineItems'][number];
+
+export type CustomerCancellationStatusRead = {
+  shopifyOrderId: string;
+  orderNumber: string;
+  requests: Array<{
+    requestId: string;
+    status: CustomerCancellationStatus;
+    requestedAt: Date;
+    resolvedAt: Date | null;
+    items: Array<{
+      shopifyLineItemId: string;
+      requestedQuantity: number;
+      resolvedQuantity: number | null;
+      status: CustomerCancellationStatus;
+    }>;
+  }>;
+};
 
 export type CustomerCancellationEligibilityLine = {
   shopifyLineItemId: string;
@@ -86,6 +104,16 @@ function normalizeGidTail(value: string) {
 
 function isActiveRequestStatus(status: CustomerCancellationStatus) {
   return (ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES as readonly CustomerCancellationStatus[]).includes(status);
+}
+
+function assertCustomerCancellationIntakeEnabled(env: AppEnv) {
+  if (!env.CUSTOMER_CANCELLATION_INTAKE_ENABLED) {
+    throw new CustomerCancellationApiError(
+      'CUSTOMER_CANCELLATION_INTAKE_DISABLED',
+      503,
+      'Customer cancellation intake is unavailable.',
+    );
+  }
 }
 
 function assertBoundedText(value: unknown, field: string, maxLength: number) {
@@ -334,6 +362,7 @@ export function createCustomerCancellationApiService(
   const createRequest = dependencies.createRequest ?? createPendingCustomerCancellationRequest;
 
   async function getEligibility(session: CustomerAccountSession, rawOrderId: string) {
+    assertCustomerCancellationIntakeEnabled(env);
     const orderId = assertBoundedText(rawOrderId, 'shopifyOrderId', 200);
     let canonical: CustomerCancellationCanonicalOrderSnapshot | null;
     let refunds: FetchCanonicalShopifyRefundsForOrderResult;
@@ -360,6 +389,7 @@ export function createCustomerCancellationApiService(
   }
 
   async function createCancellationRequest(session: CustomerAccountSession, rawInput: CreateRequestInput) {
+    assertCustomerCancellationIntakeEnabled(env);
     const shopifyOrderId = assertBoundedText(rawInput.shopifyOrderId, 'shopifyOrderId', 200);
     const reasonCode = assertBoundedText(rawInput.reasonCode, 'reasonCode', 80);
     const idempotencyKey = assertBoundedText(rawInput.idempotencyKey, 'idempotencyKey', 200);
@@ -510,5 +540,66 @@ export function createCustomerCancellationApiService(
     };
   }
 
-  return { getEligibility, createCancellationRequest };
+  async function getStatus(
+    session: CustomerAccountSession,
+    rawOrderId: string,
+  ): Promise<CustomerCancellationStatusRead> {
+    const orderId = assertBoundedText(rawOrderId, 'shopifyOrderId', 200);
+    let canonical: CustomerCancellationCanonicalOrderSnapshot | null;
+    try {
+      canonical = await shopify.fetchCustomerCancellationOrderSnapshot(orderId);
+    } catch {
+      throw new CustomerCancellationApiError(
+        'SHOPIFY_CANONICAL_STATE_UNAVAILABLE',
+        503,
+        'Canonical order state is temporarily unavailable.',
+      );
+    }
+    const ownedCanonical = requireOwnedCanonicalOrder(canonical, session);
+    const local = await db.shopifyOrder.findUnique({
+      where: { sourceShopifyOrderId: ownedCanonical.sourceShopifyOrderId },
+      select: {
+        customerCancellationRequests: {
+          where: { shopifyCustomerId: session.customerGid },
+          orderBy: { requestedAt: 'asc' },
+          select: {
+            id: true,
+            status: true,
+            requestedAt: true,
+            resolvedAt: true,
+            items: {
+              select: {
+                shopifyOrderLineItem: { select: { sourceLineItemId: true } },
+                requestedQuantity: true,
+                resolvedQuantity: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!local) {
+      throw new CustomerCancellationApiError('CANCELLATION_CONFLICT', 409, 'Order state is not ready for cancellation.');
+    }
+
+    return {
+      shopifyOrderId: ownedCanonical.orderGid,
+      orderNumber: ownedCanonical.sourceShopifyOrderNumber,
+      requests: local.customerCancellationRequests.map((request) => ({
+        requestId: request.id,
+        status: request.status,
+        requestedAt: request.requestedAt,
+        resolvedAt: request.resolvedAt,
+        items: request.items.map((item) => ({
+          shopifyLineItemId: `gid://shopify/LineItem/${item.shopifyOrderLineItem.sourceLineItemId}`,
+          requestedQuantity: item.requestedQuantity,
+          resolvedQuantity: item.resolvedQuantity,
+          status: item.status,
+        })),
+      })),
+    };
+  }
+
+  return { getEligibility, createCancellationRequest, getStatus };
 }

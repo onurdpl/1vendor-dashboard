@@ -304,23 +304,36 @@ describe('orders/create executor environment', () => {
   });
 });
 
-describe('customer cancellation auto-refund environment', () => {
+describe('customer cancellation environment', () => {
   afterEach(() => {
     process.env = { ...originalEnv };
   });
 
   it('is disabled by default with bounded executor settings', () => {
     resetEnv({
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_INTERVAL_MS: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_BATCH_SIZE: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_LEASE_MS: undefined,
     });
     expect(loadEnv()).toMatchObject({
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: false,
       CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: false,
       CUSTOMER_CANCELLATION_AUTO_REFUND_INTERVAL_MS: 5_000,
       CUSTOMER_CANCELLATION_AUTO_REFUND_BATCH_SIZE: 5,
       CUSTOMER_CANCELLATION_AUTO_REFUND_LEASE_MS: 60_000,
+    });
+  });
+
+  it('parses intake independently from auto-refund', () => {
+    resetEnv({
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: 'true',
+      CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: 'false',
+    });
+    expect(loadEnv()).toMatchObject({
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: true,
+      CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: false,
     });
   });
 });

@@ -19,6 +19,7 @@ const PENDING = 'PENDING' as const;
 function baseEnv(): AppEnv {
   return {
     NODE_ENV: 'test',
+    CUSTOMER_CANCELLATION_INTAKE_ENABLED: true,
     SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: clientId,
     SHOPIFY_WEBHOOK_SECRET: clientSecret,
     SHOPIFY_SHOP_DOMAIN: shopDomain,
@@ -141,6 +142,10 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
 function buildApi(input: { canonical?: ReturnType<typeof canonical>; local?: ReturnType<typeof localOrder>; createRequest?: ReturnType<typeof vi.fn> } = {}) {
   const canonicalOrder = input.canonical ?? canonical();
   const local = input.local ?? localOrder();
+  const findUnique = vi.fn(async () => local);
+  const fetchCustomerCancellationOrderSnapshot = vi.fn(async () => canonicalOrder);
+  const fetchCanonicalRefundsForOrder = vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', refunds: [], refundsListComplete: true, orderTotalRefundedAmount: '0', orderTotalRefundedCurrencyCode: 'TRY', source: 'mock' }));
+  const fetchCanonicalReturnsForOrder = vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', returns: [], source: 'mock' }));
   const createRequest = input.createRequest ?? vi.fn(async (request) => ({
     idempotent: false,
     request: {
@@ -173,15 +178,22 @@ function buildApi(input: { canonical?: ReturnType<typeof canonical>; local?: Ret
     },
   }));
   const api = createCustomerCancellationApiService(baseEnv(), {
-    db: { shopifyOrder: { findUnique: vi.fn(async () => local) } } as never,
+    db: { shopifyOrder: { findUnique } } as never,
     shopify: {
-      fetchCustomerCancellationOrderSnapshot: vi.fn(async () => canonicalOrder),
-      fetchCanonicalRefundsForOrder: vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', refunds: [], refundsListComplete: true, orderTotalRefundedAmount: '0', orderTotalRefundedCurrencyCode: 'TRY', source: 'mock' })),
-      fetchCanonicalReturnsForOrder: vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', returns: [], source: 'mock' })),
+      fetchCustomerCancellationOrderSnapshot,
+      fetchCanonicalRefundsForOrder,
+      fetchCanonicalReturnsForOrder,
     } as never,
     createRequest: createRequest as never,
   });
-  return { api, createRequest };
+  return {
+    api,
+    createRequest,
+    findUnique,
+    fetchCustomerCancellationOrderSnapshot,
+    fetchCanonicalRefundsForOrder,
+    fetchCanonicalReturnsForOrder,
+  };
 }
 
 describe('Shopify Customer Account session-token verification', () => {
@@ -207,7 +219,7 @@ describe('Shopify Customer Account session-token verification', () => {
 });
 
 describe('customer cancellation API domain boundary', () => {
-  it('rejects unauthenticated eligibility and creation requests before domain processing', async () => {
+  it('rejects unauthenticated eligibility, status, and creation requests before domain processing', async () => {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('SHIPPING_PROVIDER', 'kargonomi');
     vi.stubEnv('KARGONOMI_BASE_URL', 'https://kargonomi.test.example.com');
@@ -225,6 +237,10 @@ describe('customer cancellation API domain boundary', () => {
         url: '/api/customer-cancellations/requests',
         payload: { shopifyOrderId: '500', items: [], reasonCode: 'x', idempotencyKey: 'x' },
       });
+      const status = await app.inject({
+        method: 'GET',
+        url: '/api/customer-cancellations/status?shopifyOrderId=500',
+      });
       const preflight = await app.inject({
         method: 'OPTIONS',
         url: '/api/customer-cancellations/requests',
@@ -240,9 +256,85 @@ describe('customer cancellation API domain boundary', () => {
       expect(read.headers['access-control-allow-credentials']).toBeUndefined();
       expect(create.statusCode).toBe(401);
       expect(create.json()).toMatchObject({ code: 'CUSTOMER_SESSION_INVALID' });
+      expect(status.statusCode).toBe(401);
+      expect(status.json()).toMatchObject({ code: 'CUSTOMER_SESSION_INVALID' });
       expect(preflight.statusCode).toBe(204);
       expect(preflight.headers['access-control-allow-origin']).toBe('*');
       expect(preflight.headers['access-control-allow-credentials']).toBeUndefined();
+    } finally {
+      await app.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('fails eligibility and creation closed before reads or persistence when intake is disabled', async () => {
+    const enabled = buildApi();
+    const disabled = createCustomerCancellationApiService(
+      { ...baseEnv(), CUSTOMER_CANCELLATION_INTAKE_ENABLED: false },
+      {
+        db: { shopifyOrder: { findUnique: enabled.findUnique } } as never,
+        shopify: {
+          fetchCustomerCancellationOrderSnapshot: enabled.fetchCustomerCancellationOrderSnapshot,
+          fetchCanonicalRefundsForOrder: enabled.fetchCanonicalRefundsForOrder,
+          fetchCanonicalReturnsForOrder: enabled.fetchCanonicalReturnsForOrder,
+        } as never,
+        createRequest: enabled.createRequest as never,
+      },
+    );
+
+    await expect(disabled.getEligibility(session(), '500')).rejects.toMatchObject({
+      code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED',
+      statusCode: 503,
+    });
+    await expect(disabled.createCancellationRequest(session(), {
+      shopifyOrderId: '500',
+      items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
+      reasonCode: 'CUSTOMER_REQUEST',
+      idempotencyKey: 'disabled-idem',
+    })).rejects.toMatchObject({
+      code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED',
+      statusCode: 503,
+    });
+    expect(enabled.fetchCustomerCancellationOrderSnapshot).not.toHaveBeenCalled();
+    expect(enabled.fetchCanonicalRefundsForOrder).not.toHaveBeenCalled();
+    expect(enabled.fetchCanonicalReturnsForOrder).not.toHaveBeenCalled();
+    expect(enabled.findUnique).not.toHaveBeenCalled();
+    expect(enabled.createRequest).not.toHaveBeenCalled();
+  });
+
+  it('returns the typed disabled response from authenticated intake routes', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SHIPPING_PROVIDER', 'kargonomi');
+    vi.stubEnv('KARGONOMI_BASE_URL', 'https://kargonomi.test.example.com');
+    vi.stubEnv('KARGONOMI_API_TOKEN', 'test-token');
+    vi.stubEnv('SHOPIFY_WEBHOOK_SECRET', clientSecret);
+    vi.stubEnv('SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID', clientId);
+    vi.stubEnv('SHOPIFY_SHOP_DOMAIN', shopDomain);
+    vi.stubEnv('CUSTOMER_CANCELLATION_INTAKE_ENABLED', 'false');
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    try {
+      const headers = { authorization: `Bearer ${signToken()}` };
+      const eligibility = await app.inject({
+        method: 'GET',
+        url: '/api/customer-cancellations/eligibility?shopifyOrderId=500',
+        headers,
+      });
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/customer-cancellations/requests',
+        headers,
+        payload: {
+          shopifyOrderId: '500',
+          items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
+          reasonCode: 'CUSTOMER_REQUEST',
+          idempotencyKey: 'disabled-route-idem',
+        },
+      });
+      expect(eligibility.statusCode).toBe(503);
+      expect(eligibility.json()).toMatchObject({ code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED' });
+      expect(create.statusCode).toBe(503);
+      expect(create.json()).toMatchObject({ code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED' });
     } finally {
       await app.close();
       vi.unstubAllEnvs();
@@ -263,6 +355,85 @@ describe('customer cancellation API domain boundary', () => {
       canRequestCancellation: true,
       lineItems: [{ shopifyLineItemId: 'gid://shopify/LineItem/700', requestableQuantity: 2, eligible: true }],
     });
+  });
+
+  it('reads active and terminal customer-safe status while intake is disabled', async () => {
+    const statuses = [
+      'PENDING',
+      'APPROVED_FOR_REFUND',
+      'APPROVED',
+      'DECLINED',
+      'TOO_LATE',
+      'CONFLICTED',
+      'PARTIALLY_RESOLVED',
+    ] as const;
+    const statusLocal = {
+      ...localOrder(),
+      customerCancellationRequests: statuses.map((status, index) => ({
+        id: `request-${index}`,
+        status,
+        requestedAt: new Date(`2026-01-0${index + 1}T00:00:00Z`),
+        resolvedAt: status === 'PENDING' || status === 'APPROVED_FOR_REFUND' ? null : new Date(`2026-02-0${index + 1}T00:00:00Z`),
+        shopifyCustomerId: customerGid,
+        idempotencyKey: `status-idem-${index}`,
+        reasonCode: 'CUSTOMER_REQUEST',
+        customerNote: 'must-not-leak',
+        reviewedByUserId: 'must-not-leak',
+        reviewReason: 'must-not-leak',
+        items: [{
+          shopifyOrderLineItemId: 'local-line-700',
+          vendorAllocationId: 'must-not-leak',
+          requestedQuantity: 2,
+          resolvedQuantity: status === 'APPROVED' ? 2 : null,
+          status,
+          shopifyOrderLineItem: { sourceLineItemId: '700' },
+          operationalJob: { id: 'must-not-leak' },
+          outboundShopifyRefundAttempt: { id: 'must-not-leak' },
+        }],
+      })),
+    };
+    const built = buildApi({ local: statusLocal as never });
+    const api = createCustomerCancellationApiService(
+      { ...baseEnv(), CUSTOMER_CANCELLATION_INTAKE_ENABLED: false },
+      {
+        db: { shopifyOrder: { findUnique: built.findUnique } } as never,
+        shopify: {
+          fetchCustomerCancellationOrderSnapshot: built.fetchCustomerCancellationOrderSnapshot,
+          fetchCanonicalRefundsForOrder: built.fetchCanonicalRefundsForOrder,
+          fetchCanonicalReturnsForOrder: built.fetchCanonicalReturnsForOrder,
+        } as never,
+      },
+    );
+
+    const result = await api.getStatus(session(), 'gid://shopify/Order/500');
+    expect(result.requests.map((request) => request.status)).toEqual(statuses);
+    expect(result.requests[2]).toMatchObject({
+      requestId: 'request-2',
+      status: 'APPROVED',
+      items: [{
+        shopifyLineItemId: 'gid://shopify/LineItem/700',
+        requestedQuantity: 2,
+        resolvedQuantity: 2,
+        status: 'APPROVED',
+      }],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/vendor|allocation|finance|settlement|payout|operationalJob|refundAttempt|review|note/i);
+    expect(built.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        customerCancellationRequests: expect.objectContaining({
+          where: { shopifyCustomerId: customerGid },
+        }),
+      }),
+    }));
+  });
+
+  it('enforces canonical customer ownership for status reads', async () => {
+    const { api, findUnique } = buildApi();
+    await expect(api.getStatus(session('gid://shopify/Customer/other'), '500')).rejects.toMatchObject({
+      code: 'ORDER_NOT_OWNED_BY_CUSTOMER',
+      statusCode: 403,
+    });
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it('blocks tracked shipment authority and ambiguous multi-allocation mappings', async () => {

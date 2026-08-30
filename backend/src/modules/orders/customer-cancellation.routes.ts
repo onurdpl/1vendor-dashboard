@@ -70,6 +70,19 @@ export function registerCustomerCancellationRoutes(app: FastifyInstance, env: Ap
     },
   );
 
+  app.get<{ Querystring: { shopifyOrderId?: string } }>(
+    '/api/customer-cancellations/status',
+    { config: { cors: customerAccountCors }, preHandler: authenticateCustomerAccount },
+    async (request, reply) => {
+      try {
+        if (!request.customerAccountSession) throw new CustomerAccountSessionTokenError();
+        return await service.getStatus(request.customerAccountSession, request.query.shopifyOrderId ?? '');
+      } catch (error) {
+        return sendCustomerCancellationError(reply, error);
+      }
+    },
+  );
+
   app.post<{ Body: CustomerCancellationCreateBody }>(
     '/api/customer-cancellations/requests',
     { config: { cors: customerAccountCors }, preHandler: authenticateCustomerAccount },

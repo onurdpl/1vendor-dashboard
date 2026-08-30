@@ -901,9 +901,11 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 
 ## Customer Account Cancellation API
 
+- `CUSTOMER_CANCELLATION_INTAKE_ENABLED` defaults to `false` and independently controls new custom customer-cancellation intake. When disabled, eligibility and request creation return `503` with `CUSTOMER_CANCELLATION_INTAKE_DISABLED`; status reads remain available for existing requests. This flag does not alter existing holds, jobs, reconciliation, or auto-refund processing.
 - `GET /api/customer-cancellations/eligibility?shopifyOrderId=<Shopify Order GID or ID>` returns customer-safe, canonical cancellation eligibility and requestable quantities.
 - `POST /api/customer-cancellations/requests` accepts `shopifyOrderId`, `items[{shopifyLineItemId, requestedQuantity}]`, `reasonCode`, optional `note`, and `idempotencyKey`.
-- Both routes require a Shopify Customer Account session token in `Authorization: Bearer <token>`. Cookie authentication is not used. CORS is enabled only on these routes for Customer Account extension `network_access`, with no credentialed requests.
+- `GET /api/customer-cancellations/status?shopifyOrderId=<Shopify Order GID or ID>` remains available regardless of the intake flag and returns only customer-safe request/item status codes, quantities, and timestamps for the canonically owned order.
+- All three routes require a Shopify Customer Account session token in `Authorization: Bearer <token>`. Cookie authentication is not used. CORS is enabled only on these routes for Customer Account extension `network_access`, with no credentialed requests.
 - The backend verifies the token's app audience, canonical shop destination, time claims, signature, and customer subject. It then verifies the canonical Shopify Order customer GID and derives local order/allocation identity and quantity eligibility server-side.
 - Successful creation persists through the canonical-order lock and database idempotency boundary and immediately activates the allocation-scoped customer-cancellation shipment hold.
 - `APPROVED_FOR_REFUND` remains an active shipment and finance hold state. It means refund authorization only, not Shopify refund completion.

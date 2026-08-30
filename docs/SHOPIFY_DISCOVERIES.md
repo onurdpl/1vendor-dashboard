@@ -523,6 +523,7 @@ POST /fulfillments.json
 
 ## Customer Cancellation Request Foundation
 
+- `CUSTOMER_CANCELLATION_INTAKE_ENABLED` defaults to `false` and controls only new authenticated custom cancellation intake. Disabled intake fails closed for eligibility and creation while the authenticated status read remains available for existing requests. It is independent from `CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED` and does not release holds or alter existing request processing.
 - Customer Cancellation Request is a separate operational authority from Vendor Reject. It does not use `VENDOR_BLOCKED`, `cancelRefundReviewStatus`, `reassignmentRequired`, or allocation cancellation metadata.
 - The local persistence foundation retains request-level and item-level state, requested quantities, customer/shop identity, admin review metadata, and database-enforced idempotency.
 - Creating a `PENDING` request is non-monetary. It does not cancel the Shopify Order, change allocation ownership/status, create refunds or finance entries, or alter shipment/tracking state.
