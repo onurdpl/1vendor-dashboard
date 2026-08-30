@@ -899,6 +899,17 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Do not rely on the frontend to hide data as a security boundary.
 - Return `403` or `404` consistently for cross-vendor access, but do not leak data.
 
+## Customer Account Cancellation API
+
+- `GET /api/customer-cancellations/eligibility?shopifyOrderId=<Shopify Order GID or ID>` returns customer-safe, canonical cancellation eligibility and requestable quantities.
+- `POST /api/customer-cancellations/requests` accepts `shopifyOrderId`, `items[{shopifyLineItemId, requestedQuantity}]`, `reasonCode`, optional `note`, and `idempotencyKey`.
+- Both routes require a Shopify Customer Account session token in `Authorization: Bearer <token>`. Cookie authentication is not used. CORS is enabled only on these routes for Customer Account extension `network_access`, with no credentialed requests.
+- The backend verifies the token's app audience, canonical shop destination, time claims, signature, and customer subject. It then verifies the canonical Shopify Order customer GID and derives local order/allocation identity and quantity eligibility server-side.
+- Successful creation persists through the canonical-order lock and database idempotency boundary and immediately activates the allocation-scoped customer-cancellation shipment hold.
+- Responses do not expose vendor economics, finance details, Admin API credentials, customer contact information, or raw Shopify data.
+- Request creation is non-monetary: it does not cancel an order or fulfillment, create a refund, alter finance/settlement/payout state, or perform any Shopify mutation.
+- Admin review/refund handling and the Customer Account UI extension remain separate, not-yet-live phases.
+
 ## Future Shopify Notes
 
 - A Shopify store connection belongs to a vendor.

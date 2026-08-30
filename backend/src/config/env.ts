@@ -14,6 +14,7 @@ export type AppEnv = {
   SHOPIFY_WEBHOOK_SECRET: string;
   SHOPIFY_RETURN_WEBHOOK_SECRET?: string;
   SHOPIFY_FULFILLMENT_WEBHOOK_SECRET?: string;
+  SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID?: string;
   SHOPIFY_SHOP_DOMAIN?: string;
   SHOPIFY_ADMIN_ACCESS_TOKEN?: string;
   SHOPIFY_API_VERSION: string;
@@ -241,6 +242,7 @@ export function loadEnv(): AppEnv {
     (nodeEnv !== 'production' ? 'dev-shopify-webhook-secret' : undefined);
   const shopifyReturnWebhookSecret = process.env.SHOPIFY_RETURN_WEBHOOK_SECRET || undefined;
   const shopifyFulfillmentWebhookSecret = process.env.SHOPIFY_FULFILLMENT_WEBHOOK_SECRET || undefined;
+  const shopifyCustomerAccountClientId = process.env.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID?.trim() || undefined;
   const shopifyShopDomain = process.env.SHOPIFY_SHOP_DOMAIN || undefined;
   const shopifyAdminAccessToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || undefined;
   const shopifyApiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
@@ -356,6 +358,7 @@ export function loadEnv(): AppEnv {
     SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
     SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
     SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,
+    SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: shopifyCustomerAccountClientId,
     SHOPIFY_SHOP_DOMAIN: shopifyShopDomain,
     SHOPIFY_ADMIN_ACCESS_TOKEN: shopifyAdminAccessToken,
     SHOPIFY_API_VERSION: shopifyApiVersion,

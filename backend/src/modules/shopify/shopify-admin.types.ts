@@ -222,6 +222,29 @@ export type CanonicalShopifyOrderSnapshot = {
 
 export type FetchCanonicalShopifyOrderSnapshotResult = CanonicalShopifyOrderSnapshot | null;
 
+export type CustomerCancellationCanonicalOrderSnapshot = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+  customerGid: string | null;
+  cancelledAt: string | null;
+  lineItems: Array<{
+    lineItemGid: string;
+    sourceLineItemId: string;
+    title: string | null;
+    variantTitle: string | null;
+    imageUrl: string | null;
+    quantity: number;
+    currentQuantity: number | null;
+    refundableQuantity: number | null;
+  }>;
+  fulfillmentOrders: CanonicalShopifyOrderSnapshot['fulfillmentOrders'];
+  source: 'mock' | 'shopify_admin';
+};
+
+export type FetchCustomerCancellationCanonicalOrderSnapshotResult =
+  CustomerCancellationCanonicalOrderSnapshot | null;
+
 export type CanonicalShopifyRefundLineItemSnapshot = {
   refundLineItemGid: string;
   sourceRefundLineItemId: string;

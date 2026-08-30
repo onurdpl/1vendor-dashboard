@@ -83,6 +83,70 @@ afterEach(() => {
 });
 
 describe('Shopify API 2026-01 canonical current-state queries', () => {
+  it('uses a minimal customer-cancellation ownership query without protected contact data', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
+      data: {
+        order: {
+          id: 'gid://shopify/Order/7856043819345',
+          legacyResourceId: '7856043819345',
+          name: '#1105',
+          cancelledAt: null,
+          customer: { id: 'gid://shopify/Customer/42' },
+          lineItems: {
+            pageInfo: { hasNextPage: false },
+            edges: [{ node: {
+              id: 'gid://shopify/LineItem/20754005197137',
+              title: 'Product',
+              name: 'Product',
+              quantity: 2,
+              currentQuantity: 2,
+              refundableQuantity: 2,
+              image: { url: 'https://cdn.shopify.com/product.jpg' },
+              variant: { title: 'Large', image: null },
+            } }],
+          },
+          fulfillmentOrders: {
+            pageInfo: { hasNextPage: false },
+            edges: [{ node: {
+              id: 'gid://shopify/FulfillmentOrder/1',
+              status: 'OPEN',
+              requestStatus: 'UNSUBMITTED',
+              lineItems: {
+                pageInfo: { hasNextPage: false },
+                edges: [{ node: {
+                  id: 'gid://shopify/FulfillmentOrderLineItem/1',
+                  remainingQuantity: 2,
+                  totalQuantity: 2,
+                  lineItem: { id: 'gid://shopify/LineItem/20754005197137' },
+                } }],
+              },
+            } }],
+          },
+        },
+      },
+    }));
+
+    const result = await createShopifyAdminService(env)
+      .fetchCustomerCancellationOrderSnapshot('7856043819345');
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { query: string };
+
+    expect(request.query).toContain('query CustomerCancellationOrderSnapshot');
+    expect(request.query).toContain('customer {');
+    expect(request.query).not.toMatch(/\bemail\b/);
+    expect(request.query).not.toMatch(/\bphone\b/);
+    expect(request.query).not.toContain('shippingAddress');
+    expect(request.query).not.toContain('billingAddress');
+    expect(result).toMatchObject({
+      customerGid: 'gid://shopify/Customer/42',
+      lineItems: [{
+        sourceLineItemId: '20754005197137',
+        variantTitle: 'Large',
+        currentQuantity: 2,
+      }],
+      fulfillmentOrders: [{ status: 'OPEN' }],
+    });
+  });
+
   it('parses refunds as the API 2026-01 direct Refund list without Refund pageInfo or edges', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({
       data: {

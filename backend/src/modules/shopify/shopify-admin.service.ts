@@ -2,6 +2,7 @@ import type { AppEnv } from '../../config/env.js';
 import { Buffer } from 'node:buffer';
 import type {
   CanonicalShopifyOrderSnapshot,
+  CustomerCancellationCanonicalOrderSnapshot,
   CanonicalShopifyRefundSnapshot,
   CanonicalShopifyReturnSnapshot,
   CancelFulfillmentResult,
@@ -13,6 +14,7 @@ import type {
   CreateShopifyRefundResult,
   FetchOrderLineItemImagesResult,
   FetchCanonicalShopifyOrderSnapshotResult,
+  FetchCustomerCancellationCanonicalOrderSnapshotResult,
   FetchCanonicalShopifyRefundsForOrderResult,
   FetchCanonicalShopifyReturnsForOrderResult,
   FetchOrderTaxSnapshotResult,
@@ -249,6 +251,55 @@ type CanonicalOrderSnapshotQueryResponse = {
                 lineItem?: {
                   id?: string | null;
                 } | null;
+              };
+            }>;
+          } | null;
+        };
+      }>;
+    } | null;
+  } | null;
+};
+
+type CustomerCancellationOrderSnapshotQueryResponse = {
+  order: {
+    id: string;
+    legacyResourceId?: string | null;
+    name?: string | null;
+    cancelledAt?: string | null;
+    customer?: { id?: string | null } | null;
+    lineItems: {
+      pageInfo?: { hasNextPage?: boolean | null } | null;
+      edges: Array<{
+        node: {
+          id: string;
+          title?: string | null;
+          name?: string | null;
+          quantity?: number | null;
+          currentQuantity?: number | null;
+          refundableQuantity?: number | null;
+          image?: { url?: string | null } | null;
+          variant?: {
+            title?: string | null;
+            image?: { url?: string | null } | null;
+          } | null;
+        };
+      }>;
+    };
+    fulfillmentOrders?: {
+      pageInfo?: { hasNextPage?: boolean | null } | null;
+      edges: Array<{
+        node: {
+          id: string;
+          status?: string | null;
+          requestStatus?: string | null;
+          lineItems?: {
+            pageInfo?: { hasNextPage?: boolean | null } | null;
+            edges: Array<{
+              node: {
+                id: string;
+                remainingQuantity?: number | null;
+                totalQuantity?: number | null;
+                lineItem?: { id?: string | null } | null;
               };
             }>;
           } | null;
@@ -1683,6 +1734,187 @@ export function createShopifyAdminService(env: AppEnv) {
         originalUnitPrice: mapShopifyMoney(edge.node.originalUnitPriceSet ?? null),
         discountedTotal: mapShopifyMoney(edge.node.discountedTotalSet ?? null),
         taxLines: (edge.node.taxLines ?? []).map(mapShopifyTaxLine),
+      })),
+      source: 'shopify_admin',
+    };
+  }
+
+  async function fetchCustomerCancellationOrderSnapshot(
+    orderId: string,
+  ): Promise<FetchCustomerCancellationCanonicalOrderSnapshotResult> {
+    const mockSnapshot = mockCanonicalOrderSnapshotsByOrderId[orderId];
+    if (mockSnapshot) {
+      return {
+        orderGid: mockSnapshot.orderGid,
+        sourceShopifyOrderId: mockSnapshot.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: mockSnapshot.sourceShopifyOrderNumber,
+        customerGid: normalizeShopifyString(Reflect.get(mockSnapshot, 'customerGid')),
+        cancelledAt: mockSnapshot.cancelledAt,
+        lineItems: mockSnapshot.lineItems.map((lineItem) => ({
+          lineItemGid: lineItem.lineItemGid,
+          sourceLineItemId: lineItem.sourceLineItemId,
+          title: lineItem.title,
+          variantTitle: null,
+          imageUrl: lineItem.imageUrl,
+          quantity: lineItem.quantity,
+          currentQuantity: lineItem.currentQuantity,
+          refundableQuantity: lineItem.refundableQuantity,
+        })),
+        fulfillmentOrders: mockSnapshot.fulfillmentOrders,
+        source: 'mock',
+      };
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      return null;
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query CustomerCancellationOrderSnapshot($orderId: ID!) {
+              order(id: $orderId) {
+                id
+                legacyResourceId
+                name
+                cancelledAt
+                customer {
+                  id
+                }
+                lineItems(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  edges {
+                    node {
+                      id
+                      title
+                      name
+                      quantity
+                      currentQuantity
+                      refundableQuantity
+                      image {
+                        url
+                      }
+                      variant {
+                        title
+                        image {
+                          url
+                        }
+                      }
+                    }
+                  }
+                }
+                fulfillmentOrders(first: 50) {
+                  pageInfo {
+                    hasNextPage
+                  }
+                  edges {
+                    node {
+                      id
+                      status
+                      requestStatus
+                      lineItems(first: 50) {
+                        pageInfo {
+                          hasNextPage
+                        }
+                        edges {
+                          node {
+                            id
+                            remainingQuantity
+                            totalQuantity
+                            lineItem {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { orderId: toShopifyOrderGid(orderId) },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify customer cancellation order fetch failed with status ${response.status}.`);
+    }
+    const json = await parseCanonicalShopifyResponse<CustomerCancellationOrderSnapshotQueryResponse>(response);
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify customer cancellation order fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+    if (!json.data || !Object.prototype.hasOwnProperty.call(json.data, 'order')) {
+      throw new CanonicalShopifySnapshotParseError('Shopify customer cancellation response omitted order data.');
+    }
+    const order = json.data.order;
+    if (order === null) return null;
+    if (!order.id) {
+      throw new CanonicalShopifySnapshotParseError('Shopify customer cancellation response had invalid order identity.');
+    }
+    if (order.lineItems.pageInfo?.hasNextPage) {
+      throw new Error('Shopify customer cancellation order line item pagination incomplete.');
+    }
+    if (order.fulfillmentOrders?.pageInfo?.hasNextPage) {
+      throw new Error('Shopify customer cancellation fulfillment order pagination incomplete.');
+    }
+    const paginatedFulfillmentOrder = (order.fulfillmentOrders?.edges ?? []).find(
+      (edge) => edge.node.lineItems?.pageInfo?.hasNextPage,
+    );
+    if (paginatedFulfillmentOrder) {
+      throw new Error(
+        `Shopify customer cancellation fulfillment order ${paginatedFulfillmentOrder.node.id} line item pagination incomplete.`,
+      );
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: order.legacyResourceId ?? extractShopifyGidTail(order.id) ?? orderId,
+      sourceShopifyOrderNumber:
+        normalizeShopifyString(order.name) ?? `#${extractShopifyGidTail(order.id) ?? orderId}`,
+      customerGid: normalizeShopifyString(order.customer?.id),
+      cancelledAt: order.cancelledAt ?? null,
+      lineItems: order.lineItems.edges.map(({ node }) => ({
+        lineItemGid: node.id,
+        sourceLineItemId: extractShopifyGidTail(node.id) ?? node.id,
+        title: normalizeShopifyString(node.title) ?? normalizeShopifyString(node.name),
+        variantTitle: normalizeShopifyString(node.variant?.title),
+        imageUrl:
+          normalizeShopifyString(node.image?.url) ?? normalizeShopifyString(node.variant?.image?.url),
+        quantity:
+          typeof node.quantity === 'number' && Number.isFinite(node.quantity) ? node.quantity : 1,
+        currentQuantity:
+          typeof node.currentQuantity === 'number' && Number.isFinite(node.currentQuantity)
+            ? node.currentQuantity
+            : null,
+        refundableQuantity:
+          typeof node.refundableQuantity === 'number' && Number.isFinite(node.refundableQuantity)
+            ? node.refundableQuantity
+            : null,
+      })),
+      fulfillmentOrders: (order.fulfillmentOrders?.edges ?? []).map(({ node }) => ({
+        id: node.id,
+        status: node.status ?? null,
+        requestStatus: node.requestStatus ?? null,
+        lineItems: (node.lineItems?.edges ?? []).map(({ node: lineItem }) => ({
+          id: lineItem.id,
+          lineItemId: lineItem.lineItem?.id ?? null,
+          remainingQuantity:
+            typeof lineItem.remainingQuantity === 'number' ? lineItem.remainingQuantity : null,
+          totalQuantity: typeof lineItem.totalQuantity === 'number' ? lineItem.totalQuantity : null,
+        })),
       })),
       source: 'shopify_admin',
     };
@@ -4283,6 +4515,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderSellerInfo,
     fetchOrderLineItemImages,
     fetchOrderTaxSnapshot,
+    fetchCustomerCancellationOrderSnapshot,
     fetchCanonicalOrderSnapshot,
     fetchCanonicalRefundsForOrder,
     fetchCanonicalReturnsForOrder,
