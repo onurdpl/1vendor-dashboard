@@ -3,6 +3,8 @@ import { prisma } from '../../db/prisma.js';
 import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
+import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import { assertNoPendingCustomerCancellationHold } from '../orders/customer-cancellation-hold.service.js';
 
 const SHIPPED_STATUS = 'In Transit';
 
@@ -33,8 +35,13 @@ export type VendorIntegrationShipmentResult = {
 
 type VendorIntegrationShipmentDb = Pick<
   Prisma.TransactionClient,
-  'vendorAllocation' | 'vendorIntegrationShipmentEvent'
->;
+  | '$queryRaw'
+  | 'customerCancellationRequestItem'
+  | 'vendorAllocation'
+  | 'vendorIntegrationShipmentEvent'
+> & {
+  $transaction?: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
+};
 
 function normalizeRequiredText(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -79,11 +86,15 @@ function serializeShipment(allocation: {
 }
 
 function assertAllocationIsOperational(allocation: {
+  allocationStatus?: string | null;
   cancellationReason?: string | null;
   order?: { cancelledAt?: Date | null } | null;
 }) {
   if (isFullOrderCancelled(allocation.order) || allocation.cancellationReason) {
     throw new VendorIntegrationOrderStateError('Order is cancelled and cannot receive shipment updates.');
+  }
+  if (allocation.allocationStatus !== 'ACTIVE') {
+    throw new VendorIntegrationOrderStateError('Allocation is not active and cannot receive shipment updates.');
   }
 }
 
@@ -125,110 +136,132 @@ export async function updateVendorIntegrationOrderShipment(
   input: VendorIntegrationShipmentInput,
   db: VendorIntegrationShipmentDb = prisma,
 ): Promise<VendorIntegrationShipmentResult | null> {
-  const existingEvent = await db.vendorIntegrationShipmentEvent.findUnique({
-    where: {
-      clientId_vendorAllocationId_idempotencyKey: {
-        clientId: input.context.clientId,
-        vendorAllocationId: input.allocationId,
-        idempotencyKey: input.idempotencyKey,
+  const execute = async (tx: Prisma.TransactionClient) => {
+    const initialAllocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
       },
-    },
-    select: {
-      vendorAllocation: {
-        select: {
-          id: true,
-          assignedVendorId: true,
-          carrier: true,
-          trackingNumber: true,
-          vendorIntegrationTrackingUrl: true,
-          vendorIntegrationShippedAt: true,
-          shippingStatus: true,
-          lastVendorIntegrationShipmentRequestId: true,
-          cancellationReason: true,
-          order: {
-            select: {
-              cancelledAt: true,
-            },
+      select: {
+        order: {
+          select: {
+            sourceShopifyOrderId: true,
           },
         },
       },
-    },
-  });
+    });
+    if (!initialAllocation) {
+      return null;
+    }
 
-  if (existingEvent) {
-    return {
-      idempotent: true,
-      allocation: serializeShipment(existingEvent.vendorAllocation),
-    };
-  }
+    await acquireShopifyOrderTransactionLock(tx, initialAllocation.order.sourceShopifyOrderId);
 
-  const allocation = await db.vendorAllocation.findFirst({
-    where: {
-      id: input.allocationId,
-      assignedVendorId: input.context.vendorIdentifier,
-    },
-    select: {
-      id: true,
-      assignedVendorId: true,
-      cancellationReason: true,
-      order: {
-        select: {
-          cancelledAt: true,
+    const allocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        allocationStatus: true,
+        cancellationReason: true,
+        order: {
+          select: {
+            cancelledAt: true,
+            sourceShopifyOrderId: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!allocation) {
-    return null;
-  }
-  assertAllocationIsOperational(allocation);
+    if (!allocation) {
+      return null;
+    }
 
-  const shippedAt = parseShippedAt(input.shippedAt);
-  const updated = await db.vendorAllocation.update({
-    where: {
-      id: allocation.id,
-    },
-    data: {
-      carrier: normalizeRequiredText(input.carrier),
-      trackingNumber: normalizeRequiredText(input.trackingNumber),
-      vendorIntegrationTrackingUrl: normalizeTrackingUrl(input.trackingUrl),
-      vendorIntegrationShippedAt: shippedAt ?? null,
-      shippingStatus: SHIPPED_STATUS,
-      lastVendorIntegrationShipmentRequestId: input.requestId ?? null,
-    },
-    select: {
-      id: true,
-      assignedVendorId: true,
-      carrier: true,
-      trackingNumber: true,
-      vendorIntegrationTrackingUrl: true,
-      vendorIntegrationShippedAt: true,
-      shippingStatus: true,
-      lastVendorIntegrationShipmentRequestId: true,
-    },
-  });
+    const existingEvent = await tx.vendorIntegrationShipmentEvent.findUnique({
+      where: {
+        clientId_vendorAllocationId_idempotencyKey: {
+          clientId: input.context.clientId,
+          vendorAllocationId: input.allocationId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
+      select: {
+        vendorAllocation: {
+          select: {
+            id: true,
+            assignedVendorId: true,
+            carrier: true,
+            trackingNumber: true,
+            vendorIntegrationTrackingUrl: true,
+            vendorIntegrationShippedAt: true,
+            shippingStatus: true,
+            lastVendorIntegrationShipmentRequestId: true,
+          },
+        },
+      },
+    });
+    if (existingEvent) {
+      return {
+        idempotent: true,
+        allocation: serializeShipment(existingEvent.vendorAllocation),
+      };
+    }
 
-  await db.vendorIntegrationShipmentEvent.create({
-    data: {
-      clientId: input.context.clientId,
-      vendorAllocationId: allocation.id,
-      vendorIdentifier: input.context.vendorIdentifier,
-      providerName: input.context.providerName,
-      carrier: updated.carrier ?? '',
-      trackingNumber: updated.trackingNumber ?? '',
-      trackingUrl: updated.vendorIntegrationTrackingUrl,
-      shippedAt: updated.vendorIntegrationShippedAt,
-      idempotencyKey: input.idempotencyKey,
-      requestId: input.requestId ?? null,
-    },
-    select: {
-      id: true,
-    },
-  });
+    assertAllocationIsOperational(allocation);
+    await assertNoPendingCustomerCancellationHold(allocation.id, tx);
 
-  return {
-    idempotent: false,
-    allocation: serializeShipment(updated),
+    const shippedAt = parseShippedAt(input.shippedAt);
+    const updated = await tx.vendorAllocation.update({
+      where: {
+        id: allocation.id,
+      },
+      data: {
+        carrier: normalizeRequiredText(input.carrier),
+        trackingNumber: normalizeRequiredText(input.trackingNumber),
+        vendorIntegrationTrackingUrl: normalizeTrackingUrl(input.trackingUrl),
+        vendorIntegrationShippedAt: shippedAt ?? null,
+        shippingStatus: SHIPPED_STATUS,
+        lastVendorIntegrationShipmentRequestId: input.requestId ?? null,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        carrier: true,
+        trackingNumber: true,
+        vendorIntegrationTrackingUrl: true,
+        vendorIntegrationShippedAt: true,
+        shippingStatus: true,
+        lastVendorIntegrationShipmentRequestId: true,
+      },
+    });
+
+    await tx.vendorIntegrationShipmentEvent.create({
+      data: {
+        clientId: input.context.clientId,
+        vendorAllocationId: allocation.id,
+        vendorIdentifier: input.context.vendorIdentifier,
+        providerName: input.context.providerName,
+        carrier: updated.carrier ?? '',
+        trackingNumber: updated.trackingNumber ?? '',
+        trackingUrl: updated.vendorIntegrationTrackingUrl,
+        shippedAt: updated.vendorIntegrationShippedAt,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId ?? null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return {
+      idempotent: false,
+      allocation: serializeShipment(updated),
+    };
   };
+
+  return db.$transaction
+    ? db.$transaction(execute)
+    : execute(db as Prisma.TransactionClient);
 }

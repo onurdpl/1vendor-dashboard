@@ -8,6 +8,13 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     upsert: vi.fn(),
   },
+  shipmentExecution: {
+    findFirst: vi.fn(),
+  },
+  customerCancellationRequestItem: {
+    findFirst: vi.fn(),
+  },
+  $queryRaw: vi.fn(),
   $transaction: vi.fn(),
 }));
 
@@ -109,6 +116,11 @@ describe('fulfillment tracking sync', () => {
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.vendorAllocation.update.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
+    prismaMock.shipmentExecution.findFirst.mockReset();
+    prismaMock.customerCancellationRequestItem.findFirst.mockReset();
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue(null);
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$queryRaw.mockResolvedValue([]);
     prismaMock.$transaction.mockReset();
     shopifyAdminMock.fetchFulfillmentOrders.mockReset();
     shopifyAdminMock.createFulfillmentTracking.mockReset();
@@ -159,6 +171,24 @@ describe('fulfillment tracking sync', () => {
     });
     expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('blocks Shopify tracking submission under the canonical order lock when customer cancellation is pending', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
+    const service = createFulfillmentService(env);
+
+    await expect(service.updateAllocationTracking(buildRequest())).resolves.toEqual({
+      ok: false,
+      code: 409,
+      errorCode: 'CUSTOMER_CANCELLATION_PENDING',
+      message: 'A pending customer cancellation request blocks new shipment and tracking actions.',
+    });
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
   });
 
   it('builds line-item scoped Shopify tracking payload from allocation data', async () => {

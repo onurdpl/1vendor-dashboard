@@ -8,6 +8,11 @@ import {
   FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import {
+  assertNoPendingCustomerCancellationHold,
+  CustomerCancellationShipmentHoldError,
+} from '../orders/customer-cancellation-hold.service.js';
 
 function normalizeOptionalString(value: string | null | undefined) {
   if (typeof value !== 'string') {
@@ -51,6 +56,7 @@ export function createFulfillmentService(env: AppEnv) {
     body: UpdateAllocationTrackingBody;
     authUser: AuthUserContext;
     vendorContext: RequestVendorContext;
+    existingProviderShipmentExecutionId?: string;
   }): Promise<UpdateAllocationTrackingResult> {
     const trackingNumber = normalizeOptionalString(input.body.trackingNumber);
     const carrier = normalizeOptionalString(input.body.carrier);
@@ -169,6 +175,113 @@ export function createFulfillmentService(env: AppEnv) {
         code: 409,
         message: 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.',
       };
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await acquireShopifyOrderTransactionLock(tx, allocation.order.sourceShopifyOrderId);
+
+        const currentAllocation = await tx.vendorAllocation.findUnique({
+          where: {
+            id: allocation.id,
+          },
+          select: {
+            assignedVendorId: true,
+            allocationStatus: true,
+            cancellationReason: true,
+            order: {
+              select: {
+                cancelledAt: true,
+                sourceShopifyOrderId: true,
+              },
+            },
+            fulfillment: {
+              select: {
+                shopifyFulfillmentId: true,
+                syncStatus: true,
+              },
+            },
+          },
+        });
+
+        if (!currentAllocation || currentAllocation.assignedVendorId !== input.vendorContext.vendorId) {
+          throw new Error('Allocation is no longer available for fulfillment tracking updates.');
+        }
+        if (
+          isFullOrderCancelled(currentAllocation.order) ||
+          currentAllocation.cancellationReason ||
+          currentAllocation.allocationStatus !== 'ACTIVE'
+        ) {
+          throw new Error('Allocation is not eligible for fulfillment tracking updates.');
+        }
+        if (currentAllocation.fulfillment?.shopifyFulfillmentId) {
+          throw new Error('Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.');
+        }
+        if (currentAllocation.fulfillment?.syncStatus === 'fulfillment_submission_pending') {
+          throw new Error('Shopify fulfillment submission is already in progress for this allocation.');
+        }
+
+        let existingProviderEvidenceVerified = false;
+        if (input.existingProviderShipmentExecutionId) {
+          const providerExecution = await tx.shipmentExecution.findFirst({
+            where: {
+              id: input.existingProviderShipmentExecutionId,
+              allocationId: allocation.id,
+            },
+            select: {
+              providerShipmentId: true,
+              trackingNumber: true,
+              trackingUrl: true,
+              labelUrl: true,
+            },
+          });
+          existingProviderEvidenceVerified = Boolean(
+            providerExecution &&
+              (providerExecution.providerShipmentId ||
+                providerExecution.trackingNumber ||
+                providerExecution.trackingUrl ||
+                providerExecution.labelUrl),
+          );
+        }
+
+        if (!existingProviderEvidenceVerified) {
+          await assertNoPendingCustomerCancellationHold(allocation.id, tx);
+        }
+
+        await tx.fulfillment.upsert({
+          where: {
+            vendorAllocationId: allocation.id,
+          },
+          update: {
+            fulfillmentStatus: 'fulfillment_submission_pending',
+            trackingNumber,
+            carrier,
+            trackingUrl,
+            notifyCustomer,
+            syncStatus: 'fulfillment_submission_pending',
+            errorMessage: null,
+          },
+          create: {
+            vendorAllocationId: allocation.id,
+            fulfillmentStatus: 'fulfillment_submission_pending',
+            trackingNumber,
+            carrier,
+            trackingUrl,
+            notifyCustomer,
+            syncStatus: 'fulfillment_submission_pending',
+          },
+        });
+      });
+    } catch (error) {
+      if (error instanceof CustomerCancellationShipmentHoldError) {
+        return {
+          ok: false,
+          code: error.statusCode,
+          errorCode: error.code,
+          message: error.message,
+        };
+      }
+      throw error;
     }
 
     const fulfillmentOrdersResponse = await shopifyAdminService.fetchFulfillmentOrders(

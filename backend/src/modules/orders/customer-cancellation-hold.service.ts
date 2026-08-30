@@ -7,8 +7,22 @@ export const ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES = [
 ] as const;
 
 export const CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS = CustomerCancellationStatus.PENDING;
+export const CUSTOMER_CANCELLATION_PENDING_CODE = 'CUSTOMER_CANCELLATION_PENDING';
+export const CUSTOMER_CANCELLATION_PENDING_MESSAGE =
+  'A pending customer cancellation request blocks new shipment and tracking actions.';
 
 type CustomerCancellationHoldDb = Pick<Prisma.TransactionClient, 'customerCancellationRequestItem'>;
+
+export class CustomerCancellationShipmentHoldError extends Error {
+  readonly code = CUSTOMER_CANCELLATION_PENDING_CODE;
+  readonly statusCode = 409;
+
+  constructor(message = CUSTOMER_CANCELLATION_PENDING_MESSAGE) {
+    super(message);
+    this.name = 'CustomerCancellationShipmentHoldError';
+    Object.setPrototypeOf(this, CustomerCancellationShipmentHoldError.prototype);
+  }
+}
 
 export function isPendingCustomerCancellationHoldState(input: {
   requestStatus: CustomerCancellationStatus;
@@ -46,4 +60,13 @@ export async function hasPendingCustomerCancellationHold(
   });
 
   return Boolean(pendingItem);
+}
+
+export async function assertNoPendingCustomerCancellationHold(
+  vendorAllocationId: string,
+  db: CustomerCancellationHoldDb = prisma,
+) {
+  if (await hasPendingCustomerCancellationHold(vendorAllocationId, db)) {
+    throw new CustomerCancellationShipmentHoldError();
+  }
 }

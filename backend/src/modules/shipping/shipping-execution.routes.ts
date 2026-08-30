@@ -18,6 +18,7 @@ import {
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
+import { CustomerCancellationShipmentHoldError } from '../orders/customer-cancellation-hold.service.js';
 
 function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
   const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
@@ -86,6 +87,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           },
         );
       } catch (error) {
+        if (error instanceof CustomerCancellationShipmentHoldError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
         const message = error instanceof Error ? error.message : 'Shipment execution preview could not be created.';
         return reply.code(400).send({ message });
       }
@@ -113,6 +117,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           vendorId,
         });
       } catch (error) {
+        if (error instanceof CustomerCancellationShipmentHoldError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
         const message = error instanceof Error ? error.message : 'Shipment execution could not be created.';
         return reply.code(400).send({ message });
       }
@@ -161,6 +168,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           actorRole: request.authUser?.role,
         });
       } catch (error) {
+        if (error instanceof CustomerCancellationShipmentHoldError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
         return reply.code(400).send({ message });
       }
@@ -317,6 +327,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           notificationUrl: resolveNotificationUrl(request),
         });
       } catch (error) {
+        if (error instanceof CustomerCancellationShipmentHoldError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
         return reply.code(400).send({ message });
       }

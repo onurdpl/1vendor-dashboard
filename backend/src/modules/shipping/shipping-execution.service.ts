@@ -46,6 +46,12 @@ import type {
   VendorShippingConfigUpdateDto,
 } from './shipping-execution.types.js';
 import { assertFullOrderOperationallyEligible } from '../orders/full-order-cancellation-policy.js';
+import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import {
+  assertNoPendingCustomerCancellationHold,
+  CustomerCancellationShipmentHoldError,
+  hasPendingCustomerCancellationHold,
+} from '../orders/customer-cancellation-hold.service.js';
 
 const SHIPPING_VAT_PERCENT = 18;
 const DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG = 1;
@@ -3968,6 +3974,7 @@ async function persistProviderShipmentResult(input: {
   });
 
   const shopifyFulfillmentSyncDiagnostics = await maybeSyncProviderShipmentToShopify({
+    shipmentExecutionId: executionId,
     allocation,
     provider,
     result,
@@ -3999,6 +4006,7 @@ async function persistProviderShipmentResult(input: {
 }
 
 async function maybeSyncProviderShipmentToShopify(input: {
+  shipmentExecutionId: string;
   allocation: {
     id: string;
     assignedVendorId: string;
@@ -4104,6 +4112,7 @@ async function maybeSyncProviderShipmentToShopify(input: {
         role: 'vendor',
         accessScope: 'vendor',
       },
+      existingProviderShipmentExecutionId: input.shipmentExecutionId,
     });
 
     return {
@@ -5765,6 +5774,7 @@ export async function refreshKargonomiShipmentProviderData(
     });
 
     const shopifyFulfillmentSyncDiagnostics = await maybeSyncProviderShipmentToShopify({
+      shipmentExecutionId: existing.id,
       allocation: {
         id: existing.allocationId,
         assignedVendorId: existing.vendorId,
@@ -6261,6 +6271,7 @@ async function buildShipmentRequestPreview(
     env?: AppEnv;
     kargonomiDestinationClient?: KargonomiDestinationLookupClient;
     allowNavlungoFullSenderDetails?: boolean;
+    skipCustomerCancellationHoldPreview?: boolean;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
@@ -6310,6 +6321,10 @@ async function buildShipmentRequestPreview(
 
   if (allocation.cancellationReason || allocation.allocationStatus !== 'ACTIVE') {
     throw new Error('Allocation is not eligible for shipment execution.');
+  }
+
+  if (!options.skipCustomerCancellationHoldPreview && await hasPendingCustomerCancellationHold(allocation.id)) {
+    throw new CustomerCancellationShipmentHoldError();
   }
 
   const config = mapShippingConfig(await getStoredShippingConfig(options.vendorId), options.vendorId);
@@ -6696,6 +6711,56 @@ export async function previewShipmentExecution(
   return buildShipmentRequestPreview(input, options);
 }
 
+async function assertShipmentProviderCallMayBegin(
+  tx: Prisma.TransactionClient,
+  input: {
+    allocationId: string;
+    vendorId: string;
+    sourceShopifyOrderId: string;
+  },
+) {
+  await acquireShopifyOrderTransactionLock(tx, input.sourceShopifyOrderId);
+
+  const currentAllocation = await tx.vendorAllocation.findUnique({
+    where: {
+      id: input.allocationId,
+    },
+    select: {
+      assignedVendorId: true,
+      allocationStatus: true,
+      cancellationReason: true,
+      order: {
+        select: {
+          cancelledAt: true,
+          sourceShopifyOrderId: true,
+        },
+      },
+    },
+  });
+
+  if (
+    !currentAllocation ||
+    currentAllocation.assignedVendorId !== input.vendorId ||
+    currentAllocation.order.sourceShopifyOrderId !== input.sourceShopifyOrderId
+  ) {
+    throw new Error('Allocation is no longer available for shipment execution.');
+  }
+  assertFullOrderOperationallyEligible(currentAllocation.order);
+  if (currentAllocation.cancellationReason || currentAllocation.allocationStatus !== 'ACTIVE') {
+    throw new Error('Allocation is not eligible for shipment execution.');
+  }
+
+  await assertNoPendingCustomerCancellationHold(input.allocationId, tx);
+}
+
+function buildProviderCallClaimSnapshot(snapshot: unknown, claimKind: 'create' | 'dry_run_retry' | 'failed_retry') {
+  return {
+    ...(isRecord(snapshot) ? snapshot : {}),
+    providerCallClaimedAt: new Date().toISOString(),
+    providerCallClaimKind: claimKind,
+  };
+}
+
 export async function createShipmentExecution(
   input: CreateShipmentExecutionDto,
   options: {
@@ -6709,6 +6774,7 @@ export async function createShipmentExecution(
     vendorId: options.vendorId,
     env: options.env,
     kargonomiDestinationClient: options.kargonomiDestinationClient,
+    skipCustomerCancellationHoldPreview: true,
   });
 
   const allocation = await prisma.vendorAllocation.findUnique({
@@ -6742,9 +6808,7 @@ export async function createShipmentExecution(
     },
   });
   if (existing) {
-  if (
-      canRetryStaleNavlungoExecution(existing)
-    ) {
+    if (canRetryStaleNavlungoExecution(existing)) {
       const recoveredEvidence = readNavlungoSnapshotEvidence(existing.responseSnapshot);
       if (recoveredEvidence) {
         return persistProviderShipmentResult({
@@ -6780,23 +6844,39 @@ export async function createShipmentExecution(
         });
       }
 
-      const retrySnapshot = appendTimelineEvent(existing.responseSnapshot, {
-        label: 'Retry attempted',
-        status: 'pending',
-      });
+      const retrySnapshot = buildProviderCallClaimSnapshot(
+        appendTimelineEvent(existing.responseSnapshot, {
+          label: 'Retry attempted',
+          status: 'pending',
+        }),
+        'failed_retry',
+      );
       const requestSnapshot = preview.payload;
-      await prisma.shipmentExecution.update({
-        where: {
-          id: existing.id,
-        },
-        data: {
-          shipmentStatus: ShipmentExecutionStatus.PENDING,
-          desi: Number(preview.desi),
-          cargoIntegrationId: preview.cargoIntegrationId,
-          warehouseId: preview.warehouseId,
-          requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
-          responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
-        },
+      await prisma.$transaction(async (tx) => {
+        await assertShipmentProviderCallMayBegin(tx, {
+          allocationId: allocation.id,
+          vendorId: allocation.assignedVendorId,
+          sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+        });
+        const currentExecution = await tx.shipmentExecution.findUnique({
+          where: { id: existing.id },
+        });
+        if (!currentExecution || hasPersistedShipmentEvidence(currentExecution)) {
+          throw new Error('Shipment execution changed before the provider retry could begin.');
+        }
+        await tx.shipmentExecution.update({
+          where: {
+            id: existing.id,
+          },
+          data: {
+            shipmentStatus: ShipmentExecutionStatus.PENDING,
+            desi: Number(preview.desi),
+            cargoIntegrationId: preview.cargoIntegrationId,
+            warehouseId: preview.warehouseId,
+            requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+            responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
+          },
+        });
       });
 
       try {
@@ -6838,31 +6918,57 @@ export async function createShipmentExecution(
   const desi = resolvePersistedShipmentDesi(preview);
   const requestSnapshot = preview.payload;
   const executionId = buildShipmentExecutionId({ allocationId: allocation.id, provider });
+  const providerCallClaimSnapshot = buildProviderCallClaimSnapshot(null, 'create');
 
-  await prisma.shipmentExecution.create({
-    data: {
-      id: executionId,
-      sourceShopifyOrderId: allocation.sourceShopifyOrderId,
-      sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
-      sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
-      provider,
-      shipmentStatus: ShipmentExecutionStatus.PENDING,
-      desi,
-      cargoIntegrationId: preview.cargoIntegrationId,
-      warehouseId: preview.warehouseId,
-      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
-      allocation: {
-        connect: {
-          id: allocation.id,
+  const claim = await prisma.$transaction(async (tx) => {
+    await assertShipmentProviderCallMayBegin(tx, {
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    });
+    const currentExecution = await tx.shipmentExecution.findUnique({
+      where: {
+        allocationId_provider: {
+          allocationId: allocation.id,
+          provider,
         },
       },
-      vendor: {
-        connect: {
-          id: allocation.assignedVendorId,
+      select: { id: true },
+    });
+    if (currentExecution) {
+      return { created: false as const, executionId: currentExecution.id };
+    }
+    await tx.shipmentExecution.create({
+      data: {
+        id: executionId,
+        sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+        sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+        sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
+        provider,
+        shipmentStatus: ShipmentExecutionStatus.PENDING,
+        desi,
+        cargoIntegrationId: preview.cargoIntegrationId,
+        warehouseId: preview.warehouseId,
+        requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+        responseSnapshot: providerCallClaimSnapshot as Prisma.InputJsonValue,
+        allocation: {
+          connect: {
+            id: allocation.id,
+          },
+        },
+        vendor: {
+          connect: {
+            id: allocation.assignedVendorId,
+          },
         },
       },
-    },
+    });
+    return { created: true as const, executionId };
   });
+
+  if (!claim.created) {
+    return getShipmentExecutionById(claim.executionId, options.vendorId) as Promise<ShipmentExecutionDto>;
+  }
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
@@ -6880,7 +6986,7 @@ export async function createShipmentExecution(
       result,
     });
   } catch (error) {
-    const attemptSnapshot = appendTimelineEvent({}, {
+    const attemptSnapshot = appendTimelineEvent(providerCallClaimSnapshot, {
       label: 'Create attempted',
       status: 'failed',
     });
@@ -6952,6 +7058,7 @@ export async function retryDryRunShipmentExecution(
   assertDryRunRetryEligible(existing);
 
   await assertShipmentRetryOperationallyEligible(existing.allocationId);
+  await assertNoPendingCustomerCancellationHold(existing.allocationId);
 
   const providerDto = mapProvider(existing.provider);
   assertActiveShippingProvider(providerDto);
@@ -6974,6 +7081,7 @@ export async function retryDryRunShipmentExecution(
     {
       vendorId: existing.vendorId,
       env: options.env,
+      skipCustomerCancellationHoldPreview: true,
     },
   );
 
@@ -7002,16 +7110,32 @@ export async function retryDryRunShipmentExecution(
   }
 
   const requestSnapshot = applyExistingTryOtoOrderReference(existing, preview.payload);
-  await prisma.shipmentExecution.update({
-    where: {
-      id: existing.id,
-    },
-    data: {
-      desi: Number(preview.desi),
-      cargoIntegrationId: preview.cargoIntegrationId,
-      warehouseId: preview.warehouseId,
-      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
-    },
+  const retrySnapshot = buildProviderCallClaimSnapshot(existing.responseSnapshot, 'dry_run_retry');
+  await prisma.$transaction(async (tx) => {
+    await assertShipmentProviderCallMayBegin(tx, {
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    });
+    const currentExecution = await tx.shipmentExecution.findUnique({
+      where: { id: existing.id },
+    });
+    if (!currentExecution) {
+      throw new Error('Shipment execution not found.');
+    }
+    assertDryRunRetryEligible(currentExecution);
+    await tx.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        desi: Number(preview.desi),
+        cargoIntegrationId: preview.cargoIntegrationId,
+        warehouseId: preview.warehouseId,
+        requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+        responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
+      },
+    });
   });
 
   try {
@@ -7039,7 +7163,7 @@ export async function retryDryRunShipmentExecution(
         allocation,
         error,
         requestSnapshot,
-        baseSnapshot: existing.responseSnapshot,
+        baseSnapshot: retrySnapshot,
       });
       if (recovered) {
         return recovered;
@@ -7051,7 +7175,7 @@ export async function retryDryRunShipmentExecution(
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, existing.responseSnapshot, {
+        responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, retrySnapshot, {
           vendorId: existing.vendorId,
           executionId: existing.id,
         })) as Prisma.InputJsonValue,
@@ -7094,6 +7218,7 @@ export async function retryFailedShipmentExecution(
   }
 
   await assertShipmentRetryOperationallyEligible(existing.allocationId);
+  await assertNoPendingCustomerCancellationHold(existing.allocationId);
 
   const providerDto = mapProvider(existing.provider);
   assertActiveShippingProvider(providerDto);
@@ -7115,6 +7240,7 @@ export async function retryFailedShipmentExecution(
       vendorId: existing.vendorId,
       env: options.env,
       allowNavlungoFullSenderDetails: options.useFullSenderDetailsForThisRetry === true,
+      skipCustomerCancellationHoldPreview: true,
     },
   );
 
@@ -7146,8 +7272,8 @@ export async function retryFailedShipmentExecution(
     throw new Error('Allocation could not be found for the selected shipment execution.');
   }
 
-  const retrySnapshot = appendTimelineEvent(
-    {
+  const retrySnapshot = buildProviderCallClaimSnapshot(
+    appendTimelineEvent({
       ...(isRecord(existing.responseSnapshot) ? existing.responseSnapshot : {}),
       retryEndpointUsed: '/shipments/:id/retry',
       existingExecutionId: existing.id,
@@ -7159,25 +7285,45 @@ export async function retryFailedShipmentExecution(
       providerCallSkippedReason: null,
       fullSenderRetryRequested,
       senderMode: navlungoSenderMode,
-    },
-    {
-    label: 'Retry attempted',
-    status: 'pending',
-    },
+    }, {
+      label: 'Retry attempted',
+      status: 'pending',
+    }),
+    'failed_retry',
   );
   const requestSnapshot = applyExistingTryOtoOrderReference(existing, preview.payload);
-  await prisma.shipmentExecution.update({
-    where: {
-      id: existing.id,
-    },
-    data: {
-      shipmentStatus: ShipmentExecutionStatus.PENDING,
-      desi: Number(preview.desi),
-      cargoIntegrationId: preview.cargoIntegrationId,
-      warehouseId: preview.warehouseId,
-      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
-      responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
-    },
+  await prisma.$transaction(async (tx) => {
+    await assertShipmentProviderCallMayBegin(tx, {
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    });
+    const currentExecution = await tx.shipmentExecution.findUnique({
+      where: { id: existing.id },
+    });
+    if (!currentExecution) {
+      throw new Error('Shipment execution not found.');
+    }
+    if (retryingStaleNavlungo) {
+      if (!canRetryStaleNavlungoExecution(currentExecution)) {
+        throw new Error('Shipment execution changed before the provider retry could begin.');
+      }
+    } else {
+      assertFailedRetryEligible(currentExecution);
+    }
+    await tx.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        shipmentStatus: ShipmentExecutionStatus.PENDING,
+        desi: Number(preview.desi),
+        cargoIntegrationId: preview.cargoIntegrationId,
+        warehouseId: preview.warehouseId,
+        requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+        responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
+      },
+    });
   });
 
   try {

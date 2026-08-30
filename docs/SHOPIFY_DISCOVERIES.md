@@ -526,7 +526,9 @@ POST /fulfillments.json
 - Customer Cancellation Request is a separate operational authority from Vendor Reject. It does not use `VENDOR_BLOCKED`, `cancelRefundReviewStatus`, `reassignmentRequired`, or allocation cancellation metadata.
 - The local persistence foundation retains request-level and item-level state, requested quantities, customer/shop identity, admin review metadata, and database-enforced idempotency.
 - Creating a `PENDING` request is non-monetary. It does not cancel the Shopify Order, change allocation ownership/status, create refunds or finance entries, or alter shipment/tracking state.
-- The reusable pending-request predicate exists for later shipment and finance guard phases, but it is not wired into those production paths yet.
+- A persisted `PENDING` request item is now an authoritative shipment hold for its allocation. Provider/Kargonomi creation and retries, manual tracking that creates Shopify fulfillment, and Vendor Integration shipment ingestion all re-check the hold under the canonical Shopify-order transaction lock before claiming or persisting new shipment authority; blocked HTTP paths return `409` with `CUSTOMER_CANCELLATION_PENDING`.
+- Shipment authority remains allocation-scoped for multi-vendor orders. Existing carrier/provider/Shopify evidence is preserved and reconciled rather than cancelled or discarded; if durable shipment intent or real shipment evidence wins the same order lock first, the later customer request is recorded as `CONFLICTED` or `TOO_LATE` instead of becoming a shipment hold.
+- This phase does not block inbound canonical Shopify fulfillment webhooks and does not add automatic carrier cancellation, refunds, finance mutations, customer endpoints, or admin approval/decline actions.
 - No customer endpoint, Customer Account extension, admin approval/decline workflow, Shopify mutation, notification, or native Shopify setting change is implemented by this foundation.
 - Historical Shopify RequestedEdit evidence, including order `#1124`, is not imported into the local request model.
 

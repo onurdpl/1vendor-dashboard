@@ -34,11 +34,13 @@ export type UpdateAllocationTrackingFailure =
   | {
       ok: false;
       code: 400 | 404 | 409 | 502;
+      errorCode?: string;
       message: string;
     }
   | {
       ok: false;
       code: 403;
+      errorCode?: string;
       message: string;
     };
 

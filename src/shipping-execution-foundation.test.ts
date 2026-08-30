@@ -29,12 +29,16 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     upsert: vi.fn(),
   },
+  customerCancellationRequestItem: {
+    findFirst: vi.fn(),
+  },
   returnRecord: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
 }));
 
 const shopifyAdminMock = vi.hoisted(() => ({
@@ -420,10 +424,14 @@ describe('shipping execution foundation', () => {
     prismaMock.shipmentShippingCost.findFirst.mockReset();
     prismaMock.shipmentShippingCost.upsert.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
+    prismaMock.customerCancellationRequestItem.findFirst.mockReset();
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue(null);
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.returnRecord.findUnique.mockReset();
     prismaMock.returnRecord.update.mockReset();
     prismaMock.$transaction.mockReset();
+    prismaMock.$queryRaw.mockReset();
+    prismaMock.$queryRaw.mockResolvedValue([]);
     shopifyAdminMock.fetchFulfillmentOrders.mockReset();
     shopifyAdminMock.createFulfillmentTracking.mockReset();
     shopifyAdminMock.probeReturnLabelUpload.mockReset();
@@ -524,6 +532,64 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
+  it('blocks provider creation when a pending customer cancellation wins the canonical order lock', async () => {
+    const adapter = buildAdapter();
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
+
+    await expect(createShipmentExecution(
+      { allocationId: 'alloc-1' },
+      { env, vendorId: 'sporjinal', adapter },
+    )).rejects.toMatchObject({
+      code: 'CUSTOMER_CANCELLATION_PENDING',
+      statusCode: 409,
+    });
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks a failed provider retry before provider call when customer cancellation is pending', async () => {
+    const failedExecution = buildShipmentExecution({ shipmentStatus: 'FAILED' });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(failedExecution);
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
+    const adapter = buildAdapter();
+
+    await expect(retryFailedShipmentExecution(failedExecution.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toMatchObject({
+      code: 'CUSTOMER_CANCELLATION_PENDING',
+      statusCode: 409,
+    });
+
+    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks a dry-run retry before provider readiness or provider call when customer cancellation is pending', async () => {
+    const dryRunExecution = buildShipmentExecution({
+      shipmentStatus: 'PENDING',
+      responseSnapshot: { dryRun: true, disabledGates: ['SHIPPING_EXECUTION_ENABLED'] },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(dryRunExecution);
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
+    const adapter = buildAdapter();
+
+    await expect(retryDryRunShipmentExecution(dryRunExecution.id, {
+      env,
+      actorRole: 'admin',
+      adapter,
+    })).rejects.toMatchObject({
+      code: 'CUSTOMER_CANCELLATION_PENDING',
+      statusCode: 409,
+    });
+
+    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
   it('creates a shipment execution and links confirmed provider cost to finance shipping cost input', async () => {
     const adapter = buildAdapter();
     adapter.createShipment.mockResolvedValue({
@@ -586,7 +652,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('refreshes existing Kargonomi provider data without creating a new shipment', async () => {
+  it('preserves and syncs existing Kargonomi provider evidence even when a cancellation hold appears later', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-kargonomi-alloc-1',
       provider: 'KARGONOMI',
@@ -637,6 +703,13 @@ describe('shipping execution foundation', () => {
       }),
     });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+    });
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
     storedExecution = existing as typeof storedExecution;
 

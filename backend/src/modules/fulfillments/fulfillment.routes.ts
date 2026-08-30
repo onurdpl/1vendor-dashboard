@@ -30,7 +30,10 @@ export function registerFulfillmentRoutes(app: FastifyInstance, env: AppEnv) {
       });
 
       if (!result.ok) {
-        return reply.code(result.code).send({ message: result.message });
+        return reply.code(result.code).send({
+          ...(result.errorCode ? { code: result.errorCode } : {}),
+          message: result.message,
+        });
       }
 
       return result;

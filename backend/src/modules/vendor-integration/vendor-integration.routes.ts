@@ -21,6 +21,7 @@ import {
   updateVendorIntegrationOrderShipment,
   validateVendorIntegrationShipmentPayload,
 } from './vendor-integration.shipment.service.js';
+import { CustomerCancellationShipmentHoldError } from '../orders/customer-cancellation-hold.service.js';
 import {
   isVendorIntegrationStatus,
   updateVendorIntegrationOrderStatus,
@@ -384,6 +385,9 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
           requestId: request.requestId ?? request.id ?? null,
         });
       } catch (error) {
+        if (error instanceof CustomerCancellationShipmentHoldError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
         if (error instanceof VendorIntegrationOrderStateError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }

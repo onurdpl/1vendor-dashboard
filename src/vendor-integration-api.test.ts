@@ -31,6 +31,11 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     findUnique: vi.fn(),
   },
+  customerCancellationRequestItem: {
+    findFirst: vi.fn(),
+  },
+  $queryRaw: vi.fn(),
+  $transaction: vi.fn(),
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -380,10 +385,7 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
     prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation()]);
-    prismaMock.vendorAllocation.findFirst.mockResolvedValue({
-      id: 'alloc-sporjinal-1',
-      assignedVendorId: 'sporjinal',
-    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation());
     prismaMock.vendorAllocation.update.mockResolvedValue({
       id: 'alloc-sporjinal-1',
       assignedVendorId: 'sporjinal',
@@ -399,6 +401,9 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValue(null);
     prismaMock.vendorIntegrationInvoiceEvent.create.mockResolvedValue({ id: 'invoice-event-1' });
     prismaMock.vendorIntegrationInvoiceEvent.findUnique.mockResolvedValue(null);
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue(null);
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
   });
 
@@ -842,11 +847,14 @@ describe('vendor integration API foundation', () => {
 
   it('rejects status writes for full Shopify cancellations', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue({
       id: 'alloc-sporjinal-1',
       assignedVendorId: 'sporjinal',
+      sourceShopifyOrderId: 'gid://shopify/Order/1001',
+      allocationStatus: 'ACTIVE',
       cancellationReason: null,
       order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1001',
         cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
       },
     });
@@ -1135,11 +1143,13 @@ describe('vendor integration API foundation', () => {
 
   it('rejects shipment writes for full Shopify cancellations', async () => {
     prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce({
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue({
       id: 'alloc-sporjinal-1',
       assignedVendorId: 'sporjinal',
+      allocationStatus: 'ACTIVE',
       cancellationReason: null,
       order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1001',
         cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
       },
     });
@@ -1155,6 +1165,47 @@ describe('vendor integration API foundation', () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.payload).toEqual({ message: 'Order is cancelled and cannot receive shipment updates.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor integration shipment writes under the canonical order lock while cancellation is pending', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.customerCancellationRequestItem.findFirst.mockResolvedValue({ id: 'pending-cancellation-item' });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-held-key',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({
+      code: 'CUSTOMER_CANCELLATION_PENDING',
+      message: 'A pending customer cancellation request blocks new shipment and tracking actions.',
+    });
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects vendor integration shipment writes for a non-active allocation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({ allocationStatus: 'VENDOR_BLOCKED' }));
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-inactive-key',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({ message: 'Allocation is not active and cannot receive shipment updates.' });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 

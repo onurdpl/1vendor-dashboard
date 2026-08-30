@@ -102,6 +102,73 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
+function hasClaimedProviderCall(snapshot: Prisma.JsonValue | null) {
+  return Boolean(
+    snapshot &&
+      typeof snapshot === 'object' &&
+      !Array.isArray(snapshot) &&
+      typeof snapshot.providerCallClaimedAt === 'string',
+  );
+}
+
+function classifyExistingShipmentAuthority(allocation: {
+  id: string;
+  trackingNumber: string | null;
+  carrier: string | null;
+  vendorIntegrationTrackingUrl: string | null;
+  vendorIntegrationShippedAt: Date | null;
+  fulfillment: {
+    shopifyFulfillmentId: string | null;
+    trackingNumber: string | null;
+    fulfilledAt: Date | null;
+    shipmentCreatedAt: Date | null;
+    syncStatus: string | null;
+  } | null;
+  shipmentExecutions: Array<{
+    shipmentStatus: string;
+    providerShipmentId: string | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+    labelUrl: string | null;
+    responseSnapshot: Prisma.JsonValue | null;
+  }>;
+  vendorIntegrationShipmentEvents: Array<{ id: string }>;
+}) {
+  const hasExistingShipmentTruth = Boolean(
+    allocation.trackingNumber ||
+      allocation.carrier ||
+      allocation.vendorIntegrationTrackingUrl ||
+      allocation.vendorIntegrationShippedAt ||
+      allocation.vendorIntegrationShipmentEvents.length > 0 ||
+      allocation.fulfillment?.shopifyFulfillmentId ||
+      allocation.fulfillment?.trackingNumber ||
+      allocation.fulfillment?.fulfilledAt ||
+      allocation.fulfillment?.shipmentCreatedAt ||
+      allocation.shipmentExecutions.some((execution) =>
+        Boolean(
+          execution.providerShipmentId ||
+            execution.trackingNumber ||
+            execution.trackingUrl ||
+            execution.labelUrl ||
+            ['CREATED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED'].includes(execution.shipmentStatus),
+        ),
+      ),
+  );
+  if (hasExistingShipmentTruth) {
+    return CustomerCancellationStatus.TOO_LATE;
+  }
+
+  const hasCommittedShipmentIntent = Boolean(
+    allocation.fulfillment?.syncStatus === 'fulfillment_submission_pending' ||
+      allocation.fulfillment?.syncStatus === 'fulfillment_sync_failed' ||
+      allocation.shipmentExecutions.some((execution) => hasClaimedProviderCall(execution.responseSnapshot)),
+  );
+
+  return hasCommittedShipmentIntent
+    ? CustomerCancellationStatus.CONFLICTED
+    : CustomerCancellationStatus.PENDING;
+}
+
 function idempotencyWhere(input: {
   shopDomain: string;
   shopifyCustomerId: string;
@@ -180,6 +247,57 @@ async function createPendingCustomerCancellationRequestInTransaction(
     }
   }
 
+  const affectedAllocations = await tx.vendorAllocation.findMany({
+    where: {
+      id: {
+        in: [...new Set(input.items.map((item) => item.vendorAllocationId))],
+      },
+      sourceShopifyOrderId: order.id,
+    },
+    select: {
+      id: true,
+      trackingNumber: true,
+      carrier: true,
+      vendorIntegrationTrackingUrl: true,
+      vendorIntegrationShippedAt: true,
+      fulfillment: {
+        select: {
+          shopifyFulfillmentId: true,
+          trackingNumber: true,
+          fulfilledAt: true,
+          shipmentCreatedAt: true,
+          syncStatus: true,
+        },
+      },
+      shipmentExecutions: {
+        select: {
+          shipmentStatus: true,
+          providerShipmentId: true,
+          trackingNumber: true,
+          trackingUrl: true,
+          labelUrl: true,
+          responseSnapshot: true,
+        },
+      },
+      vendorIntegrationShipmentEvents: {
+        select: {
+          id: true,
+        },
+        take: 1,
+      },
+    },
+  });
+  const statusByAllocationId = new Map(
+    affectedAllocations.map((allocation) => [allocation.id, classifyExistingShipmentAuthority(allocation)]),
+  );
+  const itemStatuses = input.items.map((item) =>
+    statusByAllocationId.get(item.vendorAllocationId) ?? CustomerCancellationStatus.CONFLICTED,
+  );
+  const uniqueItemStatuses = new Set(itemStatuses);
+  const initialStatus = uniqueItemStatuses.size === 1
+    ? itemStatuses[0] ?? CustomerCancellationStatus.CONFLICTED
+    : CustomerCancellationStatus.PARTIALLY_RESOLVED;
+
   const existingPendingItem = await tx.customerCancellationRequestItem.findFirst({
     where: {
       vendorAllocationId: {
@@ -207,16 +325,16 @@ async function createPendingCustomerCancellationRequestInTransaction(
       shopifyOrderId: order.id,
       shopDomain: input.shopDomain,
       shopifyCustomerId: input.shopifyCustomerId,
-      status: CustomerCancellationStatus.PENDING,
+      status: initialStatus,
       reasonCode: input.reasonCode,
       customerNote: input.customerNote,
       idempotencyKey: input.idempotencyKey,
       items: {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, index) => ({
           shopifyOrderLineItemId: item.shopifyOrderLineItemId,
           vendorAllocationId: item.vendorAllocationId,
           requestedQuantity: item.requestedQuantity,
-          status: CustomerCancellationStatus.PENDING,
+          status: itemStatuses[index] ?? CustomerCancellationStatus.CONFLICTED,
         })),
       },
     },
