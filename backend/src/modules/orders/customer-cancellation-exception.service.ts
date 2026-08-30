@@ -72,10 +72,6 @@ export function classifyCustomerCancellationException(
     return CUSTOMER_CANCELLATION_EXCEPTION_REASONS.canonicalMismatch;
   }
 
-  if (evidence.itemStatus !== CustomerCancellationStatus.APPROVED_FOR_REFUND) {
-    return null;
-  }
-
   const attemptStatus = normalized(evidence.attemptStatus);
   if (attemptStatus === 'FAILED') {
     return CUSTOMER_CANCELLATION_EXCEPTION_REASONS.failedRefundAttempt;
@@ -104,6 +100,10 @@ export function classifyCustomerCancellationException(
   }
   if (terminalJob && failureCategory === 'CUSTOMER_CANCELLATION_EXCEPTION') {
     return CUSTOMER_CANCELLATION_EXCEPTION_REASONS.processingException;
+  }
+
+  if (evidence.itemStatus !== CustomerCancellationStatus.APPROVED_FOR_REFUND) {
+    return null;
   }
 
   return null;

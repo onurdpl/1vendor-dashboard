@@ -40,6 +40,15 @@ describe('customer cancellation exception authority', () => {
     })).toBe(CUSTOMER_CANCELLATION_EXCEPTION_REASONS.ambiguousRefundState);
   });
 
+  it('surfaces terminal processing evidence even while the child lifecycle remains pending', () => {
+    expect(classifyCustomerCancellationException({
+      itemStatus: status('PENDING'),
+      jobStatus: jobStatus('FAILED'),
+      jobFailureCategory: 'CUSTOMER_CANCELLATION_EXCEPTION',
+      jobErrorSummary: 'TERMINAL_EXCEPTION',
+    })).toBe(CUSTOMER_CANCELLATION_EXCEPTION_REASONS.processingException);
+  });
+
   it('classifies canonical mismatch, finance conflict, shipment race, and external partial mismatch', () => {
     expect(classifyCustomerCancellationException({
       itemStatus: status('APPROVED_FOR_REFUND'),

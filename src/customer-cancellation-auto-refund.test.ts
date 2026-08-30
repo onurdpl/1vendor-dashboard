@@ -15,6 +15,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({ prisma: prismaMock }));
 import {
   buildCustomerCancellationRefundSubmission,
   classifyCustomerCancellationAutoRefundEligibility,
+  processCustomerCancellationAutoRefundItem,
   type CustomerCancellationAutoRefundCleanContext,
 } from '../backend/src/modules/orders/customer-cancellation-auto-refund.service.js';
 import {
@@ -59,7 +60,10 @@ function localItem(overrides: Record<string, unknown> = {}) {
     requestedQuantity: 1,
     shopifyOrderLineItemId: 'line-local-a',
     vendorAllocationId: 'allocation-a',
-    request: { order: { id: 'order-local', sourceShopifyOrderId: '9001', currency: 'TRY', cancelledAt: null } },
+    request: {
+      order: { id: 'order-local', sourceShopifyOrderId: '9001', currency: 'TRY', cancelledAt: null },
+      items: [{ id: 'cancel-item-1', outboundShopifyRefundAttempt: null }],
+    },
     shopifyOrderLineItem: { sourceLineItemId: 'line-a' },
     outboundShopifyRefundAttempt: null,
     vendorAllocation: {
@@ -132,6 +136,26 @@ describe('customer cancellation auto-refund safety contract', () => {
     }));
     await expect(classifyCustomerCancellationAutoRefundEligibility({ itemId: 'cancel-item-1', shopifyAdminService: service as never }))
       .resolves.toMatchObject({ classification: 'REFUND_CONFLICT' });
+  });
+
+  it('defers an active sibling request attempt instead of terminally conflicting', async () => {
+    const siblingItem = localItem({
+      request: {
+        order: { id: 'order-local', sourceShopifyOrderId: '9001', currency: 'TRY', cancelledAt: null },
+        items: [
+          { id: 'cancel-item-1', outboundShopifyRefundAttempt: null },
+          { id: 'cancel-item-2', outboundShopifyRefundAttempt: { id: 'attempt-2', status: 'SHOPIFY_ACTION_PENDING' } },
+        ],
+      },
+    });
+    prismaMock.customerCancellationRequestItem.findUnique.mockResolvedValue(siblingItem);
+    const service = shopifyService();
+
+    await expect(processCustomerCancellationAutoRefundItem({
+      itemId: 'cancel-item-1',
+      shopifyAdminService: service as never,
+    })).resolves.toBe('RETRYABLE');
+    expect(service.previewSuggestedRefund).not.toHaveBeenCalled();
   });
 
   it('builds an exact partial product-only refund with stable authority, no shipping and no notification', () => {

@@ -31,6 +31,7 @@ export const CUSTOMER_CANCELLATION_AUTO_REFUND_CLASSIFICATIONS = {
   FINANCE_CONFLICT: 'FINANCE_CONFLICT',
   CANONICAL_UNAVAILABLE: 'CANONICAL_UNAVAILABLE',
   REFUND_CONFLICT: 'REFUND_CONFLICT',
+  SIBLING_IN_PROGRESS: 'SIBLING_IN_PROGRESS',
   OTHER_UNSAFE: 'OTHER_UNSAFE',
 } as const;
 
@@ -91,7 +92,17 @@ async function loadItem(itemId: string) {
   return prisma.customerCancellationRequestItem.findUnique({
     where: { id: itemId },
     include: {
-      request: { include: { order: { select: { id: true, sourceShopifyOrderId: true, currency: true, cancelledAt: true } } } },
+      request: {
+        include: {
+          order: { select: { id: true, sourceShopifyOrderId: true, currency: true, cancelledAt: true } },
+          items: {
+            select: {
+              id: true,
+              outboundShopifyRefundAttempt: { select: { id: true, status: true } },
+            },
+          },
+        },
+      },
       shopifyOrderLineItem: { select: { sourceLineItemId: true } },
       outboundShopifyRefundAttempt: true,
       vendorAllocation: {
@@ -101,7 +112,12 @@ async function loadItem(itemId: string) {
           shipmentExecutions: true,
           vendorIntegrationShipmentEvents: { select: { id: true }, take: 1 },
           returnRecords: { select: { id: true, sourceShopifyLineItemId: true }, take: 5 },
-          refundRecords: { select: { id: true }, take: 1 },
+          refundRecords: {
+            select: {
+              id: true,
+              lineItems: { select: { sourceLineItemId: true, quantity: true } },
+            },
+          },
           economicTransfers: { select: { id: true, status: true }, take: 5 },
           financeIntegrityAlerts: {
             where: { status: { in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES] }, severity: { in: ['critical', 'warning'] } },
@@ -146,7 +162,21 @@ function classifyLocal(item: NonNullable<Awaited<ReturnType<typeof loadItem>>>):
   ) return { classification: 'CONFLICTED', reason: 'Allocation authority is not clean and active.', context: null };
   if (localShipmentConflict(allocation)) return { classification: 'TOO_LATE', reason: 'Local shipment or fulfillment authority exists.', context: null };
   if (allocation.returnRecords.length) return { classification: 'CONFLICTED', reason: 'Local return evidence overlaps the allocation.', context: null };
-  if (allocation.refundRecords.length) return { classification: 'REFUND_CONFLICT', reason: 'Local refund evidence overlaps the allocation.', context: null };
+  if (allocation.refundRecords.some((refund) =>
+    refund.lineItems.some((line) => line.sourceLineItemId === item.shopifyOrderLineItem.sourceLineItemId && line.quantity > 0),
+  )) return { classification: 'REFUND_CONFLICT', reason: 'Local refund evidence overlaps the exact line item.', context: null };
+  const activeSiblingAttempt = item.request.items.some((candidate) =>
+    candidate.id !== item.id &&
+    candidate.outboundShopifyRefundAttempt &&
+    [
+      OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.PREVIEWED,
+      OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
+      OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+    ].includes(candidate.outboundShopifyRefundAttempt.status as never),
+  );
+  if (activeSiblingAttempt) {
+    return { classification: 'SIBLING_IN_PROGRESS', reason: 'A sibling full-order refund item is still active.', context: null };
+  }
   if (allocation.outboundShopifyRefundAttempts.some((attempt) => attempt.customerCancellationRequestItemId !== item.id)) {
     return { classification: 'REFUND_CONFLICT', reason: 'Another active refund attempt owns the allocation.', context: null };
   }
@@ -253,6 +283,8 @@ function aggregate(statuses: CustomerCancellationStatus[]) {
   return new Set(statuses).size === 1 ? statuses[0]! : CustomerCancellationStatus.PARTIALLY_RESOLVED;
 }
 
+class CustomerCancellationSiblingRefundInProgressError extends Error {}
+
 async function approveAndCreateAttempt(itemId: string, context: CustomerCancellationAutoRefundCleanContext) {
   return prisma.$transaction(async (tx) => {
     const initial = await tx.customerCancellationRequestItem.findUnique({
@@ -271,6 +303,27 @@ async function approveAndCreateAttempt(itemId: string, context: CustomerCancella
     });
     if (!current || (current.status !== CustomerCancellationStatus.PENDING && current.status !== CustomerCancellationStatus.APPROVED_FOR_REFUND)) {
       throw new Error('Customer cancellation item no longer has processable authority.');
+    }
+    const activeSiblingAttempt = await tx.outboundShopifyRefundAttempt.findFirst({
+      where: {
+        customerCancellationRequestItem: {
+          requestId: current.requestId,
+          id: { not: current.id },
+        },
+        status: {
+          in: [
+            OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.PREVIEWED,
+            OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
+            OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    if (activeSiblingAttempt) {
+      throw new CustomerCancellationSiblingRefundInProgressError(
+        'A sibling full-order refund item is still active.',
+      );
     }
     if (current.vendorAllocation.allocationStatus !== AllocationStatus.ACTIVE || current.vendorAllocation.reassignmentRequired ||
       current.vendorAllocation.cancellationReason || current.vendorAllocation.cancelRefundReviewStatus || localShipmentConflict(current.vendorAllocation)) {
@@ -413,14 +466,23 @@ export async function processCustomerCancellationAutoRefundItem(input: {
   if (await reconcileCustomerCancellationItemFromCanonicalRefunds(input)) return 'COMPLETED';
   let eligibility = await classifyCustomerCancellationAutoRefundEligibility(input);
   if (eligibility.classification === 'CANONICAL_UNAVAILABLE') return 'RETRYABLE';
+  if (eligibility.classification === 'SIBLING_IN_PROGRESS') return 'RETRYABLE';
   if (eligibility.classification !== 'CLEAN' || !eligibility.context) return 'TERMINAL_EXCEPTION';
-  const attempt = await approveAndCreateAttempt(input.itemId, eligibility.context);
+  let attempt;
+  try {
+    attempt = await approveAndCreateAttempt(input.itemId, eligibility.context);
+  } catch (error) {
+    if (error instanceof CustomerCancellationSiblingRefundInProgressError) return 'RETRYABLE';
+    throw error;
+  }
   if (attempt.status === OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING) return 'AWAITING_RECONCILIATION';
 
   // Re-read all canonical authority after the transaction/lock has committed and before mutation.
   eligibility = await classifyCustomerCancellationAutoRefundEligibility(input);
   if (eligibility.classification !== 'CLEAN' || !eligibility.context) {
-    return eligibility.classification === 'CANONICAL_UNAVAILABLE' ? 'RETRYABLE' : 'TERMINAL_EXCEPTION';
+    return eligibility.classification === 'CANONICAL_UNAVAILABLE' || eligibility.classification === 'SIBLING_IN_PROGRESS'
+      ? 'RETRYABLE'
+      : 'TERMINAL_EXCEPTION';
   }
   const submission = buildCustomerCancellationRefundSubmission({ itemId: input.itemId, attemptId: attempt.id, context: eligibility.context });
   if (submission.blockers.length) return 'TERMINAL_EXCEPTION';

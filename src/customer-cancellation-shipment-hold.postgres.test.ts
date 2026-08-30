@@ -229,6 +229,10 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
         shopifyOrderLineItemId: lineAId,
         vendorAllocationId: allocationAId,
         requestedQuantity: 1,
+      }, {
+        shopifyOrderLineItemId: lineBId,
+        vendorAllocationId: allocationBId,
+        requestedQuantity: 1,
       }],
     });
     const item = created.request.items[0];
@@ -241,10 +245,10 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
       reviewReason: 'Approved for controlled refund execution.',
     });
 
-    expect(approved.request.status).toBe(CustomerCancellationStatus.APPROVED_FOR_REFUND);
+    expect(approved.request.status).toBe('PARTIALLY_RESOLVED');
     expect(approved.item.status).toBe(CustomerCancellationStatus.APPROVED_FOR_REFUND);
     await expect(hasPendingCustomerCancellationHold(allocationAId)).resolves.toBe(true);
-    await expect(hasPendingCustomerCancellationHold(allocationBId)).resolves.toBe(false);
+    await expect(hasPendingCustomerCancellationHold(allocationBId)).resolves.toBe(true);
   });
 
   it('classifies a later request as conflicted when durable provider-call intent wins first', async () => {
@@ -265,7 +269,7 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
       });
     });
 
-    const result = await createPendingCustomerCancellationRequest({
+    await expect(createPendingCustomerCancellationRequest({
       shopifyOrderId: orderId,
       shopDomain: 'xgi47p-3k.myshopify.com',
       shopifyCustomerId: `gid://shopify/Customer/${suffix}`,
@@ -275,13 +279,15 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
         shopifyOrderLineItemId: lineAId,
         vendorAllocationId: allocationAId,
         requestedQuantity: 1,
+      }, {
+        shopifyOrderLineItemId: lineBId,
+        vendorAllocationId: allocationBId,
+        requestedQuantity: 1,
       }],
-    });
+    })).rejects.toThrow('complete order changed');
 
-    expect(result.request.status).toBe(CustomerCancellationStatus.CONFLICTED);
-    expect(result.request.items).toHaveLength(1);
-    expect(result.request.items[0]?.status).toBe(CustomerCancellationStatus.CONFLICTED);
     await expect(hasPendingCustomerCancellationHold(allocationAId)).resolves.toBe(false);
+    await expect(hasPendingCustomerCancellationHold(allocationBId)).resolves.toBe(false);
   });
 
   it('classifies a later request as too late when real provider evidence already exists', async () => {
@@ -300,7 +306,7 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
       },
     });
 
-    const result = await createPendingCustomerCancellationRequest({
+    await expect(createPendingCustomerCancellationRequest({
       shopifyOrderId: orderId,
       shopDomain: 'xgi47p-3k.myshopify.com',
       shopifyCustomerId: `gid://shopify/Customer/${suffix}`,
@@ -310,10 +316,14 @@ describeWithPostgres('customer cancellation shipment hold with real PostgreSQL',
         shopifyOrderLineItemId: lineAId,
         vendorAllocationId: allocationAId,
         requestedQuantity: 1,
+      }, {
+        shopifyOrderLineItemId: lineBId,
+        vendorAllocationId: allocationBId,
+        requestedQuantity: 1,
       }],
-    });
+    })).rejects.toThrow('complete order changed');
 
-    expect(result.request.status).toBe(CustomerCancellationStatus.TOO_LATE);
-    expect(result.request.items[0]?.status).toBe(CustomerCancellationStatus.TOO_LATE);
+    await expect(hasPendingCustomerCancellationHold(allocationAId)).resolves.toBe(false);
+    await expect(hasPendingCustomerCancellationHold(allocationBId)).resolves.toBe(false);
   });
 });

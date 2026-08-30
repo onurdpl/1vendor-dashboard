@@ -8,10 +8,7 @@ declare module 'fastify' {
 
 export type CustomerCancellationCreateBody = {
   shopifyOrderId?: string;
-  items?: Array<{
-    shopifyLineItemId?: string;
-    requestedQuantity?: number;
-  }>;
+  items?: unknown;
   reasonCode?: string;
   note?: string | null;
   idempotencyKey?: string;

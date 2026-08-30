@@ -96,6 +96,8 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
       id,
       allocationStatus: 'ACTIVE',
       cancellationReason: null,
+      reassignmentRequired: false,
+      cancelRefundReviewStatus: null,
       trackingNumber: input.shipped ? 'TRACK-1' : null,
       carrier: null,
       vendorIntegrationTrackingUrl: null,
@@ -105,6 +107,10 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
       vendorIntegrationShipmentEvents: [],
       fulfillment: null,
       shipmentExecutions: [],
+      economicTransfers: [],
+      financeIntegrityAlerts: [],
+      financeEntries: [],
+      outboundShopifyRefundAttempts: [],
     },
   });
   return {
@@ -122,7 +128,7 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
       items: [{
         shopifyOrderLineItemId: 'local-line-700',
         vendorAllocationId: 'allocation-a',
-        requestedQuantity: 1,
+        requestedQuantity: 2,
         status: PENDING,
       }],
     }] : [],
@@ -139,13 +145,19 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
   };
 }
 
-function buildApi(input: { canonical?: ReturnType<typeof canonical>; local?: ReturnType<typeof localOrder>; createRequest?: ReturnType<typeof vi.fn> } = {}) {
+function buildApi(input: {
+  canonical?: ReturnType<typeof canonical>;
+  local?: ReturnType<typeof localOrder>;
+  createRequest?: ReturnType<typeof vi.fn>;
+  refunds?: Record<string, unknown>;
+  returns?: Record<string, unknown>;
+} = {}) {
   const canonicalOrder = input.canonical ?? canonical();
   const local = input.local ?? localOrder();
   const findUnique = vi.fn(async () => local);
   const fetchCustomerCancellationOrderSnapshot = vi.fn(async () => canonicalOrder);
-  const fetchCanonicalRefundsForOrder = vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', refunds: [], refundsListComplete: true, orderTotalRefundedAmount: '0', orderTotalRefundedCurrencyCode: 'TRY', source: 'mock' }));
-  const fetchCanonicalReturnsForOrder = vi.fn(async () => ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', returns: [], source: 'mock' }));
+  const fetchCanonicalRefundsForOrder = vi.fn(async () => input.refunds ?? ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', refunds: [], refundsListComplete: true, orderTotalRefundedAmount: '0', orderTotalRefundedCurrencyCode: 'TRY', source: 'mock' }));
+  const fetchCanonicalReturnsForOrder = vi.fn(async () => input.returns ?? ({ orderGid: canonicalOrder.orderGid, sourceShopifyOrderId: '500', returns: [], source: 'mock' }));
   const createRequest = input.createRequest ?? vi.fn(async (request) => ({
     idempotent: false,
     request: {
@@ -357,6 +369,62 @@ describe('customer cancellation API domain boundary', () => {
     });
   });
 
+  it('makes the whole order unavailable when any canonical line lacks an exact local allocation', async () => {
+    const base = canonical();
+    const extraLine = {
+      ...base.lineItems[0]!,
+      lineItemGid: 'gid://shopify/LineItem/701',
+      sourceLineItemId: '701',
+      quantity: 1,
+      currentQuantity: 1,
+      refundableQuantity: 1,
+    };
+    const order = canonical({
+      lineItems: [...base.lineItems, extraLine],
+      fulfillmentOrders: [{
+        ...base.fulfillmentOrders[0]!,
+        lineItems: [
+          ...base.fulfillmentOrders[0]!.lineItems,
+          { id: 'gid://shopify/FulfillmentOrderLineItem/901', lineItemId: extraLine.lineItemGid, remainingQuantity: 1, totalQuantity: 1 },
+        ],
+      }],
+    });
+    await expect(buildApi({ canonical: order }).api.getEligibility(session(), '500')).resolves.toMatchObject({
+      canRequestCancellation: false,
+      lineItems: [expect.objectContaining({ eligible: true }), expect.objectContaining({ eligible: false })],
+    });
+  });
+
+  it('fails full-order eligibility closed for prior partial refund, return overlap, or finance progression', async () => {
+    const partialRefund = buildApi({
+      refunds: {
+        orderGid: 'gid://shopify/Order/500', sourceShopifyOrderId: '500', refundsListComplete: true,
+        orderTotalRefundedAmount: '10.00', orderTotalRefundedCurrencyCode: 'TRY', source: 'mock',
+        refunds: [{
+          sourceShopifyRefundId: 'refund-1', refundGid: 'gid://shopify/Refund/1', createdAt: null, updatedAt: null,
+          note: null, totalRefundedAmount: '10.00', totalRefundedCurrencyCode: 'TRY', transactionPaginationComplete: true,
+          lineItemPaginationComplete: true, transactions: [],
+          refundLineItems: [{ sourceLineItemId: '700', quantity: 1 }],
+        }],
+      },
+    });
+    await expect(partialRefund.api.getEligibility(session(), '500')).resolves.toMatchObject({ canRequestCancellation: false });
+
+    const returnOverlap = buildApi({
+      returns: {
+        orderGid: 'gid://shopify/Order/500', sourceShopifyOrderId: '500', source: 'mock',
+        returns: [{ returnLineItems: [{ sourceLineItemId: '700' }] }],
+      },
+    });
+    await expect(returnOverlap.api.getEligibility(session(), '500')).resolves.toMatchObject({ canRequestCancellation: false });
+
+    const progressed = localOrder();
+    progressed.lineItems[0]!.allocationLineItems[0]!.vendorAllocation.financeEntries = [{
+      payoutStatus: 'APPROVED', settlementStatus: 'PENDING', payoutBatchLines: [], settlementApprovalLines: [],
+    }] as never;
+    await expect(buildApi({ local: progressed }).api.getEligibility(session(), '500')).resolves.toMatchObject({ canRequestCancellation: false });
+  });
+
   it('reads active and terminal customer-safe status while intake is disabled', async () => {
     const statuses = [
       'PENDING',
@@ -410,13 +478,8 @@ describe('customer cancellation API domain boundary', () => {
     expect(result.requests[2]).toMatchObject({
       requestId: 'request-2',
       status: 'APPROVED',
-      items: [{
-        shopifyLineItemId: 'gid://shopify/LineItem/700',
-        requestedQuantity: 2,
-        resolvedQuantity: 2,
-        status: 'APPROVED',
-      }],
     });
+    expect(result.requests[2]).not.toHaveProperty('items');
     expect(JSON.stringify(result)).not.toMatch(/vendor|allocation|finance|settlement|payout|operationalJob|refundAttempt|review|note/i);
     expect(built.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
@@ -449,25 +512,24 @@ describe('customer cancellation API domain boundary', () => {
     });
   });
 
-  it('derives allocation identity server-side and invokes only the Phase 1 request writer', async () => {
+  it('derives the complete line and full quantity server-side', async () => {
     const { api, createRequest } = buildApi();
     const result = await api.createCancellationRequest(session(), {
       shopifyOrderId: 'gid://shopify/Order/500',
-      items: [{ shopifyLineItemId: 'gid://shopify/LineItem/700', requestedQuantity: 1 }],
       reasonCode: 'CUSTOMER_REQUEST',
-      note: 'Please cancel one.',
+      note: 'Please cancel the order.',
       idempotencyKey: 'idem-1',
     });
     expect(result).toMatchObject({ requestId: 'request-1', status: PENDING });
     expect(createRequest).toHaveBeenCalledWith(expect.objectContaining({
       shopifyOrderId: 'local-order-500',
       shopifyCustomerId: customerGid,
-      items: [{ shopifyOrderLineItemId: 'local-line-700', vendorAllocationId: 'allocation-a', requestedQuantity: 1 }],
+      items: [{ shopifyOrderLineItemId: 'local-line-700', vendorAllocationId: 'allocation-a', requestedQuantity: 2 }],
     }));
     expect(createRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('maps a selected line to only its own allocation in a multi-vendor order', async () => {
+  it('derives every allocation in a multi-vendor order', async () => {
     const baseCanonical = canonical();
     const baseLocal = localOrder();
     const firstCanonicalLine = baseCanonical.lineItems[0]!;
@@ -508,29 +570,39 @@ describe('customer cancellation API domain boundary', () => {
 
     await api.createCancellationRequest(session(), {
       shopifyOrderId: '500',
-      items: [{ shopifyLineItemId: 'gid://shopify/LineItem/701', requestedQuantity: 1 }],
       reasonCode: 'CUSTOMER_REQUEST',
       idempotencyKey: 'multi-vendor-idem',
     });
 
     expect(createRequest).toHaveBeenCalledWith(expect.objectContaining({
-      items: [{ shopifyOrderLineItemId: 'local-line-701', vendorAllocationId: 'allocation-b', requestedQuantity: 1 }],
+      items: [
+        { shopifyOrderLineItemId: 'local-line-700', vendorAllocationId: 'allocation-a', requestedQuantity: 2 },
+        { shopifyOrderLineItemId: 'local-line-701', vendorAllocationId: 'allocation-b', requestedQuantity: 1 },
+      ],
     }));
-    expect(createRequest).not.toHaveBeenCalledWith(expect.objectContaining({
-      items: expect.arrayContaining([expect.objectContaining({ vendorAllocationId: 'allocation-a' })]),
-    }));
+  });
+
+  it('rejects customer-supplied partial line or quantity authority', async () => {
+    const { api, createRequest } = buildApi();
+    await expect(api.createCancellationRequest(session(), {
+      shopifyOrderId: '500',
+      items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
+      reasonCode: 'CUSTOMER_REQUEST',
+      idempotencyKey: 'partial-idem',
+    })).rejects.toMatchObject({ code: 'INVALID_LINE_OR_QUANTITY', statusCode: 400 });
+    expect(createRequest).not.toHaveBeenCalled();
   });
 
   it('returns stable pending and too-late errors without invoking the writer', async () => {
     const pending = buildApi({ local: localOrder({ pending: true }) });
     await expect(pending.api.createCancellationRequest(session(), {
-      shopifyOrderId: '500', items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }], reasonCode: 'CUSTOMER_REQUEST', idempotencyKey: 'idem-2',
+      shopifyOrderId: '500', reasonCode: 'CUSTOMER_REQUEST', idempotencyKey: 'idem-2',
     })).rejects.toMatchObject({ code: 'CANCELLATION_ALREADY_PENDING' });
     expect(pending.createRequest).not.toHaveBeenCalled();
 
     const shipped = buildApi({ local: localOrder({ shipped: true }) });
     await expect(shipped.api.createCancellationRequest(session(), {
-      shopifyOrderId: '500', items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }], reasonCode: 'CUSTOMER_REQUEST', idempotencyKey: 'idem-3',
+      shopifyOrderId: '500', reasonCode: 'CUSTOMER_REQUEST', idempotencyKey: 'idem-3',
     })).rejects.toMatchObject({ code: 'CANCELLATION_TOO_LATE' });
     expect(shipped.createRequest).not.toHaveBeenCalled();
   });
@@ -539,7 +611,6 @@ describe('customer cancellation API domain boundary', () => {
     const cancelled = buildApi({ canonical: canonical({ cancelledAt: '2026-08-30T00:00:00Z' }) });
     await expect(cancelled.api.createCancellationRequest(session(), {
       shopifyOrderId: '500',
-      items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
       reasonCode: 'CUSTOMER_REQUEST',
       idempotencyKey: 'cancelled-idem',
     })).rejects.toMatchObject({ code: 'CANCELLATION_CONFLICT', statusCode: 409 });
@@ -550,7 +621,6 @@ describe('customer cancellation API domain boundary', () => {
     const { api, createRequest } = buildApi({ local: localOrder({ pending: true }) });
     await expect(api.createCancellationRequest(session(), {
       shopifyOrderId: '500',
-      items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
       reasonCode: 'CUSTOMER_REQUEST',
       idempotencyKey: 'existing-idem',
     })).resolves.toMatchObject({ requestId: 'pending-request', idempotent: true, status: PENDING });
@@ -575,7 +645,6 @@ describe('customer cancellation API domain boundary', () => {
 
     await expect(api.createCancellationRequest(session(), {
       shopifyOrderId: '500',
-      items: [{ shopifyLineItemId: '700', requestedQuantity: 1 }],
       reasonCode: 'CUSTOMER_REQUEST',
       idempotencyKey: 'existing-idem',
     })).resolves.toMatchObject({ requestId: 'pending-request', idempotent: true, status: 'DECLINED' });

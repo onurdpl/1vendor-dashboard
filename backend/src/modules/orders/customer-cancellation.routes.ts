@@ -91,10 +91,7 @@ export function registerCustomerCancellationRoutes(app: FastifyInstance, env: Ap
         if (!request.customerAccountSession) throw new CustomerAccountSessionTokenError();
         const result = await service.createCancellationRequest(request.customerAccountSession, {
           shopifyOrderId: request.body?.shopifyOrderId ?? '',
-          items: (request.body?.items ?? []).map((item) => ({
-            shopifyLineItemId: item.shopifyLineItemId ?? '',
-            requestedQuantity: item.requestedQuantity ?? Number.NaN,
-          })),
+          items: request.body?.items,
           reasonCode: request.body?.reasonCode ?? '',
           note: request.body?.note,
           idempotencyKey: request.body?.idempotencyKey ?? '',

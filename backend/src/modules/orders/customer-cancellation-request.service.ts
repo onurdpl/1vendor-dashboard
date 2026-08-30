@@ -1,6 +1,8 @@
 import { CustomerCancellationStatus, OperationalJobStatus, OperationalJobType, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
+import { OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES } from './outbound-shopify-refund-attempt.service.js';
 import {
   ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES,
   ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES,
@@ -246,6 +248,15 @@ async function createPendingCustomerCancellationRequestInTransaction(
     select: {
       id: true,
       sourceShopifyOrderId: true,
+      lineItems: {
+        select: {
+          id: true,
+          quantity: true,
+          allocationLineItems: {
+            select: { vendorAllocationId: true, quantity: true },
+          },
+        },
+      },
     },
   });
   if (!order) {
@@ -261,6 +272,23 @@ async function createPendingCustomerCancellationRequestInTransaction(
       request: existingRequest,
       idempotent: true,
     };
+  }
+
+  const expectedScope = order.lineItems.map((line) => {
+    if (line.allocationLineItems.length !== 1 || line.allocationLineItems[0]!.quantity !== line.quantity) {
+      throw new CustomerCancellationRequestValidationError(
+        'The complete Shopify order does not have an exact one-allocation mapping.',
+      );
+    }
+    return `${line.id}:${line.allocationLineItems[0]!.vendorAllocationId}:${line.quantity}`;
+  }).sort();
+  const requestedScope = input.items
+    .map((item) => `${item.shopifyOrderLineItemId}:${item.vendorAllocationId}:${item.requestedQuantity}`)
+    .sort();
+  if (expectedScope.length === 0 || JSON.stringify(expectedScope) !== JSON.stringify(requestedScope)) {
+    throw new CustomerCancellationRequestValidationError(
+      'Customer cancellation must cover every Shopify order line at its full quantity.',
+    );
   }
 
   for (const item of input.items) {
@@ -300,6 +328,10 @@ async function createPendingCustomerCancellationRequestInTransaction(
     },
     select: {
       id: true,
+      allocationStatus: true,
+      cancellationReason: true,
+      reassignmentRequired: true,
+      cancelRefundReviewStatus: true,
       trackingNumber: true,
       carrier: true,
       vendorIntegrationTrackingUrl: true,
@@ -329,15 +361,77 @@ async function createPendingCustomerCancellationRequestInTransaction(
         },
         take: 1,
       },
+      returnRecords: { select: { id: true }, take: 1 },
+      refundRecords: { select: { id: true }, take: 1 },
+      economicTransfers: { select: { status: true } },
+      financeIntegrityAlerts: {
+        where: {
+          status: { in: [...FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES] },
+          severity: { in: ['critical', 'warning'] },
+        },
+        select: { id: true },
+        take: 1,
+      },
+      financeEntries: {
+        where: { entryType: 'sale', voidedAt: null },
+        select: {
+          payoutStatus: true,
+          settlementStatus: true,
+          payoutBatchLines: { select: { payoutBatch: { select: { status: true } } } },
+          settlementApprovalLines: {
+            select: {
+              settlementApproval: {
+                select: {
+                  status: true,
+                  commissionInvoices: { select: { status: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+      outboundShopifyRefundAttempts: {
+        where: {
+          status: {
+            in: [
+              OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.PREVIEWED,
+              OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
+              OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+            ],
+          },
+        },
+        select: { id: true },
+      },
     },
   });
-  const statusByAllocationId = new Map(
-    affectedAllocations.map((allocation) => [allocation.id, classifyExistingShipmentAuthority(allocation)]),
+  const affectedAllocationIds = new Set(input.items.map((item) => item.vendorAllocationId));
+  const locallyUnsafe = affectedAllocations.length !== affectedAllocationIds.size || affectedAllocations.some((allocation) =>
+    classifyExistingShipmentAuthority(allocation) !== CustomerCancellationStatus.PENDING ||
+    allocation.allocationStatus !== 'ACTIVE' ||
+    allocation.reassignmentRequired ||
+    Boolean(allocation.cancellationReason) ||
+    Boolean(allocation.cancelRefundReviewStatus) ||
+    allocation.returnRecords.length > 0 ||
+    allocation.refundRecords.length > 0 ||
+    allocation.outboundShopifyRefundAttempts.length > 0 ||
+    allocation.economicTransfers.some((transfer) => transfer.status === 'COMPLETED') ||
+    allocation.financeIntegrityAlerts.length > 0 ||
+    allocation.financeEntries.some((entry) =>
+      entry.payoutStatus !== 'PENDING' ||
+      entry.settlementStatus !== 'PENDING' ||
+      entry.payoutBatchLines.some((line) => line.payoutBatch.status.toLowerCase() !== 'cancelled') ||
+      entry.settlementApprovalLines.some((line) => {
+        const status = line.settlementApproval.status.toLowerCase();
+        return status !== 'cancelled' ||
+          line.settlementApproval.commissionInvoices.some((invoice) => invoice.status.toLowerCase() !== 'cancelled');
+      }),
+    )
   );
-  const itemStatuses = input.items.map((item) =>
-    statusByAllocationId.get(item.vendorAllocationId) ?? CustomerCancellationStatus.CONFLICTED,
-  );
-  const initialStatus = aggregateCustomerCancellationRequestStatus(itemStatuses);
+  if (locallyUnsafe) {
+    throw new CustomerCancellationRequestValidationError(
+      'The complete order changed and is no longer safely cancellable.',
+    );
+  }
 
   const existingPendingItem = await tx.customerCancellationRequestItem.findFirst({
     where: {
@@ -368,16 +462,16 @@ async function createPendingCustomerCancellationRequestInTransaction(
       shopifyOrderId: order.id,
       shopDomain: input.shopDomain,
       shopifyCustomerId: input.shopifyCustomerId,
-      status: initialStatus,
+      status: CustomerCancellationStatus.PENDING,
       reasonCode: input.reasonCode,
       customerNote: input.customerNote,
       idempotencyKey: input.idempotencyKey,
       items: {
-        create: input.items.map((item, index) => ({
+        create: input.items.map((item) => ({
           shopifyOrderLineItemId: item.shopifyOrderLineItemId,
           vendorAllocationId: item.vendorAllocationId,
           requestedQuantity: item.requestedQuantity,
-          status: itemStatuses[index] ?? CustomerCancellationStatus.CONFLICTED,
+          status: CustomerCancellationStatus.PENDING,
         })),
       },
     },

@@ -55,6 +55,7 @@ import {
   approveCustomerCancellationItemForRefund,
   createPendingCustomerCancellationRequest,
   CustomerCancellationRequestConflictError,
+  CustomerCancellationRequestValidationError,
 } from '../backend/src/modules/orders/customer-cancellation-request.service.js';
 import {
   hasPendingCustomerCancellationHold,
@@ -75,7 +76,7 @@ function verifiedInput(overrides: Record<string, unknown> = {}) {
     shopDomain: 'xgi47p-3k.myshopify.com',
     shopifyCustomerId: 'gid://shopify/Customer/1001',
     reasonCode: 'CUSTOMER_CHANGED_MIND',
-    customerNote: 'Please cancel the selected item.',
+    customerNote: 'Please cancel the order.',
     idempotencyKey: 'cancel-request-1',
     items: [
       {
@@ -122,6 +123,10 @@ function createdRequest(input: ReturnType<typeof verifiedInput>) {
 function emptyShipmentAuthority(allocationId: string) {
   return {
     id: allocationId,
+    allocationStatus: 'ACTIVE',
+    cancellationReason: null,
+    reassignmentRequired: false,
+    cancelRefundReviewStatus: null,
     trackingNumber: null,
     carrier: null,
     vendorIntegrationTrackingUrl: null,
@@ -129,6 +134,12 @@ function emptyShipmentAuthority(allocationId: string) {
     fulfillment: null,
     shipmentExecutions: [],
     vendorIntegrationShipmentEvents: [],
+    returnRecords: [],
+    refundRecords: [],
+    economicTransfers: [],
+    financeIntegrityAlerts: [],
+    financeEntries: [],
+    outboundShopifyRefundAttempts: [],
   };
 }
 
@@ -139,6 +150,11 @@ describe('customer cancellation request persistence and hold foundation', () => 
     prismaMock.shopifyOrder.findUnique.mockResolvedValue({
       id: 'order-local-1',
       sourceShopifyOrderId: 'gid://shopify/Order/9001',
+      lineItems: [{
+        id: 'line-local-1',
+        quantity: 1,
+        allocationLineItems: [{ vendorAllocationId: 'allocation-1', quantity: 1 }],
+      }],
     });
     prismaMock.customerCancellationRequest.findUnique.mockResolvedValue(null);
     prismaMock.vendorAllocationLineItem.findFirst.mockResolvedValue({ quantity: 2 });
@@ -209,6 +225,14 @@ describe('customer cancellation request persistence and hold foundation', () => 
     prismaMock.vendorAllocationLineItem.findFirst
       .mockResolvedValueOnce({ quantity: 1 })
       .mockResolvedValueOnce({ quantity: 2 });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'order-local-1',
+      sourceShopifyOrderId: 'gid://shopify/Order/9001',
+      lineItems: [
+        { id: 'line-local-1', quantity: 1, allocationLineItems: [{ vendorAllocationId: 'allocation-1', quantity: 1 }] },
+        { id: 'line-local-2', quantity: 2, allocationLineItems: [{ vendorAllocationId: 'allocation-2', quantity: 2 }] },
+      ],
+    });
     prismaMock.vendorAllocation.findMany.mockResolvedValue([
       emptyShipmentAuthority('allocation-1'),
       emptyShipmentAuthority('allocation-2'),
@@ -244,15 +268,10 @@ describe('customer cancellation request persistence and hold foundation', () => 
     expect(prismaMock.vendorAllocationLineItem.findFirst).not.toHaveBeenCalled();
   });
 
-  it('records a conflicted request when a provider-call claim already owns shipment authority', async () => {
+  it('rejects the whole request when a provider-call claim already owns shipment authority', async () => {
     const input = verifiedInput();
     prismaMock.vendorAllocation.findMany.mockResolvedValue([{
-      id: 'allocation-1',
-      trackingNumber: null,
-      carrier: null,
-      vendorIntegrationTrackingUrl: null,
-      vendorIntegrationShippedAt: null,
-      fulfillment: null,
+      ...emptyShipmentAuthority('allocation-1'),
       shipmentExecutions: [{
         shipmentStatus: 'PENDING',
         providerShipmentId: null,
@@ -261,52 +280,27 @@ describe('customer cancellation request persistence and hold foundation', () => 
         labelUrl: null,
         responseSnapshot: { providerCallClaimedAt: '2026-08-30T10:00:00.000Z' },
       }],
-      vendorIntegrationShipmentEvents: [],
     }]);
-    prismaMock.customerCancellationRequest.create.mockResolvedValue({
-      ...createdRequest(input),
-      status: 'CONFLICTED',
-      items: createdRequest(input).items.map((item) => ({ ...item, status: 'CONFLICTED' })),
-    });
 
-    const result = await createPendingCustomerCancellationRequest(input);
-
-    expect(prismaMock.customerCancellationRequest.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: 'CONFLICTED',
-        items: { create: [expect.objectContaining({ status: 'CONFLICTED' })] },
-      }),
-    }));
-    expect(result.request.status).toBe('CONFLICTED');
+    await expect(createPendingCustomerCancellationRequest(input))
+      .rejects.toBeInstanceOf(CustomerCancellationRequestValidationError);
+    expect(prismaMock.customerCancellationRequest.create).not.toHaveBeenCalled();
   });
 
-  it('records a too-late request when real carrier evidence already exists', async () => {
+  it('rejects the whole request when real carrier evidence already exists', async () => {
     const input = verifiedInput();
     prismaMock.vendorAllocation.findMany.mockResolvedValue([{
-      id: 'allocation-1',
+      ...emptyShipmentAuthority('allocation-1'),
       trackingNumber: 'TRACK-ALREADY-SHIPPED',
       carrier: 'Existing Carrier',
-      vendorIntegrationTrackingUrl: null,
-      vendorIntegrationShippedAt: null,
-      fulfillment: null,
-      shipmentExecutions: [],
-      vendorIntegrationShipmentEvents: [],
     }]);
-    prismaMock.customerCancellationRequest.create.mockResolvedValue({
-      ...createdRequest(input),
-      status: 'TOO_LATE',
-      items: createdRequest(input).items.map((item) => ({ ...item, status: 'TOO_LATE' })),
-    });
 
-    const result = await createPendingCustomerCancellationRequest(input);
-
-    expect(prismaMock.customerCancellationRequest.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: 'TOO_LATE' }),
-    }));
-    expect(result.request.status).toBe('TOO_LATE');
+    await expect(createPendingCustomerCancellationRequest(input))
+      .rejects.toBeInstanceOf(CustomerCancellationRequestValidationError);
+    expect(prismaMock.customerCancellationRequest.create).not.toHaveBeenCalled();
   });
 
-  it('keeps shipment authority allocation-scoped in a mixed multi-vendor request', async () => {
+  it('rejects every child when one allocation is unsafe in a multi-vendor request', async () => {
     const input = verifiedInput({
       items: [
         { shopifyOrderLineItemId: 'line-local-1', vendorAllocationId: 'allocation-1', requestedQuantity: 1 },
@@ -314,32 +308,21 @@ describe('customer cancellation request persistence and hold foundation', () => 
       ],
     });
     prismaMock.vendorAllocationLineItem.findFirst.mockResolvedValue({ quantity: 1 });
+    prismaMock.shopifyOrder.findUnique.mockResolvedValue({
+      id: 'order-local-1',
+      sourceShopifyOrderId: 'gid://shopify/Order/9001',
+      lineItems: [
+        { id: 'line-local-1', quantity: 1, allocationLineItems: [{ vendorAllocationId: 'allocation-1', quantity: 1 }] },
+        { id: 'line-local-2', quantity: 1, allocationLineItems: [{ vendorAllocationId: 'allocation-2', quantity: 1 }] },
+      ],
+    });
     prismaMock.vendorAllocation.findMany.mockResolvedValue([
       { ...emptyShipmentAuthority('allocation-1'), trackingNumber: 'ALREADY-SHIPPED' },
       emptyShipmentAuthority('allocation-2'),
     ]);
-    prismaMock.customerCancellationRequest.create.mockResolvedValue({
-      ...createdRequest(input),
-      status: 'PARTIALLY_RESOLVED',
-      items: createdRequest(input).items.map((item, index) => ({
-        ...item,
-        status: index === 0 ? 'TOO_LATE' : 'PENDING',
-      })),
-    });
-
-    await createPendingCustomerCancellationRequest(input);
-
-    expect(prismaMock.customerCancellationRequest.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        status: 'PARTIALLY_RESOLVED',
-        items: {
-          create: [
-            expect.objectContaining({ vendorAllocationId: 'allocation-1', status: 'TOO_LATE' }),
-            expect.objectContaining({ vendorAllocationId: 'allocation-2', status: 'PENDING' }),
-          ],
-        },
-      }),
-    }));
+    await expect(createPendingCustomerCancellationRequest(input))
+      .rejects.toBeInstanceOf(CustomerCancellationRequestValidationError);
+    expect(prismaMock.customerCancellationRequest.create).not.toHaveBeenCalled();
   });
 
   it('rejects a different active request affecting the same allocation after acquiring the order lock', async () => {
