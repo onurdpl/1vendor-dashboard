@@ -906,10 +906,13 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Both routes require a Shopify Customer Account session token in `Authorization: Bearer <token>`. Cookie authentication is not used. CORS is enabled only on these routes for Customer Account extension `network_access`, with no credentialed requests.
 - The backend verifies the token's app audience, canonical shop destination, time claims, signature, and customer subject. It then verifies the canonical Shopify Order customer GID and derives local order/allocation identity and quantity eligibility server-side.
 - Successful creation persists through the canonical-order lock and database idempotency boundary and immediately activates the allocation-scoped customer-cancellation shipment hold.
-- `APPROVED_FOR_REFUND` remains an active shipment and finance hold state. It means refund authorization only, not Shopify refund completion; no Admin Review endpoint exposes that transition yet.
+- `APPROVED_FOR_REFUND` remains an active shipment and finance hold state. It means refund authorization only, not Shopify refund completion.
+- When `CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED=true`, a durable item-scoped `REFUND_SYNC` processor may auto-authorize a canonically clean pre-shipment item without an Admin actor and submit only its verified product quantity to Shopify. The flag defaults to `false`.
+- Customer auto-refunds exclude checkout shipping and use `notify=false`. A successful `refundCreate` response is not completion authority: the exact item remains held until verified monetary `refunds/create` or canonical refund evidence proves the requested line-item quantity, at which point `resolvedQuantity` is set and the item becomes `APPROVED`.
+- Unsafe, ambiguous, shipped, finance-conflicted, or failed cases remain held with durable job/attempt evidence for later Admin Review. Vendor Reject refund guards and behavior are separate and unchanged.
 - Responses do not expose vendor economics, finance details, Admin API credentials, customer contact information, or raw Shopify data.
 - Request creation is non-monetary: it does not cancel an order or fulfillment, create a refund, alter finance/settlement/payout state, or perform any Shopify mutation.
-- Admin review/refund handling and the Customer Account UI extension remain separate, not-yet-live phases.
+- The Customer Account UI extension remains a separate, not-yet-live phase; this backend processor does not alter Shopify native cancellation settings.
 
 ## Future Shopify Notes
 

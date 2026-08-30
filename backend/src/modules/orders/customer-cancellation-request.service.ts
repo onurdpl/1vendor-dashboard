@@ -1,4 +1,4 @@
-import { CustomerCancellationStatus, Prisma } from '@prisma/client';
+import { CustomerCancellationStatus, OperationalJobStatus, OperationalJobType, Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
 import {
@@ -201,6 +201,31 @@ function idempotencyWhere(input: {
   };
 }
 
+async function ensureCustomerCancellationRefundJobs(
+  tx: Prisma.TransactionClient,
+  request: CustomerCancellationRequestWithItems,
+  sourceShopifyOrderId: string,
+) {
+  for (const item of request.items) {
+    if (item.status !== CustomerCancellationStatus.PENDING) continue;
+    await tx.operationalJob.upsert({
+      where: { customerCancellationRequestItemId: item.id },
+      create: {
+        jobType: OperationalJobType.REFUND_SYNC,
+        status: OperationalJobStatus.PENDING,
+        priority: 20,
+        payloadRef: item.id,
+        payload: { authority: 'CUSTOMER_CANCELLATION_REQUEST_ITEM', requestId: request.id },
+        sourceShopifyOrderId,
+        vendorAllocationId: item.vendorAllocationId,
+        customerCancellationRequestItemId: item.id,
+        maxRetries: 8,
+      },
+      update: {},
+    });
+  }
+}
+
 async function findIdempotentRequest(
   db: Pick<Prisma.TransactionClient, 'customerCancellationRequest'>,
   input: { shopDomain: string; shopifyCustomerId: string; idempotencyKey: string },
@@ -231,6 +256,7 @@ async function createPendingCustomerCancellationRequestInTransaction(
 
   const existingRequest = await findIdempotentRequest(tx, input);
   if (existingRequest) {
+    await ensureCustomerCancellationRefundJobs(tx, existingRequest, order.sourceShopifyOrderId);
     return {
       request: existingRequest,
       idempotent: true,
@@ -357,6 +383,8 @@ async function createPendingCustomerCancellationRequestInTransaction(
     },
     ...requestWithItems,
   });
+
+  await ensureCustomerCancellationRefundJobs(tx, request, order.sourceShopifyOrderId);
 
   return {
     request,

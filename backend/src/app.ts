@@ -11,6 +11,7 @@ import { createAuthMiddleware } from './modules/auth/auth.middleware.js';
 import { requireVendorAccess } from './modules/vendor-access/vendor-access.middleware.js';
 import { registerOrdersRoutes } from './modules/orders/orders.routes.js';
 import { registerCustomerCancellationRoutes } from './modules/orders/customer-cancellation.routes.js';
+import { registerCustomerCancellationAutoRefundExecutor } from './modules/orders/customer-cancellation-auto-refund-executor.service.js';
 import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
 import { registerDashboardSummaryRoutes } from './modules/dashboard/dashboard-summary.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
@@ -497,6 +498,7 @@ export function createApp() {
   registerShopifyOrderWebhookRegistrationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
   registerOrdersCreateExecutor(app, env);
+  registerCustomerCancellationAutoRefundExecutor(app, env);
   registerMissedOrderDiscoveryScheduler(app, env);
   registerCanonicalReconciliationScheduler(app, env);
   registerScheduledReconciliationScheduler(app, env);

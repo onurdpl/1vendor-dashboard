@@ -39,6 +39,16 @@ const txMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
+  customerCancellationRequestItem: {
+    findMany: vi.fn(),
+    update: vi.fn(),
+  },
+  customerCancellationRequest: {
+    update: vi.fn(),
+  },
+  operationalJob: {
+    updateMany: vi.fn(),
+  },
   orderShippingRefundClaim: {
     findMany: vi.fn(),
     updateMany: vi.fn(),
@@ -530,6 +540,7 @@ describe('Shopify refund return linking', () => {
     txMock.vendorAllocation.updateMany.mockResolvedValue({ count: 0 });
     txMock.outboundShopifyRefundAttempt.findFirst.mockResolvedValue(null);
     txMock.outboundShopifyRefundAttempt.updateMany.mockResolvedValue({ count: 0 });
+    txMock.customerCancellationRequestItem.findMany.mockResolvedValue([]);
     txMock.orderShippingRefundClaim.findMany.mockResolvedValue([]);
     txMock.orderShippingRefundClaim.updateMany.mockResolvedValue({ count: 0 });
     txMock.shopifyOrder.update.mockResolvedValue({ id: 'shopify-order-db-1029' });
@@ -833,6 +844,39 @@ describe('Shopify refund return linking', () => {
       where: { id: 'shopify-order-db-1029' },
       data: { financialStatus: 'partially_refunded' },
     });
+  });
+
+  it('reconciles only the linked exact customer cancellation item after verified monetary quantity evidence', async () => {
+    setupOrder();
+    txMock.returnRecord.findFirst.mockResolvedValueOnce(null);
+    txMock.customerCancellationRequestItem.findMany.mockResolvedValueOnce([{
+      id: 'cancel-item-1',
+      requestId: 'cancel-request-1',
+      requestedQuantity: 1,
+      shopifyOrderLineItem: { sourceLineItemId: '20346971095377' },
+      request: { items: [{ id: 'cancel-item-1', status: 'APPROVED_FOR_REFUND' }] },
+    }]);
+
+    const result = await ingestVerifiedShopifyRefund({
+      event: webhookEvent() as never,
+      payload: refundPayload() as never,
+      monetaryEvidence: monetaryEvidence('1074533826897', '3399.00'),
+      canonicalFinancialStatus: 'PARTIALLY_REFUNDED',
+    });
+
+    expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
+    expect(txMock.customerCancellationRequestItem.update).toHaveBeenCalledWith({
+      where: { id: 'cancel-item-1' },
+      data: { status: 'APPROVED', resolvedQuantity: 1 },
+    });
+    expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { customerCancellationRequestItemId: 'cancel-item-1' },
+      data: expect.objectContaining({ status: 'RESOLVED', shopifyRefundId: '1074533826897' }),
+    }));
+    expect(txMock.operationalJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { customerCancellationRequestItemId: 'cancel-item-1' },
+      data: expect.objectContaining({ status: 'COMPLETED' }),
+    }));
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {

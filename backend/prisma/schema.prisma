@@ -739,6 +739,8 @@ model CustomerCancellationRequestItem {
   shopifyOrderLineItem   ShopifyOrderLineItem        @relation(fields: [shopifyOrderLineItemId], references: [id], onDelete: Cascade)
   vendorAllocation       VendorAllocation            @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   reviewedByUser         User?                       @relation("customerCancellationRequestItemReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  outboundShopifyRefundAttempt OutboundShopifyRefundAttempt?
+  operationalJob               OperationalJob?
 
   @@unique([requestId, shopifyOrderLineItemId, vendorAllocationId])
   @@index([vendorAllocationId, status])
@@ -749,6 +751,7 @@ model OutboundShopifyRefundAttempt {
   id                               String                    @id @default(cuid())
   vendorAllocationId               String
   shopifyOrderId                   String
+  customerCancellationRequestItemId String?                   @unique
   status                           String
   restockType                      String
   refundShipping                   Boolean                   @default(false)
@@ -774,6 +777,7 @@ model OutboundShopifyRefundAttempt {
   updatedAt                        DateTime                  @updatedAt
   vendorAllocation                 VendorAllocation          @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   requestedByUser                  User?                     @relation("outboundShopifyRefundAttemptRequestedBy", fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  customerCancellationRequestItem CustomerCancellationRequestItem? @relation(fields: [customerCancellationRequestItemId], references: [id], onDelete: SetNull)
   orderShippingRefundClaim         OrderShippingRefundClaim?
 
   @@index([vendorAllocationId])
@@ -1628,6 +1632,7 @@ model OperationalJob {
   vendorAllocationId   String?
   refundRecordId       String?
   returnRecordId       String?
+  customerCancellationRequestItemId String? @unique
   retryCount           Int                  @default(0)
   maxRetries           Int                  @default(3)
   scheduledAt          DateTime             @default(now())
@@ -1640,12 +1645,15 @@ model OperationalJob {
   errorSummary         String?
   failureCategory      String?
   escalationReason     String?
+  processingGeneration Int                  @default(0)
+  processingLeaseExpiresAt DateTime?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   webhookEvent         WebhookEvent?        @relation(fields: [webhookEventId], references: [id], onDelete: SetNull)
   vendorAllocation     VendorAllocation?    @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   refundRecord         RefundRecord?        @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
   returnRecord         ReturnRecord?        @relation(fields: [returnRecordId], references: [id], onDelete: SetNull)
+  customerCancellationRequestItem CustomerCancellationRequestItem? @relation(fields: [customerCancellationRequestItemId], references: [id], onDelete: SetNull)
   operationalSignals   OperationalSignal[]
   automationActions    AutomationAction[]
 
@@ -1655,6 +1663,7 @@ model OperationalJob {
   @@index([webhookEventId])
   @@index([vendorAllocationId])
   @@index([sourceShopifyOrderId])
+  @@index([status, processingLeaseExpiresAt])
 }
 
 model CanonicalReconciliationRun {

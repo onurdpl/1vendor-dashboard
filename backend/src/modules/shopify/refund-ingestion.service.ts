@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import { FinanceEventType, type Prisma } from '@prisma/client';
+import { CustomerCancellationStatus, FinanceEventType, OperationalJobStatus, type Prisma } from '@prisma/client';
 import { createEventsIdempotently } from '../finance/finance-event.service.js';
 import { assertResolvedEconomicOwnerForMoneyMovement } from '../finance/economic-owner-resolution.service.js';
 import { CANCEL_REFUND_REVIEW_BLOCKING_STATUSES } from '../finance/cancel-refund-review-hold.service.js';
@@ -155,6 +155,65 @@ function buildRefundReturnRecordId(input: {
   vendorAllocationId: string;
 }) {
   return `return-${input.originalVendorId}-${input.sourceShopifyRefundId}-${input.vendorAllocationId}`;
+}
+
+async function reconcileCustomerCancellationItemsFromVerifiedRefund(
+  tx: Prisma.TransactionClient,
+  input: { parsedRefund: ParsedShopifyRefundPayload; sourceShopifyRefundId: string },
+) {
+  const quantitiesByLineItemId = new Map<string, number>();
+  for (const line of input.parsedRefund.refundLineItems) {
+    if (!line.sourceLineItemId) continue;
+    quantitiesByLineItemId.set(line.sourceLineItemId, (quantitiesByLineItemId.get(line.sourceLineItemId) ?? 0) + line.quantity);
+  }
+  if (!quantitiesByLineItemId.size) return;
+  const candidates = await tx.customerCancellationRequestItem.findMany({
+    where: {
+      status: CustomerCancellationStatus.APPROVED_FOR_REFUND,
+      shopifyOrderLineItem: { sourceLineItemId: { in: [...quantitiesByLineItemId.keys()] } },
+      outboundShopifyRefundAttempt: {
+        status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.SHOPIFY_ACTION_PENDING,
+        OR: [
+          { shopifyRefundId: null },
+          { shopifyRefundId: input.sourceShopifyRefundId },
+          { shopifyRefundId: { endsWith: `/${input.sourceShopifyRefundId}` } },
+        ],
+      },
+    },
+    include: {
+      shopifyOrderLineItem: { select: { sourceLineItemId: true } },
+      request: { include: { items: { select: { id: true, status: true } } } },
+    },
+  });
+  for (const item of candidates) {
+    const refundedQuantity = quantitiesByLineItemId.get(item.shopifyOrderLineItem.sourceLineItemId) ?? 0;
+    if (refundedQuantity !== item.requestedQuantity) continue;
+    await tx.customerCancellationRequestItem.update({
+      where: { id: item.id },
+      data: { status: CustomerCancellationStatus.APPROVED, resolvedQuantity: item.requestedQuantity },
+    });
+    const statuses = item.request.items.map((candidate) =>
+      candidate.id === item.id ? CustomerCancellationStatus.APPROVED : candidate.status,
+    );
+    const parentStatus = new Set(statuses).size === 1 ? statuses[0]! : CustomerCancellationStatus.PARTIALLY_RESOLVED;
+    const allTerminal = statuses.every((status) =>
+      status !== CustomerCancellationStatus.PENDING &&
+      status !== CustomerCancellationStatus.APPROVED_FOR_REFUND &&
+      status !== CustomerCancellationStatus.PARTIALLY_RESOLVED,
+    );
+    await tx.customerCancellationRequest.update({
+      where: { id: item.requestId },
+      data: { status: parentStatus, resolvedAt: allTerminal ? new Date() : null },
+    });
+    await tx.outboundShopifyRefundAttempt.updateMany({
+      where: { customerCancellationRequestItemId: item.id },
+      data: { status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED, resolvedAt: new Date(), shopifyRefundId: input.sourceShopifyRefundId },
+    });
+    await tx.operationalJob.updateMany({
+      where: { customerCancellationRequestItemId: item.id },
+      data: { status: OperationalJobStatus.COMPLETED, completedAt: new Date(), processingLeaseExpiresAt: null, errorSummary: null },
+    });
+  }
 }
 
 async function resolveCancelRefundReviewAfterRefundIngestion(
@@ -970,6 +1029,16 @@ async function ingestShopifyRefundWebhookInternal(
           cancelRefundReviewStatus: vendorLineItems[0].cancelRefundReviewStatus,
           sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
           resolvedAt: new Date(),
+        });
+      }
+
+      if (
+        monetaryEvidence?.sourceShopifyRefundId === parsedRefund.sourceShopifyRefundId &&
+        monetaryEvidence.classification === REFUND_MONETARY_CLASSIFICATIONS.monetaryRefund
+      ) {
+        await reconcileCustomerCancellationItemsFromVerifiedRefund(tx, {
+          parsedRefund,
+          sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
         });
       }
 

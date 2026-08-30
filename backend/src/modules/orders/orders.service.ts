@@ -57,6 +57,7 @@ import {
   mapOutboundShopifyRefundAttemptSummary,
   OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES,
 } from './outbound-shopify-refund-attempt.service.js';
+import { submitShopifyRefundCore } from './shopify-refund-core.service.js';
 import {
   acquireOrderShippingRefundClaim,
   buildShopifyRefundIdempotencyKey,
@@ -3691,21 +3692,24 @@ export async function executeShopifyRefundForAdminOrder(
     refundLineItems: preview.refundLineItemsPreview,
     locationIdsByLineItemId: refundLineItemLocationIds,
   });
-  const refundCreateResult = await input.shopifyAdminService.createShopifyRefund({
-    orderId: allocation.order.sourceShopifyOrderId,
-    refundLineItems: refundLineItemsWithLocationIds,
-    transactions: suggestedTransactions.map((transaction) => ({
-      parentTransactionId: transaction.parentTransactionId,
-      amount: transaction.amount,
-      gateway: transaction.gateway,
-    })),
-    shipping: shippingAmount ? { amount: shippingAmount } : null,
-    note,
-    notify: notifyCustomer,
-    idempotencyKey: buildShopifyRefundIdempotencyKey({
-      allocationId: allocation.id,
-      attemptId: attempt.id,
-    }),
+  const refundCreateResult = await submitShopifyRefundCore({
+    service: input.shopifyAdminService,
+    refund: {
+      orderId: allocation.order.sourceShopifyOrderId,
+      refundLineItems: refundLineItemsWithLocationIds,
+      transactions: suggestedTransactions.map((transaction) => ({
+        parentTransactionId: transaction.parentTransactionId,
+        amount: transaction.amount,
+        gateway: transaction.gateway,
+      })),
+      shipping: shippingAmount ? { amount: shippingAmount } : null,
+      note,
+      notify: notifyCustomer,
+      idempotencyKey: buildShopifyRefundIdempotencyKey({
+        allocationId: allocation.id,
+        attemptId: attempt.id,
+      }),
+    },
   });
 
   if (refundCreateResult.userErrors.length > 0) {

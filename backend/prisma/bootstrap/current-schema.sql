@@ -454,6 +454,7 @@ CREATE TABLE "OutboundShopifyRefundAttempt" (
     "id" TEXT NOT NULL,
     "vendorAllocationId" TEXT NOT NULL,
     "shopifyOrderId" TEXT NOT NULL,
+    "customerCancellationRequestItemId" TEXT,
     "status" TEXT NOT NULL,
     "restockType" TEXT NOT NULL,
     "refundShipping" BOOLEAN NOT NULL DEFAULT false,
@@ -1170,6 +1171,7 @@ CREATE TABLE "OperationalJob" (
     "vendorAllocationId" TEXT,
     "refundRecordId" TEXT,
     "returnRecordId" TEXT,
+    "customerCancellationRequestItemId" TEXT,
     "retryCount" INTEGER NOT NULL DEFAULT 0,
     "maxRetries" INTEGER NOT NULL DEFAULT 3,
     "scheduledAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1182,6 +1184,8 @@ CREATE TABLE "OperationalJob" (
     "errorSummary" TEXT,
     "failureCategory" TEXT,
     "escalationReason" TEXT,
+    "processingGeneration" INTEGER NOT NULL DEFAULT 0,
+    "processingLeaseExpiresAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -1397,6 +1401,9 @@ CREATE INDEX "CustomerCancellationRequestItem_shopifyOrderLineItemId_idx" ON "Cu
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CustomerCancellationRequestItem_requestId_shopifyOrderLineI_key" ON "CustomerCancellationRequestItem"("requestId", "shopifyOrderLineItemId", "vendorAllocationId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "OutboundShopifyRefundAttempt_customerCancellationRequestIte_key" ON "OutboundShopifyRefundAttempt"("customerCancellationRequestItemId");
 
 -- CreateIndex
 CREATE INDEX "OutboundShopifyRefundAttempt_vendorAllocationId_idx" ON "OutboundShopifyRefundAttempt"("vendorAllocationId");
@@ -1771,6 +1778,9 @@ CREATE INDEX "WebhookEvent_topic_sourceShopifyOrderId_status_idx" ON "WebhookEve
 CREATE UNIQUE INDEX "WebhookEvent_sourceShopDomain_topic_webhookId_key" ON "WebhookEvent"("sourceShopDomain", "topic", "webhookId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "OperationalJob_customerCancellationRequestItemId_key" ON "OperationalJob"("customerCancellationRequestItemId");
+
+-- CreateIndex
 CREATE INDEX "OperationalJob_status_scheduledAt_idx" ON "OperationalJob"("status", "scheduledAt");
 
 -- CreateIndex
@@ -1787,6 +1797,9 @@ CREATE INDEX "OperationalJob_vendorAllocationId_idx" ON "OperationalJob"("vendor
 
 -- CreateIndex
 CREATE INDEX "OperationalJob_sourceShopifyOrderId_idx" ON "OperationalJob"("sourceShopifyOrderId");
+
+-- CreateIndex
+CREATE INDEX "OperationalJob_status_processingLeaseExpiresAt_idx" ON "OperationalJob"("status", "processingLeaseExpiresAt");
 
 -- CreateIndex
 CREATE INDEX "CanonicalReconciliationRun_startedAt_idx" ON "CanonicalReconciliationRun"("startedAt");
@@ -1904,6 +1917,9 @@ ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefund
 
 -- AddForeignKey
 ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_requestedByUserId_fkey" FOREIGN KEY ("requestedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OutboundShopifyRefundAttempt" ADD CONSTRAINT "OutboundShopifyRefundAttempt_customerCancellationRequestIt_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES "CustomerCancellationRequestItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OrderShippingRefundClaim" ADD CONSTRAINT "OrderShippingRefundClaim_ownerAttemptId_fkey" FOREIGN KEY ("ownerAttemptId") REFERENCES "OutboundShopifyRefundAttempt"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -2159,6 +2175,9 @@ ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_refundRecordId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_returnRecordId_fkey" FOREIGN KEY ("returnRecordId") REFERENCES "ReturnRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OperationalJob" ADD CONSTRAINT "OperationalJob_customerCancellationRequestItemId_fkey" FOREIGN KEY ("customerCancellationRequestItemId") REFERENCES "CustomerCancellationRequestItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OperationalSignal" ADD CONSTRAINT "OperationalSignal_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "Vendor"("id") ON DELETE CASCADE ON UPDATE CASCADE;

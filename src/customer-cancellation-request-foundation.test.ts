@@ -36,6 +36,9 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     create: vi.fn(),
   },
+  operationalJob: {
+    upsert: vi.fn(),
+  },
 }));
 
 const acquireShopifyOrderTransactionLockMock = vi.hoisted(() => vi.fn());
@@ -144,7 +147,7 @@ describe('customer cancellation request persistence and hold foundation', () => 
     acquireShopifyOrderTransactionLockMock.mockResolvedValue(undefined);
   });
 
-  it('persists one pending item under the canonical Shopify order lock without operational side effects', async () => {
+  it('persists one pending item and its durable refund job under the canonical Shopify order lock', async () => {
     const input = verifiedInput();
     const expectedRequest = createdRequest(input);
     prismaMock.customerCancellationRequest.create.mockResolvedValue(expectedRequest);
@@ -173,6 +176,14 @@ describe('customer cancellation request persistence and hold foundation', () => 
     expect(acquireShopifyOrderTransactionLockMock.mock.invocationCallOrder[0]).toBeLessThan(
       prismaMock.customerCancellationRequest.create.mock.invocationCallOrder[0]!,
     );
+    expect(prismaMock.operationalJob.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { customerCancellationRequestItemId: 'customer-cancellation-item-1' },
+      create: expect.objectContaining({
+        customerCancellationRequestItemId: 'customer-cancellation-item-1',
+        payloadRef: 'customer-cancellation-item-1',
+        sourceShopifyOrderId: 'gid://shopify/Order/9001',
+      }),
+    }));
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.refundRecord.create).not.toHaveBeenCalled();
     expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
