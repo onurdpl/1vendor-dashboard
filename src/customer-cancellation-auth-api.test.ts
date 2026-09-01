@@ -148,6 +148,21 @@ function localOrder(input: { shipped?: boolean; pending?: boolean; secondAllocat
   };
 }
 
+function localOrderWithFinance(
+  settlementStatus: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const order = localOrder();
+  order.lineItems[0]!.allocationLineItems[0]!.vendorAllocation.financeEntries = [{
+    payoutStatus: 'PENDING',
+    settlementStatus,
+    payoutBatchLines: [],
+    settlementApprovalLines: [],
+    ...overrides,
+  }] as never;
+  return order;
+}
+
 function buildApi(input: {
   canonical?: ReturnType<typeof canonical>;
   local?: ReturnType<typeof localOrder>;
@@ -481,6 +496,27 @@ describe('customer cancellation API domain boundary', () => {
     }] as never;
     await expect(buildApi({ local: progressed }).api.getEligibility(session(), '500')).resolves.toMatchObject({ canRequestCancellation: false });
   });
+
+  it.each(['PENDING', 'ACCRUING'])('accepts otherwise-safe %s sale finance state', async (settlementStatus) => {
+    await expect(buildApi({ local: localOrderWithFinance(settlementStatus) }).api.getEligibility(session(), '500'))
+      .resolves.toMatchObject({
+        canRequestCancellation: true,
+        unavailableReason: null,
+        lineItems: [expect.objectContaining({ eligible: true, unavailableReason: null })],
+      });
+  });
+
+  it.each(['PAYABLE', 'PARTIALLY_REFUNDED', 'HELD', 'SETTLED', 'DISPUTED'])(
+    'rejects unsafe %s sale finance state',
+    async (settlementStatus) => {
+      await expect(buildApi({ local: localOrderWithFinance(settlementStatus) }).api.getEligibility(session(), '500'))
+        .resolves.toMatchObject({
+          canRequestCancellation: false,
+          unavailableReason: 'NO_ELIGIBLE_ITEMS',
+          lineItems: [expect.objectContaining({ eligible: false, unavailableReason: 'NOT_FULFILLABLE' })],
+        });
+    },
+  );
 
   it('reads active and terminal customer-safe status while intake is disabled', async () => {
     const statuses = [

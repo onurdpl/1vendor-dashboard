@@ -43,6 +43,12 @@ export type CreateCustomerCancellationRequestResult = {
 export class CustomerCancellationRequestValidationError extends Error {}
 export class CustomerCancellationRequestConflictError extends Error {}
 
+const CUSTOMER_CANCELLATION_SAFE_SETTLEMENT_STATUSES = new Set(['PENDING', 'ACCRUING']);
+
+export function isCustomerCancellationSettlementStatusSafe(status: string) {
+  return CUSTOMER_CANCELLATION_SAFE_SETTLEMENT_STATUSES.has(status);
+}
+
 export type ApproveCustomerCancellationItemForRefundInput = {
   requestId: string;
   itemId: string;
@@ -418,7 +424,7 @@ async function createPendingCustomerCancellationRequestInTransaction(
     allocation.financeIntegrityAlerts.length > 0 ||
     allocation.financeEntries.some((entry) =>
       entry.payoutStatus !== 'PENDING' ||
-      entry.settlementStatus !== 'PENDING' ||
+      !isCustomerCancellationSettlementStatusSafe(entry.settlementStatus) ||
       entry.payoutBatchLines.some((line) => line.payoutBatch.status.toLowerCase() !== 'cancelled') ||
       entry.settlementApprovalLines.some((line) => {
         const status = line.settlementApproval.status.toLowerCase();

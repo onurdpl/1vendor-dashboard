@@ -143,6 +143,22 @@ function emptyShipmentAuthority(allocationId: string) {
   };
 }
 
+function allocationWithFinance(
+  settlementStatus: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    ...emptyShipmentAuthority('allocation-1'),
+    financeEntries: [{
+      payoutStatus: 'PENDING',
+      settlementStatus,
+      payoutBatchLines: [],
+      settlementApprovalLines: [],
+      ...overrides,
+    }],
+  };
+}
+
 describe('customer cancellation request persistence and hold foundation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -205,6 +221,76 @@ describe('customer cancellation request persistence and hold foundation', () => 
     expect(prismaMock.financeLedgerEntry.create).not.toHaveBeenCalled();
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
     expect(prismaMock.fulfillment.create).not.toHaveBeenCalled();
+  });
+
+  it('persists an accruing sale request and activates the pending finance hold authority', async () => {
+    const input = verifiedInput();
+    const expectedRequest = createdRequest(input);
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([allocationWithFinance('ACCRUING')]);
+    prismaMock.customerCancellationRequest.create.mockResolvedValue(expectedRequest);
+
+    const result = await createPendingCustomerCancellationRequest(input);
+
+    expect(result.request.status).toBe(CustomerCancellationStatus.PENDING);
+    expect(result.request.items).toEqual([
+      expect.objectContaining({ status: CustomerCancellationStatus.PENDING }),
+    ]);
+    expect(isPendingCustomerCancellationHoldState({
+      requestStatus: result.request.status,
+      itemStatus: result.request.items[0]!.status,
+    })).toBe(true);
+    expect(prismaMock.operationalJob.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['PENDING', 'ACCRUING'])('accepts otherwise-safe %s settlement state during persistence', async (settlementStatus) => {
+    const input = verifiedInput();
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([allocationWithFinance(settlementStatus)]);
+    prismaMock.customerCancellationRequest.create.mockResolvedValue(createdRequest(input));
+
+    await expect(createPendingCustomerCancellationRequest(input)).resolves.toMatchObject({
+      request: { status: CustomerCancellationStatus.PENDING },
+    });
+  });
+
+  it.each(['PAYABLE', 'PARTIALLY_REFUNDED', 'HELD', 'SETTLED', 'DISPUTED'])(
+    'rejects unsafe %s settlement state during persistence',
+    async (settlementStatus) => {
+      prismaMock.vendorAllocation.findMany.mockResolvedValue([allocationWithFinance(settlementStatus)]);
+
+      await expect(createPendingCustomerCancellationRequest(verifiedInput()))
+        .rejects.toBeInstanceOf(CustomerCancellationRequestValidationError);
+      expect(prismaMock.customerCancellationRequest.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['progressed payout', allocationWithFinance('ACCRUING', { payoutStatus: 'APPROVED' })],
+    ['active settlement approval', allocationWithFinance('ACCRUING', {
+      settlementApprovalLines: [{ settlementApproval: { status: 'DRAFT', commissionInvoices: [] } }],
+    })],
+    ['active payout batch', allocationWithFinance('ACCRUING', {
+      payoutBatchLines: [{ payoutBatch: { status: 'DRAFT' } }],
+    })],
+    ['active refund attempt', {
+      ...allocationWithFinance('ACCRUING'),
+      outboundShopifyRefundAttempts: [{ id: 'refund-attempt-1' }],
+    }],
+    ['existing fulfillment', {
+      ...allocationWithFinance('ACCRUING'),
+      fulfillment: {
+        shopifyFulfillmentId: 'gid://shopify/Fulfillment/1',
+        trackingNumber: null,
+        fulfilledAt: null,
+        shipmentCreatedAt: null,
+        syncStatus: null,
+      },
+    }],
+  ])('rejects %s while persisting an accruing cancellation request', async (_label, allocation) => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([allocation]);
+
+    await expect(createPendingCustomerCancellationRequest(verifiedInput()))
+      .rejects.toBeInstanceOf(CustomerCancellationRequestValidationError);
+    expect(prismaMock.customerCancellationRequest.create).not.toHaveBeenCalled();
   });
 
   it('persists one request containing items from multiple allocations', async () => {

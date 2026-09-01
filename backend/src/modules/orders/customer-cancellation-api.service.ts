@@ -9,6 +9,7 @@ import {
   createPendingCustomerCancellationRequest,
   CustomerCancellationRequestConflictError,
   CustomerCancellationRequestValidationError,
+  isCustomerCancellationSettlementStatusSafe,
   type CreateVerifiedCustomerCancellationRequestInput,
 } from './customer-cancellation-request.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
@@ -366,7 +367,7 @@ function deriveEligibility(input: {
           allocationLine.vendorAllocation.financeIntegrityAlerts.length > 0 ||
           allocationLine.vendorAllocation.financeEntries.some((entry) =>
             entry.payoutStatus !== 'PENDING' ||
-            entry.settlementStatus !== 'PENDING' ||
+            !isCustomerCancellationSettlementStatusSafe(entry.settlementStatus) ||
             entry.payoutBatchLines.some((line) => line.payoutBatch.status.toLowerCase() !== 'cancelled') ||
             entry.settlementApprovalLines.some((line) => {
               const status = line.settlementApproval.status.toLowerCase();
