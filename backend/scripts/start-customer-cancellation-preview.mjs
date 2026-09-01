@@ -10,7 +10,7 @@ const REPO_ROOT = resolve(BACKEND_DIR, '..');
 const ENV_FILE = resolve(BACKEND_DIR, '.env.customer-cancellation-preview');
 
 const EXPECTED_SHOP = 'sporgym-cancellation-dev.myshopify.com';
-const EXPECTED_CLIENT_ID = '189b719fce9bc8da4d30ee7818d1a93e';
+const EXPECTED_CLIENT_ID = '2f542047bb25c5f0e2eef3e279390c8d';
 const REQUIRED_FALSE_FLAGS = [
   'CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED',
   'SHIPPING_EXECUTION_ENABLED',
