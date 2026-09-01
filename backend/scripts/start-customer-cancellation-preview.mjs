@@ -24,7 +24,7 @@ const REQUIRED_FALSE_FLAGS = [
   'CANONICAL_RECONCILIATION_ENABLED',
 ];
 const PLACEHOLDER_VALUES = new Set([
-  'REPLACE_WITH_METAFIELD_SYNC_TOOL_CLIENT_SECRET',
+  'REPLACE_WITH_CUSTOMER_CANCELLATION_APP_CLIENT_SECRET',
   'REPLACE_WITH_DEV_STORE_ADMIN_ACCESS_TOKEN',
   '',
 ]);
@@ -123,7 +123,7 @@ function validatePreviewEnv(env) {
     assertFalse(env, key);
   }
 
-  assertNotPlaceholder(env, 'SHOPIFY_WEBHOOK_SECRET');
+  assertNotPlaceholder(env, 'SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET');
   assertNotPlaceholder(env, 'SHOPIFY_ADMIN_ACCESS_TOKEN');
   assertLocalPreviewDatabase(env.DATABASE_URL);
 

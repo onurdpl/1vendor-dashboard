@@ -311,6 +311,8 @@ describe('customer cancellation environment', () => {
 
   it('is disabled by default with bounded executor settings', () => {
     resetEnv({
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: undefined,
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
       CUSTOMER_CANCELLATION_INTAKE_ENABLED: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: undefined,
       CUSTOMER_CANCELLATION_AUTO_REFUND_INTERVAL_MS: undefined,
@@ -323,18 +325,54 @@ describe('customer cancellation environment', () => {
       CUSTOMER_CANCELLATION_AUTO_REFUND_INTERVAL_MS: 5_000,
       CUSTOMER_CANCELLATION_AUTO_REFUND_BATCH_SIZE: 5,
       CUSTOMER_CANCELLATION_AUTO_REFUND_LEASE_MS: 60_000,
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
     });
   });
 
   it('parses intake independently from auto-refund', () => {
     resetEnv({
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: 'customer-account-client-id',
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: 'customer-account-client-secret',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
       CUSTOMER_CANCELLATION_INTAKE_ENABLED: 'true',
       CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: 'false',
     });
     expect(loadEnv()).toMatchObject({
       CUSTOMER_CANCELLATION_INTAKE_ENABLED: true,
       CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: false,
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: 'customer-account-client-secret',
     });
+  });
+
+  it('keeps production startup safe while cancellation intake and its dedicated secret are absent', () => {
+    resetEnv({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: 'existing-client-id',
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: undefined,
+    });
+
+    expect(loadEnv()).toMatchObject({
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: false,
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: 'existing-client-id',
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
+    });
+  });
+
+  it('rejects enabled cancellation intake without complete dedicated auth authority', () => {
+    resetEnv({
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: 'customer-account-client-id',
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      CUSTOMER_CANCELLATION_INTAKE_ENABLED: 'true',
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'CUSTOMER_CANCELLATION_INTAKE_ENABLED requires SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID, SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET, and SHOPIFY_SHOP_DOMAIN.',
+    );
   });
 });
 

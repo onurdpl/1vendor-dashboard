@@ -205,6 +205,12 @@ Alternative for quick schema sync without migration history:
   - `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET`
   - when set, fulfillment lifecycle webhook routes use this secret instead of the default webhook secret
   - this is useful when GraphQL-created fulfillment webhook subscriptions are signed with a different app secret than orders/refunds routes
+- Customer Account authentication is a separate authority:
+  - `SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID` is the Customer Account app JWT audience
+  - `SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET` verifies Customer Account HS256 session-token signatures only
+  - it may belong to a dedicated Customer Cancellation Shopify app and never falls back to `SHOPIFY_WEBHOOK_SECRET`
+  - `SHOPIFY_WEBHOOK_SECRET` remains the orders/refunds webhook HMAC authority and the existing return/fulfillment fallback
+  - missing dedicated Customer Account configuration does not block startup while cancellation intake is disabled; requests fail closed, and enabling intake requires the complete dedicated authority
 - Safety behavior:
   - missing variables are reported by name only
   - secret values are never printed

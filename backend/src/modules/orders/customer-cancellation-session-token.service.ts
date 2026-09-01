@@ -68,7 +68,7 @@ function readRequiredNumber(payload: jwt.JwtPayload, key: 'exp' | 'nbf' | 'iat')
 export function createCustomerAccountSessionTokenVerifier(env: AppEnv) {
   function verifySessionToken(token: string): CustomerAccountSession {
     const clientId = env.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID?.trim();
-    const clientSecret = env.SHOPIFY_WEBHOOK_SECRET?.trim();
+    const clientSecret = env.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET?.trim();
     const configuredShop = normalizeShopHostname(env.SHOPIFY_SHOP_DOMAIN);
     if (!clientId || !clientSecret || !configuredShop) {
       throw new CustomerAccountAuthConfigurationError();

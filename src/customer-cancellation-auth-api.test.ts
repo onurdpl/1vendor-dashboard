@@ -2,8 +2,10 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createCustomerAccountSessionTokenVerifier,
+  CustomerAccountAuthConfigurationError,
   CustomerAccountSessionTokenError,
 } from '../backend/src/modules/orders/customer-cancellation-session-token.service.js';
+import { verifyShopifyWebhookHmac } from '../backend/src/modules/shopify/webhook.service.js';
 import {
   createCustomerCancellationApiService,
   CustomerCancellationApiError,
@@ -21,7 +23,8 @@ function baseEnv(): AppEnv {
     NODE_ENV: 'test',
     CUSTOMER_CANCELLATION_INTAKE_ENABLED: true,
     SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID: clientId,
-    SHOPIFY_WEBHOOK_SECRET: clientSecret,
+    SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: clientSecret,
+    SHOPIFY_WEBHOOK_SECRET: 'webhook-signing-secret',
     SHOPIFY_SHOP_DOMAIN: shopDomain,
   } as AppEnv;
 }
@@ -228,6 +231,33 @@ describe('Shopify Customer Account session-token verification', () => {
       CustomerAccountSessionTokenError,
     );
   });
+
+  it('fails closed when the dedicated Customer Account secret is absent', () => {
+    expect(() => createCustomerAccountSessionTokenVerifier({
+      ...baseEnv(),
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: undefined,
+    }).verifySessionToken(signToken())).toThrow(CustomerAccountAuthConfigurationError);
+  });
+
+  it('isolates Customer Account JWT authority from webhook HMAC authority', () => {
+    const rawBody = Buffer.from('{"id":500}', 'utf8');
+    const webhookSecret = 'webhook-signing-secret';
+    const webhookHmac = createHmac('sha256', webhookSecret).update(rawBody).digest('base64');
+    const env = {
+      ...baseEnv(),
+      SHOPIFY_WEBHOOK_SECRET: webhookSecret,
+      SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET: clientSecret,
+    };
+
+    expect(createCustomerAccountSessionTokenVerifier(env).verifySessionToken(signToken())).toMatchObject({
+      customerGid,
+    });
+    expect(() => createCustomerAccountSessionTokenVerifier(env).verifySessionToken(signToken({}, webhookSecret))).toThrow(
+      CustomerAccountSessionTokenError,
+    );
+    expect(verifyShopifyWebhookHmac(rawBody, webhookHmac, env.SHOPIFY_WEBHOOK_SECRET)).toBe(true);
+    expect(verifyShopifyWebhookHmac(rawBody, webhookHmac, env.SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET!)).toBe(false);
+  });
 });
 
 describe('customer cancellation API domain boundary', () => {
@@ -321,6 +351,7 @@ describe('customer cancellation API domain boundary', () => {
     vi.stubEnv('KARGONOMI_API_TOKEN', 'test-token');
     vi.stubEnv('SHOPIFY_WEBHOOK_SECRET', clientSecret);
     vi.stubEnv('SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID', clientId);
+    vi.stubEnv('SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET', clientSecret);
     vi.stubEnv('SHOPIFY_SHOP_DOMAIN', shopDomain);
     vi.stubEnv('CUSTOMER_CANCELLATION_INTAKE_ENABLED', 'false');
     const { createApp } = await import('../backend/src/app.js');
@@ -347,6 +378,32 @@ describe('customer cancellation API domain boundary', () => {
       expect(eligibility.json()).toMatchObject({ code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED' });
       expect(create.statusCode).toBe(503);
       expect(create.json()).toMatchObject({ code: 'CUSTOMER_CANCELLATION_INTAKE_DISABLED' });
+    } finally {
+      await app.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('fails authenticated Customer Account requests closed when the dedicated secret is absent', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SHIPPING_PROVIDER', 'kargonomi');
+    vi.stubEnv('KARGONOMI_BASE_URL', 'https://kargonomi.test.example.com');
+    vi.stubEnv('KARGONOMI_API_TOKEN', 'test-token');
+    vi.stubEnv('SHOPIFY_WEBHOOK_SECRET', clientSecret);
+    vi.stubEnv('SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_ID', clientId);
+    vi.stubEnv('SHOPIFY_CUSTOMER_ACCOUNT_CLIENT_SECRET', '');
+    vi.stubEnv('SHOPIFY_SHOP_DOMAIN', shopDomain);
+    vi.stubEnv('CUSTOMER_CANCELLATION_INTAKE_ENABLED', 'false');
+    const { createApp } = await import('../backend/src/app.js');
+    const app = createApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/customer-cancellations/status?shopifyOrderId=500',
+        headers: { authorization: `Bearer ${signToken()}` },
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ code: 'CUSTOMER_ACCOUNT_AUTH_NOT_CONFIGURED' });
     } finally {
       await app.close();
       vi.unstubAllEnvs();
