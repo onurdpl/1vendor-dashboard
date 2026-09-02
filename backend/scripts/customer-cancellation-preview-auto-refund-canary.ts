@@ -62,18 +62,6 @@ function orderIdTail(value: string) {
   return value.trim().split('/').at(-1) ?? value.trim();
 }
 
-function amountFromPreview(
-  money:
-    | { shopMoney?: { amount?: string | null; currencyCode?: string | null } | null }
-    | null
-    | undefined,
-) {
-  return {
-    amount: money?.shopMoney?.amount ?? null,
-    currency: money?.shopMoney?.currencyCode ?? null,
-  };
-}
-
 async function assertRuntimeDatabase() {
   const [database] = await prisma.$queryRaw<{ database_name: string }[]>`
     select current_database() as database_name
@@ -209,9 +197,7 @@ async function main() {
     fail(`Request is not clean for auto-refund canary: ${eligibility.classification} ${eligibility.reason}`);
   }
 
-  const subtotal = amountFromPreview(eligibility.context.preview.suggestedRefund?.subtotalSet);
-  const shipping = amountFromPreview(eligibility.context.preview.suggestedRefund?.shipping?.amountSet);
-  const total = amountFromPreview(eligibility.context.preview.suggestedRefund?.amountSet);
+  const suggestedRefund = eligibility.context.preview.suggestedRefund;
   const linePreview = eligibility.context.preview.refundLineItemsPreview[0];
 
   const summary = {
@@ -221,10 +207,10 @@ async function main() {
     shopifyOrderId: request.order.sourceShopifyOrderId,
     targetShop: env.SHOPIFY_SHOP_DOMAIN,
     quantity: item.requestedQuantity,
-    productRefund: subtotal.amount,
-    shippingRefund: shipping.amount ?? '0.00',
-    total: total.amount,
-    currency: total.currency ?? subtotal.currency ?? request.order.currency,
+    productRefund: suggestedRefund?.subtotalAmount ?? null,
+    shippingRefund: suggestedRefund?.shippingAmount ?? '0.00',
+    total: suggestedRefund?.totalRefundAmount ?? null,
+    currency: suggestedRefund?.currencyCode ?? suggestedRefund?.shippingCurrencyCode ?? request.order.currency,
     lineItemId: linePreview?.lineItemId ?? item.shopifyOrderLineItem.sourceLineItemId,
     unrelatedRefundSyncCandidatesNotProcessed: unrelatedJobs,
     shopifyMutation: args.execute ? 'refundCreate' : 'NO',
