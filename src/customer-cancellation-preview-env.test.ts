@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  buildCustomerCancellationAutoRefundCanaryChildEnv,
+  parseCustomerCancellationAutoRefundCanaryArgs,
+} from '../backend/scripts/customer-cancellation-preview-auto-refund-canary.mjs';
+import {
   CUSTOMER_CANCELLATION_PREVIEW_DATABASE_NAME,
   CUSTOMER_CANCELLATION_PREVIEW_ENV_FILE,
   assertCustomerCancellationPreviewDatabase,
@@ -161,5 +165,37 @@ describe('customer cancellation preview env guard', () => {
     } finally {
       process.env.DATABASE_URL = originalDatabaseUrl;
     }
+  });
+
+  it('keeps normal preview startup closed when auto-refund is true', () => {
+    expect(() =>
+      validateCustomerCancellationPreviewEnv({
+        ...validEnv,
+        CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED: 'true',
+      }),
+    ).toThrow(/CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED must be false/);
+  });
+
+  it('requires an explicit canary request id before reaching Prisma', () => {
+    expect(() => parseCustomerCancellationAutoRefundCanaryArgs([])).toThrow(/request ID is required/i);
+  });
+
+  it('defaults the canary runner to dry-run mode', () => {
+    expect(parseCustomerCancellationAutoRefundCanaryArgs(['cmtjozilt00018obvfsx0po00'])).toEqual({
+      requestId: 'cmtjozilt00018obvfsx0po00',
+      execute: false,
+    });
+  });
+
+  it('scopes auto-refund enablement only to explicit canary execution child env', () => {
+    expect(validEnv.CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED).toBe('false');
+    expect(
+      buildCustomerCancellationAutoRefundCanaryChildEnv(validEnv, { execute: false })
+        .CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED,
+    ).toBe('false');
+    expect(
+      buildCustomerCancellationAutoRefundCanaryChildEnv(validEnv, { execute: true })
+        .CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED,
+    ).toBe('true');
   });
 });
