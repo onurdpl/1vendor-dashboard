@@ -1,7 +1,6 @@
 import {
   AllocationStatus,
   CustomerCancellationStatus,
-  OperationalJobStatus,
   Prisma,
 } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
@@ -23,6 +22,7 @@ import {
   submitShopifyRefundCore,
   validateSuggestedRefundForSubmission,
 } from './shopify-refund-core.service.js';
+import { processCustomerCancellationOrderCancel } from './customer-cancellation-order-cancel.service.js';
 
 export const CUSTOMER_CANCELLATION_AUTO_REFUND_CLASSIFICATIONS = {
   CLEAN: 'CLEAN',
@@ -428,7 +428,6 @@ export async function reconcileCustomerCancellationItemFromCanonicalRefunds(inpu
     );
     await tx.customerCancellationRequest.update({ where: { id: current.requestId }, data: { status: parentStatus, resolvedAt: allTerminal ? new Date() : null } });
     await tx.outboundShopifyRefundAttempt.updateMany({ where: { customerCancellationRequestItemId: item.id }, data: { status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED, resolvedAt: new Date(), failedAt: null, failureReason: null } });
-    await tx.operationalJob.updateMany({ where: { customerCancellationRequestItemId: item.id }, data: { status: OperationalJobStatus.COMPLETED, completedAt: new Date(), processingLeaseExpiresAt: null, errorSummary: null } });
   });
   return true;
 }
@@ -474,7 +473,13 @@ export async function processCustomerCancellationAutoRefundItem(input: {
   itemId: string;
   shopifyAdminService: ShopifyService;
 }): Promise<CustomerCancellationAutoRefundProcessResult> {
-  if (await reconcileCustomerCancellationItemFromCanonicalRefunds(input)) return 'COMPLETED';
+  if (await reconcileCustomerCancellationItemFromCanonicalRefunds(input)) {
+    const cancelResult = await processCustomerCancellationOrderCancel(input);
+    if (cancelResult.outcome === 'APPROVED' || cancelResult.outcome === 'ALREADY_CANCELLED_APPROVED') return 'COMPLETED';
+    if (cancelResult.outcome === 'AWAITING_JOB' || cancelResult.outcome === 'RETRYABLE') return 'RETRYABLE';
+    if (cancelResult.outcome === 'TERMINAL_EXCEPTION') return 'TERMINAL_EXCEPTION';
+    return 'SKIPPED';
+  }
   let eligibility = await classifyCustomerCancellationAutoRefundEligibility(input);
   if (eligibility.classification === 'CANONICAL_UNAVAILABLE') return 'RETRYABLE';
   if (eligibility.classification === 'SIBLING_IN_PROGRESS') return 'RETRYABLE';
@@ -522,7 +527,12 @@ export async function processCustomerCancellationAutoRefundItem(input: {
     mutationResponseJson: result.rawResponse === undefined ? undefined : json(result.rawResponse),
   } });
   // A successful mutation response is deliberately not completion authority.
-  return await reconcileCustomerCancellationItemFromCanonicalRefunds(input) ? 'COMPLETED' : 'AWAITING_RECONCILIATION';
+  if (!(await reconcileCustomerCancellationItemFromCanonicalRefunds(input))) return 'AWAITING_RECONCILIATION';
+  const cancelResult = await processCustomerCancellationOrderCancel(input);
+  if (cancelResult.outcome === 'APPROVED' || cancelResult.outcome === 'ALREADY_CANCELLED_APPROVED') return 'COMPLETED';
+  if (cancelResult.outcome === 'AWAITING_JOB' || cancelResult.outcome === 'RETRYABLE') return 'RETRYABLE';
+  if (cancelResult.outcome === 'TERMINAL_EXCEPTION') return 'TERMINAL_EXCEPTION';
+  return 'SKIPPED';
 }
 
 export function createCustomerCancellationAutoRefundService(env: AppEnv) {

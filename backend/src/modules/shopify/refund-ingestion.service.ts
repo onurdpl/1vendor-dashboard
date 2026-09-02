@@ -213,10 +213,6 @@ async function reconcileCustomerCancellationItemsFromVerifiedRefund(
       where: { customerCancellationRequestItemId: item.id },
       data: { status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.RESOLVED, resolvedAt: new Date(), shopifyRefundId: input.sourceShopifyRefundId },
     });
-    await tx.operationalJob.updateMany({
-      where: { customerCancellationRequestItemId: item.id },
-      data: { status: OperationalJobStatus.COMPLETED, completedAt: new Date(), processingLeaseExpiresAt: null, errorSummary: null },
-    });
   }
 }
 

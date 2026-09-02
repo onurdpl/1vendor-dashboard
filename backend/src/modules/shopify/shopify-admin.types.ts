@@ -399,6 +399,31 @@ export type ShopifyUserError = {
   message: string;
 };
 
+export type ShopifyOrderCancelUserError = ShopifyUserError & {
+  code: string | null;
+};
+
+export type CancelShopifyOrderInput = {
+  orderId: string;
+  notifyCustomer: boolean;
+  staffNote?: string | null;
+};
+
+export type CancelShopifyOrderResult = {
+  orderId: string;
+  jobId: string | null;
+  jobDone: boolean | null;
+  orderCancelUserErrors: ShopifyOrderCancelUserError[];
+  userErrors: ShopifyUserError[];
+  rawResponse?: unknown;
+};
+
+export type ShopifyJobStatusResult = {
+  jobId: string;
+  done: boolean;
+  source: 'shopify_admin';
+};
+
 export type CancelShopifyReturnResult = {
   returnGid: string | null;
   status: string | null;

@@ -7,6 +7,8 @@ import type {
   CanonicalShopifyReturnSnapshot,
   CancelFulfillmentResult,
   CancelFulfillmentOrderResult,
+  CancelShopifyOrderInput,
+  CancelShopifyOrderResult,
   CancelShopifyReturnResult,
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
@@ -31,7 +33,9 @@ import type {
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
+  ShopifyJobStatusResult,
   ShopifyMoneySnapshot,
+  ShopifyOrderCancelUserError,
   ShopifyRefundRestockType,
   ShopifyOrderFulfillmentState,
   ShopifyReturnCancellationState,
@@ -117,6 +121,31 @@ type OrderLineItemImagesQueryResponse = {
         };
       }>;
     };
+  } | null;
+};
+
+type OrderCancelMutationResponse = {
+  orderCancel?: {
+    job?: {
+      id?: string | null;
+      done?: boolean | null;
+    } | null;
+    orderCancelUserErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+      code?: string | null;
+    }> | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }> | null;
+  } | null;
+};
+
+type JobStatusQueryResponse = {
+  job?: {
+    id?: string | null;
+    done?: boolean | null;
   } | null;
 };
 
@@ -3212,6 +3241,138 @@ export function createShopifyAdminService(env: AppEnv) {
     }));
   }
 
+  function normalizeOrderCancelUserErrors(
+    errors: Array<{ field?: string[] | null; message?: string | null; code?: string | null }> | undefined | null,
+  ): ShopifyOrderCancelUserError[] {
+    return (errors ?? []).map((error) => ({
+      field: Array.isArray(error.field) ? error.field.filter((field): field is string => typeof field === 'string') : [],
+      message: error.message ?? 'Unknown Shopify order cancellation error.',
+      code: typeof error.code === 'string' && error.code.trim() ? error.code.trim() : null,
+    }));
+  }
+
+  async function fetchJobStatus(jobId: string): Promise<ShopifyJobStatusResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify job status fetch is not configured.');
+    }
+    const normalizedJobId = toShopifyGid('Job', jobId);
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query ShopifyJobStatus($id: ID!) {
+              job(id: $id) {
+                id
+                done
+              }
+            }
+          `,
+          variables: { id: normalizedJobId },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify job status fetch failed with status ${response.status}.`);
+    }
+    const json = await parseCanonicalShopifyResponse<JobStatusQueryResponse>(response);
+    if (json.errors?.length) {
+      throw new Error(`Shopify job status fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+    const job = json.data?.job;
+    if (!job?.id || typeof job.done !== 'boolean') {
+      throw new Error('Shopify job status response was incomplete.');
+    }
+    return { jobId: job.id, done: job.done, source: 'shopify_admin' };
+  }
+
+  async function cancelOrder(input: CancelShopifyOrderInput): Promise<CancelShopifyOrderResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify order cancel is not configured.');
+    }
+
+    const orderGid = toShopifyOrderGid(input.orderId);
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation OrderCancel(
+              $orderId: ID!
+              $notifyCustomer: Boolean
+              $refundMethod: OrderCancelRefundMethodInput!
+              $restock: Boolean!
+              $reason: OrderCancelReason!
+              $staffNote: String
+            ) {
+              orderCancel(
+                orderId: $orderId
+                notifyCustomer: $notifyCustomer
+                refundMethod: $refundMethod
+                restock: $restock
+                reason: $reason
+                staffNote: $staffNote
+              ) {
+                job {
+                  id
+                  done
+                }
+                orderCancelUserErrors {
+                  field
+                  message
+                  code
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
+          variables: {
+            orderId: orderGid,
+            notifyCustomer: input.notifyCustomer,
+            refundMethod: {
+              originalPaymentMethodsRefund: false,
+            },
+            restock: false,
+            reason: 'CUSTOMER',
+            staffNote: input.staffNote?.trim() || null,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify order cancel failed with status ${response.status}.`);
+    }
+
+    const json = await parseCanonicalShopifyResponse<OrderCancelMutationResponse>(response);
+    if (json.errors?.length) {
+      throw new Error(`Shopify order cancel returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+    const payload = json.data?.orderCancel;
+    return {
+      orderId: orderGid,
+      jobId: payload?.job?.id ?? null,
+      jobDone: typeof payload?.job?.done === 'boolean' ? payload.job.done : null,
+      orderCancelUserErrors: normalizeOrderCancelUserErrors(payload?.orderCancelUserErrors),
+      userErrors: normalizeUserErrors(payload?.userErrors ?? undefined),
+      rawResponse: payload ?? null,
+    };
+  }
+
   async function cancelReturn(returnGid: string): Promise<CancelShopifyReturnResult> {
     if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
       throw new Error('Shopify return cancel is not configured.');
@@ -4520,6 +4681,8 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchCanonicalRefundsForOrder,
     fetchCanonicalReturnsForOrder,
     previewSuggestedRefund,
+    fetchJobStatus,
+    cancelOrder,
     fetchReturnDetails,
     fetchReturnCancellationState,
     cancelReturn,

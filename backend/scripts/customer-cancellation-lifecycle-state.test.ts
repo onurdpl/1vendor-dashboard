@@ -94,6 +94,46 @@ assert.doesNotMatch(
   'refund webhook ingestion must not transition customer cancellations directly to APPROVED',
 );
 
+const shopifyAdminService = read('src/modules/shopify/shopify-admin.service.ts');
+assert.match(
+  shopifyAdminService,
+  /orderCancel\(\s*orderId: \$orderId\s*notifyCustomer: \$notifyCustomer\s*refundMethod: \$refundMethod\s*restock: \$restock\s*reason: \$reason/s,
+  'Shopify orderCancel uses the supported refundMethod/restock mutation shape',
+);
+assert.match(
+  shopifyAdminService,
+  /refundMethod:\s*\{\s*originalPaymentMethodsRefund: false,\s*\}/,
+  'orderCancel does not create another original-payment refund',
+);
+assert.match(shopifyAdminService, /restock: false,/, 'orderCancel uses restock=false');
+assert.doesNotMatch(
+  shopifyAdminService,
+  /orderCancel[\s\S]*\brefund:\s*\{/,
+  'orderCancel must not use the deprecated refund argument or invented refund shape',
+);
+
+const orderCancelService = read('src/modules/orders/customer-cancellation-order-cancel.service.ts');
+assert.match(
+  orderCancelService,
+  /item\.status !== CustomerCancellationStatus\.REFUNDED_AWAITING_ORDER_CANCEL/,
+  'orderCancel is only started from the post-refund/pre-cancel state',
+);
+assert.match(
+  orderCancelService,
+  /if \(!after\.cancelledAt\)/,
+  'final APPROVED requires canonical Shopify cancellation evidence',
+);
+assert.match(
+  orderCancelService,
+  /readPersistedOrderCancelJobId/,
+  'accepted orderCancel Job ID is persisted for idempotent recovery',
+);
+assert.match(
+  autoRefundService,
+  /processCustomerCancellationOrderCancel/,
+  'auto-refund processor continues from canonical refund verification into orderCancel',
+);
+
 const schema = read('prisma/schema.prisma');
 assert.match(schema, /REFUNDED_AWAITING_ORDER_CANCEL/, 'Prisma schema persists the new state');
 
