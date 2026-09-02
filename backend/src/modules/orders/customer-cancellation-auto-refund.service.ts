@@ -376,7 +376,9 @@ export async function reconcileCustomerCancellationItemFromCanonicalRefunds(inpu
   shopifyAdminService: ShopifyService;
 }) {
   const item = await loadItem(input.itemId);
-  if (!item || item.status !== CustomerCancellationStatus.APPROVED_FOR_REFUND) return false;
+  if (!item) return false;
+  if (item.status === CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL) return true;
+  if (item.status !== CustomerCancellationStatus.APPROVED_FOR_REFUND) return false;
   const [refunds, order] = await Promise.all([
     input.shopifyAdminService.fetchCanonicalRefundsForOrder(item.request.order.sourceShopifyOrderId),
     input.shopifyAdminService.fetchCustomerCancellationOrderSnapshot(item.request.order.sourceShopifyOrderId),
@@ -407,12 +409,21 @@ export async function reconcileCustomerCancellationItemFromCanonicalRefunds(inpu
     await acquireShopifyOrderTransactionLock(tx, item.request.order.sourceShopifyOrderId);
     const current = await tx.customerCancellationRequestItem.findUnique({ where: { id: item.id }, include: { request: { include: { items: { select: { id: true, status: true } } } } } });
     if (!current || current.status !== CustomerCancellationStatus.APPROVED_FOR_REFUND) return;
-    await tx.customerCancellationRequestItem.update({ where: { id: item.id }, data: { status: CustomerCancellationStatus.APPROVED, resolvedQuantity: current.requestedQuantity } });
-    const statuses = current.request.items.map((candidate) => candidate.id === item.id ? CustomerCancellationStatus.APPROVED : candidate.status);
+    await tx.customerCancellationRequestItem.update({
+      where: { id: item.id },
+      data: {
+        status: CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
+        resolvedQuantity: current.requestedQuantity,
+      },
+    });
+    const statuses = current.request.items.map((candidate) =>
+      candidate.id === item.id ? CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL : candidate.status,
+    );
     const parentStatus = aggregate(statuses);
     const allTerminal = statuses.every((status) =>
       status !== CustomerCancellationStatus.PENDING &&
       status !== CustomerCancellationStatus.APPROVED_FOR_REFUND &&
+      status !== CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL &&
       status !== CustomerCancellationStatus.PARTIALLY_RESOLVED,
     );
     await tx.customerCancellationRequest.update({ where: { id: current.requestId }, data: { status: parentStatus, resolvedAt: allTerminal ? new Date() : null } });

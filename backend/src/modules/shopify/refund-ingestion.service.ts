@@ -190,15 +190,19 @@ async function reconcileCustomerCancellationItemsFromVerifiedRefund(
     if (refundedQuantity !== item.requestedQuantity) continue;
     await tx.customerCancellationRequestItem.update({
       where: { id: item.id },
-      data: { status: CustomerCancellationStatus.APPROVED, resolvedQuantity: item.requestedQuantity },
+      data: {
+        status: CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
+        resolvedQuantity: item.requestedQuantity,
+      },
     });
     const statuses = item.request.items.map((candidate) =>
-      candidate.id === item.id ? CustomerCancellationStatus.APPROVED : candidate.status,
+      candidate.id === item.id ? CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL : candidate.status,
     );
     const parentStatus = new Set(statuses).size === 1 ? statuses[0]! : CustomerCancellationStatus.PARTIALLY_RESOLVED;
     const allTerminal = statuses.every((status) =>
       status !== CustomerCancellationStatus.PENDING &&
       status !== CustomerCancellationStatus.APPROVED_FOR_REFUND &&
+      status !== CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL &&
       status !== CustomerCancellationStatus.PARTIALLY_RESOLVED,
     );
     await tx.customerCancellationRequest.update({

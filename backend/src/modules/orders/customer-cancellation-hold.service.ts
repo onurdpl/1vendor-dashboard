@@ -5,12 +5,14 @@ export const ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES = [
   CustomerCancellationStatus.PENDING,
   CustomerCancellationStatus.PARTIALLY_RESOLVED,
   CustomerCancellationStatus.APPROVED_FOR_REFUND,
+  CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
 ] as const;
 
 export const CUSTOMER_CANCELLATION_PENDING_ITEM_STATUS = CustomerCancellationStatus.PENDING;
 export const ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES = [
   CustomerCancellationStatus.PENDING,
   CustomerCancellationStatus.APPROVED_FOR_REFUND,
+  CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
 ] as const;
 export const CUSTOMER_CANCELLATION_PENDING_CODE = 'CUSTOMER_CANCELLATION_PENDING';
 export const CUSTOMER_CANCELLATION_PENDING_MESSAGE =

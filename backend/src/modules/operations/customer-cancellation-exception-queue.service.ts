@@ -11,6 +11,7 @@ import type { OperationsQueueDashboardDto, OperationsQueueItemDto } from './oper
 const CANDIDATE_STATUSES = [
   CustomerCancellationStatus.PENDING,
   CustomerCancellationStatus.APPROVED_FOR_REFUND,
+  CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
   CustomerCancellationStatus.TOO_LATE,
   CustomerCancellationStatus.CONFLICTED,
 ] as const;
