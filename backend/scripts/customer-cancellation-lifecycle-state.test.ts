@@ -76,6 +76,36 @@ assert.match(
   /item\.status === CustomerCancellationStatus\.REFUNDED_AWAITING_ORDER_CANCEL\) return true;/,
   'processor skips already-refunded awaiting-cancel items instead of creating another refund',
 );
+assert.match(
+  autoRefundService,
+  /shippingMaximumPreview = await input\.shopifyAdminService\.previewSuggestedRefund\(\{\s*shopifyOrderId: sourceOrderId,\s*refundLineItems: \[\],\s*refundShipping: false,/s,
+  'customer cancellation reads Shopify shipping.maximumRefundableSet before refund submission',
+);
+assert.match(
+  autoRefundService,
+  /shippingAmount: isPositiveMoneyAmount\(shippingRefundAmount\) \? shippingRefundAmount : null/,
+  'customer cancellation includes shipping in trusted combined preview only when Shopify reports a positive refundable amount',
+);
+assert.match(
+  autoRefundService,
+  /intendedShippingRefundAmount: context\.shippingRefundAmount/,
+  'intended customer-cancellation shipping refund amount is persisted',
+);
+assert.match(
+  autoRefundService,
+  /refundShipping: isPositiveMoneyAmount\(context\.shippingRefundAmount\)/,
+  'attempt marks shipping refund only when canonical refundable shipping is positive',
+);
+assert.match(
+  autoRefundService,
+  /shipping: shippingRefundAmount && isPositiveMoneyAmount\(shippingRefundAmount\)\s*\?\s*\{ amount: shippingRefundAmount \}\s*:\s*null/,
+  'refundCreate shipping input is included only for positive canonical shipping',
+);
+assert.match(
+  autoRefundService,
+  /refundedShippingAmount !== intendedShippingRefundAmount/,
+  'canonical reconciliation requires intended shipping refund evidence before orderCancel',
+);
 assert.doesNotMatch(
   autoRefundService,
   /data: \{ status: CustomerCancellationStatus\.APPROVED, resolvedQuantity: current\.requestedQuantity \}/,
@@ -85,8 +115,8 @@ assert.doesNotMatch(
 const refundIngestionService = read('src/modules/shopify/refund-ingestion.service.ts');
 assert.match(
   refundIngestionService,
-  /status: CustomerCancellationStatus\.REFUNDED_AWAITING_ORDER_CANCEL/,
-  'refund webhook ingestion transitions customer cancellations to the new state',
+  /hasPositiveIntendedCustomerCancellationShippingRefund/,
+  'refund webhook ingestion does not complete shipping-scoped customer cancellations without canonical processor verification',
 );
 assert.doesNotMatch(
   refundIngestionService,

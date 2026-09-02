@@ -49,6 +49,9 @@ export type CustomerCancellationAutoRefundCleanContext = {
   preRefundCurrentQuantity: number;
   preRefundRefundableQuantity: number;
   locationId: string;
+  productRefundAmount: string | null;
+  shippingRefundAmount: string | null;
+  shippingRefundCurrencyCode: string | null;
   preview: Awaited<ReturnType<ShopifyService['previewSuggestedRefund']>>;
   fulfillmentOrders: ShopifyFulfillmentOrderCancellationClassificationResponse;
 };
@@ -204,6 +207,16 @@ function exactRefundedQuantity(refund: CanonicalShopifyRefundSnapshot, lineItemI
     .reduce((sum, line) => sum + line.quantity, 0);
 }
 
+function normalizeMoneyAmount(value: unknown) {
+  const parsed = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : null;
+}
+
+function isPositiveMoneyAmount(value: unknown) {
+  const parsed = Number(value ?? '');
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
 export async function classifyCustomerCancellationAutoRefundEligibility(input: {
   itemId: string;
   shopifyAdminService: ShopifyService;
@@ -248,15 +261,53 @@ export async function classifyCustomerCancellationAutoRefundEligibility(input: {
       return { classification: 'TOO_LATE', reason: 'FulfillmentOrder is not clean OPEN/UNSUBMITTED with sufficient remaining quantity.', context: null };
     }
     if (!owner.assignedLocationId?.trim()) return { classification: 'OTHER_UNSAFE', reason: 'Required restock location is unavailable.', context: null };
-    const preview = await input.shopifyAdminService.previewSuggestedRefund({
+    const productPreview = await input.shopifyAdminService.previewSuggestedRefund({
       shopifyOrderId: sourceOrderId,
       refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: 'CANCEL' }],
       refundShipping: false,
     });
+    const productValidation = validateSuggestedRefundForSubmission({ preview: productPreview, orderCurrency: item.request.order.currency });
+    const previewLine = productPreview.refundLineItemsPreview.find((line) => gidTail(line.lineItemId) === gidTail(sourceLineItemId));
+    if (productValidation.blockers.length || !previewLine || previewLine.quantity !== item.requestedQuantity) {
+      return { classification: 'FINANCE_CONFLICT', reason: productValidation.blockers.join(' ') || 'Suggested refund quantity did not match.', context: null };
+    }
+
+    const shippingMaximumPreview = await input.shopifyAdminService.previewSuggestedRefund({
+      shopifyOrderId: sourceOrderId,
+      refundLineItems: [],
+      refundShipping: false,
+    });
+    if (shippingMaximumPreview.graphqlErrors.length) {
+      return { classification: 'FINANCE_CONFLICT', reason: shippingMaximumPreview.graphqlErrors.map((error) => `Shopify shipping refund maximum returned GraphQL error: ${error}`).join(' '), context: null };
+    }
+    const shippingMaximumRefundableAmount = normalizeMoneyAmount(shippingMaximumPreview.suggestedRefund?.shippingMaximumRefundableAmount);
+    const shippingRefundCurrencyCode = shippingMaximumPreview.suggestedRefund?.shippingCurrencyCode ?? null;
+    if (shippingMaximumRefundableAmount === null) {
+      return { classification: 'FINANCE_CONFLICT', reason: 'Shopify current refundable checkout shipping amount is unavailable.', context: null };
+    }
+    if (
+      isPositiveMoneyAmount(shippingMaximumRefundableAmount) &&
+      item.request.order.currency?.trim() &&
+      shippingRefundCurrencyCode?.trim() &&
+      item.request.order.currency.trim().toUpperCase() !== shippingRefundCurrencyCode.trim().toUpperCase()
+    ) {
+      return { classification: 'FINANCE_CONFLICT', reason: 'Shopify checkout shipping currency conflicts with the order currency.', context: null };
+    }
+
+    const shippingRefundAmount = shippingMaximumRefundableAmount;
+    const preview = await input.shopifyAdminService.previewSuggestedRefund({
+      shopifyOrderId: sourceOrderId,
+      refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: 'CANCEL' }],
+      refundShipping: false,
+      shippingAmount: isPositiveMoneyAmount(shippingRefundAmount) ? shippingRefundAmount : null,
+    });
     const validation = validateSuggestedRefundForSubmission({ preview, orderCurrency: item.request.order.currency });
-    const previewLine = preview.refundLineItemsPreview.find((line) => gidTail(line.lineItemId) === gidTail(sourceLineItemId));
-    if (validation.blockers.length || !previewLine || previewLine.quantity !== item.requestedQuantity) {
+    const combinedPreviewLine = preview.refundLineItemsPreview.find((line) => gidTail(line.lineItemId) === gidTail(sourceLineItemId));
+    if (validation.blockers.length) {
       return { classification: 'FINANCE_CONFLICT', reason: validation.blockers.join(' ') || 'Suggested refund quantity did not match.', context: null };
+    }
+    if (!combinedPreviewLine || combinedPreviewLine.quantity !== item.requestedQuantity) {
+      return { classification: 'FINANCE_CONFLICT', reason: 'Combined suggested refund quantity did not match.', context: null };
     }
     return {
       classification: 'CLEAN',
@@ -270,6 +321,9 @@ export async function classifyCustomerCancellationAutoRefundEligibility(input: {
         preRefundCurrentQuantity: canonicalLine.currentQuantity,
         preRefundRefundableQuantity: canonicalLine.refundableQuantity,
         locationId: owner.assignedLocationId,
+        productRefundAmount: productPreview.suggestedRefund?.totalRefundAmount ?? null,
+        shippingRefundAmount,
+        shippingRefundCurrencyCode,
         preview,
         fulfillmentOrders,
       },
@@ -352,7 +406,7 @@ async function approveAndCreateAttempt(itemId: string, context: CustomerCancella
         vendorAllocationId: current.vendorAllocationId,
         shopifyOrderId: context.sourceShopifyOrderId,
         status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
-        restockType: 'CANCEL', refundShipping: false, notifyCustomer: false,
+        restockType: 'CANCEL', refundShipping: isPositiveMoneyAmount(context.shippingRefundAmount), notifyCustomer: false,
         note: `Customer cancellation item ${itemId}`,
         refundLineItemsJson: json([{
           lineItemId: context.sourceLineItemId,
@@ -361,6 +415,8 @@ async function approveAndCreateAttempt(itemId: string, context: CustomerCancella
           locationId: context.locationId,
           preRefundCurrentQuantity: context.preRefundCurrentQuantity,
           preRefundRefundableQuantity: context.preRefundRefundableQuantity,
+          intendedShippingRefundAmount: context.shippingRefundAmount,
+          intendedShippingRefundCurrencyCode: context.shippingRefundCurrencyCode,
         }]),
         suggestedTransactionsJson: json(context.preview.suggestedRefund?.suggestedTransactions ?? []),
         fulfillmentOrderCancellationJson: json(context.fulfillmentOrders),
@@ -397,6 +453,10 @@ export async function reconcileCustomerCancellationItemFromCanonicalRefunds(inpu
     ? Reflect.get(submittedLine, 'preRefundCurrentQuantity') : null;
   const preRefundable = submittedLine && typeof submittedLine === 'object' && !Array.isArray(submittedLine)
     ? Reflect.get(submittedLine, 'preRefundRefundableQuantity') : null;
+  const intendedShippingRefundAmount = submittedLine && typeof submittedLine === 'object' && !Array.isArray(submittedLine)
+    ? normalizeMoneyAmount(Reflect.get(submittedLine, 'intendedShippingRefundAmount')) : null;
+  const intendedShippingRefundCurrencyCode = submittedLine && typeof submittedLine === 'object' && !Array.isArray(submittedLine)
+    ? Reflect.get(submittedLine, 'intendedShippingRefundCurrencyCode') : null;
   const canonicalLine = order.lineItems.find((line) => gidTail(line.lineItemGid) === gidTail(item.shopifyOrderLineItem.sourceLineItemId));
   if (
     typeof preCurrent !== 'number' || typeof preRefundable !== 'number' ||
@@ -405,6 +465,18 @@ export async function reconcileCustomerCancellationItemFromCanonicalRefunds(inpu
     preCurrent - canonicalLine.currentQuantity < item.requestedQuantity ||
     preRefundable - canonicalLine.refundableQuantity < item.requestedQuantity
   ) return false;
+  if (intendedShippingRefundAmount !== null) {
+    const refundedShippingAmount = normalizeMoneyAmount(refunds.orderTotalRefundedShippingAmount) ?? '0.00';
+    if (refundedShippingAmount !== intendedShippingRefundAmount) return false;
+    if (
+      isPositiveMoneyAmount(intendedShippingRefundAmount) &&
+      (typeof intendedShippingRefundCurrencyCode !== 'string' ||
+      !intendedShippingRefundCurrencyCode.trim() ||
+      !refunds.orderTotalRefundedShippingCurrencyCode?.trim() ||
+      refunds.orderTotalRefundedShippingCurrencyCode.trim().toUpperCase() !== intendedShippingRefundCurrencyCode.trim().toUpperCase()
+      )
+    ) return false;
+  }
   await prisma.$transaction(async (tx) => {
     await acquireShopifyOrderTransactionLock(tx, item.request.order.sourceShopifyOrderId);
     const current = await tx.customerCancellationRequestItem.findUnique({ where: { id: item.id }, include: { request: { include: { items: { select: { id: true, status: true } } } } } });
@@ -439,6 +511,7 @@ export function buildCustomerCancellationRefundSubmission(input: {
   attemptId: string;
   context: CustomerCancellationAutoRefundCleanContext;
 }) {
+  const shippingRefundAmount = input.context.shippingRefundAmount;
   const validation = validateSuggestedRefundForSubmission({
     preview: input.context.preview,
     orderCurrency: input.context.orderCurrency,
@@ -458,7 +531,9 @@ export function buildCustomerCancellationRefundSubmission(input: {
         amount: transaction.amount,
         gateway: transaction.gateway,
       })),
-      shipping: null,
+      shipping: shippingRefundAmount && isPositiveMoneyAmount(shippingRefundAmount)
+        ? { amount: shippingRefundAmount }
+        : null,
       note: `Customer cancellation item ${input.itemId}`,
       notify: false,
       idempotencyKey: buildShopifyRefundIdempotencyKey({

@@ -85,6 +85,20 @@ function hasBlockingPostRefundFulfillmentCheck(value: unknown) {
   return Boolean(status && status !== 'passed');
 }
 
+function normalizeMoneyAmount(value: unknown) {
+  const parsed = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : null;
+}
+
+function hasPositiveIntendedCustomerCancellationShippingRefund(value: unknown) {
+  const firstLine = Array.isArray(value) ? value[0] : null;
+  if (!firstLine || typeof firstLine !== 'object' || Array.isArray(firstLine)) return false;
+  const intendedShipping = normalizeMoneyAmount(
+    Reflect.get(firstLine, 'intendedShippingRefundAmount'),
+  );
+  return intendedShipping !== null && Number(intendedShipping) > 0;
+}
+
 function parseRefundPayload(payload: ShopifyRefundsCreateWebhookPayload): ParsedShopifyRefundPayload {
   const refundLineItems = Array.isArray(payload.refund_line_items) ? payload.refund_line_items : [];
 
@@ -182,10 +196,14 @@ async function reconcileCustomerCancellationItemsFromVerifiedRefund(
     },
     include: {
       shopifyOrderLineItem: { select: { sourceLineItemId: true } },
+      outboundShopifyRefundAttempt: { select: { refundLineItemsJson: true } },
       request: { include: { items: { select: { id: true, status: true } } } },
     },
   });
   for (const item of candidates) {
+    if (hasPositiveIntendedCustomerCancellationShippingRefund(item.outboundShopifyRefundAttempt?.refundLineItemsJson)) {
+      continue;
+    }
     const refundedQuantity = quantitiesByLineItemId.get(item.shopifyOrderLineItem.sourceLineItemId) ?? 0;
     if (refundedQuantity !== item.requestedQuantity) continue;
     await tx.customerCancellationRequestItem.update({
