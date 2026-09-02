@@ -28,6 +28,7 @@
     "backend:db:seed": "npm --prefix backend run db:seed",
     "backend:customer-cancellation:preview": "npm --prefix backend run customer-cancellation:preview",
     "backend:customer-cancellation:preview:check": "npm --prefix backend run customer-cancellation:preview:check",
+    "backend:customer-cancellation:preview:probe": "npm --prefix backend run customer-cancellation:preview:probe",
     "shopify:readiness": "npm --prefix backend run shopify:readiness",
     "shopify:order-backfill": "npm --prefix backend run shopify:order-backfill",
     "shopify:order-webhooks:register": "npm --prefix backend run shopify:order-webhooks:register",

@@ -1,28 +1,23 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 import {
   BACKEND_DIR,
-  REPO_ROOT,
   buildCustomerCancellationPreviewChildEnv,
   loadCustomerCancellationPreviewEnv,
   printCustomerCancellationPreviewGuardFailure,
 } from './customer-cancellation-preview-env.mjs';
 
 function main() {
-  const checkOnly = process.argv.includes('--check');
   const { env, database } = loadCustomerCancellationPreviewEnv();
 
   console.log('Customer cancellation preview env passed local safety checks.');
   console.log(`Shop: ${env.SHOPIFY_SHOP_DOMAIN}`);
   console.log(`Database: ${database.host}/${database.database}`);
-  console.log('Intake: enabled');
-  console.log('Auto-refund: disabled');
-  console.log('Shipping execution: disabled');
 
-  if (checkOnly) return;
-
-  const child = spawn('npm', ['--prefix', BACKEND_DIR, 'run', 'dev'], {
-    cwd: REPO_ROOT,
+  const tsxBin = resolve(BACKEND_DIR, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
+  const child = spawn(tsxBin, ['scripts/customer-cancellation-preview-db-probe.ts'], {
+    cwd: BACKEND_DIR,
     env: buildCustomerCancellationPreviewChildEnv(env),
     stdio: 'inherit',
   });

@@ -18,6 +18,7 @@
     "db:seed": "prisma db seed",
     "customer-cancellation:preview": "node scripts/start-customer-cancellation-preview.mjs",
     "customer-cancellation:preview:check": "node scripts/start-customer-cancellation-preview.mjs --check",
+    "customer-cancellation:preview:probe": "node scripts/customer-cancellation-preview-probe.mjs",
     "smoke": "node scripts/smoke.mjs",
     "shopify:readiness": "node scripts/shopify-readiness.mjs",
     "shopify:order-backfill": "npm run build && node dist/modules/shopify/order-backfill.cli.js",
