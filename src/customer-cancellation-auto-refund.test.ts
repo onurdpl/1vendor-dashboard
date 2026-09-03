@@ -39,12 +39,12 @@ function cleanContext(quantity = 1): CustomerCancellationAutoRefundCleanContext 
     preview: {
       orderGid: 'gid://shopify/Order/9001',
       sourceShopifyOrderId: '9001',
-      refundLineItemsPreview: [{ lineItemId: 'line-a', quantity, restockType: 'CANCEL' }],
+      refundLineItemsPreview: [{ lineItemId: 'line-a', quantity, restockType: 'NO_RESTOCK' }],
       suggestedRefund: {
         totalRefundAmount: '25.00', currencyCode: 'TRY', subtotalAmount: '25.00', totalTaxAmount: '0.00',
         shippingAmount: null, shippingMaximumRefundableAmount: '10.00', shippingCurrencyCode: 'TRY', maximumRefundableAmount: '25.00',
         suggestedTransactions: [{ gateway: 'test', formattedGateway: 'Test', amount: '25.00', currencyCode: 'TRY', parentTransactionId: 'gid://shopify/OrderTransaction/1' }],
-        refundLineItems: [{ lineItemId: 'line-a', quantity, restockType: 'CANCEL', subtotalAmount: '25.00', totalTaxAmount: '0.00', currencyCode: 'TRY' }],
+        refundLineItems: [{ lineItemId: 'line-a', quantity, restockType: 'NO_RESTOCK', subtotalAmount: '25.00', totalTaxAmount: '0.00', currencyCode: 'TRY' }],
       },
       graphqlErrors: [],
       source: 'shopify_admin',
@@ -109,7 +109,7 @@ describe('customer cancellation auto-refund safety contract', () => {
     expect(result.classification).toBe('CLEAN');
     expect(service.previewSuggestedRefund).toHaveBeenCalledWith({
       shopifyOrderId: '9001',
-      refundLineItems: [{ sourceLineItemId: 'line-a', quantity: 1, restockType: 'CANCEL' }],
+      refundLineItems: [{ sourceLineItemId: 'line-a', quantity: 1, restockType: 'NO_RESTOCK' }],
       refundShipping: false,
     });
   });
@@ -162,11 +162,32 @@ describe('customer cancellation auto-refund safety contract', () => {
     const result = buildCustomerCancellationRefundSubmission({ itemId: 'cancel-item-1', attemptId: 'attempt-1', context: cleanContext(1) });
     expect(result.blockers).toEqual([]);
     expect(result.refund.refundLineItems).toEqual([{
-      lineItemId: 'line-a', quantity: 1, restockType: 'CANCEL', locationId: 'gid://shopify/Location/10',
+      lineItemId: 'line-a', quantity: 1, restockType: 'NO_RESTOCK', locationId: 'gid://shopify/Location/10',
     }]);
     expect(result.refund.shipping).toBeNull();
     expect(result.refund.notify).toBe(false);
     expect(result.refund.idempotencyKey).toBe('shopify-refund:allocation-a:attempt-1');
+  });
+
+  it('builds customer-cancellation refunds without intentionally requesting Shopify inventory restock', () => {
+    const context = cleanContext(2);
+    context.shippingRefundAmount = '10.00';
+    context.preview.suggestedRefund = {
+      ...context.preview.suggestedRefund!,
+      shippingAmount: '10.00',
+      totalRefundAmount: '35.00',
+      suggestedTransactions: [{ gateway: 'test', formattedGateway: 'Test', amount: '35.00', currencyCode: 'TRY', parentTransactionId: 'gid://shopify/OrderTransaction/1' }],
+    };
+
+    const result = buildCustomerCancellationRefundSubmission({ itemId: 'cancel-item-1', attemptId: 'attempt-1', context });
+
+    expect(result.blockers).toEqual([]);
+    expect(result.refund.refundLineItems).toEqual([{
+      lineItemId: 'line-a', quantity: 2, restockType: 'NO_RESTOCK', locationId: 'gid://shopify/Location/10',
+    }]);
+    expect(result.refund.refundLineItems).not.toContainEqual(expect.objectContaining({ restockType: 'CANCEL' }));
+    expect(result.refund.shipping).toEqual({ amount: '10.00' });
+    expect(result.refund.transactions).toEqual([{ parentTransactionId: 'gid://shopify/OrderTransaction/1', amount: '35.00', gateway: 'test' }]);
   });
 
   it('does not register an executor when the default-off feature flag is disabled', () => {

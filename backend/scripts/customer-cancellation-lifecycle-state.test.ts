@@ -83,6 +83,16 @@ assert.match(
 );
 assert.match(
   autoRefundService,
+  /CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE = 'NO_RESTOCK'/,
+  'customer cancellation refund line items must not intentionally request Shopify inventory restock',
+);
+assert.doesNotMatch(
+  autoRefundService,
+  /restockType:\s*'CANCEL'/,
+  'customer cancellation refund line items must never use restockType=CANCEL',
+);
+assert.match(
+  autoRefundService,
   /shippingAmount: isPositiveMoneyAmount\(shippingRefundAmount\) \? shippingRefundAmount : null/,
   'customer cancellation includes shipping in trusted combined preview only when Shopify reports a positive refundable amount',
 );

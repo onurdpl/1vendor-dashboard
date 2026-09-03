@@ -35,6 +35,8 @@ export const CUSTOMER_CANCELLATION_AUTO_REFUND_CLASSIFICATIONS = {
   OTHER_UNSAFE: 'OTHER_UNSAFE',
 } as const;
 
+const CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE = 'NO_RESTOCK' as const;
+
 export type CustomerCancellationAutoRefundClassification =
   (typeof CUSTOMER_CANCELLATION_AUTO_REFUND_CLASSIFICATIONS)[keyof typeof CUSTOMER_CANCELLATION_AUTO_REFUND_CLASSIFICATIONS];
 
@@ -263,7 +265,7 @@ export async function classifyCustomerCancellationAutoRefundEligibility(input: {
     if (!owner.assignedLocationId?.trim()) return { classification: 'OTHER_UNSAFE', reason: 'Required restock location is unavailable.', context: null };
     const productPreview = await input.shopifyAdminService.previewSuggestedRefund({
       shopifyOrderId: sourceOrderId,
-      refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: 'CANCEL' }],
+      refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE }],
       refundShipping: false,
     });
     const productValidation = validateSuggestedRefundForSubmission({ preview: productPreview, orderCurrency: item.request.order.currency });
@@ -297,7 +299,7 @@ export async function classifyCustomerCancellationAutoRefundEligibility(input: {
     const shippingRefundAmount = shippingMaximumRefundableAmount;
     const preview = await input.shopifyAdminService.previewSuggestedRefund({
       shopifyOrderId: sourceOrderId,
-      refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: 'CANCEL' }],
+      refundLineItems: [{ sourceLineItemId, quantity: item.requestedQuantity, restockType: CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE }],
       refundShipping: false,
       shippingAmount: isPositiveMoneyAmount(shippingRefundAmount) ? shippingRefundAmount : null,
     });
@@ -406,12 +408,12 @@ async function approveAndCreateAttempt(itemId: string, context: CustomerCancella
         vendorAllocationId: current.vendorAllocationId,
         shopifyOrderId: context.sourceShopifyOrderId,
         status: OUTBOUND_SHOPIFY_REFUND_ATTEMPT_STATUSES.READY_TO_SUBMIT,
-        restockType: 'CANCEL', refundShipping: isPositiveMoneyAmount(context.shippingRefundAmount), notifyCustomer: false,
+        restockType: CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE, refundShipping: isPositiveMoneyAmount(context.shippingRefundAmount), notifyCustomer: false,
         note: `Customer cancellation item ${itemId}`,
         refundLineItemsJson: json([{
           lineItemId: context.sourceLineItemId,
           quantity: context.requestedQuantity,
-          restockType: 'CANCEL',
+          restockType: CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE,
           locationId: context.locationId,
           preRefundCurrentQuantity: context.preRefundCurrentQuantity,
           preRefundRefundableQuantity: context.preRefundRefundableQuantity,
@@ -523,7 +525,7 @@ export function buildCustomerCancellationRefundSubmission(input: {
       refundLineItems: [{
         lineItemId: input.context.sourceLineItemId,
         quantity: input.context.requestedQuantity,
-        restockType: 'CANCEL' as const,
+        restockType: CUSTOMER_CANCELLATION_REFUND_RESTOCK_TYPE,
         locationId: input.context.locationId,
       }],
       transactions: validation.transactions.map((transaction) => ({

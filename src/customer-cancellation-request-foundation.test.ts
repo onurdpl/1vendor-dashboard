@@ -66,6 +66,7 @@ const CustomerCancellationStatus = {
   PENDING: 'PENDING',
   PARTIALLY_RESOLVED: 'PARTIALLY_RESOLVED',
   APPROVED_FOR_REFUND: 'APPROVED_FOR_REFUND',
+  REFUNDED_AWAITING_ORDER_CANCEL: 'REFUNDED_AWAITING_ORDER_CANCEL',
   APPROVED: 'APPROVED',
   DECLINED: 'DECLINED',
 } as const;
@@ -435,6 +436,10 @@ describe('customer cancellation request persistence and hold foundation', () => 
       itemStatus: CustomerCancellationStatus.APPROVED_FOR_REFUND,
     })).toBe(true);
     expect(isPendingCustomerCancellationHoldState({
+      requestStatus: CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
+      itemStatus: CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
+    })).toBe(true);
+    expect(isPendingCustomerCancellationHoldState({
       requestStatus: CustomerCancellationStatus.APPROVED,
       itemStatus: CustomerCancellationStatus.PENDING,
     })).toBe(false);
@@ -464,7 +469,11 @@ describe('customer cancellation request persistence and hold foundation', () => 
       where: {
         vendorAllocationId: 'allocation-1',
         status: {
-          in: [CustomerCancellationStatus.PENDING, CustomerCancellationStatus.APPROVED_FOR_REFUND],
+          in: [
+            CustomerCancellationStatus.PENDING,
+            CustomerCancellationStatus.APPROVED_FOR_REFUND,
+            CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
+          ],
         },
         request: {
           status: {
@@ -472,6 +481,7 @@ describe('customer cancellation request persistence and hold foundation', () => 
               CustomerCancellationStatus.PENDING,
               CustomerCancellationStatus.PARTIALLY_RESOLVED,
               CustomerCancellationStatus.APPROVED_FOR_REFUND,
+              CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL,
             ],
           },
         },

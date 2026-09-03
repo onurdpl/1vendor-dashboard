@@ -867,16 +867,13 @@ describe('Shopify refund return linking', () => {
     expect(result).toMatchObject({ ok: true, refundAllocationCount: 1 });
     expect(txMock.customerCancellationRequestItem.update).toHaveBeenCalledWith({
       where: { id: 'cancel-item-1' },
-      data: { status: 'APPROVED', resolvedQuantity: 1 },
+      data: { status: 'REFUNDED_AWAITING_ORDER_CANCEL', resolvedQuantity: 1 },
     });
     expect(txMock.outboundShopifyRefundAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { customerCancellationRequestItemId: 'cancel-item-1' },
       data: expect.objectContaining({ status: 'RESOLVED', shopifyRefundId: '1074533826897' }),
     }));
-    expect(txMock.operationalJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { customerCancellationRequestItemId: 'cancel-item-1' },
-      data: expect.objectContaining({ status: 'COMPLETED' }),
-    }));
+    expect(txMock.operationalJob.updateMany).not.toHaveBeenCalled();
   });
 
   it('attaches refund info to an existing Shopify return request row for the same vendor/order/line item', async () => {
