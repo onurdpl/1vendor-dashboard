@@ -523,6 +523,16 @@ POST /fulfillments.json
 
 ## Customer Cancellation Request Foundation
 
+### Production Customer Account Full-Page Navigation Blocker
+
+- `customer-account.order.action.menu-item.render` runs in production: cancellation eligibility resolves and the eligible action becomes visible.
+- The active app release includes the `customer-account.order.page.render` destination extension.
+- Shopify documents the order-specific cross-extension route shape as `extension:<destination-extension-handle>/customer-account.order.page.render/<orderId>[/<path>]`.
+- The retrieved Shopify Customer Account UI Extensions `2026-07` documentation does not define the exact runtime representation of `<orderId>`; numeric ID, raw GID, and percent-encoded GID remain unverified.
+- No further navigation implementation change is allowed until Shopify provides authoritative confirmation of the required `<orderId>` representation.
+- Production `CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED` remains `false`.
+- Production customer cancellation rollout remains blocked by the unresolved Customer Account full-page navigation contract.
+
 - `CUSTOMER_CANCELLATION_INTAKE_ENABLED` defaults to `false` and controls only new authenticated custom cancellation intake. Disabled intake fails closed for eligibility and creation while the authenticated status read remains available for existing requests. It is independent from `CUSTOMER_CANCELLATION_AUTO_REFUND_ENABLED` and does not release holds or alter existing request processing.
 - Customer Cancellation Request is a separate operational authority from Vendor Reject. It does not use `VENDOR_BLOCKED`, `cancelRefundReviewStatus`, `reassignmentRequired`, or allocation cancellation metadata.
 - The local persistence foundation retains request-level and item-level state, requested quantities, customer/shop identity, admin review metadata, and database-enforced idempotency.
