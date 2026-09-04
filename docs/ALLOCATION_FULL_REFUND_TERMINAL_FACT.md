@@ -54,12 +54,7 @@ model AllocationFullRefundTerminalFact {
   shopifyApiVersion    String
   verifiedAt           DateTime         @default(now())
   evidenceJson         Json
-  vendorAllocation     VendorAllocation @relation(
-    fields: [vendorAllocationId],
-    references: [id],
-    onDelete: Restrict,
-    onUpdate: Cascade
-  )
+  vendorAllocation     VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([shopifyOrderGid])
 }

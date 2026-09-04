@@ -35,6 +35,17 @@ describe('backend deployment health endpoint', () => {
     vi.stubEnv('KARGONOMI_API_TOKEN', 'test-kargonomi-token');
   }
 
+  const requiredSchemaRows = [
+    { table_name: 'ShopifyOrder', column_name: 'customerPhone' },
+    { table_name: 'ReturnRecord', column_name: 'returnProvider' },
+    { table_name: 'ReturnRecord', column_name: 'returnProviderShipmentId' },
+    { table_name: 'ReturnRecord', column_name: 'returnLabel' },
+    { table_name: 'ReturnRecord', column_name: 'returnReferenceId' },
+    { table_name: 'ReturnRecord', column_name: 'navlungoReturnCreatedAt' },
+    { table_name: 'ReturnRecord', column_name: 'returnProviderSnapshot' },
+    { table_name: 'AllocationFullRefundTerminalFact', column_name: 'vendorAllocationId' },
+  ];
+
   it('returns safe runtime health metadata without exposing environment values', async () => {
     stubTestEnv();
     const app = createApp();
@@ -135,6 +146,66 @@ describe('backend deployment health endpoint', () => {
       expect(payload).not.toHaveProperty('schemaReady');
       expect(payload).not.toHaveProperty('missingColumns');
       expect(payload).not.toHaveProperty('financeAuditMetadata');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('degrades database health when the full-refund terminal fact schema is missing', async () => {
+    stubTestEnv();
+    vi.stubEnv('DATABASE_URL', 'postgresql://test:test@localhost:5432/vendor_dashboard_test');
+    queryRawMock
+      .mockResolvedValueOnce([{ '?column?': 1 }])
+      .mockResolvedValueOnce(requiredSchemaRows.slice(0, -1))
+      .mockResolvedValueOnce([{ count: 1 }]);
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        status: 'degraded',
+        schemaReady: false,
+        requiredColumnCount: 8,
+        missingColumns: [
+          {
+            tableName: 'AllocationFullRefundTerminalFact',
+            columnName: 'vendorAllocationId',
+            expectedMigration: '20260904120000_add_allocation_full_refund_terminal_fact',
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reports schema readiness when the full-refund terminal fact schema is present', async () => {
+    stubTestEnv();
+    vi.stubEnv('DATABASE_URL', 'postgresql://test:test@localhost:5432/vendor_dashboard_test');
+    queryRawMock
+      .mockResolvedValueOnce([{ '?column?': 1 }])
+      .mockResolvedValueOnce(requiredSchemaRows)
+      .mockResolvedValueOnce([{ count: 1 }]);
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        status: 'ok',
+        schemaReady: true,
+        requiredColumnCount: 8,
+        missingColumns: [],
+      });
     } finally {
       await app.close();
     }

@@ -141,6 +141,11 @@ const REQUIRED_SCHEMA_COLUMNS = [
     columnName: 'returnProviderSnapshot',
     migration: '20260522130000_add_return_provider_evidence',
   },
+  {
+    tableName: 'AllocationFullRefundTerminalFact',
+    columnName: 'vendorAllocationId',
+    migration: '20260904120000_add_allocation_full_refund_terminal_fact',
+  },
 ] as const;
 
 const processStartedAt = Date.now();

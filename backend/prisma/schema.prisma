@@ -692,11 +692,25 @@ model VendorAllocation {
   sourceAllocationSplitEvents            AllocationSplitEvent[]                  @relation("allocationSplitSourceAllocation")
   childAllocationSplitEvents             AllocationSplitEvent[]                  @relation("allocationSplitChildAllocation")
   customerCancellationRequestItems       CustomerCancellationRequestItem[]
+  fullRefundTerminalFact                 AllocationFullRefundTerminalFact?
 
   @@index([createdAt])
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
   @@index([cancelRefundReviewStatus])
+}
+
+model AllocationFullRefundTerminalFact {
+  id                   String           @id @default(cuid())
+  vendorAllocationId   String           @unique
+  shopifyOrderGid      String
+  verificationSource   String
+  shopifyApiVersion    String
+  verifiedAt           DateTime         @default(now())
+  evidenceJson         Json
+  vendorAllocation     VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([shopifyOrderGid])
 }
 
 model CustomerCancellationRequest {
