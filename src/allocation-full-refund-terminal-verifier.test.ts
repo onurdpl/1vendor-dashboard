@@ -209,7 +209,15 @@ function verifierInput(input: {
 describe('allocation full-refund terminal verifier', () => {
   it('qualifies one fully refunded line with zero OPEN remaining quantity', () => {
     const result = verifyAllocationFullRefundTerminal(verifierInput());
-    expect(result).toMatchObject({ state: 'QUALIFIES', reasonCode: 'allocation_full_refund_terminal_verified' });
+    expect(result).toMatchObject({
+      state: 'QUALIFIES',
+      reasonCode: 'allocation_full_refund_terminal_verified',
+      shopifyOrderGid: 'gid://shopify/Order/8151983227217',
+    });
+    if (result.state !== 'QUALIFIES') throw new Error('Expected allocation to qualify.');
+    expect(result.shopifyOrderGid).toBe(orderGid);
+    expect(result.shopifyOrderGid).not.toBe(localOrderId);
+    expect(result.shopifyOrderGid).not.toBe(shopifyOrderId);
     expect(result.evidence?.lines[0]).toMatchObject({
       vendorAllocationLineItemId: 'allocation-line-1',
       shopifyLineItemGid: 'gid://shopify/LineItem/line-1',
@@ -224,6 +232,7 @@ describe('allocation full-refund terminal verifier', () => {
       allocation: allocation([allocationLine('allocation-line-1', 'line-1', 2)]),
     }));
     expect(result).toMatchObject({ state: 'DOES_NOT_QUALIFY', reasonCode: 'refund_quantity_below_owned_quantity' });
+    expect('shopifyOrderGid' in result).toBe(false);
   });
 
   it('qualifies a fully refunded multi-line allocation', () => {
@@ -271,6 +280,23 @@ describe('allocation full-refund terminal verifier', () => {
     expect(verifyAllocationFullRefundTerminal(verifierInput({
       order: orderSnapshot({ lines: [orderLine('line-1'), orderLine('line-1')] }),
     })).state).toBe('INDETERMINATE');
+  });
+
+  it('does not expose a canonical GID when Shopify order identities mismatch', () => {
+    const input = verifierInput();
+    input.orderSnapshot = {
+      ...input.orderSnapshot,
+      orderGid: 'gid://shopify/Order/9999999999999',
+    };
+
+    const result = verifyAllocationFullRefundTerminal(input);
+
+    expect(result).toEqual({
+      state: 'INDETERMINATE',
+      reasonCode: 'canonical_order_identity_mismatch',
+      evidence: null,
+    });
+    expect('shopifyOrderGid' in result).toBe(false);
   });
 
   it.each([

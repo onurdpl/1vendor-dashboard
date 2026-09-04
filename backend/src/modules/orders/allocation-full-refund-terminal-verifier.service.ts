@@ -59,6 +59,7 @@ export type AllocationFullRefundTerminalVerifierResult =
   | {
       state: 'QUALIFIES';
       reasonCode: 'allocation_full_refund_terminal_verified';
+      shopifyOrderGid: string;
       evidence: AllocationFullRefundTerminalEvidence;
     }
   | {
@@ -435,6 +436,7 @@ export function verifyAllocationFullRefundTerminal(
   return {
     state: ALLOCATION_FULL_REFUND_TERMINAL_RESULTS.qualifies,
     reasonCode: 'allocation_full_refund_terminal_verified',
+    shopifyOrderGid: orderSnapshot.orderGid,
     evidence: {
       schemaVersion: 1,
       orderLineItemsComplete: true,
