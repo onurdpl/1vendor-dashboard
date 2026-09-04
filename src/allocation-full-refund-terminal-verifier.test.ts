@@ -14,7 +14,9 @@ import type {
   CanonicalShopifyRefundSnapshot,
 } from '../backend/src/modules/shopify/shopify-admin.types.js';
 
-const orderGid = 'gid://shopify/Order/100';
+const localOrderId = 'cm1234567890localorder';
+const shopifyOrderId = '8151983227217';
+const orderGid = `gid://shopify/Order/${shopifyOrderId}`;
 
 function allocationLine(id: string, sourceLineItemId: string, quantity = 1) {
   return {
@@ -31,7 +33,11 @@ function allocationLine(id: string, sourceLineItemId: string, quantity = 1) {
 function allocation(lines = [allocationLine('allocation-line-1', 'line-1')]): AllocationForFullRefundTerminalVerification {
   return {
     id: 'allocation-1',
-    sourceShopifyOrderId: '100',
+    sourceShopifyOrderId: localOrderId,
+    order: {
+      id: localOrderId,
+      sourceShopifyOrderId: shopifyOrderId,
+    },
     lineItems: lines,
   };
 }
@@ -62,7 +68,7 @@ function orderSnapshot(input: {
 } = {}): CanonicalShopifyOrderSnapshot {
   return {
     orderGid,
-    sourceShopifyOrderId: '100',
+    sourceShopifyOrderId: shopifyOrderId,
     sourceShopifyOrderNumber: '#100',
     shopifyCreatedAt: null,
     currency: 'TRY',
@@ -175,7 +181,7 @@ function verifierInput(input: {
     orderSnapshot: input.order ?? orderSnapshot(),
     refundCollection: {
       orderGid,
-      sourceShopifyOrderId: '100',
+      sourceShopifyOrderId: shopifyOrderId,
       displayFinancialStatus: 'REFUNDED',
       orderTotalReceivedAmount: total,
       orderTotalReceivedCurrencyCode: 'TRY',
@@ -424,8 +430,31 @@ describe('allocation full-refund terminal verifier', () => {
     };
     const result = await createAllocationFullRefundTerminalVerifier({ shopifyAdminService: source }).verify(allocation());
     expect(result.state).toBe('QUALIFIES');
-    expect(source.fetchCanonicalOrderSnapshot).toHaveBeenCalledWith('100');
-    expect(source.fetchCanonicalRefundsForOrder).toHaveBeenCalledWith('100');
+    expect(source.fetchCanonicalOrderSnapshot).toHaveBeenCalledWith(shopifyOrderId);
+    expect(source.fetchCanonicalRefundsForOrder).toHaveBeenCalledWith(shopifyOrderId);
+    expect(source.fetchCanonicalOrderSnapshot).not.toHaveBeenCalledWith(localOrderId);
+    expect(source.fetchCanonicalRefundsForOrder).not.toHaveBeenCalledWith(localOrderId);
+  });
+
+  it.each([
+    { label: 'missing related ShopifyOrder', order: null },
+    { label: 'blank related Shopify source id', order: { id: localOrderId, sourceShopifyOrderId: '  ' } },
+  ])('fails closed on $label without calling canonical readers', async ({ order }) => {
+    const source = {
+      fetchCanonicalOrderSnapshot: vi.fn(),
+      fetchCanonicalRefundsForOrder: vi.fn(),
+    };
+    const input = { ...allocation(), order };
+
+    const result = await createAllocationFullRefundTerminalVerifier({ shopifyAdminService: source }).verify(input);
+
+    expect(result).toEqual({
+      state: 'INDETERMINATE',
+      reasonCode: 'canonical_shopify_order_identity_missing',
+      evidence: null,
+    });
+    expect(source.fetchCanonicalOrderSnapshot).not.toHaveBeenCalled();
+    expect(source.fetchCanonicalRefundsForOrder).not.toHaveBeenCalled();
   });
 });
 

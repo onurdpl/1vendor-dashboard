@@ -77,6 +77,10 @@ export type AllocationFullRefundTerminalVerifierResult =
 export type AllocationForFullRefundTerminalVerification = {
   id: string;
   sourceShopifyOrderId: string;
+  order: {
+    id: string;
+    sourceShopifyOrderId: string;
+  } | null;
   lineItems: Array<{
     id: string;
     shopifyLineItemId: string;
@@ -153,6 +157,11 @@ export function verifyAllocationFullRefundTerminal(
   input: VerifyAllocationFullRefundTerminalInput,
 ): AllocationFullRefundTerminalVerifierResult {
   const { allocation, orderSnapshot, refundCollection, completeness } = input;
+  const canonicalShopifyOrderId = normalizeRequired(allocation.order?.sourceShopifyOrderId);
+
+  if (!canonicalShopifyOrderId) {
+    return indeterminate('canonical_shopify_order_identity_missing');
+  }
 
   if (!completeness.orderLineItemsComplete) {
     return indeterminate('canonical_order_line_items_incomplete');
@@ -167,7 +176,7 @@ export function verifyAllocationFullRefundTerminal(
     return indeterminate('canonical_refunds_list_incomplete');
   }
   if (
-    allocation.sourceShopifyOrderId !== orderSnapshot.sourceShopifyOrderId ||
+    canonicalShopifyOrderId !== orderSnapshot.sourceShopifyOrderId ||
     refundCollection.sourceShopifyOrderId !== orderSnapshot.sourceShopifyOrderId ||
     refundCollection.orderGid !== orderSnapshot.orderGid
   ) {
@@ -445,10 +454,15 @@ export function createAllocationFullRefundTerminalVerifier(input: {
     async verify(
       allocation: AllocationForFullRefundTerminalVerification,
     ): Promise<AllocationFullRefundTerminalVerifierResult> {
+      const canonicalShopifyOrderId = normalizeRequired(allocation.order?.sourceShopifyOrderId);
+      if (!canonicalShopifyOrderId) {
+        return indeterminate('canonical_shopify_order_identity_missing');
+      }
+
       try {
         const [orderSnapshot, refundCollection] = await Promise.all([
-          input.shopifyAdminService.fetchCanonicalOrderSnapshot(allocation.sourceShopifyOrderId),
-          input.shopifyAdminService.fetchCanonicalRefundsForOrder(allocation.sourceShopifyOrderId),
+          input.shopifyAdminService.fetchCanonicalOrderSnapshot(canonicalShopifyOrderId),
+          input.shopifyAdminService.fetchCanonicalRefundsForOrder(canonicalShopifyOrderId),
         ]);
         if (!orderSnapshot || !refundCollection) {
           return indeterminate('canonical_shopify_snapshot_unavailable');
