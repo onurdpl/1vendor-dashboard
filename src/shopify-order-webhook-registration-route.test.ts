@@ -87,7 +87,7 @@ describe('admin Shopify order webhook registration route', () => {
     expect(registrationLibMock.registerWebhookTopics).not.toHaveBeenCalled();
   });
 
-  it('skips existing ORDERS_CREATE and creates missing paid/cancelled/updated order webhooks', async () => {
+  it('uses the exact five-topic order/refund contract and creates only missing callbacks', async () => {
     registrationLibMock.registerWebhookTopics.mockResolvedValueOnce({
       existing: [
         {
@@ -112,6 +112,11 @@ describe('admin Shopify order webhook registration route', () => {
           callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
           subscriptionId: 'gid://shopify/WebhookSubscription/4',
         },
+        {
+          topic: 'REFUNDS_CREATE',
+          callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+          subscriptionId: 'gid://shopify/WebhookSubscription/5',
+        },
       ],
       failed: [],
     });
@@ -126,8 +131,14 @@ describe('admin Shopify order webhook registration route', () => {
         { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
         { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
         { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
+        { topic: 'REFUNDS_CREATE', routePath: '/webhooks/shopify/refunds-create' },
       ],
       baseUrl: 'https://backend.example',
+    });
+    expect(registrationLibMock.createShopifyGraphqlClient).toHaveBeenCalledWith({
+      shopDomain: 'sporgym.myshopify.com',
+      accessToken: 'shpat_secret_token',
+      apiVersion: '2026-01',
     });
     expect(result).toMatchObject({
       ok: true,
@@ -152,6 +163,11 @@ describe('admin Shopify order webhook registration route', () => {
           topic: 'ORDERS_UPDATED',
           action: 'created',
           subscriptionId: 'gid://shopify/WebhookSubscription/4',
+        },
+        {
+          topic: 'REFUNDS_CREATE',
+          action: 'created',
+          subscriptionId: 'gid://shopify/WebhookSubscription/5',
         },
       ],
     });

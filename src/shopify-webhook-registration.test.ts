@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { registerWebhookTopics } from '../backend/scripts/shopify-webhook-registration-lib.mjs';
 
+const orderRefundTopics = [
+  { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+  { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
+  { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
+  { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
+  { topic: 'REFUNDS_CREATE', routePath: '/webhooks/shopify/refunds-create' },
+] as const;
+
 describe('Shopify webhook registration helpers', () => {
-  it('registers order webhooks idempotently without duplicating existing callbacks', async () => {
+  it('registers the exact five-topic order/refund family idempotently without duplicating existing callbacks', async () => {
+    expect(orderRefundTopics).toHaveLength(5);
+    expect(orderRefundTopics).toEqual([
+      { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
+      { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
+      { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
+      { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
+      { topic: 'REFUNDS_CREATE', routePath: '/webhooks/shopify/refunds-create' },
+    ]);
     const client = {};
     const listSubscriptions = async () => [
       {
@@ -25,17 +41,17 @@ describe('Shopify webhook registration helpers', () => {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
+      {
+        id: 'gid://shopify/WebhookSubscription/5',
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+      },
     ];
     const createCalls: Array<{ topic: string; callbackUrl: string }> = [];
 
     const summary = await registerWebhookTopics({
       client,
-      topics: [
-        { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
-        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
-        { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
-        { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
-      ],
+      topics: orderRefundTopics,
       baseUrl: 'https://backend.example',
       listSubscriptions,
       createSubscription: async (_client, topic, callbackUrl) => {
@@ -68,23 +84,23 @@ describe('Shopify webhook registration helpers', () => {
           callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
           subscriptionId: 'gid://shopify/WebhookSubscription/4',
         },
+        {
+          topic: 'REFUNDS_CREATE',
+          callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+          subscriptionId: 'gid://shopify/WebhookSubscription/5',
+        },
       ],
       failed: [],
     });
   });
 
-  it('creates missing order callbacks through the shared registration path', async () => {
+  it('creates missing order/refund callbacks through the shared registration path', async () => {
     const client = {};
     const createCalls: Array<{ topic: string; callbackUrl: string }> = [];
 
     const summary = await registerWebhookTopics({
       client,
-      topics: [
-        { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
-        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
-        { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
-        { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
-      ],
+      topics: orderRefundTopics,
       baseUrl: 'https://backend.example',
       listSubscriptions: async () => [],
       createSubscription: async (_client, topic, callbackUrl) => {
@@ -110,6 +126,10 @@ describe('Shopify webhook registration helpers', () => {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
+      {
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+      },
     ]);
     expect(summary.created).toEqual([
       {
@@ -132,22 +152,22 @@ describe('Shopify webhook registration helpers', () => {
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
         subscriptionId: 'gid://shopify/WebhookSubscription/2',
       },
+      {
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+        subscriptionId: 'gid://shopify/WebhookSubscription/2',
+      },
     ]);
     expect(summary.failed).toEqual([]);
   });
 
-  it('creates only missing paid/cancelled/updated order webhooks when ORDERS_CREATE already exists', async () => {
+  it('creates only missing paid/cancelled/updated/refund webhooks when ORDERS_CREATE already exists', async () => {
     const client = {};
     const createCalls: Array<{ topic: string; callbackUrl: string }> = [];
 
     const summary = await registerWebhookTopics({
       client,
-      topics: [
-        { topic: 'ORDERS_CREATE', routePath: '/webhooks/shopify/orders-create' },
-        { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
-        { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
-        { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
-      ],
+      topics: orderRefundTopics,
       baseUrl: 'https://backend.example',
       listSubscriptions: async () => [
         {
@@ -175,6 +195,10 @@ describe('Shopify webhook registration helpers', () => {
         topic: 'ORDERS_UPDATED',
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
       },
+      {
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+      },
     ]);
     expect(summary.existing).toEqual([
       {
@@ -199,23 +223,28 @@ describe('Shopify webhook registration helpers', () => {
         callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
         subscriptionId: 'gid://shopify/WebhookSubscription/3',
       },
+      {
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+        subscriptionId: 'gid://shopify/WebhookSubscription/3',
+      },
     ]);
     expect(summary.failed).toEqual([]);
   });
 
-  it('reports a callback mismatch without creating a duplicate subscription for the same topic', async () => {
+  it('reports a REFUNDS_CREATE callback mismatch without creating a duplicate or replacement', async () => {
     const client = {};
     const createCalls: Array<{ topic: string; callbackUrl: string }> = [];
 
     const summary = await registerWebhookTopics({
       client,
-      topics: [{ topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' }],
+      topics: [{ topic: 'REFUNDS_CREATE', routePath: '/webhooks/shopify/refunds-create' }],
       baseUrl: 'https://backend.example',
       listSubscriptions: async () => [
         {
           id: 'gid://shopify/WebhookSubscription/4',
-          topic: 'ORDERS_UPDATED',
-          callbackUrl: 'https://old-backend.example/webhooks/shopify/orders-updated',
+          topic: 'REFUNDS_CREATE',
+          callbackUrl: 'https://old-backend.example/webhooks/shopify/refunds-create',
         },
       ],
       createSubscription: async (_client, topic, callbackUrl) => {
@@ -229,9 +258,9 @@ describe('Shopify webhook registration helpers', () => {
     expect(summary.existing).toEqual([]);
     expect(summary.failed).toEqual([
       {
-        topic: 'ORDERS_UPDATED',
-        callbackUrl: 'https://backend.example/webhooks/shopify/orders-updated',
-        reason: 'Existing ORDERS_UPDATED subscription uses a different callback URL: https://old-backend.example/webhooks/shopify/orders-updated',
+        topic: 'REFUNDS_CREATE',
+        callbackUrl: 'https://backend.example/webhooks/shopify/refunds-create',
+        reason: 'Existing REFUNDS_CREATE subscription uses a different callback URL: https://old-backend.example/webhooks/shopify/refunds-create',
       },
     ]);
   });

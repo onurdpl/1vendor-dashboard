@@ -17,6 +17,7 @@ const topics = [
   { topic: 'ORDERS_PAID', routePath: '/webhooks/shopify/orders-paid' },
   { topic: 'ORDERS_CANCELLED', routePath: '/webhooks/shopify/orders-cancelled' },
   { topic: 'ORDERS_UPDATED', routePath: '/webhooks/shopify/orders-updated' },
+  { topic: 'REFUNDS_CREATE', routePath: '/webhooks/shopify/refunds-create' },
 ];
 
 function isValidHttpsUrl(value) {

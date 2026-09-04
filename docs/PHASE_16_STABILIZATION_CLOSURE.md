@@ -122,7 +122,7 @@
 | `ORDERS_PAID` | `/webhooks/shopify/orders-paid` | Required production subscription for order payment snapshot updates | Shopify Admin GraphQL subscription listing |
 | `ORDERS_CANCELLED` | `/webhooks/shopify/orders-cancelled` | Required production subscription for full-order cancellation reconciliation | Shopify Admin GraphQL subscription listing |
 | `ORDERS_UPDATED` | `/webhooks/shopify/orders-updated` | Required production subscription for order address/contact updates | Shopify Admin GraphQL subscription listing |
-| `REFUNDS_CREATE` | `/webhooks/shopify/refunds-create` | Required production subscription | Shopify Admin GraphQL subscription listing |
+| `REFUNDS_CREATE` | `/webhooks/shopify/refunds-create` | Required production subscription | `shopify:order-webhooks:register` / GraphQL listing |
 | `RETURNS_REQUEST` | `/webhooks/shopify/returns-request` | Required production subscription | `shopify:return-webhooks:register` / GraphQL listing |
 | `RETURNS_APPROVE` | `/webhooks/shopify/returns-approve` | Required production subscription | `shopify:return-webhooks:register` / GraphQL listing |
 | `RETURNS_DECLINE` | `/webhooks/shopify/returns-decline` | Required production subscription | `shopify:return-webhooks:register` / GraphQL listing |

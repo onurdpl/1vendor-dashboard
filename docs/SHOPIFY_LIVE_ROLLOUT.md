@@ -20,7 +20,7 @@ Set these in `backend/.env` or the runtime environment before live rollout:
   - must not contain an Admin API access token
 - `SHOPIFY_API_VERSION` (production webhooks currently use stable `2026-01`; do not use `unstable`)
 - `SHOPIFY_RETURN_WEBHOOK_BASE_URL` (required only when registering return lifecycle webhooks)
-- `SHOPIFY_ORDER_WEBHOOK_BASE_URL` (required only when registering order-create webhooks)
+- `SHOPIFY_ORDER_WEBHOOK_BASE_URL` (required only when registering order/refund webhooks)
 
 Optional:
 
@@ -101,8 +101,8 @@ Behavior:
 - never prints secret values
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
 
-## Order Webhook Registration (Opt-In)
-Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Payment snapshot updates depend on `ORDERS_PAID` delivery. Full-order cancellation reconciliation depends on `ORDERS_CANCELLED` delivery. Order address/contact correction and cancellation fallback depend on `ORDERS_UPDATED` delivery. Register all four through the same idempotent GraphQL helper used for other webhook groups.
+## Order / Refund Webhook Registration (Opt-In)
+Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Payment snapshot updates depend on `ORDERS_PAID` delivery. Full-order cancellation reconciliation depends on `ORDERS_CANCELLED` delivery. Order address/contact correction and cancellation fallback depend on `ORDERS_UPDATED` delivery. Refund ingestion depends on `REFUNDS_CREATE` delivery. The order/refund registration family restores these four order topics plus the permanent refund topic, exactly five topics total, through the same idempotent GraphQL helper used for other webhook groups.
 
 Registration command from repository root:
 
@@ -130,6 +130,7 @@ Registered topics and callbacks:
 - `ORDERS_PAID` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-paid`
 - `ORDERS_CANCELLED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-cancelled`
 - `ORDERS_UPDATED` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-updated`
+- `REFUNDS_CREATE` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/refunds-create`
 
 Full-order cancellation notes:
 - `ORDERS_CANCELLED` is the primary full-order cancellation webhook.
