@@ -110,6 +110,9 @@ function currentAllocation(input: {
 function createDbMock() {
   return {
     $transaction: vi.fn(),
+    shopifyOrder: {
+      findUnique: vi.fn(),
+    },
     vendorAllocation: {
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -139,8 +142,12 @@ function arrangeWriter(input: {
   const db = createDbMock();
   const verifier = { verify: vi.fn().mockResolvedValue(input.verification ?? qualifyingResult) };
   const acquireOrderLock = vi.fn().mockResolvedValue(undefined);
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const current = input.current ?? currentAllocation();
   db.$transaction.mockImplementation(async (callback) => callback(db));
+  db.shopifyOrder.findUnique.mockResolvedValue({
+    allocations: [{ id: allocationId }],
+  });
   db.vendorAllocation.findUnique.mockImplementation(async (args) => {
     if (args.select?.lineItems) return verificationAllocation();
     if (args.select?.fullRefundTerminalFact) return current;
@@ -161,9 +168,10 @@ function arrangeWriter(input: {
       db: db as never,
       verifier,
       acquireOrderLock,
+      logger: logger as never,
     },
   );
-  return { service, db, verifier, acquireOrderLock };
+  return { service, db, verifier, acquireOrderLock, logger };
 }
 
 describe('allocation full-refund terminal fact writer foundation', () => {
@@ -206,6 +214,158 @@ describe('allocation full-refund terminal fact writer foundation', () => {
     expect(db.allocationFullRefundTerminalFact.create).not.toHaveBeenCalled();
     expect(verifier.verify).not.toHaveBeenCalled();
     expect(acquireOrderLock).not.toHaveBeenCalled();
+  });
+
+  it('does no order lookup or canonical work for disabled order-scoped orchestration', async () => {
+    const { service, db, verifier } = arrangeWriter({ enabled: false });
+
+    await expect(service.createVerifiedFactsForShopifyOrder({
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+    })).resolves.toEqual({
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+      outcome: 'DISABLED',
+      reasonCode: 'writer_disabled',
+      allocations: [],
+    });
+    expect(db.shopifyOrder.findUnique).not.toHaveBeenCalled();
+    expect(db.vendorAllocation.findUnique).not.toHaveBeenCalled();
+    expect(verifier.verify).not.toHaveBeenCalled();
+  });
+
+  it('evaluates every allocation independently without order-level closure', async () => {
+    const { service, db, verifier, logger } = arrangeWriter();
+    db.shopifyOrder.findUnique.mockResolvedValueOnce({
+      allocations: [{ id: 'alloc-a' }, { id: 'alloc-b' }],
+    });
+    db.vendorAllocation.findUnique.mockImplementation(async (args) => {
+      if (args.select?.lineItems) {
+        return { ...verificationAllocation(), id: args.where.id };
+      }
+      if (args.select?.fullRefundTerminalFact) {
+        return { ...currentAllocation(), id: args.where.id };
+      }
+      return { ...verificationAllocation(), id: args.where.id };
+    });
+    verifier.verify
+      .mockResolvedValueOnce(qualifyingResult)
+      .mockResolvedValueOnce({
+        state: 'DOES_NOT_QUALIFY',
+        reasonCode: 'refund_quantity_below_owned_quantity',
+        evidence: null,
+      });
+
+    const result = await service.createVerifiedFactsForShopifyOrder({
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+    });
+
+    expect(db.shopifyOrder.findUnique).toHaveBeenCalledWith({
+      where: { sourceShopifyOrderId: shopifyOrderId },
+      select: {
+        allocations: {
+          select: { id: true },
+          orderBy: { id: 'asc' },
+        },
+      },
+    });
+    expect(verifier.verify).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      outcome: 'COMPLETED',
+      reasonCode: null,
+      allocations: [
+        {
+          allocationId: 'alloc-a',
+          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          outcome: 'CREATED',
+          reasonCode: null,
+        },
+        {
+          allocationId: 'alloc-b',
+          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          outcome: 'DOES_NOT_QUALIFY',
+          reasonCode: 'refund_quantity_below_owned_quantity',
+        },
+      ],
+    });
+    expect(result).not.toHaveProperty('fact');
+    expect(result).not.toHaveProperty('evidenceJson');
+    expect(logger.info).toHaveBeenCalledTimes(2);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('isolates one allocation exception and continues evaluating the others', async () => {
+    const { service, db, verifier, logger } = arrangeWriter();
+    db.shopifyOrder.findUnique.mockResolvedValueOnce({
+      allocations: [{ id: 'alloc-a' }, { id: 'alloc-b' }],
+    });
+    db.vendorAllocation.findUnique.mockImplementation(async (args) => ({
+      ...verificationAllocation(),
+      id: args.where.id,
+    }));
+    verifier.verify
+      .mockRejectedValueOnce(new Error('sensitive upstream detail'))
+      .mockResolvedValueOnce({
+        state: 'DOES_NOT_QUALIFY',
+        reasonCode: 'refund_quantity_below_owned_quantity',
+        evidence: null,
+      });
+
+    const result = await service.createVerifiedFactsForShopifyOrder({
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+    });
+
+    expect(verifier.verify).toHaveBeenCalledTimes(2);
+    expect(result.allocations).toEqual([
+      {
+        allocationId: 'alloc-a',
+        verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+        outcome: 'ERROR',
+        reasonCode: 'unexpected_writer_error',
+      },
+      {
+        allocationId: 'alloc-b',
+        verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+        outcome: 'DOES_NOT_QUALIFY',
+        reasonCode: 'refund_quantity_below_owned_quantity',
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('sensitive upstream detail');
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({
+      allocationId: 'alloc-a',
+      outcome: 'ERROR',
+      reasonCode: 'unexpected_writer_error',
+    }), expect.any(String));
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('sensitive upstream detail');
+  });
+
+  it('warns with sanitized fields when an allocation is indeterminate', async () => {
+    const { service, logger } = arrangeWriter({
+      verification: {
+        state: 'INDETERMINATE',
+        reasonCode: 'canonical_refunds_list_incomplete',
+        evidence: null,
+      },
+    });
+
+    const result = await service.createVerifiedFactsForShopifyOrder({
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+    });
+
+    expect(result.allocations[0]).toMatchObject({
+      outcome: 'INDETERMINATE',
+      reasonCode: 'canonical_refunds_list_incomplete',
+    });
+    expect(logger.warn).toHaveBeenCalledWith({
+      allocationId,
+      sourceShopifyOrderId: shopifyOrderId,
+      verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+      outcome: 'INDETERMINATE',
+      reasonCode: 'canonical_refunds_list_incomplete',
+    }, expect.any(String));
   });
 
   it('creates exactly one immutable fact from the qualifying verifier result', async () => {

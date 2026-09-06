@@ -1,3 +1,5 @@
+import type { FullRefundTerminalOrderWriterResult } from '../orders/allocation-full-refund-terminal-fact.service.js';
+
 export type ReconciliationFieldChange = {
   scope: string;
   field: string;
@@ -66,6 +68,7 @@ export type CanonicalRefundReconciliationReport = {
   failedCount: number;
   signalsCreatedOrUpdated: number;
   results: CanonicalRefundReconciliationItemResult[];
+  terminalWriter: FullRefundTerminalOrderWriterResult | null;
 };
 
 export type CanonicalReturnReconciliationItemResult = {

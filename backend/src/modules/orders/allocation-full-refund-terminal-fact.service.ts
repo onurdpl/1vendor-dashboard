@@ -4,6 +4,7 @@ import {
   type AllocationFullRefundTerminalFact,
 } from '@prisma/client';
 import type { AppEnv } from '../../config/env.js';
+import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../db/prisma.js';
 import {
   createAllocationFullRefundTerminalVerifier,
@@ -48,6 +49,21 @@ export type FullRefundTerminalFactWriterResult =
       reasonCode: 'shipment_execution_pending' | 'shopify_fulfillment_submission_pending';
     };
 
+export type FullRefundTerminalOrderAllocationOutcome = {
+  allocationId: string;
+  verificationSource: FullRefundTerminalFactSource;
+  outcome: FullRefundTerminalFactWriterResult['outcome'] | 'ERROR';
+  reasonCode: string | null;
+};
+
+export type FullRefundTerminalOrderWriterResult = {
+  sourceShopifyOrderId: string;
+  verificationSource: FullRefundTerminalFactSource;
+  outcome: 'DISABLED' | 'COMPLETED' | 'INDETERMINATE';
+  reasonCode: string | null;
+  allocations: FullRefundTerminalOrderAllocationOutcome[];
+};
+
 type TerminalVerifier = {
   verify(
     allocation: AllocationForFullRefundTerminalVerification,
@@ -58,6 +74,7 @@ type WriterDependencies = {
   db?: typeof prisma;
   verifier?: TerminalVerifier;
   acquireOrderLock?: typeof acquireShopifyOrderTransactionLock;
+  logger?: Pick<FastifyInstance['log'], 'info' | 'warn' | 'error'>;
 };
 
 const verificationAllocationSelect = {
@@ -104,6 +121,7 @@ export function createAllocationFullRefundTerminalFactService(
   const db = dependencies.db ?? prisma;
   const verifier = dependencies.verifier ?? createAllocationFullRefundTerminalVerifier({ shopifyAdminService });
   const acquireOrderLock = dependencies.acquireOrderLock ?? acquireShopifyOrderTransactionLock;
+  const logger = dependencies.logger;
 
   async function findExisting(vendorAllocationId: string) {
     return db.allocationFullRefundTerminalFact.findUnique({
@@ -111,11 +129,10 @@ export function createAllocationFullRefundTerminalFactService(
     });
   }
 
-  return {
-    async createVerifiedFact(input: {
-      vendorAllocationId: string;
-      verificationSource: FullRefundTerminalFactSource;
-    }): Promise<FullRefundTerminalFactWriterResult> {
+  async function createVerifiedFact(input: {
+    vendorAllocationId: string;
+    verificationSource: FullRefundTerminalFactSource;
+  }): Promise<FullRefundTerminalFactWriterResult> {
       if (!env.FULL_REFUND_TERMINAL_WRITER_ENABLED) {
         return {
           outcome: FULL_REFUND_TERMINAL_FACT_OUTCOMES.disabled,
@@ -267,7 +284,132 @@ export function createAllocationFullRefundTerminalFactService(
           reasonCode: null,
         };
       }
-    },
+  }
+
+  function logOutcome(
+    sourceShopifyOrderId: string,
+    outcome: FullRefundTerminalOrderAllocationOutcome,
+  ) {
+    const fields = {
+      allocationId: outcome.allocationId,
+      sourceShopifyOrderId,
+      verificationSource: outcome.verificationSource,
+      outcome: outcome.outcome,
+      reasonCode: outcome.reasonCode,
+    };
+    if (outcome.outcome === 'ERROR') {
+      logger?.error(fields, 'Full-refund terminal writer failed unexpectedly.');
+    } else if (
+      outcome.outcome === FULL_REFUND_TERMINAL_FACT_OUTCOMES.indeterminate ||
+      outcome.outcome === FULL_REFUND_TERMINAL_FACT_OUTCOMES.outboundClaimConflict
+    ) {
+      logger?.warn(fields, 'Full-refund terminal writer deferred allocation convergence.');
+    } else {
+      logger?.info(fields, 'Full-refund terminal writer evaluated allocation.');
+    }
+  }
+
+  async function createVerifiedFactsForShopifyOrder(input: {
+    sourceShopifyOrderId: string;
+    verificationSource: FullRefundTerminalFactSource;
+  }): Promise<FullRefundTerminalOrderWriterResult> {
+    const sourceShopifyOrderId = normalizeRequired(input.sourceShopifyOrderId) ?? '';
+    if (!env.FULL_REFUND_TERMINAL_WRITER_ENABLED) {
+      logger?.info({
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: FULL_REFUND_TERMINAL_FACT_OUTCOMES.disabled,
+        reasonCode: 'writer_disabled',
+      }, 'Full-refund terminal writer is disabled.');
+      return {
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: 'DISABLED',
+        reasonCode: 'writer_disabled',
+        allocations: [],
+      };
+    }
+
+    if (!sourceShopifyOrderId) {
+      logger?.warn({
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: FULL_REFUND_TERMINAL_FACT_OUTCOMES.indeterminate,
+        reasonCode: 'canonical_shopify_order_identity_missing',
+      }, 'Full-refund terminal writer could not resolve the Shopify order identity.');
+      return {
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: 'INDETERMINATE',
+        reasonCode: 'canonical_shopify_order_identity_missing',
+        allocations: [],
+      };
+    }
+
+    const order = await db.shopifyOrder.findUnique({
+      where: { sourceShopifyOrderId },
+      select: {
+        allocations: {
+          select: { id: true },
+          orderBy: { id: 'asc' },
+        },
+      },
+    });
+    if (!order) {
+      logger?.warn({
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: FULL_REFUND_TERMINAL_FACT_OUTCOMES.indeterminate,
+        reasonCode: 'local_shopify_order_not_found',
+      }, 'Full-refund terminal writer could not resolve the local Shopify order.');
+      return {
+        sourceShopifyOrderId,
+        verificationSource: input.verificationSource,
+        outcome: 'INDETERMINATE',
+        reasonCode: 'local_shopify_order_not_found',
+        allocations: [],
+      };
+    }
+
+    const allocations: FullRefundTerminalOrderAllocationOutcome[] = [];
+    for (const allocation of order.allocations) {
+      try {
+        const result = await createVerifiedFact({
+          vendorAllocationId: allocation.id,
+          verificationSource: input.verificationSource,
+        });
+        const outcome = {
+          allocationId: allocation.id,
+          verificationSource: input.verificationSource,
+          outcome: result.outcome,
+          reasonCode: result.reasonCode,
+        } satisfies FullRefundTerminalOrderAllocationOutcome;
+        allocations.push(outcome);
+        logOutcome(sourceShopifyOrderId, outcome);
+      } catch {
+        const outcome = {
+          allocationId: allocation.id,
+          verificationSource: input.verificationSource,
+          outcome: 'ERROR',
+          reasonCode: 'unexpected_writer_error',
+        } satisfies FullRefundTerminalOrderAllocationOutcome;
+        allocations.push(outcome);
+        logOutcome(sourceShopifyOrderId, outcome);
+      }
+    }
+
+    return {
+      sourceShopifyOrderId,
+      verificationSource: input.verificationSource,
+      outcome: 'COMPLETED',
+      reasonCode: null,
+      allocations,
+    };
+  }
+
+  return {
+    createVerifiedFact,
+    createVerifiedFactsForShopifyOrder,
 
     findByVendorAllocationId(vendorAllocationId: string) {
       return findExisting(vendorAllocationId);

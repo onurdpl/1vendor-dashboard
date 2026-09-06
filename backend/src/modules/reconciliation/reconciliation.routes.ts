@@ -22,7 +22,9 @@ export function registerReconciliationRoutes(app: FastifyInstance, env: AppEnv) 
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
   const reconciliationService = createReconciliationService(env);
-  const canonicalRefundReconciliationService = createCanonicalRefundReconciliationService(env);
+  const canonicalRefundReconciliationService = createCanonicalRefundReconciliationService(env, {
+    logger: app.log,
+  });
   const canonicalReturnReconciliationService = createCanonicalReturnReconciliationService(env);
   const canonicalCancellationReconciliationService = createCanonicalCancellationReconciliationService(env);
 

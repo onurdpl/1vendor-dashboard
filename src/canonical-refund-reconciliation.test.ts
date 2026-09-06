@@ -26,6 +26,9 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const ingestVerifiedShopifyRefundMock = vi.hoisted(() => vi.fn());
+const terminalWriterMock = vi.hoisted(() => ({
+  createVerifiedFactsForShopifyOrder: vi.fn(),
+}));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
@@ -34,6 +37,16 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 vi.mock('../backend/src/modules/shopify/refund-ingestion.service.js', () => ({
   ingestVerifiedShopifyRefund: ingestVerifiedShopifyRefundMock,
 }));
+
+vi.mock('../backend/src/modules/orders/allocation-full-refund-terminal-fact.service.js', async () => {
+  const actual = await vi.importActual<typeof import('../backend/src/modules/orders/allocation-full-refund-terminal-fact.service.js')>(
+    '../backend/src/modules/orders/allocation-full-refund-terminal-fact.service.js',
+  );
+  return {
+    ...actual,
+    createAllocationFullRefundTerminalFactService: vi.fn(() => terminalWriterMock),
+  };
+});
 
 const {
   createCanonicalRefundReconciliationService,
@@ -141,6 +154,13 @@ describe('canonical Shopify refund reconciliation', () => {
       shopifyOrderId: 'order-1',
       refundAllocationCount: 1,
     });
+    terminalWriterMock.createVerifiedFactsForShopifyOrder.mockResolvedValue({
+      sourceShopifyOrderId: 'order-1',
+      verificationSource: 'canonical_reconciliation',
+      outcome: 'DISABLED',
+      reasonCode: 'writer_disabled',
+      allocations: [],
+    });
   });
 
   it('creates a missing local refund through the existing refund ingestion path', async () => {
@@ -201,6 +221,94 @@ describe('canonical Shopify refund reconciliation', () => {
         idempotencyKey: 'canonical_refund_reconciliation:demo.myshopify.com:order-1:5001',
       },
     }));
+    expect(terminalWriterMock.createVerifiedFactsForShopifyOrder).toHaveBeenCalledWith({
+      sourceShopifyOrderId: 'order-1',
+      verificationSource: 'canonical_reconciliation',
+    });
+    expect(result?.terminalWriter).toMatchObject({ outcome: 'DISABLED' });
+  });
+
+  it.each([
+    'CREATED',
+    'ALREADY_EXISTS_SAME_TERMINAL_STATE',
+    'DOES_NOT_QUALIFY',
+    'INDETERMINATE',
+    'CONFLICT_WITH_OUTBOUND_DURABLE_CLAIM',
+  ] as const)('reports the sanitized %s terminal convergence outcome', async (outcome) => {
+    mockEvidenceCounts([
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+    ]);
+    terminalWriterMock.createVerifiedFactsForShopifyOrder.mockResolvedValueOnce({
+      sourceShopifyOrderId: 'order-1',
+      verificationSource: 'canonical_reconciliation',
+      outcome: 'COMPLETED',
+      reasonCode: null,
+      allocations: [{
+        allocationId: 'alloc-a',
+        verificationSource: 'canonical_reconciliation',
+        outcome,
+        reasonCode: outcome === 'INDETERMINATE' ? 'canonical_state_incomplete' : null,
+      }],
+    });
+
+    const result = await createCanonicalRefundReconciliationService(
+      buildEnv([canonicalRefund()]),
+    ).reconcileShopifyOrderRefunds('order-1');
+
+    expect(result?.failedCount).toBe(0);
+    expect(result?.terminalWriter?.allocations).toEqual([
+      expect.objectContaining({ allocationId: 'alloc-a', outcome }),
+    ]);
+    expect(result?.terminalWriter).not.toHaveProperty('evidenceJson');
+  });
+
+  it('does not invoke terminal convergence when refund ingestion has unresolved failures', async () => {
+    mockEvidenceCounts([
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+    ]);
+    ingestVerifiedShopifyRefundMock.mockResolvedValueOnce({
+      ok: false,
+      action: 'received_needs_attention',
+      processingStatus: 'needs_attention',
+      error: 'Unresolved allocation mapping.',
+    });
+
+    const result = await createCanonicalRefundReconciliationService(
+      buildEnv([canonicalRefund()]),
+    ).reconcileShopifyOrderRefunds('order-1');
+
+    expect(result?.failedCount).toBe(1);
+    expect(result?.terminalWriter).toBeNull();
+    expect(terminalWriterMock.createVerifiedFactsForShopifyOrder).not.toHaveBeenCalled();
+  });
+
+  it('isolates an unexpected terminal convergence error after committed refund work', async () => {
+    mockEvidenceCounts([
+      { refundRecords: 0, refundLedgers: 0, financeEvents: 0 },
+      { refundRecords: 1, refundLedgers: 1, financeEvents: 4 },
+    ]);
+    terminalWriterMock.createVerifiedFactsForShopifyOrder.mockRejectedValueOnce(
+      new Error('sensitive terminal detail'),
+    );
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const result = await createCanonicalRefundReconciliationService(
+      buildEnv([canonicalRefund()]),
+      { logger: logger as never },
+    ).reconcileShopifyOrderRefunds('order-1');
+
+    expect(result).toMatchObject({
+      refundsCreated: 1,
+      failedCount: 0,
+      terminalWriter: {
+        outcome: 'INDETERMINATE',
+        reasonCode: 'unexpected_order_writer_error',
+        allocations: [],
+      },
+    });
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('sensitive terminal detail');
   });
 
   it('is idempotent when refund records, ledgers, and finance events are already present', async () => {

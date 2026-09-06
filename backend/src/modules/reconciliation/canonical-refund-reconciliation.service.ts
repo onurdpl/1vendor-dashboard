@@ -25,6 +25,11 @@ import type {
   CanonicalRefundReconciliationItemResult,
   CanonicalRefundReconciliationReport,
 } from './reconciliation.types.js';
+import type { FastifyInstance } from 'fastify';
+import {
+  createAllocationFullRefundTerminalFactService,
+  FULL_REFUND_TERMINAL_FACT_SOURCES,
+} from '../orders/allocation-full-refund-terminal-fact.service.js';
 
 const CANONICAL_REFUND_SIGNAL_RULE_KEYS = {
   missingLocalOrder: 'canonical_refund_missing_local_order',
@@ -293,8 +298,20 @@ function summarizeItemStatus(input: {
   return 'already_present' as const;
 }
 
-export function createCanonicalRefundReconciliationService(env: AppEnv) {
+type CanonicalRefundReconciliationDependencies = {
+  logger?: Pick<FastifyInstance['log'], 'info' | 'warn' | 'error'>;
+};
+
+export function createCanonicalRefundReconciliationService(
+  env: AppEnv,
+  dependencies: CanonicalRefundReconciliationDependencies = {},
+) {
   const shopifyAdminService = createShopifyAdminService(env);
+  const fullRefundTerminalFactService = createAllocationFullRefundTerminalFactService(
+    env,
+    shopifyAdminService,
+    { logger: dependencies.logger },
+  );
 
   async function reconcileShopifyOrderRefunds(sourceShopifyOrderId: string): Promise<CanonicalRefundReconciliationReport | null> {
     const canonicalRefunds = await shopifyAdminService.fetchCanonicalRefundsForOrder(sourceShopifyOrderId);
@@ -313,6 +330,7 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
       failedCount: 0,
       signalsCreatedOrUpdated: 0,
       results: [],
+      terminalWriter: null,
     };
 
     const monetaryEvidence = requiresRefundMonetaryEvidenceClassification(canonicalRefunds)
@@ -596,6 +614,29 @@ export function createCanonicalRefundReconciliationService(env: AppEnv) {
         affectedVendorIds: [...new Set(recordSummary.map((record) => record.vendorAllocation.assignedVendorId))],
         affectedRefundRecordIds: recordSummary.map((record) => record.id),
       });
+    }
+
+    if (report.failedCount === 0) {
+      try {
+        report.terminalWriter = await fullRefundTerminalFactService.createVerifiedFactsForShopifyOrder({
+          sourceShopifyOrderId,
+          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+        });
+      } catch {
+        dependencies.logger?.error({
+          sourceShopifyOrderId,
+          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          outcome: 'ERROR',
+          reasonCode: 'unexpected_order_writer_error',
+        }, 'Full-refund terminal writer orchestration failed after canonical refund reconciliation.');
+        report.terminalWriter = {
+          sourceShopifyOrderId,
+          verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.CANONICAL_RECONCILIATION,
+          outcome: 'INDETERMINATE',
+          reasonCode: 'unexpected_order_writer_error',
+          allocations: [],
+        };
+      }
     }
 
     return report;

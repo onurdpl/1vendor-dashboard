@@ -52,6 +52,10 @@ import {
   isRefundEvidenceBlocked,
   REFUND_MONETARY_CLASSIFICATIONS,
 } from './shopify-refund-monetary-evidence.js';
+import {
+  createAllocationFullRefundTerminalFactService,
+  FULL_REFUND_TERMINAL_FACT_SOURCES,
+} from '../orders/allocation-full-refund-terminal-fact.service.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
@@ -61,6 +65,11 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     logger: app.log,
   });
   const canonicalCancellationReconciliationService = createCanonicalCancellationReconciliationService(env);
+  const fullRefundTerminalFactService = createAllocationFullRefundTerminalFactService(
+    env,
+    shopifyAdminService,
+    { logger: app.log },
+  );
   const resolveWebhookSecret = (topic: string) => {
     if (topic.startsWith('returns/')) {
       return env.SHOPIFY_RETURN_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
@@ -1358,6 +1367,20 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         processingStatus: ingestionResult.processingStatus,
         message: ingestionResult.error,
       });
+    }
+
+    try {
+      await fullRefundTerminalFactService.createVerifiedFactsForShopifyOrder({
+        sourceShopifyOrderId: ingestionResult.shopifyOrderId,
+        verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+      });
+    } catch {
+      app.log.error({
+        sourceShopifyOrderId: ingestionResult.shopifyOrderId,
+        verificationSource: FULL_REFUND_TERMINAL_FACT_SOURCES.REFUND_WEBHOOK,
+        outcome: 'ERROR',
+        reasonCode: 'unexpected_order_writer_error',
+      }, 'Full-refund terminal writer orchestration failed after refund ingestion.');
     }
 
     await markJobCompleted(operationalJob?.id);
