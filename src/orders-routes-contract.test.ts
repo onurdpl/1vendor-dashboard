@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerOrdersRoutes } from '../backend/src/modules/orders/orders.routes.js';
+import { AllocationActionabilityGuardError } from '../backend/src/modules/orders/allocation-actionability-guard.service.js';
 
 const listVendorOrdersMock = vi.hoisted(() => vi.fn());
 const getVendorOrderByIdForUserMock = vi.hoisted(() => vi.fn());
@@ -174,6 +175,41 @@ describe('orders route contract', () => {
       actorUserId: 'user-1',
     }, {
       productPanelEnv: env,
+    });
+  });
+
+  it('maps a full-refund terminal reject guard to the stable 409 machine contract', async () => {
+    rejectVendorOrderAllocationMock.mockRejectedValueOnce(
+      new AllocationActionabilityGuardError('ALLOCATION_REFUND_TERMINAL'),
+    );
+    const posts = new Map<string, (request: Record<string, unknown>, reply: {
+      code: (statusCode: number) => { send: (payload: unknown) => unknown };
+    }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: typeof posts extends Map<string, infer T> ? T : never) => {
+        posts.set(path, handler);
+      }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const response = await posts.get('/orders/:orderId/reject')?.({
+      authUser: { id: 'user-1', role: 'vendor' },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { orderId: 'alloc-1' },
+      body: { reason: 'OUT_OF_STOCK', note: 'Missing stock' },
+    }, {
+      code: (statusCode: number) => ({
+        send: (payload: unknown) => ({ statusCode, payload }),
+      }),
+    });
+
+    expect(response).toEqual({
+      statusCode: 409,
+      payload: {
+        code: 'ALLOCATION_REFUND_TERMINAL',
+        message: 'Allocation is operationally closed by a verified full refund.',
+      },
     });
   });
 

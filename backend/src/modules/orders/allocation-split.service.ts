@@ -17,6 +17,7 @@ import {
   planAllocationSplitForLineItemReject,
 } from './allocation-split-planner.service.js';
 import { isFullOrderCancelled } from './full-order-cancellation-policy.js';
+import { assertAllocationActionable } from './allocation-actionability-guard.service.js';
 
 export type SplitAllocationForLineItemRejectInput = {
   vendorAllocationId: string;
@@ -537,6 +538,8 @@ export async function splitAllocationForLineItemReject(
       remainingLedgerId,
       childLedgerId,
     });
+
+    await assertAllocationActionable(tx, vendorAllocationId);
 
     const planner = await planAllocationSplitForLineItemReject({
       vendorAllocationId,

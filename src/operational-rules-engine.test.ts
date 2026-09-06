@@ -39,7 +39,12 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinanceDashboard: getVendorFinanceDashboardMock,
 }));
 
-const { evaluateOperationalSignals, updateOperationalSignalStatus } = await import(
+const {
+  evaluateOperationalSignals,
+  listDashboardOperationalSignals,
+  listOperationalSignals,
+  updateOperationalSignalStatus,
+} = await import(
   '../backend/src/modules/rules/rules.service.js'
 );
 
@@ -187,6 +192,7 @@ describe('operational rules engine foundation', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           assignedVendorId: 'sporjinal',
+          fullRefundTerminalFact: null,
         }),
       }),
     );
@@ -197,6 +203,24 @@ describe('operational rules engine foundation', () => {
         }),
       }),
     );
+  });
+
+  it('filters terminal fulfillment signals at query time while preserving non-fulfillment history', async () => {
+    prismaMock.operationalSignal.findMany.mockResolvedValue([]);
+
+    await listOperationalSignals({ vendorId: 'sporjinal' });
+    await listDashboardOperationalSignals({ vendorId: 'sporjinal' });
+
+    for (const [call] of prismaMock.operationalSignal.findMany.mock.calls) {
+      expect(call.where).toEqual(expect.objectContaining({
+        vendorId: 'sporjinal',
+        OR: [
+          { allocationId: null },
+          { sourceArea: { not: 'FULFILLMENT' } },
+          { allocation: { fullRefundTerminalFact: null } },
+        ],
+      }));
+    }
   });
 
   it('excludes conflict-cancelled allocations from stale fulfillment rules', async () => {

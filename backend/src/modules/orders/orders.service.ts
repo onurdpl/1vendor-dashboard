@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import { AllocationStatus, CancellationReason, ShipmentExecutionStatus } from '@prisma/client';
+import { AllocationStatus, CancellationReason, ShipmentExecutionStatus, type Prisma } from '@prisma/client';
 import type {
   AllocationSplitExecutionResponseDto,
   AllocationSplitPlannerResponseDto,
@@ -89,6 +89,7 @@ import {
   readPostRefundFulfillmentCheckStatus,
 } from './customer-cancellation-exception.service.js';
 import { isPendingCustomerCancellationHoldState } from './customer-cancellation-hold.service.js';
+import { assertAllocationActionable } from './allocation-actionability-guard.service.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -2396,7 +2397,7 @@ export async function rejectVendorOrderAllocation(
   const note = normalizeRejectNote(input.note);
 
   await prisma.$transaction(async (transaction) => {
-    const allocation = await transaction.vendorAllocation.findFirst({
+    const allocationQuery = {
       where: {
         id: orderId,
       },
@@ -2438,8 +2439,16 @@ export async function rejectVendorOrderAllocation(
           },
         },
       },
-    });
+    } satisfies Prisma.VendorAllocationFindFirstArgs;
+    let allocation = await transaction.vendorAllocation.findFirst(allocationQuery);
 
+    if (!allocation || allocation.assignedVendorId !== vendorId) {
+      throw new OrderRejectValidationError('Order not found.', 404);
+    }
+
+    await assertAllocationActionable(transaction, allocation.id);
+
+    allocation = await transaction.vendorAllocation.findFirst(allocationQuery);
     if (!allocation || allocation.assignedVendorId !== vendorId) {
       throw new OrderRejectValidationError('Order not found.', 404);
     }
@@ -2518,7 +2527,7 @@ export async function returnBlockedAllocationToVendor(
   const note = normalizeAdminResolutionNote(input.note);
 
   await prisma.$transaction(async (transaction) => {
-    const allocation = await transaction.vendorAllocation.findFirst({
+    const allocationQuery = {
       where: {
         id: allocationId,
         order: {
@@ -2568,8 +2577,16 @@ export async function returnBlockedAllocationToVendor(
           },
         },
       },
-    });
+    } satisfies Prisma.VendorAllocationFindFirstArgs;
+    let allocation = await transaction.vendorAllocation.findFirst(allocationQuery);
 
+    if (!allocation) {
+      throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
+    }
+
+    await assertAllocationActionable(transaction, allocation.id);
+
+    allocation = await transaction.vendorAllocation.findFirst(allocationQuery);
     if (!allocation) {
       throw new OrderRejectValidationError('Allocation not found for Shopify order.', 404);
     }

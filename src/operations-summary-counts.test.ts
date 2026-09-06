@@ -458,6 +458,7 @@ describe('admin operations summary counts', () => {
           cancelledAt: null,
         },
         allocationStatus: 'VENDOR_BLOCKED',
+        fullRefundTerminalFact: null,
         NOT: expect.any(Object),
       },
     });
@@ -467,6 +468,7 @@ describe('admin operations summary counts', () => {
           cancelledAt: null,
         },
         allocationStatus: 'VENDOR_BLOCKED',
+        fullRefundTerminalFact: null,
         NOT: expect.any(Object),
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
@@ -654,6 +656,7 @@ describe('admin operations summary counts', () => {
         in: ['PENDING', 'FAILED'],
       },
       allocation: {
+        fullRefundTerminalFact: null,
         order: {
           cancelledAt: null,
         },
@@ -938,6 +941,7 @@ describe('admin operations summary counts', () => {
           in: ['PENDING', 'FAILED'],
         },
         allocation: {
+          fullRefundTerminalFact: null,
           order: {
             cancelledAt: null,
           },

@@ -8,6 +8,7 @@ import {
   type FinanceIntegrityAlert,
   type OperationalSignal,
   OperationalSignalSeverity,
+  OperationalSignalSourceArea,
   OperationalSignalStatus,
   SettlementStatus,
   type Prisma,
@@ -37,6 +38,7 @@ import {
   fullOrderOperationalAllocationWhere,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import { allocationActionableWhere } from '../orders/allocation-actionability-policy.service.js';
 import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
 import {
   getCustomerCancellationExceptionOperationsQueue,
@@ -129,6 +131,7 @@ const shipmentOperationsQueueWhere = {
   },
   allocation: {
     ...fullOrderOperationalAllocationWhere,
+    ...allocationActionableWhere,
   },
 } satisfies Prisma.ShipmentExecutionWhereInput;
 
@@ -719,6 +722,7 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
       prisma.vendorAllocation.count({
         where: {
           ...fullOrderOperationalAllocationWhere,
+          ...allocationActionableWhere,
           allocationStatus: {
             not: AllocationStatus.VENDOR_BLOCKED,
           },
@@ -733,6 +737,7 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
       prisma.vendorAllocation.count({
         where: {
           ...fullOrderOperationalAllocationWhere,
+          ...allocationActionableWhere,
           ...getUnresolvedVendorBlockedWhere(),
         },
       }),
@@ -742,6 +747,7 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
         where: {
           AND: [
             fullOrderOperationalAllocationWhere,
+            allocationActionableWhere,
             {
               OR: [
                 { fulfillmentStatus: insensitiveEquals('processing') },
@@ -796,6 +802,11 @@ export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueD
         by: ['severity'],
         where: {
           status: OperationalSignalStatus.ACTIVE,
+          OR: [
+            { allocationId: null },
+            { sourceArea: { not: OperationalSignalSourceArea.FULFILLMENT } },
+            { allocation: allocationActionableWhere },
+          ],
         },
         _count: {
           _all: true,
@@ -1133,6 +1144,7 @@ async function getVendorBlockedOperationsQueue(
     ? getResolvedVendorBlockedRefundWhere()
     : {
         ...fullOrderOperationalAllocationWhere,
+        ...allocationActionableWhere,
         ...getUnresolvedVendorBlockedWhere(),
       };
   const [total, allocations] = await Promise.all([
@@ -1497,6 +1509,7 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
 
   const candidateTake = offset + limit;
   const allocations = await withDashboardTiming('operations.allocation_fetch', () => prisma.vendorAllocation.findMany({
+    where: allocationActionableWhere,
     select: operationsAllocationSelect,
     orderBy: {
       createdAt: 'desc',
@@ -1703,6 +1716,11 @@ export async function getAdminOperationsQueue(options: AdminOperationsQueueOptio
   const signals = await withDashboardTiming('operations.operational_signals_fetch', () => prisma.operationalSignal.findMany({
     where: {
       status: OperationalSignalStatus.ACTIVE,
+      OR: [
+        { allocationId: null },
+        { sourceArea: { not: OperationalSignalSourceArea.FULFILLMENT } },
+        { allocation: allocationActionableWhere },
+      ],
     },
     orderBy: [
       {
@@ -1872,6 +1890,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       },
       allocation: {
         ...fullOrderOperationalAllocationWhere,
+        ...allocationActionableWhere,
       },
     },
     include: {

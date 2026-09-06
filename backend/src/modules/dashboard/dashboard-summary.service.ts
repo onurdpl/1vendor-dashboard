@@ -4,6 +4,7 @@ import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { buildReturnReviewAttentionWhere } from '../returns/return-review-status.js';
 import type { DashboardOperationalSummaryDto } from './dashboard-summary.types.js';
 import { fullOrderOperationalAllocationWhere } from '../orders/full-order-cancellation-policy.js';
+import { allocationActionableWhere } from '../orders/allocation-actionability-policy.service.js';
 
 const NON_AWAITING_SHIPPING_STATUSES = [
   'delivered',
@@ -43,6 +44,7 @@ export async function getDashboardOperationalSummary(vendorId: string): Promise<
         by: ['allocationStatus'],
         where: {
           assignedVendorId: vendorId,
+          ...allocationActionableWhere,
         },
         _count: {
           _all: true,
@@ -54,6 +56,7 @@ export async function getDashboardOperationalSummary(vendorId: string): Promise<
         where: {
           assignedVendorId: vendorId,
           ...fullOrderOperationalAllocationWhere,
+          ...allocationActionableWhere,
           NOT: NON_AWAITING_SHIPPING_STATUSES.map((status) => ({
             shippingStatus: insensitiveEquals(status),
           })),

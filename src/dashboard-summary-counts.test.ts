@@ -38,9 +38,19 @@ describe('dashboard summary return review counts', () => {
     const summary = await getDashboardOperationalSummary('yalispor');
 
     expect(summary.returns.refundAttention).toBe(5);
+    expect(prismaMock.vendorAllocation.count).toHaveBeenNthCalledWith(1, {
+      where: { assignedVendorId: 'yalispor' },
+    });
+    expect(prismaMock.vendorAllocation.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        assignedVendorId: 'yalispor',
+        fullRefundTerminalFact: null,
+      },
+    }));
     expect(prismaMock.vendorAllocation.count).toHaveBeenNthCalledWith(2, {
       where: {
         assignedVendorId: 'yalispor',
+        fullRefundTerminalFact: null,
         order: {
           cancelledAt: null,
         },

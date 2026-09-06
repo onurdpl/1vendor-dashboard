@@ -28,6 +28,10 @@ import {
 } from './vendor-integration.status.service.js';
 import { createVendorIntegrationClientToken } from './vendor-integration.tokens.js';
 import './vendor-integration.types.js';
+import {
+  ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
+  AllocationActionabilityGuardError,
+} from '../orders/allocation-actionability-guard.service.js';
 
 type TokenCreateBody = {
   vendorIdentifier?: string;
@@ -329,6 +333,12 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
           requestId: request.requestId ?? request.id ?? null,
         });
       } catch (error) {
+        if (
+          error instanceof AllocationActionabilityGuardError &&
+          error.code === ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES.refundTerminal
+        ) {
+          return reply.code(409).send({ code: error.code, message: error.message });
+        }
         if (error instanceof VendorIntegrationOrderStateError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
@@ -385,6 +395,12 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
           requestId: request.requestId ?? request.id ?? null,
         });
       } catch (error) {
+        if (
+          error instanceof AllocationActionabilityGuardError &&
+          error.code === ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES.refundTerminal
+        ) {
+          return reply.code(409).send({ code: error.code, message: error.message });
+        }
         if (error instanceof CustomerCancellationShipmentHoldError) {
           return reply.code(error.statusCode).send({ code: error.code, message: error.message });
         }

@@ -3,8 +3,8 @@ import { prisma } from '../../db/prisma.js';
 import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
-import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
 import { assertNoPendingCustomerCancellationHold } from '../orders/customer-cancellation-hold.service.js';
+import { assertAllocationActionable } from '../orders/allocation-actionability-guard.service.js';
 
 const SHIPPED_STATUS = 'In Transit';
 
@@ -137,48 +137,6 @@ export async function updateVendorIntegrationOrderShipment(
   db: VendorIntegrationShipmentDb = prisma,
 ): Promise<VendorIntegrationShipmentResult | null> {
   const execute = async (tx: Prisma.TransactionClient) => {
-    const initialAllocation = await tx.vendorAllocation.findFirst({
-      where: {
-        id: input.allocationId,
-        assignedVendorId: input.context.vendorIdentifier,
-      },
-      select: {
-        order: {
-          select: {
-            sourceShopifyOrderId: true,
-          },
-        },
-      },
-    });
-    if (!initialAllocation) {
-      return null;
-    }
-
-    await acquireShopifyOrderTransactionLock(tx, initialAllocation.order.sourceShopifyOrderId);
-
-    const allocation = await tx.vendorAllocation.findFirst({
-      where: {
-        id: input.allocationId,
-        assignedVendorId: input.context.vendorIdentifier,
-      },
-      select: {
-        id: true,
-        assignedVendorId: true,
-        allocationStatus: true,
-        cancellationReason: true,
-        order: {
-          select: {
-            cancelledAt: true,
-            sourceShopifyOrderId: true,
-          },
-        },
-      },
-    });
-
-    if (!allocation) {
-      return null;
-    }
-
     const existingEvent = await tx.vendorIntegrationShipmentEvent.findUnique({
       where: {
         clientId_vendorAllocationId_idempotencyKey: {
@@ -207,6 +165,42 @@ export async function updateVendorIntegrationOrderShipment(
         idempotent: true,
         allocation: serializeShipment(existingEvent.vendorAllocation),
       };
+    }
+
+    const accessibleAllocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
+      },
+      select: { id: true },
+    });
+    if (!accessibleAllocation) {
+      return null;
+    }
+
+    await assertAllocationActionable(tx, input.allocationId);
+
+    const allocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        allocationStatus: true,
+        cancellationReason: true,
+        order: {
+          select: {
+            cancelledAt: true,
+            sourceShopifyOrderId: true,
+          },
+        },
+      },
+    });
+
+    if (!allocation) {
+      return null;
     }
 
     assertAllocationIsOperational(allocation);

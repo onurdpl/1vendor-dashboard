@@ -166,6 +166,7 @@ function createSplitDb(sourceOverrides: Record<string, unknown> = {}) {
   }
 
   const tx = {
+    $queryRaw: async () => [],
     vendorAllocation: {
       findUnique: async ({ where }: any) => hydrateAllocation(state.allocations.get(where.id)),
       create: async ({ data, include }: any) => {
@@ -521,6 +522,25 @@ describe('allocation split service', () => {
       ...first,
       idempotent: true,
     });
+  });
+
+  it('blocks a full-refund terminal split without child, line, event, history, or ledger writes', async () => {
+    const { db, state } = createSplitDb({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    });
+
+    await expect(splitAllocationForLineItemReject({
+      vendorAllocationId: 'alloc-source',
+      selectedVendorAllocationLineItemIds: ['line-2'],
+      reason: 'OUT_OF_STOCK',
+      confirmSplit: true,
+    }, db as never)).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(state.allocations.size).toBe(1);
+    expect(state.lines.get('line-2')?.vendorAllocationId).toBe('alloc-source');
+    expect(state.splitEvents.size).toBe(0);
+    expect(state.history).toHaveLength(0);
+    expect(state.ledgerOperations).toHaveLength(0);
   });
 
   it('blocks existing child without split event', async () => {

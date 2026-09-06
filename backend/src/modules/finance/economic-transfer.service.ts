@@ -27,6 +27,7 @@ import {
   customerCancellationFinanceHoldSelect,
   hasActiveCustomerCancellationFinanceHold,
 } from './customer-cancellation-finance-hold.service.js';
+import { assertAllocationActionable } from '../orders/allocation-actionability-guard.service.js';
 
 export type TransferAllocationEconomicsInput = {
   vendorAllocationId: string;
@@ -84,6 +85,7 @@ type EconomicTransferDb = Pick<
   | 'allocationAssignmentHistory'
   | 'financeEvent'
   | 'financeIntegrityAlert'
+  | '$queryRaw'
 > & {
   $transaction?: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 };
@@ -754,40 +756,75 @@ export async function transferAllocationEconomics(
     fromVendorId,
     toVendorId,
   });
-  const existingTransfer = await db.allocationEconomicTransfer.findUnique({
-    where: {
-      idempotencyKey,
-    },
-  });
-  if (existingTransfer) {
-    const status = normalizeTransferStatus(existingTransfer.status);
-    if (status === 'COMPLETED') {
-      return buildTransferResult(existingTransfer);
-    }
-    throw new EconomicTransferValidationError(`Economic transfer status ${existingTransfer.status} cannot be executed again.`, 409);
-  }
+  const transfer = await db.$transaction?.(async (tx) => {
+    await assertAllocationActionable(tx, vendorAllocationId);
 
-  const transfer = await db.allocationEconomicTransfer.create({
-    data: {
-      id: randomUUID(),
-      vendorAllocationId,
-      fromVendorId,
+    const currentAllocation = await loadAllocationForTransfer(tx, vendorAllocationId);
+    if (!currentAllocation) {
+      throw new EconomicTransferValidationError('Allocation not found.', 404);
+    }
+    if (hasActiveCustomerCancellationFinanceHold(currentAllocation)) {
+      throw new EconomicTransferValidationError(CUSTOMER_CANCELLATION_FINANCE_HOLD_REASON, 409);
+    }
+    const currentSourceLedger = assertAllocationTransferable({
+      allocation: currentAllocation,
       toVendorId,
-      status: 'PENDING',
-      reason,
-      adminActorUserId: input.adminUserId ?? null,
-      idempotencyKey,
-      pricingSnapshotJson: buildPricingSnapshot({
-        sourceLedger: preflight.sourceLedger,
+    });
+    if (currentSourceLedger.id !== preflight.sourceLedger.id) {
+      throw new EconomicTransferValidationError('Active sale ledger changed during economic transfer.', 409);
+    }
+    assertLedgerBlockers(currentSourceLedger);
+    await assertNoOpenFinanceIntegrityAlertForMoneyMovement({
+      vendorAllocationId: currentAllocation.id,
+    }, tx);
+
+    const existingTransfer = await tx.allocationEconomicTransfer.findUnique({
+      where: {
+        idempotencyKey,
+      },
+    });
+    if (existingTransfer) {
+      const status = normalizeTransferStatus(existingTransfer.status);
+      if (status === 'COMPLETED') {
+        return existingTransfer;
+      }
+      throw new EconomicTransferValidationError(
+        `Economic transfer status ${existingTransfer.status} cannot be executed again.`,
+        409,
+      );
+    }
+
+    return tx.allocationEconomicTransfer.create({
+      data: {
+        id: randomUUID(),
+        vendorAllocationId,
         fromVendorId,
         toVendorId,
-      }),
-    },
+        status: 'PENDING',
+        reason,
+        adminActorUserId: input.adminUserId ?? null,
+        idempotencyKey,
+        pricingSnapshotJson: buildPricingSnapshot({
+          sourceLedger: currentSourceLedger,
+          fromVendorId,
+          toVendorId,
+        }),
+      },
+    });
   });
+
+  if (!transfer) {
+    throw new Error('Database transaction support is required for economic transfer.');
+  }
+  if (normalizeTransferStatus(transfer.status) === 'COMPLETED') {
+    return buildTransferResult(transfer);
+  }
 
   const affectedLedgerIds = [preflight.sourceLedger.id];
   try {
     const completed = await db.$transaction?.(async (tx) => {
+      await assertAllocationActionable(tx, vendorAllocationId);
+
       const allocation = await loadAllocationForTransfer(tx, vendorAllocationId);
       if (!allocation) {
         throw new EconomicTransferValidationError('Allocation not found.', 404);
@@ -994,6 +1031,8 @@ export async function retryFailedEconomicTransfer(
       if (!FAILED_TRANSFER_STATUSES.has(currentStatus)) {
         throw new EconomicTransferValidationError(`Economic transfer status ${currentTransfer.status} cannot be retried.`, 409);
       }
+
+      await assertAllocationActionable(tx, currentTransfer.vendorAllocationId);
 
       const currentAllocation = await loadAllocationForTransfer(tx, currentTransfer.vendorAllocationId);
       if (!currentAllocation) {

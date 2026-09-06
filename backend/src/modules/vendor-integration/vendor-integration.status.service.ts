@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import { isFullOrderCancelled } from '../orders/full-order-cancellation-policy.js';
 import { VendorIntegrationOrderStateError } from './vendor-integration.errors.js';
 import type { VendorIntegrationContext } from './vendor-integration.types.js';
+import { assertAllocationActionable } from '../orders/allocation-actionability-guard.service.js';
 
 export const VENDOR_INTEGRATION_STATUSES = [
   'acknowledged',
@@ -37,6 +38,13 @@ export type VendorIntegrationStatusResult = {
 };
 
 const ALLOWED_STATUS_SET = new Set<string>(VENDOR_INTEGRATION_STATUSES);
+
+type VendorIntegrationStatusDb = Pick<
+  Prisma.TransactionClient,
+  '$queryRaw' | 'vendorAllocation' | 'vendorIntegrationStatusEvent'
+> & {
+  $transaction?: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
+};
 
 export function isVendorIntegrationStatus(value: string): value is VendorIntegrationStatus {
   return ALLOWED_STATUS_SET.has(value);
@@ -78,108 +86,127 @@ function assertAllocationIsOperational(allocation: {
 
 export async function updateVendorIntegrationOrderStatus(
   input: VendorIntegrationStatusInput,
-  db: Pick<Prisma.TransactionClient, 'vendorAllocation' | 'vendorIntegrationStatusEvent'> = prisma,
+  db: VendorIntegrationStatusDb = prisma,
 ): Promise<VendorIntegrationStatusResult | null> {
-  const existingEvent = await db.vendorIntegrationStatusEvent.findUnique({
-    where: {
-      clientId_vendorAllocationId_idempotencyKey: {
-        clientId: input.context.clientId,
-        vendorAllocationId: input.allocationId,
-        idempotencyKey: input.idempotencyKey,
+  const execute = async (tx: Prisma.TransactionClient) => {
+    const existingEvent = await tx.vendorIntegrationStatusEvent.findUnique({
+      where: {
+        clientId_vendorAllocationId_idempotencyKey: {
+          clientId: input.context.clientId,
+          vendorAllocationId: input.allocationId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
-    },
-    select: {
-      vendorAllocation: {
-        select: {
-          id: true,
-          assignedVendorId: true,
-          vendorIntegrationStatus: true,
-          vendorIntegrationStatusMessage: true,
-          vendorIntegrationStatusUpdatedAt: true,
-          vendorIntegrationProvider: true,
-          lastVendorIntegrationRequestId: true,
-          cancellationReason: true,
-          order: {
-            select: {
-              cancelledAt: true,
+      select: {
+        vendorAllocation: {
+          select: {
+            id: true,
+            assignedVendorId: true,
+            vendorIntegrationStatus: true,
+            vendorIntegrationStatusMessage: true,
+            vendorIntegrationStatusUpdatedAt: true,
+            vendorIntegrationProvider: true,
+            lastVendorIntegrationRequestId: true,
+            cancellationReason: true,
+            order: {
+              select: {
+                cancelledAt: true,
+              },
             },
           },
         },
       },
-    },
-  });
+    });
 
-  if (existingEvent) {
-    return {
-      idempotent: true,
-      allocation: serializeAllocationStatus(existingEvent.vendorAllocation),
-    };
-  }
+    if (existingEvent) {
+      return {
+        idempotent: true,
+        allocation: serializeAllocationStatus(existingEvent.vendorAllocation),
+      };
+    }
 
-  const allocation = await db.vendorAllocation.findFirst({
-    where: {
-      id: input.allocationId,
-      assignedVendorId: input.context.vendorIdentifier,
-    },
-    select: {
-      id: true,
-      assignedVendorId: true,
-      cancellationReason: true,
-      order: {
-        select: {
-          cancelledAt: true,
+    const accessibleAllocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
+      },
+      select: { id: true },
+    });
+    if (!accessibleAllocation) {
+      return null;
+    }
+
+    await assertAllocationActionable(tx, input.allocationId);
+
+    const allocation = await tx.vendorAllocation.findFirst({
+      where: {
+        id: input.allocationId,
+        assignedVendorId: input.context.vendorIdentifier,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        cancellationReason: true,
+        order: {
+          select: {
+            cancelledAt: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!allocation) {
-    return null;
-  }
-  assertAllocationIsOperational(allocation);
+    if (!allocation) {
+      return null;
+    }
+    assertAllocationIsOperational(allocation);
 
-  const now = new Date();
-  const message = normalizeMessage(input.message);
-  const updated = await db.vendorAllocation.update({
-    where: {
-      id: allocation.id,
-    },
-    data: {
-      vendorIntegrationStatus: input.status,
-      vendorIntegrationStatusMessage: message,
-      vendorIntegrationStatusUpdatedAt: now,
-      vendorIntegrationProvider: input.context.providerName,
-      lastVendorIntegrationRequestId: input.requestId ?? null,
-    },
-    select: {
-      id: true,
-      assignedVendorId: true,
-      vendorIntegrationStatus: true,
-      vendorIntegrationStatusMessage: true,
-      vendorIntegrationStatusUpdatedAt: true,
-      vendorIntegrationProvider: true,
-      lastVendorIntegrationRequestId: true,
-    },
-  });
+    const now = new Date();
+    const message = normalizeMessage(input.message);
+    const updated = await tx.vendorAllocation.update({
+      where: {
+        id: allocation.id,
+      },
+      data: {
+        vendorIntegrationStatus: input.status,
+        vendorIntegrationStatusMessage: message,
+        vendorIntegrationStatusUpdatedAt: now,
+        vendorIntegrationProvider: input.context.providerName,
+        lastVendorIntegrationRequestId: input.requestId ?? null,
+      },
+      select: {
+        id: true,
+        assignedVendorId: true,
+        vendorIntegrationStatus: true,
+        vendorIntegrationStatusMessage: true,
+        vendorIntegrationStatusUpdatedAt: true,
+        vendorIntegrationProvider: true,
+        lastVendorIntegrationRequestId: true,
+      },
+    });
 
-  await db.vendorIntegrationStatusEvent.create({
-    data: {
-      clientId: input.context.clientId,
-      vendorAllocationId: allocation.id,
-      vendorIdentifier: input.context.vendorIdentifier,
-      providerName: input.context.providerName,
-      status: input.status,
-      message,
-      idempotencyKey: input.idempotencyKey,
-      requestId: input.requestId ?? null,
-    },
-    select: {
-      id: true,
-    },
-  });
+    await tx.vendorIntegrationStatusEvent.create({
+      data: {
+        clientId: input.context.clientId,
+        vendorAllocationId: allocation.id,
+        vendorIdentifier: input.context.vendorIdentifier,
+        providerName: input.context.providerName,
+        status: input.status,
+        message,
+        idempotencyKey: input.idempotencyKey,
+        requestId: input.requestId ?? null,
+      },
+      select: {
+        id: true,
+      },
+    });
 
-  return {
-    idempotent: false,
-    allocation: serializeAllocationStatus(updated),
+    return {
+      idempotent: false,
+      allocation: serializeAllocationStatus(updated),
+    };
   };
+
+  return db.$transaction
+    ? db.$transaction(execute)
+    : execute(db as Prisma.TransactionClient);
 }

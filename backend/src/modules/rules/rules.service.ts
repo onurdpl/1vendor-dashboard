@@ -24,6 +24,7 @@ import {
   fullOrderOperationalAllocationWhere,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
+import { allocationActionableWhere } from '../orders/allocation-actionability-policy.service.js';
 
 type SignalDefinition = {
   id: string;
@@ -383,6 +384,7 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
     where: {
       assignedVendorId: options.vendorId ?? undefined,
       ...fullOrderOperationalAllocationWhere,
+      ...allocationActionableWhere,
       updatedAt: {
         lt: staleFulfillmentCutoff,
       },
@@ -710,6 +712,11 @@ export async function listOperationalSignals(options: {
     where: {
       vendorId: options.vendorId ?? undefined,
       status: options.status ?? OperationalSignalStatus.ACTIVE,
+      OR: [
+        { allocationId: null },
+        { sourceArea: { not: OperationalSignalSourceArea.FULFILLMENT } },
+        { allocation: allocationActionableWhere },
+      ],
       sourceArea: options.includeInternal
         ? undefined
         : {
@@ -748,6 +755,11 @@ export async function listDashboardOperationalSignals(options: {
     where: {
       vendorId: options.vendorId ?? undefined,
       status: options.status ?? OperationalSignalStatus.ACTIVE,
+      OR: [
+        { allocationId: null },
+        { sourceArea: { not: OperationalSignalSourceArea.FULFILLMENT } },
+        { allocation: allocationActionableWhere },
+      ],
       sourceArea: options.includeInternal
         ? undefined
         : {

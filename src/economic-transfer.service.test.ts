@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
   vendor: {
     findUnique: vi.fn(),
   },
@@ -184,6 +185,7 @@ function setupDb(input: {
   const histories: Array<Record<string, unknown>> = [];
 
   prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+  prismaMock.$queryRaw.mockResolvedValue([]);
   prismaMock.vendor.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
     vendors.has(where.id) ? { id: where.id } : null,
   );
@@ -377,6 +379,9 @@ describe('economic transfer service', () => {
       allocationId: 'alloc-1',
       status: 'COMPLETED',
     });
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.allocationEconomicTransfer.create.mock.invocationCallOrder[0],
+    );
     const sourceLedger = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-a-sale-1001');
     const targetLedger = db.allocation.financeEntries.find((ledger) => ledger.id === 'fin-vendor-b-sale-1001-alloc-1');
     expect(sourceLedger).toMatchObject({
@@ -426,6 +431,19 @@ describe('economic transfer service', () => {
         financeLedgerEntryId: 'fin-vendor-b-sale-1001-alloc-1',
       }),
     ]));
+  });
+
+  it('blocks a full-refund terminal transfer before a pending claim or forward reassignment write', async () => {
+    const db = setupDb({
+      allocation: buildAllocation({ fullRefundTerminalFact: { id: 'terminal-fact-1' } }),
+    });
+
+    await expect(runTransfer()).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.allocationEconomicTransfer.create).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(db.transfers).toHaveLength(0);
+    expect(db.allocation.assignedVendorId).toBe('vendor-a');
   });
 
   it.each(['PENDING', 'APPROVED_FOR_REFUND'] as const)(

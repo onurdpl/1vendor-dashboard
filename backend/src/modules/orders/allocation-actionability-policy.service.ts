@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 export const ALLOCATION_ACTIONABILITY_REASONS = {
   refundTerminal: 'ALLOCATION_REFUND_TERMINAL',
 } as const;
@@ -21,3 +23,7 @@ export function evaluateAllocationActionability(input: {
 
   return { actionable: true, reason: null };
 }
+
+export const allocationActionableWhere = {
+  fullRefundTerminalFact: null,
+} satisfies Prisma.VendorAllocationWhereInput;

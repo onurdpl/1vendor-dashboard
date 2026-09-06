@@ -16,6 +16,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorAllocation: {
     findMany: vi.fn(),
+    findUnique: vi.fn(),
     findFirst: vi.fn(),
     update: vi.fn(),
   },
@@ -386,6 +387,16 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
     prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation()]);
     prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildAllocation(),
+      sourceShopifyOrderId: 'shopify-order-db-1001',
+      reassignmentRequired: false,
+      fullRefundTerminalFact: null,
+      order: {
+        id: 'shopify-order-db-1001',
+        sourceShopifyOrderId: '1001',
+      },
+    });
     prismaMock.vendorAllocation.update.mockResolvedValue({
       id: 'alloc-sporjinal-1',
       assignedVendorId: 'sporjinal',
@@ -446,13 +457,13 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorAllocation.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        where: { assignedVendorId: 'sporjinal' },
+        where: { assignedVendorId: 'sporjinal', fullRefundTerminalFact: null },
       }),
     );
     expect(prismaMock.vendorAllocation.findMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        where: { assignedVendorId: 'yalispor' },
+        where: { assignedVendorId: 'yalispor', fullRefundTerminalFact: null },
       }),
     );
   });
@@ -522,6 +533,7 @@ describe('vendor integration API foundation', () => {
       expect.objectContaining({
         where: {
           assignedVendorId: 'sporjinal',
+          fullRefundTerminalFact: null,
         },
         take: 26,
       }),
@@ -618,6 +630,7 @@ describe('vendor integration API foundation', () => {
       expect.objectContaining({
         where: {
           assignedVendorId: 'sporjinal',
+          fullRefundTerminalFact: null,
         },
       }),
     );
@@ -632,7 +645,7 @@ describe('vendor integration API foundation', () => {
     expect(response.statusCode).toBe(200);
     expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { assignedVendorId: 'sporjinal' },
+        where: { assignedVendorId: 'sporjinal', fullRefundTerminalFact: null },
         take: 26,
       }),
     );
@@ -871,6 +884,34 @@ describe('vendor integration API foundation', () => {
     expect(response.statusCode).toBe(409);
     expect(response.payload).toEqual({ message: 'Order is cancelled and cannot be updated.' });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks terminal status mutation with 409 before allocation or status-event writes', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildAllocation(),
+      sourceShopifyOrderId: 'local-shopify-order-cuid',
+      reassignmentRequired: false,
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+      order: { id: 'local-shopify-order-cuid', sourceShopifyOrderId: '1001' },
+    });
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      { authorization: 'Bearer write-token', 'idempotency-key': 'terminal-status-key' },
+      { status: 'processing' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({
+      code: 'ALLOCATION_REFUND_TERMINAL',
+      message: 'Allocation is operationally closed by a verified full refund.',
+    });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationStatusEvent.create).not.toHaveBeenCalled();
+    const lock = prismaMock.$queryRaw.mock.calls[0]?.[0] as { values?: unknown[] };
+    expect(lock.values).toContain('1001');
+    expect(lock.values).not.toContain('local-shopify-order-cuid');
   });
 
   it('allows the same vendor integration token to write after vendor activation', async () => {
@@ -1166,6 +1207,31 @@ describe('vendor integration API foundation', () => {
     expect(response.statusCode).toBe(409);
     expect(response.payload).toEqual({ message: 'Order is cancelled and cannot receive shipment updates.' });
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('blocks terminal shipment mutation with 409 without tracking or shipment-event writes', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildAllocation(),
+      sourceShopifyOrderId: 'local-shopify-order-cuid',
+      reassignmentRequired: false,
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+      order: { id: 'local-shopify-order-cuid', sourceShopifyOrderId: '1001' },
+    });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      { authorization: 'Bearer write-token', 'idempotency-key': 'terminal-shipment-key' },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.payload).toEqual({
+      code: 'ALLOCATION_REFUND_TERMINAL',
+      message: 'Allocation is operationally closed by a verified full refund.',
+    });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
   });
 
   it('rejects vendor integration shipment writes under the canonical order lock while cancellation is pending', async () => {

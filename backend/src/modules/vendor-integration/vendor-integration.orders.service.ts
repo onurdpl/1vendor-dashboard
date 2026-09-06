@@ -308,6 +308,7 @@ export async function listVendorIntegrationOrders(
   const cursor = normalizeCursor(query.cursor);
   const where: Prisma.VendorAllocationWhereInput = {
     assignedVendorId: vendorIdentifier,
+    fullRefundTerminalFact: null,
     ...(status ? { allocationStatus: status } : {}),
   };
   const allocations = await prisma.vendorAllocation.findMany({

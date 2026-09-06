@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
   vendorAllocation: {
+    findUnique: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     update: vi.fn(),
@@ -373,6 +375,17 @@ describe('vendor order reject operational hold', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    prismaMock.$queryRaw.mockResolvedValue([]);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildRejectAllocation(),
+      sourceShopifyOrderId: 'shopify-order-db-1088',
+      reassignmentRequired: false,
+      order: {
+        id: 'shopify-order-db-1088',
+        sourceShopifyOrderId: '1088',
+      },
+      fullRefundTerminalFact: null,
+    });
     enqueueProductPanelVariantDisableEventsMock.mockResolvedValue([]);
     triggerProductPanelVariantDisableAutoSendMock.mockReturnValue({
       scheduled: false,
@@ -442,6 +455,7 @@ describe('vendor order reject operational hold', () => {
     enqueueProductPanelVariantDisableEventsMock.mockResolvedValueOnce([productPanelEvent]);
     prismaMock.vendorAllocation.findFirst
       .mockResolvedValueOnce(buildRejectAllocation())
+      .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildDetailAllocation());
 
     const result = await rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
@@ -476,6 +490,9 @@ describe('vendor order reject operational hold', () => {
         actorUserId: 'user-1',
       },
     });
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.vendorAllocation.update.mock.invocationCallOrder[0],
+    );
     expect(enqueueProductPanelVariantDisableEventsMock).toHaveBeenCalledWith({
       allocationId: 'alloc-1088',
       reasonCode: 'OUT_OF_STOCK',
@@ -502,8 +519,30 @@ describe('vendor order reject operational hold', () => {
     expect(result.cancellationReason).toBe('OUT_OF_STOCK');
   });
 
+  it('blocks a full-refund terminal vendor reject before state, history, or Product Panel effects', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRejectAllocation());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildRejectAllocation(),
+      sourceShopifyOrderId: 'shopify-order-db-1088',
+      reassignmentRequired: false,
+      order: { id: 'shopify-order-db-1088', sourceShopifyOrderId: '1088' },
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    });
+
+    await expect(rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
+      reason: 'OUT_OF_STOCK',
+      note: 'Missing stock',
+    })).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+    expect(enqueueProductPanelVariantDisableEventsMock).not.toHaveBeenCalled();
+    expect(triggerProductPanelVariantDisableAutoSendMock).not.toHaveBeenCalled();
+  });
+
   it('does not enqueue Product Panel availability events for non-stock rejection reasons', async () => {
     prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(
         buildDetailAllocation({
@@ -534,6 +573,7 @@ describe('vendor order reject operational hold', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     enqueueProductPanelVariantDisableEventsMock.mockRejectedValueOnce(new Error('outbox unavailable'));
     prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildDetailAllocation());
 
@@ -566,6 +606,7 @@ describe('vendor order reject operational hold', () => {
       throw new Error('scheduler unavailable');
     });
     prismaMock.vendorAllocation.findFirst
+      .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildRejectAllocation())
       .mockResolvedValueOnce(buildDetailAllocation());
 
@@ -614,7 +655,8 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('blocks already blocked allocations from being rejected again', async () => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRejectAllocation({ allocationStatus: 'VENDOR_BLOCKED' }));
+    const allocation = buildRejectAllocation({ allocationStatus: 'VENDOR_BLOCKED' });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     await expect(
       rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
@@ -632,7 +674,8 @@ describe('vendor order reject operational hold', () => {
     ['tracked allocation', { trackingNumber: 'TRK-1' }],
     ['carrier allocation', { carrier: 'Yurtiçi Kargo' }],
   ])('blocks %s from being rejected', async (_label, overrides) => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRejectAllocation(overrides));
+    const allocation = buildRejectAllocation(overrides);
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     await expect(
       rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
@@ -645,12 +688,13 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('blocks full Shopify cancelled orders from being rejected', async () => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildRejectAllocation({
+    const allocation = buildRejectAllocation({
       order: {
         cancelledAt: new Date('2026-07-11T10:00:00.000Z'),
         cancelReason: 'customer',
       },
-    }));
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     await expect(
       rejectVendorOrderAllocation('yalispor', 'alloc-1088', {
@@ -688,7 +732,8 @@ describe('vendor order reject operational hold', () => {
   });
 
   it('lets an admin return a blocked allocation to the assigned vendor', async () => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation());
+    const allocation = buildReturnableBlockedAllocation();
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     const result = await returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {
       note: 'Vendor confirmed stock is available.',
@@ -713,13 +758,36 @@ describe('vendor order reject operational hold', () => {
         actorUserId: 'admin-1',
       },
     });
+    expect(prismaMock.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.vendorAllocation.update.mock.invocationCallOrder[0],
+    );
     expect(result.allocations[0]?.allocationStatus).toBe('ACTIVE');
   });
 
+  it('blocks a full-refund terminal allocation from returning to ACTIVE without history', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue({
+      ...buildReturnableBlockedAllocation(),
+      sourceShopifyOrderId: 'shopify-order-db-1088',
+      order: { id: 'shopify-order-db-1088', sourceShopifyOrderId: '1088' },
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    });
+
+    await expect(returnBlockedAllocationToVendor(
+      'gid://shopify/Order/1088',
+      'alloc-1088',
+      { note: 'Return to vendor.' },
+    )).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.allocationAssignmentHistory.create).not.toHaveBeenCalled();
+  });
+
   it('does not return non-blocked allocations to vendor', async () => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation({
+    const allocation = buildReturnableBlockedAllocation({
       allocationStatus: 'ACTIVE',
-    }));
+    });
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     await expect(
       returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {
@@ -737,7 +805,8 @@ describe('vendor order reject operational hold', () => {
     ['tracked allocation', { trackingNumber: 'TRK-1' }],
     ['carrier allocation', { carrier: 'Yurtiçi Kargo' }],
   ])('does not return %s to vendor', async (_label, overrides) => {
-    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(buildReturnableBlockedAllocation(overrides));
+    const allocation = buildReturnableBlockedAllocation(overrides);
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(allocation).mockResolvedValueOnce(allocation);
 
     await expect(
       returnBlockedAllocationToVendor('gid://shopify/Order/1088', 'alloc-1088', {

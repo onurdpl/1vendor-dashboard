@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
@@ -30,6 +30,20 @@ import {
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+import {
+  ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
+  AllocationActionabilityGuardError,
+} from './allocation-actionability-guard.service.js';
+
+function replyWithAllocationTerminalError(reply: FastifyReply, error: unknown) {
+  if (
+    error instanceof AllocationActionabilityGuardError &&
+    error.code === ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES.refundTerminal
+  ) {
+    return reply.code(409).send({ code: error.code, message: error.message });
+  }
+  return null;
+}
 
 function readRequiredRouteParam(value: string | undefined, message: string) {
   const trimmed = value?.trim() ?? '';
@@ -145,6 +159,8 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           }),
         );
       } catch (error) {
+        const terminalReply = replyWithAllocationTerminalError(reply, error);
+        if (terminalReply) return terminalReply;
         if (error instanceof OrderRejectValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
@@ -228,6 +244,8 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           }),
         );
       } catch (error) {
+        const terminalReply = replyWithAllocationTerminalError(reply, error);
+        if (terminalReply) return terminalReply;
         if (error instanceof OrderRejectValidationError || error instanceof AllocationSplitValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
@@ -320,6 +338,8 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           }),
         );
       } catch (error) {
+        const terminalReply = replyWithAllocationTerminalError(reply, error);
+        if (terminalReply) return terminalReply;
         if (error instanceof OrderRejectValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
@@ -509,6 +529,8 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
           }),
         );
       } catch (error) {
+        const terminalReply = replyWithAllocationTerminalError(reply, error);
+        if (terminalReply) return terminalReply;
         if (error instanceof OrderRejectValidationError || error instanceof EconomicTransferValidationError) {
           return reply.code(error.statusCode).send({ message: error.message });
         }
