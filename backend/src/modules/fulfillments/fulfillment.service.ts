@@ -8,7 +8,11 @@ import {
   FULL_ORDER_CANCELLATION_BLOCKED_MESSAGE,
   isFullOrderCancelled,
 } from '../orders/full-order-cancellation-policy.js';
-import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import {
+  ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
+  AllocationActionabilityGuardError,
+  assertAllocationActionable,
+} from '../orders/allocation-actionability-guard.service.js';
 import {
   assertNoPendingCustomerCancellationHold,
   CustomerCancellationShipmentHoldError,
@@ -179,7 +183,7 @@ export function createFulfillmentService(env: AppEnv) {
 
     try {
       await prisma.$transaction(async (tx) => {
-        await acquireShopifyOrderTransactionLock(tx, allocation.order.sourceShopifyOrderId);
+        await assertAllocationActionable(tx, allocation.id);
 
         const currentAllocation = await tx.vendorAllocation.findUnique({
           where: {
@@ -273,6 +277,17 @@ export function createFulfillmentService(env: AppEnv) {
         });
       });
     } catch (error) {
+      if (
+        error instanceof AllocationActionabilityGuardError &&
+        error.code === ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES.refundTerminal
+      ) {
+        return {
+          ok: false,
+          code: 409,
+          errorCode: error.code,
+          message: error.message,
+        };
+      }
       if (error instanceof CustomerCancellationShipmentHoldError) {
         return {
           ok: false,

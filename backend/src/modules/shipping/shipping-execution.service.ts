@@ -46,7 +46,7 @@ import type {
   VendorShippingConfigUpdateDto,
 } from './shipping-execution.types.js';
 import { assertFullOrderOperationallyEligible } from '../orders/full-order-cancellation-policy.js';
-import { acquireShopifyOrderTransactionLock } from '../shopify/orders-create-ownership.service.js';
+import { assertAllocationActionable } from '../orders/allocation-actionability-guard.service.js';
 import {
   assertNoPendingCustomerCancellationHold,
   CustomerCancellationShipmentHoldError,
@@ -6278,6 +6278,8 @@ async function buildShipmentRequestPreview(
     throw new Error('allocationId is required.');
   }
 
+  await prisma.$transaction((tx) => assertAllocationActionable(tx, input.allocationId));
+
   const allocation = await prisma.vendorAllocation.findUnique({
     where: {
       id: input.allocationId,
@@ -6719,7 +6721,10 @@ async function assertShipmentProviderCallMayBegin(
     sourceShopifyOrderId: string;
   },
 ) {
-  await acquireShopifyOrderTransactionLock(tx, input.sourceShopifyOrderId);
+  const actionability = await assertAllocationActionable(tx, input.allocationId);
+  if (actionability.sourceShopifyOrderId !== input.sourceShopifyOrderId) {
+    throw new Error('Allocation is no longer available for shipment execution.');
+  }
 
   const currentAllocation = await tx.vendorAllocation.findUnique({
     where: {
@@ -7020,6 +7025,8 @@ export async function createShipmentExecution(
 }
 
 async function assertShipmentRetryOperationallyEligible(allocationId: string) {
+  await prisma.$transaction((tx) => assertAllocationActionable(tx, allocationId));
+
   const allocation = await prisma.vendorAllocation.findUnique({
     where: { id: allocationId },
     select: {

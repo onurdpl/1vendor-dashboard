@@ -191,6 +191,29 @@ describe('fulfillment tracking sync', () => {
     expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
   });
 
+  it('blocks terminal allocation tracking and Shopify fulfillment submission with a stable 409 code', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        sourceShopifyOrderId: '1039',
+      },
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+    const service = createFulfillmentService(env);
+
+    await expect(service.updateAllocationTracking(buildRequest())).resolves.toEqual({
+      ok: false,
+      code: 409,
+      errorCode: 'ALLOCATION_REFUND_TERMINAL',
+      message: 'Allocation is operationally closed by a verified full refund.',
+    });
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
   it('builds line-item scoped Shopify tracking payload from allocation data', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
     const service = createFulfillmentService(env);

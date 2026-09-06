@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
@@ -19,6 +19,20 @@ import {
 } from './shipping-execution.service.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
 import { CustomerCancellationShipmentHoldError } from '../orders/customer-cancellation-hold.service.js';
+import {
+  ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
+  AllocationActionabilityGuardError,
+} from '../orders/allocation-actionability-guard.service.js';
+
+function replyWithOperationalGuardError(reply: FastifyReply, error: unknown) {
+  if (
+    error instanceof AllocationActionabilityGuardError &&
+    error.code === ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES.refundTerminal
+  ) {
+    return reply.code(409).send({ code: error.code, message: error.message });
+  }
+  return null;
+}
 
 function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
   const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
@@ -87,6 +101,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           },
         );
       } catch (error) {
+        const guardReply = replyWithOperationalGuardError(reply, error);
+        if (guardReply) return guardReply;
         if (error instanceof CustomerCancellationShipmentHoldError) {
           return reply.code(error.statusCode).send({ code: error.code, message: error.message });
         }
@@ -117,6 +133,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           vendorId,
         });
       } catch (error) {
+        const guardReply = replyWithOperationalGuardError(reply, error);
+        if (guardReply) return guardReply;
         if (error instanceof CustomerCancellationShipmentHoldError) {
           return reply.code(error.statusCode).send({ code: error.code, message: error.message });
         }
@@ -168,6 +186,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           actorRole: request.authUser?.role,
         });
       } catch (error) {
+        const guardReply = replyWithOperationalGuardError(reply, error);
+        if (guardReply) return guardReply;
         if (error instanceof CustomerCancellationShipmentHoldError) {
           return reply.code(error.statusCode).send({ code: error.code, message: error.message });
         }
@@ -327,6 +347,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           notificationUrl: resolveNotificationUrl(request),
         });
       } catch (error) {
+        const guardReply = replyWithOperationalGuardError(reply, error);
+        if (guardReply) return guardReply;
         if (error instanceof CustomerCancellationShipmentHoldError) {
           return reply.code(error.statusCode).send({ code: error.code, message: error.message });
         }

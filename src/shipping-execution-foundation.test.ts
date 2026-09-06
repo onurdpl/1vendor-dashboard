@@ -290,7 +290,7 @@ function buildNavlungoReturnRecordWithShipmentExecutions(
 }
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
-  return {
+  const base = {
     id: 'alloc-1',
     assignedVendorId: 'sporjinal',
     sourceShopifyOrderId: '7616544244049',
@@ -302,6 +302,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     fulfillment: null,
     order: {
       id: 'order-1',
+      sourceShopifyOrderId: '7616544244049',
       customerName: 'Test Customer',
       customerEmail: 'customer@example.com',
     },
@@ -315,7 +316,14 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
         },
       },
     ],
+  };
+  return {
+    ...base,
     ...overrides,
+    order: {
+      ...base.order,
+      ...((overrides.order as Record<string, unknown> | undefined) ?? {}),
+    },
   };
 }
 
@@ -514,6 +522,190 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
+  it('blocks terminal allocation preview before Kargonomi destination lookup and maps the route error to 409', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+    const kargonomiDestinationClient = {
+      listStates: vi.fn(),
+      listCities: vi.fn(),
+    };
+
+    await expect(previewShipmentExecution(
+      { allocationId: 'alloc-1', provider: 'kargonomi' },
+      {
+        vendorId: 'sporjinal',
+        env: { ...env, SHIPPING_PROVIDER: 'kargonomi' },
+        kargonomiDestinationClient,
+      },
+    )).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    const posts = new Map<string, (request: unknown, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => posts.set(path, args.at(-1) as never)),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+    registerShippingExecutionRoutes(app as never, env);
+    const routeResult = await posts.get('/shipments/preview')?.(
+      {
+        body: { allocationId: 'alloc-1', provider: 'kargonomi' },
+        vendorContext: { vendorId: 'sporjinal' },
+        headers: {},
+        protocol: 'https',
+        hostname: 'example.test',
+      },
+      reply,
+    );
+
+    expect(routeResult).toEqual({
+      status: 409,
+      body: {
+        code: 'ALLOCATION_REFUND_TERMINAL',
+        message: 'Allocation is operationally closed by a verified full refund.',
+      },
+    });
+    expect(kargonomiDestinationClient.listStates).not.toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listCities).not.toHaveBeenCalled();
+  });
+
+  it('blocks terminal allocation Kargonomi create before destination lookup, provider call, or durable claim', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    const kargonomiDestinationClient = {
+      listStates: vi.fn(),
+      listCities: vi.fn(),
+    };
+
+    await expect(createShipmentExecution(
+      { allocationId: 'alloc-1', provider: 'kargonomi' },
+      {
+        env: { ...env, SHIPPING_PROVIDER: 'kargonomi' },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient,
+      },
+    )).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listStates).not.toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listCities).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('re-reads terminal state under the shared order lock before creating the shipment claim', async () => {
+    let allocationReadCount = 0;
+    prismaMock.vendorAllocation.findUnique.mockImplementation(async () => {
+      allocationReadCount += 1;
+      return buildAllocation({
+        fullRefundTerminalFact: allocationReadCount >= 6 ? { id: 'terminal-fact-race-winner' } : null,
+      });
+    });
+    const adapter = buildAdapter();
+
+    await expect(createShipmentExecution(
+      { allocationId: 'alloc-1' },
+      { env, vendorId: 'sporjinal', adapter },
+    )).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('persists provider result and shipment history when a valid durable claim predates terminal closure', async () => {
+    let terminalFactPresent = false;
+    prismaMock.vendorAllocation.findUnique.mockImplementation(async () => buildAllocation({
+      fullRefundTerminalFact: terminalFactPresent ? { id: 'terminal-fact-after-claim' } : null,
+    }));
+    const adapter = buildAdapter();
+    adapter.createShipment.mockImplementation(async () => {
+      terminalFactPresent = true;
+      return {
+        providerShipmentId: 'hpj-before-terminal',
+        trackingNumber: 'TRK-BEFORE-TERMINAL',
+        trackingUrl: 'https://tracking.example/TRK-BEFORE-TERMINAL',
+        labelUrl: 'https://labels.example/TRK-BEFORE-TERMINAL.pdf',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: { ok: true },
+      };
+    });
+
+    const result = await createShipmentExecution(
+      { allocationId: 'alloc-1' },
+      { env, vendorId: 'sporjinal', adapter },
+    );
+
+    expect(prismaMock.shipmentExecution.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shipmentStatus: 'PENDING' }),
+      }),
+    );
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerShipmentId: 'hpj-before-terminal',
+          trackingNumber: 'TRK-BEFORE-TERMINAL',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      providerShipmentId: 'hpj-before-terminal',
+      trackingNumber: 'TRK-BEFORE-TERMINAL',
+      shipmentStatus: 'created',
+    });
+  });
+
+  it('blocks terminal allocation shipment retry before provider call or retry claim', async () => {
+    const failedExecution = buildShipmentExecution({ shipmentStatus: 'FAILED' });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(failedExecution);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+    const adapter = buildAdapter();
+
+    await expect(retryFailedShipmentExecution(failedExecution.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks terminal allocation dry-run retry before provider call or retry claim', async () => {
+    const dryRunExecution = buildShipmentExecution({
+      shipmentStatus: 'PENDING',
+      responseSnapshot: { dryRun: true, disabledGates: ['SHIPPING_EXECUTION_ENABLED'] },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(dryRunExecution);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+    const adapter = buildAdapter();
+
+    await expect(retryDryRunShipmentExecution(dryRunExecution.id, {
+      env,
+      actorRole: 'admin',
+      adapter,
+    })).rejects.toMatchObject({ code: 'ALLOCATION_REFUND_TERMINAL' });
+
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
   it('blocks shipment retry from canonical cancellation metadata alone', async () => {
     const failedExecution = buildShipmentExecution({ shipmentStatus: 'FAILED' });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(failedExecution);
@@ -544,7 +736,7 @@ describe('shipping execution foundation', () => {
       statusCode: 409,
     });
 
-    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
@@ -564,7 +756,7 @@ describe('shipping execution foundation', () => {
       statusCode: 409,
     });
 
-    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
@@ -586,7 +778,7 @@ describe('shipping execution foundation', () => {
       statusCode: 409,
     });
 
-    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
@@ -4716,7 +4908,7 @@ describe('shipping execution foundation', () => {
   });
 
   it('preserves vendor isolation when creating shipments', async () => {
-    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
         assignedVendorId: 'other-vendor',
       }),
