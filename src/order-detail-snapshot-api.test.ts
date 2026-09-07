@@ -24,6 +24,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     assignedVendorId: 'sporjinal',
     originalVendorId: 'sporjinal',
     allocationStatus: 'ACTIVE',
+    fullRefundTerminalFact: null,
     fulfillmentStatus: 'Pending',
     shippingStatus: 'Awaiting Shipment',
     carrier: null,
@@ -114,6 +115,7 @@ describe('order detail snapshot API mapping', () => {
     const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
 
     expect(result?.trackingUrl).toBe('https://tracking.example/SKU-1001');
+    expect(result?.operationalActionability).toEqual({ actionable: true, reason: null });
     expect(result?.shipmentCreatedAt).toBe('2026-06-02T12:00:00.000Z');
     expect(result?.orderSnapshot).toEqual({
       shopifyCreatedAt: '2026-06-01T09:55:00.000Z',
@@ -168,6 +170,38 @@ describe('order detail snapshot API mapping', () => {
       }),
     );
     expect(JSON.stringify(result)).not.toContain('rawPayload');
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          fullRefundTerminalFact: {
+            select: {
+              id: true,
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('keeps terminal detail accessible with unchanged raw lifecycle fields', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(buildAllocation({
+      fullRefundTerminalFact: { id: 'terminal-fact-1' },
+    }));
+
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+
+    expect(result).toMatchObject({
+      id: 'alloc-sporjinal-1001',
+      allocationStatus: 'ACTIVE',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      carrier: null,
+      trackingNumber: null,
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+    });
   });
 
   it('exposes a canonically converged refund status from the persisted order snapshot', async () => {

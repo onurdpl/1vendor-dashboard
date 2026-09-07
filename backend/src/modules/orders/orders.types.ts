@@ -11,6 +11,10 @@ export type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  operationalActionability: {
+    actionable: boolean;
+    reason: string | null;
+  };
   isCancelled: boolean;
   cancelledAt: string | null;
   cancelReason: string | null;

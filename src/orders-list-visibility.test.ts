@@ -18,6 +18,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     assignedVendorId: 'sporjinal',
     originalVendorId: 'sporjinal',
     allocationStatus: 'ACTIVE',
+    fullRefundTerminalFact: null,
     fulfillmentStatus: 'Processing',
     shippingStatus: 'label_created',
     trackingNumber: 'OTO-TRACK-1038',
@@ -75,6 +76,11 @@ describe('vendor orders list visibility', () => {
               shipmentUpdatedAt: true,
             },
           },
+          fullRefundTerminalFact: {
+            select: {
+              id: true,
+            },
+          },
           lineItems: {
             select: {
               quantity: true,
@@ -101,6 +107,10 @@ describe('vendor orders list visibility', () => {
         id: 'alloc-sporjinal-1038',
         sourceShopifyOrderNumber: '#1038',
         allocationStatus: 'ACTIVE',
+        operationalActionability: {
+          actionable: true,
+          reason: null,
+        },
         fulfillmentStatus: 'Processing',
         shippingStatus: 'label_created',
         carrier: 'try_oto',
@@ -112,5 +122,92 @@ describe('vendor orders list visibility', () => {
         shipmentUpdatedAt: '2026-05-18T12:00:00.000Z',
       }),
     ]);
+  });
+
+  it('keeps a terminal allocation visible with unchanged raw state and projects it as non-actionable', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([
+      buildAllocation({
+        allocationStatus: 'ACTIVE',
+        fulfillmentStatus: 'Pending',
+        shippingStatus: 'Awaiting Shipment',
+        carrier: null,
+        trackingNumber: null,
+        fullRefundTerminalFact: { id: 'terminal-fact-1' },
+      }),
+    ]);
+
+    const result = await listVendorOrders('sporjinal', { limit: 100, offset: 0 });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'alloc-sporjinal-1038',
+        allocationStatus: 'ACTIVE',
+        fulfillmentStatus: 'Pending',
+        shippingStatus: 'Awaiting Shipment',
+        carrier: null,
+        trackingNumber: null,
+        operationalActionability: {
+          actionable: false,
+          reason: 'ALLOCATION_REFUND_TERMINAL',
+        },
+      }),
+    ]);
+  });
+
+  it('derives actionability independently for allocations belonging to the same Shopify order', async () => {
+    const sharedOrder = {
+      sourceShopifyOrderId: 'gid://shopify/Order/2001',
+      sourceShopifyOrderNumber: '#2001',
+    };
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([
+      buildAllocation({
+        id: 'allocation-a',
+        order: sharedOrder,
+        fullRefundTerminalFact: { id: 'terminal-fact-a' },
+      }),
+      buildAllocation({
+        id: 'allocation-b',
+        order: sharedOrder,
+        fullRefundTerminalFact: null,
+      }),
+    ]);
+
+    const result = await listVendorOrders('sporjinal');
+
+    expect(result.map(({ id, operationalActionability }) => ({ id, operationalActionability }))).toEqual([
+      {
+        id: 'allocation-a',
+        operationalActionability: {
+          actionable: false,
+          reason: 'ALLOCATION_REFUND_TERMINAL',
+        },
+      },
+      {
+        id: 'allocation-b',
+        operationalActionability: {
+          actionable: true,
+          reason: null,
+        },
+      },
+    ]);
+  });
+
+  it('does not infer terminality from refund evidence when the terminal fact is absent', async () => {
+    prismaMock.vendorAllocation.findMany.mockResolvedValue([
+      buildAllocation({
+        refundRecords: [{ id: 'partial-refund-1' }],
+        fullRefundTerminalFact: null,
+      }),
+    ]);
+
+    const result = await listVendorOrders('sporjinal');
+
+    expect(result[0]).toMatchObject({
+      refundRecordCount: 1,
+      operationalActionability: {
+        actionable: true,
+        reason: null,
+      },
+    });
   });
 });

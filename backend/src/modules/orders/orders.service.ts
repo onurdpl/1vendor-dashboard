@@ -90,6 +90,7 @@ import {
 } from './customer-cancellation-exception.service.js';
 import { isPendingCustomerCancellationHoldState } from './customer-cancellation-hold.service.js';
 import { assertAllocationActionable } from './allocation-actionability-guard.service.js';
+import { evaluateAllocationActionability } from './allocation-actionability-policy.service.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -2292,6 +2293,11 @@ export async function listVendorOrders(
       assignedVendorId: true,
       originalVendorId: true,
       allocationStatus: true,
+      fullRefundTerminalFact: {
+        select: {
+          id: true,
+        },
+      },
       cancelRefundReviewStatus: true,
       fulfillmentStatus: true,
       shippingStatus: true,
@@ -2363,6 +2369,9 @@ export async function listVendorOrders(
       assignedVendorId: allocation.assignedVendorId,
       originalVendorId: allocation.originalVendorId,
       allocationStatus: allocation.allocationStatus,
+      operationalActionability: evaluateAllocationActionability({
+        fullRefundTerminalFactPresent: Boolean(allocation.fullRefundTerminalFact),
+      }),
       isCancelled: isFullOrderCancelled(allocation.order),
       cancelledAt: toIsoString(allocation.order.cancelledAt),
       cancelReason: allocation.order.cancelReason,
@@ -4010,6 +4019,11 @@ export async function getVendorOrderById(
     include: {
       order: true,
       fulfillment: true,
+      fullRefundTerminalFact: {
+        select: {
+          id: true,
+        },
+      },
       shipmentExecutions: {
         orderBy: {
           createdAt: 'desc',
@@ -4117,6 +4131,9 @@ export async function getVendorOrderById(
     assignedVendorId: allocation.assignedVendorId,
     originalVendorId: allocation.originalVendorId,
     allocationStatus: allocation.allocationStatus,
+    operationalActionability: evaluateAllocationActionability({
+      fullRefundTerminalFactPresent: Boolean(allocation.fullRefundTerminalFact),
+    }),
     isCancelled: isFullOrderCancelled(allocation.order),
     cancelledAt: toIsoString(allocation.order.cancelledAt),
     cancelReason: allocation.order.cancelReason,
