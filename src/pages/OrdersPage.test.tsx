@@ -1417,7 +1417,7 @@ describe('OrdersPage control center', () => {
     expect(blockedRow).not.toHaveTextContent(formatDateTime(firstRejectAt, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'Not synced'));
   });
 
-  it('shows refunded completion story for vendor-blocked orders resolved by refund', async () => {
+  it('does not infer terminal operational closure from vendor-blocked refund evidence', async () => {
     setVendorUser();
     const refundedBlockedOrder = buildAwaitingRejectableOrder({
       status: 'On Hold',
@@ -1445,24 +1445,23 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Vendor Blocked')).length).toBeGreaterThan(0);
     const axes = screen.getByLabelText('Order status axes');
     expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
     expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
-    expect(within(axes).getByText('Refunded')).toBeInTheDocument();
-    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
-    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Reject unavailable')).toHaveTextContent(
-      'Vendor rejection was resolved by Shopify refund. No further rejection action is required.',
+      'Vendor rejection already submitted. This order is awaiting Sporgym admin review.',
     );
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('No action required');
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review order');
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Refund is complete and fulfillment is no longer required for this order.',
+      'Review the blocked order before shipment work continues.',
     );
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
 
     expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
-    expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
   });
 
   it('clears shipment label success feedback when selecting another order', async () => {

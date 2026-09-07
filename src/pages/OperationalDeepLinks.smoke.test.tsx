@@ -88,6 +88,7 @@ function orderFixture(overrides: Partial<OrderDetail>): OrderDetail {
     assignmentHistory: [],
     fulfillmentActionState: 'awaiting_shipment',
     fulfillmentActionAvailable: true,
+    operationalActionability: { actionable: true, reason: null },
     fulfillmentStatus: 'Processing',
     shippingStatus: 'Awaiting Shipment',
     date: '2026-05-15T10:00:00Z',

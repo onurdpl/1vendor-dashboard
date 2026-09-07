@@ -2522,7 +2522,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).queryByText('TRY -599.88')).not.toBeInTheDocument();
   });
 
-  it('hides Estimated Earnings after a product refund plus terminal checkout shipping refund', async () => {
+  it('keeps refund finance presentation without inferring terminal operational closure', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2553,10 +2553,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
     expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
-    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+    const axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
   });
 
-  it('hides Estimated Earnings for a terminal shipping-only refund without product finance rows', async () => {
+  it('hides Estimated Earnings for resolved shipping refund evidence without inferring terminality', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2584,7 +2587,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+    const axes = screen.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
   });
 
   it('keeps Estimated Earnings for a non-terminal return without posted refund evidence', async () => {
@@ -2897,7 +2902,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
   });
 
-  it('shows refund-completed overlay for vendor-blocked orders resolved by Shopify refund', async () => {
+  it('keeps vendor-blocked operational state while retaining refund finance evidence', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2933,28 +2938,26 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Refunded')).length).toBeGreaterThan(0);
+    await screen.findByText('Vendor Blocked');
     const axes = screen.getByLabelText('Order status axes');
     expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
     expect(within(axes).getByText('Fulfillment')).toBeInTheDocument();
     expect(within(axes).getByText('Finance state')).toBeInTheDocument();
-    expect(within(axes).getByText('Refunded')).toBeInTheDocument();
-    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Awaiting Admin Resolution')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
 
     const alerts = screen.getByLabelText('Operational alerts');
-    expect(within(alerts).queryByText('Vendor rejected allocation')).not.toBeInTheDocument();
-    expect(within(alerts).queryByText(/Admin resolution required/i)).not.toBeInTheDocument();
+    expect(within(alerts).getByText('Vendor rejected allocation')).toBeInTheDocument();
+    expect(within(alerts).getByText(/Admin resolution required/i)).toBeInTheDocument();
 
-    const primaryStatus = screen.getByLabelText('Primary operational status');
-    expect(within(primaryStatus).getByText('Refund completed')).toBeInTheDocument();
-    expect(within(primaryStatus).getByText('Fulfillment is not required for this refunded order.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
 
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
-    expect(shipmentRequirement).toHaveTextContent('Fulfillment not required');
-    expect(shipmentRequirement).toHaveTextContent('Shipment work is closed');
+    expect(shipmentRequirement).toHaveTextContent('Blocked');
+    expect(shipmentRequirement).toHaveTextContent('Shipment work is paused');
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry shipment' })).not.toBeInTheDocument();
 
@@ -2964,11 +2967,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Vendor rejected selected items')).toBeInTheDocument();
-    expect(timelineScope.getByText('Refund processed')).toBeInTheDocument();
-    expect(timelineScope.getAllByText('Refund completed').length).toBeGreaterThan(0);
-    expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    expect(timelineScope.queryByText('Order review started')).not.toBeInTheDocument();
-    expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+    expect(timelineScope.queryByText('Refund processed')).not.toBeInTheDocument();
+    expect(timelineScope.queryByText('Refund completed')).not.toBeInTheDocument();
+    expect(timelineScope.getByText('Order review started')).toBeInTheDocument();
+    expect(timelineScope.getByText('Awaiting admin resolution')).toBeInTheDocument();
   });
 
   it('keeps a terminal allocation detail visible while removing shipment, tracking, reject, and split actions', async () => {
@@ -3031,7 +3033,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(terminalOrder.shippingStatus).toBe('Awaiting Shipment');
   });
 
-  it('keeps terminal refund status separate from admin monetary preview rows', async () => {
+  it('keeps refund finance presentation separate from non-terminal operational status', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -3088,7 +3090,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const axes = await screen.findByLabelText('Order status axes');
     expect(within(axes).getByText('Finance state')).toBeInTheDocument();
-    expect(within(axes).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).queryByText('Refund completed')).not.toBeInTheDocument();
 
     const snapshot = screen.getByLabelText('Shopify order snapshot');
     expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();

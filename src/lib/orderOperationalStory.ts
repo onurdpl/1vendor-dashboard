@@ -17,7 +17,6 @@ type OrderOperationalStoryInput = {
   cancelRefundReviewStatus?: string | null;
   outboundRefundAttemptStatus?: string | null;
   latestOutboundRefundAttemptStatus?: string | null;
-  hasResolvedRefundEvidence?: boolean | null;
   refundRecordCount?: number | null;
   refundedLineItems?: unknown[] | null;
   refundedItems?: unknown[] | null;
@@ -33,7 +32,6 @@ export type OperationalStoryState =
   | 'shopify_order_cancelled'
   | 'shopify_order_cancelled_conflict'
   | 'vendor_blocked_awaiting_admin_resolution'
-  | 'vendor_blocked_resolved_by_refund'
   | 'refunded_completed'
   | 'active_or_unknown';
 
@@ -88,14 +86,13 @@ function parseAmount(value: string | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function hasRefundEvidence(input: OrderOperationalStoryInput | null | undefined) {
+function hasCancellationConflictRefundEvidence(input: OrderOperationalStoryInput | null | undefined) {
   if (!input) {
     return false;
   }
 
   return Boolean(
-    input.hasResolvedRefundEvidence ||
-      (input.refundRecordCount ?? 0) > 0 ||
+    (input.refundRecordCount ?? 0) > 0 ||
       (input.refundedLineItems?.length ?? 0) > 0 ||
       (input.refundedItems?.length ?? 0) > 0 ||
       normalizeToken(input.outboundRefundAttemptStatus) === 'resolved' ||
@@ -106,31 +103,17 @@ function hasRefundEvidence(input: OrderOperationalStoryInput | null | undefined)
   );
 }
 
-export function isVendorBlockedResolvedByRefund(input: OrderOperationalStoryInput | null | undefined) {
-  if (!input || normalizeToken(input.allocationStatus) !== 'vendor_blocked') {
-    return false;
-  }
-
-  const reviewResolved = normalizeToken(input.cancelRefundReviewStatus) === 'resolved';
-  if (!reviewResolved) {
-    return false;
-  }
-
-  return hasRefundEvidence(input);
-}
-
 // Operational story projection should be centralized here before adding page-specific state copy.
 export function getOperationalStory(input: OrderOperationalStoryInput): OperationalStory {
   const reason = input.cancellationReason?.trim();
   const allocationStatus = normalizeToken(input.allocationStatus);
-  const resolvedByRefund = isVendorBlockedResolvedByRefund(input);
   const isFullOrderCancelled = input.isCancelled === true || Boolean(input.cancelledAt);
   const cancellationConflict =
     input.isCancellationConflict === true ||
     (
       isFullOrderCancelled &&
       (
-        hasRefundEvidence(input) ||
+        hasCancellationConflictRefundEvidence(input) ||
         ['fulfilled', 'partially_fulfilled'].includes(normalizeToken(input.fulfillmentStatus)) ||
         ['delivered', 'in_transit', 'label_created', 'shipped'].includes(normalizeToken(input.shippingStatus)) ||
         Boolean(input.trackingNumber?.trim()) ||
@@ -239,48 +222,6 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
     };
   }
 
-  if (resolvedByRefund) {
-    return {
-      state: 'vendor_blocked_resolved_by_refund',
-      resolvedByRefund: true,
-      primaryLabel: 'Refunded',
-      secondaryLabel: 'Fulfillment not required',
-      fulfillmentLabel: 'Fulfillment not required',
-      shippingLabel: 'Unavailable',
-      financeLabel: 'Refund completed',
-      nextActionLabel: 'No action required',
-      queueVisible: false,
-      actionVisibility: {
-        canCreateShipment: false,
-        canReject: false,
-        canTransfer: false,
-        canPreviewRefund: false,
-      },
-      timelineEvents: [
-        {
-          label: 'Vendor rejected allocation',
-          detail: reason ? `Reason: ${reason}.` : 'Vendor rejected allocation.',
-          tone: 'warning',
-        },
-        {
-          label: 'Refund processed',
-          detail: 'Shopify refund webhook recorded refund finance.',
-          tone: 'success',
-        },
-        {
-          label: 'Refund completed',
-          detail: 'Cancel/refund review resolved.',
-          tone: 'success',
-        },
-        {
-          label: 'Fulfillment not required',
-          detail: 'Shipment work is closed for the refunded allocation.',
-          tone: 'success',
-        },
-      ],
-    };
-  }
-
   if (allocationStatus === 'vendor_blocked') {
     return {
       state: 'vendor_blocked_awaiting_admin_resolution',
@@ -323,43 +264,6 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
     };
   }
 
-  if (
-    allocationStatus === 'refunded' ||
-    allocationStatus === 'refund_completed' ||
-    normalizeToken(input.fulfillmentStatus) === 'refunded' ||
-    input.hasResolvedRefundEvidence === true
-  ) {
-    return {
-      state: 'refunded_completed',
-      resolvedByRefund: true,
-      primaryLabel: 'Refunded',
-      secondaryLabel: 'Fulfillment not required',
-      fulfillmentLabel: 'Fulfillment not required',
-      shippingLabel: 'Unavailable',
-      financeLabel: 'Refund completed',
-      nextActionLabel: 'No action required',
-      queueVisible: false,
-      actionVisibility: {
-        canCreateShipment: false,
-        canReject: false,
-        canTransfer: false,
-        canPreviewRefund: false,
-      },
-      timelineEvents: [
-        {
-          label: 'Refund completed',
-          detail: 'Shopify refund is complete.',
-          tone: 'success',
-        },
-        {
-          label: 'Fulfillment not required',
-          detail: 'Shipment work is closed for the refunded allocation.',
-          tone: 'success',
-        },
-      ],
-    };
-  }
-
   return {
     state: 'active_or_unknown',
     resolvedByRefund: false,
@@ -382,26 +286,8 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
 
 export function getVendorBlockedOperationalStory(input: OrderOperationalStoryInput): VendorBlockedOperationalStory | null {
   const story = getOperationalStory(input);
-  if (story.state !== 'vendor_blocked_awaiting_admin_resolution' && story.state !== 'vendor_blocked_resolved_by_refund') {
+  if (story.state !== 'vendor_blocked_awaiting_admin_resolution') {
     return null;
-  }
-
-  if (story.state === 'vendor_blocked_resolved_by_refund') {
-    return {
-      ...story,
-      isVendorBlocked: true,
-      trackingLabel: story.fulfillmentLabel,
-      trackingHelper: 'Refund completed for this blocked allocation.',
-      workflowCopy: 'Refund completed',
-      shipmentLabel: story.shippingLabel,
-      nextAction: story.nextActionLabel,
-      nextActionDescription: 'Shopify refund is complete and fulfillment is no longer required for this allocation.',
-      rejectUnavailableTitle: 'Reject unavailable',
-      rejectUnavailableCopy: 'Vendor rejection was resolved by Shopify refund. No further rejection action is required.',
-      adminActionTitle: 'Refund completed',
-      adminActionCopy: 'Shopify refund processed. Fulfillment is not required.',
-      hideShipmentActions: !story.actionVisibility.canCreateShipment,
-    };
   }
 
   return {
