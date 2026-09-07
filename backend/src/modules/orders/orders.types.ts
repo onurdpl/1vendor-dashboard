@@ -3,6 +3,15 @@ import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import type { NavlungoCreatePostRequestSummaryDto } from '../shipping/shipping-execution.types.js';
 import type { CustomerRefundCompletion } from '../shopify/shopify-refund-monetary-evidence.js';
 
+export type VendorOrdersWorkflow = 'all' | 'awaitingShipment' | 'shipmentReview' | 'trackingMissing';
+
+export type VendorOrdersWorkflowSummaryDto = {
+  all: number;
+  awaitingShipment: number;
+  shipmentReview: number;
+  trackingMissing: number;
+};
+
 export type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;

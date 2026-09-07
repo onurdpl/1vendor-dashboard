@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
 import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
-import { listOrders } from './services/real/orders';
+import { getVendorOrdersWorkflowSummary, listOrders } from './services/real/orders';
 import { getAdminOperationsQueueDashboard, listAdminOperationsQueue } from './services/real/operations';
 import { queryKeys } from './lib/api/queryKeys';
 import { listDashboardReturns, listReturns } from './services/real/returns';
@@ -36,6 +36,21 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenNthCalledWith(2, '/returns?limit=25&offset=50');
     expect(apiClientGet).toHaveBeenNthCalledWith(3, '/admin/diagnostics/webhooks?limit=25&offset=50', expect.any(Object));
     expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?limit=25&offset=50', expect.any(Object));
+  });
+
+  it('passes validated vendor order workflow paging and reads its separate summary contract', async () => {
+    apiClientGet
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ all: 3, awaitingShipment: 2, shipmentReview: 2, trackingMissing: 1 });
+
+    await listOrders({ workflow: 'trackingMissing', limit: 25, offset: 50 });
+    await getVendorOrdersWorkflowSummary();
+
+    expect(apiClientGet).toHaveBeenNthCalledWith(
+      1,
+      '/orders?workflow=trackingMissing&limit=25&offset=50',
+    );
+    expect(apiClientGet).toHaveBeenNthCalledWith(2, '/orders/workflow-summary');
   });
 
   it('passes the operations queue type filter only when requested', async () => {

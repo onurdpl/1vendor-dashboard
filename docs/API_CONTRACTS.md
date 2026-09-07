@@ -58,6 +58,7 @@ The frontend currently uses mock transport in local/demo mode, but the same rout
 The current frontend directly or indirectly expects the following read endpoints:
 
 - `GET /orders`
+- `GET /orders/workflow-summary`
 - `GET /orders/:orderId`
 - `GET /admin/orders/:shopifyOrderId` (admin operational view)
 - `GET /returns`
@@ -102,12 +103,25 @@ Webhook processing lifecycle states:
 - Required auth: yes.
 - Vendor scoping rule: only orders for the authenticated user’s allowed vendor scope may be returned.
 - Expected success response shape: `OrderSummary[]`.
+- Optional `workflow` query values are `all`, `awaitingShipment`, `shipmentReview`, and `trackingMissing`; omitted `workflow` is equivalent to `all`.
+- `all` preserves historical visibility, including allocations with an authoritative full-refund terminal fact.
+- Forward workflow modes exclude allocations with an authoritative full-refund terminal fact before `limit`/`offset` pagination. `shipmentReview` intentionally shares the current `awaitingShipment` predicate.
+- Unsupported `workflow` values return `400 Bad Request`.
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the session is authenticated but not permitted for the vendor scope or route.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
 - Order records are vendor-scoped views of Shopify source orders and must include a vendor-safe internal order id.
 - Fulfillment and shipping fields are vendor-scoped too; vendor allocations may have different fulfillment states for the same Shopify order.
 - Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
+
+### GET /orders/workflow-summary
+
+- Purpose: return authoritative aggregate counts for the current vendor’s order workflows.
+- Required auth: yes.
+- Vendor scoping rule: count only allocations for the authenticated user’s allowed vendor scope.
+- Expected success response shape: `{ all: number, awaitingShipment: number, shipmentReview: number, trackingMissing: number }`.
+- `all` includes allocations with an authoritative full-refund terminal fact; the three forward-work counts exclude them through the same predicates used by `GET /orders?workflow=...`.
+- Counts are unpaginated and do not expose customer data.
 
 ### GET /orders/:orderId
 

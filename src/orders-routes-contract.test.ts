@@ -3,6 +3,7 @@ import { registerOrdersRoutes } from '../backend/src/modules/orders/orders.route
 import { AllocationActionabilityGuardError } from '../backend/src/modules/orders/allocation-actionability-guard.service.js';
 
 const listVendorOrdersMock = vi.hoisted(() => vi.fn());
+const getVendorOrdersWorkflowSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorOrderByIdForUserMock = vi.hoisted(() => vi.fn());
 const getAdminShopifyOrderBreakdownMock = vi.hoisted(() => vi.fn());
 const rejectVendorOrderAllocationMock = vi.hoisted(() => vi.fn());
@@ -43,6 +44,7 @@ vi.mock('../backend/src/modules/orders/orders.service.js', () => ({
   addBlockedAllocationResolutionNote: addBlockedAllocationResolutionNoteMock,
   getAdminShopifyOrderBreakdown: getAdminShopifyOrderBreakdownMock,
   getVendorOrderByIdForUser: getVendorOrderByIdForUserMock,
+  getVendorOrdersWorkflowSummary: getVendorOrdersWorkflowSummaryMock,
   listVendorOrders: listVendorOrdersMock,
   OrderRejectValidationError: MockOrderRejectValidationError,
   planAllocationSplitForVendorOrder: planAllocationSplitForVendorOrderMock,
@@ -91,6 +93,7 @@ vi.mock('../backend/src/modules/vendor-access/vendor-access.middleware.js', () =
 describe('orders route contract', () => {
   beforeEach(() => {
     listVendorOrdersMock.mockReset();
+    getVendorOrdersWorkflowSummaryMock.mockReset();
     getVendorOrderByIdForUserMock.mockReset();
     getAdminShopifyOrderBreakdownMock.mockReset();
     rejectVendorOrderAllocationMock.mockReset();
@@ -102,6 +105,82 @@ describe('orders route contract', () => {
     previewShopifyRefundForAdminOrderMock.mockReset();
     transferAllocationEconomicsForAdminOrderMock.mockReset();
     sendProductPanelVariantDisableDryRunEventsForOrderMock.mockReset();
+  });
+
+  it('validates and passes the optional vendor orders workflow before listing', async () => {
+    listVendorOrdersMock.mockResolvedValueOnce([]);
+    const gets = new Map<string, (request: {
+      vendorContext?: { vendorId?: string };
+      query?: unknown;
+    }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+        gets.set(path, handler as never);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    await gets.get('/orders')?.({
+      vendorContext: { vendorId: 'vendor-a' },
+      query: { workflow: 'awaitingShipment', limit: '2', offset: '1' },
+    }, {});
+
+    expect(listVendorOrdersMock).toHaveBeenCalledWith('vendor-a', {
+      workflow: 'awaitingShipment',
+      limit: 2,
+      offset: 1,
+    });
+  });
+
+  it('rejects unsupported vendor orders workflows with the existing 400 response convention', async () => {
+    const gets = new Map<string, (request: {
+      vendorContext?: { vendorId?: string };
+      query?: unknown;
+    }, reply: { code: (statusCode: number) => { send: (payload: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+        gets.set(path, handler as never);
+      }),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: (statusCode: number) => ({ send: (payload: unknown) => ({ statusCode, payload }) }),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const result = await gets.get('/orders')?.({
+      vendorContext: { vendorId: 'vendor-a' },
+      query: { workflow: 'unsupported' },
+    }, reply);
+
+    expect(result).toEqual({
+      statusCode: 400,
+      payload: { message: 'workflow must be all, awaitingShipment, shipmentReview, or trackingMissing.' },
+    });
+    expect(listVendorOrdersMock).not.toHaveBeenCalled();
+  });
+
+  it('exposes vendor-scoped workflow summary counts without changing the orders array route', async () => {
+    getVendorOrdersWorkflowSummaryMock.mockResolvedValueOnce({
+      all: 3,
+      awaitingShipment: 2,
+      shipmentReview: 2,
+      trackingMissing: 1,
+    });
+    const gets = new Map<string, (request: { vendorContext?: { vendorId?: string } }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+        gets.set(path, handler as never);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    const result = await gets.get('/orders/workflow-summary')?.({ vendorContext: { vendorId: 'vendor-a' } }, {});
+
+    expect(result).toEqual({ all: 3, awaitingShipment: 2, shipmentReview: 2, trackingMissing: 1 });
+    expect(getVendorOrdersWorkflowSummaryMock).toHaveBeenCalledWith('vendor-a');
   });
 
   it('keeps vendor order detail as a DB read without Shopify image backfill service wiring', async () => {

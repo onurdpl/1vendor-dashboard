@@ -48,6 +48,7 @@ import type {
   OperationsQueueDashboard,
   OperationsQueueItem,
   OperationsQueueTypeFilter,
+  OrderSummary,
   VendorBlockedQueueScope,
   SupportAnalytics,
   SupportAttentionTicketsPage,
@@ -68,6 +69,8 @@ import type {
   VendorIntegrationProviderRevokeResult,
   VendorIntegrationTokenCreateInput,
   VendorIntegrationTokenCreateResult,
+  VendorOrdersWorkflow,
+  VendorOrdersWorkflowSummary,
 } from '../lib/api/contracts';
 import type {
   AdminCancelRefundReviewPayload,
@@ -88,6 +91,7 @@ function getCurrentVendorId() {
 }
 
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
+type OrdersReadRequestOptions = ReadRequestOptions & { workflow?: VendorOrdersWorkflow };
 type OperationsReadRequestOptions = ReadRequestOptions & { type?: OperationsQueueTypeFilter; scope?: VendorBlockedQueueScope };
 
 const mockSupportTickets: SupportTicket[] = [];
@@ -134,6 +138,25 @@ function buildMockDashboardOperationalSummary(vendorId: string): DashboardOperat
     returns: {
       refundAttention: returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length,
     },
+  };
+}
+
+function filterMockVendorOrdersByWorkflow(orders: OrderSummary[], workflow: VendorOrdersWorkflow = 'all') {
+  if (workflow === 'all') return orders;
+  if (workflow === 'trackingMissing') {
+    return orders.filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier);
+  }
+  return orders.filter((order) => !order.isCancelled && order.shippingStatus === 'Awaiting Shipment');
+}
+
+function buildMockVendorOrdersWorkflowSummary(vendorId: string): VendorOrdersWorkflowSummary {
+  const orders = listMockOrders(vendorId);
+  const awaitingShipment = filterMockVendorOrdersByWorkflow(orders, 'awaitingShipment').length;
+  return {
+    all: orders.length,
+    awaitingShipment,
+    shipmentReview: awaitingShipment,
+    trackingMissing: filterMockVendorOrdersByWorkflow(orders, 'trackingMissing').length,
   };
 }
 
@@ -954,10 +977,26 @@ export const runtimeServices = {
         : Promise.resolve(buildMockDashboardOperationalSummary(vendorId)),
   },
   orders: {
-    list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+    list: (vendorId = getCurrentVendorId(), options: OrdersReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOrders.listOrders({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
-        : Promise.resolve(listMockOrders(vendorId)),
+        ? realOrders.listOrders({
+            vendorId,
+            signal: options.signal,
+            headers: options.headers,
+            limit: options.limit,
+            offset: options.offset,
+            workflow: options.workflow,
+          })
+        : Promise.resolve(
+            filterMockVendorOrdersByWorkflow(listMockOrders(vendorId), options.workflow).slice(
+              options.offset ?? 0,
+              (options.offset ?? 0) + (options.limit ?? 100),
+            ),
+          ),
+    workflowSummary: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realOrders.getVendorOrdersWorkflowSummary({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(buildMockVendorOrdersWorkflowSummary(vendorId)),
     async detail(orderId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getOrder(orderId, { vendorId, signal: options.signal });

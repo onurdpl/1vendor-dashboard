@@ -745,6 +745,15 @@ export type OrderSummary = {
   channel: string;
 };
 
+export type VendorOrdersWorkflow = 'all' | 'awaitingShipment' | 'shipmentReview' | 'trackingMissing';
+
+export type VendorOrdersWorkflowSummary = {
+  all: number;
+  awaitingShipment: number;
+  shipmentReview: number;
+  trackingMissing: number;
+};
+
 export type OrderLineItem = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;

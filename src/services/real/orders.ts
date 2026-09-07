@@ -26,6 +26,8 @@ import type {
   CustomerRefundCompletion,
   ReturnOwnershipSummary,
   VendorAllocationSummary,
+  VendorOrdersWorkflow,
+  VendorOrdersWorkflowSummary,
   KargonomiWarehouseSyncResult,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
@@ -144,6 +146,10 @@ type OrderSummaryDto = {
   assignedVendorId: string;
   originalVendorId: string;
   allocationStatus: string;
+  operationalActionability: {
+    actionable: boolean;
+    reason: string | null;
+  };
   isCancelled?: boolean;
   isCancellationConflict?: boolean;
   cancelledAt?: string | null;
@@ -784,8 +790,16 @@ function mapAdminOrderBreakdown(response: AdminOrderBreakdownDto): ShopifyOrderB
   };
 }
 
-export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+export async function listOrders(options: {
+  limit?: number;
+  offset?: number;
+  workflow?: VendorOrdersWorkflow;
+  vendorId?: string | null;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}) {
   const params = new URLSearchParams();
+  if (options.workflow) params.set('workflow', options.workflow);
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
@@ -794,6 +808,20 @@ export async function listOrders(options: { limit?: number; offset?: number; ven
     ? apiClient.get<OrderSummaryDto[]>(path, requestOptions)
     : apiClient.get<OrderSummaryDto[]>(path));
   return response.map(mapOrderSummary);
+}
+
+export async function getVendorOrdersWorkflowSummary(options: {
+  vendorId?: string | null;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}) {
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<VendorOrdersWorkflowSummary>(
+        '/orders/workflow-summary',
+        requestOptions,
+      )
+    : apiClient.get<VendorOrdersWorkflowSummary>('/orders/workflow-summary');
 }
 
 export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {

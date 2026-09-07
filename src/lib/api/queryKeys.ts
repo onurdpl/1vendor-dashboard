@@ -1,4 +1,5 @@
 import { getCurrentVendorContext } from '../auth/vendorContext';
+import type { VendorOrdersWorkflow } from './contracts';
 
 export const queryKeys = {
   admin: {
@@ -54,7 +55,19 @@ export const queryKeys = {
     deferredOverview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'deferred-overview', vendorId] as const,
   },
   orders: {
-    list: (vendorId = getCurrentVendorContext().vendorId) => ['orders', 'list', vendorId] as const,
+    list: (
+      vendorId = getCurrentVendorContext().vendorId,
+      options: { workflow?: VendorOrdersWorkflow; limit?: number; offset?: number } = {},
+    ) => [
+      'orders',
+      'list',
+      vendorId,
+      options.workflow ?? 'all',
+      options.limit ?? 'default',
+      options.offset ?? 0,
+    ] as const,
+    workflowSummary: (vendorId = getCurrentVendorContext().vendorId) =>
+      ['orders', 'workflow-summary', vendorId] as const,
     detail: (orderId: string, vendorId = getCurrentVendorContext().vendorId) => ['orders', 'detail', vendorId, orderId] as const,
   },
   returns: {

@@ -1,5 +1,10 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
+import type {
+  ShipmentCustomerOverrides,
+  ShippingProvider,
+  VendorOrdersWorkflow,
+  VendorShippingConfigUpdate,
+} from './contracts';
 import type {
   AdminCancelRefundReviewPayload,
   AdminResolutionNotePayload,
@@ -13,8 +18,23 @@ import type {
   UpdateNavlungoShipmentPayload,
 } from '../../services/real/orders';
 
-export async function listOrders(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
-  return runtimeServices.orders.list(options.vendorId ?? undefined, { signal: options.signal });
+export async function listOrders(options: {
+  vendorId?: string | null;
+  workflow?: VendorOrdersWorkflow;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+} = {}) {
+  return runtimeServices.orders.list(options.vendorId ?? undefined, {
+    workflow: options.workflow,
+    limit: options.limit,
+    offset: options.offset,
+    signal: options.signal,
+  });
+}
+
+export async function getVendorOrdersWorkflowSummary(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.workflowSummary(options.vendorId ?? undefined, { signal: options.signal });
 }
 
 export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {

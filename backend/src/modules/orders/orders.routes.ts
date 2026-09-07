@@ -9,6 +9,7 @@ import {
   executeShopifyRefundForAdminOrder,
   getAdminShopifyOrderBreakdown,
   getVendorOrderByIdForUser,
+  getVendorOrdersWorkflowSummary,
   listVendorOrders,
   OrderRejectValidationError,
   planAllocationSplitForVendorOrder,
@@ -34,6 +35,10 @@ import {
   ALLOCATION_ACTIONABILITY_GUARD_ERROR_CODES,
   AllocationActionabilityGuardError,
 } from './allocation-actionability-guard.service.js';
+import {
+  resolveVendorOrdersWorkflow,
+  VENDOR_ORDERS_WORKFLOW_ERROR,
+} from './vendor-orders-workflow.js';
 
 function replyWithAllocationTerminalError(reply: FastifyReply, error: unknown) {
   if (
@@ -93,14 +98,40 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
     {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
     },
-    async (request) => {
+    async (request, reply) => {
       const vendorId = request.vendorContext?.vendorId;
       if (!vendorId) {
         return [];
       }
 
+      let workflow;
+      try {
+        workflow = resolveVendorOrdersWorkflow(request.query);
+      } catch {
+        return reply.code(400).send({ message: VENDOR_ORDERS_WORKFLOW_ERROR });
+      }
+
       return withDashboardRouteTiming('GET /orders', () =>
-        withSlowEndpointTiming('GET /orders', () => listVendorOrders(vendorId, resolvePagination(request.query))),
+        withSlowEndpointTiming('GET /orders', () =>
+          listVendorOrders(vendorId, { ...resolvePagination(request.query), workflow }),
+        ),
+      );
+    },
+  );
+
+  app.get(
+    '/orders/workflow-summary',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      return withDashboardRouteTiming('GET /orders/workflow-summary', () =>
+        withSlowEndpointTiming('GET /orders/workflow-summary', () => getVendorOrdersWorkflowSummary(vendorId)),
       );
     },
   );

@@ -10,6 +10,8 @@ import type {
   OrderSummaryDto,
   ShopifyFulfillmentSyncDto,
   ShopifyReturnSignalDiscoveryDto,
+  VendorOrdersWorkflow,
+  VendorOrdersWorkflowSummaryDto,
 } from './orders.types.js';
 import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
@@ -91,6 +93,7 @@ import {
 import { isPendingCustomerCancellationHoldState } from './customer-cancellation-hold.service.js';
 import { assertAllocationActionable } from './allocation-actionability-guard.service.js';
 import { evaluateAllocationActionability } from './allocation-actionability-policy.service.js';
+import { buildVendorOrdersWorkflowWhere } from './vendor-orders-workflow.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -2282,12 +2285,11 @@ async function getLatestShopifyReturnSignalForOrder(shopifyOrderDbId: string): P
 
 export async function listVendorOrders(
   vendorId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number; workflow?: VendorOrdersWorkflow } = {},
 ): Promise<OrderSummaryDto[]> {
+  const workflow = options.workflow ?? 'all';
   const allocations = await withDashboardTiming('orders.vendor_allocation_fetch', () => prisma.vendorAllocation.findMany({
-    where: {
-      assignedVendorId: vendorId,
-    },
+    where: buildVendorOrdersWorkflowWhere(vendorId, workflow),
     select: {
       id: true,
       assignedVendorId: true,
@@ -2392,6 +2394,19 @@ export async function listVendorOrders(
       updatedAt: allocation.updatedAt.toISOString(),
     };
   }));
+}
+
+export async function getVendorOrdersWorkflowSummary(
+  vendorId: string,
+): Promise<VendorOrdersWorkflowSummaryDto> {
+  const [all, awaitingShipment, shipmentReview, trackingMissing] = await Promise.all([
+    prisma.vendorAllocation.count({ where: buildVendorOrdersWorkflowWhere(vendorId, 'all') }),
+    prisma.vendorAllocation.count({ where: buildVendorOrdersWorkflowWhere(vendorId, 'awaitingShipment') }),
+    prisma.vendorAllocation.count({ where: buildVendorOrdersWorkflowWhere(vendorId, 'shipmentReview') }),
+    prisma.vendorAllocation.count({ where: buildVendorOrdersWorkflowWhere(vendorId, 'trackingMissing') }),
+  ]);
+
+  return { all, awaitingShipment, shipmentReview, trackingMissing };
 }
 
 export async function rejectVendorOrderAllocation(
