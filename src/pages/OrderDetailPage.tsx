@@ -1778,9 +1778,14 @@ export function OrderDetailPage() {
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
   const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
+  const allocationOperationallyActionable = order?.operationalActionability.actionable === true;
   const canReportIssue =
-    isVendorAssignedOwner && !!order && (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
+    allocationOperationallyActionable &&
+    isVendorAssignedOwner &&
+    !!order &&
+    (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
   const canUseFulfillmentActionsBeforeRestriction =
+    allocationOperationallyActionable &&
     isVendorAssignedOwner &&
     !!order &&
     order.fulfillmentActionAvailable &&

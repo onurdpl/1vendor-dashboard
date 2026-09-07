@@ -53,6 +53,48 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenNthCalledWith(2, '/orders/workflow-summary');
   });
 
+  it('preserves authoritative actionability while retaining raw terminal allocation lifecycle fields', async () => {
+    apiClientGet.mockResolvedValueOnce([{
+      id: 'allocation-1128',
+      sourceShopifyOrderId: 'gid://shopify/Order/8151983227217',
+      sourceShopifyOrderNumber: '#1128',
+      vendorId: 'vendor-a',
+      assignedVendorId: 'vendor-a',
+      originalVendorId: 'vendor-a',
+      allocationStatus: 'ACTIVE',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      refundRecordCount: 0,
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      carrier: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      fulfilledAt: null,
+      shipmentCreatedAt: null,
+      shipmentUpdatedAt: null,
+      totalAmount: '100.00',
+      lineItemCount: 1,
+      createdAt: '2026-09-06T10:00:00.000Z',
+      updatedAt: '2026-09-06T11:00:00.000Z',
+    }]);
+
+    const [order] = await listOrders({ workflow: 'all' });
+
+    expect(order).toMatchObject({
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      fulfillmentActionAvailable: false,
+    });
+  });
+
   it('passes the operations queue type filter only when requested', async () => {
     apiClientGet
       .mockResolvedValueOnce({ summary: {}, items: [] })

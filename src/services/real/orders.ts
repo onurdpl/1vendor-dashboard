@@ -554,6 +554,7 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
     status: toProjectedOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus, isCancelled),
     allocationStatus,
+    operationalActionability: dto.operationalActionability,
     isCancelled,
     isCancellationConflict,
     cancelledAt: dto.cancelledAt ?? undefined,
@@ -564,7 +565,8 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     assignmentHistory: [],
     fulfillmentActionState: toFulfillmentActionState(shippingStatus),
-    fulfillmentActionAvailable: !isCancelled && allocationStatus === 'active',
+    fulfillmentActionAvailable:
+      dto.operationalActionability.actionable && !isCancelled && allocationStatus === 'active',
     fulfillmentStatus,
     shippingStatus,
     trackingNumber: dto.trackingNumber ?? undefined,

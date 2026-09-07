@@ -166,6 +166,7 @@ const orderWithShipmentSummary: OrderDetail = {
   sourceShopifyOrderNumber: '#1028',
   status: 'Pending',
   allocationStatus: 'active',
+  operationalActionability: { actionable: true, reason: null },
   reassignmentRequired: false,
   assignmentHistory: [],
   fulfillmentActionState: 'awaiting_shipment',
@@ -2968,6 +2969,66 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timelineScope.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(timelineScope.queryByText('Order review started')).not.toBeInTheDocument();
     expect(timelineScope.queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+  });
+
+  it('keeps a terminal allocation detail visible while removing shipment, tracking, reject, and split actions', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const terminalOrder: OrderDetail = {
+      ...orderWithoutShipment,
+      sourceShopifyOrderNumber: '#1128',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      fulfillmentActionAvailable: false,
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+      refundRecordCount: 0,
+      lineItemCount: 2,
+      lineItems: [
+        orderWithShipmentSummary.lineItems[0],
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          id: 'line-terminal-second',
+          sku: 'TERMINAL-SECOND',
+        },
+      ],
+      timeline: [{ label: 'Order received', at: '2026-09-06T10:00:00.000Z' }],
+    };
+    getOrderMock.mockResolvedValueOnce(terminalOrder);
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Order #1128' })).toBeInTheDocument();
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Nike Air Max Alpha Trainer 6')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
+    expect(planAllocationSplitMock).not.toHaveBeenCalled();
+    expect(splitAllocationMock).not.toHaveBeenCalled();
+    expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(terminalOrder.allocationStatus).toBe('active');
+    expect(terminalOrder.fulfillmentStatus).toBe('Pending');
+    expect(terminalOrder.shippingStatus).toBe('Awaiting Shipment');
   });
 
   it('keeps terminal refund status separate from admin monetary preview rows', async () => {

@@ -1,4 +1,8 @@
 type OrderOperationalStoryInput = {
+  operationalActionability?: {
+    actionable: boolean;
+    reason: string | null;
+  } | null;
   allocationStatus?: string | null;
   isCancelled?: boolean | null;
   isCancellationConflict?: boolean | null;
@@ -133,6 +137,41 @@ export function getOperationalStory(input: OrderOperationalStoryInput): Operatio
         Boolean(input.carrier?.trim())
       )
     );
+
+  if (
+    input.operationalActionability?.actionable === false &&
+    input.operationalActionability.reason === 'ALLOCATION_REFUND_TERMINAL'
+  ) {
+    return {
+      state: 'refunded_completed',
+      resolvedByRefund: true,
+      primaryLabel: 'Refunded',
+      secondaryLabel: 'Fulfillment not required',
+      fulfillmentLabel: 'Fulfillment not required',
+      shippingLabel: 'Unavailable',
+      financeLabel: 'Refund completed',
+      nextActionLabel: 'No action required',
+      queueVisible: false,
+      actionVisibility: {
+        canCreateShipment: false,
+        canReject: false,
+        canTransfer: false,
+        canPreviewRefund: false,
+      },
+      timelineEvents: [
+        {
+          label: 'Refund completed',
+          detail: 'The allocation is authoritatively closed after a full refund.',
+          tone: 'success',
+        },
+        {
+          label: 'Fulfillment not required',
+          detail: 'Shipment work is closed for the refunded allocation.',
+          tone: 'success',
+        },
+      ],
+    };
+  }
 
   if (isFullOrderCancelled && cancellationConflict) {
     return {

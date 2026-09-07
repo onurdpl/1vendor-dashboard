@@ -23,11 +23,13 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import {
   createShipmentExecution,
   getOrder,
+  getVendorOrdersWorkflowSummary,
   listOrders,
   retryFailedShipmentExecution,
   type OrderDetail,
   type OrderSummary,
   type ShipmentExecution,
+  type VendorOrdersWorkflow,
 } from '../features/orders/api';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
@@ -54,6 +56,15 @@ type LabelActionFeedback = {
 };
 
 const RESTRICTED_SMART_LABEL_MESSAGE = 'Vendor account is restricted. Operational actions are disabled.';
+const ORDERS_PAGE_LIMIT = 100;
+const ORDERS_PAGE_OFFSET = 0;
+
+function getBackendOrdersWorkflow(workflow: string | null): VendorOrdersWorkflow {
+  if (workflow === 'awaiting-shipment') return 'awaitingShipment';
+  if (workflow === 'stale-fulfillment') return 'shipmentReview';
+  if (workflow === 'tracking-missing') return 'trackingMissing';
+  return 'all';
+}
 
 function formatDate(value?: string | null) {
   return formatDateTime(value, {
@@ -408,6 +419,9 @@ function buildOrderActionContextKey(input: {
 
 export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const workflowParam = searchParams.get('workflow');
+  const backendWorkflow = getBackendOrdersWorkflow(workflowParam);
+  const serverFilteredForwardWorkflow = backendWorkflow !== 'all';
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
@@ -416,8 +430,23 @@ export function OrdersPage() {
   const vendorRestricted = currentUser?.role === 'vendor' && isVendorContextRestricted(currentVendor);
   const { message, tone, showFeedback } = useActionFeedback();
   const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
-    queryKeys.orders.list(currentVendor.vendorId),
-    ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
+    queryKeys.orders.list(currentVendor.vendorId, {
+      workflow: backendWorkflow,
+      limit: ORDERS_PAGE_LIMIT,
+      offset: ORDERS_PAGE_OFFSET,
+    }),
+    ({ signal }) => listOrders({
+      vendorId: currentVendor.vendorId,
+      workflow: backendWorkflow,
+      limit: ORDERS_PAGE_LIMIT,
+      offset: ORDERS_PAGE_OFFSET,
+      signal,
+    }),
+    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
+  );
+  const workflowSummaryQuery = useQueryResource(
+    queryKeys.orders.workflowSummary(currentVendor.vendorId),
+    ({ signal }) => getVendorOrdersWorkflowSummary({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId) },
   );
   const ordersMissingVendorContext = appReadiness.status === 'missing_vendor_context';
@@ -429,7 +458,7 @@ export function OrdersPage() {
   const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
-  const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(searchParams.get('workflow')), [searchParams]);
+  const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(workflowParam), [workflowParam]);
   const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
   const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
   const requestedOrderTargetKey = requestedOrderTargets.join('|');
@@ -495,7 +524,9 @@ export function OrdersPage() {
 
   const filteredOrders = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    const effectiveQuickFilter = activeWorkflowFilter?.quickFilter ?? quickFilter;
+    const effectiveQuickFilter = activeWorkflowFilter
+      ? serverFilteredForwardWorkflow ? 'all' : activeWorkflowFilter.quickFilter
+      : quickFilter;
 
     return rankedOrders.filter((order) => {
       const matchesStatus = statusFilter === 'all' || order.allocationStatus === statusFilter || order.status === statusFilter;
@@ -527,9 +558,12 @@ export function OrdersPage() {
         (effectiveQuickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
         (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
 
-      return matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter && (!query || searchableText.includes(query));
+      const matchesAuthoritativeActionability =
+        !serverFilteredForwardWorkflow || order.operationalActionability.actionable;
+
+      return matchesAuthoritativeActionability && matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter && (!query || searchableText.includes(query));
     });
-  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
+  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, serverFilteredForwardWorkflow, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
     const selectedByClick = selectedOrderId ? filteredOrders.find((order) => order.id === selectedOrderId) : null;
@@ -619,14 +653,14 @@ export function OrdersPage() {
   const summary = useMemo(() => {
     const source = safeArray(orders);
     return {
-      awaitingShipment: source.filter((order) => !order.isCancelled && order.shippingStatus === 'Awaiting Shipment').length,
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
     };
   }, [orders]);
 
-  const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
-    { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
-    { key: 'tracking_missing', label: 'Tracking missing', count: safeArray(orders).filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier).length },
+  const workflowSummary = workflowSummaryQuery.data;
+  const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number | string }> = [
+    { key: 'all', label: 'All orders', count: workflowSummary?.all ?? '—' },
+    { key: 'tracking_missing', label: 'Tracking missing', count: workflowSummary?.trackingMissing ?? '—' },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
   ];
   const workflowTabs: Array<{
@@ -634,21 +668,21 @@ export function OrdersPage() {
     workflow: OrderWorkflowTabKey | null;
     label: string;
     description: string;
-    count: number;
+    count: number | string;
   }> = [
     {
       key: 'all',
       workflow: null,
       label: 'All orders',
       description: 'Full order list',
-      count: orders?.length ?? 0,
+      count: workflowSummary?.all ?? '—',
     },
     {
       key: 'awaiting-shipment',
       workflow: 'awaiting-shipment',
       label: 'Ready to ship',
       description: 'Awaiting shipment',
-      count: summary.awaitingShipment,
+      count: workflowSummary?.awaitingShipment ?? '—',
     },
     {
       key: 'blocked-allocation',
@@ -662,21 +696,22 @@ export function OrdersPage() {
       workflow: 'stale-fulfillment',
       label: 'Shipment review',
       description: 'Stale fulfillment',
-      count: summary.awaitingShipment,
+      count: workflowSummary?.shipmentReview ?? '—',
     },
     {
       key: 'tracking-missing',
       workflow: 'tracking-missing',
       label: 'Tracking missing',
       description: 'Needs tracking evidence',
-      count: safeArray(orders).filter((order) => !order.isCancelled && !order.trackingNumber && !order.carrier).length,
+      count: workflowSummary?.trackingMissing ?? '—',
     },
   ];
-  const workflowParam = searchParams.get('workflow');
   const activeWorkflowKey: OrderWorkflowTabKey = workflowTabs.some((tab) => tab.key === workflowParam)
     ? (workflowParam as OrderWorkflowTabKey)
     : 'all';
-  const effectiveQuickFilter = activeWorkflowFilter?.quickFilter ?? quickFilter;
+  const effectiveQuickFilter = activeWorkflowFilter
+    ? serverFilteredForwardWorkflow ? 'all' : activeWorkflowFilter.quickFilter
+    : quickFilter;
 
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
     const shipmentExecution = (order as OrderDetail).shipmentExecution;

@@ -704,6 +704,11 @@ export type AssignmentHistoryEntry = {
   createdAt: string;
 };
 
+export type OperationalActionability = {
+  actionable: boolean;
+  reason: string | null;
+};
+
 export type OrderSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
@@ -714,6 +719,7 @@ export type OrderSummary = {
   sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
   allocationStatus: AllocationStatus;
+  operationalActionability: OperationalActionability;
   isCancelled?: boolean;
   isCancellationConflict?: boolean;
   cancelledAt?: string | null;

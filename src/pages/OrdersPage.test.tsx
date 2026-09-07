@@ -10,11 +10,21 @@ import type {
   OrderDetail,
   OrderSummary,
   ShipmentExecution,
+  VendorOrdersWorkflow,
+  VendorOrdersWorkflowSummary,
 } from '../features/orders/api';
 import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
 import { formatDateTime } from '../services/real/formatting';
 
-const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
+const listOrdersMock = vi.fn<(options?: {
+  vendorId?: string | null;
+  workflow?: VendorOrdersWorkflow;
+  limit?: number;
+  offset?: number;
+}) => Promise<OrderSummary[]>>();
+const getVendorOrdersWorkflowSummaryMock = vi.fn<
+  (options?: { vendorId?: string | null }) => Promise<VendorOrdersWorkflowSummary>
+>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 const rejectOrderMock = vi.fn<(orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 const planAllocationSplitMock = vi.fn<(
@@ -34,7 +44,14 @@ vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
   return {
     ...actual,
-    listOrders: (options?: { vendorId?: string | null }) => listOrdersMock(options),
+    listOrders: (options?: {
+      vendorId?: string | null;
+      workflow?: VendorOrdersWorkflow;
+      limit?: number;
+      offset?: number;
+    }) => listOrdersMock(options),
+    getVendorOrdersWorkflowSummary: (options?: { vendorId?: string | null }) =>
+      getVendorOrdersWorkflowSummaryMock(options),
     getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
     rejectOrder: (orderId: string, payload: { reason: string; note: string }, options?: { vendorId?: string | null }) =>
       rejectOrderMock(orderId, payload, options),
@@ -64,6 +81,7 @@ const orderDetail: OrderDetail = {
   sourceShopifyOrderNumber: '#1002',
   status: 'Delivered',
   allocationStatus: 'fulfilled',
+  operationalActionability: { actionable: true, reason: null },
   reassignmentRequired: false,
   assignmentHistory: [],
   fulfillmentActionState: 'delivered',
@@ -324,6 +342,13 @@ describe('OrdersPage control center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     listOrdersMock.mockReset();
+    getVendorOrdersWorkflowSummaryMock.mockReset();
+    getVendorOrdersWorkflowSummaryMock.mockResolvedValue({
+      all: 1,
+      awaitingShipment: 0,
+      shipmentReview: 0,
+      trackingMissing: 0,
+    });
     getOrderMock.mockReset();
     rejectOrderMock.mockReset();
     planAllocationSplitMock.mockReset();
@@ -521,7 +546,11 @@ describe('OrdersPage control center', () => {
       customer: 'Delivered Customer',
       date: '2026-05-08T09:20:00Z',
     };
-    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder), toSummary(deliveredOrder)]);
+    listOrdersMock.mockImplementation(async (options) =>
+      options?.workflow === 'awaitingShipment'
+        ? [toSummary(awaitingShipmentOrder)]
+        : [toSummary(awaitingShipmentOrder), toSummary(deliveredOrder)],
+    );
     getOrderMock.mockImplementation(async (orderId) => (orderId === awaitingShipmentOrder.id ? awaitingShipmentOrder : deliveredOrder));
 
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
@@ -529,12 +558,135 @@ describe('OrdersPage control center', () => {
     const workflowTabs = await screen.findByLabelText('Orders workflow tabs');
     expect(workflowTabs).toHaveTextContent('Ready to ship');
     expect(within(workflowTabs).getByRole('button', { name: /Ready to ship/i })).toHaveClass('is-active');
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a',
+      workflow: 'awaitingShipment',
+      limit: 100,
+      offset: 0,
+    }));
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
 
     await userEvent.click(within(workflowTabs).getByRole('button', { name: /All orders/i }));
 
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['awaiting-shipment', 'awaitingShipment', 'No shipments currently awaiting action'],
+    ['stale-fulfillment', 'shipmentReview', 'No stale fulfillment work in this queue'],
+    ['tracking-missing', 'trackingMissing', 'No orders missing tracking'],
+  ] as const)(
+    'requests the authoritative %s workflow instead of loading All',
+    async (routeWorkflow, apiWorkflow, emptyTitle) => {
+      listOrdersMock.mockResolvedValue([]);
+
+      renderOrdersPage([`/orders?workflow=${routeWorkflow}`]);
+
+      expect(await screen.findByText(emptyTitle)).toBeInTheDocument();
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({
+        vendorId: 'demo-vendor-a',
+        workflow: apiWorkflow,
+        limit: 100,
+        offset: 0,
+      }));
+      expect(listOrdersMock).not.toHaveBeenCalledWith(expect.objectContaining({ workflow: 'all' }));
+    },
+  );
+
+  it.each([
+    ['awaiting-shipment', 'awaitingShipment', 'No shipments currently awaiting action'],
+    ['stale-fulfillment', 'shipmentReview', 'No stale fulfillment work in this queue'],
+    ['tracking-missing', 'trackingMissing', 'No orders missing tracking'],
+  ] as const)(
+    'defensively excludes terminal allocations returned for the %s workflow',
+    async (routeWorkflow, apiWorkflow, emptyTitle) => {
+      const terminalOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1128',
+        sourceShopifyOrderId: 'gid://shopify/Order/8151983227217',
+        sourceShopifyOrderNumber: '#1128',
+        operationalActionability: {
+          actionable: false,
+          reason: 'ALLOCATION_REFUND_TERMINAL',
+        },
+        fulfillmentActionAvailable: false,
+      });
+      listOrdersMock.mockResolvedValue([toSummary(terminalOrder)]);
+
+      renderOrdersPage([`/orders?workflow=${routeWorkflow}`]);
+
+      expect(await screen.findByText(emptyTitle)).toBeInTheDocument();
+      expect(screen.queryByText('#1128')).not.toBeInTheDocument();
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ workflow: apiWorkflow }));
+    },
+  );
+
+  it('uses backend workflow summary values for authoritative badges', async () => {
+    listOrdersMock.mockResolvedValue([]);
+    getVendorOrdersWorkflowSummaryMock.mockResolvedValueOnce({
+      all: 11,
+      awaitingShipment: 7,
+      shipmentReview: 5,
+      trackingMissing: 3,
+    });
+
+    renderOrdersPage();
+
+    const workflowTabs = await screen.findByLabelText('Orders workflow tabs');
+    await waitFor(() => {
+      expect(within(workflowTabs).getByRole('button', { name: /All orders/i })).toHaveTextContent('11');
+      expect(within(workflowTabs).getByRole('button', { name: /Ready to ship/i })).toHaveTextContent('7');
+      expect(within(workflowTabs).getByRole('button', { name: /Shipment review/i })).toHaveTextContent('5');
+      expect(within(workflowTabs).getByRole('button', { name: /Tracking missing/i })).toHaveTextContent('3');
+    });
+    expect(getVendorOrdersWorkflowSummaryMock).toHaveBeenCalledWith(expect.objectContaining({
+      vendorId: 'demo-vendor-a',
+    }));
+  });
+
+  it('keeps a terminal allocation visible in All with terminal story and no shipment action', async () => {
+    const terminalOrder = buildAwaitingRejectableOrder({
+      id: 'allocation-1128',
+      sourceShopifyOrderId: 'gid://shopify/Order/8151983227217',
+      sourceShopifyOrderNumber: '#1128',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      fulfillmentActionAvailable: false,
+      refundRecordCount: 0,
+      assignmentHistory: [
+        {
+          action: 'assigned',
+          fromVendorId: null,
+          toVendorId: 'demo-vendor-a',
+          actorName: 'System',
+          actorRole: 'system',
+          createdAt: '2026-09-06T10:00:00.000Z',
+        },
+      ],
+    });
+    listOrdersMock.mockResolvedValue([toSummary(terminalOrder)]);
+    getOrderMock.mockResolvedValue(terminalOrder);
+    getVendorOrdersWorkflowSummaryMock.mockResolvedValueOnce({
+      all: 1,
+      awaitingShipment: 0,
+      shipmentReview: 0,
+      trackingMissing: 0,
+    });
+
+    renderOrdersPage();
+
+    expect((await screen.findAllByText('#1128')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getByText('Barcode gateway license')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Smart label action')).not.toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'all' }));
+    expect(getOrderMock).toHaveBeenCalledWith('allocation-1128', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('keeps conflict-cancelled raw awaiting-shipment rows out of open workflow filters', async () => {
@@ -551,7 +703,9 @@ describe('OrdersPage control center', () => {
       trackingNumber: undefined,
       carrier: undefined,
     });
-    listOrdersMock.mockResolvedValue([toSummary(cancelledConflict)]);
+    listOrdersMock.mockImplementation(async (options) =>
+      options?.workflow === 'all' ? [toSummary(cancelledConflict)] : [],
+    );
     getOrderMock.mockResolvedValue(cancelledConflict);
 
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
@@ -613,7 +767,9 @@ describe('OrdersPage control center', () => {
   });
 
   it('renders an honest empty state for empty workflow order queues', async () => {
-    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    listOrdersMock.mockImplementation(async (options) =>
+      options?.workflow === 'awaitingShipment' ? [] : [toSummary(orderDetail)],
+    );
     getOrderMock.mockResolvedValue(orderDetail);
 
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);

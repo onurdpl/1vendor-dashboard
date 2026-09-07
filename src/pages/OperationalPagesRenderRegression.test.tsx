@@ -61,6 +61,7 @@ const orderSummary = {
   sourceShopifyOrderNumber: '#1001',
   status: 'Active',
   allocationStatus: 'active',
+  operationalActionability: { actionable: true, reason: null },
   reassignmentRequired: false,
   assignmentHistory: [],
   fulfillmentActionState: 'pending',

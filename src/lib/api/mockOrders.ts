@@ -432,6 +432,10 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
       sourceShopifyOrderNumber: sourceOrder.orderNumber,
       status: allocationFulfillment.status,
       allocationStatus: allocationFulfillment.allocationStatus,
+      operationalActionability: {
+        actionable: true,
+        reason: null,
+      },
       cancellationReason: allocationFulfillment.cancellationReason,
       reassignmentRequired: allocationFulfillment.reassignmentRequired,
       assignmentBlockedAt: allocationFulfillment.assignmentBlockedAt,
