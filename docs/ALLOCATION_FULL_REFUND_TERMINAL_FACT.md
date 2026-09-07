@@ -269,3 +269,9 @@ This contract does not authorize:
 - changes to finance calculations or monetary authority;
 - Shopify refund, cancellation, fulfillment, inventory, or restock mutations;
 - production database migration execution.
+
+## Current-State Repair Phase A
+
+Phase A provides one admin-only, exact-order terminal dry-run planner. It reads the local order and its allocations, reuses the canonical Shopify verifier, reports existing terminal facts and durable outbound-claim conflicts, and returns only sanitized allocation-level classifications and counters.
+
+This planner performs zero business mutation. It has no write or `execute` mode, creates no terminal fact or operational job, does not repair refund, return, finance, allocation, shipment, or fulfillment state, and does not mutate Shopify or a shipment provider. It supports no batch, lookback, scheduled scan, or historical backfill.

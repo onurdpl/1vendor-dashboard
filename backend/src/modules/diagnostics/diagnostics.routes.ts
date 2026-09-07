@@ -34,11 +34,16 @@ import {
   createCurrentStateOrderRepairService,
   CurrentStateOrderRepairError,
 } from '../shopify/current-state-order-repair.service.js';
+import {
+  createTerminalCurrentStateRepairDryRunService,
+  TerminalCurrentStateDryRunError,
+} from '../orders/terminal-current-state-repair-dry-run.service.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
   const currentStateOrderRepair = createCurrentStateOrderRepairService(env);
+  const terminalCurrentStateDryRun = createTerminalCurrentStateRepairDryRunService(env);
 
   app.get(
     '/admin/diagnostics/shopify/webhook-subscriptions',
@@ -197,6 +202,45 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(500).send({
           code: 'current_state_repair_failed',
           message: 'Current-state Shopify order repair failed.',
+        });
+      }
+    },
+  );
+
+  app.post<{ Body: { orderIdentifier?: string } }>(
+    '/admin/diagnostics/shopify/terminal-current-state-repair/dry-run',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+      if (typeof request.body?.orderIdentifier !== 'string') {
+        return reply.code(400).send({
+          code: 'invalid_order_identifier',
+          message: 'Provide exactly one Shopify order ID or order number.',
+        });
+      }
+      if (Object.prototype.hasOwnProperty.call(request.body, 'execute')) {
+        return reply.code(400).send({
+          code: 'write_mode_not_supported',
+          message: 'Terminal current-state repair supports dry-run only.',
+        });
+      }
+
+      try {
+        return await terminalCurrentStateDryRun.plan({
+          orderIdentifier: request.body.orderIdentifier,
+        });
+      } catch (error) {
+        if (error instanceof TerminalCurrentStateDryRunError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
+        request.log.error({ error }, 'Terminal current-state repair dry-run failed');
+        return reply.code(500).send({
+          code: 'terminal_current_state_dry_run_failed',
+          message: 'Terminal current-state repair dry-run failed.',
         });
       }
     },
