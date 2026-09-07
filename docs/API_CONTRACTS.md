@@ -304,6 +304,19 @@ Webhook processing lifecycle states:
   - webhook history, repair history, operational signals, and finance events have fixed maximum result limits
 - Inspection remains read-only. When this route returns `404 Order not found`, the admin Recovery Center may offer the separate current-state repair workflow for that same explicit identifier.
 
+### POST /admin/diagnostics/shopify/terminal-current-state-repair/execute
+
+- Purpose: create missing allocation-scoped full-refund terminal facts for one exact local Shopify order after fresh canonical verification.
+- Required auth: admin-only. Cookie-authenticated requests retain the shared CSRF requirement.
+- Request: `{ "orderIdentifier": "#1128", "execute": true }`. Literal `execute: true` and exactly one numeric Shopify order ID or `#` order number are required.
+- Required flags: `FULL_REFUND_CURRENT_STATE_REPAIR_WRITE_ENABLED=true` and `FULL_REFUND_TERMINAL_WRITER_ENABLED=true`. The dedicated repair-write flag defaults to `false`.
+- Each fact-absent allocation is evaluated independently through the existing immutable writer with `verificationSource=current_state_repair`. Existing facts are returned as `ALREADY_TERMINAL` without replacement.
+- Response counters: `scanned`, `candidateAllocations`, `created`, `alreadyTerminal`, `doesNotQualify`, `indeterminate`, `conflict`, and `errors`, plus sanitized allocation-level outcomes.
+- Execute persists one non-retrying `RECONCILIATION` OperationalJob with operation discriminator `terminal_current_state_repair` and sanitized identities/counts.
+- The only commerce-domain mutation authorized by this endpoint is `AllocationFullRefundTerminalFact` creation. It performs no refund, return, finance, raw allocation lifecycle, shipment, fulfillment, Shopify, or provider mutation.
+- It supports no batch, lookback, scheduler, automatic retry, or historical backfill.
+- The separate `/terminal-current-state-repair/dry-run` endpoint remains write-incapable and rejects write intent.
+
 ### POST /admin/diagnostics/shopify/order-repair
 
 - Purpose: reconstruct exactly one missed Shopify order from current canonical Shopify state without replaying a historical webhook payload.

@@ -38,12 +38,17 @@ import {
   createTerminalCurrentStateRepairDryRunService,
   TerminalCurrentStateDryRunError,
 } from '../orders/terminal-current-state-repair-dry-run.service.js';
+import {
+  createTerminalCurrentStateRepairExecuteService,
+  TerminalCurrentStateExecuteError,
+} from '../orders/terminal-current-state-repair-execute.service.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
   const currentStateOrderRepair = createCurrentStateOrderRepairService(env);
   const terminalCurrentStateDryRun = createTerminalCurrentStateRepairDryRunService(env);
+  const terminalCurrentStateExecute = createTerminalCurrentStateRepairExecuteService(env);
 
   app.get(
     '/admin/diagnostics/shopify/webhook-subscriptions',
@@ -241,6 +246,58 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(500).send({
           code: 'terminal_current_state_dry_run_failed',
           message: 'Terminal current-state repair dry-run failed.',
+        });
+      }
+    },
+  );
+
+  app.post<{ Body: { orderIdentifier?: string; execute?: boolean } }>(
+    '/admin/diagnostics/shopify/terminal-current-state-repair/execute',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+      if (typeof request.body?.orderIdentifier !== 'string') {
+        return reply.code(400).send({
+          code: 'invalid_order_identifier',
+          message: 'Provide exactly one Shopify order ID or order number.',
+        });
+      }
+      if (request.body.execute !== true) {
+        return reply.code(400).send({
+          code: 'execution_confirmation_required',
+          message: 'Literal execute=true is required.',
+        });
+      }
+      if (!env.FULL_REFUND_CURRENT_STATE_REPAIR_WRITE_ENABLED) {
+        return reply.code(503).send({
+          code: 'terminal_current_state_repair_write_disabled',
+          message: 'Terminal current-state repair write mode is disabled.',
+        });
+      }
+      if (!env.FULL_REFUND_TERMINAL_WRITER_ENABLED) {
+        return reply.code(503).send({
+          code: 'full_refund_terminal_writer_disabled',
+          message: 'The full-refund terminal writer is disabled.',
+        });
+      }
+
+      try {
+        return await terminalCurrentStateExecute.execute({
+          orderIdentifier: request.body.orderIdentifier,
+          execute: true,
+        });
+      } catch (error) {
+        if (error instanceof TerminalCurrentStateExecuteError) {
+          return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        }
+        request.log.error({ error }, 'Terminal current-state repair execute failed');
+        return reply.code(500).send({
+          code: 'terminal_current_state_execute_failed',
+          message: 'Terminal current-state repair execute failed.',
         });
       }
     },

@@ -275,3 +275,11 @@ This contract does not authorize:
 Phase A provides one admin-only, exact-order terminal dry-run planner. It reads the local order and its allocations, reuses the canonical Shopify verifier, reports existing terminal facts and durable outbound-claim conflicts, and returns only sanitized allocation-level classifications and counters.
 
 This planner performs zero business mutation. It has no write or `execute` mode, creates no terminal fact or operational job, does not repair refund, return, finance, allocation, shipment, or fulfillment state, and does not mutate Shopify or a shipment provider. It supports no batch, lookback, scheduled scan, or historical backfill.
+
+## Current-State Repair Phase B
+
+Phase B adds the separate admin-only `POST /admin/diagnostics/shopify/terminal-current-state-repair/execute` boundary for one exact Shopify order. Its request requires one numeric Shopify order ID or `#` order number plus literal `execute: true`.
+
+Execution requires both `FULL_REFUND_CURRENT_STATE_REPAIR_WRITE_ENABLED=true` and `FULL_REFUND_TERMINAL_WRITER_ENABLED=true`; the dedicated write flag defaults to `false`. Fact-absent allocations are independently reverified from fresh canonical Shopify reads and may create only an immutable `AllocationFullRefundTerminalFact` through the existing writer with `verificationSource = current_state_repair`. Existing facts are retained unchanged. One sanitized, non-retrying `OperationalJob` records invocation outcomes.
+
+Phase B does not add a batch, lookback, scheduler, historical backfill, refund/return/finance repair, raw lifecycle rewrite, Shopify mutation, or provider mutation. The Phase A dry-run endpoint remains permanently write-incapable and continues to reject write intent.

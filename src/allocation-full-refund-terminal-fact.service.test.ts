@@ -394,6 +394,10 @@ describe('allocation full-refund terminal fact writer foundation', () => {
     expect(db.allocationFullRefundTerminalFact.update).not.toHaveBeenCalled();
     expect(db.allocationFullRefundTerminalFact.delete).not.toHaveBeenCalled();
     expect(db.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(db.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(db.shipmentExecution.delete).not.toHaveBeenCalled();
+    expect(db.fulfillment.update).not.toHaveBeenCalled();
+    expect(db.fulfillment.delete).not.toHaveBeenCalled();
   });
 
   it('returns the original fact without changing source or evidence on a duplicate invocation', async () => {
