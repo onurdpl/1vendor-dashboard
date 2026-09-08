@@ -5303,15 +5303,15 @@ export function OrderDetailPage() {
             <div className="order-card-heading">
               <div>
                 <h2>{isAdmin ? 'Shipment & delivery' : 'Shipment'}</h2>
-                <p>
-                  {isFulfillmentAuthoritativelyClosed
-                    ? fulfillmentClosureDetail
-                    : hasTrackingSync
+                {!isFulfillmentAuthoritativelyClosed ? (
+                  <p>
+                    {hasTrackingSync
                       ? isAdmin
                         ? 'Carrier, tracking, label, and Shopify sync controls.'
                         : 'Carrier, tracking, and label details.'
                       : 'Add shipment details when the package is ready.'}
-                </p>
+                  </p>
+                ) : null}
               </div>
             </div>
             {canUseFulfillmentActions || (vendorRestricted && canUseFulfillmentActionsBeforeRestriction) ? (

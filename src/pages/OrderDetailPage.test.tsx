@@ -3063,6 +3063,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
+    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article');
+    expect(shipmentSection).not.toBeNull();
+    expect(within(shipmentSection as HTMLElement).getAllByText('Shipment work is closed for the refunded allocation.')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Shipment' }).parentElement?.querySelector('p')).toBeNull();
     expect(shipmentRequirement).toHaveTextContent('Shipment work is closed for the refunded allocation.');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
     expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
@@ -3241,6 +3245,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
     expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
+    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article');
+    expect(shipmentSection).not.toBeNull();
+    expect(within(shipmentSection as HTMLElement).getAllByText('Shipment and tracking work are closed for this order.')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Shipment' }).parentElement?.querySelector('p')).toBeNull();
     expect(shipmentRequirement).toHaveTextContent('Shipment and tracking work are closed for this order.');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
     expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
@@ -7836,6 +7844,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const createShipmentButton = await screen.findByRole('button', { name: 'Create shipment' });
+    expect(screen.getByText('Add shipment details when the package is ready.')).toBeInTheDocument();
     expect(createShipmentButton).toHaveClass('button-primary');
     expect(screen.getByRole('button', { name: 'Add tracking information' })).toHaveClass('button-secondary');
 
