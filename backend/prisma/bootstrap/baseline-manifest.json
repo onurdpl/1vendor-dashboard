@@ -7,14 +7,14 @@
   },
   "schema": {
     "path": "../schema.prisma",
-    "sha256": "809b66fba2cf3b9ceb2b06791108d44da748dc87f6e00e4c997024e30c007875"
+    "sha256": "b4cb90cc9826a37f94fe8ffcb74b90eb4234d8b46f2937d89daeda7796e2facf"
   },
   "snapshot": {
     "path": "current-schema.sql",
-    "sha256": "26259f69feeaa60205ae8c21d7c9e0e738ff64b19386bf02d92f3834f49f37a5"
+    "sha256": "eef720cec9c2a23a6a6dfe189379b4e8b03baa07317373789378c0a3da396439"
   },
-  "migrationCutoff": "20260830190000_add_customer_cancellation_auto_refund_processor",
-  "baselineMigrationFilesSha256": "661b4bca10c2fc853f2bbac4bb62ea372b7e0101eea286cf0ea5f0d40a6bb1ff",
+  "migrationCutoff": "20260904120000_add_allocation_full_refund_terminal_fact",
+  "baselineMigrationFilesSha256": "f87911747c58cc511fe97e14504b06286dfe19f5dfc8304ee7fab03111271405",
   "baselineMigrations": [
     "20260511081144_init",
     "20260511081846_seed_identity_fields",
@@ -103,6 +103,8 @@
     "20260826120000_add_webhook_execution_ownership",
     "20260830120000_add_customer_cancellation_request_foundation",
     "20260830150000_add_customer_cancellation_approved_for_refund",
-    "20260830190000_add_customer_cancellation_auto_refund_processor"
+    "20260830190000_add_customer_cancellation_auto_refund_processor",
+    "20260902120000_add_customer_cancellation_refunded_awaiting_order_cancel",
+    "20260904120000_add_allocation_full_refund_terminal_fact"
   ]
 }

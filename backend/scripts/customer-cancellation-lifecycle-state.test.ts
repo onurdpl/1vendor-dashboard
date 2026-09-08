@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CustomerCancellationStatus, OperationalJobStatus } from '@prisma/client';
+import { describe, it } from 'vitest';
 import {
   ACTIVE_CUSTOMER_CANCELLATION_HOLD_ITEM_STATUSES,
   ACTIVE_CUSTOMER_CANCELLATION_REQUEST_STATUSES,
@@ -15,6 +16,8 @@ function read(path: string) {
   return readFileSync(resolve(repoRoot, path), 'utf8');
 }
 
+describe('customer cancellation lifecycle state contract', () => {
+  it('preserves the post-refund cancellation lifecycle invariants', () => {
 const newState = CustomerCancellationStatus.REFUNDED_AWAITING_ORDER_CANCEL;
 
 assert.equal(newState, 'REFUNDED_AWAITING_ORDER_CANCEL');
@@ -188,3 +191,5 @@ assert.match(
 );
 
 console.log('customer cancellation lifecycle state checks passed');
+  });
+});

@@ -106,6 +106,11 @@ describe('operational signal reads', () => {
       where: {
         vendorId: 'sporjinal',
         status: 'ACTIVE',
+        OR: [
+          { allocationId: null },
+          { sourceArea: { not: 'FULFILLMENT' } },
+          { allocation: { fullRefundTerminalFact: null } },
+        ],
         sourceArea: {
           notIn: ['DIAGNOSTICS', 'RECONCILIATION'],
         },

@@ -412,6 +412,19 @@ CREATE TABLE "VendorAllocation" (
 );
 
 -- CreateTable
+CREATE TABLE "AllocationFullRefundTerminalFact" (
+    "id" TEXT NOT NULL,
+    "vendorAllocationId" TEXT NOT NULL,
+    "shopifyOrderGid" TEXT NOT NULL,
+    "verificationSource" TEXT NOT NULL,
+    "shopifyApiVersion" TEXT NOT NULL,
+    "verifiedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "evidenceJson" JSONB NOT NULL,
+
+    CONSTRAINT "AllocationFullRefundTerminalFact_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "CustomerCancellationRequest" (
     "id" TEXT NOT NULL,
     "shopifyOrderId" TEXT NOT NULL,
@@ -1385,6 +1398,12 @@ CREATE INDEX "VendorAllocation_vendorIntegrationStatus_idx" ON "VendorAllocation
 CREATE INDEX "VendorAllocation_cancelRefundReviewStatus_idx" ON "VendorAllocation"("cancelRefundReviewStatus");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "AllocationFullRefundTerminalFact_vendorAllocationId_key" ON "AllocationFullRefundTerminalFact"("vendorAllocationId");
+
+-- CreateIndex
+CREATE INDEX "AllocationFullRefundTerminalFact_shopifyOrderGid_idx" ON "AllocationFullRefundTerminalFact"("shopifyOrderGid");
+
+-- CreateIndex
 CREATE INDEX "CustomerCancellationRequest_shopifyOrderId_status_idx" ON "CustomerCancellationRequest"("shopifyOrderId", "status");
 
 -- CreateIndex
@@ -1893,6 +1912,9 @@ ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_originalVendorId
 
 -- AddForeignKey
 ALTER TABLE "VendorAllocation" ADD CONSTRAINT "VendorAllocation_assignedVendorId_fkey" FOREIGN KEY ("assignedVendorId") REFERENCES "Vendor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AllocationFullRefundTerminalFact" ADD CONSTRAINT "AllocationFullRefundTerminalFact_vendorAllocationId_fkey" FOREIGN KEY ("vendorAllocationId") REFERENCES "VendorAllocation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "CustomerCancellationRequest" ADD CONSTRAINT "CustomerCancellationRequest_shopifyOrderId_fkey" FOREIGN KEY ("shopifyOrderId") REFERENCES "ShopifyOrder"("id") ON DELETE CASCADE ON UPDATE CASCADE;
