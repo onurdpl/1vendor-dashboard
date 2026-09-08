@@ -3750,6 +3750,11 @@ h3 {
   background: rgba(239, 68, 68, 0.08);
 }
 
+.order-fulfillment-complete-panel {
+  border-color: var(--op-border);
+  background: var(--op-surface-soft);
+}
+
 .vendor-line-items .line-item-head,
 .vendor-line-items .line-item-row {
   grid-template-columns: 0.8fr 0.9fr 1.6fr 0.5fr 0.7fr 0.7fr;

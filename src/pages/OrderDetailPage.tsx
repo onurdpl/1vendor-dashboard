@@ -4167,6 +4167,11 @@ export function OrderDetailPage() {
   const fulfillmentStateLabel = operationalStory.fulfillmentLabel;
   const financeStateLabel = operationalStory.financeLabel;
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
+  const isFulfillmentAuthoritativelyClosed =
+    operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled';
+  const fulfillmentClosureDetail = isFulfillmentAuthoritativelyClosed
+    ? operationalStory.timelineEvents.find((event) => event.label === 'Fulfillment not required')?.detail ?? operationalStory.secondaryLabel
+    : null;
   const shouldShowCreateShipmentAction =
     operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
@@ -5298,11 +5303,25 @@ export function OrderDetailPage() {
             <div className="order-card-heading">
               <div>
                 <h2>{isAdmin ? 'Shipment & delivery' : 'Shipment'}</h2>
-                <p>{hasTrackingSync ? (isAdmin ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Carrier, tracking, and label details.') : 'Add shipment details when the package is ready.'}</p>
+                <p>
+                  {isFulfillmentAuthoritativelyClosed
+                    ? fulfillmentClosureDetail
+                    : hasTrackingSync
+                      ? isAdmin
+                        ? 'Carrier, tracking, label, and Shopify sync controls.'
+                        : 'Carrier, tracking, and label details.'
+                      : 'Add shipment details when the package is ready.'}
+                </p>
               </div>
             </div>
             {canUseFulfillmentActions || (vendorRestricted && canUseFulfillmentActionsBeforeRestriction) ? (
-              <div className="action-row vendor-action-panel">
+              <div className={`action-row vendor-action-panel${isFulfillmentAuthoritativelyClosed ? ' order-fulfillment-complete-panel' : ''}`}>
+                {isFulfillmentAuthoritativelyClosed ? (
+                  <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
+                    <strong>{operationalStory.fulfillmentLabel}</strong>
+                    <span>{fulfillmentClosureDetail}</span>
+                  </div>
+                ) : null}
                 <div className="vendor-actions-heading">
                   <h3>Shipment details</h3>
                 </div>
@@ -6532,13 +6551,13 @@ export function OrderDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="action-row vendor-blocked-panel">
+              <div className={`action-row ${isFulfillmentAuthoritativelyClosed ? 'order-fulfillment-complete-panel' : 'vendor-blocked-panel'}`}>
                 {hasCanonicalOperationalStory ? (
                   <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
                     <strong>{operationalStory.fulfillmentLabel}</strong>
                     <span>
-                      {operationalStory.resolvedByRefund
-                        ? 'Shipment work is closed for this refunded allocation.'
+                      {isFulfillmentAuthoritativelyClosed
+                        ? fulfillmentClosureDetail
                         : operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
                           ? 'Shipment work is paused until the allocation is resolved.'
                           : operationalStory.shippingLabel}

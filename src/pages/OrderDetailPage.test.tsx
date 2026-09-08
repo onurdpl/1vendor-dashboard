@@ -2990,6 +2990,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
     expect(shipmentRequirement).toHaveTextContent('Blocked');
     expect(shipmentRequirement).toHaveTextContent('Shipment work is paused');
+    expect(shipmentRequirement.parentElement).toHaveClass('vendor-blocked-panel');
+    expect(shipmentRequirement.parentElement).not.toHaveClass('order-fulfillment-complete-panel');
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry shipment' })).not.toBeInTheDocument();
 
@@ -3059,6 +3061,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
+    const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
+    expect(shipmentRequirement).toHaveTextContent('Shipment work is closed for the refunded allocation.');
+    expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
+    expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
     expect(screen.getAllByText('Nike Air Max Alpha Trainer 6')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
@@ -3232,6 +3239,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
+    const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
+    expect(shipmentRequirement).toHaveTextContent('Shipment and tracking work are closed for this order.');
+    expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
+    expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeInTheDocument();
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
     expect(cancellationRow).not.toHaveTextContent(formatTimelineDateForTest(orderCreatedAt));
@@ -7942,7 +7956,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
 
     expect((await screen.findAllByText('Vendor shipping warehouse is not configured.')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Shipment action needs attention.')).toBeInTheDocument();
+    const shipmentError = screen.getByText('Shipment action needs attention.').closest('.shipment-action-feedback');
+    expect(shipmentError).toHaveClass('action-error');
     expect(screen.queryByText(/Endpoint:\s*\/shipments\/create/)).not.toBeInTheDocument();
     expect(screen.queryByText(/HTTP:\s*400.*Request:\s*req-shipment-1/)).not.toBeInTheDocument();
   });
