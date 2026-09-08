@@ -61,7 +61,7 @@ import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getLatestVendorBlockedAt } from '../lib/orderAssignmentMetadata';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
-import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
+import { getOperationalStory } from '../lib/orderOperationalStory';
 import { canRejectOrder, canShowAllocationSplitRejectAction } from '../lib/rejectEligibility';
 import type {
   KargonomiLocationLookupDiagnostics,
@@ -441,23 +441,6 @@ function getOrderActivityReturnTitle(returnRecord: {
   return 'Refund recorded';
 }
 
-function getFinanceStatusClass(value: string | null | undefined) {
-  const normalized = getStatusClass(value);
-  if (normalized.includes('refund-completed')) {
-    return 'refund-completed';
-  }
-  if (normalized.includes('refunded')) {
-    return 'refunded';
-  }
-  if (normalized === 'paid') {
-    return 'paid';
-  }
-  if (normalized.includes('pending') || normalized.includes('authorized')) {
-    return 'pending';
-  }
-  return normalized || 'unknown';
-}
-
 function isVendorBlockedStatus(value: string | null | undefined) {
   return getStatusClass(value) === 'vendor-blocked';
 }
@@ -474,47 +457,6 @@ function formatCancellationReason(value: string | null | undefined) {
 
 function normalizeTimelineTitle(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? '';
-}
-
-function getTrackingTitle(order: {
-  trackingNumber?: string;
-  carrier?: string;
-  trackingUrl?: string;
-  isCancelled?: boolean;
-  isCancellationConflict?: boolean;
-}) {
-  if (order.isCancelled) {
-    if (order.isCancellationConflict && (order.trackingNumber || order.carrier || order.trackingUrl)) {
-      return 'Tracking Synced';
-    }
-    return 'Tracking not required';
-  }
-  return order.trackingNumber || order.carrier || order.trackingUrl ? 'Tracking Synced' : 'Missing Tracking';
-}
-
-function getTrackingHelper(order: {
-  trackingNumber?: string;
-  carrier?: string;
-  trackingUrl?: string;
-  isCancelled?: boolean;
-  isCancellationConflict?: boolean;
-}) {
-  if (order.isCancelled) {
-    if (order.isCancellationConflict && (order.trackingNumber || order.carrier)) {
-      return [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ');
-    }
-    return 'Shopify cancelled this order. Tracking is not required.';
-  }
-  const carrier = formatTrackingCarrierLabel(order.carrier);
-  if (order.trackingNumber || carrier) {
-    return [carrier, order.trackingNumber].filter(Boolean).join(' / ');
-  }
-
-  if (order.trackingUrl) {
-    return 'Tracking link available';
-  }
-
-  return 'No tracking information available.';
 }
 
 function getShipmentTrackingNumber(order: { trackingNumber?: string | null }, shipment?: ShipmentExecution | null) {
@@ -4102,31 +4044,21 @@ export function OrderDetailPage() {
             </div>
           </div>
         </div>
-        <div className="order-detail-status-pills" aria-label="Order status skeleton">
-          <span className="status-badge status-pending">Loading</span>
-          <span className="status-badge status-pending">Fulfillment</span>
-          <span className="status-badge status-pending">Shipping</span>
-        </div>
+        <section className="order-current-state-summary order-current-state-summary-loading" aria-label="Current order state skeleton">
+          <div className="order-current-state-primary">
+            <span>Operational state</span>
+            <strong><SkeletonText width="6rem" /></strong>
+          </div>
+          <dl className="order-current-state-details">
+            {['Fulfillment', 'Finance projection', 'Next operational action'].map((label) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd><SkeletonText width="5rem" /></dd>
+              </div>
+            ))}
+          </dl>
+        </section>
       </header>
-
-      <div className="order-status-summary-grid" aria-label="Order KPI skeleton">
-        {['Lifecycle', 'Shipping', 'Tracking', 'Finance'].map((label) => (
-          <article key={label} className="order-status-summary-card order-status-neutral">
-            <span className="order-status-icon" aria-hidden="true">
-              -
-            </span>
-            <div>
-              <span>{label}</span>
-              <strong>
-                <SkeletonText width="5rem" />
-              </strong>
-              <p>
-                <SkeletonText width="8rem" />
-              </p>
-            </div>
-          </article>
-        ))}
-      </div>
 
       <div className="order-detail-main-grid">
         <main className="order-detail-main-column" aria-label="Order operations">
@@ -4220,13 +4152,10 @@ export function OrderDetailPage() {
     canShowAllocationSplitRejectAction(order);
   const canOpenFullRejectBeforeRestriction = currentUser?.role === 'vendor' && canRejectOrder(order);
   const canShowOrderIssueActions = canOpenSplitRejectBeforeRestriction || canOpenFullRejectBeforeRestriction;
-  const trackingTitle = getTrackingTitle(order);
-  const trackingHelper = getTrackingHelper(order);
   const isVendorBlockedOrder = isVendorBlockedStatus(order.allocationStatus);
   const vendorBlockedReason = formatCancellationReason(order.cancellationReason);
   const operationalStory = getOperationalStory(order);
   const hasCanonicalOperationalStory = operationalStory.state !== 'active_or_unknown';
-  const vendorBlockedStory = getVendorBlockedOperationalStory(order);
   const operationalStatusLabel = hasCanonicalOperationalStory
     ? operationalStory.primaryLabel
     : toTitleCaseLabel(order.allocationStatus);
@@ -4565,89 +4494,6 @@ export function OrderDetailPage() {
         !financePreview ? 'ledger_preview_unavailable' : null,
       ].filter(Boolean) as string[]
     : [];
-  const summaryCards = hasCanonicalOperationalStory
-    ? [
-        {
-          label: 'Current state',
-          value: operationalStory.primaryLabel,
-          helper: operationalStory.resolvedByRefund
-            ? 'Shopify refund completed for this blocked allocation.'
-            : operationalStory.state === 'shopify_order_cancelled' || operationalStory.state === 'shopify_order_cancelled_conflict'
-              ? operationalStory.secondaryLabel
-              : vendorBlockedReason ? `Reason: ${vendorBlockedReason}` : 'Admin resolution is required.',
-          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled'
-            ? 'success'
-            : operationalStory.state === 'shopify_order_cancelled_conflict'
-              ? 'warning'
-              : 'danger',
-          icon: 'A',
-        },
-        {
-          label: 'Fulfillment',
-          value: operationalStory.fulfillmentLabel,
-          helper: operationalStory.state === 'shopify_order_cancelled'
-            ? 'Shipment work is closed for the cancelled order.'
-            : operationalStory.state === 'shopify_order_cancelled_conflict'
-              ? 'Existing fulfillment evidence is preserved for review.'
-              : operationalStory.resolvedByRefund
-            ? 'Shipment work is closed for the refunded allocation.'
-            : 'Shipment work is paused until admin resolves the rejection.',
-          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled' ? 'success' : 'warning',
-          icon: 'F',
-        },
-        {
-          label: 'Finance',
-          value: operationalStory.financeLabel,
-          helper: operationalStory.state === 'shopify_order_cancelled'
-            ? 'Sale ledger is voided for the cancelled order.'
-            : operationalStory.state === 'shopify_order_cancelled_conflict'
-              ? 'Finance evidence is preserved for review.'
-              : operationalStory.resolvedByRefund
-            ? 'Refund impact is recorded; vendor-blocked hold no longer applies.'
-            : 'Settlement and payout movement are held while the allocation is blocked.',
-          tone: operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled' ? 'success' : 'warning',
-          icon: 'H',
-        },
-        {
-          label: 'Next action',
-          value: operationalStory.nextActionLabel,
-          helper: vendorBlockedStory?.nextActionDescription ?? 'No operational shipment action is required.',
-          tone: operationalStory.resolvedByRefund ? 'success' : 'attention',
-          icon: 'N',
-        },
-      ]
-    : [
-        {
-          label: 'Allocation status',
-          value: toTitleCaseLabel(order.allocationStatus),
-          helper: order.cancellationReason
-            ? `Reason: ${order.cancellationReason.replace(/_/g, ' ')}`
-            : 'Vendor allocation state.',
-          tone: 'danger',
-          icon: 'A',
-        },
-        {
-          label: 'Fulfillment status',
-          value: order.fulfillmentStatus,
-          helper: order.fulfilledAt ? `Fulfilled ${formatDate(order.fulfilledAt)}` : 'Fulfillment is being processed.',
-          tone: 'info',
-          icon: 'F',
-        },
-        {
-          label: 'Shipping status',
-          value: order.shippingStatus,
-          helper: order.shipmentCreatedAt ? `Shipment created ${formatDate(order.shipmentCreatedAt)}` : 'Waiting for shipment progression.',
-          tone: 'warning',
-          icon: 'S',
-        },
-        {
-          label: 'Tracking status',
-          value: trackingTitle,
-          helper: trackingHelper,
-          tone: hasTrackingSync ? 'success' : 'muted',
-          icon: 'T',
-        },
-      ];
   const audience = isAdmin ? 'admin' : 'vendor';
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const orderTimelineEvents: OperationalEventInput[] = [];
@@ -4898,70 +4744,13 @@ export function OrderDetailPage() {
   const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
   const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
-  const needsOperationalAttention =
-    isActiveVendorBlockedOrder ||
-    Boolean(waitingSupportTicket) ||
-    (!hasCanonicalOperationalStory && !hasTrackingSync && order.shippingStatus !== 'Delivered');
-  const orderHealth = operationalStory.resolvedByRefund
-    ? {
-        label: operationalStory.financeLabel,
-        helper: 'Fulfillment is not required for this refunded order.',
-        tone: 'healthy',
-      }
-    : operationalStory.state === 'shopify_order_cancelled'
-    ? {
-        label: operationalStory.primaryLabel,
-        helper: operationalStory.secondaryLabel,
-        tone: 'healthy',
-      }
-    : operationalStory.state === 'shopify_order_cancelled_conflict'
-    ? {
-        label: operationalStory.primaryLabel,
-        helper: operationalStory.secondaryLabel,
-        tone: 'attention',
-      }
-    : isActiveVendorBlockedOrder
-    ? {
-        label: isAdmin ? 'Vendor rejected allocation' : 'Order needs admin review',
-        helper: vendorBlockedReason ? `Admin action required. Reason: ${vendorBlockedReason}.` : 'Admin action required.',
-        tone: 'attention',
-      }
-    : needsOperationalAttention
-    ? {
-        label: 'Needs attention',
-        helper: waitingSupportTicket
-          ? 'Support is waiting for a vendor update.'
-          : 'Shipment tracking is not fully visible yet.',
-        tone: 'attention',
-      }
-    : {
-        label: 'Healthy',
-        helper: 'Shipment and order state are progressing normally.',
-        tone: 'healthy',
-      };
   const operationalAlerts = [
-    operationalStory.state === 'shopify_order_cancelled' || operationalStory.state === 'shopify_order_cancelled_conflict'
+    operationalStory.state === 'shopify_order_cancelled_conflict'
       ? {
           id: 'shopify-order-cancelled',
           label: 'Cancelled',
-          detail: operationalStory.state === 'shopify_order_cancelled_conflict'
-            ? 'Shopify cancelled this order. Existing fulfillment, shipment, refund, or return evidence is preserved for review.'
-            : 'Shopify cancelled this order. Fulfillment, shipment, and tracking are not required.',
-          tone: operationalStory.state === 'shopify_order_cancelled_conflict' ? 'warning' : 'success',
-          href: null,
-          action: null,
-        }
-      : null,
-    operationalStory.resolvedByRefund
-      ? {
-          id: 'vendor-blocked-refund-completed',
-          label: 'Refund completed',
-          detail: isAdmin
-            ? isVendorBlockedOrder
-              ? 'Vendor rejection was resolved by Shopify refund.'
-              : 'Shopify refund completed for this allocation.'
-            : 'Refund completed. No shipment action is required.',
-          tone: 'success',
+          detail: 'Shopify cancelled this order. Existing fulfillment, shipment, refund, or return evidence is preserved for review.',
+          tone: 'warning',
           href: null,
           action: null,
         }
@@ -5262,40 +5051,39 @@ export function OrderDetailPage() {
             </div>
           </div>
         </div>
-        <div className="order-detail-status-pills" aria-label="Order status axes">
-          <div className="order-status-axis">
-            <span>Operational Status</span>
-            <span className={`status-badge status-${operationalStatusClass}`}>
+        <section
+          className={`order-current-state-summary ${hasCanonicalOperationalStory ? 'is-canonical' : 'is-fallback'}`}
+          aria-label="Current order state"
+        >
+          <div className="order-current-state-primary">
+            <span>Operational state</span>
+            <strong className={`status-badge status-${operationalStatusClass}`}>
               {operationalStatusLabel}
-            </span>
+            </strong>
           </div>
-          <div className="order-status-axis">
-            <span>Fulfillment</span>
-            <span className={`status-badge status-${getStatusClass(fulfillmentStateLabel)}`}>
-              {fulfillmentStateLabel}
-            </span>
-          </div>
-          <div className="order-status-axis">
-            <span>Finance state</span>
-            <span className={`status-badge status-${getFinanceStatusClass(financeStateLabel)}`}>
-              {financeStateLabel}
-            </span>
-          </div>
+          <dl className="order-current-state-details">
+            <div>
+              <dt>Fulfillment</dt>
+              <dd>{fulfillmentStateLabel}</dd>
+            </div>
+            <div>
+              <dt>Finance projection</dt>
+              <dd>{financeStateLabel}</dd>
+            </div>
+            <div>
+              <dt>Next operational action</dt>
+              <dd>{operationalStory.nextActionLabel}</dd>
+            </div>
+          </dl>
           {operationalStory.resolvedByRefund && isVendorBlockedOrder ? (
-            <div className="order-status-axis order-status-axis-muted">
+            <div className="order-current-state-history">
               <span>Historical Context</span>
-              <span className={`status-badge status-${getStatusClass(order.allocationStatus)}`}>
+              <strong>
                 {toTitleCaseLabel(order.allocationStatus)}
-              </span>
+              </strong>
             </div>
           ) : null}
-        </div>
-        {!hasOperationalReturn && !isActiveVendorBlockedOrder ? (
-          <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
-            <strong>{orderHealth.label}</strong>
-            <span>{orderHealth.helper}</span>
-          </div>
-        ) : null}
+        </section>
         {operationalAlerts.length ? (
           <div className="order-operational-alerts" aria-label="Operational alerts">
             {operationalAlerts.map((alert) => (
@@ -5315,23 +5103,6 @@ export function OrderDetailPage() {
           </div>
         ) : null}
       </header>
-
-      {isAdmin ? (
-      <div className="order-status-summary-grid">
-        {summaryCards.map((card) => (
-          <article key={card.label} className={`order-status-summary-card order-status-${card.tone}`}>
-            <span className="order-status-icon" aria-hidden="true">
-              {card.icon}
-            </span>
-            <div>
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <p>{card.helper}</p>
-            </div>
-          </article>
-        ))}
-      </div>
-      ) : null}
 
       <div className="order-detail-main-grid">
         <main className="order-detail-main-column" aria-label="Order operations">

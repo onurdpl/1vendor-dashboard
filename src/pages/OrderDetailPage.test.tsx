@@ -1290,10 +1290,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const axes = await screen.findByLabelText('Order status axes');
-    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    const axes = await screen.findByLabelText('Current order state');
+    expect(within(axes).getByText('Operational state')).toBeInTheDocument();
     expect(within(axes).getByText('Fulfillment')).toBeInTheDocument();
-    expect(within(axes).getByText('Finance state')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
     expect(within(axes).getByText('Active')).toBeInTheDocument();
     expect(within(axes).getByText('Pending')).toBeInTheDocument();
     expect(within(axes).getByText('In flow')).toBeInTheDocument();
@@ -1303,6 +1303,33 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(alerts).queryByText('Vendor rejected allocation')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+  });
+
+  it.each(['support', 'finance'] as const)('keeps the %s role on the existing non-admin presentation branch without vendor actions', async (role) => {
+    setCurrentUser({
+      email: `${role}@example.com`,
+      name: `${role} user`,
+      role,
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Current order state')).toBeInTheDocument();
+    expect(screen.queryByText('Shopify ID')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Internal notes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Escalate' })).not.toBeInTheDocument();
   });
 
   it('labels a normal paid Shopify snapshot with its explicit authority', async () => {
@@ -2438,7 +2465,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByLabelText('Primary operational status')).toBeInTheDocument();
+    const currentState = await screen.findByLabelText('Current order state');
+    expect(within(currentState).getByText('Operational state')).toBeInTheDocument();
+    expect(within(currentState).getByText('Active')).toBeInTheDocument();
+    expect(within(currentState).getByText('Pending')).toBeInTheDocument();
+    expect(within(currentState).getByText('In flow')).toBeInTheDocument();
+    expect(within(currentState).getByText('Continue fulfillment')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Operational alerts')).toBeInTheDocument();
     expect(screen.getByText('Tracking missing')).toBeInTheDocument();
     expect(screen.getByText('Awaiting shipment')).toBeInTheDocument();
@@ -2553,7 +2586,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
     expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
-    const axes = screen.getByLabelText('Order status axes');
+    const axes = screen.getByLabelText('Current order state');
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
     expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
@@ -2587,7 +2620,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
-    const axes = screen.getByLabelText('Order status axes');
+    const axes = screen.getByLabelText('Current order state');
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
   });
@@ -2769,13 +2802,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Vendor Blocked')).length).toBeGreaterThan(0);
-    const axes = screen.getByLabelText('Order status axes');
-    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    const axes = screen.getByLabelText('Current order state');
+    expect(within(axes).getByText('Operational state')).toBeInTheDocument();
     expect(within(axes).getByText('Fulfillment')).toBeInTheDocument();
-    expect(within(axes).getByText('Finance state')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).getByText('Review allocation')).toBeInTheDocument();
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
 
@@ -2878,8 +2912,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const axes = await screen.findByLabelText('Order status axes');
-    expect(within(axes).getByText('Finance state')).toBeInTheDocument();
+    const axes = await screen.findByLabelText('Current order state');
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
     expect(within(axes).queryByText('Paid')).not.toBeInTheDocument();
 
@@ -2888,17 +2922,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(snapshot).getByText('Paid')).toBeInTheDocument();
     expect(screen.queryByText('Payment Status')).not.toBeInTheDocument();
 
-    const summaryStrip = document.querySelector('.order-status-summary-grid');
-    expect(summaryStrip).toBeInstanceOf(HTMLElement);
-    const summary = within(summaryStrip as HTMLElement);
-    expect(summary.getByText('Current state')).toBeInTheDocument();
-    expect(summary.getByText('Fulfillment')).toBeInTheDocument();
-    expect(summary.getByText('Finance')).toBeInTheDocument();
-    expect(summary.getByText('Next action')).toBeInTheDocument();
-    expect(summary.getByText('Vendor Blocked')).toBeInTheDocument();
-    expect(summary.getByText('Blocked')).toBeInTheDocument();
-    expect(summary.getByText('Held')).toBeInTheDocument();
-    expect(summary.getByText('Review allocation')).toBeInTheDocument();
+    expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
+    expect(within(axes).getByText('Fulfillment')).toBeInTheDocument();
+    expect(within(axes).getByText('Next operational action')).toBeInTheDocument();
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).getByText('Review allocation')).toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
   });
 
@@ -2939,12 +2969,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Vendor Blocked');
-    const axes = screen.getByLabelText('Order status axes');
-    expect(within(axes).getByText('Operational Status')).toBeInTheDocument();
+    const axes = screen.getByLabelText('Current order state');
+    expect(within(axes).getByText('Operational state')).toBeInTheDocument();
     expect(within(axes).getByText('Fulfillment')).toBeInTheDocument();
-    expect(within(axes).getByText('Finance state')).toBeInTheDocument();
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(within(axes).getByText('Review allocation')).toBeInTheDocument();
     expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
     expect(within(axes).queryByText('Payment Status')).not.toBeInTheDocument();
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
@@ -3017,6 +3049,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByRole('heading', { name: 'Order #1128' })).toBeInTheDocument();
+    const currentState = screen.getByLabelText('Current order state');
+    expect(within(currentState).getByText('Refunded')).toBeInTheDocument();
+    expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(currentState).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(currentState).getByText('No action required')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
+    expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Nike Air Max Alpha Trainer 6')).toHaveLength(2);
@@ -3028,9 +3068,59 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(splitAllocationMock).not.toHaveBeenCalled();
     expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
     expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
     expect(terminalOrder.allocationStatus).toBe('active');
     expect(terminalOrder.fulfillmentStatus).toBe('Pending');
     expect(terminalOrder.shippingStatus).toBe('Awaiting Shipment');
+  });
+
+  it('shows one compact terminal-refund summary to admins without duplicate success surfaces', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithoutShipment,
+      sourceShopifyOrderNumber: '#1128',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      fulfillmentActionAvailable: false,
+      shipmentExecution: null,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+      timeline: [{ label: 'Order received', at: '2026-09-06T10:00:00.000Z' }],
+    });
+
+    renderOrderDetail();
+
+    const currentState = await screen.findByLabelText('Current order state');
+    expect(within(currentState).getByText('Refunded')).toBeInTheDocument();
+    expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(currentState).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(currentState).getByText('No action required')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
+    expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
   });
 
   it('keeps refund finance presentation separate from non-terminal operational status', async () => {
@@ -3088,8 +3178,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const axes = await screen.findByLabelText('Order status axes');
-    expect(within(axes).getByText('Finance state')).toBeInTheDocument();
+    const axes = await screen.findByLabelText('Current order state');
+    expect(within(axes).getByText('Finance projection')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).queryByText('Refund completed')).not.toBeInTheDocument();
@@ -3134,6 +3224,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shopify order cancelled');
+    const currentState = screen.getByLabelText('Current order state');
+    expect(within(currentState).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(currentState).getByText('Sale voided')).toBeInTheDocument();
+    expect(within(currentState).getByText('No action required')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
+    expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
     expect(cancellationRow).not.toHaveTextContent(formatTimelineDateForTest(orderCreatedAt));
@@ -3240,7 +3338,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Existing operational evidence')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Order status axes')).getByText('Review required')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Current order state')).getByText('Review required')).toBeInTheDocument();
+    const alerts = screen.getByLabelText('Operational alerts');
+    expect(within(alerts).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(alerts).getByText(/Existing fulfillment, shipment, refund, or return evidence is preserved/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
 
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
@@ -3446,6 +3547,34 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await within(supportCard).findByText(/already open/i)).toBeInTheDocument();
     expect(within(supportCard).queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the waiting-for-vendor support notice and its existing link', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([
+      buildSupportTicket({ status: 'WAITING_FOR_VENDOR', subject: 'Vendor response required' }),
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Current order state')).toBeInTheDocument();
+    const alerts = screen.getByLabelText('Operational alerts');
+    expect(within(alerts).getByText('Support action needed')).toBeInTheDocument();
+    expect(within(alerts).getByText('Vendor response required')).toBeInTheDocument();
+    expect(within(alerts).getByRole('link', { name: 'Open support' })).toHaveAttribute(
+      'href',
+      '/support/ticket-shipment-1',
+    );
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
   });
 
   it('escalates an existing linked support ticket without creating a new one', async () => {
