@@ -4085,7 +4085,7 @@ export function OrderDetailPage() {
           <div className="order-detail-sidebar-flow">
             <article className="operational-timeline-card order-detail-card-v2">
               <div className="order-card-heading">
-                <h2>{isAdmin ? 'Timeline' : 'Order activity'}</h2>
+                <h2>Activity</h2>
               </div>
               <div className="order-timeline-list" aria-label="Order timeline skeleton">
                 <SkeletonText width="70%" />
@@ -5060,26 +5060,42 @@ export function OrderDetailPage() {
           className={`order-current-state-summary ${hasCanonicalOperationalStory ? 'is-canonical' : 'is-fallback'}`}
           aria-label="Current order state"
         >
-          <div className="order-current-state-primary">
-            <span>Operational state</span>
-            <strong className={`status-badge status-${operationalStatusClass}`}>
-              {operationalStatusLabel}
-            </strong>
-          </div>
-          <dl className="order-current-state-details">
-            <div>
-              <dt>Fulfillment</dt>
-              <dd>{fulfillmentStateLabel}</dd>
-            </div>
-            <div>
-              <dt>Finance projection</dt>
-              <dd>{financeStateLabel}</dd>
-            </div>
-            <div>
-              <dt>Next operational action</dt>
-              <dd>{operationalStory.nextActionLabel}</dd>
-            </div>
-          </dl>
+          {operationalStory.resolvedByRefund ? (
+            <>
+              <div className="order-current-state-primary order-current-state-terminal-primary">
+                <strong className={`status-badge status-${operationalStatusClass}`}>
+                  {operationalStory.primaryLabel}
+                </strong>
+              </div>
+              <div className="order-current-state-terminal-details">
+                <strong>{operationalStory.fulfillmentLabel}</strong>
+                <span>{operationalStory.nextActionLabel}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="order-current-state-primary">
+                <span>Operational state</span>
+                <strong className={`status-badge status-${operationalStatusClass}`}>
+                  {operationalStatusLabel}
+                </strong>
+              </div>
+              <dl className="order-current-state-details">
+                <div>
+                  <dt>Fulfillment</dt>
+                  <dd>{fulfillmentStateLabel}</dd>
+                </div>
+                <div>
+                  <dt>Finance projection</dt>
+                  <dd>{financeStateLabel}</dd>
+                </div>
+                <div>
+                  <dt>Next operational action</dt>
+                  <dd>{operationalStory.nextActionLabel}</dd>
+                </div>
+              </dl>
+            </>
+          )}
           {operationalStory.resolvedByRefund && isVendorBlockedOrder ? (
             <div className="order-current-state-history">
               <span>Historical Context</span>
@@ -6555,19 +6571,20 @@ export function OrderDetailPage() {
                 {hasCanonicalOperationalStory ? (
                   <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
                     <strong>{operationalStory.fulfillmentLabel}</strong>
-                    <span>
-                      {isFulfillmentAuthoritativelyClosed
-                        ? fulfillmentClosureDetail
-                        : operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
-                          ? 'Shipment work is paused until the allocation is resolved.'
-                          : operationalStory.shippingLabel}
-                    </span>
+                    {!operationalStory.resolvedByRefund ? (
+                      <span>
+                        {isFulfillmentAuthoritativelyClosed
+                          ? fulfillmentClosureDetail
+                          : operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
+                            ? 'Shipment work is paused until the allocation is resolved.'
+                            : operationalStory.shippingLabel}
+                      </span>
+                    ) : null}
                   </div>
                 ) : null}
                 {operationalStory.resolvedByRefund ? (
                   <div className="order-fulfillment-no-action" aria-label="Fulfillment action requirement">
                     <strong>No operational action required</strong>
-                    <span>No shipment is required for this order.</span>
                   </div>
                 ) : null}
                 {(isAdmin || canUseFulfillmentActions) && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
@@ -7842,8 +7859,8 @@ export function OrderDetailPage() {
             ) : null}
 
             <OperationalTimeline
-              title={isAdmin ? 'Timeline' : 'Order activity'}
-              subtitle="Order, shipment, return, and support activity."
+              title="Activity"
+              eyebrow=""
               events={groupOrderDetailTimelineEvents([
                 ...safeArray(order.timeline)
                   .filter((entry) => !isRawProviderTimelineLabel(entry.label))

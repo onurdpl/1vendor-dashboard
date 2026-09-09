@@ -414,7 +414,7 @@ function formatTimelineDateForTest(value: string) {
 }
 
 function getOrderActivityRow(title: string) {
-  const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+  const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
   expect(timeline).not.toBeNull();
   const row = within(timeline as HTMLElement).getByText(title).closest('li');
   expect(row).not.toBeNull();
@@ -1265,7 +1265,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.getByLabelText('Order summary skeleton')).toBeInTheDocument();
     expect(screen.queryByText('Shopify ID')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
   });
 
@@ -1302,7 +1302,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const alerts = screen.getByLabelText('Operational alerts');
     expect(within(alerts).queryByText('Vendor rejected allocation')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
   });
 
   it.each(['support', 'finance'] as const)('keeps the %s role on the existing non-admin presentation branch without vendor actions', async (role) => {
@@ -2249,7 +2249,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shipment updated');
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment updated')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Updated')).toBeInTheDocument();
@@ -2289,7 +2289,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shipment cancelled');
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment cancelled')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
@@ -2329,7 +2329,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Order created');
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText('Shipment updated')).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Shipment cancelled')).not.toBeInTheDocument();
@@ -2362,7 +2362,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Customer unavailable')).length).toBeGreaterThan(0);
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/provider status/i)).not.toBeInTheDocument();
@@ -2370,7 +2370,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/Tracking pending/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
-    expect(within(timeline as HTMLElement).getByText(/Order, shipment, return, and support activity/)).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/^Timeline$/)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByRole('heading', { name: 'Order activity' })).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText('Order, shipment, return, and support activity.')).not.toBeInTheDocument();
   });
 
   it('renders stored customer names for vendor users', async () => {
@@ -2513,7 +2515,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Vendor actions' })).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment, tracking, and return controls for this order.')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
@@ -2837,7 +2839,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Finance')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     const rejectedEvent = timelineScope.getByText('Vendor rejected selected items');
@@ -3008,7 +3010,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
 
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Vendor rejected selected items')).toBeInTheDocument();
@@ -3065,8 +3067,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const currentState = screen.getByLabelText('Current order state');
     expect(within(currentState).getByText('Refunded')).toBeInTheDocument();
     expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
-    expect(within(currentState).getByText('Refund completed')).toBeInTheDocument();
     expect(within(currentState).getByText('No action required')).toBeInTheDocument();
+    expect(within(currentState).queryByText('Operational state')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Fulfillment')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Finance projection')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Next operational action')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Refund completed')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
@@ -3078,15 +3084,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(shipmentSection).not.toBeNull();
     expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
-    expect(within(shipmentSection as HTMLElement).getAllByText('Shipment work is closed for the refunded allocation.')).toHaveLength(1);
+    expect(within(shipmentSection as HTMLElement).queryByText('Shipment work is closed for the refunded allocation.')).not.toBeInTheDocument();
+    expect(within(shipmentSection as HTMLElement).queryByText('No shipment is required for this order.')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Fulfillment' }).parentElement?.querySelector('p')).toBeNull();
-    expect(shipmentRequirement).toHaveTextContent('Shipment work is closed for the refunded allocation.');
+    expect(shipmentRequirement).toHaveTextContent('Fulfillment not required');
+    expect(shipmentRequirement).not.toHaveTextContent('Shipment work is closed for the refunded allocation.');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-terminal-panel');
     expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
     const fulfillmentActionRequirement = within(shipmentSection as HTMLElement).getByLabelText('Fulfillment action requirement');
     expect(fulfillmentActionRequirement).toHaveTextContent('No operational action required');
-    expect(fulfillmentActionRequirement).toHaveTextContent('No shipment is required for this order.');
+    expect(fulfillmentActionRequirement).not.toHaveTextContent('No shipment is required for this order.');
     expect(screen.getAllByText('Nike Air Max Alpha Trainer 6')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
@@ -3096,8 +3104,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(splitAllocationMock).not.toHaveBeenCalled();
     expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
     expect(createShipmentExecutionMock).not.toHaveBeenCalled();
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).queryByText(/^Timeline$/)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText('Order, shipment, return, and support activity.')).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
     expect(terminalOrder.allocationStatus).toBe('active');
@@ -3138,8 +3148,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const currentState = await screen.findByLabelText('Current order state');
     expect(within(currentState).getByText('Refunded')).toBeInTheDocument();
     expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
-    expect(within(currentState).getByText('Refund completed')).toBeInTheDocument();
     expect(within(currentState).getByText('No action required')).toBeInTheDocument();
+    expect(within(currentState).queryByText('Operational state')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Fulfillment')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Finance projection')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Next operational action')).not.toBeInTheDocument();
+    expect(within(currentState).queryByText('Refund completed')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
@@ -3148,7 +3162,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
-    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
@@ -3256,6 +3270,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     await screen.findByText('Shopify order cancelled');
     const currentState = screen.getByLabelText('Current order state');
+    expect(within(currentState).getByText('Operational state')).toBeInTheDocument();
+    expect(within(currentState).getByText('Fulfillment')).toBeInTheDocument();
+    expect(within(currentState).getByText('Finance projection')).toBeInTheDocument();
+    expect(within(currentState).getByText('Next operational action')).toBeInTheDocument();
     expect(within(currentState).getByText('Cancelled')).toBeInTheDocument();
     expect(within(currentState).getByText('Fulfillment not required')).toBeInTheDocument();
     expect(within(currentState).getByText('Sale voided')).toBeInTheDocument();
@@ -3381,7 +3399,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Shopify order cancelled');
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
     expect(timelineScope.getByText('Existing operational evidence')).toBeInTheDocument();
@@ -3428,7 +3446,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const sidebarFlow = rail.querySelector('.order-detail-sidebar-flow');
     expect(sidebarFlow).toBeInstanceOf(HTMLElement);
 
-    const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Activity' }).closest('article');
     const supportCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Support' }).closest('article');
 
     expect(within(sidebarFlow as HTMLElement).queryByLabelText('Right panel status')).not.toBeInTheDocument();
@@ -3797,7 +3815,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const rail = await screen.findByLabelText('Order timeline and support');
     const sidebar = rail.querySelector('.order-detail-sidebar-flow') as HTMLElement;
-    const timeline = within(sidebar).getByRole('heading', { name: 'Timeline' }).closest('article') as HTMLElement;
+    const timeline = within(sidebar).getByRole('heading', { name: 'Activity' }).closest('article') as HTMLElement;
     const support = within(sidebar).getByRole('heading', { name: 'Support' }).closest('article') as HTMLElement;
     const notes = within(sidebar).getByRole('heading', { name: 'Internal notes' }).closest('article') as HTMLElement;
 
@@ -5923,7 +5941,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Transfer Aşamasında')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getAllByText('Transfer Aşamasında')).toHaveLength(1);
@@ -6211,7 +6229,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'https://tracking.tryoto.example/RET-TRACK-1028',
     );
     expect(screen.getByRole('button', { name: 'Open return label PDF' })).toBeInTheDocument();
-    const timeline = screen.getByRole('heading', { name: 'Order activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
