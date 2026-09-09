@@ -4169,9 +4169,6 @@ export function OrderDetailPage() {
   const isActiveVendorBlockedOrder = operationalStory.state === 'vendor_blocked_awaiting_admin_resolution';
   const isFulfillmentAuthoritativelyClosed =
     operationalStory.resolvedByRefund || operationalStory.state === 'shopify_order_cancelled';
-  const fulfillmentClosureDetail = isFulfillmentAuthoritativelyClosed
-    ? operationalStory.timelineEvents.find((event) => event.label === 'Fulfillment not required')?.detail ?? operationalStory.secondaryLabel
-    : null;
   const shouldShowCreateShipmentAction =
     operationalStory.actionVisibility.canCreateShipment && !hasTrackingSync && !hasShipmentExecution;
   const financePreview = isAdmin ? order.financeLedgerPreview : null;
@@ -5303,14 +5300,8 @@ export function OrderDetailPage() {
             <div className="order-card-heading">
               <div>
                 <h2>Fulfillment</h2>
-                {!isFulfillmentAuthoritativelyClosed ? (
-                  <p>
-                    {hasTrackingSync
-                      ? isAdmin
-                        ? 'Carrier, tracking, label, and Shopify sync controls.'
-                        : 'Carrier, tracking, and label details.'
-                      : 'Add shipment details when the package is ready.'}
-                  </p>
+                {operationalStory.state === 'active_or_unknown' && !hasTrackingSync && !hasShipmentExecution && !hasShopifyFulfillmentSyncAttempt ? (
+                  <p>Add shipment details when the package is ready.</p>
                 ) : null}
               </div>
             </div>
@@ -5319,7 +5310,6 @@ export function OrderDetailPage() {
                 {isFulfillmentAuthoritativelyClosed ? (
                   <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
                     <strong>{operationalStory.fulfillmentLabel}</strong>
-                    <span>{fulfillmentClosureDetail}</span>
                   </div>
                 ) : null}
                 <div className="vendor-actions-heading">
@@ -6109,11 +6099,9 @@ export function OrderDetailPage() {
                         {canSyncNavlungoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
                             <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
-                            <span>
-                              {isAdmin
-                                ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.'
-                                : 'Refresh the latest carrier status for this shipment.'}
-                            </span>
+                            {isAdmin ? (
+                              <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                            ) : null}
                             {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                               <span className="warning-copy">Carrier reported address validation issue.</span>
                             ) : null}
@@ -6555,14 +6543,8 @@ export function OrderDetailPage() {
                 {hasCanonicalOperationalStory ? (
                   <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
                     <strong>{operationalStory.fulfillmentLabel}</strong>
-                    {!operationalStory.resolvedByRefund ? (
-                      <span>
-                        {isFulfillmentAuthoritativelyClosed
-                          ? fulfillmentClosureDetail
-                          : operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
-                            ? 'Shipment work is paused until the allocation is resolved.'
-                            : operationalStory.shippingLabel}
-                      </span>
+                    {operationalStory.state === 'shopify_order_cancelled_conflict' ? (
+                      <span>{operationalStory.shippingLabel}</span>
                     ) : null}
                   </div>
                 ) : null}
@@ -7149,11 +7131,9 @@ export function OrderDetailPage() {
                     {canSyncNavlungoShipmentStatus ? (
                       <div className="shipment-recovery-actions" aria-label={isAdmin ? 'Navlungo shipment status sync' : 'Shipment status update'}>
                         <strong>{isAdmin ? 'Navlungo status sync' : 'Shipment status update'}</strong>
-                        <span>
-                          {isAdmin
-                            ? 'Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.'
-                            : 'Refresh the latest carrier status for this shipment.'}
-                        </span>
+                        {isAdmin ? (
+                          <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                        ) : null}
                         {shipmentProviderSummary?.navlungoGeoBadAddress ? (
                           <span className="warning-copy">Carrier reported address validation issue.</span>
                         ) : null}
