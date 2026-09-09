@@ -8247,6 +8247,16 @@ h3 {
   background: #f8fafc;
 }
 
+.order-current-state-summary.is-vendor-single {
+  grid-template-columns: minmax(0, 1fr);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.order-current-state-summary.is-vendor-single .order-current-state-primary {
+  border-right: 0;
+}
+
 .order-current-state-details {
   display: grid;
   min-width: 0;
@@ -10147,6 +10157,10 @@ summary.provider-response-heading::-webkit-details-marker {
   .order-current-state-primary {
     border-right: 0;
     border-bottom: 1px solid var(--op-border);
+  }
+
+  .order-current-state-summary.is-vendor-single .order-current-state-primary {
+    border-bottom: 0;
   }
 
   .order-current-state-details div {

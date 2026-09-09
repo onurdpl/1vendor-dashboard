@@ -4808,6 +4808,16 @@ export function OrderDetailPage() {
   const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
   const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
+  const vendorCurrentStateSecondaryLabel =
+    currentUser?.role !== 'vendor' || operationalStory.resolvedByRefund
+      ? null
+      : operationalStory.state === 'active_or_unknown'
+        ? hasOperationalReturn
+          ? null
+          : fulfillmentStateLabel
+        : operationalStory.state === 'vendor_blocked_awaiting_admin_resolution'
+          ? operationalStory.secondaryLabel
+          : operationalStory.nextActionLabel;
   const operationalAlerts = [
     operationalStory.state === 'shopify_order_cancelled_conflict'
       ? {
@@ -5116,7 +5126,11 @@ export function OrderDetailPage() {
           </div>
         </div>
         <section
-          className={`order-current-state-summary ${hasCanonicalOperationalStory ? 'is-canonical' : 'is-fallback'}`}
+          className={`order-current-state-summary ${hasCanonicalOperationalStory ? 'is-canonical' : 'is-fallback'} ${
+            currentUser?.role === 'vendor' && !operationalStory.resolvedByRefund && !vendorCurrentStateSecondaryLabel
+              ? 'is-vendor-single'
+              : ''
+          }`}
           aria-label="Current order state"
         >
           {operationalStory.resolvedByRefund ? (
@@ -5130,6 +5144,19 @@ export function OrderDetailPage() {
                 <strong>{operationalStory.fulfillmentLabel}</strong>
                 <span>{operationalStory.nextActionLabel}</span>
               </div>
+            </>
+          ) : currentUser?.role === 'vendor' ? (
+            <>
+              <div className="order-current-state-primary order-current-state-terminal-primary">
+                <strong className={`status-badge status-${operationalStatusClass}`}>
+                  {operationalStatusLabel}
+                </strong>
+              </div>
+              {vendorCurrentStateSecondaryLabel ? (
+                <div className="order-current-state-terminal-details">
+                  <strong>{vendorCurrentStateSecondaryLabel}</strong>
+                </div>
+              ) : null}
             </>
           ) : (
             <>
