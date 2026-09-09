@@ -4067,6 +4067,7 @@ export function OrderDetailPage() {
   }, [order?.id]);
 
   const renderOrderDetailFrame = (body?: ReactNode) => {
+    const isVendorHeader = currentUser?.role === 'vendor';
     const summarySkeletonLabels = isAdmin ? ['Created', 'Vendor', 'Customer', 'Shopify ID'] : ['Created', 'Vendor', 'Customer'];
 
     return (
@@ -4081,8 +4082,21 @@ export function OrderDetailPage() {
               <h1>Order detail</h1>
               <span className="order-source-pill">Loading</span>
             </div>
-            <div className="order-detail-meta-strip" aria-label="Order summary skeleton">
-              {summarySkeletonLabels.map((label) => (
+            <div
+              className={`order-detail-meta-strip${isVendorHeader ? ' order-detail-meta-strip-vendor' : ''}`}
+              aria-label="Order summary skeleton"
+            >
+              {isVendorHeader ? (
+                <>
+                  <div>
+                    <strong><SkeletonText width="8rem" /></strong>
+                  </div>
+                  <div>
+                    <span>Customer</span>
+                    <strong><SkeletonText width="5rem" /></strong>
+                  </div>
+                </>
+              ) : summarySkeletonLabels.map((label) => (
                 <div key={label}>
                   <span>{label}</span>
                   <strong>
@@ -5093,9 +5107,11 @@ export function OrderDetailPage() {
               <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
               {isAdmin ? <span className="order-source-pill">{order.channel || 'Unknown'}</span> : null}
             </div>
-            <div className="order-detail-meta-strip">
+            <div
+              className={`order-detail-meta-strip${currentUser?.role === 'vendor' ? ' order-detail-meta-strip-vendor' : ''}`}
+            >
               <div>
-                <span>Created</span>
+                {currentUser?.role === 'vendor' ? null : <span>Created</span>}
                 <strong>{formatDate(order.date)}</strong>
               </div>
               {isAdmin ? (

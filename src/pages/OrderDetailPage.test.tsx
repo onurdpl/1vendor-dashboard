@@ -1273,7 +1273,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(screen.getByLabelText('Order summary skeleton')).toBeInTheDocument();
+    const summarySkeleton = screen.getByLabelText('Order summary skeleton');
+    expect(summarySkeleton).toBeInTheDocument();
+    expect(summarySkeleton).toHaveClass('order-detail-meta-strip-vendor');
+    expect(within(summarySkeleton).queryByText('Created')).not.toBeInTheDocument();
+    expect(within(summarySkeleton).getByText('Customer')).toBeInTheDocument();
     expect(screen.queryByText('Shopify ID')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Timeline' })).not.toBeInTheDocument();
@@ -1347,6 +1351,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Escalate' })).not.toBeInTheDocument();
+    const header = screen.getByText('Created').closest('.order-detail-topbar');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByText('Customer')).toBeInTheDocument();
+    expect(within(header as HTMLElement).queryByText('Shopify ID')).not.toBeInTheDocument();
   });
 
   it('labels a normal paid Shopify snapshot with its explicit authority', async () => {
@@ -2620,6 +2628,52 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
   });
 
+  it('compacts vendor header metadata without changing timestamp, customer, Ship to, or current state', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      customer: 'Ada Lovelace',
+      shippingAddress: 'Shopify shipping address available in future detail sync.',
+    });
+
+    renderOrderDetail();
+
+    const heading = await screen.findByRole('heading', { name: 'Order #1028' });
+    const header = heading.closest('.order-detail-topbar');
+    expect(header).not.toBeNull();
+    const allocationCreatedAt = new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(orderWithShipmentSummary.date));
+    const shopifyCreatedAt = new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(orderWithShipmentSummary.orderSnapshot!.shopifyCreatedAt!));
+    const headerRegion = within(header as HTMLElement);
+    const metadata = (header as HTMLElement).querySelector('.order-detail-meta-strip');
+
+    expect(metadata).toHaveClass('order-detail-meta-strip-vendor');
+    expect(headerRegion.getByText(allocationCreatedAt)).toBeInTheDocument();
+    expect(headerRegion.queryByText(shopifyCreatedAt)).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('Created')).not.toBeInTheDocument();
+    expect(headerRegion.getByText('Customer')).toBeInTheDocument();
+    expect(headerRegion.getByText('Ada Lovelace')).toBeInTheDocument();
+    const shippingSummary = headerRegion.getByLabelText('Shipping address summary');
+    expect(shippingSummary).toHaveTextContent('Ship to');
+    expect(shippingSummary).toHaveTextContent('Shopify shipping address available in future detail sync.');
+    const currentState = headerRegion.getByLabelText('Current order state');
+    expect(within(currentState).getByText('Active')).toBeInTheDocument();
+    expect(within(currentState).getByText('Pending')).toBeInTheDocument();
+  });
+
   it('removes dead Order Detail header actions', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -2633,7 +2687,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByRole('heading', { name: 'Order #1028' })).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Order #1028' });
+    expect(heading).toBeInTheDocument();
+    const header = heading.closest('.order-detail-topbar');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).getByText('Created')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Customer')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Vendor')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByText('Shopify ID')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'İNCELE' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More order actions' })).not.toBeInTheDocument();
   });

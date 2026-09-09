@@ -8098,6 +8098,27 @@ h3 {
   border-right: 0;
 }
 
+.order-detail-meta-strip-vendor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.order-detail-meta-strip-vendor > div {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.order-detail-meta-strip-vendor > div:last-child {
+  flex: 1 1 160px;
+}
+
+.order-detail-meta-strip-vendor strong {
+  min-width: 0;
+}
+
 .order-detail-meta-strip span,
 .order-line-item-row-v2 span,
 .order-financial-impact-grid span,
