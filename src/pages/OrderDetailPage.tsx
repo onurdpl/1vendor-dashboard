@@ -7874,7 +7874,7 @@ export function OrderDetailPage() {
               <div className="order-card-heading">
                 <div>
                   <h2>Support</h2>
-                  <p>{relatedSupportTickets.length ? (isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.') : 'No linked support tickets'}</p>
+                  {!relatedSupportTickets.length ? <p>No linked support tickets</p> : null}
                 </div>
               </div>
               <div className="order-support-compact-stack">
@@ -7938,7 +7938,6 @@ export function OrderDetailPage() {
                   <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
                     <summary className="provider-response-heading">
                       <strong>Admin support context</strong>
-                      <span>Copy utilities</span>
                     </summary>
                     {relatedSupportTickets[0] ? (
                       <>

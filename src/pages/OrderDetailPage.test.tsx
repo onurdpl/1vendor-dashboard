@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationSplitExecutionResponse, AllocationSplitPlannerResponse, OrderDetail } from '../features/orders/api';
@@ -1324,6 +1325,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Order finance preview')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Internal notes' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Admin collaboration')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Admin support diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
@@ -3856,10 +3859,27 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const notes = within(sidebar).getByRole('heading', { name: 'Internal notes' }).closest('article') as HTMLElement;
 
     expect(within(support).getByText('No linked support tickets')).toBeInTheDocument();
+    const supportDiagnostics = within(support).getByLabelText('Admin support diagnostics') as HTMLDetailsElement;
+    expect(within(supportDiagnostics).getByText('Admin support context')).toBeInTheDocument();
+    expect(within(supportDiagnostics).queryByText('Copy utilities')).not.toBeInTheDocument();
     expect(within(notes).getByText('No internal notes yet.')).toBeInTheDocument();
+    expect(within(notes).getByRole('button', { name: 'Add note' })).toBeInTheDocument();
+    expect(notes.querySelector('.admin-collab-empty')).not.toBeNull();
     expect(notes).not.toHaveClass('admin-collab-card-compact');
     expect(Boolean(timeline.compareDocumentPosition(support) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(support.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it('uses Order Detail-local styles to remove only redundant empty-note chrome', () => {
+    const styles = readFileSync(`${process.cwd()}/src/styles.css`, 'utf8');
+
+    expect(styles).toContain(`.order-detail-sidebar-flow > .admin-collab-card .admin-collab-heading .eyebrow {
+  display: none;
+}`);
+    expect(styles).toContain(`.order-detail-sidebar-flow > .admin-collab-card:has(.admin-collab-empty) .admin-collab-heading > span {
+  display: none;
+}`);
+    expect(styles).not.toContain('.order-detail-sidebar-flow > .admin-collab-card .admin-collab-heading > span {\n  display: none;');
   });
 
   it('shows finance ledger preview to admins and hides it from vendors', async () => {
@@ -4096,6 +4116,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(supportDiagnostics).toBeInTheDocument();
     expect(supportDiagnostics.tagName).toBe('DETAILS');
     expect(supportDiagnostics.open).toBe(false);
+    const diagnosticsSummary = within(supportDiagnostics).getByText('Admin support context').closest('summary');
+    expect(diagnosticsSummary).not.toBeNull();
+    expect(within(diagnosticsSummary as HTMLElement).queryByText('Copy utilities')).not.toBeInTheDocument();
+    expect(screen.queryByText('Support context and diagnostics.')).not.toBeInTheDocument();
+    await userEvent.click(diagnosticsSummary as HTMLElement);
+    expect(supportDiagnostics.open).toBe(true);
     expect(screen.getByText('Tracking has not updated.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Copy diagnostics' }));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Shipment diagnostics'));
@@ -4125,6 +4151,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByLabelText('Support ticket summary')).toBeInTheDocument();
+    expect(screen.queryByText('Shipment and return context attached.')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Admin support diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy diagnostics' })).not.toBeInTheDocument();
   });

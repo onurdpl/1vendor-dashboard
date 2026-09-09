@@ -8478,8 +8478,8 @@ h3 {
   gap: 12px;
   padding: 14px;
   border-color: rgba(226, 232, 240, 0.95);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.9));
+  background: #fff;
+  box-shadow: none;
 }
 
 .order-support-card .order-card-heading {
@@ -8488,6 +8488,17 @@ h3 {
 
 .order-support-card .order-card-heading p {
   max-width: 24rem;
+}
+
+.order-support-card .admin-diagnostics-panel {
+  padding: 7px 9px;
+  border-color: #e2e8f0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.order-support-card .admin-diagnostics-panel:not([open]) .provider-response-heading::after {
+  content: none;
 }
 
 .order-support-compact-stack {
@@ -8574,6 +8585,32 @@ h3 {
   grid-column: 2;
   grid-row: 5;
   order: 3;
+}
+
+.order-detail-sidebar-flow > .admin-collab-card {
+  gap: 10px;
+  padding: 14px;
+  border-color: rgba(226, 232, 240, 0.95);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.order-detail-sidebar-flow > .admin-collab-card .admin-collab-heading .eyebrow {
+  display: none;
+}
+
+.order-detail-sidebar-flow > .admin-collab-card:has(.admin-collab-empty) .admin-collab-heading > span {
+  display: none;
+}
+
+.order-detail-sidebar-flow > .admin-collab-card .admin-collab-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
 }
 
 .order-detail-card-v2 {
