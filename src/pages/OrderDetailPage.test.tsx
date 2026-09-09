@@ -2690,6 +2690,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByLabelText('Operational alerts')).toBeInTheDocument();
     expect(screen.getByText('Tracking missing')).toBeInTheDocument();
     expect(screen.getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(screen.queryByText('Tracking is not visible to the operational workspace yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Create shipment or add tracking when the package is ready.')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Order detail sections' })).not.toBeInTheDocument();
     expect(screen.queryByText('Operational summary')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Context' })).not.toBeInTheDocument();
@@ -8275,6 +8277,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
+    expect(screen.getByText('Tracking missing')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(screen.queryByText('Tracking is not visible to the operational workspace yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Create shipment or add tracking when the package is ready.')).not.toBeInTheDocument();
     expect(screen.getByText('Add shipment details when the package is ready.')).toBeInTheDocument();
     expect(createShipmentButton).toHaveClass('button-primary');
     expect(screen.getByRole('button', { name: 'Add tracking information' })).toHaveClass('button-secondary');

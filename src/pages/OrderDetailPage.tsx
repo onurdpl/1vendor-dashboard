@@ -4847,7 +4847,7 @@ export function OrderDetailPage() {
       ? {
           id: 'tracking-missing',
           label: 'Tracking missing',
-          detail: 'Tracking is not visible to the operational workspace yet.',
+          detail: null,
           tone: 'attention',
           href: null,
           action: null,
@@ -4857,7 +4857,7 @@ export function OrderDetailPage() {
       ? {
           id: 'awaiting-shipment',
           label: 'Awaiting shipment',
-          detail: 'Create shipment or add tracking when the package is ready.',
+          detail: null,
           tone: 'warning',
           href: null,
           action: null,
@@ -4873,7 +4873,7 @@ export function OrderDetailPage() {
           action: 'Open support',
         }
       : null,
-  ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string; href: string | null; action: string | null }>;
+  ].filter(Boolean) as Array<{ id: string; label: string; detail: string | null; tone: string; href: string | null; action: string | null }>;
 
   const shippingConfigEditorPanel = isAdmin ? (
     <VendorShippingConfigEditor
@@ -5172,7 +5172,7 @@ export function OrderDetailPage() {
                   !
                 </span>
                 <strong>{alert.label}</strong>
-                <span>{alert.detail}</span>
+                {alert.detail ? <span>{alert.detail}</span> : null}
                 {alert.href && alert.action ? (
                   <Link className="order-alert-link" to={alert.href}>
                     {alert.action}
