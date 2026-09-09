@@ -2483,7 +2483,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/^Guided Operations$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Items/ })).toBeInTheDocument();
     const itemsSection = screen.getByRole('heading', { name: /Items/ }).closest('article') as HTMLElement;
     const financialSummary = screen.getByLabelText('Order financial summary');
@@ -2500,7 +2500,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
     expect(within(financialSummary).queryByText('Payment status')).not.toBeInTheDocument();
-    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article') as HTMLElement;
+    const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article') as HTMLElement;
     expect(Boolean(itemsSection.compareDocumentPosition(financialSummary) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(financialSummary.compareDocumentPosition(shipmentSection) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.queryByRole('heading', { name: 'Settlement preview' })).not.toBeInTheDocument();
@@ -2510,7 +2510,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Shipping deduction')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Vendor actions' })).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment, tracking, and return controls for this order.')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
@@ -2700,7 +2700,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(orderIssue).getByText('Reject selected items or send the full order to admin review.')).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject full order' })).toBeInTheDocument();
-    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article') as HTMLElement;
+    const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article') as HTMLElement;
     expect(within(shipmentSection).queryByRole('button', {
       name: 'Reject selected items',
     })).not.toBeInTheDocument();
@@ -2821,6 +2821,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(alerts).queryByText('Tracking missing')).not.toBeInTheDocument();
     expect(within(alerts).queryByText('Awaiting shipment')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
+
+    const fulfillmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
+    expect(fulfillmentSection).not.toBeNull();
+    const shipmentRequirement = within(fulfillmentSection as HTMLElement).getByLabelText('Shipment requirement state');
+    expect(shipmentRequirement).toHaveTextContent('Blocked');
+    expect(shipmentRequirement).toHaveTextContent('Shipment work is paused until the allocation is resolved.');
+    expect(shipmentRequirement.parentElement).toHaveClass('vendor-blocked-panel');
+    expect(shipmentRequirement.parentElement).not.toHaveClass('order-fulfillment-complete-panel');
+    expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
 
     expect(screen.queryByText('Current state')).not.toBeInTheDocument();
     expect(screen.queryByText('Finance')).not.toBeInTheDocument();
@@ -3063,13 +3074,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
-    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article');
+    const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
     expect(shipmentSection).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
     expect(within(shipmentSection as HTMLElement).getAllByText('Shipment work is closed for the refunded allocation.')).toHaveLength(1);
-    expect(screen.getByRole('heading', { name: 'Shipment' }).parentElement?.querySelector('p')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Fulfillment' }).parentElement?.querySelector('p')).toBeNull();
     expect(shipmentRequirement).toHaveTextContent('Shipment work is closed for the refunded allocation.');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
+    expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-terminal-panel');
     expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
+    const fulfillmentActionRequirement = within(shipmentSection as HTMLElement).getByLabelText('Fulfillment action requirement');
+    expect(fulfillmentActionRequirement).toHaveTextContent('No operational action required');
+    expect(fulfillmentActionRequirement).toHaveTextContent('No shipment is required for this order.');
     expect(screen.getAllByText('Nike Air Max Alpha Trainer 6')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
@@ -3126,6 +3143,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
@@ -3245,13 +3265,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(document.querySelector('.order-status-summary-grid')).not.toBeInTheDocument();
     expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
-    const shipmentSection = screen.getByRole('heading', { name: 'Shipment' }).closest('article');
+    const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
     expect(shipmentSection).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
     expect(within(shipmentSection as HTMLElement).getAllByText('Shipment and tracking work are closed for this order.')).toHaveLength(1);
-    expect(screen.getByRole('heading', { name: 'Shipment' }).parentElement?.querySelector('p')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Fulfillment' }).parentElement?.querySelector('p')).toBeNull();
     expect(shipmentRequirement).toHaveTextContent('Shipment and tracking work are closed for this order.');
     expect(shipmentRequirement.parentElement).toHaveClass('order-fulfillment-complete-panel');
+    expect(shipmentRequirement.parentElement).not.toHaveClass('order-fulfillment-terminal-panel');
     expect(shipmentRequirement.parentElement).not.toHaveClass('vendor-blocked-panel');
+    expect(within(shipmentSection as HTMLElement).queryByText('No operational action required')).not.toBeInTheDocument();
+    expect(within(shipmentSection as HTMLElement).queryByText('No shipment is required for this order.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create shipment' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeInTheDocument();
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
@@ -7844,6 +7869,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const createShipmentButton = await screen.findByRole('button', { name: 'Create shipment' });
+    expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment & delivery' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipment' })).not.toBeInTheDocument();
     expect(screen.getByText('Add shipment details when the package is ready.')).toBeInTheDocument();
     expect(createShipmentButton).toHaveClass('button-primary');
     expect(screen.getByRole('button', { name: 'Add tracking information' })).toHaveClass('button-secondary');
@@ -8624,6 +8652,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: false,
       defaultVendorId: 'sporjinal',
     });
+    getOrderMock.mockResolvedValueOnce(orderWithoutShipment);
     listReturnsMock.mockResolvedValueOnce([
       {
         originalVendorId: 'sporjinal',
@@ -8677,6 +8706,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect((await screen.findAllByText(/Returned trainer/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Return active')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Fulfillment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
     const alertRegion = screen.getByLabelText('Operational alerts');
     expect(within(alertRegion).getByText(/Customer return requested/i)).toBeInTheDocument();

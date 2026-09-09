@@ -9316,6 +9316,39 @@ h3 {
   gap: 8px;
 }
 
+.order-primary-action-card .order-fulfillment-terminal-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.72fr);
+  gap: 0;
+  align-items: stretch;
+}
+
+.order-fulfillment-terminal-panel .order-shipment-requirement-state {
+  align-content: center;
+  padding: 2px 16px 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.order-fulfillment-no-action {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 2px 0 2px 16px;
+  border-left: 1px solid var(--op-border);
+}
+
+.order-fulfillment-no-action strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.order-fulfillment-no-action span {
+  color: #475569;
+  font-size: 0.76rem;
+}
+
 .vendor-actions-heading {
   display: flex;
   flex-wrap: wrap;
@@ -10064,6 +10097,20 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
     padding: var(--space-1) 0;
+  }
+
+  .order-primary-action-card .order-fulfillment-terminal-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .order-fulfillment-terminal-panel .order-shipment-requirement-state {
+    padding: 2px 0 10px;
+  }
+
+  .order-fulfillment-no-action {
+    padding: 10px 0 2px;
+    border-top: 1px solid var(--op-border);
+    border-left: 0;
   }
 
   .order-detail-title-row,

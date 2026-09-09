@@ -5302,7 +5302,7 @@ export function OrderDetailPage() {
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">
               <div>
-                <h2>{isAdmin ? 'Shipment & delivery' : 'Shipment'}</h2>
+                <h2>Fulfillment</h2>
                 {!isFulfillmentAuthoritativelyClosed ? (
                   <p>
                     {hasTrackingSync
@@ -6551,7 +6551,7 @@ export function OrderDetailPage() {
                 )}
               </div>
             ) : (
-              <div className={`action-row ${isFulfillmentAuthoritativelyClosed ? 'order-fulfillment-complete-panel' : 'vendor-blocked-panel'}`}>
+              <div className={`action-row ${isFulfillmentAuthoritativelyClosed ? 'order-fulfillment-complete-panel' : 'vendor-blocked-panel'}${operationalStory.resolvedByRefund ? ' order-fulfillment-terminal-panel' : ''}`}>
                 {hasCanonicalOperationalStory ? (
                   <div className="order-shipment-requirement-state" aria-label="Shipment requirement state">
                     <strong>{operationalStory.fulfillmentLabel}</strong>
@@ -6562,6 +6562,12 @@ export function OrderDetailPage() {
                           ? 'Shipment work is paused until the allocation is resolved.'
                           : operationalStory.shippingLabel}
                     </span>
+                  </div>
+                ) : null}
+                {operationalStory.resolvedByRefund ? (
+                  <div className="order-fulfillment-no-action" aria-label="Fulfillment action requirement">
+                    <strong>No operational action required</strong>
+                    <span>No shipment is required for this order.</span>
                   </div>
                 ) : null}
                 {(isAdmin || canUseFulfillmentActions) && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
