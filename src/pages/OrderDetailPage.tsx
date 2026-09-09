@@ -441,6 +441,20 @@ function getOrderActivityReturnTitle(returnRecord: {
   return 'Refund recorded';
 }
 
+function getOrderActivityReturnDescription(returnRecord: {
+  displayTitle?: string | null;
+  itemTitle?: string | null;
+  sourceType?: 'shopify_refund' | 'shopify_return_request';
+  status: string;
+}) {
+  const itemLabel = returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item';
+  const normalizedStatus = getStatusClass(returnRecord.status);
+
+  return getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && normalizedStatus === 'processed'
+    ? itemLabel
+    : `${itemLabel} · ${normalizedStatus.replace(/-/g, ' ')}`;
+}
+
 function isVendorBlockedStatus(value: string | null | undefined) {
   return getStatusClass(value) === 'vendor-blocked';
 }
@@ -4498,7 +4512,6 @@ export function OrderDetailPage() {
   orderTimelineEvents.push({
     id: 'order-created',
     title: 'Order created',
-    description: `Order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)} entered the vendor workspace.`,
     at: order.date,
     tone: 'info',
   });
@@ -4526,6 +4539,26 @@ export function OrderDetailPage() {
     };
 
     operationalStory.timelineEvents.forEach((event) => {
+      const shouldRemoveCanonicalDescription =
+        (operationalStory.resolvedByRefund && ['Refund completed', 'Fulfillment not required'].includes(event.label)) ||
+        (operationalStory.state === 'shopify_order_cancelled_conflict' && event.label === 'Existing operational evidence') ||
+        (!isAdmin &&
+          operationalStory.state === 'vendor_blocked_awaiting_admin_resolution' &&
+          ['Vendor blocked', 'Awaiting admin resolution'].includes(event.label));
+      const canonicalDescription = shouldRemoveCanonicalDescription
+        ? undefined
+        : !isAdmin &&
+            operationalStory.state === 'vendor_blocked_awaiting_admin_resolution' &&
+            event.label === 'Vendor rejected allocation'
+          ? vendorBlockedReason
+            ? `Reason: ${vendorBlockedReason}.`
+            : undefined
+          : !isAdmin
+            ? event.detail
+                ?.replace(/allocation/gi, 'order assignment')
+                .replace(/Shopify refund/gi, 'refund')
+                .replace(/finance hold/gi, 'order review')
+            : event.detail;
       pushVendorBlockedEvent({
         id: `canonical-story-${normalizeTimelineTitle(event.label)}`,
         title:
@@ -4536,12 +4569,7 @@ export function OrderDetailPage() {
               : !isAdmin && event.label === 'Finance hold activated'
                 ? 'Order review started'
                 : event.label,
-        description: !isAdmin
-          ? event.detail
-              ?.replace(/allocation/gi, 'order assignment')
-              .replace(/Shopify refund/gi, 'refund')
-              .replace(/finance hold/gi, 'order review')
-          : event.detail,
+        description: canonicalDescription,
         at: event.at ?? (event.tone === 'success' ? refundFinanceRecord?.date ?? vendorBlockedAt : vendorBlockedAt),
         status: getCanonicalTimelineStatus(event.label),
         tone: event.tone === 'warning' ? 'attention' : event.tone ?? 'info',
@@ -4641,7 +4669,7 @@ export function OrderDetailPage() {
     ...relatedReturns.map((returnRecord) => ({
       id: `return-${returnRecord.id}`,
       title: getOrderActivityReturnTitle(returnRecord),
-      description: `${returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item'} · ${getStatusClass(returnRecord.status).replace(/-/g, ' ')}`,
+      description: getOrderActivityReturnDescription(returnRecord),
       at: returnRecord.date,
       status: returnRecord.status,
       tone: 'attention' as const,
@@ -4650,7 +4678,7 @@ export function OrderDetailPage() {
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
       title: record.category === 'Refund' ? 'Refund processed' : 'Finance entry created',
-      description: `${record.category} · ${record.amount}`,
+      description: record.category === 'Refund' ? record.amount : `${record.category} · ${record.amount}`,
       at: record.date,
       status: record.status,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),

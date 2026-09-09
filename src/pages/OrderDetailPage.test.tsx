@@ -2398,6 +2398,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/Tracking pending/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
+    const orderCreatedRow = getOrderActivityRow('Order created');
+    expect(orderCreatedRow).toHaveTextContent(formatTimelineDateForTest(orderWithShipmentSummary.date));
+    expect(orderCreatedRow).not.toHaveTextContent('entered the vendor workspace');
     expect(within(timeline as HTMLElement).queryByText(/^Timeline$/)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByRole('heading', { name: 'Order activity' })).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Order, shipment, return, and support activity.')).not.toBeInTheDocument();
@@ -2932,10 +2935,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const blockedEvent = timelineScope.getByText('Order blocked from shipment');
     const financeHoldEvent = timelineScope.getByText('Order review started');
     const adminResolutionEvent = timelineScope.getByText('Awaiting admin resolution');
-    expect(timelineScope.getByText('Reason: OUT_OF_STOCK.')).toBeInTheDocument();
-    expect(timelineScope.getByText('Fulfillment is blocked for this order assignment.')).toBeInTheDocument();
+    expect(rejectedEvent.closest('li')).toHaveTextContent('Reason: Out of stock.');
+    expect(rejectedEvent.closest('li')).not.toHaveTextContent('OUT_OF_STOCK');
+    expect(blockedEvent.closest('li')).not.toHaveTextContent('Fulfillment is blocked for this order assignment.');
     expect(timelineScope.getByText('Settlement and payout movement are held until admin resolution.')).toBeInTheDocument();
-    expect(timelineScope.getByText('Transfer order assignment, refund review, or return to vendor.')).toBeInTheDocument();
+    expect(adminResolutionEvent.closest('li')).not.toHaveTextContent('Transfer order assignment, refund review, or return to vendor.');
     expect(Boolean(rejectedEvent.compareDocumentPosition(blockedEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(blockedEvent.compareDocumentPosition(financeHoldEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -3044,7 +3048,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     getOrderMock.mockResolvedValueOnce({
       ...orderWithShipmentSummary,
       allocationStatus: 'vendor_blocked',
-      cancellationReason: 'OUT_OF_STOCK',
+      cancellationReason: 'vendor_cancelled',
       reassignmentRequired: true,
       cancelRefundReviewStatus: 'RESOLVED',
       refundRecordCount: 1,
@@ -3057,7 +3061,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           action: 'vendor_blocked',
           fromVendorId: 'sporjinal',
           toVendorId: 'sporjinal',
-          reason: 'OUT_OF_STOCK',
+          reason: 'vendor_cancelled',
           actorName: 'Vendor User',
           actorRole: 'vendor',
           createdAt: '2026-05-15T12:12:00.000Z',
@@ -3099,7 +3103,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
-    expect(timelineScope.getByText('Vendor rejected selected items')).toBeInTheDocument();
+    const rejectedEvent = timelineScope.getByText('Vendor rejected selected items');
+    expect(rejectedEvent).toBeInTheDocument();
+    expect(rejectedEvent.closest('li')).toHaveTextContent('Reason: Vendor cancelled.');
+    expect(rejectedEvent.closest('li')).not.toHaveTextContent('vendor_cancelled');
     expect(timelineScope.queryByText('Refund processed')).not.toBeInTheDocument();
     expect(timelineScope.queryByText('Refund completed')).not.toBeInTheDocument();
     expect(timelineScope.getByText('Order review started')).toBeInTheDocument();
@@ -3197,8 +3204,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/^Timeline$/)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Order, shipment, return, and support activity.')).not.toBeInTheDocument();
-    expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
-    expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
+    const refundCompletedEvent = within(timeline as HTMLElement).getByText('Refund completed');
+    const fulfillmentClosedEvent = within(timeline as HTMLElement).getByText('Fulfillment not required');
+    expect(refundCompletedEvent.closest('li')).toHaveTextContent('Completed');
+    expect(refundCompletedEvent.closest('li')).not.toHaveTextContent('authoritatively closed after a full refund');
+    expect(fulfillmentClosedEvent.closest('li')).toHaveTextContent('Closed');
+    expect(fulfillmentClosedEvent.closest('li')).not.toHaveTextContent('Shipment work is closed for the refunded');
+    expect(Boolean(refundCompletedEvent.compareDocumentPosition(fulfillmentClosedEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(terminalOrder.allocationStatus).toBe('active');
     expect(terminalOrder.fulfillmentStatus).toBe('Pending');
     expect(terminalOrder.shippingStatus).toBe('Awaiting Shipment');
@@ -3255,6 +3267,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/authoritatively closed after a full refund/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/Shipment work is closed for the refunded/i)).not.toBeInTheDocument();
   });
 
   it('keeps refund finance presentation separate from non-terminal operational status', async () => {
@@ -3492,7 +3506,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const timeline = screen.getByRole('heading', { name: 'Activity' }).closest('article');
     expect(timeline).not.toBeNull();
     const timelineScope = within(timeline as HTMLElement);
-    expect(timelineScope.getByText('Existing operational evidence')).toBeInTheDocument();
+    const existingEvidenceEvent = timelineScope.getByText('Existing operational evidence');
+    expect(existingEvidenceEvent).toBeInTheDocument();
+    expect(existingEvidenceEvent.closest('li')).not.toHaveTextContent('Local fulfillment, shipment, refund, or return evidence was preserved for review.');
     expect(within(screen.getByLabelText('Current order state')).getByText('Review required')).toBeInTheDocument();
     const alerts = screen.getByLabelText('Operational alerts');
     expect(within(alerts).getByText('Cancelled')).toBeInTheDocument();
@@ -3509,6 +3525,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
+    expect(cancellationRow).toHaveTextContent('Reason: declined.');
 
     const returnRow = (await timelineScope.findByText('Return requested')).closest('li');
     const refundRow = (await timelineScope.findByText('Refund processed')).closest('li');
@@ -3517,6 +3534,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(returnRow).not.toBe(refundRow);
     expect(returnRow).toHaveTextContent('Return-request item');
     expect(refundRow).toHaveTextContent('Refund-derived item');
+    expect(refundRow).toHaveTextContent('Processed');
+    expect(refundRow).not.toHaveTextContent('Refund-derived item · processed');
     expect(refundRow).not.toHaveTextContent('Return requested');
 
     const linkedRecords = screen.getByRole('heading', { name: 'Linked records' }).closest('.order-linked-records-panel');
@@ -3884,6 +3903,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
 
     renderOrderDetail();
+
+    const supportEventTitle = await screen.findByText('Support ticket created');
+    const activity = supportEventTitle.closest('article');
+    expect(activity).toBeTruthy();
+    const financeRefundEvent = within(activity as HTMLElement).getByText('Refund processed').closest('li');
+    expect(financeRefundEvent).toHaveTextContent('TRY 4,999.00');
+    expect(financeRefundEvent).toHaveTextContent('Recorded');
+    expect(financeRefundEvent).not.toHaveTextContent('Refund · TRY 4,999.00');
+    const supportEvent = supportEventTitle.closest('li');
+    expect(supportEvent).toHaveTextContent('Help with order #1028');
+    expect(within(supportEvent as HTMLElement).getByRole('link', { name: 'Support ticket created' })).toHaveAttribute(
+      'href',
+      '/admin/support/ticket-shipment-1',
+    );
 
     const linkedRecords = (await screen.findByRole('heading', { name: 'Linked records' })).closest('.order-linked-records-panel');
     expect(linkedRecords).toBeTruthy();
