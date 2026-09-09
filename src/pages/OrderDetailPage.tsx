@@ -4347,21 +4347,18 @@ export function OrderDetailPage() {
       ? {
           label: 'Gross Allocation Amount',
           value: grossOrderAmountValue,
-          helper: 'Total value for this order.',
         }
       : null,
     isKnownFinanceValue(commissionEstimateValue)
       ? {
           label: 'Commission',
           value: commissionEstimateValue,
-          helper: 'Commission for this order.',
         }
       : null,
     isKnownFinanceValue(shippingDeductionValue)
       ? {
           label: 'Shipping Deduction',
           value: shippingDeductionValue,
-          helper: 'Shipping deduction for this order.',
         }
       : null,
     currentRefundEvidencePresent && isKnownFinanceValue(refundImpactValue)
@@ -4375,10 +4372,9 @@ export function OrderDetailPage() {
       ? {
           label: 'Estimated Earnings',
           value: estimatedSettlementValue,
-          helper: 'Estimated amount for this order.',
         }
       : null,
-  ].filter((row): row is { label: string; value: string; helper: string } => Boolean(row));
+  ].filter((row): row is { label: string; value: string; helper?: string } => Boolean(row));
   const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
   const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
@@ -5178,7 +5174,6 @@ export function OrderDetailPage() {
               <div className="order-card-heading">
                 <div>
                   <h2>Order financial summary</h2>
-                  <p>Simple payment summary for this order. Detailed deductions are available in Finance.</p>
                 </div>
               </div>
               <div className="order-financial-impact-grid order-finance-preview-grid">
@@ -5186,7 +5181,7 @@ export function OrderDetailPage() {
                   <div key={row.label}>
                     <span>{row.label}</span>
                     <strong>{row.value}</strong>
-                    <em>{row.helper}</em>
+                    {row.helper ? <em>{row.helper}</em> : null}
                   </div>
                 ))}
               </div>

@@ -422,6 +422,15 @@ function getOrderActivityRow(title: string) {
   return row as HTMLElement;
 }
 
+function expectRedundantVendorFinanceCopyToBeAbsent(financialSummary: HTMLElement) {
+  const summary = within(financialSummary);
+  expect(summary.queryByText('Simple payment summary for this order. Detailed deductions are available in Finance.')).not.toBeInTheDocument();
+  expect(summary.queryByText('Total value for this order.')).not.toBeInTheDocument();
+  expect(summary.queryByText('Commission for this order.')).not.toBeInTheDocument();
+  expect(summary.queryByText('Shipping deduction for this order.')).not.toBeInTheDocument();
+  expect(summary.queryByText('Estimated amount for this order.')).not.toBeInTheDocument();
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -2508,6 +2517,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).getByText('TRY 0.00')).toBeInTheDocument();
     expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
     expect(within(financialSummary).getByText('TRY 4,449.20')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Refund activity linked to this order.')).toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
     expect(within(financialSummary).queryByText('Payment status')).not.toBeInTheDocument();
     const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article') as HTMLElement;
     expect(Boolean(itemsSection.compareDocumentPosition(financialSummary) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -2564,6 +2575,55 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(financialSummary).queryByText('TRY -599.88')).not.toBeInTheDocument();
   });
 
+  it('keeps an unknown shipping deduction out of the vendor financial summary', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce({
+      summary: {
+        grossSales: 'TRY 4,999.00',
+        refunds: 'TRY 0.00',
+        netRevenue: 'TRY 4,449.20',
+        platformFee: 'TRY 499.90',
+        payoutEstimate: 'TRY 4,449.20',
+      },
+      transactions: [
+        {
+          id: 'finance-sale-unknown-shipping-1028',
+          category: 'Invoice',
+          shopifyOrderId: '7616544244049',
+          shopifyOrderNumber: '#1028',
+          amount: 'TRY 4,999.00',
+          date: '2026-05-15T12:08:00.000Z',
+          status: 'Pending review',
+          payoutCalculation: {
+            grossAmount: 'TRY 4,999.00',
+            commission: 'TRY 499.90',
+            shippingDeduction: 'TRY 0.00',
+            estimatedPayout: 'TRY 4,449.20',
+            shippingCostStatus: 'pending_provider_cost',
+          },
+        },
+      ],
+    });
+
+    renderOrderDetail();
+
+    const financialSummary = await screen.findByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Commission')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Estimated Earnings')).toBeInTheDocument();
+    expect(within(financialSummary).queryByText('Shipping Deduction')).not.toBeInTheDocument();
+    expect(within(financialSummary).queryByText('TRY 0.00')).not.toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
+  });
+
   it('keeps refund finance presentation without inferring terminal operational closure', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
@@ -2595,6 +2655,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financialSummary = await screen.findByLabelText('Order financial summary');
     expect(within(financialSummary).queryByText('Estimated Earnings')).not.toBeInTheDocument();
     expect(within(financialSummary).getByText('Refund Impact')).toBeInTheDocument();
+    expect(within(financialSummary).getByText('Refund completed for this order.')).toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
     const axes = screen.getByLabelText('Current order state');
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
@@ -2830,6 +2892,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(alerts).queryByText('Tracking missing')).not.toBeInTheDocument();
     expect(within(alerts).queryByText('Awaiting shipment')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
+
+    const financialSummary = screen.getByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
 
     const fulfillmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
     expect(fulfillmentSection).not.toBeNull();
@@ -3085,6 +3151,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Operational alerts')).not.toBeInTheDocument();
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    const financialSummary = screen.getByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
     expect(screen.queryByText('Add shipment details when the package is ready.')).not.toBeInTheDocument();
     const shipmentRequirement = screen.getByLabelText('Shipment requirement state');
     const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
@@ -3415,6 +3484,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(alerts).getByText('Cancelled')).toBeInTheDocument();
     expect(within(alerts).getByText(/Existing fulfillment, shipment, refund, or return evidence is preserved/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('Right panel status')).not.toBeInTheDocument();
+
+    const financialSummary = screen.getByLabelText('Order financial summary');
+    expect(within(financialSummary).getByText('Gross Allocation Amount')).toBeInTheDocument();
+    expectRedundantVendorFinanceCopyToBeAbsent(financialSummary);
 
     const cancellationRow = getOrderActivityRow('Shopify order cancelled');
     expect(cancellationRow).toHaveTextContent(formatTimelineDateForTest(cancelledAt));
