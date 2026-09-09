@@ -491,6 +491,15 @@ function getShipmentBarcodeDisplay(shipment?: ShipmentExecution | null, tracking
   return 'Pending';
 }
 
+function getMeaningfulVendorShipmentBarcode(shipment?: ShipmentExecution | null, trackingNumber?: string | null) {
+  const barcode = shipment?.barcode?.trim();
+  if (!barcode || ['pending', 'same as tracking'].includes(barcode.toLowerCase())) {
+    return null;
+  }
+
+  return barcode === trackingNumber?.trim() ? null : barcode;
+}
+
 function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   return [
     `Provider id: ${shipment.providerShipmentId ? 'yes' : 'pending'}`,
@@ -1870,6 +1879,38 @@ export function OrderDetailPage() {
     (visibleShipmentStatus === 'cancelled' ||
       shipmentProviderSummary?.kargonomiCancelled === true ||
       shipmentProviderSummary?.providerStatus?.toLowerCase() === 'cancelled');
+  const meaningfulVendorShipmentBarcode = getMeaningfulVendorShipmentBarcode(
+    visibleShipmentExecution,
+    shipmentShopifyTrackingNumber,
+  );
+  const navlungoCarrierTrackingCode = shipmentProviderSummary?.navlungoCarrierTrackingCode?.trim() || null;
+  const navlungoCarrierTrackingUrl = shipmentProviderSummary?.navlungoCarrierTrackingUrl?.trim() || null;
+  const hasDistinctNavlungoCarrierTracking =
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    Boolean(
+      (navlungoCarrierTrackingCode && navlungoCarrierTrackingCode !== shipmentShopifyTrackingNumber?.trim()) ||
+        (navlungoCarrierTrackingUrl && navlungoCarrierTrackingUrl !== shipmentShopifyTrackingUrl?.trim()),
+    );
+  const hasNavlungoLifecycleDates =
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    Boolean(
+      shipmentProviderSummary?.navlungoPickedUpDate ||
+        shipmentProviderSummary?.navlungoDeliveredDate ||
+        shipmentProviderSummary?.navlungoCancelDate,
+    );
+  const kargonomiCarrierMessage =
+    visibleShipmentExecution?.provider === 'kargonomi' ? shipmentProviderSummary?.providerError?.trim() || null : null;
+  const shouldShowVendorBadAddressInDetails =
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    shipmentProviderSummary?.navlungoGeoBadAddress === true &&
+    !canSyncNavlungoShipmentStatus;
+  const shouldShowVendorAdditionalShipmentDetails = Boolean(
+    meaningfulVendorShipmentBarcode ||
+      hasDistinctNavlungoCarrierTracking ||
+      hasNavlungoLifecycleDates ||
+      kargonomiCarrierMessage ||
+      shouldShowVendorBadAddressInDetails,
+  );
   const shopifyFulfillmentSyncSummary =
     order && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt)
       ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution)
@@ -5416,14 +5457,16 @@ export function OrderDetailPage() {
                             )}
                           </div>
                         </div>
-                        {visibleShipmentExecution ? (
+                        {visibleShipmentExecution && (isAdmin || shouldShowVendorAdditionalShipmentDetails) ? (
                           <details className="shipment-provider-details">
                             <summary>{isAdmin ? 'Additional provider details' : 'Additional shipment details'}</summary>
                             <div className="order-shipping-state-grid">
-                              <div className="summary-row">
-                                <span>{isAdmin ? 'Shipment provider' : 'Carrier'}</span>
-                                <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
-                              </div>
+                              {isAdmin ? (
+                                <div className="summary-row">
+                                  <span>Shipment provider</span>
+                                  <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
+                                </div>
+                              ) : null}
                               {isAdmin && visibleShipmentExecution.warehouseId ? (
                                 <div className="summary-row">
                                   <span>Warehouse</span>
@@ -5438,74 +5481,111 @@ export function OrderDetailPage() {
                                   </strong>
                                 </div>
                               ) : null}
-                              <div className="summary-row">
-                                <span>Barcode</span>
-                                <strong
-                                  className={
-                                    visibleShipmentExecution.barcode || getShipmentTrackingNumber(order, visibleShipmentExecution) ? '' : 'muted'
-                                  }
-                                >
-                                  {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
-                                </strong>
-                              </div>
+                              {isAdmin || meaningfulVendorShipmentBarcode ? (
+                                <div className="summary-row">
+                                  <span>Barcode</span>
+                                  <strong
+                                    className={
+                                      visibleShipmentExecution.barcode || getShipmentTrackingNumber(order, visibleShipmentExecution) ? '' : 'muted'
+                                    }
+                                  >
+                                    {isAdmin
+                                      ? getShipmentBarcodeDisplay(
+                                          visibleShipmentExecution,
+                                          getShipmentTrackingNumber(order, visibleShipmentExecution),
+                                        )
+                                      : meaningfulVendorShipmentBarcode}
+                                  </strong>
+                                </div>
+                              ) : null}
                               {visibleShipmentExecution.provider === 'navlungo' ? (
                                 <>
-                                  <div className="summary-row">
-                                    <span>{isAdmin ? 'Provider lifecycle' : 'Shipment progress'}</span>
-                                    <strong>
-                                      {[
-                                        shipmentProviderSummary?.navlungoProviderStatusCode ?? null,
-                                        shipmentProviderSummary?.navlungoProviderStatusName ?? shipmentProviderSummary?.navlungoNormalizedStatus ?? null,
-                                      ].filter(Boolean).join(' · ') || '—'}
-                                    </strong>
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>Carrier tracking</span>
-                                    {shipmentProviderSummary?.navlungoCarrierTrackingUrl || getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
-                                      <a
-                                        className="inline-link"
-                                        href={shipmentProviderSummary?.navlungoCarrierTrackingUrl || getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                      >
-                                        {shipmentProviderSummary?.navlungoCarrierTrackingCode ||
-                                          getShipmentTrackingNumber(order, visibleShipmentExecution) ||
-                                          'Open carrier tracking'}
-                                      </a>
-                                    ) : (
-                                      <strong className={shipmentProviderSummary?.navlungoCarrierTrackingCode ? '' : 'muted'}>
-                                        {shipmentProviderSummary?.navlungoCarrierTrackingCode ?? 'Not available'}
+                                  {isAdmin ? (
+                                    <div className="summary-row">
+                                      <span>Provider lifecycle</span>
+                                      <strong>
+                                        {[
+                                          shipmentProviderSummary?.navlungoProviderStatusCode ?? null,
+                                          shipmentProviderSummary?.navlungoProviderStatusName ?? shipmentProviderSummary?.navlungoNormalizedStatus ?? null,
+                                        ].filter(Boolean).join(' · ') || '—'}
                                       </strong>
-                                    )}
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>Barcode status</span>
-                                    <strong>{shipmentProviderSummary?.navlungoBarcodeStatus || '—'}</strong>
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>Lifecycle dates</span>
-                                    <strong>
-                                      {[
-                                        shipmentProviderSummary?.navlungoPickedUpDate
-                                          ? `Picked up ${formatOptionalDate(shipmentProviderSummary.navlungoPickedUpDate)}`
-                                          : null,
-                                        shipmentProviderSummary?.navlungoDeliveredDate
-                                          ? `Delivered ${formatOptionalDate(shipmentProviderSummary.navlungoDeliveredDate)}`
-                                          : null,
-                                        shipmentProviderSummary?.navlungoCancelDate
-                                          ? `Cancelled ${formatOptionalDate(shipmentProviderSummary.navlungoCancelDate)}`
-                                          : null,
-                                      ].filter(Boolean).join(' · ') || '—'}
-                                    </strong>
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>Address intelligence</span>
-                                    <strong>
-                                      geo {shipmentProviderSummary?.navlungoGeoStatus || '—'} · bad address{' '}
-                                      {formatDiagnosticPresence(shipmentProviderSummary?.navlungoGeoBadAddress)}
-                                    </strong>
-                                  </div>
-                                  {shipmentProviderSummary?.navlungoGeoBadAddress ? (
+                                    </div>
+                                  ) : null}
+                                  {isAdmin || hasDistinctNavlungoCarrierTracking ? (
+                                    <div className="summary-row">
+                                      <span>Carrier tracking</span>
+                                      {(isAdmin
+                                        ? shipmentProviderSummary?.navlungoCarrierTrackingUrl ||
+                                          getShipmentTrackingUrl(order, visibleShipmentExecution)
+                                        : navlungoCarrierTrackingUrl) ? (
+                                        <a
+                                          className="inline-link"
+                                          href={
+                                            (isAdmin
+                                              ? shipmentProviderSummary?.navlungoCarrierTrackingUrl ||
+                                                getShipmentTrackingUrl(order, visibleShipmentExecution)
+                                              : navlungoCarrierTrackingUrl) || undefined
+                                          }
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          {(isAdmin
+                                            ? shipmentProviderSummary?.navlungoCarrierTrackingCode
+                                            : navlungoCarrierTrackingCode) ||
+                                            (isAdmin ? getShipmentTrackingNumber(order, visibleShipmentExecution) : null) ||
+                                            'Open carrier tracking'}
+                                        </a>
+                                      ) : (
+                                        <strong
+                                          className={
+                                            (isAdmin
+                                              ? shipmentProviderSummary?.navlungoCarrierTrackingCode
+                                              : navlungoCarrierTrackingCode)
+                                              ? ''
+                                              : 'muted'
+                                          }
+                                        >
+                                          {(isAdmin
+                                            ? shipmentProviderSummary?.navlungoCarrierTrackingCode
+                                            : navlungoCarrierTrackingCode) ?? 'Not available'}
+                                        </strong>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                  {isAdmin ? (
+                                    <div className="summary-row">
+                                      <span>Barcode status</span>
+                                      <strong>{shipmentProviderSummary?.navlungoBarcodeStatus || '—'}</strong>
+                                    </div>
+                                  ) : null}
+                                  {isAdmin || hasNavlungoLifecycleDates ? (
+                                    <div className="summary-row">
+                                      <span>Lifecycle dates</span>
+                                      <strong>
+                                        {[
+                                          shipmentProviderSummary?.navlungoPickedUpDate
+                                            ? `Picked up ${formatOptionalDate(shipmentProviderSummary.navlungoPickedUpDate)}`
+                                            : null,
+                                          shipmentProviderSummary?.navlungoDeliveredDate
+                                            ? `Delivered ${formatOptionalDate(shipmentProviderSummary.navlungoDeliveredDate)}`
+                                            : null,
+                                          shipmentProviderSummary?.navlungoCancelDate
+                                            ? `Cancelled ${formatOptionalDate(shipmentProviderSummary.navlungoCancelDate)}`
+                                            : null,
+                                        ].filter(Boolean).join(' · ') || '—'}
+                                      </strong>
+                                    </div>
+                                  ) : null}
+                                  {isAdmin ? (
+                                    <div className="summary-row">
+                                      <span>Address intelligence</span>
+                                      <strong>
+                                        geo {shipmentProviderSummary?.navlungoGeoStatus || '—'} · bad address{' '}
+                                        {formatDiagnosticPresence(shipmentProviderSummary?.navlungoGeoBadAddress)}
+                                      </strong>
+                                    </div>
+                                  ) : null}
+                                  {shipmentProviderSummary?.navlungoGeoBadAddress && (isAdmin || shouldShowVendorBadAddressInDetails) ? (
                                     <div className="summary-row">
                                       <span>Address warning</span>
                                       <strong>Carrier reported address validation issue.</strong>
@@ -5515,19 +5595,25 @@ export function OrderDetailPage() {
                               ) : null}
                               {visibleShipmentExecution.provider === 'kargonomi' ? (
                                 <>
-                                  <div className="summary-row">
-                                    <span>{isAdmin ? 'Provider API call attempted' : 'Carrier update attempted'}</span>
-                                    <strong>{formatDiagnosticPresence(shipmentProviderSummary?.providerApiCallAttempted)}</strong>
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>{isAdmin ? 'Last provider stage' : 'Last carrier update'}</span>
-                                    <strong>{formatKargonomiProviderStage(shipmentProviderSummary?.lastProviderStage)}</strong>
-                                  </div>
-                                  <div className="summary-row">
-                                    <span>{isAdmin ? 'Provider message' : 'Carrier message'}</span>
-                                    <strong>{shipmentProviderSummary?.providerError || '—'}</strong>
-                                  </div>
-                                  {kargonomiShipmentCancelled ? (
+                                  {isAdmin ? (
+                                    <>
+                                      <div className="summary-row">
+                                        <span>Provider API call attempted</span>
+                                        <strong>{formatDiagnosticPresence(shipmentProviderSummary?.providerApiCallAttempted)}</strong>
+                                      </div>
+                                      <div className="summary-row">
+                                        <span>Last provider stage</span>
+                                        <strong>{formatKargonomiProviderStage(shipmentProviderSummary?.lastProviderStage)}</strong>
+                                      </div>
+                                    </>
+                                  ) : null}
+                                  {isAdmin || kargonomiCarrierMessage ? (
+                                    <div className="summary-row">
+                                      <span>{isAdmin ? 'Provider message' : 'Carrier message'}</span>
+                                      <strong>{shipmentProviderSummary?.providerError || '—'}</strong>
+                                    </div>
+                                  ) : null}
+                                  {isAdmin && kargonomiShipmentCancelled ? (
                                     <div className="summary-row">
                                       <span>Provider status</span>
                                       <strong>

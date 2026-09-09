@@ -2030,6 +2030,180 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
   });
 
+  it('hides empty and duplicate vendor shipment details while preserving primary shipment information', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      vendorId: 'sporjinal',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Navlungo',
+      trackingNumber: 'NAV-1028',
+      trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+        labelUrl: 'barcode-pdf',
+        barcode: null,
+        shipmentStatus: 'created',
+        providerResponseSummary: undefined,
+      },
+    });
+
+    const { container } = renderOrderDetail();
+
+    const primaryDetails = await screen.findByRole('heading', { name: 'Shipment details' });
+    const fulfillmentSection = primaryDetails.closest('article') as HTMLElement;
+    const primarySummary = fulfillmentSection.querySelector('.order-tracking-summary-card') as HTMLElement;
+    expect(within(primarySummary).getByText('Carrier')).toBeInTheDocument();
+    expect(within(primarySummary).getByText('Shipment created')).toBeInTheDocument();
+    expect(within(primarySummary).getByText('NAV-1028')).toBeInTheDocument();
+    expect(within(primarySummary).getByRole('link', { name: 'Open tracking' })).toBeInTheDocument();
+    expect(within(primarySummary).getByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
+    expect(screen.queryByText('Additional shipment details')).not.toBeInTheDocument();
+    expect(container.querySelector('.shipment-provider-details')).toBeNull();
+  });
+
+  it('hides Navlungo carrier tracking when it matches primary tracking', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      vendorId: 'sporjinal',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      trackingNumber: 'NAV-1028',
+      trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+        barcode: null,
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoCarrierTrackingCode: 'NAV-1028',
+          navlungoCarrierTrackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const shipmentDetailsHeading = await screen.findByRole('heading', { name: 'Shipment details' });
+    const shipmentPanel = shipmentDetailsHeading.closest('.vendor-action-panel') as HTMLElement;
+    const primarySummary = shipmentPanel.querySelector('.order-tracking-summary-card') as HTMLElement;
+    expect(within(primarySummary).getByText('NAV-1028')).toBeInTheDocument();
+    expect(screen.queryByText('Carrier tracking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Additional shipment details')).not.toBeInTheDocument();
+  });
+
+  it('keeps only meaningful distinct Navlungo secondary details for vendors', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      vendorId: 'sporjinal',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Navlungo',
+      trackingNumber: 'NAV-1028',
+      trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+        labelUrl: 'barcode-pdf',
+        barcode: null,
+        shipmentStatus: 'in_transit',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoProviderStatusName: 'In Transit',
+          navlungoCarrierTrackingCode: 'CARRIER-1028',
+          navlungoCarrierTrackingUrl: 'https://carrier.example/CARRIER-1028',
+          navlungoPickedUpDate: '2026-05-22T09:00:00.000Z',
+          navlungoBarcodeStatus: 'created',
+          navlungoGeoStatus: 'verified',
+          navlungoGeoBadAddress: true,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const detailsSummary = await screen.findByText('Additional shipment details');
+    const details = detailsSummary.closest('details') as HTMLElement;
+    expect(screen.getAllByText('Shipment progress')).toHaveLength(1);
+    expect(within(details).queryByText('Carrier')).not.toBeInTheDocument();
+    expect(within(details).queryByText('Shipment progress')).not.toBeInTheDocument();
+    expect(within(details).queryByText('Barcode status')).not.toBeInTheDocument();
+    expect(within(details).queryByText('Address intelligence')).not.toBeInTheDocument();
+    expect(within(details).getByRole('link', { name: 'CARRIER-1028' })).toHaveAttribute(
+      'href',
+      'https://carrier.example/CARRIER-1028',
+    );
+    expect(within(details).getByText('Lifecycle dates')).toBeInTheDocument();
+    expect(screen.getAllByText('Carrier reported address validation issue.')).toHaveLength(1);
+  });
+
+  it('preserves a unique non-placeholder vendor barcode as meaningful secondary information', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      vendorId: 'sporjinal',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Try OTO',
+      trackingNumber: 'OTO-TRACK-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        barcode: 'OTO-BARCODE-1028',
+        labelUrl: null,
+        providerResponseSummary: undefined,
+      },
+    });
+
+    renderOrderDetail();
+
+    const detailsSummary = await screen.findByText('Additional shipment details');
+    const details = detailsSummary.closest('details') as HTMLElement;
+    expect(within(details).getByText('Barcode')).toBeInTheDocument();
+    expect(within(details).getByText('OTO-BARCODE-1028')).toBeInTheDocument();
+    expect(within(details).queryByText('Lifecycle dates')).not.toBeInTheDocument();
+    expect(within(details).queryByText('Barcode status')).not.toBeInTheDocument();
+  });
+
   it('renders failed Navlungo update diagnostics after provider rejection', async () => {
     const user = userEvent.setup();
     setCurrentUser({
@@ -4892,14 +5066,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Kargonomi')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('kargonomi')).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO return shipment')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
-    expect(screen.getByText('Carrier update attempted')).toBeInTheDocument();
-    expect(screen.getAllByText('Confirm price').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Carrier update attempted')).not.toBeInTheDocument();
+    expect(screen.queryByText('Last carrier update')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm price')).not.toBeInTheDocument();
     expect(screen.getByText('Kargonomi shipping price confirmation failed with HTTP 422.')).toBeInTheDocument();
   });
 
@@ -6155,7 +6330,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).getAllByText('Transfer Aşamasında')).toHaveLength(1);
     expect(within(timeline as HTMLElement).getAllByText('Transfer merkezinde').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SURAT-1054').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('created').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Barcode status')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Refresh shipment status' }));
 
@@ -6245,7 +6420,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
       renderOrderDetail();
 
-      expect(await screen.findByText('Same as tracking')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
+      expect(screen.queryByText('Same as tracking')).not.toBeInTheDocument();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(300_000);
       });
@@ -6337,7 +6513,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     }
   });
 
-  it('renders polished Try OTO shipment links and treats missing barcode as tracking-backed', async () => {
+  it('renders polished Try OTO shipment links without a tracking-backed barcode placeholder', async () => {
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
       carrier: 'try_oto',
@@ -6369,7 +6545,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Try OTO')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
     expect(screen.getByText('Shipment processing')).toBeInTheDocument();
     expect(screen.queryByText('SearchingDriver')).not.toBeInTheDocument();
@@ -6377,8 +6553,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3...1783322961')).not.toBeInTheDocument();
-    expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
-    expect(screen.getByText('Same as tracking')).toBeInTheDocument();
+    expect(screen.queryByText('Same as tracking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Additional shipment details')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
     expect(screen.getByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
@@ -7962,7 +8138,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Same as tracking')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Open label PDF' })).toBeInTheDocument();
+    expect(screen.queryByText('Same as tracking')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync tracking to Shopify' })).not.toBeInTheDocument();
   });
 
