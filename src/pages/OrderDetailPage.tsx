@@ -4528,19 +4528,18 @@ export function OrderDetailPage() {
       }
     };
     const getCanonicalTimelineStatus = (label: string) => {
-      if (label === 'Vendor rejected allocation') return 'Rejected';
-      if (label === 'Vendor blocked') return 'Blocked';
+      if (label === 'Vendor rejected allocation') return isAdmin ? 'Rejected' : undefined;
+      if (label === 'Vendor blocked') return isAdmin ? 'Blocked' : undefined;
       if (label === 'Finance hold activated') return 'Held';
       if (label === 'Awaiting admin resolution') return 'Action required';
-      if (label === 'Refund processed') return 'Processed';
-      if (label === 'Refund completed') return 'Completed';
-      if (label === 'Fulfillment not required') return 'Closed';
+      if (label === 'Refund processed' || label === 'Refund completed' || label === 'Fulfillment not required') return undefined;
       return undefined;
     };
 
     operationalStory.timelineEvents.forEach((event) => {
       const shouldRemoveCanonicalDescription =
         (operationalStory.resolvedByRefund && ['Refund completed', 'Fulfillment not required'].includes(event.label)) ||
+        (operationalStory.state === 'shopify_order_cancelled' && event.label === 'Fulfillment not required') ||
         (operationalStory.state === 'shopify_order_cancelled_conflict' && event.label === 'Existing operational evidence') ||
         (!isAdmin &&
           operationalStory.state === 'vendor_blocked_awaiting_admin_resolution' &&
@@ -4604,7 +4603,6 @@ export function OrderDetailPage() {
         'Recipient/shipment details updated',
       ),
       at: shipmentProviderSummary.navlungoUpdatedAt ?? visibleShipmentExecution.updatedAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
-      status: 'Updated',
       tone: 'info',
     });
   }
@@ -4617,7 +4615,6 @@ export function OrderDetailPage() {
         isAdmin ? 'Provider shipment cancelled' : 'Carrier shipment cancelled',
       ),
       at: shipmentProviderSummary.navlungoCancelledAt ?? visibleShipmentExecution.updatedAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
-      status: 'Cancelled',
       tone: 'warning',
     });
   }
@@ -4671,7 +4668,10 @@ export function OrderDetailPage() {
       title: getOrderActivityReturnTitle(returnRecord),
       description: getOrderActivityReturnDescription(returnRecord),
       at: returnRecord.date,
-      status: returnRecord.status,
+      status:
+        getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && getStatusClass(returnRecord.status) === 'processed'
+          ? undefined
+          : returnRecord.status,
       tone: 'attention' as const,
       href: `/returns/${returnRecord.id}`,
     })),
@@ -4680,7 +4680,7 @@ export function OrderDetailPage() {
       title: record.category === 'Refund' ? 'Refund processed' : 'Finance entry created',
       description: record.category === 'Refund' ? record.amount : `${record.category} · ${record.amount}`,
       at: record.date,
-      status: record.status,
+      status: record.category === 'Refund' && getStatusClass(record.status) === 'processed' ? undefined : record.status,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
       href: buildFinanceHref(record),
       visibility: 'admin' as const,
