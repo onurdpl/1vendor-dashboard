@@ -4700,24 +4700,22 @@ export function OrderDetailPage() {
   const orderCrossLinks: OperationalLinkInput[] = [
     ...relatedReturns.map((returnRecord) => ({
       id: `return-${returnRecord.id}`,
-      eyebrow: 'Return',
       title: `Return for ${formatShopifyOrderNumber(returnRecord.sourceShopifyOrderNumber)}`,
       description: [
-        returnRecord.status,
+        returnRecord.status === 'Closed' || returnRecord.status === 'Refunded' ? null : returnRecord.status,
         returnRecord.returnProviderShipmentId ? 'Navlungo pickup created' : null,
         returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item',
       ].filter(Boolean).join(' · '),
-      actionLabel: 'Open return detail',
+      actionLabel: '',
       href: `/returns/${returnRecord.id}`,
       status: returnRecord.status === 'Closed' || returnRecord.status === 'Refunded' ? 'Return closed' : 'Return linked',
       tone: returnRecord.status === 'Refunded' || returnRecord.status === 'Closed' ? ('success' as const) : ('attention' as const),
     })),
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
-      eyebrow: 'Finance',
       title: record.category === 'Refund' ? 'Refund impact' : 'Settlement activity',
-      description: `${record.amount} · ${record.status}`,
-      actionLabel: 'Open finance detail',
+      description: [record.amount, record.status === 'Pending' ? null : record.status].filter(Boolean).join(' · '),
+      actionLabel: '',
       href: buildFinanceHref(record),
       status: record.status === 'Pending' ? 'Pending review' : record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
@@ -4727,10 +4725,9 @@ export function OrderDetailPage() {
       ? [
           {
             id: `support-group-${order.id}`,
-            eyebrow: 'Support',
             title: 'Support activity',
             description: supportActivitySummary.description,
-            actionLabel: 'Open latest support ticket',
+            actionLabel: '',
             href: `${supportBasePath}/${supportActivitySummary.latestTicket.id}`,
             status: supportActivitySummary.latestStatus,
             tone: supportActivitySummary.tone,
@@ -5200,9 +5197,7 @@ export function OrderDetailPage() {
           <article className="order-detail-card-v2 order-workspace-panel order-shopify-details" aria-label="Shopify details section">
             <div className="order-card-heading order-shopify-card-heading">
               <div>
-                <p className="eyebrow">Shopify details</p>
                 <h2>Shopify order snapshot</h2>
-                <p>Reference values synced from Shopify.</p>
               </div>
             </div>
             {isInvalidShippingSnapshotAddress(order.orderSnapshot?.shippingAddress) ? (
@@ -5258,17 +5253,11 @@ export function OrderDetailPage() {
             <div className="orders-rail-summary-list">
               <div>
                 <span>Shipping address</span>
-                <strong>
-                  {formatShippingAddress(order.orderSnapshot?.shippingAddress)}
-                  <small className="order-snapshot-address-helper">Used for shipment destination.</small>
-                </strong>
+                <strong>{formatShippingAddress(order.orderSnapshot?.shippingAddress)}</strong>
               </div>
               <div>
                 <span>Billing address</span>
-                <strong>
-                  {formatBillingAddress(order.orderSnapshot?.billingAddress)}
-                  <small className="order-snapshot-address-helper">Used for billing/invoice reference.</small>
-                </strong>
+                <strong>{formatBillingAddress(order.orderSnapshot?.billingAddress)}</strong>
               </div>
               {order.orderSnapshot?.orderNote ? (
                 <div>
@@ -7772,7 +7761,7 @@ export function OrderDetailPage() {
             <div className="order-linked-records-panel">
               <OperationalLinkCards
                 title="Linked record"
-                subtitle="Secondary operational context linked to this order."
+                eyebrow=""
                 links={visibleOrderCrossLinks}
                 audience={audience}
               />
@@ -7781,7 +7770,7 @@ export function OrderDetailPage() {
             <div className="order-linked-records-panel">
               <OperationalLinkCards
                 title="Linked records"
-                subtitle={isAdmin ? 'Returns, settlement activity, and grouped support context linked to this order.' : 'Returns and support context linked to this order.'}
+                eyebrow=""
                 links={orderCrossLinks}
                 audience={audience}
               />

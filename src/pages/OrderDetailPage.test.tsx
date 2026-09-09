@@ -1446,6 +1446,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
   });
 
   it('renders persisted integration snapshot fields without exposing raw Shopify payloads', async () => {
+    const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -1461,8 +1462,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const snapshot = await screen.findByLabelText('Shopify order snapshot');
     const shopifyCard = screen.getByLabelText('Shopify details section');
     expect(within(shopifyCard).getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
-    expect(within(shopifyCard).getByText('Reference values synced from Shopify.')).toBeInTheDocument();
+    expect(within(shopifyCard).queryByText(/^Shopify details$/i)).not.toBeInTheDocument();
+    expect(within(shopifyCard).queryByText('Reference values synced from Shopify.')).not.toBeInTheDocument();
     expect(snapshot).not.toHaveAttribute('open');
+    await user.click(within(snapshot).getByText('Show details'));
+    expect(snapshot).toHaveAttribute('open');
     expect(within(snapshot).getByText('Full-order Shopify values; not allocation-projected.')).toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(within(snapshot).getByText('Shopify financial status')).toBeInTheDocument();
@@ -1476,12 +1480,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText(/Shipping street 9/)).toBeInTheDocument();
     expect(screen.getByText(/Kadikoy/)).toBeInTheDocument();
     expect(screen.getByText(/34710/)).toBeInTheDocument();
-    expect(screen.getByText('Used for shipment destination.')).toBeInTheDocument();
+    expect(screen.queryByText('Used for shipment destination.')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping address is invalid or incomplete. Kargonomi shipment will be blocked.')).not.toBeInTheDocument();
     expect(screen.getByText('Billing address')).toBeInTheDocument();
     expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
     expect(screen.getByText(/Billing street 1/)).toBeInTheDocument();
-    expect(screen.getByText('Used for billing/invoice reference.')).toBeInTheDocument();
+    expect(screen.queryByText('Used for billing/invoice reference.')).not.toBeInTheDocument();
     expect(screen.getAllByText('Integration note').length).toBeGreaterThan(0);
     expect(screen.getByText('entegrasyon, priority')).toBeInTheDocument();
     expect(screen.getByText('acknowledged')).toBeInTheDocument();
@@ -3420,6 +3424,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(returnRow).toHaveTextContent('Return-request item');
     expect(refundRow).toHaveTextContent('Refund-derived item');
     expect(refundRow).not.toHaveTextContent('Return requested');
+
+    const linkedRecords = screen.getByRole('heading', { name: 'Linked records' }).closest('.order-linked-records-panel');
+    expect(linkedRecords).not.toBeNull();
+    const processedReturnLink = linkedRecords?.querySelector('a[href="/returns/refund-derived-1028"]');
+    expect(processedReturnLink).not.toBeNull();
+    expect(processedReturnLink).toHaveAttribute('href', '/returns/refund-derived-1028');
+    expect(processedReturnLink).toHaveTextContent('Processed');
+    expect(processedReturnLink).toHaveTextContent('Return linked');
+    expect(within(processedReturnLink as HTMLElement).queryByText(/^Return$/)).not.toBeInTheDocument();
+    expect(within(processedReturnLink as HTMLElement).queryByText('Open return detail')).not.toBeInTheDocument();
   });
 
   it('keeps support directly below timeline in the right sidebar flow', async () => {
@@ -3746,9 +3760,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const linkedRecord = (await screen.findByRole('heading', { name: 'Linked record' })).closest('.order-linked-records-panel');
     expect(screen.queryByRole('heading', { name: 'Linked records' })).not.toBeInTheDocument();
     expect(linkedRecord).toBeTruthy();
+    expect(within(linkedRecord as HTMLElement).queryByText(/^Linked records$/i)).not.toBeInTheDocument();
+    expect(within(linkedRecord as HTMLElement).queryByText('Secondary operational context linked to this order.')).not.toBeInTheDocument();
     expect(within(linkedRecord as HTMLElement).getByText('Support activity')).toBeInTheDocument();
     expect(within(linkedRecord as HTMLElement).getByText(/2 linked tickets/i)).toBeInTheDocument();
     expect(linkedRecord).toHaveTextContent('Latest status: In Review');
+    const supportLink = within(linkedRecord as HTMLElement).getByRole('link', { name: /Support activity/i });
+    expect(supportLink).toHaveAttribute('href', '/support/ticket-finance-review');
+    expect(within(supportLink).queryByText(/^Support$/)).not.toBeInTheDocument();
+    expect(within(supportLink).queryByText('Open latest support ticket')).not.toBeInTheDocument();
 
     const ticketSummary = screen.getByLabelText('Support ticket summary');
     expect(ticketSummary).toHaveTextContent('Tickets · 2');
@@ -3766,15 +3786,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       defaultVendorId: 'sporjinal',
     });
     listAdminSupportTicketsMock.mockResolvedValueOnce([buildSupportTicket()]);
-    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard());
+    getFinanceDashboardMock.mockResolvedValueOnce(buildOrderFinanceDashboard({ includeProductRefund: true }));
     getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
 
     renderOrderDetail();
 
     const linkedRecords = (await screen.findByRole('heading', { name: 'Linked records' })).closest('.order-linked-records-panel');
     expect(linkedRecords).toBeTruthy();
+    expect(within(linkedRecords as HTMLElement).getAllByText('Linked records')).toHaveLength(1);
+    expect(within(linkedRecords as HTMLElement).queryByText(/Returns, settlement activity, and grouped support context linked to this order\./)).not.toBeInTheDocument();
     expect(within(linkedRecords as HTMLElement).getByText('Support activity')).toBeInTheDocument();
     expect(within(linkedRecords as HTMLElement).getByText('Settlement activity')).toBeInTheDocument();
+    const financeLink = within(linkedRecords as HTMLElement).getByRole('link', { name: /Settlement activity/i });
+    expect(financeLink).toHaveAttribute('href', expect.stringContaining('/finance'));
+    expect(financeLink).toHaveTextContent('TRY 4,999.00');
+    expect(financeLink).toHaveTextContent('Pending review');
+    expect(financeLink).not.toHaveTextContent('TRY 4,999.00 · Pending');
+    expect(within(financeLink).queryByText(/^Finance$/)).not.toBeInTheDocument();
+    expect(within(financeLink).queryByText('Open finance detail')).not.toBeInTheDocument();
+    const refundLink = within(linkedRecords as HTMLElement).getByRole('link', { name: /Refund impact/i });
+    expect(refundLink).toHaveTextContent('TRY 4,999.00 · Recorded');
+    expect(refundLink).toHaveTextContent('Refund');
+    expect(within(refundLink).queryByText('Open finance detail')).not.toBeInTheDocument();
+    const supportLink = within(linkedRecords as HTMLElement).getByRole('link', { name: /Support activity/i });
+    expect(supportLink).toHaveAttribute('href', '/admin/support/ticket-shipment-1');
+    expect(within(supportLink).queryByText('Open latest support ticket')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Linked record')).not.toBeInTheDocument();
   });
 

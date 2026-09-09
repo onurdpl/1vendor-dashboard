@@ -7453,16 +7453,6 @@ h3 {
   text-align: right;
 }
 
-.orders-rail-summary-list .order-snapshot-address-helper {
-  display: block;
-  margin-top: 3px;
-  color: #64748b;
-  font-size: 0.68rem;
-  font-weight: 650;
-  line-height: 1.25;
-  text-transform: none;
-}
-
 .orders-rail-summary-list > .order-snapshot-address-warning {
   background: #fff7ed;
 }
@@ -8975,10 +8965,6 @@ h3 {
   background: #fff;
 }
 
-.order-shopify-card-heading .eyebrow {
-  margin: 0 0 4px;
-}
-
 .order-shopify-disclosure-summary {
   display: flex;
   align-items: center;
@@ -9044,6 +9030,13 @@ h3 {
 
 .order-shopify-details > .order-snapshot-address-warning {
   margin-bottom: 2px;
+}
+
+.order-shopify-details .order-financial-impact-grid,
+.order-shopify-details .orders-rail-summary-list {
+  border-color: #eef2f7;
+  border-radius: 8px;
+  background: transparent;
 }
 
 .order-shipment-requirement-state {
@@ -14056,9 +14049,28 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .order-linked-records-panel .operational-link-row {
+  grid-template-columns: minmax(0, 1fr) max-content;
   min-height: 38px;
   padding: 0.28rem 0.38rem;
-  border-radius: 8px;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.order-linked-records-panel .operational-link-row:last-child {
+  border-bottom: 0;
+}
+
+.order-linked-records-panel .operational-link-row:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+  box-shadow: none;
+  transform: none;
+}
+
+.order-linked-records-panel .operational-link-action {
+  display: none;
 }
 
 .order-linked-records-panel .operational-link-row strong {
@@ -14068,6 +14080,16 @@ summary.provider-response-heading::-webkit-details-marker {
 .order-linked-records-panel .operational-link-row span,
 .order-linked-records-panel .operational-link-row small {
   font-size: 0.64rem;
+}
+
+@media (max-width: 760px) {
+  .order-linked-records-panel .operational-link-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-linked-records-panel .operational-link-status {
+    justify-content: flex-start;
+  }
 }
 
 .operational-empty-copy {
