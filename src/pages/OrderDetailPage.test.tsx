@@ -431,6 +431,16 @@ function expectRedundantVendorFinanceCopyToBeAbsent(financialSummary: HTMLElemen
   expect(summary.queryByText('Estimated amount for this order.')).not.toBeInTheDocument();
 }
 
+function expectVendorSupportHelperCopyToBeAbsent(supportCard: HTMLElement) {
+  const support = within(supportCard);
+  expect(support.queryByText('Create a support ticket before escalating.')).not.toBeInTheDocument();
+  expect(
+    support.queryByText(
+      'A linked support ticket is already open. Escalate only when the existing case needs attention.',
+    ),
+  ).not.toBeInTheDocument();
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -4439,9 +4449,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(supportCard).not.toHaveClass('order-support-card-empty');
     const contactSupport = await within(supportCard).findByRole('link', { name: 'Contact support' });
     expect(contactSupport).toHaveAttribute('href', '/support/ticket-shipment-1');
-    expect(await within(supportCard).findByText(/already open/i)).toBeInTheDocument();
-    expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent('Open');
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
+    const ticketSummary = within(supportCard).getByLabelText('Support ticket summary');
+    expect(ticketSummary).toHaveTextContent('Tickets · 1');
+    expect(ticketSummary).toHaveTextContent('Open');
+    expect(ticketSummary).toHaveTextContent('Help with order #1028');
+    expect(ticketSummary).toHaveTextContent('Normal priority');
     expect(within(supportCard).queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeEnabled();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
 
@@ -4470,6 +4485,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       '/support/ticket-shipment-1',
     );
+    const supportCard = screen.getByLabelText('Shipment and return support');
+    expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent('Vendor response required');
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
     expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
   });
 
@@ -4496,6 +4514,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
     await user.click(await screen.findByRole('button', { name: 'Escalate' }));
 
     await waitFor(() => expect(escalateVendorSupportTicketMock).toHaveBeenCalledWith('ticket-shipment-1'));
@@ -4524,7 +4544,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(within(supportCard).queryByText('No linked support tickets')).not.toBeInTheDocument();
     expect(within(supportCard).queryByText(/Order, shipment, and return context attached\./)).not.toBeInTheDocument();
-    expect(within(supportCard).getByText('Create a support ticket before escalating.')).toBeInTheDocument();
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
     expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
   });
 
@@ -4556,7 +4576,96 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(
       within(supportCard).queryByText('Support is available for active or fulfilled assigned orders.'),
     ).not.toBeInTheDocument();
-    expect(within(supportCard).queryByText('Create a support ticket before escalating.')).not.toBeInTheDocument();
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
+  });
+
+  it.each(['RESOLVED', 'CLOSED'] as const)(
+    'keeps a %s vendor ticket card and support actions while removing helper copy',
+    async (status) => {
+      setCurrentUser({
+        email: 'vendor@example.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'sporjinal',
+      });
+      listVendorSupportTicketsMock.mockResolvedValueOnce([
+        buildSupportTicket({
+          status,
+          resolvedAt: status === 'RESOLVED' ? '2026-05-15T20:10:00.000Z' : null,
+          closedAt: status === 'CLOSED' ? '2026-05-15T20:10:00.000Z' : null,
+        }),
+      ]);
+      getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+      renderOrderDetail();
+
+      const supportCard = await screen.findByLabelText('Shipment and return support');
+      expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent(
+        status === 'RESOLVED' ? 'Resolved' : 'Closed',
+      );
+      expect(within(supportCard).getByRole('button', { name: 'Contact support' })).toBeEnabled();
+      expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
+      expectVendorSupportHelperCopyToBeAbsent(supportCard);
+    },
+  );
+
+  it('keeps the escalated button state while removing the open-ticket advisory', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([
+      buildSupportTicket({ priority: 'high', escalatedAt: '2026-05-15T20:10:00.000Z' }),
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    expect(within(supportCard).getByRole('button', { name: 'Escalated' })).toBeDisabled();
+    expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent('High priority');
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
+  });
+
+  it('keeps the escalating button state while removing the open-ticket advisory', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const supportTicket = buildSupportTicket();
+    const escalationResult = deferred<SupportTicket>();
+    listVendorSupportTicketsMock.mockResolvedValueOnce([supportTicket]);
+    escalateVendorSupportTicketMock.mockReturnValueOnce(escalationResult.promise);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    await user.click(within(supportCard).getByRole('button', { name: 'Escalate' }));
+    expect(await within(supportCard).findByRole('button', { name: 'Escalating…' })).toBeDisabled();
+    expectVendorSupportHelperCopyToBeAbsent(supportCard);
+
+    escalationResult.resolve({
+      ...supportTicket,
+      priority: 'high',
+      status: 'IN_REVIEW',
+      escalatedAt: '2026-05-15T20:10:00.000Z',
+    });
+    await waitFor(() => expect(escalateVendorSupportTicketMock).toHaveBeenCalledWith('ticket-shipment-1'));
   });
 
   it('deduplicates duplicate-looking linked support ticket rows', async () => {
