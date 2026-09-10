@@ -904,7 +904,7 @@ export function OrdersPage() {
                     className="button button-secondary"
                     onClick={handleResetFilters}
                   >
-                    Filters
+                    Reset filters
                   </button>
                 </FilterBar>
               </OperationalToolbar>

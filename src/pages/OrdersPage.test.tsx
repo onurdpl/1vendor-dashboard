@@ -374,7 +374,8 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByLabelText('Orders operational metrics')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(3);
-    expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
@@ -789,9 +790,58 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
 
-    await userEvent.click(within(workflowTabs).getByRole('button', { name: /All orders/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
 
+    expect(within(workflowTabs).getByRole('button', { name: /All orders/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
+  });
+
+  it('preserves the local filter reset behavior under the Reset filters label', async () => {
+    setVendorUser();
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    const searchInput = await screen.findByPlaceholderText(
+      'Search order, customer, tracking, carrier...'
+    );
+    const [allocationFilter, fulfillmentFilter, shippingFilter] =
+      screen.getAllByRole('combobox');
+    const workflowTabs = screen.getByLabelText('Orders workflow tabs');
+    const quickFilters = screen.getByLabelText('Order quick filters');
+    const highValueQuickFilter = within(quickFilters).getByRole('button', {
+      name: /High value/i,
+    });
+
+    await userEvent.type(searchInput, 'DHL');
+    await userEvent.selectOptions(allocationFilter, 'fulfilled');
+    await userEvent.selectOptions(fulfillmentFilter, 'Fulfilled');
+    await userEvent.selectOptions(shippingFilter, 'Delivered');
+    await userEvent.click(highValueQuickFilter);
+
+    expect(searchInput).toHaveValue('DHL');
+    expect(allocationFilter).toHaveValue('fulfilled');
+    expect(fulfillmentFilter).toHaveValue('Fulfilled');
+    expect(shippingFilter).toHaveValue('Delivered');
+    expect(highValueQuickFilter).toHaveClass('is-active');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+
+    await waitFor(() => {
+      expect(within(workflowTabs).getByRole('button', { name: /All orders/i })).toHaveClass(
+        'is-active'
+      );
+    });
+    expect(searchInput).toHaveValue('');
+    expect(allocationFilter).toHaveValue('all');
+    expect(fulfillmentFilter).toHaveValue('all');
+    expect(shippingFilter).toHaveValue('all');
+    expect(within(quickFilters).getByRole('button', { name: /All orders/i })).toHaveClass(
+      'is-active'
+    );
+    expect(highValueQuickFilter).not.toHaveClass('is-active');
+    expect(screen.queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument();
   });
 
   it.each([
