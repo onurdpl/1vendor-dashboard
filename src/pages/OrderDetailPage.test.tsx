@@ -4289,7 +4289,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(financeRefundEvent).not.toHaveTextContent('Refund · TRY 4,999.00');
     const supportEvent = supportEventTitle.closest('li');
     expect(supportEvent).toHaveTextContent('Help with order #1028');
-    expect(within(supportEvent as HTMLElement).getByText('Open')).toBeInTheDocument();
+    expect(supportEvent).toHaveTextContent(formatTimelineDateForTest('2026-05-15T20:00:00.000Z'));
+    expect(within(supportEvent as HTMLElement).queryByText('Open')).not.toBeInTheDocument();
+    expect(supportEvent?.querySelector('.op-badge')).not.toBeInTheDocument();
     expect(within(supportEvent as HTMLElement).getByRole('link', { name: 'Support ticket created' })).toHaveAttribute(
       'href',
       '/admin/support/ticket-shipment-1',
@@ -4315,7 +4317,72 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const supportLink = within(linkedRecords as HTMLElement).getByRole('link', { name: /Support activity/i });
     expect(supportLink).toHaveAttribute('href', '/admin/support/ticket-shipment-1');
     expect(within(supportLink).queryByText('Open latest support ticket')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Support ticket summary')).toHaveTextContent('Open');
     expect(screen.queryByLabelText('Linked record')).not.toBeInTheDocument();
+  });
+
+  it('keeps resolved support status current while support activity rows remain historical', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    const createdAt = '2026-05-15T20:00:00.000Z';
+    const lastReplyAt = '2026-05-15T20:04:00.000Z';
+    const resolvedAt = '2026-05-15T20:05:00.000Z';
+    listAdminSupportTicketsMock.mockResolvedValueOnce([
+      buildSupportTicket({
+        subject: 'Resolved shipment help',
+        status: 'RESOLVED',
+        createdAt,
+        updatedAt: resolvedAt,
+        lastReplyAt,
+        lastReplyByRole: 'ADMIN',
+        resolvedAt,
+      }),
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const createdEventTitle = await screen.findByText('Support ticket created');
+    const activity = createdEventTitle.closest('article');
+    expect(activity).not.toBeNull();
+    const activityScope = within(activity as HTMLElement);
+    const createdRow = activityScope.getByText('Support ticket created').closest('li');
+    const replyRow = activityScope.getByText('Support reply added').closest('li');
+    const resolvedRow = activityScope.getByText('Support ticket resolved').closest('li');
+
+    expect(createdRow).toHaveTextContent('Resolved shipment help');
+    expect(createdRow).toHaveTextContent(formatTimelineDateForTest(createdAt));
+    expect(within(createdRow as HTMLElement).queryByText('Resolved')).not.toBeInTheDocument();
+    expect(createdRow?.querySelector('.op-badge')).not.toBeInTheDocument();
+    expect(within(createdRow as HTMLElement).getByRole('link', { name: 'Support ticket created' })).toHaveAttribute(
+      'href',
+      '/admin/support/ticket-shipment-1',
+    );
+
+    expect(replyRow).toHaveTextContent('Resolved shipment help');
+    expect(replyRow).toHaveTextContent(formatTimelineDateForTest(lastReplyAt));
+    expect(within(replyRow as HTMLElement).getByText('ADMIN')).toBeInTheDocument();
+    expect(replyRow?.querySelector('.op-badge')).toBeInTheDocument();
+
+    expect(resolvedRow).toHaveTextContent('Resolved shipment help');
+    expect(resolvedRow).toHaveTextContent(formatTimelineDateForTest(resolvedAt));
+    expect(within(resolvedRow as HTMLElement).queryByText('Resolved')).not.toBeInTheDocument();
+    expect(resolvedRow?.querySelector('.op-badge')).not.toBeInTheDocument();
+    expect(within(resolvedRow as HTMLElement).getByRole('link', { name: 'Support ticket resolved' })).toHaveAttribute(
+      'href',
+      '/admin/support/ticket-shipment-1',
+    );
+
+    expect(createdRow?.compareDocumentPosition(replyRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(replyRow?.compareDocumentPosition(resolvedRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText('Support ticket summary')).toHaveTextContent('Resolved');
   });
 
   it('integrates a single finance linked record into Settlement', async () => {
