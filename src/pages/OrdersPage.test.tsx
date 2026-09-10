@@ -700,6 +700,96 @@ describe('OrdersPage control center', () => {
     expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
   });
 
+  it('keeps pending reassignment in Status across shipment evidence without changing Tracking', async () => {
+    const pendingOrders = [
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-tracking-url',
+        sourceShopifyOrderNumber: '#1140',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        trackingNumber: 'TRK-1140',
+        trackingUrl: 'https://tracking.example/TRK-1140',
+        carrier: 'DHL',
+      }),
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-tracking-number',
+        sourceShopifyOrderNumber: '#1141',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        trackingNumber: 'TRK-1141',
+      }),
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-carrier',
+        sourceShopifyOrderNumber: '#1142',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        carrier: 'DHL',
+      }),
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-fulfilled',
+        sourceShopifyOrderNumber: '#1143',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        fulfillmentStatus: 'Fulfilled',
+        shippingStatus: 'In Transit',
+      }),
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-fulfilled-tracked',
+        sourceShopifyOrderNumber: '#1144',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        fulfillmentStatus: 'Fulfilled',
+        shippingStatus: 'Delivered',
+        trackingNumber: 'TRK-1144',
+        trackingUrl: 'https://tracking.example/TRK-1144',
+        carrier: 'DHL',
+      }),
+      buildAwaitingRejectableOrder({
+        id: 'allocation-pending-generic',
+        sourceShopifyOrderNumber: '#1145',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+        shippingStatus: 'Label Created',
+      }),
+    ];
+    listOrdersMock.mockResolvedValue(pendingOrders.map(toSummary));
+    getOrderMock.mockImplementation(async (orderId) => pendingOrders.find((order) => order.id === orderId) ?? pendingOrders[0]);
+
+    renderOrdersPage();
+
+    for (const orderNumber of ['#1140', '#1141', '#1142']) {
+      const row = await screen.findByRole('button', { name: new RegExp(orderNumber) });
+      const statusCell = row.querySelector('.orders-table-status-cell');
+      const trackingCell = row.querySelector('.orders-table-shipping-cell');
+      expect(statusCell).not.toBeNull();
+      expect(trackingCell).not.toBeNull();
+      expect(within(statusCell as HTMLElement).getByText('Awaiting shipment')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).queryByText('Tracking visible')).not.toBeInTheDocument();
+      expect(within(trackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
+    }
+
+    for (const orderNumber of ['#1143', '#1144']) {
+      const row = screen.getByRole('button', { name: new RegExp(orderNumber) });
+      const statusCell = row.querySelector('.orders-table-status-cell');
+      const trackingCell = row.querySelector('.orders-table-shipping-cell');
+      expect(statusCell).not.toBeNull();
+      expect(trackingCell).not.toBeNull();
+      expect(within(statusCell as HTMLElement).getByText('Fulfilled')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(trackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
+    }
+
+    const genericRow = screen.getByRole('button', { name: /#1145/ });
+    const genericStatusCell = genericRow.querySelector('.orders-table-status-cell');
+    const genericTrackingCell = genericRow.querySelector('.orders-table-shipping-cell');
+    expect(genericStatusCell).not.toBeNull();
+    expect(genericTrackingCell).not.toBeNull();
+    expect(within(genericStatusCell as HTMLElement).getByText('Reassignment needed')).toBeInTheDocument();
+    expect(within(genericStatusCell as HTMLElement).queryByText('Pending Reassignment')).not.toBeInTheDocument();
+    expect(within(genericTrackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
+  });
+
   it.each(['admin', 'vendor', 'support', 'finance'] as const)(
     'removes duplicate closure status lines for %s while preserving tracking closure',
     async (role) => {
@@ -802,7 +892,14 @@ describe('OrdersPage control center', () => {
       }
 
       const reassignmentRow = screen.getByRole('button', { name: /#1132/ });
-      expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
+      const reassignmentStatusCell = reassignmentRow.querySelector('.orders-table-status-cell');
+      const reassignmentTrackingCell = reassignmentRow.querySelector('.orders-table-shipping-cell');
+      expect(reassignmentStatusCell).not.toBeNull();
+      expect(reassignmentTrackingCell).not.toBeNull();
+      expect(within(reassignmentStatusCell as HTMLElement).getByText('Awaiting shipment')).toBeInTheDocument();
+      expect(within(reassignmentStatusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(reassignmentStatusCell as HTMLElement).queryByText('Tracking pending')).not.toBeInTheDocument();
+      expect(within(reassignmentTrackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
     },
   );
 

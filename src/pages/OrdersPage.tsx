@@ -253,14 +253,16 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
   if (story.state !== 'active_or_unknown') {
     return story.secondaryLabel;
   }
+  if (order.allocationStatus === 'pending_reassignment') {
+    return getLifecyclePrimaryLabel(order) === 'Reassignment needed'
+      ? null
+      : safeStatusLabel(order.allocationStatus);
+  }
   if (order.trackingNumber || order.carrier) {
     return 'Tracking visible';
   }
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Tracking pending';
-  }
-  if (order.allocationStatus === 'pending_reassignment') {
-    return safeStatusLabel(order.allocationStatus);
   }
   return null;
 }
