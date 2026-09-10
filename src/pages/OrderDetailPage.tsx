@@ -230,6 +230,42 @@ function isInvalidShippingSnapshotAddress(address: NonNullable<OrderDetail['orde
   return isInvalidAddressPlaceholderValue(address.address) || isInvalidAddressPlaceholderValue(address.city);
 }
 
+function getVendorShippingAddressParts(
+  address: NonNullable<OrderDetail['orderSnapshot']>['shippingAddress'] | null | undefined,
+  includeCountry = true,
+) {
+  if (isInvalidShippingSnapshotAddress(address)) {
+    return [];
+  }
+
+  const district = shippingAddressContainsDistrictSegment(address?.address, address?.district) ? null : address?.district;
+  return [address?.address, district, address?.city, address?.postcode, includeCountry ? address?.country : null]
+    .filter((part): part is string => !isInvalidAddressPlaceholderValue(part))
+    .map((part) => part.trim());
+}
+
+function getVendorBillingAddressParts(
+  address: NonNullable<OrderDetail['orderSnapshot']>['billingAddress'] | null | undefined,
+) {
+  if (
+    !address ||
+    isInvalidAddressPlaceholderValue(address.address1) ||
+    isInvalidAddressPlaceholderValue(address.city)
+  ) {
+    return [];
+  }
+
+  const addressLines = [address.address1, address.address2].filter(Boolean).join(' · ');
+  const district = shippingAddressContainsDistrictSegment(addressLines, address.district) ? null : address.district;
+  return [address.address1, address.address2, district, address.city, address.postcode]
+    .filter((part): part is string => !isInvalidAddressPlaceholderValue(part))
+    .map((part) => part.trim());
+}
+
+function normalizeVendorAddressComparable(parts: string[]) {
+  return parts.join(' ').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function isPositiveFinanceValue(value: string | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0;
@@ -4219,6 +4255,15 @@ export function OrderDetailPage() {
   const orderItems = safeArray(order.lineItems).length ? safeArray(order.lineItems) : safeArray(order.items);
   const snapshotCurrency = getSnapshotCurrency(order);
   const customerLabel = getCompactCustomerLabel(order.customer);
+  const vendorShippingAddressParts = getVendorShippingAddressParts(order.orderSnapshot?.shippingAddress);
+  const vendorBillingAddressParts = getVendorBillingAddressParts(order.orderSnapshot?.billingAddress);
+  const vendorShippingAddress = vendorShippingAddressParts.join(' · ');
+  const vendorBillingAddress = vendorBillingAddressParts.join(' · ');
+  const shouldShowVendorBillingAddress =
+    vendorShippingAddressParts.length > 0 &&
+    vendorBillingAddressParts.length > 0 &&
+    normalizeVendorAddressComparable(getVendorShippingAddressParts(order.orderSnapshot?.shippingAddress, false)) !==
+      normalizeVendorAddressComparable(vendorBillingAddressParts);
   const canOpenSplitRejectBeforeRestriction =
     currentUser?.role === 'vendor' &&
     orderItems.length > 1 &&
@@ -5133,14 +5178,31 @@ export function OrderDetailPage() {
                 </div>
               ) : null}
             </div>
-            <div className="order-ship-to-note" aria-label="Shipping address summary">
-              <span>Ship to</span>
-              <strong>
-                {order.shippingAddress && order.shippingAddress !== 'Unknown'
-                  ? order.shippingAddress
-                  : 'Shipping address will appear when available.'}
-              </strong>
-            </div>
+            {currentUser?.role === 'vendor' ? (
+              <>
+                {vendorShippingAddress ? (
+                  <div className="order-ship-to-note" aria-label="Shipping address summary">
+                    <span>Ship to</span>
+                    <strong>{vendorShippingAddress}</strong>
+                  </div>
+                ) : null}
+                {shouldShowVendorBillingAddress ? (
+                  <div className="order-ship-to-note" aria-label="Billing address summary">
+                    <span>Billing address</span>
+                    <strong>{vendorBillingAddress}</strong>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="order-ship-to-note" aria-label="Shipping address summary">
+                <span>Ship to</span>
+                <strong>
+                  {order.shippingAddress && order.shippingAddress !== 'Unknown'
+                    ? order.shippingAddress
+                    : 'Shipping address will appear when available.'}
+                </strong>
+              </div>
+            )}
           </div>
         </div>
         <section

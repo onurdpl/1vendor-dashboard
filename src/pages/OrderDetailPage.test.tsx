@@ -2712,7 +2712,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
   });
 
-  it('compacts vendor header metadata without changing timestamp, customer, Ship to, or current state', async () => {
+  it('compacts vendor header metadata with structured shipping and distinct billing addresses', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2752,10 +2752,207 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(headerRegion.getByText('Ada Lovelace')).toBeInTheDocument();
     const shippingSummary = headerRegion.getByLabelText('Shipping address summary');
     expect(shippingSummary).toHaveTextContent('Ship to');
-    expect(shippingSummary).toHaveTextContent('Shopify shipping address available in future detail sync.');
+    expect(shippingSummary).toHaveTextContent('Shipping street 9 · Kadikoy · Istanbul · 34710 · TR');
+    expect(shippingSummary).not.toHaveTextContent('Ada Lovelace');
+    expect(headerRegion.queryByText('Shopify shipping address available in future detail sync.')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('Phone present')).not.toBeInTheDocument();
+    const billingSummary = headerRegion.getByLabelText('Billing address summary');
+    expect(billingSummary).toHaveTextContent('Billing address');
+    expect(billingSummary).toHaveTextContent('Billing street 1 · Floor 2 · Besiktas · Istanbul · 34330');
+    expect(billingSummary).not.toHaveTextContent('Shipping street 9');
+    expect(headerRegion.queryByText('Billing Customer')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('Billing Co')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('+900000000001')).not.toBeInTheDocument();
     const currentState = headerRegion.getByLabelText('Current order state');
     expect(within(currentState).getByText('Active')).toBeInTheDocument();
     expect(within(currentState).getByText('Pending')).toBeInTheDocument();
+  });
+
+  it('shows a vendor shipping address once when billing has the same normalized address', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        shippingAddress: {
+          address: '  Same Street 9  ',
+          city: 'ISTANBUL',
+          district: 'Kadikoy',
+          postcode: '34710',
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+        billingAddress: {
+          fullName: 'Private Billing Name',
+          company: null,
+          phone: null,
+          address1: 'same street 9',
+          address2: null,
+          city: 'istanbul',
+          district: 'kadikoy',
+          postcode: '34710',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const header = (await screen.findByRole('heading', { name: 'Order #1028' })).closest('.order-detail-topbar');
+    expect(header).not.toBeNull();
+    const headerRegion = within(header as HTMLElement);
+    expect(headerRegion.getByLabelText('Shipping address summary')).toHaveTextContent(
+      'Same Street 9 · Kadikoy · ISTANBUL · 34710 · TR',
+    );
+    expect(headerRegion.queryByLabelText('Billing address summary')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('Private Billing Name')).not.toBeInTheDocument();
+  });
+
+  it('omits vendor billing when the structured billing address is missing', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        billingAddress: {
+          fullName: null,
+          company: null,
+          phone: null,
+          address1: null,
+          address2: null,
+          city: null,
+          district: null,
+          postcode: null,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const header = (await screen.findByRole('heading', { name: 'Order #1028' })).closest('.order-detail-topbar');
+    const headerRegion = within(header as HTMLElement);
+    expect(headerRegion.getByLabelText('Shipping address summary')).toHaveTextContent('Shipping street 9');
+    expect(headerRegion.queryByLabelText('Billing address summary')).not.toBeInTheDocument();
+  });
+
+  it('omits placeholder billing while keeping the valid vendor shipping address', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        billingAddress: {
+          fullName: null,
+          company: null,
+          phone: null,
+          address1: 'N/A',
+          address2: null,
+          city: 'NA',
+          district: null,
+          postcode: null,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const header = (await screen.findByRole('heading', { name: 'Order #1028' })).closest('.order-detail-topbar');
+    const headerRegion = within(header as HTMLElement);
+    expect(headerRegion.getByLabelText('Shipping address summary')).toHaveTextContent('Shipping street 9');
+    expect(headerRegion.queryByLabelText('Billing address summary')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText(/^NA$|^N\/A$/)).not.toBeInTheDocument();
+  });
+
+  it.each(['', 'NA', 'N/A'])('omits vendor address rows for invalid shipping address %j', async (invalidAddress) => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shippingAddress: 'Shopify shipping address available in future detail sync.',
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        shippingAddress: {
+          address: invalidAddress,
+          city: invalidAddress,
+          district: null,
+          postcode: null,
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const header = (await screen.findByRole('heading', { name: 'Order #1028' })).closest('.order-detail-topbar');
+    const headerRegion = within(header as HTMLElement);
+    expect(headerRegion.queryByLabelText('Shipping address summary')).not.toBeInTheDocument();
+    expect(headerRegion.queryByLabelText('Billing address summary')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText('Shopify shipping address available in future detail sync.')).not.toBeInTheDocument();
+    expect(headerRegion.queryByText(/^NA$|^N\/A$/)).not.toBeInTheDocument();
+  });
+
+  it('deduplicates a district already embedded in the vendor shipping address', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        ...orderWithShipmentSummary.orderSnapshot!,
+        shippingAddress: {
+          address: 'Çınar Mahallesi Orhan Sokak 1/3, Maltepe',
+          city: 'İstanbul',
+          district: 'Maltepe',
+          postcode: '34841',
+          country: 'TR',
+          customerPhonePresent: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const header = (await screen.findByRole('heading', { name: 'Order #1028' })).closest('.order-detail-topbar');
+    const shippingSummary = within(header as HTMLElement).getByLabelText('Shipping address summary');
+    expect(shippingSummary).toHaveTextContent('Çınar Mahallesi Orhan Sokak 1/3, Maltepe · İstanbul · 34841 · TR');
+    expect((shippingSummary.textContent?.match(/Maltepe/g) ?? []).length).toBe(1);
   });
 
   it('removes dead Order Detail header actions', async () => {
@@ -2779,6 +2976,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(header as HTMLElement).getByText('Customer')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('Vendor')).toBeInTheDocument();
     expect(within(header as HTMLElement).getByText('Shopify ID')).toBeInTheDocument();
+    expect(within(header as HTMLElement).getByLabelText('Shipping address summary')).toHaveTextContent(
+      'Shipping address will appear when available.',
+    );
     expect(screen.queryByRole('link', { name: 'İNCELE' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More order actions' })).not.toBeInTheDocument();
   });
@@ -9378,8 +9578,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const alertRegion = screen.getByLabelText('Operational alerts');
     expect(within(alertRegion).getByText(/Customer return requested/i)).toBeInTheDocument();
     expect(within(alertRegion).getByRole('link', { name: 'Open return details' })).toHaveAttribute('href', '/returns/return-1028');
-    expect(screen.getByLabelText('Shipping address summary')).toHaveTextContent('Ship to');
-    expect(screen.getByText('Shipping address will appear when available.')).toBeInTheDocument();
+    const shippingSummary = screen.getByLabelText('Shipping address summary');
+    expect(shippingSummary).toHaveTextContent('Ship to');
+    expect(shippingSummary).toHaveTextContent('Shipping street 9 · Kadikoy · Istanbul · 34710 · TR');
+    expect(screen.queryByText('Shipping address will appear when available.')).not.toBeInTheDocument();
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
     expect(screen.queryByRole('link', { name: /Settlement activity/i })).not.toBeInTheDocument();
