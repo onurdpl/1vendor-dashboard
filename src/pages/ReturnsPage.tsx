@@ -947,7 +947,7 @@ export function ReturnsPage() {
         })}
       </div>
 
-      {isAdmin ? (
+      {currentUser?.role !== 'vendor' ? (
         <div className="returns-status-row" aria-label="Return workspace status">
           <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
         </div>
