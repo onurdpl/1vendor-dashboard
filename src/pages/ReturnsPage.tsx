@@ -19,7 +19,6 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
 import { getAvailableVendors } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
-import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { ProductImagePreview } from '../components/ProductImagePreview';
@@ -695,7 +694,6 @@ export function ReturnsPage() {
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(searchParams.get('workflow')), [searchParams]);
-  const isRealMode = runtimeConfig.apiMode === 'real';
   const isAdmin = currentUser?.role === 'admin';
   const requestedReturnTarget =
     searchParams.get('returnId') ??
@@ -928,7 +926,6 @@ export function ReturnsPage() {
           <p className="eyebrow">Returns</p>
           <h2>Return requests</h2>
         </div>
-        <StatusBadge tone="info">Phase 16A foundation</StatusBadge>
       </div>
 
       <div className="orders-workflow-tabs returns-workflow-tabs" aria-label="Returns workflow tabs">
@@ -950,11 +947,11 @@ export function ReturnsPage() {
         })}
       </div>
 
-      <div className="returns-status-row" aria-label="Return workspace status">
-        <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
-        <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
-        <StatusBadge tone={attentionCount > 0 ? 'attention' : 'success'}>{attentionCount} attention</StatusBadge>
-      </div>
+      {isAdmin ? (
+        <div className="returns-status-row" aria-label="Return workspace status">
+          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+        </div>
+      ) : null}
 
       <div className="op-control-layout returns-control-layout">
         <div className="op-main-column">

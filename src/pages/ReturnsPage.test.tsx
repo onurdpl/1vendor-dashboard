@@ -333,6 +333,53 @@ describe('ReturnsPage control center', () => {
     });
   });
 
+  it('removes vendor header clutter while preserving workflow counts and vendor-scoped loading', async () => {
+    setCurrentUser({
+      email: 'vendor-a@demo.com',
+      name: 'Vendor A User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    listReturnsMock.mockResolvedValue([toSummary(receivedNeedsActionReturn)]);
+    getReturnMock.mockResolvedValue(receivedNeedsActionReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return requests' })).toBeInTheDocument();
+    expect(screen.getByText('Returns')).toBeInTheDocument();
+    expect(screen.queryByText('Phase 16A foundation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Real API')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mock mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Vendor Demo Vendor A')).not.toBeInTheDocument();
+
+    expect((await screen.findAllByText('#1072')).length).toBeGreaterThan(0);
+    const workflowTabs = screen.getByLabelText('Returns workflow tabs');
+    expect(within(workflowTabs).getByRole('button', { name: /^All/i })).toHaveTextContent('1');
+    expect(within(workflowTabs).getByRole('button', { name: /Requested/i })).toHaveTextContent('0');
+    expect(within(workflowTabs).getByRole('button', { name: /Needs Action/i })).toHaveTextContent('1');
+    expect(within(workflowTabs).getByRole('button', { name: /Approved/i })).toHaveTextContent('0');
+    expect(within(workflowTabs).getByRole('button', { name: /Refunded/i })).toHaveTextContent('0');
+    expect(within(workflowTabs).getByRole('button', { name: /Closed/i })).toHaveTextContent('0');
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getReturnMock).toHaveBeenCalledWith(receivedNeedsActionReturn.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it('keeps selected vendor context for the admin returns workspace', async () => {
+    listReturnsMock.mockResolvedValue([]);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Vendor Demo Vendor A')).toBeInTheDocument();
+    expect(screen.queryByText('Phase 16A foundation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Real API')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mock mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 attention')).not.toBeInTheDocument();
+  });
+
   it('renders missing vendor context as a terminal state instead of skeleton rows', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
