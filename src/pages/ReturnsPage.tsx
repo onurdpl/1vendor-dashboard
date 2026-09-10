@@ -1072,15 +1072,12 @@ export function ReturnsPage() {
                   >
                     <span className="returns-order-cell">
                       <strong>{formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}</strong>
-                      <small>{getVendorName(item.assignedVendorId, vendorLookup)}</small>
+                      {currentUser?.role !== 'vendor' ? <small>{getVendorName(item.assignedVendorId, vendorLookup)}</small> : null}
                       <small>{formatReturnedItemCount(itemCount)}</small>
                     </span>
                     <div className="return-items-preview">
                       {visibleItems.map((returnedItem, index) => (
                         <div key={`${returnedItem.sku}-${returnedItem.title}-${index}`} className="return-item-preview-line">
-                          <span className="return-item-thumb" aria-hidden="true">
-                            ↩
-                          </span>
                           <span>
                             <strong>{getReturnedItemTitleText(returnedItem)}</strong>
                             {getReturnedItemSkuText(returnedItem) ? <small>{getReturnedItemSkuText(returnedItem)}</small> : null}
@@ -1091,7 +1088,7 @@ export function ReturnsPage() {
                     </div>
                     <span>
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
-                      <small>{getRefundStatusLabel(item)}</small>
+                      {getRefundStatusLabel(item) !== getVendorStatusLabel(item) ? <small>{getRefundStatusLabel(item)}</small> : null}
                     </span>
                     <span className="returns-requested-cell">
                       <strong>{requestedAt.date}</strong>

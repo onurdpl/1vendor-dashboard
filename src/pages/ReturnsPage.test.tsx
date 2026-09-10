@@ -357,6 +357,12 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Vendor Demo Vendor A')).not.toBeInTheDocument();
 
     expect((await screen.findAllByText('#1072')).length).toBeGreaterThan(0);
+    const vendorTable = within(document.querySelector('.returns-op-table') as HTMLElement);
+    const vendorRow = vendorTable.getByText('#1072').closest('.op-table-row');
+    expect(vendorRow).not.toBeNull();
+    expect(within(vendorRow as HTMLElement).queryByText('Demo Vendor A')).not.toBeInTheDocument();
+    expect(within(vendorRow as HTMLElement).getByText('1 item returned')).toBeInTheDocument();
+    expect(within(vendorRow as HTMLElement).queryByText('↩')).not.toBeInTheDocument();
     const workflowTabs = screen.getByLabelText('Returns workflow tabs');
     expect(within(workflowTabs).getByRole('button', { name: /^All/i })).toHaveTextContent('1');
     expect(within(workflowTabs).getByRole('button', { name: /Requested/i })).toHaveTextContent('0');
@@ -442,6 +448,48 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
     expect(screen.queryByText(/Return item1 item/)).not.toBeInTheDocument();
     expect(screen.queryByText('1 item')).not.toBeInTheDocument();
+
+    const table = within(document.querySelector('.returns-op-table') as HTMLElement);
+    const pendingRow = table.getByText('#1001').closest('.op-table-row');
+    const refundedRow = table.getByText('#1002').closest('.op-table-row');
+    expect(pendingRow).not.toBeNull();
+    expect(refundedRow).not.toBeNull();
+    expect(within(pendingRow as HTMLElement).getByText('Demo Vendor A')).toBeInTheDocument();
+    expect(within(pendingRow as HTMLElement).getByText('Awaiting review')).toBeInTheDocument();
+    expect(within(pendingRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(refundedRow as HTMLElement).getAllByText('Refunded')).toHaveLength(1);
+  });
+
+  it('keeps non-identical return and refund statuses in table rows', async () => {
+    const underReviewReturn: ReturnDetail = {
+      ...pendingReturn,
+      id: 'RET-A-UNDER-REVIEW-1100',
+      sourceShopifyOrderNumber: 1100,
+      status: 'Pending',
+    };
+    listReturnsMock.mockResolvedValue([
+      toSummary(approvedRefundPendingReturn),
+      toSummary(underReviewReturn),
+      toSummary(closedRefundedReturnRequest),
+    ]);
+    getReturnMock.mockResolvedValue(approvedRefundPendingReturn);
+
+    renderReturnsPage();
+
+    const table = within(document.querySelector('.returns-op-table') as HTMLElement);
+    expect(await table.findByText('#1099')).toBeInTheDocument();
+    const approvedRow = table.getByText('#1099').closest('.op-table-row');
+    const underReviewRow = table.getByText('#1100').closest('.op-table-row');
+    const closedRow = table.getByText('#1098').closest('.op-table-row');
+    expect(approvedRow).not.toBeNull();
+    expect(underReviewRow).not.toBeNull();
+    expect(closedRow).not.toBeNull();
+    expect(within(approvedRow as HTMLElement).getByText('Approved')).toBeInTheDocument();
+    expect(within(approvedRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(underReviewRow as HTMLElement).getByText('Under review')).toBeInTheDocument();
+    expect(within(underReviewRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(closedRow as HTMLElement).getByText('Closed')).toBeInTheDocument();
+    expect(within(closedRow as HTMLElement).getByText('Refunded')).toBeInTheDocument();
   });
 
   it('renders multiple returned items in the table row and keeps the full sidebar list', async () => {
@@ -486,6 +534,7 @@ describe('ReturnsPage control center', () => {
     expect(table.getByText('SKU: JX1275-L')).toBeInTheDocument();
     expect(table.getByText('Training sock / White / M')).toBeInTheDocument();
     expect(table.getByText('SKU: SKU-MULTI-2')).toBeInTheDocument();
+    expect(table.queryByText('↩')).not.toBeInTheDocument();
 
     const returnedItemsSection = (await screen.findByRole('heading', { name: 'Returned items' })).closest('.op-panel-section');
     expect(returnedItemsSection).not.toBeNull();
@@ -541,6 +590,7 @@ describe('ReturnsPage control center', () => {
     expect(table.getByText('Second returned item / White')).toBeInTheDocument();
     expect(table.getByText('+1 more items')).toBeInTheDocument();
     expect(table.queryByText('Third returned item')).not.toBeInTheDocument();
+    expect(table.queryByText('↩')).not.toBeInTheDocument();
   });
 
   it('uses workflow query params to open pending return review and allows reset', async () => {
