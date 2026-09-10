@@ -1031,7 +1031,7 @@ export function OrdersPage() {
                         {currentUser?.role !== 'vendor' ? <small>{order.channel}</small> : null}
                       </span>
                       <OperationalActionGroup>
-                        <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
+                        <Link className="button orders-row-detail-action" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
                           Open detail
                         </Link>
                       </OperationalActionGroup>

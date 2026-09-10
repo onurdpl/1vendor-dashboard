@@ -428,10 +428,17 @@ describe('OrdersPage control center', () => {
     expect(updatedValue).toHaveTextContent(`${expectedUpdatedDate} · ${expectedUpdatedTime}`);
     expect(updatedValue).not.toHaveTextContent('2026');
     expect(updatedValue).not.toHaveTextContent(/\b(?:AM|PM)\b/);
-    expect(within(orderRow).getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    const openDetail = within(orderRow).getByRole('link', { name: 'Open detail' });
+    expect(openDetail).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(openDetail).toHaveClass('button', 'orders-row-detail-action');
+    expect(openDetail).not.toHaveClass('button-primary');
+    const sidebarViewDetails = screen.getByRole('link', { name: 'View details' });
+    expect(sidebarViewDetails).toHaveClass('button-secondary');
+    expect(sidebarViewDetails).not.toHaveClass('orders-row-detail-action');
 
     const secondRow = screen.getByRole('button', { name: /#1003/ });
     await userEvent.click(secondRow);
+    expect(secondRow).toHaveClass('op-row-selected');
     expect(await screen.findByRole('heading', { name: '#1003' })).toBeInTheDocument();
     expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
