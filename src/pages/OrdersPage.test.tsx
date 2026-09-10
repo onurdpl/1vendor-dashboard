@@ -1667,7 +1667,7 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
   });
 
-  it('shows why reject is unavailable for already blocked orders', async () => {
+  it('removes redundant non-actionable guidance from the vendor-blocked sidebar', async () => {
     setVendorUser();
     const blockedOrder = buildAwaitingRejectableOrder({
       status: 'On Hold',
@@ -1692,28 +1692,89 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'Vendor rejection already submitted. This order is awaiting Sporgym admin review.',
-    );
+    const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(sidebar).not.toBeNull();
+    const sidebarScope = within(sidebar as HTMLElement);
+
+    expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    const axes = sidebarScope.getByLabelText('Order status axes');
+    expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(axes).getByText('Payment Status')).toBeInTheDocument();
+    expect(within(axes).getByText('Held')).toBeInTheDocument();
+    expect(sidebarScope.queryByText('Admin action required')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Awaiting admin resolution. Fulfillment is not ready.')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Next action')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Review order')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Review the blocked order before shipment work continues.')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Reject unavailable')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Vendor rejection already submitted. This order is awaiting Sporgym admin review.')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review order');
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Review the blocked order before shipment work continues.',
-    );
-    expect(screen.getByText('Admin action required')).toBeInTheDocument();
-    expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();
     const fulfillmentCard = screen.getByRole('heading', { name: 'Shipment' }).closest('section');
     expect(fulfillmentCard).not.toBeNull();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Carrier')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Tracking')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Shipment status')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Shipping label')).toBeInTheDocument();
+    expect(within(fulfillmentCard as HTMLElement).getByText('Last update')).toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getAllByText('Blocked').length).toBeGreaterThan(0);
     expect(within(fulfillmentCard as HTMLElement).queryByText('Not fulfilled')).not.toBeInTheDocument();
     expect(within(fulfillmentCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();
     expect(screen.queryByText('Vendor integration')).not.toBeInTheDocument();
     expect(screen.queryByText('Shopify sync')).not.toBeInTheDocument();
+    expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
+    expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
     expect(screen.getAllByText('Vendor rejected order').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
+
+    const blockedRow = screen.getByRole('button', { name: /#1002/ });
+    expect(within(blockedRow).getByText('Vendor Blocked')).toBeInTheDocument();
+    expect(within(blockedRow).getAllByText('Awaiting admin resolution')).toHaveLength(2);
   });
+
+  it.each(['admin', 'support', 'finance'] as const)(
+    'preserves blocked sidebar status and workflow guidance for %s users',
+    async (role) => {
+      setCurrentUser({
+        email: `${role}@demo.com`,
+        name: `Demo ${role}`,
+        role,
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: role === 'admin',
+        defaultVendorId: 'demo-vendor-a',
+      });
+      const blockedOrder = buildAwaitingRejectableOrder({
+        status: 'On Hold',
+        allocationStatus: 'vendor_blocked',
+        reassignmentRequired: true,
+        cancellationReason: 'OUT_OF_STOCK',
+        fulfillmentActionAvailable: false,
+      });
+      listOrdersMock.mockResolvedValue([toSummary(blockedOrder)]);
+      getOrderMock.mockResolvedValue(blockedOrder);
+
+      renderOrdersPage();
+
+      expect(await screen.findByText('Admin action required')).toBeInTheDocument();
+      expect(screen.getByText(
+        role === 'admin'
+          ? 'Awaiting admin resolution. Shopify not fulfilled.'
+          : 'Awaiting admin resolution. Fulfillment is not ready.',
+      )).toBeInTheDocument();
+      const guidance = screen.getByLabelText('Workflow action guidance');
+      expect(guidance).toHaveTextContent(role === 'admin' ? 'Review allocation' : 'Review order');
+      expect(guidance).toHaveTextContent(
+        role === 'admin'
+          ? 'Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work.'
+          : 'Review the blocked order before shipment work continues.',
+      );
+      expect(screen.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    },
+  );
 
   it('uses the latest recorded vendor rejection in the selected-order timeline', async () => {
     setVendorUser();
@@ -1779,13 +1840,8 @@ describe('OrdersPage control center', () => {
     expect(within(axes).getByText('Vendor Blocked')).toBeInTheDocument();
     expect(within(axes).getByText('Held')).toBeInTheDocument();
     expect(within(axes).queryByText('Refunded')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Reject unavailable')).toHaveTextContent(
-      'Vendor rejection already submitted. This order is awaiting Sporgym admin review.',
-    );
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review order');
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent(
-      'Review the blocked order before shipment work continues.',
-    );
+    expect(screen.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
 
     expect(screen.queryByLabelText('Shopify order snapshot')).not.toBeInTheDocument();

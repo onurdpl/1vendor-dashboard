@@ -1034,6 +1034,7 @@ export function OrdersPage() {
             (() => {
               const operationalStory = getOperationalStory(selectedOrder);
               const vendorBlockedStory = getVendorBlockedOperationalStory(selectedOrder);
+              const hideVendorBlockedSidebarGuidance = currentUser?.role === 'vendor' && vendorBlockedStory !== null;
               const hasCanonicalTerminalStory = operationalStory.state !== 'active_or_unknown';
               const shippingOperational = getShippingOperationalLabel(selectedOrder);
               const shopifyFulfillmentState = getShopifyFulfillmentRailLabel(selectedOrder);
@@ -1137,17 +1138,21 @@ export function OrdersPage() {
                 </div>
               </div>
 
-              <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
-                <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
-                <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>
-                {isAdmin && !hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
-              </div>
+              {!hideVendorBlockedSidebarGuidance ? (
+                <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
+                  <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
+                  <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>
+                  {isAdmin && !hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
+                </div>
+              ) : null}
 
-              <WorkflowActionGuidance
-                actionLabel={railGuidanceActionLabel}
-                description={railGuidanceDescription}
-                tone={railGuidance.tone}
-              />
+              {!hideVendorBlockedSidebarGuidance ? (
+                <WorkflowActionGuidance
+                  actionLabel={railGuidanceActionLabel}
+                  description={railGuidanceDescription}
+                  tone={railGuidance.tone}
+                />
+              ) : null}
 
               {operationalStory.actionVisibility.canCreateShipment ? (
                 <section className="orders-smart-label-card" aria-label="Smart label action">
@@ -1192,7 +1197,7 @@ export function OrdersPage() {
                 </section>
               ) : null}
 
-              {showRejectUnavailableReason ? (
+              {showRejectUnavailableReason && !hideVendorBlockedSidebarGuidance ? (
                 <section className="orders-detail-card" aria-label="Reject unavailable">
                     <h4>{vendorBlockedStory?.rejectUnavailableTitle ?? 'Reject unavailable'}</h4>
                   <p className="page-description">{rejectUnavailableCopy}</p>
