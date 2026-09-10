@@ -4401,7 +4401,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
   });
 
-  it('keeps the vendor support-unavailable explanation while removing redundant empty-state copy', async () => {
+  it('removes vendor support-unavailable helper copy without changing disabled actions', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -4426,7 +4426,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(supportCard).getByRole('button', { name: 'Contact support' })).toBeDisabled();
     expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(within(supportCard).queryByText('No linked support tickets')).not.toBeInTheDocument();
-    expect(within(supportCard).getByText('Support is available for active or fulfilled assigned orders.')).toBeInTheDocument();
+    expect(
+      within(supportCard).queryByText('Support is available for active or fulfilled assigned orders.'),
+    ).not.toBeInTheDocument();
+    expect(within(supportCard).queryByText('Create a support ticket before escalating.')).not.toBeInTheDocument();
   });
 
   it('deduplicates duplicate-looking linked support ticket rows', async () => {

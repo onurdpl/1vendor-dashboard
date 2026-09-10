@@ -8104,9 +8104,7 @@ export function OrderDetailPage() {
                         {isEscalatingSupportTicket ? 'Escalating…' : linkedSupportTicketEscalated ? 'Escalated' : 'Escalate'}
                       </button>
                     </div>
-                    {!canReportIssue ? (
-                      <span className="muted">Support is available for active or fulfilled assigned orders.</span>
-                    ) : openLinkedSupportTicket ? (
+                    {!canReportIssue ? null : openLinkedSupportTicket ? (
                       <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
                     ) : (
                       <span className="muted">Create a support ticket before escalating.</span>
