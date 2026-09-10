@@ -1088,7 +1088,6 @@ export function ReturnsPage() {
                     </div>
                     <span>
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
-                      {getRefundStatusLabel(item) !== getVendorStatusLabel(item) ? <small>{getRefundStatusLabel(item)}</small> : null}
                     </span>
                     <span className="returns-requested-cell">
                       <strong>{requestedAt.date}</strong>

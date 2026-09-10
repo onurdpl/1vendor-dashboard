@@ -456,11 +456,11 @@ describe('ReturnsPage control center', () => {
     expect(refundedRow).not.toBeNull();
     expect(within(pendingRow as HTMLElement).getByText('Demo Vendor A')).toBeInTheDocument();
     expect(within(pendingRow as HTMLElement).getByText('Awaiting review')).toBeInTheDocument();
-    expect(within(pendingRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(pendingRow as HTMLElement).queryByText('Refund pending')).not.toBeInTheDocument();
     expect(within(refundedRow as HTMLElement).getAllByText('Refunded')).toHaveLength(1);
   });
 
-  it('keeps non-identical return and refund statuses in table rows', async () => {
+  it('renders only primary return lifecycle badges in table status cells', async () => {
     const underReviewReturn: ReturnDetail = {
       ...pendingReturn,
       id: 'RET-A-UNDER-REVIEW-1100',
@@ -485,12 +485,48 @@ describe('ReturnsPage control center', () => {
     expect(underReviewRow).not.toBeNull();
     expect(closedRow).not.toBeNull();
     expect(within(approvedRow as HTMLElement).getByText('Approved')).toBeInTheDocument();
-    expect(within(approvedRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(approvedRow as HTMLElement).queryByText('Refund pending')).not.toBeInTheDocument();
     expect(within(underReviewRow as HTMLElement).getByText('Under review')).toBeInTheDocument();
-    expect(within(underReviewRow as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    expect(within(underReviewRow as HTMLElement).queryByText('Refund pending')).not.toBeInTheDocument();
     expect(within(closedRow as HTMLElement).getByText('Closed')).toBeInTheDocument();
-    expect(within(closedRow as HTMLElement).getByText('Refunded')).toBeInTheDocument();
+    expect(within(closedRow as HTMLElement).queryByText('Refunded')).not.toBeInTheDocument();
   });
+
+  it.each(['admin', 'vendor', 'support', 'finance'] as const)(
+    'removes table refund secondary for %s while preserving sidebar refund status',
+    async (role) => {
+      const isAdminRole = role === 'admin';
+      setCurrentUser({
+        email: `${role}@demo.com`,
+        name: `${role} user`,
+        role,
+        vendorAccess: isAdminRole ? ['demo-vendor-a', 'demo-vendor-b'] : ['demo-vendor-a'],
+        vendorDetails: isAdminRole
+          ? [
+              { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+              { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+            ]
+          : [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: isAdminRole,
+        defaultVendorId: 'demo-vendor-a',
+      });
+      listReturnsMock.mockResolvedValue([toSummary(approvedRefundPendingReturn)]);
+      getReturnMock.mockResolvedValue(approvedRefundPendingReturn);
+
+      renderReturnsPage();
+
+      const table = within(document.querySelector('.returns-op-table') as HTMLElement);
+      const orderNumber = await table.findByText('#1099');
+      const row = orderNumber.closest('.op-table-row');
+      expect(row).not.toBeNull();
+      expect(within(row as HTMLElement).getByText('Approved')).toBeInTheDocument();
+      expect(within(row as HTMLElement).queryByText('Refund pending')).not.toBeInTheDocument();
+
+      const sidebarRefundStatus = screen.getByText('Refund status').closest('div');
+      expect(sidebarRefundStatus).not.toBeNull();
+      expect(within(sidebarRefundStatus as HTMLElement).getByText('Refund pending')).toBeInTheDocument();
+    },
+  );
 
   it('renders multiple returned items in the table row and keeps the full sidebar list', async () => {
     const multiItemReturn: ReturnDetail = {
