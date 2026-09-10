@@ -960,6 +960,10 @@ export function OrdersPage() {
                 ) : filteredOrders.map((order) => {
                   const lifecyclePrimary = getLifecyclePrimaryLabel(order);
                   const lifecycleSecondary = getLifecycleSecondaryLabel(order);
+                  const visibleLifecycleSecondary = currentUser?.role === 'vendor'
+                    && (lifecycleSecondary === 'Tracking visible' || lifecycleSecondary === 'Tracking pending')
+                    ? null
+                    : lifecycleSecondary;
                   const shippingOperational = getShippingOperationalLabel(order);
                   return (
                     <OperationalTableRow
@@ -978,7 +982,7 @@ export function OrdersPage() {
                       </span>
                       <div className="orders-table-status-cell">
                         <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
-                        {lifecycleSecondary ? <small>{lifecycleSecondary}</small> : null}
+                        {visibleLifecycleSecondary ? <small>{visibleLifecycleSecondary}</small> : null}
                       </div>
                       <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
                         <strong>{shippingOperational.label}</strong>

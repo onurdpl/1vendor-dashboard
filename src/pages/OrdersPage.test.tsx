@@ -391,6 +391,7 @@ describe('OrdersPage control center', () => {
     expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
     expect(within(orderRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
     expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Tracking visible')).toBeInTheDocument();
   });
 
   it('removes fixed identity and source microcopy from vendor rows without changing row data or selection', async () => {
@@ -414,7 +415,7 @@ describe('OrdersPage control center', () => {
     expect(within(orderRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
     expect(within(orderRow).queryByText('Shopify')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('Fulfilled')).toBeInTheDocument();
-    expect(within(orderRow).getByText('Tracking visible')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('Tracking synced')).toBeInTheDocument();
     expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(orderRow).getByText('$1,950.00')).toBeInTheDocument();
@@ -434,6 +435,98 @@ describe('OrdersPage control center', () => {
     await userEvent.click(secondRow);
     expect(await screen.findByRole('heading', { name: '#1003' })).toBeInTheDocument();
     expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it('removes only tracking secondary copy from vendor status cells', async () => {
+    setVendorUser();
+    const inFlowOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1004',
+      sourceShopifyOrderNumber: '#1004',
+      shippingStatus: 'Label Created',
+      trackingNumber: 'TRK-A-1004',
+      trackingUrl: 'https://tracking.example/TRK-A-1004',
+      carrier: 'DHL',
+      date: '2026-05-07T09:20:00Z',
+    });
+    const awaitingOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1005',
+      sourceShopifyOrderNumber: '#1005',
+      date: '2026-05-06T09:20:00Z',
+    });
+    const blockedOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1006',
+      sourceShopifyOrderNumber: '#1006',
+      allocationStatus: 'vendor_blocked',
+      reassignmentRequired: true,
+      cancellationReason: 'OUT_OF_STOCK',
+      fulfillmentActionAvailable: false,
+      date: '2026-05-05T09:20:00Z',
+    });
+    const cleanCancelledOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1007',
+      sourceShopifyOrderNumber: '#1007',
+      status: 'Cancelled',
+      isCancelled: true,
+      cancelledAt: '2026-05-04T09:20:00Z',
+      fulfillmentStatus: 'Not Required',
+      shippingStatus: 'Not Required',
+      fulfillmentActionState: 'not_required',
+      fulfillmentActionAvailable: false,
+      date: '2026-05-04T09:20:00Z',
+    });
+    const cancellationConflictOrder: OrderDetail = {
+      ...orderDetail,
+      id: 'ORD-A-1008',
+      sourceShopifyOrderNumber: '#1008',
+      status: 'Cancelled',
+      isCancelled: true,
+      isCancellationConflict: true,
+      cancelledAt: '2026-05-03T09:20:00Z',
+      fulfillmentActionAvailable: false,
+      date: '2026-05-03T09:20:00Z',
+    };
+    const orders = [orderDetail, inFlowOrder, awaitingOrder, blockedOrder, cleanCancelledOrder, cancellationConflictOrder];
+    listOrdersMock.mockResolvedValue(orders.map(toSummary));
+    getOrderMock.mockImplementation(async (orderId) => orders.find((order) => order.id === orderId) ?? orderDetail);
+
+    renderOrdersPage();
+
+    const fulfilledRow = await screen.findByRole('button', { name: /#1002/ });
+    expect(within(fulfilledRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(fulfilledRow).queryByText('Tracking visible')).not.toBeInTheDocument();
+    expect(within(fulfilledRow).getByText('Tracking synced')).toBeInTheDocument();
+    expect(within(fulfilledRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+
+    const inFlowRow = screen.getByRole('button', { name: /#1004/ });
+    expect(within(inFlowRow).getByText('In flow')).toBeInTheDocument();
+    expect(within(inFlowRow).queryByText('Tracking visible')).not.toBeInTheDocument();
+    expect(within(inFlowRow).getByText('Tracking synced')).toBeInTheDocument();
+    expect(within(inFlowRow).getByText('DHL / TRK-A-1004')).toBeInTheDocument();
+
+    const awaitingRow = screen.getByRole('button', { name: /#1005/ });
+    expect(within(awaitingRow).getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(within(awaitingRow).queryByText('Tracking pending')).not.toBeInTheDocument();
+    expect(within(awaitingRow).getByText('No tracking yet')).toBeInTheDocument();
+
+    const blockedRow = screen.getByRole('button', { name: /#1006/ });
+    expect(within(blockedRow).getByText('Vendor Blocked')).toBeInTheDocument();
+    const blockedStatusCell = blockedRow.querySelector('.orders-table-status-cell');
+    expect(blockedStatusCell).not.toBeNull();
+    expect(within(blockedStatusCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
+
+    const cancelledRow = screen.getByRole('button', { name: /#1007/ });
+    expect(within(cancelledRow).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(cancelledRow).getByText('Fulfillment not required')).toBeInTheDocument();
+
+    const cancellationConflictRow = screen.getByRole('button', { name: /#1008/ });
+    expect(within(cancellationConflictRow).getByText('Cancelled')).toBeInTheDocument();
+    const cancellationConflictStatusCell = cancellationConflictRow.querySelector('.orders-table-status-cell');
+    expect(cancellationConflictStatusCell).not.toBeNull();
+    expect(within(cancellationConflictStatusCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+
+    expect(screen.getAllByRole('button', { name: /#100[245678]/ })).toHaveLength(6);
+    expect(screen.getByLabelText('Orders workflow tabs')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
   });
 
   it('separates active operational and paid payment status in the right rail', async () => {
