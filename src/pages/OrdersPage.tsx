@@ -1020,7 +1020,13 @@ export function OrdersPage() {
           </div>
 
           <SideDetailPanel
-            eyebrow={selectedOrder ? currentVendor.vendorName : 'Order detail'}
+            eyebrow={
+              selectedOrder
+                ? currentUser?.role === 'vendor'
+                  ? undefined
+                  : currentVendor.vendorName
+                : 'Order detail'
+            }
             title={selectedOrder ? formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber) : 'No order selected'}
             action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>View details</Link> : null}
           >

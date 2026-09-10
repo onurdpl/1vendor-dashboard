@@ -438,6 +438,60 @@ describe('OrdersPage control center', () => {
     expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
+  it('keeps vendor scope in the page header without repeating it in the selected-order sidebar header', async () => {
+    setVendorUser();
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    const { container } = renderOrdersPage();
+
+    expect(await screen.findByRole('heading', { name: '#1002' })).toBeInTheDocument();
+    const pageHeader = container.querySelector('.orders-compact-header');
+    const sidebar = container.querySelector('.op-side-panel');
+    const sidebarHeader = sidebar?.querySelector('.op-side-panel-header');
+    expect(pageHeader).not.toBeNull();
+    expect(sidebar).not.toBeNull();
+    expect(sidebarHeader).not.toBeNull();
+    expect(within(pageHeader as HTMLElement).getByText('Demo Vendor A')).toBeInTheDocument();
+    expect(within(sidebarHeader as HTMLElement).queryByText('Demo Vendor A')).not.toBeInTheDocument();
+    expect(within(sidebarHeader as HTMLElement).getByRole('heading', { name: '#1002' })).toBeInTheDocument();
+    expect(within(sidebarHeader as HTMLElement).getByRole('link', { name: 'View details' })).toHaveAttribute(
+      'href',
+      '/orders/ORD-A-1002',
+    );
+    expect(within(sidebar as HTMLElement).getByText('Operational Status')).toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).getByLabelText('Smart label action')).toBeInTheDocument();
+  });
+
+  it.each(['admin', 'support', 'finance'] as const)(
+    'preserves the selected-order sidebar vendor eyebrow for %s users',
+    async (role) => {
+      setCurrentUser({
+        email: `${role}@demo.com`,
+        name: `Demo ${role}`,
+        role,
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'demo-vendor-a',
+      });
+      listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+      getOrderMock.mockResolvedValue(orderDetail);
+
+      const { container } = renderOrdersPage();
+
+      expect(await screen.findByRole('heading', { name: '#1002' })).toBeInTheDocument();
+      const sidebarHeader = container.querySelector('.op-side-panel-header');
+      expect(sidebarHeader).not.toBeNull();
+      expect(within(sidebarHeader as HTMLElement).getByText('Demo Vendor A')).toBeInTheDocument();
+      expect(within(sidebarHeader as HTMLElement).getByRole('link', { name: 'View details' })).toHaveAttribute(
+        'href',
+        '/orders/ORD-A-1002',
+      );
+    },
+  );
+
   it('removes only tracking secondary copy from vendor status cells', async () => {
     setVendorUser();
     const inFlowOrder = buildAwaitingRejectableOrder({
