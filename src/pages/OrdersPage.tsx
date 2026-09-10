@@ -254,7 +254,7 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
     return { label: story.shippingLabel, tone: 'fulfilled' as const, helper: 'Shopify order cancelled.' };
   }
   if (story.state === 'shopify_order_cancelled_conflict') {
-    return { label: story.shippingLabel, tone: 'blocked' as const, helper: story.secondaryLabel };
+    return { label: 'Review required', tone: 'blocked' as const, helper: null };
   }
   if (story.state !== 'active_or_unknown') {
     return {

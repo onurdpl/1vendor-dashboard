@@ -660,7 +660,9 @@ describe('OrdersPage control center', () => {
     expect(cancellationConflictStatusCell?.querySelector('small')).toBeNull();
     const cancellationConflictTrackingCell = cancellationConflictRow.querySelector('.orders-table-shipping-cell');
     expect(cancellationConflictTrackingCell).not.toBeNull();
-    expect(within(cancellationConflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
+    expect(within(cancellationConflictTrackingCell as HTMLElement).getByText('Review required')).toBeInTheDocument();
+    expect(within(cancellationConflictTrackingCell as HTMLElement).queryByText('Delivered')).not.toBeInTheDocument();
+    expect(within(cancellationConflictTrackingCell as HTMLElement).queryByText('DHL / TRK-A-1002')).not.toBeInTheDocument();
     expect(within(cancellationConflictTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
 
     expect(screen.getAllByRole('button', { name: /#100[245678]/ })).toHaveLength(6);
@@ -892,7 +894,11 @@ describe('OrdersPage control center', () => {
       expect(within(conflictStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
       expect(within(conflictStatusCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
       expect(conflictStatusCell?.querySelector('small')).toBeNull();
-      expect(within(conflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).getByText('Review required')).toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).queryByText('Delivered')).not.toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).queryByText('DHL / TRK-A-1002')).not.toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).queryByText('Tracking synced')).not.toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).queryByText('Shopify sync pending')).not.toBeInTheDocument();
       expect(within(conflictTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
 
       const blockedRow = screen.getByRole('button', { name: /#1131/ });
@@ -922,6 +928,89 @@ describe('OrdersPage control center', () => {
       expect(within(reassignmentTrackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
     },
   );
+
+  it.each([
+    {
+      name: 'awaiting shipment',
+      shippingStatus: 'Awaiting Shipment' as const,
+      trackingNumber: undefined,
+      carrier: undefined,
+    },
+    {
+      name: 'label created',
+      shippingStatus: 'Label Created' as const,
+      trackingNumber: undefined,
+      carrier: undefined,
+    },
+    {
+      name: 'in transit',
+      shippingStatus: 'In Transit' as const,
+      trackingNumber: undefined,
+      carrier: undefined,
+    },
+    {
+      name: 'delivered',
+      shippingStatus: 'Delivered' as const,
+      trackingNumber: undefined,
+      carrier: undefined,
+    },
+    {
+      name: 'tracking number',
+      shippingStatus: 'Awaiting Shipment' as const,
+      trackingNumber: 'TRACK-CONFLICT',
+      carrier: undefined,
+    },
+    {
+      name: 'carrier',
+      shippingStatus: 'Awaiting Shipment' as const,
+      trackingNumber: undefined,
+      carrier: 'DHL',
+    },
+    {
+      name: 'tracking number and carrier',
+      shippingStatus: 'Awaiting Shipment' as const,
+      trackingNumber: 'TRACK-CONFLICT',
+      carrier: 'DHL',
+    },
+  ])('renders Review required for a cancellation conflict with $name', async ({ shippingStatus, trackingNumber, carrier }) => {
+    setVendorUser();
+    const cancellationConflictOrder = buildAwaitingRejectableOrder({
+      id: 'allocation-conflict',
+      sourceShopifyOrderNumber: '#1133',
+      status: 'Cancelled',
+      isCancelled: true,
+      isCancellationConflict: true,
+      cancelledAt: '2026-05-03T09:20:00Z',
+      shippingStatus,
+      trackingNumber,
+      carrier,
+      trackingUrl: trackingNumber ? 'https://tracking.example/TRACK-CONFLICT' : undefined,
+      fulfillmentActionAvailable: false,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(cancellationConflictOrder)]);
+    getOrderMock.mockResolvedValue(cancellationConflictOrder);
+
+    renderOrdersPage();
+
+    const conflictRow = await screen.findByRole('button', { name: /#1133/ });
+    const conflictStatusCell = conflictRow.querySelector('.orders-table-status-cell');
+    const conflictTrackingCell = conflictRow.querySelector('.orders-table-shipping-cell');
+    expect(conflictStatusCell).not.toBeNull();
+    expect(conflictTrackingCell).not.toBeNull();
+    expect(within(conflictStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
+    expect(conflictStatusCell?.querySelector('small')).toBeNull();
+    expect(within(conflictTrackingCell as HTMLElement).getByText('Review required')).toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('Awaiting Shipment')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('Label Created')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('In Transit')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('Delivered')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('TRACK-CONFLICT')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('DHL')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('DHL / TRACK-CONFLICT')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('Tracking synced')).not.toBeInTheDocument();
+    expect(within(conflictTrackingCell as HTMLElement).queryByText('Shopify sync pending')).not.toBeInTheDocument();
+    expect(conflictTrackingCell?.querySelector('small')).toBeNull();
+  });
 
   it('separates active operational and paid payment status in the right rail', async () => {
     const activePaidOrder = buildAwaitingRejectableOrder({
@@ -1046,6 +1135,9 @@ describe('OrdersPage control center', () => {
     const cancelledRow = screen.getByRole('button', { name: /#1002/ });
     const cancellationTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
     expect(cancellationTrackingCell).not.toBeNull();
+    expect(within(cancellationTrackingCell as HTMLElement).getByText('Review required')).toBeInTheDocument();
+    expect(within(cancellationTrackingCell as HTMLElement).queryByText('Delivered')).not.toBeInTheDocument();
+    expect(within(cancellationTrackingCell as HTMLElement).queryByText('DHL / TRK-A-1002')).not.toBeInTheDocument();
     expect(within(cancellationTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment not required')).not.toBeInTheDocument();
     expect(screen.queryByText('Tracking not required')).not.toBeInTheDocument();
