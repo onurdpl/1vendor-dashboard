@@ -387,6 +387,53 @@ describe('OrdersPage control center', () => {
     );
     expect(screen.queryByText('0 attention')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
+    const orderRow = screen.getByRole('button', { name: /#1002/ });
+    expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
+  });
+
+  it('removes fixed identity and source microcopy from vendor rows without changing row data or selection', async () => {
+    setVendorUser();
+    const secondOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1003',
+      sourceShopifyOrderId: 'gid://shopify/Order/1003',
+      sourceShopifyOrderNumber: '#1003',
+      customer: 'Second Customer',
+      date: '2026-05-07T09:20:00Z',
+    };
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail), toSummary(secondOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => (orderId === secondOrder.id ? secondOrder : orderDetail));
+
+    renderOrdersPage();
+
+    const orderRow = await screen.findByRole('button', { name: /#1002/ });
+    expect(within(orderRow).getByText('#1002')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
+    expect(within(orderRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
+    expect(within(orderRow).queryByText('Shopify')).not.toBeInTheDocument();
+    expect(within(orderRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Tracking visible')).toBeInTheDocument();
+    expect(within(orderRow).getByText('Tracking synced')).toBeInTheDocument();
+    expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+    expect(within(orderRow).getByText('$1,950.00')).toBeInTheDocument();
+    expect(within(orderRow).getByText('1 line items')).toBeInTheDocument();
+    expect(
+      within(orderRow).getByText(
+        formatDateTime(
+          orderDetail.shipmentUpdatedAt,
+          { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' },
+          'Not synced',
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(within(orderRow).getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+
+    const secondRow = screen.getByRole('button', { name: /#1003/ });
+    await userEvent.click(secondRow);
+    expect(await screen.findByRole('heading', { name: '#1003' })).toBeInTheDocument();
+    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('separates active operational and paid payment status in the right rail', async () => {

@@ -969,8 +969,12 @@ export function OrdersPage() {
                     >
                       <span className="orders-table-order-cell">
                         <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
-                        <small>{getCustomerLabel(order.customer)}</small>
-                        <small>{currentVendor.vendorName} · {order.channel}</small>
+                        {currentUser?.role !== 'vendor' ? (
+                          <>
+                            <small>{getCustomerLabel(order.customer)}</small>
+                            <small>{currentVendor.vendorName} · {order.channel}</small>
+                          </>
+                        ) : null}
                       </span>
                       <div className="orders-table-status-cell">
                         <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
@@ -986,7 +990,7 @@ export function OrdersPage() {
                       </span>
                       <span>
                         <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
-                        <small>{order.channel}</small>
+                        {currentUser?.role !== 'vendor' ? <small>{order.channel}</small> : null}
                       </span>
                       <OperationalActionGroup>
                         <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
