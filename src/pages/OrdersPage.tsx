@@ -39,7 +39,6 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 import { getOperationalStory, getVendorBlockedOperationalStory } from '../lib/orderOperationalStory';
-import { getRejectUnavailableReason } from '../lib/rejectEligibility';
 import { openShipmentLabel } from '../lib/shipmentLabelOpening';
 import { useActionFeedback } from '../lib/ui';
 import { isVendorContextRestricted } from '../lib/auth';
@@ -1066,8 +1065,6 @@ export function OrdersPage() {
                 vendorRestricted ||
                 isLabelActionPending ||
                 Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
-              const rejectUnavailableReason = getRejectUnavailableReason(selectedOrder);
-              const showRejectUnavailableReason = currentUser?.role === 'vendor' && rejectUnavailableReason !== null;
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
@@ -1087,9 +1084,6 @@ export function OrdersPage() {
               const railGuidanceActionLabel = !isAdmin && railGuidance.actionLabel === 'Review allocation'
                 ? 'Review order'
                 : railGuidance.actionLabel;
-              const rejectUnavailableCopy = isAdmin
-                ? rejectUnavailableReason
-                : getVendorSafeOrderPanelCopy(rejectUnavailableReason);
               const fulfillmentRailValue = hasCanonicalTerminalStory
                 ? operationalStory.fulfillmentLabel
                 : selectedOrder.fulfillmentStatus;
@@ -1193,16 +1187,6 @@ export function OrdersPage() {
                     <p className={`orders-smart-label-feedback orders-smart-label-${visibleLabelActionFeedback.tone}`}>
                       {visibleLabelActionFeedback.message}
                     </p>
-                  ) : null}
-                </section>
-              ) : null}
-
-              {showRejectUnavailableReason && !hideVendorBlockedSidebarGuidance ? (
-                <section className="orders-detail-card" aria-label="Reject unavailable">
-                    <h4>{vendorBlockedStory?.rejectUnavailableTitle ?? 'Reject unavailable'}</h4>
-                  <p className="page-description">{rejectUnavailableCopy}</p>
-                  {shipmentExecution && shipmentExecution.shipmentStatus !== 'failed' && shipmentExecution.shipmentStatus !== 'cancelled' ? (
-                    <small className="muted">Shipment status: {safeStatusLabel(shipmentExecution.shipmentStatus)}</small>
                   ) : null}
                 </section>
               ) : null}

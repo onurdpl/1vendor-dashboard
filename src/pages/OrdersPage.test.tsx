@@ -15,6 +15,7 @@ import type {
 } from '../features/orders/api';
 import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
 import { formatDateTime } from '../services/real/formatting';
+import { getRejectUnavailableReason } from '../lib/rejectEligibility';
 
 const listOrdersMock = vi.fn<(options?: {
   vendorId?: string | null;
@@ -1594,7 +1595,7 @@ describe('OrdersPage control center', () => {
     expect(splitAllocationMock).not.toHaveBeenCalled();
   });
 
-  it('shows why reject is unavailable when shipment processing exists', async () => {
+  it('removes vendor reject-unavailable presentation when shipment processing exists', async () => {
     setVendorUser();
     const awaitingShipmentOrder = buildAwaitingRejectableOrder({
       shipmentExecution: {
@@ -1609,16 +1610,27 @@ describe('OrdersPage control center', () => {
     listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
     getOrderMock.mockResolvedValue(awaitingShipmentOrder);
 
-    renderOrdersPage();
-
-    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
+    expect(getRejectUnavailableReason(awaitingShipmentOrder)).toBe(
       'This order cannot be rejected because a shipment is already being processed.',
     );
-    expect(screen.getByText('Shipment status: Pending')).toBeInTheDocument();
+
+    renderOrdersPage();
+
+    const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(sidebar).not.toBeNull();
+    const sidebarScope = within(sidebar as HTMLElement);
+    expect(sidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('This order cannot be rejected because a shipment is already being processed.')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('Shipment status: Pending')).not.toBeInTheDocument();
+    expect(sidebarScope.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+    expect(sidebarScope.getByLabelText('Workflow action guidance')).toHaveTextContent('Check label availability');
+    expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
+    expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+    expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
   });
 
-  it('shows why reject is unavailable after fulfillment', async () => {
+  it('removes vendor reject-unavailable presentation after fulfillment', async () => {
     setVendorUser();
     const fulfilledOrder = buildAwaitingRejectableOrder({
       fulfillmentStatus: 'Fulfilled',
@@ -1626,15 +1638,23 @@ describe('OrdersPage control center', () => {
     listOrdersMock.mockResolvedValue([toSummary(fulfilledOrder)]);
     getOrderMock.mockResolvedValue(fulfilledOrder);
 
+    expect(getRejectUnavailableReason(fulfilledOrder)).toBe('This order cannot be rejected after fulfillment.');
+
     renderOrdersPage();
 
-    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'This order cannot be rejected after fulfillment.',
-    );
+    const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(sidebar).not.toBeNull();
+    const sidebarScope = within(sidebar as HTMLElement);
+    expect(sidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    expect(sidebarScope.queryByText('This order cannot be rejected after fulfillment.')).not.toBeInTheDocument();
+    expect(sidebarScope.getByLabelText('Workflow action guidance')).toHaveTextContent('Create shipment');
+    const shipmentCard = sidebarScope.getByRole('heading', { name: 'Shipment' }).closest('section');
+    expect(shipmentCard).not.toBeNull();
+    expect(within(shipmentCard as HTMLElement).getByText('Fulfilled')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
   });
 
-  it('shows why reject is unavailable after tracking or carrier evidence exists', async () => {
+  it('removes vendor reject-unavailable presentation after tracking or carrier evidence exists', async () => {
     setVendorUser();
     const trackedOrder = buildAwaitingRejectableOrder({
       trackingNumber: 'TRK-1092',
@@ -1642,11 +1662,16 @@ describe('OrdersPage control center', () => {
     listOrdersMock.mockResolvedValue([toSummary(trackedOrder)]);
     getOrderMock.mockResolvedValue(trackedOrder);
 
+    expect(getRejectUnavailableReason(trackedOrder)).toBe('This order cannot be rejected after tracking has been added.');
+
     renderOrdersPage();
 
-    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'This order cannot be rejected after tracking has been added.',
-    );
+    const trackedSidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(trackedSidebar).not.toBeNull();
+    const trackedSidebarScope = within(trackedSidebar as HTMLElement);
+    expect(trackedSidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    expect(trackedSidebarScope.queryByText('This order cannot be rejected after tracking has been added.')).not.toBeInTheDocument();
+    expect(trackedSidebarScope.getAllByText('TRK-1092').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
 
     cleanup();
@@ -1659,13 +1684,88 @@ describe('OrdersPage control center', () => {
     listOrdersMock.mockResolvedValue([toSummary(carrierOrder)]);
     getOrderMock.mockResolvedValue(carrierOrder);
 
+    expect(getRejectUnavailableReason(carrierOrder)).toBe('This order cannot be rejected after a carrier has been assigned.');
+
     renderOrdersPage();
 
-    expect(await screen.findByLabelText('Reject unavailable')).toHaveTextContent(
-      'This order cannot be rejected after a carrier has been assigned.',
-    );
+    const carrierSidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+    expect(carrierSidebar).not.toBeNull();
+    const carrierSidebarScope = within(carrierSidebar as HTMLElement);
+    expect(carrierSidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+    expect(carrierSidebarScope.queryByText('This order cannot be rejected after a carrier has been assigned.')).not.toBeInTheDocument();
+    expect(carrierSidebarScope.getByText('Yurtiçi Kargo')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
   });
+
+  it.each([
+    {
+      name: 'terminal refund',
+      order: buildAwaitingRejectableOrder({
+        operationalActionability: { actionable: false, reason: 'ALLOCATION_REFUND_TERMINAL' },
+        fulfillmentActionAvailable: false,
+      }),
+      operationalStatus: 'Refunded',
+      guidance: 'No action required',
+      stripCopy: 'Fulfillment not required',
+      rejectReason: 'Refund completed. No further rejection action is required.',
+    },
+    {
+      name: 'clean cancellation',
+      order: buildAwaitingRejectableOrder({
+        status: 'Cancelled',
+        isCancelled: true,
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        fulfillmentActionAvailable: false,
+      }),
+      operationalStatus: 'Cancelled',
+      guidance: 'No action required',
+      stripCopy: 'Fulfillment not required',
+      rejectReason: 'Cancelled orders cannot be rejected.',
+    },
+    {
+      name: 'cancellation conflict',
+      order: buildAwaitingRejectableOrder({
+        status: 'Cancelled',
+        isCancelled: true,
+        isCancellationConflict: true,
+        cancelledAt: '2026-07-11T10:00:00.000Z',
+        fulfillmentActionAvailable: false,
+      }),
+      operationalStatus: 'Cancelled',
+      guidance: 'Review cancellation',
+      stripCopy: 'Review existing fulfillment evidence',
+      rejectReason: 'Cancelled orders cannot be rejected.',
+    },
+  ])(
+    'removes vendor reject-unavailable presentation for $name while preserving the sidebar',
+    async ({ order, operationalStatus, guidance, stripCopy, rejectReason }) => {
+      setVendorUser();
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+
+      expect(getRejectUnavailableReason(order)).toBe(rejectReason);
+
+      renderOrdersPage();
+
+      const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+      expect(sidebar).not.toBeNull();
+      const sidebarScope = within(sidebar as HTMLElement);
+      expect(sidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
+      expect(sidebarScope.queryByText(rejectReason)).not.toBeInTheDocument();
+      expect(within(sidebarScope.getByLabelText('Order status axes')).getByText(operationalStatus)).toBeInTheDocument();
+      const statusStrip = (sidebar as HTMLElement).querySelector('.orders-detail-status-strip');
+      expect(statusStrip).not.toBeNull();
+      expect(statusStrip).toHaveTextContent(stripCopy);
+      expect(sidebarScope.getByLabelText('Workflow action guidance')).toHaveTextContent(guidance);
+      expect(sidebarScope.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+      expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
+    },
+  );
 
   it('removes redundant non-actionable guidance from the vendor-blocked sidebar', async () => {
     setVendorUser();
