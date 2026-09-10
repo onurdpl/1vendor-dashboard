@@ -4737,7 +4737,6 @@ export function OrderDetailPage() {
     orderTimelineEvents.push({
       id: 'shipment-delivered',
       title: 'Delivered',
-      description: 'Carrier delivery is confirmed.',
       at: visibleShipmentExecution?.lastProviderResponseAt ?? order.fulfilledAt ?? order.shipmentUpdatedAt ?? order.date,
       tone: 'success',
     });

@@ -2653,7 +2653,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const trackingSyncedRow = getOrderActivityRow('Tracking synced');
     expect(trackingSyncedRow).toHaveTextContent('Sürat Kargo / SURAT-1028');
     const deliveredRow = getOrderActivityRow('Delivered');
-    expect(deliveredRow).toHaveTextContent('Carrier delivery is confirmed.');
+    expect(deliveredRow).toHaveTextContent(formatTimelineDateForTest(deliveredAt));
+    expect(deliveredRow).not.toHaveTextContent('Carrier delivery is confirmed.');
+    expect(deliveredRow.querySelector('p')).toBeNull();
     const fulfillment = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
     expect(fulfillment).not.toBeNull();
     expect(within(fulfillment as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Delivered');
