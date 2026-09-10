@@ -8070,7 +8070,7 @@ export function OrderDetailPage() {
               <div className="order-card-heading">
                 <div>
                   <h2>Support</h2>
-                  {!relatedSupportTickets.length ? <p>No linked support tickets</p> : null}
+                  {!relatedSupportTickets.length && currentUser?.role !== 'vendor' ? <p>No linked support tickets</p> : null}
                 </div>
               </div>
               <div className="order-support-compact-stack">
@@ -8109,7 +8109,7 @@ export function OrderDetailPage() {
                     ) : openLinkedSupportTicket ? (
                       <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
                     ) : (
-                      <span className="muted">Order, shipment, and return context attached. Create a support ticket before escalating.</span>
+                      <span className="muted">Create a support ticket before escalating.</span>
                     )}
                   </>
                 ) : null}

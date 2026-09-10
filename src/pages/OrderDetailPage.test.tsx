@@ -4313,6 +4313,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const contactSupport = await within(supportCard).findByRole('link', { name: 'Contact support' });
     expect(contactSupport).toHaveAttribute('href', '/support/ticket-shipment-1');
     expect(await within(supportCard).findByText(/already open/i)).toBeInTheDocument();
+    expect(within(supportCard).getByLabelText('Support ticket summary')).toHaveTextContent('Open');
     expect(within(supportCard).queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
@@ -4391,10 +4392,41 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const supportCard = await screen.findByLabelText('Shipment and return support');
     expect(supportCard).toHaveClass('order-support-card');
     expect(supportCard).not.toHaveClass('order-support-card-empty');
-    expect(within(supportCard).getByText('No linked support tickets')).toBeInTheDocument();
+    expect(within(supportCard).getByRole('heading', { name: 'Support' })).toBeInTheDocument();
+    expect(within(supportCard).getByRole('button', { name: 'Contact support' })).toBeEnabled();
     expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
-    expect(within(supportCard).getByText(/Create a support ticket before escalating/i)).toBeInTheDocument();
+    expect(within(supportCard).queryByText('No linked support tickets')).not.toBeInTheDocument();
+    expect(within(supportCard).queryByText(/Order, shipment, and return context attached\./)).not.toBeInTheDocument();
+    expect(within(supportCard).getByText('Create a support ticket before escalating.')).toBeInTheDocument();
     expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the vendor support-unavailable explanation while removing redundant empty-state copy', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      allocationStatus: 'vendor_blocked',
+      operationalActionability: { actionable: false, reason: 'Vendor rejected allocation' },
+      fulfillmentActionAvailable: false,
+      shipmentExecution: null,
+    });
+
+    renderOrderDetail();
+
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    expect(within(supportCard).getByRole('heading', { name: 'Support' })).toBeInTheDocument();
+    expect(within(supportCard).getByRole('button', { name: 'Contact support' })).toBeDisabled();
+    expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
+    expect(within(supportCard).queryByText('No linked support tickets')).not.toBeInTheDocument();
+    expect(within(supportCard).getByText('Support is available for active or fulfilled assigned orders.')).toBeInTheDocument();
   });
 
   it('deduplicates duplicate-looking linked support ticket rows', async () => {
