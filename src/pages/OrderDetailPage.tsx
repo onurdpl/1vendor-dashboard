@@ -4634,9 +4634,8 @@ export function OrderDetailPage() {
     orderTimelineEvents.push({
       id: 'shipment-created',
       title: 'Shipment created',
-      description: order.carrier ? `Carrier: ${formatShippingProviderName(order.carrier)}` : 'Shipment record is available.',
+      description: order.carrier ? `Carrier: ${formatShippingProviderName(order.carrier)}` : undefined,
       at: order.shipmentCreatedAt,
-      status: order.shippingStatus,
       tone: 'success',
     });
   }

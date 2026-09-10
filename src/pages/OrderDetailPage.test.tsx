@@ -2599,11 +2599,95 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(orderCreatedRow).toHaveTextContent(formatTimelineDateForTest(orderWithShipmentSummary.date));
     expect(orderCreatedRow).not.toHaveTextContent('entered the vendor workspace');
     const shipmentCreatedRow = getOrderActivityRow('Shipment created');
-    expect(shipmentCreatedRow).toHaveTextContent('Label Created');
     expect(shipmentCreatedRow).toHaveTextContent('Carrier: Navlungo');
+    expect(shipmentCreatedRow).toHaveTextContent(formatTimelineDateForTest('2026-05-15T19:39:00.000Z'));
+    expect(within(shipmentCreatedRow).queryByText('Label Created')).not.toBeInTheDocument();
+    expect(shipmentCreatedRow.querySelector('.op-badge')).toBeNull();
+    expect(Boolean(orderCreatedRow.compareDocumentPosition(shipmentCreatedRow) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(within(timeline as HTMLElement).queryByText(/^Timeline$/)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByRole('heading', { name: 'Order activity' })).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Order, shipment, return, and support activity.')).not.toBeInTheDocument();
+  });
+
+  it('keeps delivered as current fulfillment state and a separate event without attaching it to shipment creation', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const shipmentCreatedAt = '2026-05-15T19:39:00.000Z';
+    const shipmentUpdatedAt = '2026-05-15T19:45:00.000Z';
+    const deliveredAt = '2026-05-15T20:00:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shippingStatus: 'Delivered',
+      shipmentCreatedAt,
+      shipmentUpdatedAt,
+      fulfilledAt: deliveredAt,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'SURAT-1028',
+      trackingUrl: 'https://tracking.example/SURAT-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Kargo',
+        shipmentStatus: 'delivered',
+        trackingNumber: 'SURAT-1028',
+        trackingUrl: 'https://tracking.example/SURAT-1028',
+        lastProviderResponseAt: deliveredAt,
+      },
+    });
+
+    renderOrderDetail();
+
+    const shipmentCreatedRow = await screen.findByText('Shipment created').then(() => getOrderActivityRow('Shipment created'));
+    expect(shipmentCreatedRow).toHaveTextContent('Carrier: Sürat Kargo');
+    expect(shipmentCreatedRow).toHaveTextContent(formatTimelineDateForTest(shipmentCreatedAt));
+    expect(within(shipmentCreatedRow).queryByText('Delivered')).not.toBeInTheDocument();
+    expect(shipmentCreatedRow.querySelector('.op-badge')).toBeNull();
+
+    const trackingSyncedRow = getOrderActivityRow('Tracking synced');
+    expect(trackingSyncedRow).toHaveTextContent('Sürat Kargo / SURAT-1028');
+    const deliveredRow = getOrderActivityRow('Delivered');
+    expect(deliveredRow).toHaveTextContent('Carrier delivery is confirmed.');
+    const fulfillment = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article');
+    expect(fulfillment).not.toBeNull();
+    expect(within(fulfillment as HTMLElement).getByText('Status').parentElement).toHaveTextContent('Delivered');
+    expect(Boolean(shipmentCreatedRow.compareDocumentPosition(trackingSyncedRow) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(trackingSyncedRow.compareDocumentPosition(deliveredRow) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it('omits the redundant shipment-created fallback when carrier detail is unavailable', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const shipmentCreatedAt = '2026-05-15T19:39:00.000Z';
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithoutShipment,
+      shippingStatus: 'Label Created',
+      shipmentCreatedAt,
+      carrier: undefined,
+    });
+
+    renderOrderDetail();
+
+    const orderCreatedRow = await screen.findByText('Order created').then(() => getOrderActivityRow('Order created'));
+    const shipmentCreatedRow = getOrderActivityRow('Shipment created');
+    expect(shipmentCreatedRow).toHaveTextContent(formatTimelineDateForTest(shipmentCreatedAt));
+    expect(shipmentCreatedRow).not.toHaveTextContent('Shipment record is available.');
+    expect(shipmentCreatedRow.querySelector('p')).toBeNull();
+    expect(shipmentCreatedRow.querySelector('.op-badge')).toBeNull();
+    expect(Boolean(orderCreatedRow.compareDocumentPosition(shipmentCreatedRow) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('renders stored customer names for vendor users', async () => {
