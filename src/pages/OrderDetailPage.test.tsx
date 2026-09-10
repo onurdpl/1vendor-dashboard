@@ -3899,13 +3899,23 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(refundRow).not.toBeNull();
     expect(returnRow).not.toBe(refundRow);
     expect(returnRow).toHaveTextContent('Return-request item');
+    expect(returnRow).toHaveTextContent(formatTimelineDateForTest('2026-07-11T22:00:00.000Z'));
+    expect(within(returnRow as HTMLElement).queryByText('Requested')).not.toBeInTheDocument();
+    expect(returnRow).not.toHaveTextContent('Return-request item · requested');
+    expect(returnRow?.querySelector('.op-badge')).not.toBeInTheDocument();
     expect(refundRow).toHaveTextContent('Refund-derived item');
     expect(within(refundRow as HTMLElement).queryByText('Processed')).not.toBeInTheDocument();
     expect(refundRow).not.toHaveTextContent('Refund-derived item · processed');
     expect(refundRow).not.toHaveTextContent('Return requested');
+    expect(cancellationRow.compareDocumentPosition(refundRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refundRow?.compareDocumentPosition(returnRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     const linkedRecords = screen.getByRole('heading', { name: 'Linked records' }).closest('.order-linked-records-panel');
     expect(linkedRecords).not.toBeNull();
+    const requestedReturnLink = linkedRecords?.querySelector('a[href="/returns/return-request-1028"]');
+    expect(requestedReturnLink).not.toBeNull();
+    expect(requestedReturnLink).toHaveTextContent('Requested');
+    expect(requestedReturnLink).toHaveTextContent('Return linked');
     const processedReturnLink = linkedRecords?.querySelector('a[href="/returns/refund-derived-1028"]');
     expect(processedReturnLink).not.toBeNull();
     expect(processedReturnLink).toHaveAttribute('href', '/returns/refund-derived-1028');

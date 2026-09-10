@@ -450,6 +450,10 @@ function getOrderActivityReturnDescription(returnRecord: {
   const itemLabel = returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item';
   const normalizedStatus = getStatusClass(returnRecord.status);
 
+  if (returnRecord.sourceType === 'shopify_return_request') {
+    return itemLabel;
+  }
+
   return getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && normalizedStatus === 'processed'
     ? itemLabel
     : `${itemLabel} · ${normalizedStatus.replace(/-/g, ' ')}`;
@@ -4723,7 +4727,8 @@ export function OrderDetailPage() {
       description: getOrderActivityReturnDescription(returnRecord),
       at: returnRecord.date,
       status:
-        getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && getStatusClass(returnRecord.status) === 'processed'
+        returnRecord.sourceType === 'shopify_return_request' ||
+        (getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && getStatusClass(returnRecord.status) === 'processed')
           ? undefined
           : returnRecord.status,
       tone: 'attention' as const,
