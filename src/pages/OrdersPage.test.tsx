@@ -1468,6 +1468,7 @@ describe('OrdersPage control center', () => {
   });
 
   it('uses the existing shipment create flow for the smart label action when no shipment exists', async () => {
+    setVendorUser();
     const awaitingShipmentOrder = {
       ...orderDetail,
       status: 'Pending',
@@ -1623,7 +1624,9 @@ describe('OrdersPage control center', () => {
     expect(sidebarScope.queryByText('This order cannot be rejected because a shipment is already being processed.')).not.toBeInTheDocument();
     expect(sidebarScope.queryByText('Shipment status: Pending')).not.toBeInTheDocument();
     expect(sidebarScope.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
-    expect(sidebarScope.getByLabelText('Workflow action guidance')).toHaveTextContent('Check label availability');
+    const labelGuidance = sidebarScope.getByLabelText('Workflow action guidance');
+    expect(labelGuidance).toHaveTextContent('Check label availability');
+    expect(labelGuidance).toHaveTextContent('Shipment exists; open provider evidence or retry only when safe.');
     expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
     expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
     expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
@@ -1705,7 +1708,7 @@ describe('OrdersPage control center', () => {
         fulfillmentActionAvailable: false,
       }),
       operationalStatus: 'Refunded',
-      guidance: 'No action required',
+      actionlessGuidance: 'No action required',
       stripCopy: 'Fulfillment not required',
       rejectReason: 'Refund completed. No further rejection action is required.',
     },
@@ -1718,7 +1721,7 @@ describe('OrdersPage control center', () => {
         fulfillmentActionAvailable: false,
       }),
       operationalStatus: 'Cancelled',
-      guidance: 'No action required',
+      actionlessGuidance: 'No action required',
       stripCopy: 'Fulfillment not required',
       rejectReason: 'Cancelled orders cannot be rejected.',
     },
@@ -1732,13 +1735,13 @@ describe('OrdersPage control center', () => {
         fulfillmentActionAvailable: false,
       }),
       operationalStatus: 'Cancelled',
-      guidance: 'Review cancellation',
+      actionlessGuidance: 'Review cancellation',
       stripCopy: 'Review existing fulfillment evidence',
       rejectReason: 'Cancelled orders cannot be rejected.',
     },
   ])(
     'removes vendor reject-unavailable presentation for $name while preserving the sidebar',
-    async ({ order, operationalStatus, guidance, stripCopy, rejectReason }) => {
+    async ({ order, operationalStatus, actionlessGuidance, stripCopy, rejectReason }) => {
       setVendorUser();
       listOrdersMock.mockResolvedValue([toSummary(order)]);
       getOrderMock.mockResolvedValue(order);
@@ -1756,7 +1759,9 @@ describe('OrdersPage control center', () => {
       const statusStrip = (sidebar as HTMLElement).querySelector('.orders-detail-status-strip');
       expect(statusStrip).not.toBeNull();
       expect(statusStrip).toHaveTextContent(stripCopy);
-      expect(sidebarScope.getByLabelText('Workflow action guidance')).toHaveTextContent(guidance);
+      expect(sidebarScope.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+      expect(sidebarScope.queryByText('Next action')).not.toBeInTheDocument();
+      expect(sidebarScope.queryByText(actionlessGuidance)).not.toBeInTheDocument();
       expect(sidebarScope.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
       expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
       expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
@@ -1764,6 +1769,67 @@ describe('OrdersPage control center', () => {
       expect(screen.queryByRole('button', { name: 'Reject order' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Reject full order' })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    {
+      name: 'pending reassignment',
+      order: buildAwaitingRejectableOrder({
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+      }),
+      actionlessGuidance: 'Review order',
+    },
+    {
+      name: 'tracking missing without a sidebar sync control',
+      order: buildAwaitingRejectableOrder({
+        shippingStatus: 'Label Created',
+      }),
+      actionlessGuidance: 'Sync tracking',
+    },
+    {
+      name: 'fulfilled delivery monitoring',
+      order: buildAwaitingRejectableOrder({
+        fulfillmentStatus: 'Fulfilled',
+        shippingStatus: 'Delivered',
+        trackingNumber: 'TRK-DELIVERED',
+        trackingUrl: 'https://tracking.example/TRK-DELIVERED',
+        carrier: 'DHL',
+      }),
+      actionlessGuidance: 'Monitor delivery evidence',
+    },
+    {
+      name: 'fallback shipment review',
+      order: buildAwaitingRejectableOrder({
+        shippingStatus: 'Label Created',
+        trackingNumber: 'TRK-FALLBACK',
+        carrier: 'DHL',
+      }),
+      actionlessGuidance: 'Review shipment state',
+    },
+  ])(
+    'removes actionless vendor guidance for $name while preserving factual and actionable sidebar content',
+    async ({ order, actionlessGuidance }) => {
+      setVendorUser();
+      listOrdersMock.mockResolvedValue([toSummary(order)]);
+      getOrderMock.mockResolvedValue(order);
+
+      renderOrdersPage();
+
+      const sidebar = (await screen.findByRole('heading', { name: '#1002' })).closest('aside');
+      expect(sidebar).not.toBeNull();
+      const sidebarScope = within(sidebar as HTMLElement);
+      expect(sidebarScope.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+      expect(sidebarScope.queryByText('Next action')).not.toBeInTheDocument();
+      expect(sidebarScope.queryByText(actionlessGuidance)).not.toBeInTheDocument();
+      expect((sidebar as HTMLElement).querySelector('.orders-detail-status-strip')).not.toBeNull();
+      expect(sidebarScope.getByRole('heading', { name: 'Shipment' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('heading', { name: 'Items' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('heading', { name: 'Order activity' })).toBeInTheDocument();
+      expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+      expect(sidebarScope.getByLabelText('Smart label action')).toBeInTheDocument();
+      expect(sidebarScope.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
     },
   );
 

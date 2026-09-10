@@ -63,6 +63,14 @@ const VENDOR_TRACKING_HELPERS_TO_HIDE = new Set([
   'Review existing fulfillment evidence',
   'Refund completed for this allocation.',
 ]);
+const VENDOR_ACTIONLESS_GUIDANCE_LABELS = new Set([
+  'No action required',
+  'Review order',
+  'Review cancellation',
+  'Sync tracking',
+  'Monitor delivery evidence',
+  'Review shipment state',
+]);
 
 function getBackendOrdersWorkflow(workflow: string | null): VendorOrdersWorkflow {
   if (workflow === 'awaiting-shipment') return 'awaitingShipment';
@@ -1084,6 +1092,9 @@ export function OrdersPage() {
               const railGuidanceActionLabel = !isAdmin && railGuidance.actionLabel === 'Review allocation'
                 ? 'Review order'
                 : railGuidance.actionLabel;
+              const showRailGuidance =
+                !hideVendorBlockedSidebarGuidance &&
+                (currentUser?.role !== 'vendor' || !VENDOR_ACTIONLESS_GUIDANCE_LABELS.has(railGuidanceActionLabel));
               const fulfillmentRailValue = hasCanonicalTerminalStory
                 ? operationalStory.fulfillmentLabel
                 : selectedOrder.fulfillmentStatus;
@@ -1140,7 +1151,7 @@ export function OrdersPage() {
                 </div>
               ) : null}
 
-              {!hideVendorBlockedSidebarGuidance ? (
+              {showRailGuidance ? (
                 <WorkflowActionGuidance
                   actionLabel={railGuidanceActionLabel}
                   description={railGuidanceDescription}
