@@ -732,7 +732,31 @@ describe('OrdersPage control center', () => {
         fulfillmentActionState: 'not_required',
         fulfillmentActionAvailable: false,
       });
-      const orders = [terminalOrder, cleanCancelledOrder];
+      const cancellationConflictOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1130',
+        sourceShopifyOrderNumber: '#1130',
+        status: 'Cancelled',
+        isCancelled: true,
+        isCancellationConflict: true,
+        cancelledAt: '2026-05-03T09:20:00Z',
+        shippingStatus: 'Delivered',
+        fulfillmentActionAvailable: false,
+      });
+      const blockedOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1131',
+        sourceShopifyOrderNumber: '#1131',
+        allocationStatus: 'vendor_blocked',
+        reassignmentRequired: true,
+        cancellationReason: 'OUT_OF_STOCK',
+        fulfillmentActionAvailable: false,
+      });
+      const reassignmentOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1132',
+        sourceShopifyOrderNumber: '#1132',
+        allocationStatus: 'pending_reassignment',
+        reassignmentRequired: true,
+      });
+      const orders = [terminalOrder, cleanCancelledOrder, cancellationConflictOrder, blockedOrder, reassignmentOrder];
       listOrdersMock.mockResolvedValue(orders.map(toSummary));
       getOrderMock.mockImplementation(async (orderId) => orders.find((order) => order.id === orderId) ?? terminalOrder);
 
@@ -746,9 +770,7 @@ describe('OrdersPage control center', () => {
       expect(within(terminalStatusCell as HTMLElement).getByText('Refunded')).toBeInTheDocument();
       expect(within(terminalStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
       expect(within(terminalTrackingCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
-      if (role === 'vendor') {
-        expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
-      }
+      expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
 
       const cancelledRow = screen.getByRole('button', { name: /#1129/ });
       const cancelledStatusCell = cancelledRow.querySelector('.orders-table-status-cell');
@@ -758,6 +780,29 @@ describe('OrdersPage control center', () => {
       expect(within(cancelledStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
       expect(within(cancelledStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
       expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
+      expect(within(cancelledTrackingCell as HTMLElement).queryByText('Shopify order cancelled.')).not.toBeInTheDocument();
+
+      const conflictRow = screen.getByRole('button', { name: /#1130/ });
+      const conflictStatusCell = conflictRow.querySelector('.orders-table-status-cell');
+      const conflictTrackingCell = conflictRow.querySelector('.orders-table-shipping-cell');
+      expect(conflictStatusCell).not.toBeNull();
+      expect(conflictTrackingCell).not.toBeNull();
+      expect(within(conflictStatusCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
+      expect(within(conflictTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
+
+      const blockedRow = screen.getByRole('button', { name: /#1131/ });
+      const blockedTrackingCell = blockedRow.querySelector('.orders-table-shipping-cell');
+      expect(blockedTrackingCell).not.toBeNull();
+      expect(within(blockedTrackingCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
+      if (role === 'vendor') {
+        expect(within(blockedTrackingCell as HTMLElement).queryByText('Vendor rejected allocation.')).not.toBeInTheDocument();
+      } else {
+        expect(within(blockedTrackingCell as HTMLElement).getByText('Vendor rejected allocation.')).toBeInTheDocument();
+      }
+
+      const reassignmentRow = screen.getByRole('button', { name: /#1132/ });
+      expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
     },
   );
 
@@ -837,7 +882,10 @@ describe('OrdersPage control center', () => {
     expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shipment not required').length).toBeGreaterThan(0);
-    expect(screen.getByText('Shopify order cancelled.')).toBeInTheDocument();
+    const cancelledRow = screen.getByRole('button', { name: /#1002/ });
+    const cancelledTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
+    expect(cancelledTrackingCell).not.toBeNull();
+    expect(within(cancelledTrackingCell as HTMLElement).queryByText('Shopify order cancelled.')).not.toBeInTheDocument();
     expect(screen.getByText('Tracking not required')).toBeInTheDocument();
     expect(screen.queryByText('Tracking pending')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
@@ -881,7 +929,7 @@ describe('OrdersPage control center', () => {
     const cancelledRow = screen.getByRole('button', { name: /#1002/ });
     const cancellationTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
     expect(cancellationTrackingCell).not.toBeNull();
-    expect(within(cancellationTrackingCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+    expect(within(cancellationTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipment not required')).not.toBeInTheDocument();
     expect(screen.queryByText('Tracking not required')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
@@ -1109,7 +1157,13 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1128')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
-    expect(screen.getByText('Refund completed for this allocation.')).toBeInTheDocument();
+    const paymentStatusAxis = screen.getByText('Payment Status').closest('.orders-status-axis');
+    expect(paymentStatusAxis).not.toBeNull();
+    expect(within(paymentStatusAxis as HTMLElement).getByText('Refund completed')).toBeInTheDocument();
+    const terminalRow = screen.getByRole('button', { name: /#1128/ });
+    const terminalTrackingCell = terminalRow.querySelector('.orders-table-shipping-cell');
+    expect(terminalTrackingCell).not.toBeNull();
+    expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
     expect(screen.getByText('Barcode gateway license')).toBeInTheDocument();
     expect(screen.queryByLabelText('Smart label action')).not.toBeInTheDocument();
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'all' }));

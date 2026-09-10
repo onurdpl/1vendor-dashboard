@@ -57,11 +57,13 @@ type LabelActionFeedback = {
 const RESTRICTED_SMART_LABEL_MESSAGE = 'Vendor account is restricted. Operational actions are disabled.';
 const ORDERS_PAGE_LIMIT = 100;
 const ORDERS_PAGE_OFFSET = 0;
-const VENDOR_TRACKING_HELPERS_TO_HIDE = new Set([
-  'Vendor rejected allocation.',
+const TRACKING_HELPERS_TO_HIDE = new Set([
   'Shopify order cancelled.',
   'Review existing fulfillment evidence',
   'Refund completed for this allocation.',
+]);
+const VENDOR_TRACKING_HELPERS_TO_HIDE = new Set([
+  'Vendor rejected allocation.',
 ]);
 const VENDOR_ACTIONLESS_GUIDANCE_LABELS = new Set([
   'No action required',
@@ -996,9 +998,9 @@ export function OrdersPage() {
                     ? null
                     : lifecycleSecondary;
                   const shippingOperational = getShippingOperationalLabel(order);
-                  const visibleShippingHelper = currentUser?.role === 'vendor'
-                    && shippingOperational.helper
-                    && VENDOR_TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
+                  const visibleShippingHelper = shippingOperational.helper
+                    && (TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
+                      || (currentUser?.role === 'vendor' && VENDOR_TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)))
                     ? null
                     : shippingOperational.helper;
                   return (
