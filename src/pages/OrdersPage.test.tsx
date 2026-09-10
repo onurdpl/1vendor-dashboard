@@ -513,20 +513,97 @@ describe('OrdersPage control center', () => {
     const blockedStatusCell = blockedRow.querySelector('.orders-table-status-cell');
     expect(blockedStatusCell).not.toBeNull();
     expect(within(blockedStatusCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
+    const blockedTrackingCell = blockedRow.querySelector('.orders-table-shipping-cell');
+    expect(blockedTrackingCell).not.toBeNull();
+    expect(within(blockedTrackingCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
+    expect(within(blockedTrackingCell as HTMLElement).queryByText('Vendor rejected allocation.')).not.toBeInTheDocument();
 
     const cancelledRow = screen.getByRole('button', { name: /#1007/ });
     expect(within(cancelledRow).getByText('Cancelled')).toBeInTheDocument();
     expect(within(cancelledRow).getByText('Fulfillment not required')).toBeInTheDocument();
+    const cancelledTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
+    expect(cancelledTrackingCell).not.toBeNull();
+    expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
+    expect(within(cancelledTrackingCell as HTMLElement).queryByText('Shopify order cancelled.')).not.toBeInTheDocument();
 
     const cancellationConflictRow = screen.getByRole('button', { name: /#1008/ });
     expect(within(cancellationConflictRow).getByText('Cancelled')).toBeInTheDocument();
     const cancellationConflictStatusCell = cancellationConflictRow.querySelector('.orders-table-status-cell');
     expect(cancellationConflictStatusCell).not.toBeNull();
     expect(within(cancellationConflictStatusCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+    const cancellationConflictTrackingCell = cancellationConflictRow.querySelector('.orders-table-shipping-cell');
+    expect(cancellationConflictTrackingCell).not.toBeNull();
+    expect(within(cancellationConflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
+    expect(within(cancellationConflictTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
 
     expect(screen.getAllByRole('button', { name: /#100[245678]/ })).toHaveLength(6);
     expect(screen.getByLabelText('Orders workflow tabs')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
+  });
+
+  it('keeps unresolved vendor tracking primaries and concrete evidence unchanged', async () => {
+    setVendorUser();
+    const shopifySyncPendingOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1009',
+      sourceShopifyOrderNumber: '#1009',
+      shippingStatus: 'Label Created',
+      trackingNumber: 'TRK-A-1009',
+      trackingUrl: undefined,
+      carrier: 'DHL',
+    });
+    const providerPendingOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1010',
+      sourceShopifyOrderNumber: '#1010',
+      shippingStatus: 'Label Created',
+    });
+    const reassignmentOrder = buildAwaitingRejectableOrder({
+      id: 'ORD-A-1011',
+      sourceShopifyOrderNumber: '#1011',
+      allocationStatus: 'pending_reassignment',
+      reassignmentRequired: true,
+    });
+    const orders = [shopifySyncPendingOrder, providerPendingOrder, reassignmentOrder];
+    listOrdersMock.mockResolvedValue(orders.map(toSummary));
+    getOrderMock.mockImplementation(async (orderId) => orders.find((order) => order.id === orderId) ?? shopifySyncPendingOrder);
+
+    renderOrdersPage();
+
+    const syncPendingRow = await screen.findByRole('button', { name: /#1009/ });
+    expect(within(syncPendingRow).getByText('Shopify sync pending')).toBeInTheDocument();
+    expect(within(syncPendingRow).getByText('DHL / TRK-A-1009')).toBeInTheDocument();
+
+    const providerPendingRow = screen.getByRole('button', { name: /#1010/ });
+    expect(within(providerPendingRow).getByText('Provider pending')).toBeInTheDocument();
+
+    const reassignmentRow = screen.getByRole('button', { name: /#1011/ });
+    expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
+  });
+
+  it('removes refund completion copy only from the vendor tracking cell', async () => {
+    setVendorUser();
+    const terminalOrder = buildAwaitingRejectableOrder({
+      id: 'allocation-1128',
+      sourceShopifyOrderNumber: '#1128',
+      operationalActionability: {
+        actionable: false,
+        reason: 'ALLOCATION_REFUND_TERMINAL',
+      },
+      fulfillmentActionAvailable: false,
+    });
+    listOrdersMock.mockResolvedValue([toSummary(terminalOrder)]);
+    getOrderMock.mockResolvedValue(terminalOrder);
+
+    renderOrdersPage();
+
+    const terminalRow = await screen.findByRole('button', { name: /#1128/ });
+    const terminalStatusCell = terminalRow.querySelector('.orders-table-status-cell');
+    const terminalTrackingCell = terminalRow.querySelector('.orders-table-shipping-cell');
+    expect(terminalStatusCell).not.toBeNull();
+    expect(terminalTrackingCell).not.toBeNull();
+    expect(within(terminalStatusCell as HTMLElement).getByText('Refunded')).toBeInTheDocument();
+    expect(within(terminalStatusCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(terminalTrackingCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
+    expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
   });
 
   it('separates active operational and paid payment status in the right rail', async () => {
@@ -605,6 +682,7 @@ describe('OrdersPage control center', () => {
     expect(within(axes).getByText('Cancelled')).toBeInTheDocument();
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shipment not required').length).toBeGreaterThan(0);
+    expect(screen.getByText('Shopify order cancelled.')).toBeInTheDocument();
     expect(screen.getByText('Tracking not required')).toBeInTheDocument();
     expect(screen.queryByText('Tracking pending')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
@@ -645,6 +723,10 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Review existing fulfillment evidence').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(screen.getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+    const cancelledRow = screen.getByRole('button', { name: /#1002/ });
+    const cancellationTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
+    expect(cancellationTrackingCell).not.toBeNull();
+    expect(within(cancellationTrackingCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
     expect(screen.queryByText('Shipment not required')).not.toBeInTheDocument();
     expect(screen.queryByText('Tracking not required')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Kargo etiketi yazdır/i })).not.toBeInTheDocument();
@@ -823,6 +905,7 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1128')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfillment not required').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund completed for this allocation.')).toBeInTheDocument();
     expect(screen.getByText('Barcode gateway license')).toBeInTheDocument();
     expect(screen.queryByLabelText('Smart label action')).not.toBeInTheDocument();
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'all' }));

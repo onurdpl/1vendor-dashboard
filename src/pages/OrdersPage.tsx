@@ -58,6 +58,12 @@ type LabelActionFeedback = {
 const RESTRICTED_SMART_LABEL_MESSAGE = 'Vendor account is restricted. Operational actions are disabled.';
 const ORDERS_PAGE_LIMIT = 100;
 const ORDERS_PAGE_OFFSET = 0;
+const VENDOR_TRACKING_HELPERS_TO_HIDE = new Set([
+  'Vendor rejected allocation.',
+  'Shopify order cancelled.',
+  'Review existing fulfillment evidence',
+  'Refund completed for this allocation.',
+]);
 
 function getBackendOrdersWorkflow(workflow: string | null): VendorOrdersWorkflow {
   if (workflow === 'awaiting-shipment') return 'awaitingShipment';
@@ -965,6 +971,11 @@ export function OrdersPage() {
                     ? null
                     : lifecycleSecondary;
                   const shippingOperational = getShippingOperationalLabel(order);
+                  const visibleShippingHelper = currentUser?.role === 'vendor'
+                    && shippingOperational.helper
+                    && VENDOR_TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
+                    ? null
+                    : shippingOperational.helper;
                   return (
                     <OperationalTableRow
                       key={order.id}
@@ -986,7 +997,7 @@ export function OrdersPage() {
                       </div>
                       <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
                         <strong>{shippingOperational.label}</strong>
-                        {shippingOperational.helper ? <small>{shippingOperational.helper}</small> : null}
+                        {visibleShippingHelper ? <small>{visibleShippingHelper}</small> : null}
                       </span>
                       <span>
                         <strong className="finance-amount-emphasis">{order.amount}</strong>
