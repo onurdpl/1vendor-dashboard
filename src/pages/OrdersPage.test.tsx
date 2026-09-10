@@ -639,7 +639,9 @@ describe('OrdersPage control center', () => {
 
     const cancelledRow = screen.getByRole('button', { name: /#1007/ });
     expect(within(cancelledRow).getByText('Cancelled')).toBeInTheDocument();
-    expect(within(cancelledRow).getByText('Fulfillment not required')).toBeInTheDocument();
+    const cancelledStatusCell = cancelledRow.querySelector('.orders-table-status-cell');
+    expect(cancelledStatusCell).not.toBeNull();
+    expect(within(cancelledStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
     const cancelledTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
     expect(cancelledTrackingCell).not.toBeNull();
     expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
@@ -698,32 +700,66 @@ describe('OrdersPage control center', () => {
     expect(within(reassignmentRow).getByText('Needs review')).toBeInTheDocument();
   });
 
-  it('removes refund completion copy only from the vendor tracking cell', async () => {
-    setVendorUser();
-    const terminalOrder = buildAwaitingRejectableOrder({
-      id: 'allocation-1128',
-      sourceShopifyOrderNumber: '#1128',
-      operationalActionability: {
-        actionable: false,
-        reason: 'ALLOCATION_REFUND_TERMINAL',
-      },
-      fulfillmentActionAvailable: false,
-    });
-    listOrdersMock.mockResolvedValue([toSummary(terminalOrder)]);
-    getOrderMock.mockResolvedValue(terminalOrder);
+  it.each(['admin', 'vendor', 'support', 'finance'] as const)(
+    'removes duplicate closure status lines for %s while preserving tracking closure',
+    async (role) => {
+      setCurrentUser({
+        email: `${role}@demo.com`,
+        name: `Demo ${role}`,
+        role,
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: role === 'admin',
+        defaultVendorId: 'demo-vendor-a',
+      });
+      const terminalOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1128',
+        sourceShopifyOrderNumber: '#1128',
+        operationalActionability: {
+          actionable: false,
+          reason: 'ALLOCATION_REFUND_TERMINAL',
+        },
+        fulfillmentActionAvailable: false,
+      });
+      const cleanCancelledOrder = buildAwaitingRejectableOrder({
+        id: 'allocation-1129',
+        sourceShopifyOrderNumber: '#1129',
+        status: 'Cancelled',
+        isCancelled: true,
+        cancelledAt: '2026-05-04T09:20:00Z',
+        fulfillmentStatus: 'Not Required',
+        shippingStatus: 'Not Required',
+        fulfillmentActionState: 'not_required',
+        fulfillmentActionAvailable: false,
+      });
+      const orders = [terminalOrder, cleanCancelledOrder];
+      listOrdersMock.mockResolvedValue(orders.map(toSummary));
+      getOrderMock.mockImplementation(async (orderId) => orders.find((order) => order.id === orderId) ?? terminalOrder);
 
-    renderOrdersPage();
+      renderOrdersPage();
 
-    const terminalRow = await screen.findByRole('button', { name: /#1128/ });
-    const terminalStatusCell = terminalRow.querySelector('.orders-table-status-cell');
-    const terminalTrackingCell = terminalRow.querySelector('.orders-table-shipping-cell');
-    expect(terminalStatusCell).not.toBeNull();
-    expect(terminalTrackingCell).not.toBeNull();
-    expect(within(terminalStatusCell as HTMLElement).getByText('Refunded')).toBeInTheDocument();
-    expect(within(terminalStatusCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
-    expect(within(terminalTrackingCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
-    expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
-  });
+      const terminalRow = await screen.findByRole('button', { name: /#1128/ });
+      const terminalStatusCell = terminalRow.querySelector('.orders-table-status-cell');
+      const terminalTrackingCell = terminalRow.querySelector('.orders-table-shipping-cell');
+      expect(terminalStatusCell).not.toBeNull();
+      expect(terminalTrackingCell).not.toBeNull();
+      expect(within(terminalStatusCell as HTMLElement).getByText('Refunded')).toBeInTheDocument();
+      expect(within(terminalStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+      expect(within(terminalTrackingCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
+      if (role === 'vendor') {
+        expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
+      }
+
+      const cancelledRow = screen.getByRole('button', { name: /#1129/ });
+      const cancelledStatusCell = cancelledRow.querySelector('.orders-table-status-cell');
+      const cancelledTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
+      expect(cancelledStatusCell).not.toBeNull();
+      expect(cancelledTrackingCell).not.toBeNull();
+      expect(within(cancelledStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
+      expect(within(cancelledStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+      expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
+    },
+  );
 
   it('separates active operational and paid payment status in the right rail', async () => {
     const activePaidOrder = buildAwaitingRejectableOrder({

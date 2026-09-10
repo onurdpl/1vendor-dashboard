@@ -987,8 +987,12 @@ export function OrdersPage() {
                 ) : filteredOrders.map((order) => {
                   const lifecyclePrimary = getLifecyclePrimaryLabel(order);
                   const lifecycleSecondary = getLifecycleSecondaryLabel(order);
-                  const visibleLifecycleSecondary = currentUser?.role === 'vendor'
-                    && (lifecycleSecondary === 'Tracking visible' || lifecycleSecondary === 'Tracking pending')
+                  const lifecycleStory = getOperationalStory(order);
+                  const hidesCanonicalClosureSecondary = lifecycleSecondary === 'Fulfillment not required'
+                    && (lifecycleStory.state === 'refunded_completed' || lifecycleStory.state === 'shopify_order_cancelled');
+                  const visibleLifecycleSecondary = hidesCanonicalClosureSecondary
+                    || (currentUser?.role === 'vendor'
+                      && (lifecycleSecondary === 'Tracking visible' || lifecycleSecondary === 'Tracking pending'))
                     ? null
                     : lifecycleSecondary;
                   const shippingOperational = getShippingOperationalLabel(order);
