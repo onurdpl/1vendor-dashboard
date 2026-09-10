@@ -248,25 +248,6 @@ function getLifecyclePrimaryLabel(order: OrderSummary) {
   return getAttentionLabel(order);
 }
 
-function getLifecycleSecondaryLabel(order: OrderSummary) {
-  const story = getOperationalStory(order);
-  if (story.state !== 'active_or_unknown') {
-    return story.secondaryLabel;
-  }
-  if (order.allocationStatus === 'pending_reassignment') {
-    return getLifecyclePrimaryLabel(order) === 'Reassignment needed'
-      ? null
-      : safeStatusLabel(order.allocationStatus);
-  }
-  if (order.trackingNumber || order.carrier) {
-    return 'Tracking visible';
-  }
-  if (order.shippingStatus === 'Awaiting Shipment') {
-    return 'Tracking pending';
-  }
-  return null;
-}
-
 function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
   const story = getOperationalStory(order);
   if (story.state === 'shopify_order_cancelled') {
@@ -990,15 +971,6 @@ export function OrdersPage() {
                   </OperationalTableRow>
                 ) : filteredOrders.map((order) => {
                   const lifecyclePrimary = getLifecyclePrimaryLabel(order);
-                  const lifecycleSecondary = getLifecycleSecondaryLabel(order);
-                  const lifecycleStory = getOperationalStory(order);
-                  const hidesCanonicalClosureSecondary = lifecycleSecondary === 'Fulfillment not required'
-                    && (lifecycleStory.state === 'refunded_completed' || lifecycleStory.state === 'shopify_order_cancelled');
-                  const visibleLifecycleSecondary = hidesCanonicalClosureSecondary
-                    || (currentUser?.role === 'vendor'
-                      && (lifecycleSecondary === 'Tracking visible' || lifecycleSecondary === 'Tracking pending'))
-                    ? null
-                    : lifecycleSecondary;
                   const shippingOperational = getShippingOperationalLabel(order);
                   const visibleShippingHelper = shippingOperational.helper
                     && (TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
@@ -1022,7 +994,6 @@ export function OrdersPage() {
                       </span>
                       <div className="orders-table-status-cell">
                         <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
-                        {visibleLifecycleSecondary ? <small>{visibleLifecycleSecondary}</small> : null}
                       </div>
                       <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
                         <strong>{shippingOperational.label}</strong>

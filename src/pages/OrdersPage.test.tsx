@@ -393,7 +393,7 @@ describe('OrdersPage control center', () => {
     expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
     expect(within(orderRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
     expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
-    expect(within(orderRow).getByText('Tracking visible')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
   });
 
   it('removes fixed identity and source microcopy from vendor rows without changing row data or selection', async () => {
@@ -556,7 +556,7 @@ describe('OrdersPage control center', () => {
     },
   );
 
-  it('removes only tracking secondary copy from vendor status cells', async () => {
+  it('removes all secondary copy from status cells while preserving primary and tracking content', async () => {
     setVendorUser();
     const inFlowOrder = buildAwaitingRejectableOrder({
       id: 'ORD-A-1004',
@@ -612,18 +612,21 @@ describe('OrdersPage control center', () => {
 
     const fulfilledRow = await screen.findByRole('button', { name: /#1002/ });
     expect(within(fulfilledRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(fulfilledRow.querySelector('.orders-table-status-cell small')).toBeNull();
     expect(within(fulfilledRow).queryByText('Tracking visible')).not.toBeInTheDocument();
     expect(within(fulfilledRow).getByText('Tracking synced')).toBeInTheDocument();
     expect(within(fulfilledRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
 
     const inFlowRow = screen.getByRole('button', { name: /#1004/ });
     expect(within(inFlowRow).getByText('In flow')).toBeInTheDocument();
+    expect(inFlowRow.querySelector('.orders-table-status-cell small')).toBeNull();
     expect(within(inFlowRow).queryByText('Tracking visible')).not.toBeInTheDocument();
     expect(within(inFlowRow).getByText('Tracking synced')).toBeInTheDocument();
     expect(within(inFlowRow).getByText('DHL / TRK-A-1004')).toBeInTheDocument();
 
     const awaitingRow = screen.getByRole('button', { name: /#1005/ });
     expect(within(awaitingRow).getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(awaitingRow.querySelector('.orders-table-status-cell small')).toBeNull();
     expect(within(awaitingRow).queryByText('Tracking pending')).not.toBeInTheDocument();
     expect(within(awaitingRow).getByText('No tracking yet')).toBeInTheDocument();
 
@@ -631,7 +634,8 @@ describe('OrdersPage control center', () => {
     expect(within(blockedRow).getByText('Vendor Blocked')).toBeInTheDocument();
     const blockedStatusCell = blockedRow.querySelector('.orders-table-status-cell');
     expect(blockedStatusCell).not.toBeNull();
-    expect(within(blockedStatusCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
+    expect(within(blockedStatusCell as HTMLElement).queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+    expect(blockedStatusCell?.querySelector('small')).toBeNull();
     const blockedTrackingCell = blockedRow.querySelector('.orders-table-shipping-cell');
     expect(blockedTrackingCell).not.toBeNull();
     expect(within(blockedTrackingCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
@@ -642,6 +646,7 @@ describe('OrdersPage control center', () => {
     const cancelledStatusCell = cancelledRow.querySelector('.orders-table-status-cell');
     expect(cancelledStatusCell).not.toBeNull();
     expect(within(cancelledStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+    expect(cancelledStatusCell?.querySelector('small')).toBeNull();
     const cancelledTrackingCell = cancelledRow.querySelector('.orders-table-shipping-cell');
     expect(cancelledTrackingCell).not.toBeNull();
     expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
@@ -651,7 +656,8 @@ describe('OrdersPage control center', () => {
     expect(within(cancellationConflictRow).getByText('Cancelled')).toBeInTheDocument();
     const cancellationConflictStatusCell = cancellationConflictRow.querySelector('.orders-table-status-cell');
     expect(cancellationConflictStatusCell).not.toBeNull();
-    expect(within(cancellationConflictStatusCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+    expect(within(cancellationConflictStatusCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
+    expect(cancellationConflictStatusCell?.querySelector('small')).toBeNull();
     const cancellationConflictTrackingCell = cancellationConflictRow.querySelector('.orders-table-shipping-cell');
     expect(cancellationConflictTrackingCell).not.toBeNull();
     expect(within(cancellationConflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
@@ -764,7 +770,8 @@ describe('OrdersPage control center', () => {
       expect(statusCell).not.toBeNull();
       expect(trackingCell).not.toBeNull();
       expect(within(statusCell as HTMLElement).getByText('Awaiting shipment')).toBeInTheDocument();
-      expect(within(statusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).queryByText('Pending Reassignment')).not.toBeInTheDocument();
+      expect(statusCell?.querySelector('small')).toBeNull();
       expect(within(statusCell as HTMLElement).queryByText('Tracking visible')).not.toBeInTheDocument();
       expect(within(trackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
     }
@@ -776,7 +783,8 @@ describe('OrdersPage control center', () => {
       expect(statusCell).not.toBeNull();
       expect(trackingCell).not.toBeNull();
       expect(within(statusCell as HTMLElement).getByText('Fulfilled')).toBeInTheDocument();
-      expect(within(statusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(statusCell as HTMLElement).queryByText('Pending Reassignment')).not.toBeInTheDocument();
+      expect(statusCell?.querySelector('small')).toBeNull();
       expect(within(trackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
     }
 
@@ -791,7 +799,7 @@ describe('OrdersPage control center', () => {
   });
 
   it.each(['admin', 'vendor', 'support', 'finance'] as const)(
-    'removes duplicate closure status lines for %s while preserving tracking closure',
+    'renders primary-only status cells for %s while preserving tracking content',
     async (role) => {
       setCurrentUser({
         email: `${role}@demo.com`,
@@ -850,7 +858,9 @@ describe('OrdersPage control center', () => {
       listOrdersMock.mockResolvedValue(orders.map(toSummary));
       getOrderMock.mockImplementation(async (orderId) => orders.find((order) => order.id === orderId) ?? terminalOrder);
 
-      renderOrdersPage();
+      const { container } = renderOrdersPage();
+
+      expect(container.querySelectorAll('.orders-table-status-cell small')).toHaveLength(0);
 
       const terminalRow = await screen.findByRole('button', { name: /#1128/ });
       const terminalStatusCell = terminalRow.querySelector('.orders-table-status-cell');
@@ -859,6 +869,7 @@ describe('OrdersPage control center', () => {
       expect(terminalTrackingCell).not.toBeNull();
       expect(within(terminalStatusCell as HTMLElement).getByText('Refunded')).toBeInTheDocument();
       expect(within(terminalStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+      expect(terminalStatusCell?.querySelector('small')).toBeNull();
       expect(within(terminalTrackingCell as HTMLElement).getByText('Fulfillment not required')).toBeInTheDocument();
       expect(within(terminalTrackingCell as HTMLElement).queryByText('Refund completed for this allocation.')).not.toBeInTheDocument();
 
@@ -869,6 +880,7 @@ describe('OrdersPage control center', () => {
       expect(cancelledTrackingCell).not.toBeNull();
       expect(within(cancelledStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
       expect(within(cancelledStatusCell as HTMLElement).queryByText('Fulfillment not required')).not.toBeInTheDocument();
+      expect(cancelledStatusCell?.querySelector('small')).toBeNull();
       expect(within(cancelledTrackingCell as HTMLElement).getByText('Shipment not required')).toBeInTheDocument();
       expect(within(cancelledTrackingCell as HTMLElement).queryByText('Shopify order cancelled.')).not.toBeInTheDocument();
 
@@ -877,13 +889,20 @@ describe('OrdersPage control center', () => {
       const conflictTrackingCell = conflictRow.querySelector('.orders-table-shipping-cell');
       expect(conflictStatusCell).not.toBeNull();
       expect(conflictTrackingCell).not.toBeNull();
-      expect(within(conflictStatusCell as HTMLElement).getByText('Review existing fulfillment evidence')).toBeInTheDocument();
+      expect(within(conflictStatusCell as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
+      expect(within(conflictStatusCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
+      expect(conflictStatusCell?.querySelector('small')).toBeNull();
       expect(within(conflictTrackingCell as HTMLElement).getByText('Delivered')).toBeInTheDocument();
       expect(within(conflictTrackingCell as HTMLElement).queryByText('Review existing fulfillment evidence')).not.toBeInTheDocument();
 
       const blockedRow = screen.getByRole('button', { name: /#1131/ });
+      const blockedStatusCell = blockedRow.querySelector('.orders-table-status-cell');
       const blockedTrackingCell = blockedRow.querySelector('.orders-table-shipping-cell');
+      expect(blockedStatusCell).not.toBeNull();
       expect(blockedTrackingCell).not.toBeNull();
+      expect(within(blockedStatusCell as HTMLElement).getByText('Vendor Blocked')).toBeInTheDocument();
+      expect(within(blockedStatusCell as HTMLElement).queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
+      expect(blockedStatusCell?.querySelector('small')).toBeNull();
       expect(within(blockedTrackingCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
       if (role === 'vendor') {
         expect(within(blockedTrackingCell as HTMLElement).queryByText('Vendor rejected allocation.')).not.toBeInTheDocument();
@@ -897,8 +916,9 @@ describe('OrdersPage control center', () => {
       expect(reassignmentStatusCell).not.toBeNull();
       expect(reassignmentTrackingCell).not.toBeNull();
       expect(within(reassignmentStatusCell as HTMLElement).getByText('Awaiting shipment')).toBeInTheDocument();
-      expect(within(reassignmentStatusCell as HTMLElement).getByText('Pending Reassignment')).toBeInTheDocument();
+      expect(within(reassignmentStatusCell as HTMLElement).queryByText('Pending Reassignment')).not.toBeInTheDocument();
       expect(within(reassignmentStatusCell as HTMLElement).queryByText('Tracking pending')).not.toBeInTheDocument();
+      expect(reassignmentStatusCell?.querySelector('small')).toBeNull();
       expect(within(reassignmentTrackingCell as HTMLElement).getByText('Needs review')).toBeInTheDocument();
     },
   );
@@ -2148,7 +2168,8 @@ describe('OrdersPage control center', () => {
 
     const blockedRow = screen.getByRole('button', { name: /#1002/ });
     expect(within(blockedRow).getByText('Vendor Blocked')).toBeInTheDocument();
-    expect(within(blockedRow).getAllByText('Awaiting admin resolution')).toHaveLength(2);
+    expect(within(blockedRow).getAllByText('Awaiting admin resolution')).toHaveLength(1);
+    expect(blockedRow.querySelector('.orders-table-status-cell small')).toBeNull();
   });
 
   it.each(['admin', 'support', 'finance'] as const)(
