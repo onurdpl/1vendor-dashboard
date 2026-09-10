@@ -422,21 +422,77 @@ describe('OrdersPage control center', () => {
     expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(orderRow).getByText('$1,950.00')).toBeInTheDocument();
     expect(within(orderRow).getByText('1 line items')).toBeInTheDocument();
-    expect(
-      within(orderRow).getByText(
-        formatDateTime(
-          orderDetail.shipmentUpdatedAt,
-          { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' },
-          'Not synced',
-        ),
-      ),
-    ).toBeInTheDocument();
+    const updatedValue = orderRow.querySelector('.orders-table-updated-value');
+    const expectedUpdatedDate = formatDateTime(orderDetail.shipmentUpdatedAt, { month: 'short', day: 'numeric' }, 'Not synced');
+    const expectedUpdatedTime = formatDateTime(orderDetail.shipmentUpdatedAt, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'Not synced');
+    expect(updatedValue).toHaveTextContent(`${expectedUpdatedDate} · ${expectedUpdatedTime}`);
+    expect(updatedValue).not.toHaveTextContent('2026');
+    expect(updatedValue).not.toHaveTextContent(/\b(?:AM|PM)\b/);
     expect(within(orderRow).getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
 
     const secondRow = screen.getByRole('button', { name: /#1003/ });
     await userEvent.click(secondRow);
     expect(await screen.findByRole('heading', { name: '#1003' })).toBeInTheDocument();
     expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1003', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it('formats only the Orders table Updated value compactly while preserving timestamp precedence and fallback', async () => {
+    const shipmentUpdatedOrder = buildSummary({
+      id: 'ORD-A-1101',
+      sourceShopifyOrderNumber: '#1101',
+      shipmentUpdatedAt: '2026-08-13T13:55:00',
+      fulfilledAt: '2026-08-12T10:10:00',
+      date: '2026-08-11T09:09:00',
+    });
+    const fulfilledOrder = buildSummary({
+      id: 'ORD-A-1102',
+      sourceShopifyOrderNumber: '#1102',
+      shipmentUpdatedAt: undefined,
+      fulfilledAt: '2026-09-03T12:04:00',
+      date: '2026-09-02T09:09:00',
+    });
+    const createdOrder = buildSummary({
+      id: 'ORD-A-1103',
+      sourceShopifyOrderNumber: '#1103',
+      shipmentUpdatedAt: undefined,
+      fulfilledAt: undefined,
+      date: '2026-12-01T08:07:00',
+    });
+    const invalidOrder = buildSummary({
+      id: 'ORD-A-1104',
+      sourceShopifyOrderNumber: '#1104',
+      shipmentUpdatedAt: undefined,
+      fulfilledAt: undefined,
+      date: 'invalid-date',
+    });
+    const missingOrder = buildSummary({
+      id: 'ORD-A-1105',
+      sourceShopifyOrderNumber: '#1105',
+      shipmentUpdatedAt: undefined,
+      fulfilledAt: undefined,
+      date: undefined as unknown as OrderSummary['date'],
+    });
+    listOrdersMock.mockResolvedValue([shipmentUpdatedOrder, fulfilledOrder, createdOrder, invalidOrder, missingOrder]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    const shipmentUpdatedRow = await screen.findByRole('button', { name: /#1101/ });
+    const fulfilledRow = screen.getByRole('button', { name: /#1102/ });
+    const createdRow = screen.getByRole('button', { name: /#1103/ });
+    const invalidRow = screen.getByRole('button', { name: /#1104/ });
+    const missingRow = screen.getByRole('button', { name: /#1105/ });
+
+    expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Aug 13 · 13:55');
+    expect(fulfilledRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Sep 3 · 12:04');
+    expect(createdRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Dec 1 · 08:07');
+    expect(invalidRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Not synced');
+    expect(missingRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Not synced');
+    expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')).not.toHaveTextContent(/2026|\b(?:AM|PM)\b/);
+    expect(within(shipmentUpdatedRow).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getByText('$1,950.00')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1101');
   });
 
   it('keeps vendor scope in the page header without repeating it in the selected-order sidebar header', async () => {

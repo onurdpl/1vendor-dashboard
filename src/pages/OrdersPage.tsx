@@ -89,6 +89,20 @@ function formatDate(value?: string | null) {
   }, 'Not synced');
 }
 
+function formatTableUpdatedDate(value?: string | null) {
+  const date = formatDateTime(value, {
+    month: 'short',
+    day: 'numeric',
+  }, '');
+  const time = formatDateTime(value, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }, '');
+
+  return date && time ? `${date} · ${time}` : 'Not synced';
+}
+
 function getSnapshotCurrency(order: OrderSummary | OrderDetail) {
   return (order as OrderDetail).orderSnapshot?.currency || 'TRY';
 }
@@ -1011,7 +1025,9 @@ export function OrdersPage() {
                         <small>{getLineItemCount(order)} line items</small>
                       </span>
                       <span>
-                        <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
+                        <strong className="orders-table-updated-value">
+                          {formatTableUpdatedDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}
+                        </strong>
                         {currentUser?.role !== 'vendor' ? <small>{order.channel}</small> : null}
                       </span>
                       <OperationalActionGroup>

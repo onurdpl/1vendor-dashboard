@@ -6731,6 +6731,11 @@ h3 {
   color: #1d4ed8;
 }
 
+.orders-table-updated-value {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
 .orders-op-table-v3 .op-action-group {
   justify-content: flex-end;
 }
