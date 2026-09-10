@@ -3489,9 +3489,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(blockedEvent.closest('li')).not.toHaveTextContent('Fulfillment is blocked for this order assignment.');
     expect(within(blockedEvent.closest('li') as HTMLElement).queryByText('Blocked')).not.toBeInTheDocument();
     expect(timelineScope.getByText('Settlement and payout movement are held until admin resolution.')).toBeInTheDocument();
-    expect(within(financeHoldEvent.closest('li') as HTMLElement).getByText('Held')).toBeInTheDocument();
+    expect(within(financeHoldEvent.closest('li') as HTMLElement).queryByText('Held')).not.toBeInTheDocument();
     expect(adminResolutionEvent.closest('li')).not.toHaveTextContent('Transfer order assignment, refund review, or return to vendor.');
-    expect(within(adminResolutionEvent.closest('li') as HTMLElement).getByText('Action required')).toBeInTheDocument();
+    expect(within(adminResolutionEvent.closest('li') as HTMLElement).queryByText('Action required')).not.toBeInTheDocument();
     expect(Boolean(rejectedEvent.compareDocumentPosition(blockedEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(blockedEvent.compareDocumentPosition(financeHoldEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(financeHoldEvent.compareDocumentPosition(adminResolutionEvent) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -4125,6 +4125,131 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(processedReturnLink).toHaveTextContent('Return linked');
     expect(within(processedReturnLink as HTMLElement).queryByText(/^Return$/)).not.toBeInTheDocument();
     expect(within(processedReturnLink as HTMLElement).queryByText('Open return detail')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { status: 'Created', title: 'Refund created', suffix: 'created' },
+    { status: 'Pending', title: 'Refund pending', suffix: 'pending' },
+    { status: 'Refunded', title: 'Refund processed', suffix: 'refunded' },
+    { status: 'Failed', title: 'Refund failed', suffix: 'failed' },
+  ])('removes redundant vendor refund Activity status for $status without removing the event', async ({ status, title, suffix }) => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const eventAt = '2026-07-11T21:24:00.000Z';
+    listReturnsMock.mockResolvedValueOnce([
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: `refund-${suffix}-1028`,
+        sourceShopifyOrderId: '7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: `gid://shopify/Refund/${suffix}`,
+        sourceShopifyReturnId: null,
+        sourceType: 'shopify_refund',
+        status,
+        relatedOrderId: '7616544244049',
+        date: eventAt,
+        customer: 'Customer unavailable',
+        reason: 'Shopify refund webhook allocation',
+        amount: 'TRY 4,999.00',
+        itemTitle: 'Refund activity item',
+      },
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const refundRow = await screen.findByText(title).then(() => getOrderActivityRow(title));
+    expect(refundRow).toHaveTextContent('Refund activity item');
+    expect(refundRow).toHaveTextContent(formatTimelineDateForTest(eventAt));
+    expect(refundRow).not.toHaveTextContent(`Refund activity item · ${suffix}`);
+    expect(refundRow.querySelector('.op-badge')).toBeNull();
+  });
+
+  it('preserves unknown Refund recorded status copy and badge for vendors', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listReturnsMock.mockResolvedValueOnce([
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: 'refund-manual-review-1028',
+        sourceShopifyOrderId: '7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: 'gid://shopify/Refund/manual-review',
+        sourceShopifyReturnId: null,
+        sourceType: 'shopify_refund',
+        status: 'Manual Review',
+        relatedOrderId: '7616544244049',
+        date: '2026-07-11T21:24:00.000Z',
+        customer: 'Customer unavailable',
+        reason: 'Shopify refund webhook allocation',
+        amount: 'TRY 4,999.00',
+        itemTitle: 'Fallback refund item',
+      },
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const refundRow = await screen.findByText('Refund recorded').then(() => getOrderActivityRow('Refund recorded'));
+    expect(refundRow).toHaveTextContent('Fallback refund item · manual review');
+    expect(within(refundRow).getByText('Manual Review')).toBeInTheDocument();
+  });
+
+  it.each(['admin', 'support', 'finance'] as const)('preserves %s refund Activity status presentation', async (role) => {
+    setCurrentUser({
+      email: `${role}@example.com`,
+      name: `${role} User`,
+      role,
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: role === 'admin',
+      defaultVendorId: 'sporjinal',
+    });
+    listReturnsMock.mockResolvedValueOnce([
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: 'refund-created-admin-1028',
+        sourceShopifyOrderId: '7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: 'gid://shopify/Refund/created-admin',
+        sourceShopifyReturnId: null,
+        sourceType: 'shopify_refund',
+        status: 'Created',
+        relatedOrderId: '7616544244049',
+        date: '2026-07-11T21:24:00.000Z',
+        customer: 'Customer unavailable',
+        reason: 'Shopify refund webhook allocation',
+        amount: 'TRY 4,999.00',
+        itemTitle: 'Admin refund item',
+      },
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const refundRow = await screen.findByText('Refund created').then(() => getOrderActivityRow('Refund created'));
+    expect(refundRow).toHaveTextContent('Admin refund item · created');
+    expect(within(refundRow).getByText('Created')).toBeInTheDocument();
   });
 
   it('keeps support directly below timeline in the right sidebar flow', async () => {

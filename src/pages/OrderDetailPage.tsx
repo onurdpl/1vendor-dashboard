@@ -482,11 +482,15 @@ function getOrderActivityReturnDescription(returnRecord: {
   itemTitle?: string | null;
   sourceType?: 'shopify_refund' | 'shopify_return_request';
   status: string;
-}) {
+}, compactRecognizedRefundStatus = false) {
   const itemLabel = returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item';
   const normalizedStatus = getStatusClass(returnRecord.status);
 
   if (returnRecord.sourceType === 'shopify_return_request') {
+    return itemLabel;
+  }
+
+  if (compactRecognizedRefundStatus && getOrderActivityReturnTitle(returnRecord) !== 'Refund recorded') {
     return itemLabel;
   }
 
@@ -4634,8 +4638,8 @@ export function OrderDetailPage() {
     const getCanonicalTimelineStatus = (label: string) => {
       if (label === 'Vendor rejected allocation') return isAdmin ? 'Rejected' : undefined;
       if (label === 'Vendor blocked') return isAdmin ? 'Blocked' : undefined;
-      if (label === 'Finance hold activated') return 'Held';
-      if (label === 'Awaiting admin resolution') return 'Action required';
+      if (label === 'Finance hold activated') return currentUser?.role === 'vendor' ? undefined : 'Held';
+      if (label === 'Awaiting admin resolution') return currentUser?.role === 'vendor' ? undefined : 'Action required';
       if (label === 'Refund processed' || label === 'Refund completed' || label === 'Fulfillment not required') return undefined;
       return undefined;
     };
@@ -4768,10 +4772,11 @@ export function OrderDetailPage() {
     ...relatedReturns.map((returnRecord) => ({
       id: `return-${returnRecord.id}`,
       title: getOrderActivityReturnTitle(returnRecord),
-      description: getOrderActivityReturnDescription(returnRecord),
+      description: getOrderActivityReturnDescription(returnRecord, currentUser?.role === 'vendor'),
       at: returnRecord.date,
       status:
         returnRecord.sourceType === 'shopify_return_request' ||
+        (currentUser?.role === 'vendor' && getOrderActivityReturnTitle(returnRecord) !== 'Refund recorded') ||
         (getOrderActivityReturnTitle(returnRecord) === 'Refund processed' && getStatusClass(returnRecord.status) === 'processed')
           ? undefined
           : returnRecord.status,
