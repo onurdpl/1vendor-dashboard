@@ -820,14 +820,35 @@ describe('VendorProfilePage', () => {
     const managedSection = managedHeading.closest('section');
     expect(managedSection).not.toBeNull();
     expect(within(managedSection!).getByText('These settings are managed by the Marketplace. If something needs to change, open a correction ticket.')).toBeInTheDocument();
-    expect(within(managedSection!).getByText('Shipping')).toBeInTheDocument();
+    expect(within(managedSection!).queryByText('Shipping')).not.toBeInTheDocument();
     expect(within(managedSection!).getByText('Returns')).toBeInTheDocument();
     expect(within(managedSection!).queryByText('Finance Policy')).not.toBeInTheDocument();
     expect(within(managedSection!).getByText('Warehouse')).toBeInTheDocument();
     expect(within(managedSection!).getByText('Billing')).toBeInTheDocument();
     expect(within(managedSection!).queryByText('Integrations')).not.toBeInTheDocument();
-    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(4);
-    await waitFor(() => expect(within(managedSection!).getAllByText('Configured').length).toBeGreaterThanOrEqual(3));
+    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(3);
+    await waitFor(() => expect(within(managedSection!).getAllByText('Configured').length).toBeGreaterThanOrEqual(2));
+
+    const shippingSection = screen.getByRole('heading', { name: 'Shipping' }).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(within(shippingSection!).getByRole('heading', { name: 'Delivery configuration' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Provider')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Navlungo')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Shipping enabled')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Yes')).toBeInTheDocument();
+    expect(within(shippingSection!).getByRole('heading', { name: 'Package and tax defaults' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Default desi')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('3.00')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Shipping VAT')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('18.00%')).toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Configured')).not.toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Ready')).not.toBeInTheDocument();
+    expect(screen.queryByText('2547')).not.toBeInTheDocument();
+    expect(screen.queryByText('55574')).not.toBeInTheDocument();
+    expect(screen.queryByText('Istanbul warehouse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mugla')).not.toBeInTheDocument();
+    expect(screen.queryByText('Konya')).not.toBeInTheDocument();
+    expect(within(shippingSection!).queryByRole('button')).not.toBeInTheDocument();
 
     const financePolicySection = screen.getByRole('heading', { name: 'Finance Policy' }).closest('section');
     expect(financePolicySection).not.toBeNull();
@@ -913,7 +934,9 @@ describe('VendorProfilePage', () => {
       expect(within(managedSection!).getByText(summary)).toBeInTheDocument();
     }
     expect(screen.queryByRole('heading', { name: 'Finance Policy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipping' })).not.toBeInTheDocument();
     expect(screen.queryByText('12.50%')).not.toBeInTheDocument();
+    expect(screen.queryByText('18.00%')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
     const requestChangesSection = screen.getByRole('heading', { name: 'Request Changes' }).closest('section');
     expect(requestChangesSection).not.toBeNull();
@@ -973,16 +996,89 @@ describe('VendorProfilePage', () => {
     expect(screen.getAllByRole('button', { name: 'Open correction ticket' })).toHaveLength(1);
   });
 
-  it('shows marketplace-managed settings status and the default vendor finance policy without readiness cards', async () => {
+  it('shows disabled vendor shipping as a supported blocked exception with readable values', async () => {
     getVendorShippingConfigMock.mockResolvedValue({
       ...shippingConfig,
       shippingEnabled: false,
-      preferredProvider: 'navlungo',
-      defaultWarehouseId: null,
-      warehouses: [],
-      providerMetadata: {},
+    });
+
+    renderVendorProfilePage();
+
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping' })).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(await within(shippingSection!).findByText('Blocked')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Shipping is disabled, so shipment work cannot start for this vendor.')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('No')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Navlungo')).toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Ready')).not.toBeInTheDocument();
+  });
+
+  it('shows effective vendor shipping values with one marketplace fallback disclosure', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
       source: 'default',
     });
+
+    renderVendorProfilePage();
+
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping' })).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(await within(shippingSection!).findByText('Marketplace default fallback')).toBeInTheDocument();
+    expect(within(shippingSection!).getAllByText('Marketplace default fallback')).toHaveLength(1);
+    expect(within(shippingSection!).getByText('Navlungo')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('3.00')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('18.00%')).toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Configured')).not.toBeInTheDocument();
+  });
+
+  it('shows the existing needs-review shipping exception without claiming execution failure', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      providerMetadata: {},
+    });
+
+    renderVendorProfilePage();
+
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping' })).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(await within(shippingSection!).findByText('Needs review')).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Provider or warehouse configuration needs review before shipment work is trusted.')).toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Blocked')).not.toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Ready')).not.toBeInTheDocument();
+  });
+
+  it('renders a section-local loading state without fabricated vendor shipping values', async () => {
+    getVendorShippingConfigMock.mockImplementation(() => new Promise(() => undefined));
+
+    renderVendorProfilePage();
+
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping' })).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(within(shippingSection!).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Provider')).not.toBeInTheDocument();
+    expect(within(shippingSection!).queryByText('Navlungo')).not.toBeInTheDocument();
+  });
+
+  it('renders a section-local vendor shipping error and retries the existing query', async () => {
+    getVendorShippingConfigMock
+      .mockRejectedValueOnce(new Error('Shipping configuration failed to load.'))
+      .mockResolvedValueOnce(shippingConfig);
+
+    renderVendorProfilePage();
+
+    const shippingSection = (await screen.findByRole('heading', { name: 'Shipping' })).closest('section');
+    expect(shippingSection).not.toBeNull();
+    expect(await within(shippingSection!).findByRole('heading', { name: 'Shipping setup unavailable' })).toBeInTheDocument();
+    expect(within(shippingSection!).getByText('Shipping configuration failed to load.')).toBeInTheDocument();
+    expect(within(shippingSection!).queryByRole('heading', { name: 'Loading shipping setup' })).not.toBeInTheDocument();
+
+    await userEvent.click(within(shippingSection!).getByRole('button', { name: 'Retry' }));
+
+    expect(await within(shippingSection!).findByText('Navlungo')).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows effective vendor finance values with the existing marketplace fallback disclosure', async () => {
     getFinanceProfileMock.mockResolvedValue({
       ...financeProfile,
       active: false,
@@ -991,23 +1087,14 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    const managedHeading = await screen.findByRole('heading', { name: 'Marketplace Managed Settings' });
-    const managedSection = managedHeading.closest('section');
-    expect(managedSection).not.toBeNull();
-    expect(within(managedSection!).getByText('Shipping')).toBeInTheDocument();
-    expect(within(managedSection!).getByText('Returns')).toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Finance Policy')).not.toBeInTheDocument();
-    await waitFor(() => expect(within(managedSection!).getAllByText('Needs review').length).toBeGreaterThanOrEqual(2));
-    const financePolicySection = screen.getByRole('heading', { name: 'Finance Policy' }).closest('section');
+    const financePolicySection = (await screen.findByRole('heading', { name: 'Finance Policy' })).closest('section');
     expect(financePolicySection).not.toBeNull();
-    expect(within(financePolicySection!).getByText('Marketplace default fallback')).toBeInTheDocument();
-    expect(screen.getAllByText('Marketplace default fallback')).toHaveLength(1);
+    expect(await within(financePolicySection!).findByText('Marketplace default fallback')).toBeInTheDocument();
+    expect(within(financePolicySection!).getAllByText('Marketplace default fallback')).toHaveLength(1);
     expect(within(financePolicySection!).getByText('12.50%')).toBeInTheDocument();
     expect(within(financePolicySection!).getByText('20.00%')).toBeInTheDocument();
     expect(within(financePolicySection!).getByText('Needs review')).toBeInTheDocument();
     expect(within(financePolicySection!).queryByText('Configured')).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Shipping ready' })).not.toBeInTheDocument();
   });
 
   it('renders a fixed shipping fee only for a fixed vendor finance policy', async () => {

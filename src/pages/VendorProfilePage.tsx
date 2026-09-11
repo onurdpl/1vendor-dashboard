@@ -2235,7 +2235,9 @@ export function VendorProfilePage() {
     },
   ] as const;
   const visibleManagedSettings = isVendor
-    ? managedSettings.filter((setting) => setting.title !== 'Finance Policy' && setting.title !== 'Integrations')
+    ? managedSettings.filter(
+        (setting) => setting.title !== 'Shipping' && setting.title !== 'Finance Policy' && setting.title !== 'Integrations',
+      )
     : managedSettings;
 
   return (
@@ -2339,6 +2341,40 @@ export function VendorProfilePage() {
               </div>
             </div>
           </OperationalSection>
+
+          {isVendor ? (
+            <OperationalSection title="Shipping">
+              {shippingQuery.isError && !shippingConfig ? (
+                <SectionErrorRetry
+                  title="Shipping setup unavailable"
+                  description={shippingQuery.error ?? 'Unable to load the vendor shipping configuration.'}
+                  onRetry={() => void shippingQuery.refetch()}
+                />
+              ) : shippingQuery.isInitialLoading || !shippingConfig ? (
+                <SectionSkeleton title="Loading shipping setup" description="Fetching the current vendor shipping configuration." />
+              ) : (
+                <div className="vendor-profile-shipping-settings">
+                  {shippingConfig.source === 'default' ? (
+                    <p className="vendor-profile-shipping-settings-source">{formatSource(shippingConfig.source)}</p>
+                  ) : null}
+                  {!shippingConfigured ? (
+                    <div className="vendor-profile-shipping-settings-state">
+                      <StatusBadge tone={shippingHealth.tone}>{shippingHealth.label}</StatusBadge>
+                      <span>{shippingHealth.description}</span>
+                    </div>
+                  ) : null}
+                  <MetadataGroup title="Delivery configuration">
+                    <MetadataRow label="Provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
+                    <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Package and tax defaults">
+                    <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
+                    <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
+                  </MetadataGroup>
+                </div>
+              )}
+            </OperationalSection>
+          ) : null}
 
           {isVendor ? (
             <OperationalSection title="Finance Policy">

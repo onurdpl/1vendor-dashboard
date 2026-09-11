@@ -15787,6 +15787,26 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.86rem;
 }
 
+.vendor-profile-shipping-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-profile-shipping-settings-source {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.vendor-profile-shipping-settings-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
 .vendor-profile-finance-policy {
   display: grid;
   gap: 12px;
