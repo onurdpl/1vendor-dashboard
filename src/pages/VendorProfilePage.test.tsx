@@ -861,6 +861,46 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
   });
 
+  it.each([
+    { role: 'support' as const, email: 'support@demo.com' },
+    { role: 'finance' as const, email: 'finance@demo.com' },
+  ])('keeps the current non-admin summary presentation for the $role role', async ({ role, email }) => {
+    setCurrentUser({
+      email,
+      name: `${role} user`,
+      role,
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    renderVendorProfilePage();
+
+    expect(await screen.findByRole('heading', { name: 'My Account' })).toBeInTheDocument();
+    const managedSection = screen.getByRole('heading', { name: 'Marketplace Managed Settings' }).closest('section');
+    expect(managedSection).not.toBeNull();
+    for (const summary of ['Shipping', 'Returns', 'Finance Policy', 'Warehouse', 'Billing', 'Integrations']) {
+      expect(within(managedSection!).getByText(summary)).toBeInTheDocument();
+    }
+    expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open correction ticket' })).toBeInTheDocument();
+    expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
+
+    expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shipping operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Warehouse and returns' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission %')).not.toBeInTheDocument();
+    expect(screen.queryByText('Commission VAT %')).not.toBeInTheDocument();
+    expect(screen.queryByText('Default warehouse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Forward warehouse')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save shipping config' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Integration Token' })).not.toBeInTheDocument();
+    expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
   it('shows restricted vendor workspace state without an active workspace badge', async () => {
     setCurrentUser({
       email: 'vendor-a@demo.com',

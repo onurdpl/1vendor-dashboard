@@ -1098,6 +1098,10 @@ export function VendorProfilePage() {
     currentVendorId: currentVendor.vendorId,
   });
   const isAdmin = currentUser?.role === 'admin';
+  const isVendor = currentUser?.role === 'vendor';
+  const isSupport = currentUser?.role === 'support';
+  const isFinance = currentUser?.role === 'finance';
+  const usesSummarySettingsPresentation = isVendor || isSupport || isFinance;
   const canLoadProfile = pageReadiness.ready && (!isAdminVendorRoute || isAdmin);
   const { message, tone, showFeedback } = useActionFeedback();
   const [billingEditOpen, setBillingEditOpen] = useState(false);
@@ -2297,7 +2301,7 @@ export function VendorProfilePage() {
         ) : null}
       </div>
 
-      {!isAdmin ? (
+      {usesSummarySettingsPresentation ? (
         <>
           <OperationalSection title="My Account">
             <MetadataGroup>
