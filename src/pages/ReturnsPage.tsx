@@ -72,27 +72,28 @@ function formatDate(value: string | null | undefined) {
   }).format(date);
 }
 
-function formatDateParts(value: string | null | undefined) {
+function formatTableRequestedDate(value: string | null | undefined) {
   if (!value) {
-    return { date: '—', time: '' };
+    return '—';
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return { date: '—', time: '' };
+    return '—';
   }
 
-  return {
-    date: new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(date),
-    time: new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-  };
+  const datePart = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+
+  return `${datePart} · ${timePart}`;
 }
 
 function getRefundStatusLabel(item: ReturnSummary) {
@@ -1063,7 +1064,7 @@ export function ReturnsPage() {
                 const tableItems = getTableReturnedItems(item);
                 const visibleItems = tableItems.slice(0, 2);
                 const hiddenItemCount = Math.max(itemCount - visibleItems.length, 0);
-                const requestedAt = formatDateParts(item.date);
+                const requestedAt = formatTableRequestedDate(item.date);
                 return (
                   <OperationalTableRow
                     key={item.id}
@@ -1089,18 +1090,15 @@ export function ReturnsPage() {
                     <span>
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
                     </span>
-                    <span className="returns-requested-cell">
-                      <strong>{requestedAt.date}</strong>
-                      {requestedAt.time ? <small>{requestedAt.time}</small> : null}
-                    </span>
+                    <span className="returns-requested-cell">{requestedAt}</span>
                     <OperationalActionGroup>
                       <Link
                         to={`/returns/${item.id}`}
                         className="button button-ghost button-link returns-row-action"
-                        aria-label={`İncele return for order ${formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}`}
+                        aria-label={`Open detail for return order ${formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}`}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        İncele
+                        Open detail
                       </Link>
                     </OperationalActionGroup>
                   </OperationalTableRow>

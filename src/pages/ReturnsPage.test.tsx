@@ -460,6 +460,70 @@ describe('ReturnsPage control center', () => {
     expect(within(refundedRow as HTMLElement).getAllByText('Refunded')).toHaveLength(1);
   });
 
+  it('renders compact requested timestamps from the existing return date with preserved fallbacks', async () => {
+    const timestampedReturn: ReturnDetail = {
+      ...pendingReturn,
+      id: 'RET-A-TIMESTAMP-1120',
+      sourceShopifyOrderNumber: 1120,
+      date: '2026-09-03T21:55:00',
+      updatedAt: '2027-01-04T01:02:00',
+    };
+    const invalidDateReturn: ReturnDetail = {
+      ...pendingReturn,
+      id: 'RET-A-INVALID-DATE-1121',
+      sourceShopifyOrderNumber: 1121,
+      date: 'invalid-date',
+    };
+    const missingDateReturn = {
+      ...pendingReturn,
+      id: 'RET-A-MISSING-DATE-1122',
+      sourceShopifyOrderNumber: 1122,
+      date: undefined,
+    } as unknown as ReturnDetail;
+    listReturnsMock.mockResolvedValue([
+      toSummary(timestampedReturn),
+      toSummary(invalidDateReturn),
+      toSummary(missingDateReturn),
+    ]);
+    getReturnMock.mockResolvedValue(timestampedReturn);
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+
+    expect(await table.findByText('#1120')).toBeInTheDocument();
+    const timestampRow = table.getByText('#1120').closest('.op-table-row') as HTMLElement;
+    const requestedValue = timestampRow.querySelector('.returns-requested-cell');
+    expect(requestedValue).toHaveTextContent('Sep 3, 2026 · 21:55');
+    expect(requestedValue?.children).toHaveLength(0);
+    expect(requestedValue).not.toHaveTextContent(/AM|PM/);
+    expect(within(table.getByText('#1121').closest('.op-table-row') as HTMLElement).getByText('—')).toBeInTheDocument();
+    expect(within(table.getByText('#1122').closest('.op-table-row') as HTMLElement).getByText('—')).toBeInTheDocument();
+  });
+
+  it('keeps return detail navigation isolated from row selection with the English action label', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    const { container } = renderReturnsPage();
+    const table = within(container.querySelector('.returns-op-table') as HTMLElement);
+
+    expect(await table.findByText('#1001')).toBeInTheDocument();
+    const firstRow = table.getByText('#1001').closest('.op-table-row') as HTMLElement;
+    const secondRow = table.getByText('#1002').closest('.op-table-row') as HTMLElement;
+    const detailLink = within(secondRow).getByRole('link', { name: 'Open detail for return order #1002' });
+    expect(detailLink).toHaveTextContent('Open detail');
+    expect(detailLink).toHaveAttribute('href', `/returns/${processedRefund.id}`);
+    expect(detailLink).toHaveClass('returns-row-action');
+    expect(firstRow).toHaveClass('op-row-selected');
+    expect(secondRow).not.toHaveClass('op-row-selected');
+
+    await userEvent.click(detailLink);
+
+    expect(firstRow).toHaveClass('op-row-selected');
+    expect(secondRow).not.toHaveClass('op-row-selected');
+    expect(table.queryByText('İncele')).not.toBeInTheDocument();
+  });
+
   it('renders only primary return lifecycle badges in table status cells', async () => {
     const underReviewReturn: ReturnDetail = {
       ...pendingReturn,
@@ -909,7 +973,7 @@ describe('ReturnsPage control center', () => {
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review return');
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText('İncele return for order #1001').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('Open detail for return order #1001').length).toBeGreaterThan(0);
   });
 
   it('keeps approved returns without refunds in the active refund-monitoring flow', async () => {
