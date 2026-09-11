@@ -1,10 +1,15 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type {
   LogoIsbasiCommissionInvoicePreviewInput,
+  VendorBillingLegalSelfView,
   VendorBillingProfileInput,
   VendorProvisioningInput,
   VendorStatusInput,
 } from './contracts';
+
+export function getVendorBillingLegalSelfView(options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.vendors.billingLegalSelfView({ signal: options.signal }) as Promise<VendorBillingLegalSelfView | null>;
+}
 
 export function getVendorBillingProfile(vendorId: string, options: { signal?: AbortSignal } = {}) {
   return runtimeServices.vendors.billingProfile(vendorId, { signal: options.signal });

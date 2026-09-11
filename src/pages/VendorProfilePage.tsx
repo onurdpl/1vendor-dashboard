@@ -29,6 +29,7 @@ import {
   discoverLogoIsbasiInvoices,
   discoverLogoIsbasiServices,
   fetchLogoIsbasiInvoicePdf,
+  getVendorBillingLegalSelfView,
   getVendorStatus,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
@@ -58,6 +59,7 @@ import type {
   LogoIsbasiProductServiceDiscoveryResult,
   CreateSupportTicketInput,
   SupportTicket,
+  VendorBillingLegalSelfView,
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorFinancialProfile,
@@ -126,6 +128,34 @@ const EMPTY_INTEGRATION_TOKEN_FORM: IntegrationTokenFormState = {
 
 function formatValue(value: string | null | undefined, fallback = 'Not configured') {
   return value && value.trim() ? value.trim() : fallback;
+}
+
+function VendorBillingLegalSelfViewContent({ profile }: { profile: VendorBillingLegalSelfView | null }) {
+  return (
+    <div className="vendor-profile-billing-legal-self-view">
+      <MetadataGroup title="Company details">
+        <MetadataRow label="Legal company name" value={formatValue(profile?.legalCompanyName)} />
+        <MetadataRow label="Legal entity type" value={formatValue(profile?.legalEntityType)} />
+      </MetadataGroup>
+      <MetadataGroup title="Tax details">
+        <MetadataRow label="Tax number / TCKN" value={formatValue(profile?.taxNumber)} />
+        <MetadataRow label="Tax office" value={formatValue(profile?.taxOffice)} />
+      </MetadataGroup>
+      <MetadataGroup title="Billing address">
+        <MetadataRow label="Full billing address" value={formatValue(profile?.billingAddress)} />
+        <MetadataRow label="Billing city" value={formatValue(profile?.billingCity)} />
+        <MetadataRow label="Billing district" value={formatValue(profile?.billingDistrict)} />
+      </MetadataGroup>
+      <MetadataGroup title="Contact">
+        <MetadataRow label="Authorized person" value={formatValue(profile?.authorizedPerson)} />
+        <MetadataRow label="Billing email" value={formatValue(profile?.billingEmail)} />
+        <MetadataRow label="Billing phone" value={formatValue(profile?.billingPhone)} />
+      </MetadataGroup>
+      <MetadataGroup title="Payment details">
+        <MetadataRow label="IBAN" value={formatValue(profile?.iban)} />
+      </MetadataGroup>
+    </div>
+  );
 }
 
 function formatAuditDate(value: string | null | undefined) {
@@ -1151,6 +1181,11 @@ export function VendorProfilePage() {
     queryKeys.vendorProfile.billingProfile(currentVendor.vendorId),
     ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
     { enabled: canLoadProfile && isAdmin },
+  );
+  const vendorBillingLegalQuery = useQueryResource(
+    queryKeys.vendorProfile.billingLegalSelfView(currentVendor.vendorId),
+    ({ signal }) => getVendorBillingLegalSelfView({ signal }),
+    { enabled: canLoadProfile && isVendor },
   );
   const vendorStatusQuery = useQueryResource(
     queryKeys.vendorProfile.status(currentVendor.vendorId),
@@ -2462,6 +2497,25 @@ export function VendorProfilePage() {
                     <MetadataRow label="Settlement schedule" value={formatSettlementSchedule(financeProfile)} />
                   </MetadataGroup>
                 </div>
+              )}
+            </OperationalSection>
+          ) : null}
+
+          {isVendor ? (
+            <OperationalSection title="Billing & Legal">
+              {vendorBillingLegalQuery.isError ? (
+                <SectionErrorRetry
+                  title="Billing & Legal unavailable"
+                  description={vendorBillingLegalQuery.error ?? 'Unable to load the vendor billing and legal profile.'}
+                  onRetry={() => void vendorBillingLegalQuery.refetch()}
+                />
+              ) : vendorBillingLegalQuery.isInitialLoading ? (
+                <SectionSkeleton
+                  title="Loading Billing & Legal"
+                  description="Fetching the current vendor billing and legal profile."
+                />
+              ) : (
+                <VendorBillingLegalSelfViewContent profile={vendorBillingLegalQuery.data ?? null} />
               )}
             </OperationalSection>
           ) : null}

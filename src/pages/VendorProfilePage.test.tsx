@@ -15,6 +15,7 @@ import type {
   LogoIsbasiLoginProbeResult,
   LogoIsbasiTestInvoiceCreateResult,
   SupportTicket,
+  VendorBillingLegalSelfView,
   VendorBillingProfile,
   VendorBillingProfileInput,
   VendorFinancialProfile,
@@ -56,6 +57,7 @@ const updateVendorFinancialProfileMock = vi.fn<
 >();
 const getFinanceDashboardMock = vi.fn();
 const getVendorBillingProfileMock = vi.fn<(vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorBillingProfile | null>>();
+const getVendorBillingLegalSelfViewMock = vi.fn<(options?: { signal?: AbortSignal }) => Promise<VendorBillingLegalSelfView | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
 const getVendorStatusMock = vi.fn<(vendorId: string, options?: { signal?: AbortSignal }) => Promise<VendorStatus>>();
 const updateVendorStatusMock = vi.fn<
@@ -120,6 +122,8 @@ vi.mock('../features/vendors/api', async () => {
   const actual = await vi.importActual<typeof import('../features/vendors/api')>('../features/vendors/api');
   return {
     ...actual,
+    getVendorBillingLegalSelfView: (options?: { signal?: AbortSignal }) =>
+      getVendorBillingLegalSelfViewMock(options),
     getVendorBillingProfile: (vendorId: string, options?: { signal?: AbortSignal }) =>
       getVendorBillingProfileMock(vendorId, options),
     getVendorStatus: (vendorId: string, options?: { signal?: AbortSignal }) => getVendorStatusMock(vendorId, options),
@@ -283,6 +287,20 @@ const billingProfile: VendorBillingProfile = {
   logoIsbasiLastCheckedAt: '2026-06-07T10:00:00Z',
   createdAt: '2026-06-05T10:00:00Z',
   updatedAt: '2026-06-05T10:00:00Z',
+};
+
+const vendorBillingLegalSelfView: VendorBillingLegalSelfView = {
+  legalCompanyName: billingProfile.legalCompanyName,
+  legalEntityType: billingProfile.legalEntityType,
+  taxNumber: billingProfile.taxNumber,
+  taxOffice: billingProfile.taxOffice,
+  billingAddress: billingProfile.billingAddress,
+  billingCity: billingProfile.billingCity,
+  billingDistrict: billingProfile.billingDistrict,
+  authorizedPerson: billingProfile.authorizedPerson,
+  billingEmail: billingProfile.billingEmail,
+  billingPhone: billingProfile.billingPhone,
+  iban: billingProfile.iban,
 };
 
 const activeVendorStatus: VendorStatus = {
@@ -509,6 +527,8 @@ describe('VendorProfilePage', () => {
     );
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
+    getVendorBillingLegalSelfViewMock.mockReset();
+    getVendorBillingLegalSelfViewMock.mockResolvedValue(vendorBillingLegalSelfView);
     getVendorStatusMock.mockReset();
     getVendorStatusMock.mockResolvedValue(activeVendorStatus);
     updateVendorStatusMock.mockReset();
@@ -879,6 +899,47 @@ describe('VendorProfilePage', () => {
     expect(within(financePolicySection!).queryByText('Auto approve')).not.toBeInTheDocument();
     expect(within(financePolicySection!).queryByText('Auto invoice')).not.toBeInTheDocument();
 
+    const billingLegalSection = screen.getByRole('heading', { name: 'Billing & Legal' }).closest('section');
+    expect(billingLegalSection).not.toBeNull();
+    for (const group of ['Company details', 'Tax details', 'Billing address', 'Contact', 'Payment details']) {
+      expect(within(billingLegalSection!).getByRole('heading', { name: group })).toBeInTheDocument();
+    }
+    for (const label of [
+      'Legal company name',
+      'Legal entity type',
+      'Tax number / TCKN',
+      'Tax office',
+      'Full billing address',
+      'Billing city',
+      'Billing district',
+      'Authorized person',
+      'Billing email',
+      'Billing phone',
+      'IBAN',
+    ]) {
+      expect(within(billingLegalSection!).getByText(label)).toBeInTheDocument();
+    }
+    for (const value of [
+      'Demo Vendor A Ltd.',
+      'limited_company',
+      '1111111111',
+      'Kadikoy',
+      'Billing Street 1, Istanbul',
+      'Istanbul',
+      'Atasehir',
+      'Demo Authorized Person',
+      'billing@example.test',
+      '+905551112233',
+      'TR000000000000000000000000',
+    ]) {
+      expect(within(billingLegalSection!).getByText(value)).toBeInTheDocument();
+    }
+    expect(within(billingLegalSection!).queryByRole('button', { name: /edit|save|update/i })).not.toBeInTheDocument();
+    expect(within(billingLegalSection!).queryByText(/configured|complete|ready|verified/i)).not.toBeInTheDocument();
+    expect(within(billingLegalSection!).queryByText(/Logo İşbaşı/i)).not.toBeInTheDocument();
+    expect(within(billingLegalSection!).queryByText('billing-demo-vendor-a')).not.toBeInTheDocument();
+    expect(within(billingLegalSection!).queryByText('2026-06-05T10:00:00Z')).not.toBeInTheDocument();
+
     const requestChangesSection = screen.getByRole('heading', { name: 'Request Changes' }).closest('section');
     expect(requestChangesSection).not.toBeNull();
     expect(requestChangesSection!.querySelector('.vendor-profile-support-panel-flat')).not.toBeNull();
@@ -903,11 +964,24 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
+    expect(getVendorBillingLegalSelfViewMock).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(getFinanceProfileMock).toHaveBeenCalled();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(screen.queryByText('Legal entity name, tax office, and tax identity')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit finance policy' })).not.toBeInTheDocument();
+  });
+
+  it('renders stable Not configured values when the vendor has no billing profile', async () => {
+    getVendorBillingLegalSelfViewMock.mockResolvedValue(null);
+
+    renderVendorProfilePage();
+
+    const billingLegalSection = (await screen.findByRole('heading', { name: 'Billing & Legal' })).closest('section');
+    expect(billingLegalSection).not.toBeNull();
+    expect(await within(billingLegalSection!).findAllByText('Not configured')).toHaveLength(11);
+    expect(within(billingLegalSection!).queryByRole('button', { name: /edit|save|update/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
   });
 
   it.each([
@@ -954,6 +1028,7 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipping operations' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Warehouse and returns' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Billing & Legal' })).not.toBeInTheDocument();
     expect(screen.queryByText('Commission %')).not.toBeInTheDocument();
     expect(screen.queryByText('Commission VAT %')).not.toBeInTheDocument();
     expect(screen.queryByText('Default warehouse')).not.toBeInTheDocument();
@@ -963,6 +1038,7 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('button', { name: 'Create Integration Token' })).not.toBeInTheDocument();
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(getFinanceProfileMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    expect(getVendorBillingLegalSelfViewMock).not.toHaveBeenCalled();
   });
 
   it('shows restricted vendor workspace state without an active workspace badge', async () => {
@@ -2001,6 +2077,8 @@ describe('VendorProfilePage', () => {
     getVendorBillingProfileMock.mockResolvedValue(billingProfile);
 
     renderVendorProfilePage();
+
+    expect(getVendorBillingLegalSelfViewMock).not.toHaveBeenCalled();
 
     const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
     const billingSection = billingHeading.closest('section');

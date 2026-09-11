@@ -9,10 +9,32 @@ const prismaMock = vi.hoisted(() => ({
     upsert: vi.fn(),
     update: vi.fn(),
   },
+  userVendorAccess: {
+    findMany: vi.fn(),
+  },
   vendorProfileAuditLog: {
     createMany: vi.fn(),
     findMany: vi.fn(),
   },
+}));
+
+const authenticateRequestMock = vi.hoisted(() => vi.fn(async (
+  request: { authUser?: unknown },
+  reply: ReturnType<typeof createReply>,
+) => {
+  if (!request.authUser) {
+    return reply.code(401).send({ message: 'Unauthorized' });
+  }
+}));
+const requireVendorAccessMock = vi.hoisted(() => vi.fn(async (
+  request: { vendorContext?: { vendorId: string }; headers?: Record<string, string> },
+  reply: ReturnType<typeof createReply>,
+) => {
+  const requestedVendorId = request.headers?.['x-vendor-id'];
+  if (requestedVendorId === 'unlinked-vendor') {
+    return reply.code(403).send({ message: 'Requested vendor is not allowed for this user.' });
+  }
+  request.vendorContext = { vendorId: requestedVendorId ?? 'sporjinal' };
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -25,16 +47,22 @@ vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
 
 vi.mock('../backend/src/modules/auth/auth.middleware.js', () => ({
   createAuthMiddleware: vi.fn(() => ({
-    authenticateRequest: vi.fn(),
+    authenticateRequest: authenticateRequestMock,
   })),
+}));
+
+vi.mock('../backend/src/modules/vendor-access/vendor-access.middleware.js', () => ({
+  requireVendorAccess: requireVendorAccessMock,
 }));
 
 const {
   bindLogoIsbasiFirmToVendor,
+  getVendorBillingLegalSelfView,
   getVendorBillingProfile,
   upsertVendorBillingProfile,
   __vendorBillingProfileTesting,
 } = await import('../backend/src/modules/vendors/vendor-billing-profile.service.js');
+const { resolveRequestVendorContext } = await import('../backend/src/modules/vendor-access/vendor-access.service.js');
 const { registerVendorBillingProfileRoutes } = await import(
   '../backend/src/modules/vendors/vendor-billing-profile.routes.js'
 );
@@ -88,19 +116,25 @@ function createReply() {
 
 type RouteHandler = (
   request: {
-    authUser?: { role?: string };
+    authUser?: { id?: string; role?: string };
+    vendorContext?: { vendorId: string };
+    headers?: Record<string, string>;
     params?: Record<string, string>;
     body?: unknown;
   },
   reply: ReturnType<typeof createReply>,
 ) => unknown;
 
+type RouteOptions = { preHandler?: Array<(request: Parameters<RouteHandler>[0], reply: ReturnType<typeof createReply>) => unknown> };
+
 function createRegisteredRoutes() {
   const gets = new Map<string, RouteHandler>();
+  const getOptions = new Map<string, RouteOptions>();
   const puts = new Map<string, RouteHandler>();
   const app = {
-    get: vi.fn((path: string, _options: unknown, handler: RouteHandler) => {
+    get: vi.fn((path: string, options: RouteOptions, handler: RouteHandler) => {
       gets.set(path, handler);
+      getOptions.set(path, options);
     }),
     put: vi.fn((path: string, _options: unknown, handler: RouteHandler) => {
       puts.set(path, handler);
@@ -108,7 +142,23 @@ function createRegisteredRoutes() {
   };
 
   registerVendorBillingProfileRoutes(app as never, {} as never);
-  return { gets, puts };
+  return { gets, getOptions, puts };
+}
+
+async function executeGetRoute(
+  route: string,
+  request: Parameters<RouteHandler>[0],
+  registered = createRegisteredRoutes(),
+) {
+  const reply = createReply();
+  for (const preHandler of registered.getOptions.get(route)?.preHandler ?? []) {
+    await preHandler(request, reply);
+    if (reply.sent) {
+      return { result: reply.payload, reply };
+    }
+  }
+  const result = await registered.gets.get(route)?.(request, reply);
+  return { result, reply };
 }
 
 describe('vendor billing profile service', () => {
@@ -118,6 +168,7 @@ describe('vendor billing profile service', () => {
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(null);
     prismaMock.vendorBillingProfile.upsert.mockResolvedValue(billingProfileRecord());
     prismaMock.vendorBillingProfile.update.mockResolvedValue(billingProfileRecord());
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
     prismaMock.vendorProfileAuditLog.createMany.mockResolvedValue({ count: 0 });
     prismaMock.vendorProfileAuditLog.findMany.mockResolvedValue([]);
   });
@@ -167,6 +218,72 @@ describe('vendor billing profile service', () => {
       updatedAt: '2026-06-05T10:00:00.000Z',
     });
     expect(JSON.stringify(result)).not.toMatch(/password|secret|token/i);
+  });
+
+  it('returns only the approved vendor billing and legal self-view fields', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(
+      billingProfileRecord({
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
+        iban: 'TR000000000000000000000000',
+        authorizedPerson: 'Owner',
+        billingEmail: 'billing@example.test',
+        billingPhone: '+905551112233',
+        legalEntityType: 'limited_company',
+        logoIsbasiCustomerCode: 'LOGO-CODE-1',
+        logoIsbasiCustomerId: 'LOGO-ID-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: now,
+        unexpectedInternalField: 'do-not-expose',
+      }),
+    );
+
+    const result = await getVendorBillingLegalSelfView('sporjinal');
+
+    expect(result).toEqual({
+      legalCompanyName: 'Sporjinal Spor Malzemeleri A.S.',
+      legalEntityType: 'limited_company',
+      taxNumber: '1111111111',
+      taxOffice: 'Kadikoy',
+      billingAddress: 'Billing address 1',
+      billingCity: 'Istanbul',
+      billingDistrict: 'Kadikoy',
+      authorizedPerson: 'Owner',
+      billingEmail: 'billing@example.test',
+      billingPhone: '+905551112233',
+      iban: 'TR000000000000000000000000',
+    });
+    expect(result).not.toHaveProperty('id');
+    expect(result).not.toHaveProperty('vendorId');
+    expect(result).not.toHaveProperty('createdAt');
+    expect(result).not.toHaveProperty('updatedAt');
+    expect(result).not.toHaveProperty('logoIsbasiCustomerCode');
+    expect(result).not.toHaveProperty('logoIsbasiCustomerId');
+    expect(result).not.toHaveProperty('logoIsbasiEinvoiceEligible');
+    expect(result).not.toHaveProperty('logoIsbasiLastCheckedAt');
+    expect(result).not.toHaveProperty('unexpectedInternalField');
+  });
+
+  it('preserves nullable values in the vendor billing and legal self-view', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(billingProfileRecord());
+
+    const result = await getVendorBillingLegalSelfView('sporjinal');
+
+    expect(result).toMatchObject({
+      legalEntityType: null,
+      billingCity: null,
+      billingDistrict: null,
+      authorizedPerson: null,
+      billingEmail: null,
+      billingPhone: null,
+      iban: null,
+    });
+  });
+
+  it('returns null for a missing vendor billing and legal self-view profile', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(null);
+
+    await expect(getVendorBillingLegalSelfView('sporjinal')).resolves.toBeNull();
   });
 
   it('upserts a trimmed billing profile for an existing vendor', async () => {
@@ -481,12 +598,98 @@ describe('vendor billing profile service', () => {
   });
 });
 
+describe('vendor billing context isolation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('resolves a vendor own linked context and denies an unlinked context', async () => {
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([
+      { vendorId: 'sporjinal', vendor: { name: 'Sporjinal', status: 'active' } },
+    ]);
+    const user = { id: 'vendor-user-1', role: 'vendor' as const };
+
+    await expect(resolveRequestVendorContext(user as never, 'sporjinal')).resolves.toMatchObject({
+      ok: true,
+      context: { vendorId: 'sporjinal' },
+    });
+    await expect(resolveRequestVendorContext(user as never, 'unlinked-vendor')).resolves.toEqual({
+      ok: false,
+      code: 403,
+      message: 'Requested vendor is not allowed for this user.',
+    });
+  });
+
+  it('requires an explicit context for a vendor linked to multiple vendors', async () => {
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([
+      { vendorId: 'vendor-a', vendor: { name: 'Vendor A', status: 'active' } },
+      { vendorId: 'vendor-b', vendor: { name: 'Vendor B', status: 'active' } },
+    ]);
+
+    await expect(resolveRequestVendorContext({ id: 'vendor-user-1', role: 'vendor' } as never)).resolves.toEqual({
+      ok: false,
+      code: 400,
+      message: 'Vendor context is required for this user.',
+    });
+  });
+});
+
 describe('vendor billing profile routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal' });
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(null);
     prismaMock.vendorBillingProfile.upsert.mockResolvedValue(billingProfileRecord());
+    authenticateRequestMock.mockClear();
+    requireVendorAccessMock.mockClear();
+  });
+
+  it('registers and serves the vendor self-view through auth, role, and vendor access guards', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(billingProfileRecord({
+      iban: 'TR000000000000000000000000',
+    }));
+    const registered = createRegisteredRoutes();
+    const options = registered.getOptions.get('/vendor/billing-profile');
+
+    expect(options?.preHandler).toHaveLength(3);
+    expect(options?.preHandler?.[0]).toBe(authenticateRequestMock);
+    expect(options?.preHandler?.[2]).toBe(requireVendorAccessMock);
+
+    const { result, reply } = await executeGetRoute('/vendor/billing-profile', {
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      headers: { 'x-vendor-id': 'sporjinal' },
+    }, registered);
+
+    expect(reply.sent).toBe(false);
+    expect(requireVendorAccessMock).toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      legalCompanyName: 'Sporjinal Spor Malzemeleri A.S.',
+      iban: 'TR000000000000000000000000',
+    }));
+    expect(result).not.toHaveProperty('vendorId');
+    expect(prismaMock.vendorBillingProfile.findUnique).toHaveBeenCalledWith({ where: { vendorId: 'sporjinal' } });
+  });
+
+  it('denies unauthenticated, admin, support, finance, and unlinked vendor self-view requests', async () => {
+    const unauthenticated = await executeGetRoute('/vendor/billing-profile', {});
+    expect(unauthenticated.reply.statusCode).toBe(401);
+
+    for (const role of ['admin', 'support', 'finance'] as const) {
+      const denied = await executeGetRoute('/vendor/billing-profile', {
+        authUser: { id: `${role}-user`, role },
+        headers: { 'x-vendor-id': 'sporjinal' },
+      });
+      expect(denied.reply.statusCode).toBe(403);
+      expect(denied.reply.payload).toEqual({ message: 'Vendor access required.' });
+    }
+
+    const unlinked = await executeGetRoute('/vendor/billing-profile', {
+      authUser: { id: 'vendor-user-1', role: 'vendor' },
+      headers: { 'x-vendor-id': 'unlinked-vendor' },
+    });
+    expect(unlinked.reply.statusCode).toBe(403);
+    expect(unlinked.reply.payload).toEqual({ message: 'Requested vendor is not allowed for this user.' });
+    expect(prismaMock.vendorBillingProfile.findUnique).not.toHaveBeenCalled();
   });
 
   it('requires admin access for billing profile reads', async () => {

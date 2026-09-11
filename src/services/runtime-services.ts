@@ -60,6 +60,7 @@ import type {
   ShippingProvider,
   VendorDirectoryResponse,
   VendorDirectoryStatusFilter,
+  VendorBillingLegalSelfView,
   VendorBillingProfileInput,
   VendorProvisioningInput,
   VendorProvisioningResult,
@@ -452,6 +453,10 @@ export const runtimeServices = {
     billingProfile: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.getVendorBillingProfile(vendorId, { signal: options.signal })
+        : Promise.resolve(null),
+    billingLegalSelfView: (options: ReadRequestOptions = {}): Promise<VendorBillingLegalSelfView | null> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.getVendorBillingLegalSelfView({ signal: options.signal })
         : Promise.resolve(null),
     profileAuditLogs: (vendorId = getCurrentVendorId(), options: ReadRequestOptions & { section?: string | null; limit?: number } = {}) =>
       runtimeConfig.apiMode === 'real'

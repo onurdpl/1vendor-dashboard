@@ -27,6 +27,20 @@ export type VendorBillingProfileDto = {
   updatedAt: string;
 };
 
+export type VendorBillingLegalSelfViewDto = {
+  legalCompanyName: string | null;
+  legalEntityType: string | null;
+  taxNumber: string | null;
+  taxOffice: string | null;
+  billingAddress: string | null;
+  billingCity: string | null;
+  billingDistrict: string | null;
+  authorizedPerson: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  iban: string | null;
+};
+
 export type VendorBillingProfileInputDto = {
   legalCompanyName?: unknown;
   taxNumber?: unknown;
@@ -107,6 +121,22 @@ function mapBillingProfile(profile: VendorBillingProfile): VendorBillingProfileD
   };
 }
 
+function mapBillingLegalSelfView(profile: VendorBillingProfile): VendorBillingLegalSelfViewDto {
+  return {
+    legalCompanyName: profile.legalCompanyName,
+    legalEntityType: profile.legalEntityType,
+    taxNumber: profile.taxNumber,
+    taxOffice: profile.taxOffice,
+    billingAddress: profile.billingAddress,
+    billingCity: profile.billingCity,
+    billingDistrict: profile.billingDistrict,
+    authorizedPerson: profile.authorizedPerson,
+    billingEmail: profile.billingEmail,
+    billingPhone: profile.billingPhone,
+    iban: profile.iban,
+  };
+}
+
 function normalizeBillingProfileInput(input: VendorBillingProfileInputDto) {
   return {
     legalCompanyName: trimRequiredString(input, 'legalCompanyName'),
@@ -151,6 +181,19 @@ export async function getVendorBillingProfile(vendorId: string): Promise<VendorB
   });
 
   return profile ? mapBillingProfile(profile) : null;
+}
+
+export async function getVendorBillingLegalSelfView(
+  vendorId: string,
+): Promise<VendorBillingLegalSelfViewDto | null> {
+  await assertVendorExists(vendorId);
+  const profile = await prisma.vendorBillingProfile.findUnique({
+    where: {
+      vendorId,
+    },
+  });
+
+  return profile ? mapBillingLegalSelfView(profile) : null;
 }
 
 export async function upsertVendorBillingProfile(

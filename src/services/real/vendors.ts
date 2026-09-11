@@ -14,6 +14,7 @@ import type {
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorBillingLegalSelfView,
   VendorDirectoryResponse,
   VendorDirectoryStatusFilter,
   VendorProvisioningInput,
@@ -22,6 +23,12 @@ import type {
   VendorStatus,
   VendorStatusInput,
 } from '../../lib/api/contracts';
+
+export function getVendorBillingLegalSelfView(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<VendorBillingLegalSelfView | null>('/vendor/billing-profile', {
+    signal: options.signal,
+  });
+}
 
 export function listAdminVendors(
   options: { search?: string | null; status?: VendorDirectoryStatusFilter; limit?: number; signal?: AbortSignal } = {},

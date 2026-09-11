@@ -2097,6 +2097,20 @@ export type VendorBillingProfile = {
   updatedAt: string;
 };
 
+export type VendorBillingLegalSelfView = {
+  legalCompanyName: string | null;
+  legalEntityType: string | null;
+  taxNumber: string | null;
+  taxOffice: string | null;
+  billingAddress: string | null;
+  billingCity: string | null;
+  billingDistrict: string | null;
+  authorizedPerson: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  iban: string | null;
+};
+
 export type VendorBillingProfileInput = {
   legalCompanyName: string;
   taxNumber: string;
