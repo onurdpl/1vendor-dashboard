@@ -1133,7 +1133,11 @@ describe('VendorProfilePage', () => {
     const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
     expect(warehouseSection).not.toBeNull();
     expect(await within(warehouseSection!).findByText('Review the return recipient destination before return workflows rely on it.')).toBeInTheDocument();
-    expect(within(warehouseSection!).getByText('Return destination location not configured')).toBeInTheDocument();
+    const returnDestinationGroup = within(warehouseSection!).getByRole('heading', { name: 'Return destination' }).closest('section');
+    expect(returnDestinationGroup).not.toBeNull();
+    expect(within(returnDestinationGroup!).getByText('Not configured')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Return destination location not configured')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Needs review')).toBeInTheDocument();
     expect(within(warehouseSection!).queryByText('Returns configured')).not.toBeInTheDocument();
     expect(within(warehouseSection!).queryByText('Konya / Selcuklu')).not.toBeInTheDocument();
   });
@@ -1151,7 +1155,7 @@ describe('VendorProfilePage', () => {
     const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
     expect(warehouseSection).not.toBeNull();
     expect(await within(warehouseSection!).findByText('Configure a warehouse or sender address for shipment work.')).toBeInTheDocument();
-    expect(within(warehouseSection!).getByText('Not configured')).toBeInTheDocument();
+    expect(within(warehouseSection!).getAllByText('Not configured')).toHaveLength(2);
     expect(within(warehouseSection!).getByText('Location not configured')).toBeInTheDocument();
     expect(within(warehouseSection!).queryByText('Main warehouse')).not.toBeInTheDocument();
     expect(within(warehouseSection!).queryByText('Istanbul warehouse')).not.toBeInTheDocument();
@@ -1278,6 +1282,24 @@ describe('VendorProfilePage', () => {
     expect(financePolicySection).not.toBeNull();
     expect(await within(financePolicySection!).findByText('Fixed shipping fee')).toBeInTheDocument();
     expect(within(financePolicySection!).getByText('39.90')).toBeInTheDocument();
+    expect(within(financePolicySection!).getByText('Deduct after fulfillment')).toBeInTheDocument();
+    expect(within(financePolicySection!).getByText('Yes')).toBeInTheDocument();
+  });
+
+  it('omits deduct-after-fulfillment metadata when shipping deduction is disabled', async () => {
+    getFinanceProfileMock.mockResolvedValue({
+      ...financeProfile,
+      shippingMode: 'disabled',
+      deductShippingEnabled: true,
+    });
+
+    renderVendorProfilePage();
+
+    const financePolicySection = (await screen.findByRole('heading', { name: 'Finance Policy' })).closest('section');
+    expect(financePolicySection).not.toBeNull();
+    expect(await within(financePolicySection!).findByText('Shipping deduction mode')).toBeInTheDocument();
+    expect(within(financePolicySection!).getByText('Disabled')).toBeInTheDocument();
+    expect(within(financePolicySection!).queryByText('Deduct after fulfillment')).not.toBeInTheDocument();
   });
 
   it('renders a section-local loading state without fabricated vendor finance values', async () => {
@@ -1350,6 +1372,7 @@ describe('VendorProfilePage', () => {
       .then((heading) => heading.closest('section'));
     expect(requestChangesSection).not.toBeNull();
     await waitFor(() => expect(within(requestChangesSection!).getByText('Correction ticket open')).toBeInTheDocument());
+    expect(within(requestChangesSection!).queryByText('Vendor profile settings correction is open.')).not.toBeInTheDocument();
     expect(screen.getAllByText('Correction ticket open')).toHaveLength(1);
     const accountSection = screen.getByRole('heading', { name: 'My Account' }).closest('section');
     expect(accountSection).not.toBeNull();
@@ -1360,6 +1383,39 @@ describe('VendorProfilePage', () => {
 
     expect(await screen.findByText('Vendor support detail route')).toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['IN_REVIEW', 'Vendor profile settings correction is in review.'],
+    ['WAITING_FOR_VENDOR', 'Vendor profile settings correction is waiting for vendor.'],
+  ] as const)('preserves informative correction-ticket copy for %s', async (status, expectedCopy) => {
+    listVendorSupportTicketsMock.mockResolvedValue([supportTicket({ status })]);
+
+    renderVendorProfilePage();
+
+    const requestChangesSection = await screen
+      .findByRole('heading', { name: 'Request Changes' })
+      .then((heading) => heading.closest('section'));
+    expect(requestChangesSection).not.toBeNull();
+    expect(await within(requestChangesSection!).findByText(expectedCopy)).toBeInTheDocument();
+    expect(within(requestChangesSection!).getByText('Correction ticket open')).toBeInTheDocument();
+    expect(within(requestChangesSection!).getByRole('button', { name: 'Open correction ticket' })).toBeInTheDocument();
+  });
+
+  it('preserves a materially different correction-ticket subject in the OPEN state', async () => {
+    listVendorSupportTicketsMock.mockResolvedValue([
+      supportTicket({ subject: 'Warehouse address correction', status: 'OPEN' }),
+    ]);
+
+    renderVendorProfilePage();
+
+    const requestChangesSection = await screen
+      .findByRole('heading', { name: 'Request Changes' })
+      .then((heading) => heading.closest('section'));
+    expect(requestChangesSection).not.toBeNull();
+    expect(await within(requestChangesSection!).findByText('Warehouse address correction is open.')).toBeInTheDocument();
+    expect(within(requestChangesSection!).getByText('Correction ticket open')).toBeInTheDocument();
+    expect(within(requestChangesSection!).getByRole('button', { name: 'Open correction ticket' })).toBeInTheDocument();
   });
 
   it('hides safe cleanup placeholders without rendering a broad editor before billing edit is opened', async () => {

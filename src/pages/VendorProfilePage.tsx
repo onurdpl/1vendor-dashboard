@@ -1281,7 +1281,7 @@ export function VendorProfilePage() {
   const navlungoReturnLocation = getNavlungoReturnLocation(shippingConfig);
   const navlungoSenderLocation = getNavlungoSenderLocation(shippingConfig);
   const forwardWarehouseLocation = navlungoSenderLocation || defaultWarehouse?.address || defaultWarehouse?.name || null;
-  const returnDestinationLocation = navlungoReturnLocation || 'Return destination location not configured';
+  const returnDestinationLocation = navlungoReturnLocation || 'Not configured';
   const warehouseReturnValuesAvailable = Boolean(
     defaultWarehouse?.name?.trim() ||
       defaultWarehouse?.address?.trim() ||
@@ -2487,7 +2487,9 @@ export function VendorProfilePage() {
                   </MetadataGroup>
                   <MetadataGroup title="Shipping deduction">
                     <MetadataRow label="Shipping deduction mode" value={formatShippingMode(financeProfile.shippingMode)} />
-                    <MetadataRow label="Deduct after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
+                    {financeProfile.shippingMode !== 'disabled' ? (
+                      <MetadataRow label="Deduct after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
+                    ) : null}
                     {financeProfile.shippingMode === 'fixed' ? (
                       <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
                     ) : null}
@@ -2524,11 +2526,13 @@ export function VendorProfilePage() {
             <div className={isVendor ? 'vendor-profile-support-panel vendor-profile-support-panel-flat' : 'vendor-profile-support-panel'}>
               <div>
                 <strong>{existingProfileTicket ? 'Correction ticket open' : 'Open correction ticket'}</strong>
-                <p>
-                  {existingProfileTicket
-                    ? `${existingProfileTicket.subject} is ${safeStatusLabel(existingProfileTicket.status).toLowerCase()}.`
-                    : 'Request Marketplace support to review account or managed setting changes.'}
-                </p>
+                {existingProfileTicket?.status === 'OPEN' && existingProfileTicket.subject === 'Vendor profile settings correction' ? null : (
+                  <p>
+                    {existingProfileTicket
+                      ? `${existingProfileTicket.subject} is ${safeStatusLabel(existingProfileTicket.status).toLowerCase()}.`
+                      : 'Request Marketplace support to review account or managed setting changes.'}
+                  </p>
+                )}
               </div>
               <OperationalActionGroup>
                 <button
