@@ -15807,6 +15807,31 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.86rem;
 }
 
+.vendor-profile-warehouse-returns {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-profile-warehouse-returns-source {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.vendor-profile-warehouse-returns-state {
+  display: grid;
+  gap: 8px;
+}
+
+.vendor-profile-warehouse-returns-state > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
 .vendor-profile-finance-policy {
   display: grid;
   gap: 12px;

@@ -1247,6 +1247,12 @@ export function VendorProfilePage() {
   const navlungoSenderLocation = getNavlungoSenderLocation(shippingConfig);
   const forwardWarehouseLocation = navlungoSenderLocation || defaultWarehouse?.address || defaultWarehouse?.name || null;
   const returnDestinationLocation = navlungoReturnLocation || 'Return destination location not configured';
+  const warehouseReturnValuesAvailable = Boolean(
+    defaultWarehouse?.name?.trim() ||
+      defaultWarehouse?.address?.trim() ||
+      forwardWarehouseLocation ||
+      navlungoReturnLocation,
+  );
   const shippingDataLoaded = Boolean(!shippingQuery.isInitialLoading && shippingConfig);
   const financeDataLoaded = Boolean(!financeQuery.isInitialLoading && financeQuery.data);
   const supportDataLoaded = Boolean(!supportQuery.isInitialLoading && supportQuery.data);
@@ -2236,7 +2242,12 @@ export function VendorProfilePage() {
   ] as const;
   const visibleManagedSettings = isVendor
     ? managedSettings.filter(
-        (setting) => setting.title !== 'Shipping' && setting.title !== 'Finance Policy' && setting.title !== 'Integrations',
+        (setting) =>
+          setting.title !== 'Shipping' &&
+          setting.title !== 'Returns' &&
+          setting.title !== 'Finance Policy' &&
+          setting.title !== 'Warehouse' &&
+          setting.title !== 'Integrations',
       )
     : managedSettings;
 
@@ -2370,6 +2381,54 @@ export function VendorProfilePage() {
                   <MetadataGroup title="Package and tax defaults">
                     <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
                     <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
+                  </MetadataGroup>
+                </div>
+              )}
+            </OperationalSection>
+          ) : null}
+
+          {isVendor ? (
+            <OperationalSection title="Warehouse and returns">
+              {shippingQuery.isError && !shippingConfig ? (
+                <SectionErrorRetry
+                  title="Warehouse setup unavailable"
+                  description={shippingQuery.error ?? 'Unable to load warehouse and return destination metadata.'}
+                  onRetry={() => void shippingQuery.refetch()}
+                />
+              ) : shippingQuery.isInitialLoading || !shippingConfig ? (
+                <SectionSkeleton title="Loading warehouse setup" description="Fetching warehouse and return destination metadata." />
+              ) : (
+                <div className="vendor-profile-warehouse-returns">
+                  {shippingConfig.source === 'default' && warehouseReturnValuesAvailable ? (
+                    <p className="vendor-profile-warehouse-returns-source">{formatSource(shippingConfig.source)}</p>
+                  ) : null}
+                  {!warehouseConfigured || !returnsConfigured ? (
+                    <div className="vendor-profile-warehouse-returns-state">
+                      {!warehouseConfigured ? (
+                        <div>
+                          <StatusBadge tone="warning">Needs review</StatusBadge>
+                          <span>Configure a warehouse or sender address for shipment work.</span>
+                        </div>
+                      ) : null}
+                      {!returnsConfigured ? (
+                        <div>
+                          <StatusBadge tone="warning">Needs review</StatusBadge>
+                          <span>Review the return recipient destination before return workflows rely on it.</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <MetadataGroup title="Default warehouse">
+                    <MetadataRow label="Name" value={formatValue(defaultWarehouse?.name)} />
+                    {defaultWarehouse?.address?.trim() ? (
+                      <MetadataRow label="Address summary" value={defaultWarehouse.address} />
+                    ) : null}
+                  </MetadataGroup>
+                  <MetadataGroup title="Forward warehouse">
+                    <MetadataRow label="Location" value={formatValue(forwardWarehouseLocation, 'Location not configured')} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Return destination">
+                    <MetadataRow label="Location" value={returnDestinationLocation} />
                   </MetadataGroup>
                 </div>
               )}

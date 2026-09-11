@@ -821,17 +821,16 @@ describe('VendorProfilePage', () => {
     expect(managedSection).not.toBeNull();
     expect(within(managedSection!).getByText('These settings are managed by the Marketplace. If something needs to change, open a correction ticket.')).toBeInTheDocument();
     expect(within(managedSection!).queryByText('Shipping')).not.toBeInTheDocument();
-    expect(within(managedSection!).getByText('Returns')).toBeInTheDocument();
+    expect(within(managedSection!).queryByText('Returns')).not.toBeInTheDocument();
     expect(within(managedSection!).queryByText('Finance Policy')).not.toBeInTheDocument();
-    expect(within(managedSection!).getByText('Warehouse')).toBeInTheDocument();
+    expect(within(managedSection!).queryByText('Warehouse')).not.toBeInTheDocument();
     expect(within(managedSection!).getByText('Billing')).toBeInTheDocument();
     expect(within(managedSection!).queryByText('Integrations')).not.toBeInTheDocument();
-    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(3);
-    await waitFor(() => expect(within(managedSection!).getAllByText('Configured').length).toBeGreaterThanOrEqual(2));
+    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(1);
 
     const shippingSection = screen.getByRole('heading', { name: 'Shipping' }).closest('section');
     expect(shippingSection).not.toBeNull();
-    expect(within(shippingSection!).getByRole('heading', { name: 'Delivery configuration' })).toBeInTheDocument();
+    expect(await within(shippingSection!).findByRole('heading', { name: 'Delivery configuration' })).toBeInTheDocument();
     expect(within(shippingSection!).getByText('Provider')).toBeInTheDocument();
     expect(within(shippingSection!).getByText('Navlungo')).toBeInTheDocument();
     expect(within(shippingSection!).getByText('Shipping enabled')).toBeInTheDocument();
@@ -845,10 +844,23 @@ describe('VendorProfilePage', () => {
     expect(within(shippingSection!).queryByText('Ready')).not.toBeInTheDocument();
     expect(screen.queryByText('2547')).not.toBeInTheDocument();
     expect(screen.queryByText('55574')).not.toBeInTheDocument();
-    expect(screen.queryByText('Istanbul warehouse')).not.toBeInTheDocument();
-    expect(screen.queryByText('Mugla')).not.toBeInTheDocument();
-    expect(screen.queryByText('Konya')).not.toBeInTheDocument();
     expect(within(shippingSection!).queryByRole('button')).not.toBeInTheDocument();
+
+    const warehouseSection = screen.getByRole('heading', { name: 'Warehouse and returns' }).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(within(warehouseSection!).getByRole('heading', { name: 'Default warehouse' })).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Main warehouse')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Istanbul warehouse')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByRole('heading', { name: 'Forward warehouse' })).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Mugla / Fethiye')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByRole('heading', { name: 'Return destination' })).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Konya / Selcuklu')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Navlungo')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Configured')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Returns configured')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('55574')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('55578')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByRole('button')).not.toBeInTheDocument();
 
     const financePolicySection = screen.getByRole('heading', { name: 'Finance Policy' }).closest('section');
     expect(financePolicySection).not.toBeNull();
@@ -888,15 +900,12 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('heading', { name: 'Automation visibility ready' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Billing / Legal Profile' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipping operations' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Warehouse and returns' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Integration status' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Additional seller profile fields' })).not.toBeInTheDocument();
     expect(screen.queryByText('Commission %')).not.toBeInTheDocument();
     expect(screen.queryByText('Commission VAT %')).not.toBeInTheDocument();
     expect(screen.queryByText('Deduct shipping after fulfillment')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider configuration status')).not.toBeInTheDocument();
-    expect(screen.queryByText('Default warehouse')).not.toBeInTheDocument();
-    expect(screen.queryByText('Forward warehouse')).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
@@ -1029,6 +1038,71 @@ describe('VendorProfilePage', () => {
     expect(within(shippingSection!).getByText('3.00')).toBeInTheDocument();
     expect(within(shippingSection!).getByText('18.00%')).toBeInTheDocument();
     expect(within(shippingSection!).queryByText('Configured')).not.toBeInTheDocument();
+    const warehouseSection = screen.getByRole('heading', { name: 'Warehouse and returns' }).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(within(warehouseSection!).getAllByText('Marketplace default fallback')).toHaveLength(1);
+    expect(within(warehouseSection!).getByText('Main warehouse')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Konya / Selcuklu')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Configured')).not.toBeInTheDocument();
+  });
+
+  it('shows the existing return-destination exception without fabricating a location', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoSenderCity: 'Mugla',
+        navlungoSenderDistrict: 'Fethiye',
+      },
+    });
+
+    renderVendorProfilePage();
+
+    const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(await within(warehouseSection!).findByText('Review the return recipient destination before return workflows rely on it.')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Return destination location not configured')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Returns configured')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Konya / Selcuklu')).not.toBeInTheDocument();
+  });
+
+  it('shows the existing warehouse exception without fabricating warehouse data', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      defaultWarehouseId: null,
+      warehouses: [],
+      providerMetadata: {},
+    });
+
+    renderVendorProfilePage();
+
+    const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(await within(warehouseSection!).findByText('Configure a warehouse or sender address for shipment work.')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Not configured')).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Location not configured')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Istanbul warehouse')).not.toBeInTheDocument();
+  });
+
+  it('does not claim fallback warehouse values when the default shipping config has none', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      defaultWarehouseId: null,
+      warehouses: [],
+      providerMetadata: {},
+      source: 'default',
+    });
+
+    renderVendorProfilePage();
+
+    const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(await within(warehouseSection!).findByText('Configure a warehouse or sender address for shipment work.')).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Marketplace default fallback')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Configured')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Main warehouse')).not.toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Konya / Selcuklu')).not.toBeInTheDocument();
   });
 
   it('shows the existing needs-review shipping exception without claiming execution failure', async () => {
@@ -1057,6 +1131,28 @@ describe('VendorProfilePage', () => {
     expect(within(shippingSection!).getByRole('heading', { name: 'Loading shipping setup' })).toBeInTheDocument();
     expect(within(shippingSection!).queryByText('Provider')).not.toBeInTheDocument();
     expect(within(shippingSection!).queryByText('Navlungo')).not.toBeInTheDocument();
+    const warehouseSection = screen.getByRole('heading', { name: 'Warehouse and returns' }).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(within(warehouseSection!).getByRole('heading', { name: 'Loading warehouse setup' })).toBeInTheDocument();
+    expect(within(warehouseSection!).queryByText('Default warehouse')).not.toBeInTheDocument();
+  });
+
+  it('renders a section-local warehouse error and retries the existing shipping query', async () => {
+    getVendorShippingConfigMock
+      .mockRejectedValueOnce(new Error('Warehouse configuration failed to load.'))
+      .mockResolvedValueOnce(shippingConfig);
+
+    renderVendorProfilePage();
+
+    const warehouseSection = (await screen.findByRole('heading', { name: 'Warehouse and returns' })).closest('section');
+    expect(warehouseSection).not.toBeNull();
+    expect(await within(warehouseSection!).findByRole('heading', { name: 'Warehouse setup unavailable' })).toBeInTheDocument();
+    expect(within(warehouseSection!).getByText('Warehouse configuration failed to load.')).toBeInTheDocument();
+
+    await userEvent.click(within(warehouseSection!).getByRole('button', { name: 'Retry' }));
+
+    expect(await within(warehouseSection!).findByText('Main warehouse')).toBeInTheDocument();
+    expect(getVendorShippingConfigMock).toHaveBeenCalledTimes(2);
   });
 
   it('renders a section-local vendor shipping error and retries the existing query', async () => {
