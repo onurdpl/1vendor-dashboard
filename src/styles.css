@@ -15787,6 +15787,22 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.86rem;
 }
 
+.vendor-profile-finance-policy {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-profile-finance-policy-source {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.vendor-profile-finance-policy-state {
+  display: flex;
+  align-items: center;
+}
+
 .vendor-profile-readiness-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

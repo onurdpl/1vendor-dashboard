@@ -2235,7 +2235,7 @@ export function VendorProfilePage() {
     },
   ] as const;
   const visibleManagedSettings = isVendor
-    ? managedSettings.filter((setting) => setting.title !== 'Integrations')
+    ? managedSettings.filter((setting) => setting.title !== 'Finance Policy' && setting.title !== 'Integrations')
     : managedSettings;
 
   return (
@@ -2339,6 +2339,46 @@ export function VendorProfilePage() {
               </div>
             </div>
           </OperationalSection>
+
+          {isVendor ? (
+            <OperationalSection title="Finance Policy">
+              {financeQuery.isError && !financeProfile ? (
+                <SectionErrorRetry
+                  title="Finance policy unavailable"
+                  description={financeQuery.error ?? 'Unable to load the vendor commercial profile.'}
+                  onRetry={() => void financeQuery.refetch()}
+                />
+              ) : financeQuery.isInitialLoading || !financeProfile ? (
+                <SectionSkeleton title="Loading finance policy" description="Fetching the current vendor finance profile." />
+              ) : (
+                <div className="vendor-profile-finance-policy">
+                  {financeProfile.source === 'default' ? (
+                    <p className="vendor-profile-finance-policy-source">{formatSource(financeProfile.source)}</p>
+                  ) : null}
+                  {!financeProfile.active ? (
+                    <div className="vendor-profile-finance-policy-state">
+                      <StatusBadge tone="warning">Needs review</StatusBadge>
+                    </div>
+                  ) : null}
+                  <MetadataGroup title="Commercial rates">
+                    <MetadataRow label="Commission" value={`${financeProfile.commissionPercent}%`} />
+                    <MetadataRow label="Commission VAT" value={`${financeProfile.commissionVatPercent}%`} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Shipping deduction">
+                    <MetadataRow label="Shipping deduction mode" value={formatShippingMode(financeProfile.shippingMode)} />
+                    <MetadataRow label="Deduct after fulfillment" value={formatBoolean(financeProfile.deductShippingEnabled)} />
+                    {financeProfile.shippingMode === 'fixed' ? (
+                      <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
+                    ) : null}
+                  </MetadataGroup>
+                  <MetadataGroup title="Settlement schedule">
+                    <MetadataRow label="Settlement delay" value={`${financeProfile.settlementDelayDays} days`} />
+                    <MetadataRow label="Settlement schedule" value={formatSettlementSchedule(financeProfile)} />
+                  </MetadataGroup>
+                </div>
+              )}
+            </OperationalSection>
+          ) : null}
 
           <OperationalSection title="Request Changes">
             <div className={isVendor ? 'vendor-profile-support-panel vendor-profile-support-panel-flat' : 'vendor-profile-support-panel'}>
