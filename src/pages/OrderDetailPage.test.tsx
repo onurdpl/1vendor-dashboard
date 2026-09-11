@@ -3295,6 +3295,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
   });
 
   it('shows selected item rejection on detail for multi-line rejectable allocations', async () => {
+    const user = userEvent.setup();
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -3339,7 +3340,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const orderIssue = await screen.findByLabelText('Order issue');
     expect(within(orderIssue).getByRole('heading', { name: 'Order issue' })).toBeInTheDocument();
-    expect(within(orderIssue).getByText('Reject selected items or send the full order to admin review.')).toBeInTheDocument();
+    expect(within(orderIssue).queryByText('Unavailable items')).not.toBeInTheDocument();
+    expect(within(orderIssue).queryByText('Reject selected items or send the full order to admin review.')).not.toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject selected items' })).toBeInTheDocument();
     expect(within(orderIssue).getByRole('button', { name: 'Reject full order' })).toBeInTheDocument();
     const shipmentSection = screen.getByRole('heading', { name: 'Fulfillment' }).closest('article') as HTMLElement;
@@ -3352,9 +3354,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       shipmentSection.compareDocumentPosition(orderIssue) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Reject selected items' }));
+    await user.click(within(orderIssue).getByRole('button', { name: 'Reject selected items' }));
 
-    expect(screen.getByRole('dialog', { name: 'Reject selected items' })).toBeInTheDocument();
+    const splitDialog = screen.getByRole('dialog', { name: 'Reject selected items' });
+    expect(splitDialog).toBeInTheDocument();
+    await user.click(within(splitDialog).getByRole('button', { name: 'Close reject selected items form' }));
+
+    await user.click(within(orderIssue).getByRole('button', { name: 'Reject full order' }));
+
+    const fullOrderDialog = screen.getByRole('dialog', { name: 'Reject order' });
+    expect(within(fullOrderDialog).getByText('This will block fulfillment and send the order to Sporgym admin review.')).toBeInTheDocument();
+    expect(within(fullOrderDialog).getByLabelText('Reason')).toBeInTheDocument();
+    expect(within(fullOrderDialog).getByLabelText('Note')).toBeInTheDocument();
+    expect(within(fullOrderDialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(fullOrderDialog).getByRole('button', { name: 'Reject order' })).toBeInTheDocument();
   });
 
   it('lets a vendor reject the full order from the detail right panel', async () => {
@@ -9036,6 +9049,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const createShipmentButton = screen.getByRole('button', { name: 'Create shipment' });
     expect(createShipmentButton).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeDisabled();
+    const orderIssue = screen.getByLabelText('Order issue');
+    expect(within(orderIssue).getByText('Unavailable while your account is restricted.')).toBeInTheDocument();
+    expect(within(orderIssue).queryByRole('button', { name: 'Reject selected items' })).not.toBeInTheDocument();
+    expect(within(orderIssue).getByRole('button', { name: 'Reject full order' })).toBeDisabled();
 
     await user.click(createShipmentButton);
 

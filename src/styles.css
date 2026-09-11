@@ -12960,28 +12960,6 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 8px;
 }
 
-.allocation-split-entry-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid #fecaca;
-  border-radius: 14px;
-  background: #fff7ed;
-  padding: 12px;
-}
-
-.allocation-split-entry-card div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.allocation-split-entry-card span {
-  color: #64748b;
-  font-size: 0.86rem;
-}
-
 @media (max-width: 720px) {
   .allocation-split-two-column,
   .allocation-split-preview-grid,
@@ -12998,9 +12976,10 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-column: 3;
   }
 
-  .allocation-split-entry-card {
-    align-items: stretch;
-    flex-direction: column;
+  .order-detail-sidebar-flow .orders-reject-action-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 }
 

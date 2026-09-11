@@ -8009,40 +8009,34 @@ export function OrderDetailPage() {
                     <h2>Order issue</h2>
                   </div>
                 </div>
-                <div className="allocation-split-entry-card">
-                  <div>
-                    <strong>Unavailable items</strong>
-                    <span>Reject selected items or send the full order to admin review.</span>
-                  </div>
-                  {vendorRestricted ? <p className="restricted-action-message">{RESTRICTED_ACTION_MESSAGE}</p> : null}
-                  <div className="orders-reject-action-stack">
-                    {canOpenSplitRejectBeforeRestriction ? (
-                      <button
-                        type="button"
-                        className="button button-danger"
-                        disabled={vendorRestricted}
-                        title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
-                        onClick={() => setSplitRejectOpen(true)}
-                      >
-                        Reject selected items
-                      </button>
-                    ) : null}
-                    {canOpenFullRejectBeforeRestriction ? (
-                      <button
-                        type="button"
-                        className={canOpenSplitRejectBeforeRestriction ? 'button button-secondary' : 'button button-danger'}
-                        disabled={vendorRestricted}
-                        title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
-                        onClick={() => {
-                          setRejectReason('OUT_OF_STOCK');
-                          setRejectNote('');
-                          setFullRejectOpen(true);
-                        }}
-                      >
-                        Reject full order
-                      </button>
-                    ) : null}
-                  </div>
+                {vendorRestricted ? <p className="restricted-action-message">{RESTRICTED_ACTION_MESSAGE}</p> : null}
+                <div className="orders-reject-action-stack">
+                  {canOpenSplitRejectBeforeRestriction ? (
+                    <button
+                      type="button"
+                      className="button button-danger"
+                      disabled={vendorRestricted}
+                      title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
+                      onClick={() => setSplitRejectOpen(true)}
+                    >
+                      Reject selected items
+                    </button>
+                  ) : null}
+                  {canOpenFullRejectBeforeRestriction ? (
+                    <button
+                      type="button"
+                      className={canOpenSplitRejectBeforeRestriction ? 'button button-secondary' : 'button button-danger'}
+                      disabled={vendorRestricted}
+                      title={vendorRestricted ? RESTRICTED_ACTION_MESSAGE : undefined}
+                      onClick={() => {
+                        setRejectReason('OUT_OF_STOCK');
+                        setRejectNote('');
+                        setFullRejectOpen(true);
+                      }}
+                    >
+                      Reject full order
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ) : null}
