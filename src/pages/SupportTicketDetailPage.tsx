@@ -538,6 +538,7 @@ export function SupportTicketDetailPage() {
     });
   }
   const hasAssignmentRecommendation = supportRecommendations.some((recommendation) => recommendation.type === 'support_assignment');
+  const hasSideContent = isAdmin || supportRecommendations.length > 0;
 
   return (
     <section className="op-page support-detail-page">
@@ -546,7 +547,7 @@ export function SupportTicketDetailPage() {
           <Link to={isAdmin ? '/admin/support' : '/support'} className="return-review-back">
             {'<-'} Back to support
           </Link>
-          <p className="eyebrow">Ticket #{ticket.id}</p>
+          <p className="support-ticket-id">Ticket #{ticket.id}</p>
           <h1>{ticket.subject}</h1>
         </div>
         <div className="support-ticket-metadata" aria-label="Ticket metadata">
@@ -575,14 +576,11 @@ export function SupportTicketDetailPage() {
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
 
-      <div className="support-detail-grid">
+      <div className={`support-detail-grid${hasSideContent ? '' : ' support-detail-grid-single'}`}>
         <main className="support-detail-main">
           <article className="support-card support-conversation-card">
             <div className="support-card-header support-conversation-header">
-              <div>
-                <p className="eyebrow">Conversation</p>
-                <h3>Public thread</h3>
-              </div>
+              <h3>Conversation</h3>
               <div className="support-conversation-state">
                 <StatusBadge tone={story.replyOwnerTone}>{story.replyOwnerLabel}</StatusBadge>
                 {!isAdmin && ticket.status === 'WAITING_FOR_VENDOR' ? <span>Waiting for your reply.</span> : null}
@@ -622,7 +620,7 @@ export function SupportTicketDetailPage() {
                   value={replyMessage}
                   onChange={(event) => setReplyMessage(event.target.value)}
                   placeholder="Write a public reply..."
-                  rows={4}
+                  rows={3}
                 />
                 {isAdmin ? (
                   <div className="support-reply-tools">
@@ -732,7 +730,7 @@ export function SupportTicketDetailPage() {
             <summary>
               <span>
                 <span className="eyebrow">History</span>
-                <strong>Activity history ({unifiedTimeline.length} events)</strong>
+                <strong>Activity history ({unifiedTimeline.length} {unifiedTimeline.length === 1 ? 'event' : 'events'})</strong>
               </span>
               <span>Expand to view events</span>
             </summary>

@@ -134,6 +134,7 @@ describe('SupportTicketDetailPage context visibility', () => {
     expect(within(metadata).getByText(/May 16, 2026/)).toBeInTheDocument();
     expect(within(metadata).getByText('Priority')).toBeInTheDocument();
     expect(within(metadata).getByText('Normal')).toBeInTheDocument();
+    expect(screen.getByText('Activity history (1 event)')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Operations Summary' })).not.toBeInTheDocument();
     expect(document.querySelector('.support-command-grid')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Context summary' })).not.toBeInTheDocument();
@@ -190,6 +191,7 @@ describe('SupportTicketDetailPage context visibility', () => {
     expect(screen.getAllByRole('button', { name: 'Mark Waiting For Vendor' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Mark Resolved' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mark Closed' })).toBeInTheDocument();
+    expect(document.querySelector('.support-detail-grid-single')).not.toBeInTheDocument();
     const history = screen.getByText(/Activity history/).closest('details') as HTMLDetailsElement;
     const audit = screen.getByText('Audit Details').closest('details') as HTMLDetailsElement;
     expect(history.open).toBe(false);
@@ -296,8 +298,9 @@ describe('SupportTicketDetailPage context visibility', () => {
 
     renderPage('/admin/support/ticket-1');
 
-    const conversationHeading = await screen.findByRole('heading', { name: 'Public thread' });
+    const conversationHeading = await screen.findByRole('heading', { name: 'Conversation' });
     const conversation = conversationHeading.closest('article') as HTMLElement;
+    expect(screen.queryByRole('heading', { name: 'Public thread' })).not.toBeInTheDocument();
     expect(within(conversation).getByText('Please help with this return.')).toBeInTheDocument();
     expect(within(conversation).getByText('Here is the requested context.')).toBeInTheDocument();
     expect(screen.getAllByText('Admin reply required')).toHaveLength(1);
@@ -331,6 +334,8 @@ describe('SupportTicketDetailPage context visibility', () => {
     expect(screen.queryByText('Public support replies will appear here.')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Support review' })).not.toBeInTheDocument();
     expect(screen.queryByText('Support is reviewing this.')).not.toBeInTheDocument();
+    expect(document.querySelector('.support-detail-grid-single')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveAttribute('rows', '3');
 
     await user.type(screen.getByPlaceholderText('Write a public reply...'), 'Vendor reply');
     await user.click(screen.getByRole('button', { name: 'Post reply' }));
@@ -403,6 +408,7 @@ describe('SupportTicketDetailPage context visibility', () => {
 
     expect(await screen.findByRole('button', { name: 'Post reply' })).toBeDisabled();
     expect(getVendorSupportTicketMock).toHaveBeenCalledWith('ticket-1');
+    expect(document.querySelector('.support-detail-grid-single')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Manage ticket' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Audit Details' })).not.toBeInTheDocument();
   });
@@ -546,7 +552,7 @@ describe('SupportTicketDetailPage context visibility', () => {
 
     renderPage('/admin/support/ticket-1');
 
-    await screen.findByRole('heading', { name: 'Public thread' });
+    await screen.findByRole('heading', { name: 'Conversation' });
     await userEvent.selectOptions(screen.getByLabelText('Reply template'), 'Tracking required');
 
     expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue(

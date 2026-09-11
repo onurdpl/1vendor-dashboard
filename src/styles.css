@@ -13214,16 +13214,16 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .support-detail-header {
-  padding: 18px 20px;
+  padding: 14px 18px;
 }
 
 .support-command-header {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
 .support-detail-header h1 {
-  margin: 6px 0;
+  margin: 0;
   color: #0f172a;
   font-size: 1.7rem;
 }
@@ -13231,6 +13231,27 @@ summary.provider-response-heading::-webkit-details-marker {
 .support-detail-header p {
   margin: 0;
   color: #64748b;
+}
+
+.support-ticket-heading {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.support-ticket-heading .return-review-back {
+  margin-bottom: 0;
+}
+
+.support-detail-header .support-ticket-id {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-transform: none;
 }
 
 .support-card-header,
@@ -13245,7 +13266,7 @@ summary.provider-response-heading::-webkit-details-marker {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 20px;
-  padding-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid #e2e8f0;
 }
 
@@ -13273,6 +13294,10 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 16px;
   align-items: start;
+}
+
+.support-detail-grid-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .support-detail-main,
@@ -13549,6 +13574,10 @@ summary.provider-response-heading::-webkit-details-marker {
 .support-conversation-card .support-note-form {
   padding-top: 16px;
   border-top: 1px solid #e2e8f0;
+}
+
+.support-conversation-card .support-note-form > .button {
+  justify-self: end;
 }
 
 .support-note-form textarea {
