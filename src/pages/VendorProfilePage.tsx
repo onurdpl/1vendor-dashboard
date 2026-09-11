@@ -2240,17 +2240,6 @@ export function VendorProfilePage() {
       tone: canLoadProfile ? 'success' : 'warning',
     },
   ] as const;
-  const visibleManagedSettings = isVendor
-    ? managedSettings.filter(
-        (setting) =>
-          setting.title !== 'Shipping' &&
-          setting.title !== 'Returns' &&
-          setting.title !== 'Finance Policy' &&
-          setting.title !== 'Warehouse' &&
-          setting.title !== 'Integrations',
-      )
-    : managedSettings;
-
   return (
     <section className="op-page vendor-profile-page">
       <div className="vendor-profile-shell" data-testid="vendor-profile-shell">
@@ -2334,24 +2323,26 @@ export function VendorProfilePage() {
             </MetadataGroup>
           </OperationalSection>
 
-          <OperationalSection title="Marketplace Managed Settings">
-            <div className="vendor-managed-settings">
-              <p className="vendor-managed-settings-notice">
-                These settings are managed by the Marketplace. If something needs to change, open a correction ticket.
-              </p>
-              <div className="vendor-managed-settings-list">
-                {visibleManagedSettings.map((setting) => (
-                  <div className="vendor-managed-settings-row" key={setting.title}>
-                    <div>
-                      <strong>{setting.title}</strong>
-                      <span>{setting.description}</span>
+          {!isVendor ? (
+            <OperationalSection title="Marketplace Managed Settings">
+              <div className="vendor-managed-settings">
+                <p className="vendor-managed-settings-notice">
+                  These settings are managed by the Marketplace. If something needs to change, open a correction ticket.
+                </p>
+                <div className="vendor-managed-settings-list">
+                  {managedSettings.map((setting) => (
+                    <div className="vendor-managed-settings-row" key={setting.title}>
+                      <div>
+                        <strong>{setting.title}</strong>
+                        <span>{setting.description}</span>
+                      </div>
+                      <StatusBadge tone={setting.tone}>{setting.status}</StatusBadge>
                     </div>
-                    <StatusBadge tone={setting.tone}>{setting.status}</StatusBadge>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          </OperationalSection>
+            </OperationalSection>
+          ) : null}
 
           {isVendor ? (
             <OperationalSection title="Shipping">

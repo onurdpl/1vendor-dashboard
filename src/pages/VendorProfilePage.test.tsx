@@ -816,17 +816,11 @@ describe('VendorProfilePage', () => {
     expect(within(accountSection!).queryByText('Correction Ticket Status')).not.toBeInTheDocument();
     expect(within(accountSection!).queryByText('No correction ticket open')).not.toBeInTheDocument();
 
-    const managedHeading = screen.getByRole('heading', { name: 'Marketplace Managed Settings' });
-    const managedSection = managedHeading.closest('section');
-    expect(managedSection).not.toBeNull();
-    expect(within(managedSection!).getByText('These settings are managed by the Marketplace. If something needs to change, open a correction ticket.')).toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Shipping')).not.toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Returns')).not.toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Finance Policy')).not.toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Warehouse')).not.toBeInTheDocument();
-    expect(within(managedSection!).getByText('Billing')).toBeInTheDocument();
-    expect(within(managedSection!).queryByText('Integrations')).not.toBeInTheDocument();
-    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Marketplace Managed Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByText('These settings are managed by the Marketplace. If something needs to change, open a correction ticket.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Billing')).not.toBeInTheDocument();
+    expect(screen.queryByText('Managed by Marketplace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Managed')).not.toBeInTheDocument();
 
     const shippingSection = screen.getByRole('heading', { name: 'Shipping' }).closest('section');
     expect(shippingSection).not.toBeNull();
@@ -942,6 +936,8 @@ describe('VendorProfilePage', () => {
     for (const summary of ['Shipping', 'Returns', 'Finance Policy', 'Warehouse', 'Billing', 'Integrations']) {
       expect(within(managedSection!).getByText(summary)).toBeInTheDocument();
     }
+    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(6);
+    expect(within(managedSection!).getByText('Managed')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Finance Policy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipping' })).not.toBeInTheDocument();
     expect(screen.queryByText('12.50%')).not.toBeInTheDocument();
