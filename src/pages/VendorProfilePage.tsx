@@ -2143,7 +2143,7 @@ export function VendorProfilePage() {
           tone: 'attention' as const,
         }
       : null,
-    existingProfileTicket
+    existingProfileTicket && !isVendor
       ? {
           key: 'correction',
           label: 'Correction ticket open',
@@ -2234,6 +2234,9 @@ export function VendorProfilePage() {
       tone: canLoadProfile ? 'success' : 'warning',
     },
   ] as const;
+  const visibleManagedSettings = isVendor
+    ? managedSettings.filter((setting) => setting.title !== 'Integrations')
+    : managedSettings;
 
   return (
     <section className="op-page vendor-profile-page">
@@ -2255,9 +2258,11 @@ export function VendorProfilePage() {
           <div className="vendor-profile-header-actions">
             <div className="vendor-profile-header-badges" aria-label="Vendor workspace state">
               <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
-              <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
-                {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
-              </StatusBadge>
+              {!isVendor || !canLoadProfile || vendorStatus.restricted ? (
+                <StatusBadge tone={!canLoadProfile ? 'warning' : vendorStatus.restricted ? 'attention' : 'success'}>
+                  {!canLoadProfile ? 'Context loading' : vendorStatus.restricted ? 'Restricted account' : 'Active workspace'}
+                </StatusBadge>
+              ) : null}
             </div>
             {isAdmin ? (
               <button
@@ -2275,21 +2280,23 @@ export function VendorProfilePage() {
             ) : null}
           </div>
         </header>
-        <div className={`vendor-profile-status-strip ${shellStatusItems.length ? 'vendor-profile-status-strip-warning' : ''}`} aria-label="Vendor workspace summary">
-          {shellStatusItems.length ? (
-            shellStatusItems.map((item) => (
-              <div className="vendor-profile-status-strip-item" key={item.key}>
-                <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
-                <span>{item.detail}</span>
+        {!isVendor || shellStatusItems.length ? (
+          <div className={`vendor-profile-status-strip ${shellStatusItems.length ? 'vendor-profile-status-strip-warning' : ''}`} aria-label="Vendor workspace summary">
+            {shellStatusItems.length ? (
+              shellStatusItems.map((item) => (
+                <div className="vendor-profile-status-strip-item" key={item.key}>
+                  <StatusBadge tone={item.tone}>{item.label}</StatusBadge>
+                  <span>{item.detail}</span>
+                </div>
+              ))
+            ) : (
+              <div className="vendor-profile-status-strip-item">
+                <StatusBadge tone="success">Healthy workspace</StatusBadge>
+                <span>Primary vendor profile signals are available with no high-level blockers shown.</span>
               </div>
-            ))
-          ) : (
-            <div className="vendor-profile-status-strip-item">
-              <StatusBadge tone="success">Healthy workspace</StatusBadge>
-              <span>Primary vendor profile signals are available with no high-level blockers shown.</span>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        ) : null}
         {isAdmin ? (
           <nav className="vendor-profile-section-nav" aria-label="Vendor profile sections">
             {sectionNavigation.map((item) => (
@@ -2310,7 +2317,7 @@ export function VendorProfilePage() {
               <MetadataRow label="Vendor ID" value={formatValue(currentVendor.vendorId, 'Missing vendor context')} />
               <MetadataRow label="Account Status" value={accountStatusLabel} />
               {restrictionStatusLabel ? <MetadataRow label="Restriction Status" value={restrictionStatusLabel} /> : null}
-              <MetadataRow label="Correction Ticket Status" value={correctionTicketStatusLabel} />
+              {!isVendor ? <MetadataRow label="Correction Ticket Status" value={correctionTicketStatusLabel} /> : null}
             </MetadataGroup>
           </OperationalSection>
 
@@ -2320,7 +2327,7 @@ export function VendorProfilePage() {
                 These settings are managed by the Marketplace. If something needs to change, open a correction ticket.
               </p>
               <div className="vendor-managed-settings-list">
-                {managedSettings.map((setting) => (
+                {visibleManagedSettings.map((setting) => (
                   <div className="vendor-managed-settings-row" key={setting.title}>
                     <div>
                       <strong>{setting.title}</strong>
@@ -2334,7 +2341,7 @@ export function VendorProfilePage() {
           </OperationalSection>
 
           <OperationalSection title="Request Changes">
-            <div className="vendor-profile-support-panel">
+            <div className={isVendor ? 'vendor-profile-support-panel vendor-profile-support-panel-flat' : 'vendor-profile-support-panel'}>
               <div>
                 <strong>{existingProfileTicket ? 'Correction ticket open' : 'Open correction ticket'}</strong>
                 <p>

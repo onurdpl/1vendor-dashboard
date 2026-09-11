@@ -799,7 +799,8 @@ describe('VendorProfilePage', () => {
     expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
     expect(screen.getByText('Marketplace Seller Workspace')).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
-    expect(screen.getByText('Active workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Active workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Healthy workspace')).not.toBeInTheDocument();
 
     const accountHeading = screen.getByRole('heading', { name: 'My Account' });
     const accountSection = accountHeading.closest('section');
@@ -812,8 +813,8 @@ describe('VendorProfilePage', () => {
     expect(within(accountSection!).getByText('demo-vendor-a')).toBeInTheDocument();
     expect(within(accountSection!).getByText('Account Status')).toBeInTheDocument();
     expect(within(accountSection!).getByText('Active')).toBeInTheDocument();
-    expect(within(accountSection!).getByText('Correction Ticket Status')).toBeInTheDocument();
-    expect(within(accountSection!).getByText('No correction ticket open')).toBeInTheDocument();
+    expect(within(accountSection!).queryByText('Correction Ticket Status')).not.toBeInTheDocument();
+    expect(within(accountSection!).queryByText('No correction ticket open')).not.toBeInTheDocument();
 
     const managedHeading = screen.getByRole('heading', { name: 'Marketplace Managed Settings' });
     const managedSection = managedHeading.closest('section');
@@ -824,11 +825,13 @@ describe('VendorProfilePage', () => {
     expect(within(managedSection!).getByText('Finance Policy')).toBeInTheDocument();
     expect(within(managedSection!).getByText('Warehouse')).toBeInTheDocument();
     expect(within(managedSection!).getByText('Billing')).toBeInTheDocument();
-    expect(within(managedSection!).getByText('Integrations')).toBeInTheDocument();
-    expect(within(managedSection!).getAllByText('Managed by Marketplace').length).toBe(6);
+    expect(within(managedSection!).queryByText('Integrations')).not.toBeInTheDocument();
+    expect(within(managedSection!).getAllByText('Managed by Marketplace')).toHaveLength(5);
     await waitFor(() => expect(within(managedSection!).getAllByText('Configured').length).toBeGreaterThanOrEqual(4));
 
-    expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
+    const requestChangesSection = screen.getByRole('heading', { name: 'Request Changes' }).closest('section');
+    expect(requestChangesSection).not.toBeNull();
+    expect(requestChangesSection!.querySelector('.vendor-profile-support-panel-flat')).not.toBeNull();
     expect(screen.getAllByRole('button', { name: 'Open correction ticket' })).toHaveLength(1);
 
     expect(screen.queryByText('Review the seller identity, finance policy, shipping operations, and return destination currently managed for this store. Marketplace-owned fields are read-only here.')).not.toBeInTheDocument();
@@ -878,14 +881,23 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage();
 
     expect(await screen.findByRole('heading', { name: 'My Account' })).toBeInTheDocument();
+    const accountSection = screen.getByRole('heading', { name: 'My Account' }).closest('section');
+    expect(accountSection).not.toBeNull();
+    expect(within(accountSection!).getByText('Correction Ticket Status')).toBeInTheDocument();
+    expect(within(accountSection!).getByText('No correction ticket open')).toBeInTheDocument();
     const managedSection = screen.getByRole('heading', { name: 'Marketplace Managed Settings' }).closest('section');
     expect(managedSection).not.toBeNull();
     for (const summary of ['Shipping', 'Returns', 'Finance Policy', 'Warehouse', 'Billing', 'Integrations']) {
       expect(within(managedSection!).getByText(summary)).toBeInTheDocument();
     }
     expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
+    const requestChangesSection = screen.getByRole('heading', { name: 'Request Changes' }).closest('section');
+    expect(requestChangesSection).not.toBeNull();
+    expect(requestChangesSection!.querySelector('.vendor-profile-support-panel-flat')).toBeNull();
     expect(screen.getByRole('button', { name: 'Open correction ticket' })).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
+    expect(screen.getByText('Active workspace')).toBeInTheDocument();
+    expect(screen.getByText('Healthy workspace')).toBeInTheDocument();
 
     expect(screen.queryByRole('heading', { name: 'Operational readiness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Shipping operations' })).not.toBeInTheDocument();
@@ -932,6 +944,7 @@ describe('VendorProfilePage', () => {
     expect(accountSection).not.toBeNull();
     expect(within(accountSection!).getByText('Restriction Status')).toBeInTheDocument();
     expect(within(accountSection!).getByText('Operational review')).toBeInTheDocument();
+    expect(within(accountSection!).queryByText('Correction Ticket Status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Request Changes' })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Open correction ticket' })).toHaveLength(1);
   });
@@ -999,7 +1012,15 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    await waitFor(() => expect(screen.getAllByText('Correction ticket open').length).toBeGreaterThan(0));
+    const requestChangesSection = await screen
+      .findByRole('heading', { name: 'Request Changes' })
+      .then((heading) => heading.closest('section'));
+    expect(requestChangesSection).not.toBeNull();
+    await waitFor(() => expect(within(requestChangesSection!).getByText('Correction ticket open')).toBeInTheDocument());
+    expect(screen.getAllByText('Correction ticket open')).toHaveLength(1);
+    const accountSection = screen.getByRole('heading', { name: 'My Account' }).closest('section');
+    expect(accountSection).not.toBeNull();
+    expect(within(accountSection!).queryByText('Correction Ticket Status')).not.toBeInTheDocument();
     const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(supportButtons[0]).not.toBeDisabled());
     await userEvent.click(supportButtons[0]);

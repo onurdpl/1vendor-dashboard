@@ -16350,6 +16350,13 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #64748b;
 }
 
+.vendor-profile-support-panel.vendor-profile-support-panel-flat {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .vendor-profile-disclosure {
   border: 1px solid #e2e8f0;
   border-radius: 14px;
