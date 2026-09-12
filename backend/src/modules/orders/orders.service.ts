@@ -15,6 +15,7 @@ import type {
 } from './orders.types.js';
 import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
+import { getAllocationFinanceSummary } from '../finance/allocation-finance-summary.service.js';
 import { FINANCE_INTEGRITY_ALERT_BLOCKING_STATUSES } from '../finance/finance-integrity-alert.service.js';
 import { hasBlockingCancelRefundReviewStatus } from '../finance/cancel-refund-review-hold.service.js';
 import {
@@ -4256,6 +4257,7 @@ export async function getVendorOrderByIdForUser(
   options: {
     includeShipmentProviderResponseSummary?: boolean;
     includeFinanceLedgerPreview?: boolean;
+    includeAllocationFinanceSummary?: boolean;
   } = {},
 ): Promise<OrderDetailDto | null> {
   const order = await getVendorOrderById(vendorId, orderId);
@@ -4265,6 +4267,12 @@ export async function getVendorOrderByIdForUser(
 
   const financeLedgerPreview = options.includeFinanceLedgerPreview
     ? await getFinanceLedgerPreviewForAllocation(vendorId, order.id)
+    : undefined;
+  const allocationFinanceSummary = options.includeAllocationFinanceSummary
+    ? await getAllocationFinanceSummary({
+        vendorAllocationId: order.id,
+        expectedVendorId: vendorId,
+      })
     : undefined;
 
   const shipmentExecution = options.includeShipmentProviderResponseSummary
@@ -4282,6 +4290,7 @@ export async function getVendorOrderByIdForUser(
   return {
     ...order,
     ...(financeLedgerPreview !== undefined ? { financeLedgerPreview } : {}),
+    ...(allocationFinanceSummary !== undefined ? { allocationFinanceSummary } : {}),
     shipmentExecution: options.includeShipmentProviderResponseSummary
       ? mapShipmentExecution(shipmentExecution, {
           includeProviderResponseSummary: true,

@@ -1,6 +1,7 @@
 import type { FinanceLedgerPreviewDto } from '../finance/finance-ledger-preview.types.js';
 import type { ReturnOwnershipSummaryDto } from '../returns/returns.types.js';
 import type { NavlungoCreatePostRequestSummaryDto } from '../shipping/shipping-execution.types.js';
+import type { AllocationFinanceSummaryDto } from '../finance/finance.types.js';
 import type { CustomerRefundCompletion } from '../shopify/shopify-refund-monetary-evidence.js';
 
 export type VendorOrdersWorkflow = 'all' | 'awaitingShipment' | 'shipmentReview' | 'trackingMissing';
@@ -620,6 +621,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
   shopifyReturnSignal: ShopifyReturnSignalDiscoveryDto | null;
   financeLedgerPreview?: FinanceLedgerPreviewDto | null;
+  allocationFinanceSummary?: AllocationFinanceSummaryDto;
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
   shipmentExecution: OrderShipmentExecutionDto | null;

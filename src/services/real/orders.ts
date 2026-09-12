@@ -186,6 +186,7 @@ type OrderDetailDto = OrderSummaryDto & {
     lastAttemptedAt: string | null;
   };
   shopifyReturnSignal?: OrderDetail['shopifyReturnSignal'];
+  allocationFinanceSummary?: OrderDetail['allocationFinanceSummary'];
   lineItems: Array<{
     id: string;
     sourceLineItemId: string;
@@ -601,6 +602,9 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shipmentExecution: dto.shipmentExecution ?? null,
     shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
     shopifyReturnSignal: dto.shopifyReturnSignal ?? null,
+    ...(dto.allocationFinanceSummary !== undefined
+      ? { allocationFinanceSummary: dto.allocationFinanceSummary }
+      : {}),
     orderSnapshot: dto.orderSnapshot ?? null,
     splitSummary: dto.splitSummary ?? null,
     reassignmentRequired: dto.reassignmentRequired,

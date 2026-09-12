@@ -204,8 +204,37 @@ describe('orders route contract', () => {
     expect(getVendorOrderByIdForUserMock).toHaveBeenCalledWith('vendor-a', 'alloc-1', {
       includeShipmentProviderResponseSummary: true,
       includeFinanceLedgerPreview: true,
+      includeAllocationFinanceSummary: true,
     });
     expect(JSON.stringify(getVendorOrderByIdForUserMock.mock.calls[0])).not.toContain('shopifyAdminService');
+  });
+
+  it.each(['vendor', 'support', 'finance'])('omits the allocation finance summary for %s order detail', async (role) => {
+    getVendorOrderByIdForUserMock.mockResolvedValueOnce({ id: 'alloc-1' });
+    const gets = new Map<string, (request: {
+      authUser?: { role?: string };
+      vendorContext?: { vendorId?: string };
+      params: { orderId: string };
+    }, reply: unknown) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: never, reply: never) => unknown) => {
+        gets.set(path, handler as never);
+      }),
+      post: vi.fn(),
+    };
+
+    registerOrdersRoutes(app as never, {} as never);
+    await gets.get('/orders/:orderId')?.({
+      authUser: { role },
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { orderId: 'alloc-1' },
+    }, {});
+
+    expect(getVendorOrderByIdForUserMock).toHaveBeenCalledWith('vendor-a', 'alloc-1', {
+      includeShipmentProviderResponseSummary: false,
+      includeFinanceLedgerPreview: false,
+      includeAllocationFinanceSummary: false,
+    });
   });
 
   it('wires vendor reject route to the operational hold service', async () => {

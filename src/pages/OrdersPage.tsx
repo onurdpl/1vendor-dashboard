@@ -115,6 +115,10 @@ function formatSnapshotAmount(value: string | null | undefined, currency: string
   return value === null || value === undefined || value === '' ? '—' : formatCurrency(value, currency);
 }
 
+function formatAllocationFinanceAmount(value: string | null | undefined) {
+  return value === null || value === undefined || value === '' ? 'Not available' : formatCurrency(value, 'TRY');
+}
+
 function formatVatRate(value: string | null | undefined) {
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -124,14 +128,19 @@ function formatVatRate(value: string | null | undefined) {
   return Number.isFinite(numeric) ? `${numeric.toLocaleString('en-US')}%` : value;
 }
 
-function formatBillingAddress(address: NonNullable<OrderDetail['orderSnapshot']>['billingAddress'] | null | undefined) {
-  if (!address) {
-    return '—';
-  }
+function getAllocationPrimaryPayableLabel(type: NonNullable<NonNullable<OrderDetail['allocationFinanceSummary']>['primaryPayable']>['type']) {
+  if (type === 'approved') return 'Approved payable';
+  if (type === 'paid_payout_contribution') return 'Paid payout contribution';
+  return 'Estimated payable';
+}
 
-  return [address.fullName, address.company, address.phone, address.address1, address.address2, address.district, address.city, address.postcode]
-    .filter((part) => part?.trim())
-    .join(' · ') || '—';
+function getAllocationPayoutStatusLabel(status: NonNullable<OrderDetail['allocationFinanceSummary']>['payoutStatus']) {
+  if (status === 'pending') return 'Not prepared';
+  if (status === 'draft') return 'Estimated';
+  if (status === 'review') return 'Pending review';
+  if (status === 'execution_pending') return 'Scheduled';
+  if (status === 'paid_placeholder') return 'Payment evidence pending';
+  return status ? safeStatusLabel(status) : 'Not available';
 }
 
 function getStatusTone(status: string | null | undefined) {
@@ -1069,6 +1078,7 @@ export function OrdersPage() {
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
+              const allocationFinanceSummary = (selectedOrder as OrderDetail).allocationFinanceSummary;
               const snapshotCurrency = getSnapshotCurrency(selectedOrder);
               const operationalStatusLabel = hasCanonicalTerminalStory ? operationalStory.primaryLabel : safeStatusLabel(selectedOrder.allocationStatus);
               const operationalStatusTone = hasCanonicalTerminalStory
@@ -1233,44 +1243,61 @@ export function OrdersPage() {
                 </div>
               </section>
 
+              {isAdmin && allocationFinanceSummary ? (
+                <section className="orders-detail-card" aria-label="Financial summary">
+                  <h4>Financial summary</h4>
+                  {allocationFinanceSummary.available ? (
+                    <div className="orders-rail-summary-list">
+                      <div>
+                        <span>Product value</span>
+                        <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.productValue)}</strong>
+                      </div>
+                      <div>
+                        <span>Commission</span>
+                        <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.commission)}</strong>
+                      </div>
+                      <div>
+                        <span>Commission VAT</span>
+                        <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.commissionVat)}</strong>
+                      </div>
+                      <div>
+                        <span>Shipping deduction</span>
+                        <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.shippingDeduction)}</strong>
+                      </div>
+                      {allocationFinanceSummary.primaryPayable ? (
+                        <div className="orders-financial-primary">
+                          <span>{getAllocationPrimaryPayableLabel(allocationFinanceSummary.primaryPayable.type)}</span>
+                          <strong>{formatAllocationFinanceAmount(allocationFinanceSummary.primaryPayable.amount)}</strong>
+                        </div>
+                      ) : null}
+                      <div>
+                        <span>Settlement</span>
+                        <strong>{safeStatusLabel(allocationFinanceSummary.settlementStatus, 'Not available')}</strong>
+                      </div>
+                      <div>
+                        <span>Payout</span>
+                        <strong>{getAllocationPayoutStatusLabel(allocationFinanceSummary.payoutStatus)}</strong>
+                      </div>
+                      {allocationFinanceSummary.paidAt ? (
+                        <div>
+                          <span>Paid at</span>
+                          <strong>{formatDate(allocationFinanceSummary.paidAt)}</strong>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="page-description">Finance data unavailable. Requires review.</p>
+                  )}
+                </section>
+              ) : null}
+
               {isAdmin ? (
                 <section className="orders-detail-card" aria-label="Shopify order snapshot">
                   <h4>Shopify order snapshot</h4>
-                  {selectedOrder.splitSummary ? (
-                    <p className="page-description">
-                      This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.
-                    </p>
-                  ) : null}
                   <div className="orders-rail-summary-list">
-                    <div>
-                      <span>Payment gateway</span>
-                      <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
-                    </div>
                     <div>
                       <span>Vendor integration</span>
                       <strong>{hasCanonicalTerminalStory ? '—' : formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
-                    </div>
-                    <div>
-                      <span>Currency</span>
-                      <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
-                    </div>
-                    {orderSnapshot?.orderTaxAmount ? (
-                      <div>
-                        <span>Tax total</span>
-                        <strong>{formatSnapshotAmount(orderSnapshot.orderTaxAmount, snapshotCurrency)}</strong>
-                      </div>
-                    ) : null}
-                    <div>
-                      <span>Shipping</span>
-                      <strong>{formatSnapshotAmount(orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
-                    </div>
-                    <div>
-                      <span>Discount</span>
-                      <strong>{formatSnapshotAmount(orderSnapshot?.discountAmount, snapshotCurrency)}</strong>
-                    </div>
-                    <div>
-                      <span>Billing</span>
-                      <strong>{formatBillingAddress(orderSnapshot?.billingAddress)}</strong>
                     </div>
                     {orderSnapshot?.vendorIntegrationTrackingUrl ? (
                       <div>

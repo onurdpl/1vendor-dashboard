@@ -1009,7 +1009,34 @@ export type OrderDetail = OrderSummary & {
     matchedByField: string | null;
   } | null;
   financeLedgerPreview?: FinanceLedgerPreview | null;
+  allocationFinanceSummary?: AllocationFinanceSummary;
   splitSummary?: AllocationSplitSummary | null;
+};
+
+export type AllocationFinanceSummary = {
+  available: boolean;
+  resolutionStatus: string;
+  productValue: string | null;
+  commission: string | null;
+  commissionVat: string | null;
+  shippingDeduction: string | null;
+  shippingDeductionStatus: 'available' | 'pending' | 'unavailable';
+  primaryPayable: {
+    type: 'estimated' | 'approved' | 'paid_payout_contribution';
+    amount: string;
+  } | null;
+  settlementStatus: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed' | null;
+  payoutStatus:
+    | 'pending'
+    | 'approved'
+    | 'paid'
+    | 'hold'
+    | 'draft'
+    | 'review'
+    | 'execution_pending'
+    | 'paid_placeholder'
+    | null;
+  paidAt: string | null;
 };
 
 export type EconomicTransferSummary = {

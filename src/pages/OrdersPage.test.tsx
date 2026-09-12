@@ -1691,7 +1691,6 @@ describe('OrdersPage control center', () => {
     expect(within(screen.getByLabelText('Shopify order snapshot')).queryByText('Financial status')).not.toBeInTheDocument();
     expect(screen.queryByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).not.toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
-    expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('processing')).toBeInTheDocument();
     expect(screen.getByText('External shipment')).toBeInTheDocument();
     expect(screen.getByText('External shipped at')).toBeInTheDocument();
@@ -1700,7 +1699,12 @@ describe('OrdersPage control center', () => {
     expect(screen.getByText('2026-06-02')).toBeInTheDocument();
     expect(screen.getAllByText(/TRY\s*1,950\.00/).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'Open invoice' })).toHaveAttribute('href', 'https://example.com/invoices/ABC202600001.pdf');
-    expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
+    expect(screen.queryByText('Payment gateway')).not.toBeInTheDocument();
+    expect(screen.queryByText('Currency')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tax total')).not.toBeInTheDocument();
+    expect(screen.queryByText('Discount')).not.toBeInTheDocument();
+    expect(screen.queryByText('Billing')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rail billing street/)).not.toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*650\.00/)).toBeInTheDocument();
@@ -1709,7 +1713,7 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).not.toBeInTheDocument();
   });
 
-  it('shows split-specific Shopify snapshot scope copy on split orders', async () => {
+  it('keeps operational Shopify evidence while omitting full-order finance reference rows on split orders', async () => {
     const splitOrder = {
       ...orderDetail,
       splitSummary: {
@@ -1732,11 +1736,105 @@ describe('OrdersPage control center', () => {
 
     const snapshot = screen.getByLabelText('Shopify order snapshot');
     expect(within(snapshot).queryByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).not.toBeInTheDocument();
-    expect(within(snapshot).getByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).toBeInTheDocument();
+    expect(within(snapshot).queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(within(snapshot).getByText('Vendor integration')).toBeInTheDocument();
-    expect(within(snapshot).getByText('Tax total')).toBeInTheDocument();
-    expect(within(snapshot).getByText('Shipping')).toBeInTheDocument();
-    expect(within(snapshot).getByText('Discount')).toBeInTheDocument();
+    expect(within(snapshot).getByText('External shipment')).toBeInTheDocument();
+    expect(within(snapshot).queryByText('Tax total')).not.toBeInTheDocument();
+    expect(within(snapshot).queryByText('Shipping')).not.toBeInTheDocument();
+    expect(within(snapshot).queryByText('Discount')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['estimated', 'Estimated payable'],
+    ['approved', 'Approved payable'],
+    ['paid_payout_contribution', 'Paid payout contribution'],
+  ] as const)('renders the admin allocation financial summary with one %s primary value', async (type, label) => {
+    const detailWithFinance: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type, amount: '1540.00' },
+        settlementStatus: type === 'estimated' ? 'payable' : 'settled',
+        payoutStatus: type === 'paid_payout_contribution' ? 'paid' : 'pending',
+        paidAt: type === 'paid_payout_contribution' ? '2026-06-10T11:00:00.000Z' : null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithFinance)]);
+    getOrderMock.mockResolvedValue(detailWithFinance);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).getByText('Product value')).toBeInTheDocument();
+    expect(within(card).getByText('Commission')).toBeInTheDocument();
+    expect(within(card).getByText('Commission VAT')).toBeInTheDocument();
+    expect(within(card).getByText('Shipping deduction')).toBeInTheDocument();
+    expect(within(card).getByText(label)).toBeInTheDocument();
+    expect(within(card).getAllByText(/TRY\s*1,540\.00/)).toHaveLength(1);
+    expect(within(card).queryByText(type === 'estimated' ? 'Approved payable' : 'Estimated payable')).not.toBeInTheDocument();
+    expect(within(card).getByText('Settlement')).toBeInTheDocument();
+    expect(within(card).getByText('Payout')).toBeInTheDocument();
+  });
+
+  it('renders the fail-closed finance state without monetary zero fallbacks', async () => {
+    const detailWithUnavailableFinance: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: false,
+        resolutionStatus: 'multiple_active_sale_ledgers',
+        productValue: null,
+        commission: null,
+        commissionVat: null,
+        shippingDeduction: null,
+        shippingDeductionStatus: 'unavailable',
+        primaryPayable: null,
+        settlementStatus: null,
+        payoutStatus: null,
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithUnavailableFinance)]);
+    getOrderMock.mockResolvedValue(detailWithUnavailableFinance);
+
+    renderOrdersPage();
+
+    const card = await screen.findByLabelText('Financial summary');
+    expect(within(card).getByText('Finance data unavailable. Requires review.')).toBeInTheDocument();
+    expect(within(card).queryByText(/TRY\s*0\.00/)).not.toBeInTheDocument();
+    expect(within(card).queryByText('multiple_active_sale_ledgers')).not.toBeInTheDocument();
+  });
+
+  it('does not render the admin allocation financial summary for vendor presentation', async () => {
+    setVendorUser();
+    const detailWithFinance: OrderDetail = {
+      ...orderDetail,
+      allocationFinanceSummary: {
+        available: true,
+        resolutionStatus: 'resolved',
+        productValue: '2000.00',
+        commission: '300.00',
+        commissionVat: '60.00',
+        shippingDeduction: '100.00',
+        shippingDeductionStatus: 'available',
+        primaryPayable: { type: 'estimated', amount: '1540.00' },
+        settlementStatus: 'payable',
+        payoutStatus: 'pending',
+        paidAt: null,
+      },
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithFinance)]);
+    getOrderMock.mockResolvedValue(detailWithFinance);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('Shipment')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Financial summary')).not.toBeInTheDocument();
   });
 
   it('opens an existing shipment label without creating a duplicate shipment', async () => {

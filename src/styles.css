@@ -7503,6 +7503,15 @@ h3 {
   text-align: right;
 }
 
+.orders-rail-summary-list > .orders-financial-primary {
+  background: #f8fafc;
+}
+
+.orders-rail-summary-list > .orders-financial-primary strong {
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
 .orders-rail-summary-list > .order-snapshot-address-warning {
   background: #fff7ed;
 }

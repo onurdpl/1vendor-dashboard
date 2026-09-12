@@ -27,6 +27,33 @@ export type PayoutBatchStatusDto =
   | 'paid'
   | 'paid_placeholder';
 
+export type AllocationFinanceSummaryDto = {
+  available: boolean;
+  resolutionStatus:
+    | 'resolved'
+    | 'no_active_sale_ledger'
+    | 'multiple_active_sale_ledgers'
+    | 'transfer_in_progress'
+    | 'transfer_failed'
+    | 'economic_owner_mismatch'
+    | 'finance_record_unavailable'
+    | 'missing_finance_snapshot'
+    | 'ambiguous_settlement_authority'
+    | 'ambiguous_payout_authority';
+  productValue: string | null;
+  commission: string | null;
+  commissionVat: string | null;
+  shippingDeduction: string | null;
+  shippingDeductionStatus: 'available' | 'pending' | 'unavailable';
+  primaryPayable: {
+    type: 'estimated' | 'approved' | 'paid_payout_contribution';
+    amount: string;
+  } | null;
+  settlementStatus: SettlementDto['status'] | null;
+  payoutStatus: PayoutBatchStatusDto | 'pending' | 'approved' | 'paid' | 'hold' | null;
+  paidAt: string | null;
+};
+
 export type PayoutBatchSummaryDto = {
   eligibleRowCount: number;
   eligibleNetAmount: string;

@@ -151,6 +151,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         getVendorOrderByIdForUser(vendorId, request.params.orderId, {
           includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
           includeFinanceLedgerPreview: request.authUser?.role === 'admin',
+          includeAllocationFinanceSummary: request.authUser?.role === 'admin',
         }),
       );
       if (!order) {

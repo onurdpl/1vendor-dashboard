@@ -805,7 +805,7 @@ function normalizeSettlementStatus(status: string | null | undefined): Settlemen
   return 'pending';
 }
 
-function getSettlementStatus(entry: {
+export function getSettlementStatus(entry: {
   id?: string | null;
   entryType: string;
   payoutStatus?: string | null;
