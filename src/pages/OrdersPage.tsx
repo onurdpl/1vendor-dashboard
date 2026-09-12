@@ -987,7 +987,7 @@ export function OrdersPage() {
                         {currentUser?.role !== 'vendor' ? (
                           <>
                             {visibleTableCustomerLabel ? <small>{visibleTableCustomerLabel}</small> : null}
-                            <small>{currentVendor.vendorName} · {order.channel}</small>
+                            <small>{order.channel}</small>
                           </>
                         ) : null}
                       </span>
@@ -1353,7 +1353,6 @@ export function OrdersPage() {
                                 item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
                                 `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
                                 `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
-                                item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
                               ].filter(Boolean).join(' · ')}
                             </small>
                           ) : null}

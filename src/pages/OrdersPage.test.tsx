@@ -400,8 +400,9 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
     const orderRow = screen.getByRole('button', { name: /#1002/ });
     expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
-    expect(within(orderRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
-    expect(within(orderRow).queryByText('Shopify')).not.toBeInTheDocument();
+    expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
+    expect(within(orderRow).queryByText('Demo Vendor A')).not.toBeInTheDocument();
     expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
     expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
   });
@@ -508,7 +509,8 @@ describe('OrdersPage control center', () => {
     expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')).not.toHaveTextContent(/2026|\b(?:AM|PM)\b/);
     expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')?.parentElement?.querySelector('small')).toBeNull();
     expect(within(shipmentUpdatedRow).getByText('Acme Supply Co.')).toBeInTheDocument();
-    expect(within(shipmentUpdatedRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getByText('Shopify')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('Fulfilled')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('$1,950.00')).toBeInTheDocument();
@@ -562,6 +564,10 @@ describe('OrdersPage control center', () => {
       const sidebarHeader = container.querySelector('.op-side-panel-header');
       expect(sidebarHeader).not.toBeNull();
       expect(within(sidebarHeader as HTMLElement).getByText('Demo Vendor A')).toBeInTheDocument();
+      const orderRow = screen.getByRole('button', { name: /#1002/ });
+      expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
+      expect(within(orderRow).queryByText('Demo Vendor A · Shopify')).not.toBeInTheDocument();
+      expect(within(orderRow).queryByText('Demo Vendor A')).not.toBeInTheDocument();
       expect(within(sidebarHeader as HTMLElement).getByRole('link', { name: 'View details' })).toHaveAttribute(
         'href',
         '/orders/ORD-A-1002',
@@ -1696,7 +1702,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*650\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Line total incl\. VAT TRY\s*1,950\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).toBeInTheDocument();
+    expect(screen.getByText('SKU456 · Standard')).toBeInTheDocument();
+    expect(screen.queryByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).not.toBeInTheDocument();
   });
 
   it('shows split-specific Shopify snapshot scope copy on split orders', async () => {
