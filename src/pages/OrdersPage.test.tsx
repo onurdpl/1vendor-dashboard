@@ -392,8 +392,9 @@ describe('OrdersPage control center', () => {
     const orderRow = screen.getByRole('button', { name: /#1002/ });
     expect(within(orderRow).getByText('Acme Supply Co.')).toBeInTheDocument();
     expect(within(orderRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
-    expect(within(orderRow).getByText('Shopify')).toBeInTheDocument();
+    expect(within(orderRow).queryByText('Shopify')).not.toBeInTheDocument();
     expect(within(orderRow).queryByText('Tracking visible')).not.toBeInTheDocument();
+    expect(within(orderRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
   });
 
   it('removes fixed identity and source microcopy from vendor rows without changing row data or selection', async () => {
@@ -496,6 +497,9 @@ describe('OrdersPage control center', () => {
     expect(invalidRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Not synced');
     expect(missingRow.querySelector('.orders-table-updated-value')).toHaveTextContent('Not synced');
     expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')).not.toHaveTextContent(/2026|\b(?:AM|PM)\b/);
+    expect(shipmentUpdatedRow.querySelector('.orders-table-updated-value')?.parentElement?.querySelector('small')).toBeNull();
+    expect(within(shipmentUpdatedRow).getByText('Acme Supply Co.')).toBeInTheDocument();
+    expect(within(shipmentUpdatedRow).getByText('Demo Vendor A · Shopify')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('Fulfilled')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('DHL / TRK-A-1002')).toBeInTheDocument();
     expect(within(shipmentUpdatedRow).getByText('$1,950.00')).toBeInTheDocument();
@@ -910,11 +914,7 @@ describe('OrdersPage control center', () => {
       expect(within(blockedStatusCell as HTMLElement).queryByText('Awaiting admin resolution')).not.toBeInTheDocument();
       expect(blockedStatusCell?.querySelector('small')).toBeNull();
       expect(within(blockedTrackingCell as HTMLElement).getByText('Awaiting admin resolution')).toBeInTheDocument();
-      if (role === 'vendor') {
-        expect(within(blockedTrackingCell as HTMLElement).queryByText('Vendor rejected allocation.')).not.toBeInTheDocument();
-      } else {
-        expect(within(blockedTrackingCell as HTMLElement).getByText('Vendor rejected allocation.')).toBeInTheDocument();
-      }
+      expect(within(blockedTrackingCell as HTMLElement).queryByText('Vendor rejected allocation.')).not.toBeInTheDocument();
 
       const reassignmentRow = screen.getByRole('button', { name: /#1132/ });
       const reassignmentStatusCell = reassignmentRow.querySelector('.orders-table-status-cell');

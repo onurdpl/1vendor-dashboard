@@ -61,8 +61,6 @@ const TRACKING_HELPERS_TO_HIDE = new Set([
   'Shopify order cancelled.',
   'Review existing fulfillment evidence',
   'Refund completed for this allocation.',
-]);
-const VENDOR_TRACKING_HELPERS_TO_HIDE = new Set([
   'Vendor rejected allocation.',
 ]);
 const VENDOR_ACTIONLESS_GUIDANCE_LABELS = new Set([
@@ -973,8 +971,7 @@ export function OrdersPage() {
                   const lifecyclePrimary = getLifecyclePrimaryLabel(order);
                   const shippingOperational = getShippingOperationalLabel(order);
                   const visibleShippingHelper = shippingOperational.helper
-                    && (TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
-                      || (currentUser?.role === 'vendor' && VENDOR_TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)))
+                    && TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
                     ? null
                     : shippingOperational.helper;
                   return (
@@ -1007,7 +1004,6 @@ export function OrdersPage() {
                         <strong className="orders-table-updated-value">
                           {formatTableUpdatedDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}
                         </strong>
-                        {currentUser?.role !== 'vendor' ? <small>{order.channel}</small> : null}
                       </span>
                       <OperationalActionGroup>
                         <Link className="button orders-row-detail-action" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
