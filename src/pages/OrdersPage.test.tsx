@@ -371,7 +371,16 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByRole('searchbox')).toHaveLength(1);
     const workflowTabs = screen.getByLabelText('Orders workflow tabs');
     expect(workflowTabs).toBeInTheDocument();
-    expect(within(workflowTabs).getByRole('button', { name: /All orders/i })).toHaveClass('is-active');
+    const allOrdersTab = within(workflowTabs).getByRole('button', { name: /All orders/i });
+    expect(allOrdersTab).toHaveClass('is-active');
+    expect(allOrdersTab).toHaveTextContent('1');
+    expect(within(workflowTabs).queryByText('Full order list')).not.toBeInTheDocument();
+    const trackingMissingTab = within(workflowTabs).getByRole('button', { name: /Tracking missing/i });
+    expect(trackingMissingTab).toHaveTextContent('0');
+    expect(within(workflowTabs).queryByText('Needs tracking evidence')).not.toBeInTheDocument();
+    expect(within(workflowTabs).getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(within(workflowTabs).getByText('Needs admin resolution')).toBeInTheDocument();
+    expect(within(workflowTabs).getByText('Stale fulfillment')).toBeInTheDocument();
     expect(screen.queryByLabelText('Orders operational metrics')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(3);
@@ -1496,7 +1505,9 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect((await screen.findAllByText('#1038')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Customer hidden for vendor scope').length).toBeGreaterThan(0);
+    const orderRow = screen.getByRole('button', { name: /#1038/ });
+    expect(within(orderRow).queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
+    expect(screen.getByText('Customer hidden for vendor scope')).toBeInTheDocument();
     expect(screen.getAllByText('Tracking synced').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Try OTO / OTO-TRACK-1038').length).toBeGreaterThan(0);
     expect(screen.queryByText('try_oto / OTO-TRACK-1038')).not.toBeInTheDocument();
@@ -1667,6 +1678,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('Payment Status')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Shopify order snapshot')).queryByText('Financial status')).not.toBeInTheDocument();
     expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
@@ -2289,11 +2302,15 @@ describe('OrdersPage control center', () => {
       renderOrdersPage();
 
       expect(await screen.findByText('Admin action required')).toBeInTheDocument();
-      expect(screen.getByText(
-        role === 'admin'
-          ? 'Awaiting admin resolution. Shopify not fulfilled.'
-          : 'Awaiting admin resolution. Fulfillment is not ready.',
-      )).toBeInTheDocument();
+      if (role === 'admin') {
+        expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
+        const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
+        expect(fulfillmentCard).not.toBeNull();
+        expect(within(fulfillmentCard as HTMLElement).getByText('Shopify sync')).toBeInTheDocument();
+        expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
+      } else {
+        expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();
+      }
       const guidance = screen.getByLabelText('Workflow action guidance');
       expect(guidance).toHaveTextContent(role === 'admin' ? 'Review allocation' : 'Review order');
       expect(guidance).toHaveTextContent(

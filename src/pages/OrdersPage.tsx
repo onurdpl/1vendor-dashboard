@@ -677,14 +677,13 @@ export function OrdersPage() {
     key: OrderWorkflowTabKey;
     workflow: OrderWorkflowTabKey | null;
     label: string;
-    description: string;
+    description?: string;
     count: number | string;
   }> = [
     {
       key: 'all',
       workflow: null,
       label: 'All orders',
-      description: 'Full order list',
       count: workflowSummary?.all ?? '—',
     },
     {
@@ -712,7 +711,6 @@ export function OrdersPage() {
       key: 'tracking-missing',
       workflow: 'tracking-missing',
       label: 'Tracking missing',
-      description: 'Needs tracking evidence',
       count: workflowSummary?.trackingMissing ?? '—',
     },
   ];
@@ -847,7 +845,7 @@ export function OrdersPage() {
                   >
                     <span>{tab.label}</span>
                     <strong>{tab.count}</strong>
-                    <small>{tab.description}</small>
+                    {tab.description ? <small>{tab.description}</small> : null}
                   </button>
                 );
               })}
@@ -974,6 +972,10 @@ export function OrdersPage() {
                     && TRACKING_HELPERS_TO_HIDE.has(shippingOperational.helper)
                     ? null
                     : shippingOperational.helper;
+                  const customerLabel = getCustomerLabel(order.customer);
+                  const visibleTableCustomerLabel = customerLabel === 'Customer hidden for vendor scope'
+                    ? null
+                    : customerLabel;
                   return (
                     <OperationalTableRow
                       key={order.id}
@@ -984,7 +986,7 @@ export function OrdersPage() {
                         <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
                         {currentUser?.role !== 'vendor' ? (
                           <>
-                            <small>{getCustomerLabel(order.customer)}</small>
+                            {visibleTableCustomerLabel ? <small>{visibleTableCustomerLabel}</small> : null}
                             <small>{currentVendor.vendorName} · {order.channel}</small>
                           </>
                         ) : null}
@@ -1137,7 +1139,7 @@ export function OrdersPage() {
               {!hideVendorBlockedSidebarGuidance ? (
                 <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
                   <strong>{vendorBlockedStory?.adminActionTitle ?? (hasCanonicalTerminalStory ? operationalStory.primaryLabel : selectedOrder.shippingStatus)}</strong>
-                  <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>
+                  {isAdmin && vendorBlockedStory ? null : <span>{isAdmin ? statusStripCopy : vendorStatusStripCopy}</span>}
                   {isAdmin && !hasCanonicalTerminalStory ? <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span> : null}
                 </div>
               ) : null}
@@ -1243,10 +1245,6 @@ export function OrdersPage() {
                     </p>
                   ) : null}
                   <div className="orders-rail-summary-list">
-                    <div>
-                      <span>Financial status</span>
-                      <strong>{hasCanonicalTerminalStory ? operationalStory.financeLabel : formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
-                    </div>
                     <div>
                       <span>Payment gateway</span>
                       <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
