@@ -1144,7 +1144,7 @@ export function OrdersPage() {
                 </div>
               ) : null}
 
-              {showRailGuidance ? (
+              {!isAdmin && showRailGuidance ? (
                 <WorkflowActionGuidance
                   actionLabel={railGuidanceActionLabel}
                   description={railGuidanceDescription}
@@ -1236,9 +1236,6 @@ export function OrdersPage() {
               {isAdmin ? (
                 <section className="orders-detail-card" aria-label="Shopify order snapshot">
                   <h4>Shopify order snapshot</h4>
-                  <p className="page-description">
-                    Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.
-                  </p>
                   {selectedOrder.splitSummary ? (
                     <p className="page-description">
                       This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.

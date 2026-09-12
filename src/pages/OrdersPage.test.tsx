@@ -391,7 +391,9 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor delivery evidence');
+    expect(screen.queryByText('Next action')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Smart label action')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Barcode gateway license product image' })).toHaveAttribute(
       'src',
       'https://cdn.example.com/barcode-license.png',
@@ -1460,7 +1462,8 @@ describe('OrdersPage control center', () => {
     expect(within(workflowTabs).getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
+    expect(screen.queryByText('Next action')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
     expect(screen.getAllByText('Vendor Blocked').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Awaiting admin resolution').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vendor rejected allocation.').length).toBeGreaterThan(0);
@@ -1686,7 +1689,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getByRole('heading', { name: 'Shopify order snapshot' })).toBeInTheDocument();
     expect(screen.getByText('Payment Status')).toBeInTheDocument();
     expect(within(screen.getByLabelText('Shopify order snapshot')).queryByText('Financial status')).not.toBeInTheDocument();
-    expect(screen.getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(screen.queryByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).not.toBeInTheDocument();
     expect(screen.queryByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).not.toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('processing')).toBeInTheDocument();
@@ -1728,7 +1731,7 @@ describe('OrdersPage control center', () => {
     await userEvent.click(customerLabels[0]);
 
     const snapshot = screen.getByLabelText('Shopify order snapshot');
-    expect(within(snapshot).getByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).toBeInTheDocument();
+    expect(within(snapshot).queryByText('Full-order Shopify values. Tax, shipping, and discount are not allocation-projected.')).not.toBeInTheDocument();
     expect(within(snapshot).getByText('This order was split. Tax, shipping, and discount below are full-order Shopify snapshot values.')).toBeInTheDocument();
     expect(within(snapshot).getByText('Vendor integration')).toBeInTheDocument();
     expect(within(snapshot).getByText('Tax total')).toBeInTheDocument();
@@ -2311,20 +2314,25 @@ describe('OrdersPage control center', () => {
       expect(await screen.findByText('Admin action required')).toBeInTheDocument();
       if (role === 'admin') {
         expect(screen.queryByText('Awaiting admin resolution. Shopify not fulfilled.')).not.toBeInTheDocument();
+        expect(screen.queryByText('Next action')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
+        const sidebar = screen.getByRole('heading', { name: '#1002' }).closest('aside');
+        expect(sidebar).not.toBeNull();
+        const sidebarScope = within(sidebar as HTMLElement);
+        expect(within(sidebarScope.getByLabelText('Order status axes')).getByText('Vendor Blocked')).toBeInTheDocument();
+        expect(sidebarScope.getByRole('link', { name: 'View details' })).toHaveAttribute('href', '/orders/ORD-A-1002');
         const fulfillmentCard = screen.getByRole('heading', { name: 'Fulfillment and shipping' }).closest('section');
         expect(fulfillmentCard).not.toBeNull();
+        expect(within(fulfillmentCard as HTMLElement).getByText('Provider')).toBeInTheDocument();
+        expect(within(fulfillmentCard as HTMLElement).getAllByText('Blocked').length).toBeGreaterThan(0);
         expect(within(fulfillmentCard as HTMLElement).getByText('Shopify sync')).toBeInTheDocument();
         expect(within(fulfillmentCard as HTMLElement).getByText('Not fulfilled')).toBeInTheDocument();
       } else {
         expect(screen.getByText('Awaiting admin resolution. Fulfillment is not ready.')).toBeInTheDocument();
+        const guidance = screen.getByLabelText('Workflow action guidance');
+        expect(guidance).toHaveTextContent('Review order');
+        expect(guidance).toHaveTextContent('Review the blocked order before shipment work continues.');
       }
-      const guidance = screen.getByLabelText('Workflow action guidance');
-      expect(guidance).toHaveTextContent(role === 'admin' ? 'Review allocation' : 'Review order');
-      expect(guidance).toHaveTextContent(
-        role === 'admin'
-          ? 'Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work.'
-          : 'Review the blocked order before shipment work continues.',
-      );
       expect(screen.queryByLabelText('Reject unavailable')).not.toBeInTheDocument();
     },
   );
